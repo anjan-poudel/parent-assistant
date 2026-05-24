@@ -1,0 +1,15 @@
+{
+  "id": "7c013acb-0303-42c1-9f23-ea79c76ea3b1",
+  "task_id": "define-requirements",
+  "workflow_id": "elderly-ai-assistant-sdd",
+  "status": "RESOLVED",
+  "reason": "T2 risk tier — mandatory human sign-off required before executing task 'define-requirements'",
+  "context": {
+    "task_description": "Elicit and document project requirements. Produce a requirements document\nwith functional requirements, non-functional requirements, and Gherkin\nacceptance criteria for each requirement.\n",
+    "risk_tier": "T2",
+    "agent": "ba"
+  },
+  "created_at": "2026-03-03T10:37:30.257Z",
+  "notes": "Requirements document reviewed and approved. See .ai-sdd/outputs/define-requirements.md",
+  "resolved_at": "2026-03-03T10:39:50.519Z"
+}

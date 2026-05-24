@@ -1,0 +1,123 @@
+# ============================================================
+# Elderly AI Assistant — Workflow Configuration
+# Base: 05-greenfield-product.yaml
+#
+# CUSTOMISATIONS FROM BASE AND RATIONALE:
+#
+# 1. Added risk_tier T2 override on define-requirements.
+#    Reason: safety-critical health app — requirements must receive
+#    senior human sign-off before any design work begins. A health
+#    alert or medication reminder specified incorrectly at this stage
+#    cannot be caught cheaply later.
+#
+# 2. Added security-design-review task after review-l2, before plan-tasks.
+#    Reason: on-device voice biometric auth, health data access, emergency
+#    call triggering, and end-to-end encrypted remote config are all
+#    security-sensitive surfaces requiring an explicit STRIDE threat model
+#    review before any implementation begins.
+#
+# 3. Added review: { mode: paired } on implement task.
+#    Reason: safety-critical project — paired agentic review is required
+#    on all implementation output per ai-sdd safety-critical tuning rules.
+#
+# 4. Elevated confidence threshold on implement to 0.85 (from base 0.80).
+#    Reason: emergency call logic and health alert monitoring require
+#    higher confidence before output is accepted into the workflow.
+#
+# 5. Increased max_rework_iterations on implement to 5 (from base 4).
+#    Reason: multi-platform (iOS + Android) with on-device LLM integration,
+#    voice biometrics, and health API integration is complex. More rework
+#    budget is required to handle platform-specific edge cases.
+#
+# 6. Added security-test task after review-implementation, before final-sign-off.
+#    Reason: App Store and Google Play Store health app policies require
+#    evidence of security testing. Voice input processing, health data
+#    handling, and authentication paths are all high-value attack surfaces.
+#
+# 7. Added final-sign-off task at the end of the workflow.
+#    Reason: safety-critical greenfield product — a human sign-off gate
+#    with T2 risk tier is required before the workflow is considered complete.
+#    This produces the compliance checklist and requirements traceability doc.
+#
+# 8. Elevated workflow-level max_rework_iterations to 5 (from base 2).
+#    Reason: complexity of multi-platform safety-critical implementation
+#    warrants additional rework headroom at the workflow level.
+# ============================================================
+
+version: "1"
+name: elderly-ai-assistant-sdd
+description: "Greenfield SDD for elderly AI assistant — safety-critical, App Store / Play Store compliant"
+
+defaults:
+  risk_tier: T0
+  max_rework_iterations: 5
+
+tasks:
+  define-requirements:
+    use: define-requirements
+    # T2 override: requirements on a safety-critical health app require
+    # senior human sign-off before any design work begins.
+    overlays:
+      hil:         { enabled: true }
+    risk_tier: T2
+  design-l1:
+    use: design-architecture
+    depends_on: [define-requirements]
+    # Architect must address: on-device LLM selection, cross-platform strategy,
+    # voice biometric architecture, remote config E2E encryption, background
+    # service design for iOS and Android, emergency call isolation module.
+
+  design-l2:
+    use: design-component
+    depends_on: [design-l1]
+
+  review-l2:
+    use: review-l2
+    depends_on: [design-l2]
+    exit_conditions:
+      - "review.decision == GO"
+
+  security-design-review:
+    use: security-design-review
+    depends_on: [review-l2]
+    # STRIDE threat model required. Focus areas:
+    # - Voice biometric spoofing and replay attacks
+    # - Health data interception and tampering
+    # - Emergency call trigger manipulation
+    # - Remote config channel interception
+    # - On-device LLM prompt injection via voice input
+    exit_conditions:
+      - "review.decision == \"SECURITY-GO\""
+
+  plan-tasks:
+    use: plan-tasks
+    depends_on: [security-design-review]
+
+  implement:
+    use: standard-implement
+    depends_on: [plan-tasks]
+    overlays:
+      # Safety-critical: paired agentic review required on all implementation output.
+      review: { mode: "paired", enabled: true }
+      # Elevated confidence threshold for safety-critical features.
+      confidence: { enabled: true, threshold: 0.85 }
+    # Extended rework budget for multi-platform safety-critical code.
+    max_rework_iterations: 5
+
+  review-implementation:
+    use: review-implementation
+    depends_on: [implement]
+
+  security-test:
+    use: security-test
+    depends_on: [review-implementation]
+    # Focus: voice input injection, health data PII in logs, auth bypass,
+    # emergency call trigger validation, encrypted config payload verification.
+    exit_conditions:
+      - "review.decision == \"SECURITY-GO\""
+
+  final-sign-off:
+    use: final-sign-off
+    depends_on: [security-test]
+    # T2 gate: mandatory human sign-off before app is submitted to App Store
+    # or Play Store. Produces compliance checklist and requirements traceability.

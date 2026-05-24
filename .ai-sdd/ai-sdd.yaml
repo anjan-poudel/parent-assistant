@@ -1,0 +1,82 @@
+version: "1"
+
+# ============================================================
+# Elderly AI Assistant — ai-sdd Project Configuration
+# Scale: greenfield
+# Safety-critical: YES (emergency calls, health alerts, medication reminders, voice biometrics)
+# Compliance: Apple App Store + Google Play Store health app policies
+#
+# Non-default settings and rationale:
+#
+# cost_budget_per_run_usd: 25.00
+#   Greenfield scale — full 8-task workflow from requirements through
+#   final sign-off. Generous budget to support security design review,
+#   security test, and final sign-off tasks added for safety-critical compliance.
+#
+# overlays.hil.enabled: true
+#   Safety-critical project. Human-in-the-loop is enabled globally.
+#   Individual tasks may override to false where HIL is not needed
+#   (e.g. automated review tasks), but all decision gates require it.
+#
+# overlays.confidence: { enabled: true, threshold: 0.85 }
+#   Applied on the implement task (see workflow). Elevated above the
+#   greenfield default of 0.80 because safety-critical features
+#   (emergency call logic, health alert monitoring, voice biometric auth)
+#   require higher confidence before output is accepted.
+#
+# review: { mode: paired }
+#   Applied on the implement task (see workflow). Safety-critical project
+#   requires paired agentic review on all implementation output.
+#
+# security.injection_detection_level: quarantine
+#   App Store and Google Play Store compliance requires strict input
+#   handling. Quarantine level halts the task on detection rather than
+#   warning only. This also protects voice input processing paths.
+#
+# max_rework_iterations: 5
+#   Increased from the greenfield default of 2 to accommodate the
+#   complexity of multi-platform (iOS + Android) safety-critical code
+#   requiring security review loops.
+#
+# WORKFLOW POLICY GATE NOTES (apply in .ai-sdd/workflows/default-sdd.yaml):
+#   - define-requirements:  add T2 policy_gate override — requirements
+#     sign-off on a safety-critical health app requires senior human approval.
+#   - security-design-review and final-sign-off use T2 gates (via task library).
+#
+# DATA RESIDENCY NOTE:
+#   The fixed constraint "all AI inference on-device" satisfies the primary
+#   data residency concern — no user data leaves the device for AI processing.
+#   If a remote config relay server is used, its hosting region must be
+#   confirmed. See Open Decision #9 in constitution.md.
+# ============================================================
+
+adapter:
+  type: claude_code
+  dispatch_mode: direct
+
+engine:
+  max_concurrent_tasks: 3
+  rate_limit_requests_per_minute: 20
+  cost_budget_per_run_usd: 25.00
+  cost_enforcement: pause
+  context_warning_threshold_pct: 80
+  context_hil_threshold_pct: 95
+
+overlays:
+  hil:
+    enabled: true
+    queue_path: ".ai-sdd/state/hil/"
+    poll_interval_seconds: 5
+    notify:
+      on_created: []
+      on_t2_gate: []
+
+security:
+  secret_patterns: []
+  injection_detection_level: quarantine
+
+constitution:
+  strict_parse: true
+
+observability:
+  log_level: INFO
