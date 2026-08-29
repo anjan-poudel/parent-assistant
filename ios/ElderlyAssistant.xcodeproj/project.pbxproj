@@ -1,0 +1,699 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		030616993A706F818B3E2C87 /* PlatformAlarmScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53B1F7C24D2C273993F61341 /* PlatformAlarmScheduler.swift */; };
+		0D70DE412C00001898760AF5 /* ElderlyAssistantApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 050315DE680CE94C0C4594A5 /* ElderlyAssistantApp.swift */; };
+		203223B8756FC96334BC2960 /* EscalationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AF7478D117F7C991FC99A68 /* EscalationEngine.swift */; };
+		299549B47B6CBC1FEED6E1EF /* ConfirmationChallenge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B4100D9B7589B71AD8962A0 /* ConfirmationChallenge.swift */; };
+		38EA930604B28AB2BF63DF05 /* WakeWordEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFE0B77607ED7DA0553D6F0 /* WakeWordEngine.swift */; };
+		3FE394412AC1FB089526F43C /* ModelStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F9D2C931DA6AAFA3A23B6C /* ModelStoreTests.swift */; };
+		408C22DF6353AF02C3CF6A5B /* LogSanitiser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8ACA4236E037E41C5E53D9 /* LogSanitiser.swift */; };
+		47965D07120D816E5424A120 /* WhisperSpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 426B00DB54390C484D152534 /* WhisperSpeechRecognizer.swift */; };
+		49E6A368A078D9CF076BEA23 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9B3203338B37AF2615B9D88 /* ContentView.swift */; };
+		4BF2988FCED95DD8A8B71BC4 /* DoubleDoseDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D42344465731A5DA5ABD125C /* DoubleDoseDetector.swift */; };
+		5354B411A9014B6CCB476F30 /* LlamaCommandInterpreter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 459B50A39CF4B7C83A674894 /* LlamaCommandInterpreter.swift */; };
+		53AA5137EF546574CE276BA8 /* IdHashing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91DDA75BE5CF8691D09075D6 /* IdHashing.swift */; };
+		549799318F9082CDE85AF5F7 /* CommandRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90995C4CAB955FB574BB07C6 /* CommandRouter.swift */; };
+		5707C48E2D863D068ADDB5E0 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2AB3C99F28EE6B02B39ECEB /* SpeechRecognizer.swift */; };
+		5FC266A49696E92A57F6F704 /* SwiftWhisper in Frameworks */ = {isa = PBXBuildFile; productRef = 8A067B2B3D4535E50D1CCB35 /* SwiftWhisper */; };
+		5FF89DF6EC03BA9412F1D1AA /* CommandRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FF305EE75985E7F2B131DD2 /* CommandRouterTests.swift */; };
+		72C5DCF0A0774E359FF6167C /* MemoryProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA1D94894BBEEB22126873C /* MemoryProbe.swift */; };
+		7721DD8366DF52E918926DA8 /* KeychainEncryptedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF694F3FBB8E78AF5BBCC74 /* KeychainEncryptedStorage.swift */; };
+		79D094F839936BD503BA7800 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3ABF1E7E6E221112999571F /* Models.swift */; };
+		7A821335546B5C53D68FD5C0 /* SileroVAD.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F45398E4D634DDBCE65A38 /* SileroVAD.swift */; };
+		7DEDF2D378FEA4B0ECAC05D0 /* AppCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030DDED1BA852B1A12ABABBE /* AppCoordinator.swift */; };
+		85B42C13987E77A9592E8572 /* DoubleDoseDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B3C30966EA4E8B1E94A6917 /* DoubleDoseDetectorTests.swift */; };
+		8B5593B7AEDF4E0D815FA1BC /* MedicationSchedulerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B6FEFA69334CCBC0A933E9 /* MedicationSchedulerTests.swift */; };
+		8CD67C3B34F99F3EC51312F9 /* FamilyNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 875C3FEBDCA672D2C9E0E7F2 /* FamilyNotifier.swift */; };
+		94095F9C5AC0B9770AB6CE8D /* ModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03E5F94D893E4006B4C592D /* ModelCatalog.swift */; };
+		A83A346A8F1366347514E5AF /* MedicationScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0776B7C899783B35B84D499A /* MedicationScheduler.swift */; };
+		B21B3DF09B034133EFFFDF1B /* EnergyVADTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4099370DD1353BABBAF99588 /* EnergyVADTests.swift */; };
+		B54AE9405FEBDBD383BEFD87 /* VoicePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 680AAA1A7F05226F9618CE82 /* VoicePipeline.swift */; };
+		B6B573A73467D62075D67B2C /* ConfirmationChallengeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89ED4B2E4128B4CFA0B6365B /* ConfirmationChallengeTests.swift */; };
+		B82C18E493D6249A16752637 /* PhotoVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB904565A0A394840F58300D /* PhotoVerifier.swift */; };
+		B970107BCCDA8472F0BCA767 /* Speaker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7962DC2383BB09B89340F5 /* Speaker.swift */; };
+		C2070A4B539BD460E7BF2E99 /* LlamaCommandInterpreterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1E8CAFF81975F728099576 /* LlamaCommandInterpreterTests.swift */; };
+		C9EB06ED68AC62EB0872C5D1 /* LLM in Frameworks */ = {isa = PBXBuildFile; productRef = 785605133017A7EB4690010A /* LLM */; };
+		CCCF817EA766F6043F60C9E5 /* ModelStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5FEB104D893654A4F159A51 /* ModelStore.swift */; };
+		CF1D61DC1AE25927611816F8 /* MedicationSchedulerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A97FCC20DC139A6F36EF5884 /* MedicationSchedulerProtocol.swift */; };
+		D6835191986FBF797464B5BD /* ModelDownloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7665911F65DF1CD61EC44277 /* ModelDownloadService.swift */; };
+		EAA4C9A61CDA5778686FDA76 /* EscalationEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5B0563FB83838D506EA5E4 /* EscalationEngineTests.swift */; };
+		F2545B47080302C2D47C85BB /* WhisperSpeechRecognizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EF74EEC9797CDE01B05BAA0 /* WhisperSpeechRecognizerTests.swift */; };
+		F46656314EF3B024F5871089 /* AudioSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54BA14F8D657DC91DFCC22AF /* AudioSessionManager.swift */; };
+		FAF5990EE46B3F7B950249B2 /* DependencyProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50EFF6165E6175FF1A801198 /* DependencyProtocols.swift */; };
+		FD0C74053396420771C700C1 /* SpeakerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A94328FF3C48D674B487DD12 /* SpeakerTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		79F74A39F60644EE114EA6D4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1814F1FD1E452A3F842D4F73 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9967E45A189F990A572818AA;
+			remoteInfo = ElderlyAssistant;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		0079B2DA884AD6CEC405B03C /* ElderlyAssistantTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ElderlyAssistantTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		030DDED1BA852B1A12ABABBE /* AppCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCoordinator.swift; sourceTree = "<group>"; };
+		050315DE680CE94C0C4594A5 /* ElderlyAssistantApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElderlyAssistantApp.swift; sourceTree = "<group>"; };
+		0776B7C899783B35B84D499A /* MedicationScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationScheduler.swift; sourceTree = "<group>"; };
+		1AFE0B77607ED7DA0553D6F0 /* WakeWordEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeWordEngine.swift; sourceTree = "<group>"; };
+		2CA1D94894BBEEB22126873C /* MemoryProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryProbe.swift; sourceTree = "<group>"; };
+		3AF7478D117F7C991FC99A68 /* EscalationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EscalationEngine.swift; sourceTree = "<group>"; };
+		3B8ACA4236E037E41C5E53D9 /* LogSanitiser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogSanitiser.swift; sourceTree = "<group>"; };
+		3CF694F3FBB8E78AF5BBCC74 /* KeychainEncryptedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainEncryptedStorage.swift; sourceTree = "<group>"; };
+		4099370DD1353BABBAF99588 /* EnergyVADTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnergyVADTests.swift; sourceTree = "<group>"; };
+		426B00DB54390C484D152534 /* WhisperSpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperSpeechRecognizer.swift; sourceTree = "<group>"; };
+		459B50A39CF4B7C83A674894 /* LlamaCommandInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaCommandInterpreter.swift; sourceTree = "<group>"; };
+		4FF305EE75985E7F2B131DD2 /* CommandRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRouterTests.swift; sourceTree = "<group>"; };
+		50EFF6165E6175FF1A801198 /* DependencyProtocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyProtocols.swift; sourceTree = "<group>"; };
+		53B1F7C24D2C273993F61341 /* PlatformAlarmScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformAlarmScheduler.swift; sourceTree = "<group>"; };
+		54BA14F8D657DC91DFCC22AF /* AudioSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSessionManager.swift; sourceTree = "<group>"; };
+		5F1E8CAFF81975F728099576 /* LlamaCommandInterpreterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaCommandInterpreterTests.swift; sourceTree = "<group>"; };
+		680AAA1A7F05226F9618CE82 /* VoicePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePipeline.swift; sourceTree = "<group>"; };
+		6B3C30966EA4E8B1E94A6917 /* DoubleDoseDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoubleDoseDetectorTests.swift; sourceTree = "<group>"; };
+		6B4100D9B7589B71AD8962A0 /* ConfirmationChallenge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationChallenge.swift; sourceTree = "<group>"; };
+		6EF74EEC9797CDE01B05BAA0 /* WhisperSpeechRecognizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperSpeechRecognizerTests.swift; sourceTree = "<group>"; };
+		7665911F65DF1CD61EC44277 /* ModelDownloadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadService.swift; sourceTree = "<group>"; };
+		875C3FEBDCA672D2C9E0E7F2 /* FamilyNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyNotifier.swift; sourceTree = "<group>"; };
+		89ED4B2E4128B4CFA0B6365B /* ConfirmationChallengeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationChallengeTests.swift; sourceTree = "<group>"; };
+		90995C4CAB955FB574BB07C6 /* CommandRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRouter.swift; sourceTree = "<group>"; };
+		91DDA75BE5CF8691D09075D6 /* IdHashing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdHashing.swift; sourceTree = "<group>"; };
+		A5FEB104D893654A4F159A51 /* ModelStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStore.swift; sourceTree = "<group>"; };
+		A7B6FEFA69334CCBC0A933E9 /* MedicationSchedulerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationSchedulerTests.swift; sourceTree = "<group>"; };
+		A94328FF3C48D674B487DD12 /* SpeakerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerTests.swift; sourceTree = "<group>"; };
+		A97FCC20DC139A6F36EF5884 /* MedicationSchedulerProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationSchedulerProtocol.swift; sourceTree = "<group>"; };
+		A9F9D2C931DA6AAFA3A23B6C /* ModelStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStoreTests.swift; sourceTree = "<group>"; };
+		AA7962DC2383BB09B89340F5 /* Speaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Speaker.swift; sourceTree = "<group>"; };
+		AD5B0563FB83838D506EA5E4 /* EscalationEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EscalationEngineTests.swift; sourceTree = "<group>"; };
+		C2AB3C99F28EE6B02B39ECEB /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
+		C9B3203338B37AF2615B9D88 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		D42344465731A5DA5ABD125C /* DoubleDoseDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoubleDoseDetector.swift; sourceTree = "<group>"; };
+		D4F45398E4D634DDBCE65A38 /* SileroVAD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SileroVAD.swift; sourceTree = "<group>"; };
+		E0D51BFE01BE4E11E7CA840E /* ElderlyAssistant.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ElderlyAssistant.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E3ABF1E7E6E221112999571F /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		F03E5F94D893E4006B4C592D /* ModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelCatalog.swift; sourceTree = "<group>"; };
+		FB904565A0A394840F58300D /* PhotoVerifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoVerifier.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		348BA7029FE20D86170FCBBF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5FC266A49696E92A57F6F704 /* SwiftWhisper in Frameworks */,
+				C9EB06ED68AC62EB0872C5D1 /* LLM in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1B29DE634D16120E129D68A0 /* Observability */ = {
+			isa = PBXGroup;
+			children = (
+				3B8ACA4236E037E41C5E53D9 /* LogSanitiser.swift */,
+			);
+			path = Observability;
+			sourceTree = "<group>";
+		};
+		532DAB8D89B5BE790DC133D2 /* ModelStore */ = {
+			isa = PBXGroup;
+			children = (
+				A9F9D2C931DA6AAFA3A23B6C /* ModelStoreTests.swift */,
+			);
+			path = ModelStore;
+			sourceTree = "<group>";
+		};
+		68E39F790AD087B318261C49 /* FamilyNotifier */ = {
+			isa = PBXGroup;
+			children = (
+				875C3FEBDCA672D2C9E0E7F2 /* FamilyNotifier.swift */,
+			);
+			path = FamilyNotifier;
+			sourceTree = "<group>";
+		};
+		7DDF55B3BBF81B10A9E7B21F /* ElderlyAssistant */ = {
+			isa = PBXGroup;
+			children = (
+				A3B76EF03E8183C14A62A39B /* App */,
+				D738EBA5083996234166BD9E /* Services */,
+			);
+			path = ElderlyAssistant;
+			sourceTree = "<group>";
+		};
+		933D20AA23A788790BFBF3D0 = {
+			isa = PBXGroup;
+			children = (
+				7DDF55B3BBF81B10A9E7B21F /* ElderlyAssistant */,
+				EAA2EE60AA1C50B2F502C77E /* ElderlyAssistantTests */,
+				BC857D1BA3EF841D00FB2AF4 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		9519F23A89EC16E40C4E278E /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				CD858715B4AA04346AEF2620 /* MedicationScheduler */,
+				532DAB8D89B5BE790DC133D2 /* ModelStore */,
+				E69B193AFBFA082B3A31836C /* Voice */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		9E701634E7E75769DB3D33CE /* ModelStore */ = {
+			isa = PBXGroup;
+			children = (
+				2CA1D94894BBEEB22126873C /* MemoryProbe.swift */,
+				F03E5F94D893E4006B4C592D /* ModelCatalog.swift */,
+				7665911F65DF1CD61EC44277 /* ModelDownloadService.swift */,
+				A5FEB104D893654A4F159A51 /* ModelStore.swift */,
+			);
+			path = ModelStore;
+			sourceTree = "<group>";
+		};
+		A3B76EF03E8183C14A62A39B /* App */ = {
+			isa = PBXGroup;
+			children = (
+				030DDED1BA852B1A12ABABBE /* AppCoordinator.swift */,
+				C9B3203338B37AF2615B9D88 /* ContentView.swift */,
+				050315DE680CE94C0C4594A5 /* ElderlyAssistantApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		BC857D1BA3EF841D00FB2AF4 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				E0D51BFE01BE4E11E7CA840E /* ElderlyAssistant.app */,
+				0079B2DA884AD6CEC405B03C /* ElderlyAssistantTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		CD858715B4AA04346AEF2620 /* MedicationScheduler */ = {
+			isa = PBXGroup;
+			children = (
+				89ED4B2E4128B4CFA0B6365B /* ConfirmationChallengeTests.swift */,
+				6B3C30966EA4E8B1E94A6917 /* DoubleDoseDetectorTests.swift */,
+				AD5B0563FB83838D506EA5E4 /* EscalationEngineTests.swift */,
+				A7B6FEFA69334CCBC0A933E9 /* MedicationSchedulerTests.swift */,
+			);
+			path = MedicationScheduler;
+			sourceTree = "<group>";
+		};
+		D738EBA5083996234166BD9E /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				68E39F790AD087B318261C49 /* FamilyNotifier */,
+				F6A2FD0A446F342EF8783A8E /* MedicationScheduler */,
+				9E701634E7E75769DB3D33CE /* ModelStore */,
+				1B29DE634D16120E129D68A0 /* Observability */,
+				F981889A905A1AC2E6CE6148 /* Storage */,
+				D8FFD7B97DF7F341380EDE63 /* Voice */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		D8FFD7B97DF7F341380EDE63 /* Voice */ = {
+			isa = PBXGroup;
+			children = (
+				54BA14F8D657DC91DFCC22AF /* AudioSessionManager.swift */,
+				90995C4CAB955FB574BB07C6 /* CommandRouter.swift */,
+				459B50A39CF4B7C83A674894 /* LlamaCommandInterpreter.swift */,
+				D4F45398E4D634DDBCE65A38 /* SileroVAD.swift */,
+				AA7962DC2383BB09B89340F5 /* Speaker.swift */,
+				C2AB3C99F28EE6B02B39ECEB /* SpeechRecognizer.swift */,
+				680AAA1A7F05226F9618CE82 /* VoicePipeline.swift */,
+				1AFE0B77607ED7DA0553D6F0 /* WakeWordEngine.swift */,
+				426B00DB54390C484D152534 /* WhisperSpeechRecognizer.swift */,
+			);
+			path = Voice;
+			sourceTree = "<group>";
+		};
+		E69B193AFBFA082B3A31836C /* Voice */ = {
+			isa = PBXGroup;
+			children = (
+				4FF305EE75985E7F2B131DD2 /* CommandRouterTests.swift */,
+				4099370DD1353BABBAF99588 /* EnergyVADTests.swift */,
+				5F1E8CAFF81975F728099576 /* LlamaCommandInterpreterTests.swift */,
+				A94328FF3C48D674B487DD12 /* SpeakerTests.swift */,
+				6EF74EEC9797CDE01B05BAA0 /* WhisperSpeechRecognizerTests.swift */,
+			);
+			path = Voice;
+			sourceTree = "<group>";
+		};
+		EAA2EE60AA1C50B2F502C77E /* ElderlyAssistantTests */ = {
+			isa = PBXGroup;
+			children = (
+				9519F23A89EC16E40C4E278E /* Services */,
+			);
+			path = ElderlyAssistantTests;
+			sourceTree = "<group>";
+		};
+		F6A2FD0A446F342EF8783A8E /* MedicationScheduler */ = {
+			isa = PBXGroup;
+			children = (
+				6B4100D9B7589B71AD8962A0 /* ConfirmationChallenge.swift */,
+				50EFF6165E6175FF1A801198 /* DependencyProtocols.swift */,
+				D42344465731A5DA5ABD125C /* DoubleDoseDetector.swift */,
+				3AF7478D117F7C991FC99A68 /* EscalationEngine.swift */,
+				91DDA75BE5CF8691D09075D6 /* IdHashing.swift */,
+				0776B7C899783B35B84D499A /* MedicationScheduler.swift */,
+				A97FCC20DC139A6F36EF5884 /* MedicationSchedulerProtocol.swift */,
+				E3ABF1E7E6E221112999571F /* Models.swift */,
+				FB904565A0A394840F58300D /* PhotoVerifier.swift */,
+				53B1F7C24D2C273993F61341 /* PlatformAlarmScheduler.swift */,
+			);
+			path = MedicationScheduler;
+			sourceTree = "<group>";
+		};
+		F981889A905A1AC2E6CE6148 /* Storage */ = {
+			isa = PBXGroup;
+			children = (
+				3CF694F3FBB8E78AF5BBCC74 /* KeychainEncryptedStorage.swift */,
+			);
+			path = Storage;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		9967E45A189F990A572818AA /* ElderlyAssistant */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5AA32E54ED416816598D5D4B /* Build configuration list for PBXNativeTarget "ElderlyAssistant" */;
+			buildPhases = (
+				36CAA60EA5EFE6C9914290F3 /* Sources */,
+				348BA7029FE20D86170FCBBF /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ElderlyAssistant;
+			packageProductDependencies = (
+				8A067B2B3D4535E50D1CCB35 /* SwiftWhisper */,
+				785605133017A7EB4690010A /* LLM */,
+			);
+			productName = ElderlyAssistant;
+			productReference = E0D51BFE01BE4E11E7CA840E /* ElderlyAssistant.app */;
+			productType = "com.apple.product-type.application";
+		};
+		DD44C866B90F5DD4A561A04E /* ElderlyAssistantTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2D10CA6CF225346C3FD27F0C /* Build configuration list for PBXNativeTarget "ElderlyAssistantTests" */;
+			buildPhases = (
+				AA46568A664D5F471CD93E05 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EFF73D9F761CB6FD5D31670B /* PBXTargetDependency */,
+			);
+			name = ElderlyAssistantTests;
+			packageProductDependencies = (
+			);
+			productName = ElderlyAssistantTests;
+			productReference = 0079B2DA884AD6CEC405B03C /* ElderlyAssistantTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		1814F1FD1E452A3F842D4F73 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					9967E45A189F990A572818AA = {
+						ProvisioningStyle = Automatic;
+					};
+					DD44C866B90F5DD4A561A04E = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = EB7C0425BC0CC2EB412C380C /* Build configuration list for PBXProject "ElderlyAssistant" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 933D20AA23A788790BFBF3D0;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM" */,
+				7B16D8138C2ED1D8657D75EC /* XCRemoteSwiftPackageReference "SwiftWhisper" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = BC857D1BA3EF841D00FB2AF4 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				9967E45A189F990A572818AA /* ElderlyAssistant */,
+				DD44C866B90F5DD4A561A04E /* ElderlyAssistantTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		36CAA60EA5EFE6C9914290F3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7DEDF2D378FEA4B0ECAC05D0 /* AppCoordinator.swift in Sources */,
+				F46656314EF3B024F5871089 /* AudioSessionManager.swift in Sources */,
+				549799318F9082CDE85AF5F7 /* CommandRouter.swift in Sources */,
+				299549B47B6CBC1FEED6E1EF /* ConfirmationChallenge.swift in Sources */,
+				49E6A368A078D9CF076BEA23 /* ContentView.swift in Sources */,
+				FAF5990EE46B3F7B950249B2 /* DependencyProtocols.swift in Sources */,
+				4BF2988FCED95DD8A8B71BC4 /* DoubleDoseDetector.swift in Sources */,
+				0D70DE412C00001898760AF5 /* ElderlyAssistantApp.swift in Sources */,
+				203223B8756FC96334BC2960 /* EscalationEngine.swift in Sources */,
+				8CD67C3B34F99F3EC51312F9 /* FamilyNotifier.swift in Sources */,
+				53AA5137EF546574CE276BA8 /* IdHashing.swift in Sources */,
+				7721DD8366DF52E918926DA8 /* KeychainEncryptedStorage.swift in Sources */,
+				5354B411A9014B6CCB476F30 /* LlamaCommandInterpreter.swift in Sources */,
+				408C22DF6353AF02C3CF6A5B /* LogSanitiser.swift in Sources */,
+				A83A346A8F1366347514E5AF /* MedicationScheduler.swift in Sources */,
+				CF1D61DC1AE25927611816F8 /* MedicationSchedulerProtocol.swift in Sources */,
+				72C5DCF0A0774E359FF6167C /* MemoryProbe.swift in Sources */,
+				94095F9C5AC0B9770AB6CE8D /* ModelCatalog.swift in Sources */,
+				D6835191986FBF797464B5BD /* ModelDownloadService.swift in Sources */,
+				CCCF817EA766F6043F60C9E5 /* ModelStore.swift in Sources */,
+				79D094F839936BD503BA7800 /* Models.swift in Sources */,
+				B82C18E493D6249A16752637 /* PhotoVerifier.swift in Sources */,
+				030616993A706F818B3E2C87 /* PlatformAlarmScheduler.swift in Sources */,
+				7A821335546B5C53D68FD5C0 /* SileroVAD.swift in Sources */,
+				B970107BCCDA8472F0BCA767 /* Speaker.swift in Sources */,
+				5707C48E2D863D068ADDB5E0 /* SpeechRecognizer.swift in Sources */,
+				B54AE9405FEBDBD383BEFD87 /* VoicePipeline.swift in Sources */,
+				38EA930604B28AB2BF63DF05 /* WakeWordEngine.swift in Sources */,
+				47965D07120D816E5424A120 /* WhisperSpeechRecognizer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AA46568A664D5F471CD93E05 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5FF89DF6EC03BA9412F1D1AA /* CommandRouterTests.swift in Sources */,
+				B6B573A73467D62075D67B2C /* ConfirmationChallengeTests.swift in Sources */,
+				85B42C13987E77A9592E8572 /* DoubleDoseDetectorTests.swift in Sources */,
+				B21B3DF09B034133EFFFDF1B /* EnergyVADTests.swift in Sources */,
+				EAA4C9A61CDA5778686FDA76 /* EscalationEngineTests.swift in Sources */,
+				C2070A4B539BD460E7BF2E99 /* LlamaCommandInterpreterTests.swift in Sources */,
+				8B5593B7AEDF4E0D815FA1BC /* MedicationSchedulerTests.swift in Sources */,
+				3FE394412AC1FB089526F43C /* ModelStoreTests.swift in Sources */,
+				FD0C74053396420771C700C1 /* SpeakerTests.swift in Sources */,
+				F2545B47080302C2D47C85BB /* WhisperSpeechRecognizerTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		EFF73D9F761CB6FD5D31670B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9967E45A189F990A572818AA /* ElderlyAssistant */;
+			targetProxy = 79F74A39F60644EE114EA6D4 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		28037AC60FCCEEC752F5444A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		3E488DFAE8BF8CF637FEC16C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.elderlyassistant.app.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ElderlyAssistant.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ElderlyAssistant";
+			};
+			name = Debug;
+		};
+		6244EE394FFC9311AED2F060 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.elderlyassistant.app.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ElderlyAssistant.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ElderlyAssistant";
+			};
+			name = Release;
+		};
+		64CE1CE1BCBE17D0296DFBC0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		7542A3C41B25B5B324990BDC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = BKXWPS4X87;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ElderlyAssistant/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.elderlyassistant.app;
+				PRODUCT_NAME = ElderlyAssistant;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "";
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		7FB478A824707FA246ABC5C9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = BKXWPS4X87;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ElderlyAssistant/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.elderlyassistant.app;
+				PRODUCT_NAME = ElderlyAssistant;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "";
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		2D10CA6CF225346C3FD27F0C /* Build configuration list for PBXNativeTarget "ElderlyAssistantTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3E488DFAE8BF8CF637FEC16C /* Debug */,
+				6244EE394FFC9311AED2F060 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		5AA32E54ED416816598D5D4B /* Build configuration list for PBXNativeTarget "ElderlyAssistant" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7FB478A824707FA246ABC5C9 /* Debug */,
+				7542A3C41B25B5B324990BDC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		EB7C0425BC0CC2EB412C380C /* Build configuration list for PBXProject "ElderlyAssistant" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				64CE1CE1BCBE17D0296DFBC0 /* Debug */,
+				28037AC60FCCEEC752F5444A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/eastriverlee/LLM.swift";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+		7B16D8138C2ED1D8657D75EC /* XCRemoteSwiftPackageReference "SwiftWhisper" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/exPHAT/SwiftWhisper";
+			requirement = {
+				branch = master;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		785605133017A7EB4690010A /* LLM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM" */;
+			productName = LLM;
+		};
+		8A067B2B3D4535E50D1CCB35 /* SwiftWhisper */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7B16D8138C2ED1D8657D75EC /* XCRemoteSwiftPackageReference "SwiftWhisper" */;
+			productName = SwiftWhisper;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 1814F1FD1E452A3F842D4F73 /* Project object */;
+}

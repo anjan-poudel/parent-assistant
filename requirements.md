@@ -25,6 +25,8 @@ The system must support bilingual operation: Nepali as the primary language and 
 **FR-004**
 The system must support always-on wake-word detection. When the wake word is detected the assistant must activate and begin listening for a voice command without requiring any screen tap. Wake-word detection must remain active when the screen is locked.
 
+**iOS MVP scope note:** FR-004 is deferred to v2 for the iOS MVP. MVP activation is a large "Talk to Assistant" control plus scheduled auto-activation for medication and routine reminders.
+
 **FR-005**
 The system must support accent and regional dialect personalisation for Nepali speakers. During onboarding the user provides voice samples; the STT model fine-tunes to the individual's accent. Accent tuning data is stored on-device only.
 

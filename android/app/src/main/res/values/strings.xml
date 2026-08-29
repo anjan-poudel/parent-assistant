@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Elderly Assistant</string>
+    <string name="service_notification_title">Elderly Assistant</string>
+    <string name="service_notification_text">Listening for "Hey Sahayak"...</string>
+    <string name="medication_reminder_title">Medication Reminder</string>
+    <string name="medication_reminder_body">Time to take your medication</string>
+</resources>

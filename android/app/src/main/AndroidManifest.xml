@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Required Permissions -->
+    <!-- Always-on microphone for wake word detection -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
+
+    <!-- Exact alarm for medication reminders (NFR-027) -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+    <!-- Health Connect -->
+    <uses-permission android:name="android.permission.health.READ_BLOOD_PRESSURE" />
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+
+    <!-- Network for Calendar API, FCM, Messenger deep links -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Camera for medication photo verification -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Wake lock for alarms -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Boot completed to re-arm reminders -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <application
+        android:name=".ElderlyAssistantApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="Elderly Assistant"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.ElderlyAssistant"
+        android:networkSecurityConfig="@xml/network_security_config">
+
+        <!-- Main Activity (minimal UI — voice-first app) -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.ElderlyAssistant">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Foreground Service (24/7 always-on) -->
+        <service
+            android:name=".services.AssistantForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|health" />
+
+        <!-- Medication Alarm Receiver -->
+        <receiver
+            android:name=".services.medication.MedicationAlarmReceiver"
+            android:exported="false" />
+
+        <!-- Boot Receiver (re-arm reminders after reboot) -->
+        <receiver
+            android:name=".services.medication.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- FCM Service -->
+        <service
+            android:name=".services.family.FCMService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+    </application>
+</manifest>

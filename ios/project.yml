@@ -1,0 +1,106 @@
+# XcodeGen spec for ElderlyAssistant.
+#
+# Generate the .xcodeproj with:  xcodegen generate
+# (installed via `brew install xcodegen` — see ios/build.sh).
+#
+# Source of truth for the iOS project structure. Do NOT edit
+# ElderlyAssistant.xcodeproj/project.pbxproj by hand — regenerate it from
+# this file so history stays legible.
+
+name: ElderlyAssistant
+options:
+  bundleIdPrefix: com.elderlyassistant
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+
+# Wake word (Porcupine) — commented until access key + trained .ppn are
+# provisioned. See docs/voice-pipeline-setup.md.
+#
+# whisper.cpp (real Nepali STT) — enabled on branch master. Once the
+# runtime is linked, WhisperSpeechRecognizer.isAvailable flips to true and
+# AppCoordinator hot-swaps it in over the SFSpeechRecognizer fallback.
+packages:
+  # whisper.cpp itself has no Package.swift at repo root — use exPHAT's
+  # community wrapper, which is a well-maintained Swift binding around
+  # whisper.cpp with iOS + Accelerate + optional CoreML.
+  SwiftWhisper:
+    url: https://github.com/exPHAT/SwiftWhisper
+    branch: master
+  # Thin Swift wrapper around llama.cpp with Metal. Provides the `LLM`
+  # module and a Template abstraction (llama3, chatML, etc). Used by
+  # LlamaCommandInterpreter to run LLaMA 3.2 on-device.
+  LLM:
+    url: https://github.com/eastriverlee/LLM.swift
+    branch: main
+  # Porcupine:
+  #   url: https://github.com/Picovoice/porcupine.git
+  #   from: 3.0.0
+
+targets:
+  ElderlyAssistant:
+    type: application
+    platform: iOS
+    sources:
+      - path: ElderlyAssistant
+        excludes:
+          - "Info.plist"
+    resources: []
+    # Do NOT add an `info:` block here — that would make XcodeGen overwrite
+    # ElderlyAssistant/Info.plist on every `./build.sh generate`, wiping the
+    # real permission descriptions and BGTaskScheduler identifiers. Instead,
+    # point INFOPLIST_FILE at the plist we maintain by hand.
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.elderlyassistant.app
+        PRODUCT_NAME: ElderlyAssistant
+        INFOPLIST_FILE: ElderlyAssistant/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"  # iPhone only
+        SWIFT_OBJC_BRIDGING_HEADER: ""
+    dependencies:
+      - package: SwiftWhisper
+      - package: LLM
+        product: LLM
+
+  ElderlyAssistantTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: ElderlyAssistantTests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.elderlyassistant.app.tests
+        GENERATE_INFOPLIST_FILE: YES
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ElderlyAssistant.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ElderlyAssistant"
+    dependencies:
+      - target: ElderlyAssistant
+
+schemes:
+  ElderlyAssistant:
+    build:
+      targets:
+        ElderlyAssistant: all
+        ElderlyAssistantTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - ElderlyAssistantTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

@@ -47,7 +47,7 @@ The following constraints are non-negotiable. They must be enforced in all desig
 
 3. Voice biometric is the primary authentication mechanism. The system must enroll a voice profile from voice samples during setup and verify speaker identity before executing sensitive commands (calls, health data access, config changes). PIN is the fallback only — it must not be the default path.
 
-4. 24/7 always-on background service on both iOS and Android. The assistant must remain active and responsive to voice activation even when the screen is locked. This requires compliance with iOS Background Modes and Android foreground service / battery optimisation policies.
+4. 24/7 safety services on the MVP platform. For the iOS MVP, medication and other safety-critical reminders must continue to fire reliably in the background. Production wake-word activation is deferred to v2; v1 uses scheduled auto-activation plus a large "Talk to Assistant" control. Wake-word work must not block the iOS MVP.
 
 5. Highly personalised per-user profiles. Each installation maintains a profile: enrolled voice model, accent/dialect tuning, family contact list, medication schedule, appointment calendar, entertainment preferences, therapy routines, and health alert thresholds.
 
@@ -102,7 +102,7 @@ The following decisions could not be determined from the provided brief. They mu
 
 4. ~~**Cross-platform framework vs. native.**~~ **RESOLVED:** React Native (single codebase for iOS + Android).
 
-5. **Remote configuration push channel mechanism.** The brief requires end-to-end encrypted remote config push but does not specify the channel (e.g. Signal Protocol over a relay server, direct device-to-device via Apple Push Notification / FCM with payload encryption, peer-to-peer). Assumed: architect will propose. Confirm or correct before running /sdd-run.
+5. ~~**Remote configuration push channel mechanism.**~~ **RESOLVED:** Double Ratchet over an in-house minimum-trust "config broker" relay; APNs/FCM used only for wake-up. Broker never sees plaintext. See `docs/remote-config-channel-design.md` for full design, including how `FamilyNotifier` is rewired around it. Open items #1–#4 in that doc are for architect follow-up but do not block implementation of the L1 skeleton.
 
 6. **WhatsApp integration method.** WhatsApp does not provide a public API for third-party apps to send messages or make calls on behalf of a user. Integration likely requires Accessibility Services (Android) or Share Extension (iOS), or use of the WhatsApp Business API (requires business account). Assumed: architect will evaluate feasibility and propose an approach. Confirm or correct before running /sdd-run.
 
@@ -112,7 +112,7 @@ The following decisions could not be determined from the provided brief. They mu
 
 9. **Data residency.** The brief does not specify a country of distribution or data residency requirement. The on-device AI constraint addresses the core concern, but the remote config relay server (if used) has a location. Assumed: no specific data residency requirement beyond on-device AI processing. Confirm or correct before running /sdd-run.
 
-10. **Voice activation keyword.** An always-on assistant requires a wake-word or hotword detection model (e.g. "Hey [Name]"). No keyword was specified. Assumed: architect will propose an on-device hotword detection approach. Confirm or correct before running /sdd-run.
+10. ~~**Voice activation keyword.**~~ **RESOLVED FOR iOS MVP:** Wake word is deferred to v2. The iOS MVP uses scheduled auto-activation plus a large "Talk to Assistant" control. Research continues on a Nepali on-device KWS path.
 
 ## Agent Principles
 

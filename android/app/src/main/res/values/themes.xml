@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ElderlyAssistant" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorPrimary">#1565C0</item>
+        <item name="colorPrimaryDark">#0D47A1</item>
+        <item name="colorAccent">#42A5F5</item>
+        <item name="android:textColor">#212121</item>
+        <item name="android:windowBackground">#FAFAFA</item>
+        <!-- Large text for accessibility (NFR-021: min 18sp) -->
+        <item name="android:textAppearance">@style/TextAppearance.ElderlyAssistant</item>
+    </style>
+
+    <style name="TextAppearance.ElderlyAssistant" parent="TextAppearance.AppCompat">
+        <item name="android:textSize">18sp</item>
+        <item name="android:lineSpacingExtra">4sp</item>
+    </style>
+
+    <!-- Large tap targets (NFR-020: min 48x48dp) -->
+    <style name="Widget.ElderlyAssistant.Button" parent="Widget.AppCompat.Button">
+        <item name="android:minWidth">48dp</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:textSize">20sp</item>
+    </style>
+</resources>

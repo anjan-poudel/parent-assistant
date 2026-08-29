@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Relay server — certificate pinning in production -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="false">relay.elderlyassistant.com</domain>
+        <pin-set expiration="2027-01-01">
+            <!-- Pin to be added when relay server certificate is provisioned -->
+        </pin-set>
+    </domain-config>
+</network-security-config>

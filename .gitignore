@@ -1,1 +1,39 @@
-.idea
+.idea/
+.DS_Store
+
+# Local agent/editor state
+.serena/
+
+# Apple / Xcode
+ios/build/
+ios/DerivedData/
+ios/ios/build/
+ios/ios/DerivedData/
+**/DerivedData/
+**/xcuserdata/
+ios/*.xcarchive
+ios/ipa/
+ios/ExportOptions.plist
+ios/ElderlyAssistant.xcodeproj/project.xcworkspace/xcuserdata/
+ios/ElderlyAssistant.xcodeproj/xcuserdata/
+
+# Android generated output
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+
+# Downloaded or locally converted model weights
+*.gguf
+*.ggml
+*.bin
+*.onnx
+*.mlmodelc
+*.ppn
+
+# Local secrets
+.env
+.env.*
+!.env.example
+*.p8
+*.mobileprovision

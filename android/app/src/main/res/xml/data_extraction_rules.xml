@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="elderly_assistant_secure_storage" />
+        <exclude domain="database" path="elderly_assistant.db" />
+        <exclude domain="file" path="medication/" />
+        <exclude domain="file" path="health/" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="elderly_assistant_secure_storage" />
+        <exclude domain="database" path="elderly_assistant.db" />
+    </device-transfer>
+</data-extraction-rules>
