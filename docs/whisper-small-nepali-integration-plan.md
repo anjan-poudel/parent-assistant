@@ -137,6 +137,16 @@ whisper.cpp (a 2023 snapshot; upstream SwiftWhisper is unmaintained):
 `_with_params` API. Offline validation: the fixed build transcribes the
 SLR54 clip to `छिमेकी मोलुक भारतको` (was: crash).
 
+**CoreML status (2026-08-30):** the large-v3 CoreML encoder loads on
+device (`Core ML model loaded`, `backend=ane`) but the first prediction
+never returns — whisper.cpp's current converter produces fp32/fp16
+encoders with no palettization (the old ANE-palettized pipeline was
+removed upstream; `--optimize-ane` no longer shrinks output), and the
+1.2 GB fp16 model appears to hang on first inference. The encoder is
+therefore NOT bundled; large-v3 runs on CPU (correct Devanagari, but
+slow). The fast-Nepali path is the distilled small model (§8) — 80
+mels, ANE-friendly, ~60 MB encoder.
+
 ## 7. Long-term
 
 A small-footprint Devanagari Nepali model requires training one ourselves

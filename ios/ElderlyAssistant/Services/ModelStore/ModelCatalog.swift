@@ -113,7 +113,11 @@ enum ModelCatalog {
             // gate it to 6 GB-class devices; others use the small model.
             minDeviceRAMBytes: 4_500_000_000,
             dependsOn: nil,
-            coreMLEncoderBundledName: "whisper-large-v3-nepali-encoder"
+            // No bundled CoreML encoder: whisper.cpp's current converter
+            // emits fp32/fp16 (no palettization) and the fp16 encoder
+            // hangs on-device (see the plan doc §9). Runs on CPU — slow
+            // but functional. The distilled small model is the fast path.
+            coreMLEncoderBundledName: nil
         ),
         ModelCatalogEntry(
             id: whisperSmallMultilingual,

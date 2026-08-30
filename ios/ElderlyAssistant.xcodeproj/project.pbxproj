@@ -12,7 +12,6 @@
 		0D70DE412C00001898760AF5 /* ElderlyAssistantApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 050315DE680CE94C0C4594A5 /* ElderlyAssistantApp.swift */; };
 		203223B8756FC96334BC2960 /* EscalationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AF7478D117F7C991FC99A68 /* EscalationEngine.swift */; };
 		299549B47B6CBC1FEED6E1EF /* ConfirmationChallenge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B4100D9B7589B71AD8962A0 /* ConfirmationChallenge.swift */; };
-		2B24FDB3E8B6EB7EDF1EE8C6 /* whisper-large-v3-nepali-encoder.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = 4DD8E236D867F0EED3822BE8 /* whisper-large-v3-nepali-encoder.mlmodelc */; };
 		38EA930604B28AB2BF63DF05 /* WakeWordEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFE0B77607ED7DA0553D6F0 /* WakeWordEngine.swift */; };
 		3FE394412AC1FB089526F43C /* ModelStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F9D2C931DA6AAFA3A23B6C /* ModelStoreTests.swift */; };
 		408C22DF6353AF02C3CF6A5B /* LogSanitiser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8ACA4236E037E41C5E53D9 /* LogSanitiser.swift */; };
@@ -78,7 +77,6 @@
 		4099370DD1353BABBAF99588 /* EnergyVADTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnergyVADTests.swift; sourceTree = "<group>"; };
 		426B00DB54390C484D152534 /* WhisperSpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperSpeechRecognizer.swift; sourceTree = "<group>"; };
 		459B50A39CF4B7C83A674894 /* LlamaCommandInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaCommandInterpreter.swift; sourceTree = "<group>"; };
-		4DD8E236D867F0EED3822BE8 /* whisper-large-v3-nepali-encoder.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = "whisper-large-v3-nepali-encoder.mlmodelc"; sourceTree = "<group>"; };
 		4FF305EE75985E7F2B131DD2 /* CommandRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRouterTests.swift; sourceTree = "<group>"; };
 		5037C77CFB1853F53CE7B8B6 /* TranscriptSanityGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSanityGuardTests.swift; sourceTree = "<group>"; };
 		50EFF6165E6175FF1A801198 /* DependencyProtocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyProtocols.swift; sourceTree = "<group>"; };
@@ -132,7 +130,6 @@
 			children = (
 				8C06C6328EED789FA5A827B2 /* ggml-small-encoder.mlmodelc */,
 				7CB5EAD9E47FF64F437F4BC8 /* README.md */,
-				4DD8E236D867F0EED3822BE8 /* whisper-large-v3-nepali-encoder.mlmodelc */,
 			);
 			path = CoreML;
 			sourceTree = "<group>";
@@ -406,7 +403,6 @@
 			files = (
 				AC19D7287A994FE6A8A5C3C9 /* README.md in Resources */,
 				F200FB06833F10743C65EF74 /* ggml-small-encoder.mlmodelc in Resources */,
-				2B24FDB3E8B6EB7EDF1EE8C6 /* whisper-large-v3-nepali-encoder.mlmodelc in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -723,7 +719,7 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/anjan-poudel/SwiftWhisper";
 			requirement = {
-				branch = n-mels-fix;
+				branch = "n-mels-fix";
 				kind = branch;
 			};
 		};
