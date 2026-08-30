@@ -137,6 +137,18 @@ whisper.cpp (a 2023 snapshot; upstream SwiftWhisper is unmaintained):
 `_with_params` API. Offline validation: the fixed build transcribes the
 SLR54 clip to `छिमेकी मोलुक भारतको` (was: crash).
 
+**Metal GPU (2026-08-30, device-verified):** Whisper now runs on the
+Metal GPU — `metal-experiment` fork branch enables GGML_USE_METAL with a
+precompiled `default.metallib` bundled as an app resource (SPM can't
+compile the 2023-era shader with modern flags, and never embedded .copy
+resources), ARC-safe ggml-metal.m, CPU fallback when Metal init fails,
+and `use_gpu: true` (the gate SwiftWhisper never opened — whisper.cpp
+only calls ggml_metal_init when the context param is set). Result on
+iPhone 14 Pro Max: large-v3 transcription dropped from 5-7 min to
+**12 s first utterance (incl. one-time Metal warm-up)**, and the full
+loop (STT → LLaMA JSON → TTS) runs crash-free. The app's
+`backend=cpu` label is stale (CoreML-specific check) — cosmetic.
+
 **CoreML status (2026-08-30):** the large-v3 CoreML encoder loads on
 device (`Core ML model loaded`, `backend=ane`) but the first prediction
 never returns — whisper.cpp's current converter produces fp32/fp16
@@ -168,7 +180,7 @@ adapted to Nepali:
 | Item | Choice |
 |---|---|
 | Teacher | `kiranpantha/whisper-large-v3-nepali` (Devanagari, WER 18.7% SLR54) |
-| Student | `openai/whisper-small` (244 M) — encoder initialized from 12 of the teacher's 32 encoder layers (every 2nd–3rd), decoder fresh |
+| Student | Distil-Whisper-style: **teacher width** (d_model 1280) with 12 encoder / 4 decoder layers (~250 M, whisper-small class) — encoder layers copied from every 2nd–3rd teacher layer (1280-wide weights can't load into whisper-small's 768-wide layers; same approach as distil-small), decoder fresh |
 | Stage 1 — distillation | KL divergence against teacher output distributions + pseudo-label cross-entropy, on unlabeled Nepali audio (SLR54 audio, CV17 ne audio, FLEURS train — no transcripts needed) |
 | Stage 2 — fine-tune | Standard cross-entropy on Devanagari transcripts (SLR54 `utt_spk_text.tsv`, CV17 `ne-NP`, FLEURS — ~200 h) with the Rijal augmentation recipe |
 | Hardware | The 4090/24 GB box (research doc §12): teacher bf16 ≈ 3.1 GB + student ≈ 1 GB + activations — comfortable; small-model runs are ~2–4 h/epoch |
