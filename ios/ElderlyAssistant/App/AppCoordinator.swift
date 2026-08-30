@@ -132,6 +132,14 @@ final class AppCoordinator: ObservableObject {
         // Register background tasks (iOS)
         registerBackgroundTasks()
 
+        // Repair encoder installs from older builds: the bundled-encoder
+        // copy step normally runs at download finalize, so models cached
+        // before a naming fix (or before the encoder existed) sit without
+        // one. Idempotent — no-op when the target already exists.
+        for entry in ModelCatalog.entries(kind: .whisperBase) {
+            modelStore.installBundledCoreMLEncoder(for: entry.id)
+        }
+
         // Restore and re-arm any outstanding medication reminders
         medicationScheduler.scheduleAll()
 
