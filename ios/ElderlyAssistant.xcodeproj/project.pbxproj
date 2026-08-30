@@ -709,9 +709,9 @@
 /* Begin XCRemoteSwiftPackageReference section */
 		6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/eastriverlee/LLM.swift";
+			repositoryURL = "https://github.com/anjan-poudel/LLM.swift";
 			requirement = {
-				branch = main;
+				branch = llm-safety;
 				kind = branch;
 			};
 		};

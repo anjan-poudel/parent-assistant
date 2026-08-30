@@ -1,33 +1,24 @@
 {
-  "originHash" : "89b7b7cf1739a9df6f7842d5168895b1234931d2bad66ff34c8642f458cb6e18",
-  "pins" : [
+  "originHash": "6c32e6ee0ace481efb5fa4376be000e2be71b9657c55f83bb21d63acd352135c",
+  "pins": [
     {
-      "identity" : "llm.swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/eastriverlee/LLM.swift",
-      "state" : {
-        "branch" : "main",
-        "revision" : "1d42188d5238ce4b9d25958f5444713b83d5e045"
+      "identity": "llm.swift",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/anjan-poudel/LLM.swift",
+      "state": {
+        "branch": "llm-safety",
+        "revision": "40e56d4a12f735504aa51db0d3783b68790f2323"
       }
     },
     {
-      "identity" : "swift-syntax",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-syntax.git",
-      "state" : {
-        "revision" : "4799286537280063c85a32f09884cfbca301b1a1",
-        "version" : "602.0.0"
-      }
-    },
-    {
-      "identity" : "swiftwhisper",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/anjan-poudel/SwiftWhisper",
-      "state" : {
-        "branch" : "n-mels-fix",
-        "revision" : "5551bf22f697863068021d0ea0ea0245dd9cd18e"
+      "identity": "swiftwhisper",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/anjan-poudel/SwiftWhisper",
+      "state": {
+        "branch": "n-mels-fix",
+        "revision": "5551bf22f697863068021d0ea0ea0245dd9cd18e"
       }
     }
   ],
-  "version" : 3
+  "version": 3
 }
