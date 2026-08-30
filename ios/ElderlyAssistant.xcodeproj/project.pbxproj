@@ -12,7 +12,7 @@
 		0D70DE412C00001898760AF5 /* ElderlyAssistantApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 050315DE680CE94C0C4594A5 /* ElderlyAssistantApp.swift */; };
 		203223B8756FC96334BC2960 /* EscalationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AF7478D117F7C991FC99A68 /* EscalationEngine.swift */; };
 		299549B47B6CBC1FEED6E1EF /* ConfirmationChallenge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B4100D9B7589B71AD8962A0 /* ConfirmationChallenge.swift */; };
-		2B24FDB3E8B6EB7EDF1EE8C6 /* whisper-large-v3-nepali-q5_1-encoder.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = 4DD8E236D867F0EED3822BE8 /* whisper-large-v3-nepali-q5_1-encoder.mlmodelc */; };
+		2B24FDB3E8B6EB7EDF1EE8C6 /* whisper-large-v3-nepali-encoder.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = 4DD8E236D867F0EED3822BE8 /* whisper-large-v3-nepali-encoder.mlmodelc */; };
 		38EA930604B28AB2BF63DF05 /* WakeWordEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFE0B77607ED7DA0553D6F0 /* WakeWordEngine.swift */; };
 		3FE394412AC1FB089526F43C /* ModelStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F9D2C931DA6AAFA3A23B6C /* ModelStoreTests.swift */; };
 		408C22DF6353AF02C3CF6A5B /* LogSanitiser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8ACA4236E037E41C5E53D9 /* LogSanitiser.swift */; };
@@ -48,7 +48,7 @@
 		CF1D61DC1AE25927611816F8 /* MedicationSchedulerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A97FCC20DC139A6F36EF5884 /* MedicationSchedulerProtocol.swift */; };
 		D6835191986FBF797464B5BD /* ModelDownloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7665911F65DF1CD61EC44277 /* ModelDownloadService.swift */; };
 		EAA4C9A61CDA5778686FDA76 /* EscalationEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5B0563FB83838D506EA5E4 /* EscalationEngineTests.swift */; };
-		F200FB06833F10743C65EF74 /* ggml-small-q5_1-encoder.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = 8C06C6328EED789FA5A827B2 /* ggml-small-q5_1-encoder.mlmodelc */; };
+		F200FB06833F10743C65EF74 /* ggml-small-encoder.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = 8C06C6328EED789FA5A827B2 /* ggml-small-encoder.mlmodelc */; };
 		F2545B47080302C2D47C85BB /* WhisperSpeechRecognizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EF74EEC9797CDE01B05BAA0 /* WhisperSpeechRecognizerTests.swift */; };
 		F46656314EF3B024F5871089 /* AudioSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54BA14F8D657DC91DFCC22AF /* AudioSessionManager.swift */; };
 		FAF5990EE46B3F7B950249B2 /* DependencyProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50EFF6165E6175FF1A801198 /* DependencyProtocols.swift */; };
@@ -78,7 +78,7 @@
 		4099370DD1353BABBAF99588 /* EnergyVADTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnergyVADTests.swift; sourceTree = "<group>"; };
 		426B00DB54390C484D152534 /* WhisperSpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperSpeechRecognizer.swift; sourceTree = "<group>"; };
 		459B50A39CF4B7C83A674894 /* LlamaCommandInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaCommandInterpreter.swift; sourceTree = "<group>"; };
-		4DD8E236D867F0EED3822BE8 /* whisper-large-v3-nepali-q5_1-encoder.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = "whisper-large-v3-nepali-q5_1-encoder.mlmodelc"; sourceTree = "<group>"; };
+		4DD8E236D867F0EED3822BE8 /* whisper-large-v3-nepali-encoder.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = "whisper-large-v3-nepali-encoder.mlmodelc"; sourceTree = "<group>"; };
 		4FF305EE75985E7F2B131DD2 /* CommandRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRouterTests.swift; sourceTree = "<group>"; };
 		5037C77CFB1853F53CE7B8B6 /* TranscriptSanityGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSanityGuardTests.swift; sourceTree = "<group>"; };
 		50EFF6165E6175FF1A801198 /* DependencyProtocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyProtocols.swift; sourceTree = "<group>"; };
@@ -93,7 +93,7 @@
 		7CB5EAD9E47FF64F437F4BC8 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		875C3FEBDCA672D2C9E0E7F2 /* FamilyNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyNotifier.swift; sourceTree = "<group>"; };
 		89ED4B2E4128B4CFA0B6365B /* ConfirmationChallengeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationChallengeTests.swift; sourceTree = "<group>"; };
-		8C06C6328EED789FA5A827B2 /* ggml-small-q5_1-encoder.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = "ggml-small-q5_1-encoder.mlmodelc"; sourceTree = "<group>"; };
+		8C06C6328EED789FA5A827B2 /* ggml-small-encoder.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = "ggml-small-encoder.mlmodelc"; sourceTree = "<group>"; };
 		90995C4CAB955FB574BB07C6 /* CommandRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRouter.swift; sourceTree = "<group>"; };
 		91DDA75BE5CF8691D09075D6 /* IdHashing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdHashing.swift; sourceTree = "<group>"; };
 		A5FEB104D893654A4F159A51 /* ModelStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStore.swift; sourceTree = "<group>"; };
@@ -130,9 +130,9 @@
 		0DB8876E94D9B5D8C577BDAB /* CoreML */ = {
 			isa = PBXGroup;
 			children = (
-				8C06C6328EED789FA5A827B2 /* ggml-small-q5_1-encoder.mlmodelc */,
+				8C06C6328EED789FA5A827B2 /* ggml-small-encoder.mlmodelc */,
 				7CB5EAD9E47FF64F437F4BC8 /* README.md */,
-				4DD8E236D867F0EED3822BE8 /* whisper-large-v3-nepali-q5_1-encoder.mlmodelc */,
+				4DD8E236D867F0EED3822BE8 /* whisper-large-v3-nepali-encoder.mlmodelc */,
 			);
 			path = CoreML;
 			sourceTree = "<group>";
@@ -405,8 +405,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				AC19D7287A994FE6A8A5C3C9 /* README.md in Resources */,
-				F200FB06833F10743C65EF74 /* ggml-small-q5_1-encoder.mlmodelc in Resources */,
-				2B24FDB3E8B6EB7EDF1EE8C6 /* whisper-large-v3-nepali-q5_1-encoder.mlmodelc in Resources */,
+				F200FB06833F10743C65EF74 /* ggml-small-encoder.mlmodelc in Resources */,
+				2B24FDB3E8B6EB7EDF1EE8C6 /* whisper-large-v3-nepali-encoder.mlmodelc in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -721,9 +721,9 @@
 		};
 		7B16D8138C2ED1D8657D75EC /* XCRemoteSwiftPackageReference "SwiftWhisper" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/exPHAT/SwiftWhisper";
+			repositoryURL = "https://github.com/anjan-poudel/SwiftWhisper";
 			requirement = {
-				branch = master;
+				branch = n-mels-fix;
 				kind = branch;
 			};
 		};

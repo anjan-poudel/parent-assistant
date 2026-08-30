@@ -110,12 +110,32 @@ All of the machinery, none of the model:
    quality path.
 3. On-device manual matrix + RTF on a 6 GB-class device.
 4. CoreML encoder for large-v3: ✅ generated 2026-08-30 (fp16,
-   `whisper-large-v3-nepali-q5_1-encoder.mlmodelc`, **1.2 GB** — the
+   `whisper-large-v3-nepali-encoder.mlmodelc`, **1.2 GB** — the
    ANE/palettization flag in whisper.cpp's `-h5` path is upstream-broken,
-   so no 320 MB variant). Hosted as a release asset; NOT bundled in the
-   app (would add 1.2 GB to the IPA). Wiring it up needs the coreml
-   plan's M2 download pipeline, or a manual drop into
-   `Resources/CoreML/` for a heavier test build.
+   so no 320 MB variant). Bundled in `Resources/CoreML/` for test builds
+   (git-ignored; regenerate per the coreml plan).
+
+## 9. SwiftWhisper whisper.cpp bugs found on-device (2026-08-30)
+
+Device logs + source audit found two blockers in SwiftWhisper's vendored
+whisper.cpp (a 2023 snapshot; upstream SwiftWhisper is unmaintained):
+
+1. **Hardcoded `WHISPER_N_MEL 80`** — the mel spectrogram was always
+   built with 80 bins, then asserted against the model's `n_mels`
+   (large-v3 = 128) → instant crash on every encode. Fixed by vendoring
+   whisper.cpp @ `0de8582f` ("coreml: use the correct `n_mel` value").
+2. **Encoder path naming** — whisper.cpp strips the `-qX_X` quantization
+   suffix from the ggml filename before appending `-encoder.mlmodelc`
+   (`whisper-large-v3-nepali-q5_1.bin` → `whisper-large-v3-nepali-
+   encoder.mlmodelc`). The catalog/ModelStore convention preserved the
+   suffix, so the runtime never found the bundled encoder. Fixed in
+   `ModelStore.coreMLBundleFinalURL` + catalog names + bundled dirs.
+
+**Durable fix:** the app's SwiftWhisper dependency now points at
+`anjan-poudel/SwiftWhisper@n-mels-fix` — the fork vendors whisper.cpp
+@ 0de8582f as real files (no submodule), with init calls adapted to the
+`_with_params` API. Offline validation: the fixed build transcribes the
+SLR54 clip to `छिमेकी मोलुक भारतको` (was: crash).
 
 ## 7. Long-term
 

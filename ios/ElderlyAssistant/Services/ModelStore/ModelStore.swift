@@ -85,23 +85,32 @@ final class ModelStore {
     /// — combine with `isCoreMLCached(_:)`.
     ///
     /// Whisper.cpp derives this path by stripping `.bin` from the ggml
-    /// filename and appending `-encoder.mlmodelc`, so we match that
-    /// convention exactly.
+    /// filename AND stripping a trailing `-qX_X` quantization suffix
+    /// (`whisper-large-v3-nepali-q5_1.bin` → `whisper-large-v3-nepali-
+    /// encoder.mlmodelc`), so we match that derivation exactly — a
+    /// q5_1-preserving name here is silently ignored by the runtime.
     func coreMLBundleFinalURL(for id: ModelID) -> URL? {
         guard let entry = ModelCatalog.entry(for: id),
               entry.coreMLEncoderBundledName != nil else {
             return nil
         }
         let ggmlURL = finalURL(for: entry)
-        let base: String
+        var stem: String
         if ggmlURL.pathExtension == "bin" {
-            base = ggmlURL.deletingPathExtension().lastPathComponent
+            stem = ggmlURL.deletingPathExtension().lastPathComponent
         } else {
-            base = ggmlURL.lastPathComponent
+            stem = ggmlURL.lastPathComponent
+        }
+        // Drop a trailing "-qX_X" (5 chars) like whisper.cpp does.
+        if let dash = stem.lastIndex(of: "-") {
+            let suffix = Array(stem[dash...])
+            if suffix.count == 5, suffix[1] == "q", suffix[3] == "_" {
+                stem = String(stem[..<dash])
+            }
         }
         return ggmlURL
             .deletingLastPathComponent()
-            .appendingPathComponent("\(base)-encoder.mlmodelc", isDirectory: true)
+            .appendingPathComponent("\(stem)-encoder.mlmodelc", isDirectory: true)
     }
 
     /// True when the mlmodelc directory exists on disk next to the ggml.

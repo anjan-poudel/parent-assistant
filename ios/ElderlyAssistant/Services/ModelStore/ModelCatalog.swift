@@ -113,7 +113,7 @@ enum ModelCatalog {
             // gate it to 6 GB-class devices; others use the small model.
             minDeviceRAMBytes: 4_500_000_000,
             dependsOn: nil,
-            coreMLEncoderBundledName: "whisper-large-v3-nepali-q5_1-encoder"
+            coreMLEncoderBundledName: "whisper-large-v3-nepali-encoder"
         ),
         ModelCatalogEntry(
             id: whisperSmallMultilingual,
@@ -128,7 +128,7 @@ enum ModelCatalog {
             // Drop `ggml-small-q5_1-encoder.mlmodelc/` into
             // ElderlyAssistant/Resources/CoreML/ per the coreml plan
             // §4. Absent = model still works, just on CPU.
-            coreMLEncoderBundledName: "ggml-small-q5_1-encoder"
+            coreMLEncoderBundledName: "ggml-small-encoder"
         ),
         ModelCatalogEntry(
             id: whisperBaseEn,
