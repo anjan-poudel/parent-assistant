@@ -15,10 +15,10 @@ from transformers import (
     Seq2SeqTrainer,
     Seq2SeqTrainingArguments,
     WhisperForConditionalGeneration,
-    WhisperProcessor,
 )
 
-from config import abs_path, add_common, apply_common, load_config, set_determinism
+from config import (abs_path, add_common, apply_common, load_config,
+                   load_processor, set_determinism)
 from dataset import DataCollatorSpeechSeq2SeqWithPadding, prepare_dataset
 
 LANG, TASK = "ne", "transcribe"
@@ -50,8 +50,7 @@ def main() -> None:
     base = args.model or str(abs_path(cfg, "checkpoint_dir") / "distill-final")
     print(f"loading base model: {base}")
     model = WhisperForConditionalGeneration.from_pretrained(base)
-    processor = WhisperProcessor.from_pretrained(cfg["teacher"],
-                                                 language=LANG, task=TASK)
+    processor = load_processor(cfg["teacher"])
 
     manifest = "smoke-manifest.jsonl" if args.smoke else "manifest.jsonl"
     ds = prepare_dataset(data_dir / manifest, processor,

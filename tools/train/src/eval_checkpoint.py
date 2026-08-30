@@ -19,7 +19,8 @@ from datasets import Audio, Dataset
 from jiwer import cer, wer
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
-from config import ROOT, abs_path, add_common, apply_common, load_config
+from config import (ROOT, abs_path, add_common, apply_common,
+                   load_config, load_processor)
 
 LANG, TASK = "ne", "transcribe"
 
@@ -63,8 +64,7 @@ def main() -> None:
 
     data_dir = abs_path(cfg, "data_dir")
     model = WhisperForConditionalGeneration.from_pretrained(args.model)
-    processor = WhisperProcessor.from_pretrained(cfg["teacher"],
-                                                 language=LANG, task=TASK)
+    processor = load_processor(cfg["teacher"])
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
     model.eval()

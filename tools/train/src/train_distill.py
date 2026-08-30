@@ -29,7 +29,8 @@ from transformers import (
     WhisperProcessor,
 )
 
-from config import abs_path, add_common, apply_common, load_config, set_determinism
+from config import (abs_path, add_common, apply_common, load_config,
+                   load_processor, set_determinism)
 from dataset import DataCollatorSpeechSeq2SeqWithPadding, prepare_dataset
 
 LANG, TASK = "ne", "transcribe"
@@ -44,8 +45,6 @@ def load_teacher(cfg):
     return teacher
 
 
-def load_processor(teacher_id: str):
-    return WhisperProcessor.from_pretrained(teacher_id, language=LANG, task=TASK)
 
 
 def pseudo_labels(cfg, data_dir, teacher, processor, smoke=False):

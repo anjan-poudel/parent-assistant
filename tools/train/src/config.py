@@ -74,3 +74,20 @@ def set_determinism(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+
+
+def load_processor(teacher_id: str):
+    """WhisperProcessor for the teacher, falling back to the standard
+    multilingual tokenizer: kiranpantha/whisper-large-v3-nepali ships no
+    tokenizer files, so the openai/whisper-large-v3 set is the correct
+    substitute (same 51,866-token vocab the model uses)."""
+    from transformers import WhisperProcessor
+
+    try:
+        return WhisperProcessor.from_pretrained(teacher_id,
+                                                language="ne", task="transcribe")
+    except OSError:
+        print(f"teacher '{teacher_id}' ships no tokenizer files — "
+              "borrowing openai/whisper-large-v3's")
+        return WhisperProcessor.from_pretrained("openai/whisper-large-v3",
+                                                language="ne", task="transcribe")
