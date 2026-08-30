@@ -127,8 +127,8 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
             return pref
         }
         let automaticOrder: [ModelID] = [
-            ModelCatalog.whisperSmallMultilingual,
             ModelCatalog.whisperLargeV3Nepali,
+            ModelCatalog.whisperSmallMultilingual,
             ModelCatalog.whisperBaseEn
         ]
         return automaticOrder.first { modelStore.isCached($0) }
@@ -386,11 +386,11 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
     ///
     ///   1. The user's explicit pick from the UI (RAM-gated only for the
     ///      1.9 GB large-v3; the small models fit every supported device).
-    ///   2. Automatic order: stock small multilingual (auto-detect, the
-    ///      lightweight default), then the large-v3 Nepali fine-tune only
-    ///      if the current process memory ceiling can hold it (gated to
-    ///      6 GB-class devices — we emit `model_skipped_ram` and drop
-    ///      through), then base-en.
+    ///   2. Automatic order is device-tier-aware: the large-v3 Nepali
+    ///      fine-tune first when the device can hold it (6 GB class) —
+    ///      the stock small produces gibberish on Nepali (109% WER in
+    ///      the eval), so it is a low-RAM fallback, not the default on
+    ///      capable devices. Then small multilingual, then base-en.
     private func selectModelId() -> ModelID? {
         if let pref = preferredModelID {
             if modelStore.isCached(pref) {
@@ -402,12 +402,14 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
                 emit("preferred_model_not_cached", errorCode: "not_cached")
             }
         }
+        if modelStore.isCached(ModelCatalog.whisperLargeV3Nepali) {
+            if fitsRAM(ModelCatalog.whisperLargeV3Nepali) {
+                return ModelCatalog.whisperLargeV3Nepali
+            }
+            // fitsRAM emitted model_skipped_ram — drop through to small.
+        }
         if modelStore.isCached(ModelCatalog.whisperSmallMultilingual) {
             return ModelCatalog.whisperSmallMultilingual
-        }
-        if modelStore.isCached(ModelCatalog.whisperLargeV3Nepali),
-           fitsRAM(ModelCatalog.whisperLargeV3Nepali) {
-            return ModelCatalog.whisperLargeV3Nepali
         }
         if modelStore.isCached(ModelCatalog.whisperBaseEn) {
             return ModelCatalog.whisperBaseEn
