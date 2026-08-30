@@ -77,6 +77,87 @@ final class ModelStore {
         path(for: id) != nil
     }
 
+    // MARK: - CoreML encoder companion
+
+    /// URL of the extracted `-encoder.mlmodelc` directory that whisper.cpp
+    /// autodetects to run the encoder on the Neural Engine. Nil when the
+    /// catalog entry has no CoreML companion. May not exist on disk yet
+    /// — combine with `isCoreMLCached(_:)`.
+    ///
+    /// Whisper.cpp derives this path by stripping `.bin` from the ggml
+    /// filename and appending `-encoder.mlmodelc`, so we match that
+    /// convention exactly.
+    func coreMLBundleFinalURL(for id: ModelID) -> URL? {
+        guard let entry = ModelCatalog.entry(for: id),
+              entry.coreMLEncoderBundledName != nil else {
+            return nil
+        }
+        let ggmlURL = finalURL(for: entry)
+        let base: String
+        if ggmlURL.pathExtension == "bin" {
+            base = ggmlURL.deletingPathExtension().lastPathComponent
+        } else {
+            base = ggmlURL.lastPathComponent
+        }
+        return ggmlURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("\(base)-encoder.mlmodelc", isDirectory: true)
+    }
+
+    /// True when the mlmodelc directory exists on disk next to the ggml.
+    func isCoreMLCached(_ id: ModelID) -> Bool {
+        guard let url = coreMLBundleFinalURL(for: id) else { return false }
+        var isDir: ObjCBool = false
+        return fileManager.fileExists(atPath: url.path, isDirectory: &isDir)
+            && isDir.boolValue
+    }
+
+    /// Copies the app-bundled `-encoder.mlmodelc` (if any) into place next
+    /// to the ggml file. Idempotent — noop when the target already exists
+    /// or the bundle has no resource by that name. Called from `finalize`;
+    /// safe to call standalone at app launch to catch first-run installs.
+    ///
+    /// Returns the installed URL on success, nil when nothing was installed.
+    /// Errors are swallowed and emitted as observability — CoreML is an
+    /// optimisation, and any failure falls back to CPU without impact.
+    @discardableResult
+    func installBundledCoreMLEncoder(for id: ModelID,
+                                     bundle: Bundle = .main) -> URL? {
+        guard let entry = ModelCatalog.entry(for: id),
+              let resourceName = entry.coreMLEncoderBundledName,
+              let dest = coreMLBundleFinalURL(for: id) else {
+            return nil
+        }
+        if fileManager.fileExists(atPath: dest.path) {
+            return dest
+        }
+        guard let source = bundle.url(forResource: resourceName,
+                                      withExtension: "mlmodelc") else {
+            emit("coreml_encoder_not_bundled", outcome: "info",
+                 modelId: id, errorCode: nil)
+            return nil
+        }
+        do {
+            try ensureDirectory(dest.deletingLastPathComponent())
+            try fileManager.copyItem(at: source, to: dest)
+            try? fileManager.setAttributes(
+                [.protectionKey: FileProtectionType.complete],
+                ofItemAtPath: dest.path
+            )
+            var mutable = dest
+            var resource = URLResourceValues()
+            resource.isExcludedFromBackup = true
+            try? mutable.setResourceValues(resource)
+            emit("coreml_encoder_installed", outcome: "success",
+                 modelId: id, errorCode: nil)
+            return dest
+        } catch {
+            emit("coreml_encoder_install_failed", outcome: "failure",
+                 modelId: id, errorCode: "copy")
+            return nil
+        }
+    }
+
     /// A model is "available" when it is cached AND all its declared
     /// dependencies are cached.
     func isAvailable(_ id: ModelID) -> Bool {
@@ -138,11 +219,17 @@ final class ModelStore {
         resource.isExcludedFromBackup = true
         try? mutable.setResourceValues(resource)
 
+        // Install the app-bundled CoreML encoder (if any) so whisper.cpp
+        // picks it up on next `Whisper(fromFileURL:)`. Failure here is
+        // logged, not raised — CPU fallback is fine.
+        _ = installBundledCoreMLEncoder(for: id)
+
         emit("finalize_success", outcome: "success", modelId: id, errorCode: nil)
         return final
     }
 
-    /// Deletes a cached model file. Idempotent.
+    /// Deletes a cached model file. Idempotent. Also removes the
+    /// `-encoder.mlmodelc` sibling if present.
     func delete(_ id: ModelID) throws {
         guard let entry = ModelCatalog.entry(for: id) else {
             throw ModelStoreError.unknownModel
@@ -151,6 +238,12 @@ final class ModelStore {
         if fileManager.fileExists(atPath: final.path) {
             try fileManager.removeItem(at: final)
             emit("delete", outcome: "success", modelId: id, errorCode: nil)
+        }
+        if let coreml = coreMLBundleFinalURL(for: id),
+           fileManager.fileExists(atPath: coreml.path) {
+            try? fileManager.removeItem(at: coreml)
+            emit("delete_coreml_encoder", outcome: "success",
+                 modelId: id, errorCode: nil)
         }
     }
 

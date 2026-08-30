@@ -25,10 +25,14 @@ enum MemoryProbe {
         return UInt64(Double(physicalMemoryBytes) * 0.55)
     }
 
-    /// Whether a model with the given RAM floor is safe to load right now.
-    /// Adds a 200 MB working-set headroom on top of the model's own claim.
+    /// Whether the DEVICE can hold a model with the given RAM floor.
+    /// Catalog `minDeviceRAMBytes` values are physical-device claims (an
+    /// iPhone 12 has ~4 GB, a 14 Pro Max ~6 GB). `os_proc_available_memory`
+    /// — the app's *current* ceiling, typically 1–3 GB on iOS — is the
+    /// wrong comparator here: it rejected every model over ~2 GB on every
+    /// device ("device does not have enough memory" on a 14 Pro Max).
+    /// Runtime spikes are handled by whisper.cpp's mmap + OS paging.
     static func canFit(_ requiredBytes: UInt64) -> Bool {
-        let headroom: UInt64 = 200_000_000
-        return availableProcessMemoryBytes >= requiredBytes + headroom
+        physicalMemoryBytes >= requiredBytes
     }
 }

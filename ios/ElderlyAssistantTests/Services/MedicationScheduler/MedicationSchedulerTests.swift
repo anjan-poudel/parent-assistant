@@ -115,7 +115,9 @@ final class MedicationSchedulerTests: XCTestCase {
 
         scheduler.loadSchedule(entries: [entry])
 
-        XCTAssertEqual(mockStorage.writeCallCount, 1)
+        // Two writes: the schedule entries, then the pending reminders
+        // derived from them (createPendingReminders → persistReminders).
+        XCTAssertEqual(mockStorage.writeCallCount, 2)
         XCTAssertEqual(scheduler.pendingReminders.count, 1)
     }
 

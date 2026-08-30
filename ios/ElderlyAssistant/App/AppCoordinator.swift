@@ -11,6 +11,18 @@ final class AppCoordinator: ObservableObject {
     @Published var voiceState: VoicePipeline.State = .stopped
     @Published var voiceError: String?
     @Published var activeSTTName: String = "SFSpeechRecognizer (English fallback)"
+    /// User's STT model pick from the UI. Nil = automatic selection.
+    /// Persisted in UserDefaults (a UI preference, not a secret) and
+    /// pushed to WhisperSpeechRecognizer so it survives restarts.
+    @Published var sttModelPreference: ModelID? {
+        didSet {
+            UserDefaults.standard.set(sttModelPreference?.rawValue,
+                                      forKey: Self.sttPreferenceKey)
+            whisperSpeechRecognizer.setPreferredModel(sttModelPreference)
+            updateActiveSTTName()
+        }
+    }
+    private static let sttPreferenceKey = "sttModelPreference"
     @Published var lastTranscript: String?
     /// While non-nil, a confirmation challenge is awaiting the user's
     /// yes/no follow-up. Set by `startVoiceAckConfirmation` and cleared by
@@ -40,12 +52,15 @@ final class AppCoordinator: ObservableObject {
     private let fallbackSpeechRecognizer: OnDeviceSpeechRecognizer
 
     /// The IDs the first-run flow will download by default. Order matters —
-    /// STT unlocks the whole Nepali path so it goes first.
+    /// STT unlocks the whole voice path so the ~190 MB stock small model
+    /// goes first. The 1.9 GB large-v3 Nepali fine-tune stays in the list
+    /// (user-choosable, per the model-picker decision) but last so it
+    /// never blocks the LLM/TTS downloads; it can be cancelled from the UI.
     let requiredModelIds: [ModelID] = [
-        ModelCatalog.whisperLargeV3Nepali,
         ModelCatalog.whisperSmallMultilingual,
         ModelCatalog.llama3_2_1B,
-        ModelCatalog.piperNepali
+        ModelCatalog.piperNepali,
+        ModelCatalog.whisperLargeV3Nepali
     ]
 
     init() {
@@ -102,6 +117,15 @@ final class AppCoordinator: ObservableObject {
             modelStore: modelStore,
             observabilityBus: bus
         )
+
+        // Restore the persisted STT model choice. The didSet observer
+        // pushes it to the recognizer and refreshes the label. Unknown
+        // IDs (a model removed from the catalog, or a bad stored value)
+        // are ignored so a stale preference can't wedge the picker.
+        if let raw = UserDefaults.standard.string(forKey: Self.sttPreferenceKey),
+           ModelCatalog.entry(for: ModelID(rawValue: raw)) != nil {
+            self.sttModelPreference = ModelID(rawValue: raw)
+        }
     }
 
     func start() {
@@ -170,7 +194,8 @@ final class AppCoordinator: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] states in
                 guard let self else { return }
-                if states[ModelCatalog.whisperLargeV3Nepali] == .completed ||
+                if states[ModelCatalog.whisperSmallNepali] == .completed ||
+                   states[ModelCatalog.whisperLargeV3Nepali] == .completed ||
                    states[ModelCatalog.whisperSmallMultilingual] == .completed {
                     self.trySwapToWhisper()
                 }
@@ -186,11 +211,36 @@ final class AppCoordinator: ObservableObject {
         guard whisperSpeechRecognizer.isAvailable else { return }
         voicePipeline?.setSpeechRecognizer(whisperSpeechRecognizer)
         DispatchQueue.main.async { [weak self] in
-            if self?.modelStore.isCached(ModelCatalog.whisperLargeV3Nepali) == true {
-                self?.activeSTTName = "Whisper (Nepali large v3)"
-            } else {
-                self?.activeSTTName = "Whisper (multilingual fallback)"
-            }
+            self?.updateActiveSTTName()
+        }
+    }
+
+    /// Model the recognizer will use for the next utterance — the user's
+    /// pick when cached, else the automatic order. Exposed for the UI's
+    /// ANE/CPU label so it reports the engine that will actually run.
+    var resolvedSTTModelID: ModelID? {
+        whisperSpeechRecognizer.currentModelID()
+    }
+
+    /// Keeps `activeSTTName` honest: explicit pick first, then whatever
+    /// the recognizer would auto-select, then the SFSpeech fallback.
+    private func updateActiveSTTName() {
+        let resolved = sttModelPreference
+            .flatMap { modelStore.isCached($0) ? $0 : nil }
+            ?? whisperSpeechRecognizer.currentModelID()
+        activeSTTName = sttName(for: resolved)
+    }
+
+    private func sttName(for id: ModelID?) -> String {
+        switch id {
+        case ModelCatalog.whisperLargeV3Nepali:
+            return "Whisper (Nepali large v3)"
+        case ModelCatalog.whisperSmallMultilingual:
+            return "Whisper (multilingual fallback)"
+        case ModelCatalog.whisperBaseEn:
+            return "Whisper (English)"
+        default:
+            return "SFSpeechRecognizer (English fallback)"
         }
     }
 

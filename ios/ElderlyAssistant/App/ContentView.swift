@@ -77,12 +77,24 @@ struct ContentView: View {
 
     private var voiceStatusRow: some View {
         HStack(spacing: 8) {
-            Circle()
-                .fill(indicatorColor)
-                .frame(width: 10, height: 10)
+            if isBusy {
+                ProgressView()
+                    .controlSize(.small)
+            } else {
+                Circle()
+                    .fill(indicatorColor)
+                    .frame(width: 10, height: 10)
+            }
             Text(indicatorLabel)
                 .font(.subheadline)
                 .foregroundColor(.secondary)
+        }
+    }
+
+    private var isBusy: Bool {
+        switch coordinator.voiceState {
+        case .capturingCommand, .processing, .routing: return true
+        default: return false
         }
     }
 
@@ -101,11 +113,30 @@ struct ContentView: View {
         switch coordinator.voiceState {
         case .idle:              return "Listening for wake word"
         case .capturingCommand:  return "Listening for your command…"
-        case .processing:        return "Transcribing (Whisper CPU, ~15–30 s)…"
+        case .processing:        return transcribingLabel
         case .routing:           return "Understanding…"
         case .error(let msg):    return "Voice: \(msg)"
         case .stopped:           return "Voice off"
         }
+    }
+
+    /// Honest label: says ANE when the CoreML encoder is installed for the
+    /// model WhisperSpeechRecognizer will actually pick (user preference,
+    /// else automatic resolution), CPU otherwise. First transcription
+    /// after installing the mlmodelc pays a one-time ANE compile
+    /// (10–30 s for small) — the label still says ANE, which is where the
+    /// runtime is heading.
+    private var transcribingLabel: String {
+        let store = coordinator.modelStore
+        let coreMLReady: Bool
+        if let resolved = coordinator.resolvedSTTModelID {
+            coreMLReady = store.isCoreMLCached(resolved)
+        } else {
+            coreMLReady = false
+        }
+        return coreMLReady
+            ? "Transcribing (Whisper ANE, ~1–3 s)…"
+            : "Transcribing (Whisper CPU, ~15–30 s)…"
     }
 }
 
@@ -133,8 +164,30 @@ private struct ModelDownloadSection: View {
                              onDelete: {
                                  try? coordinator.modelStore.delete(id)
                                  service.reset(id)
+                                 // Deleting the chosen model falls back
+                                 // to automatic selection.
+                                 if coordinator.sttModelPreference == id {
+                                     coordinator.sttModelPreference = nil
+                                 }
                              })
                 }
+            }
+
+            // STT model choice — only cached whisper models are pickable;
+            // "Automatic" uses the recognizer's priority order. Hidden
+            // until at least one model is downloaded.
+            if !cachedWhisperModels.isEmpty {
+                Divider()
+                Picker("Speech recognition model",
+                       selection: $coordinator.sttModelPreference) {
+                    Text("Automatic").tag(Optional<ModelID>.none)
+                    ForEach(cachedWhisperModels, id: \.rawValue) { id in
+                        if let entry = ModelCatalog.entry(for: id) {
+                            Text(entry.displayName).tag(Optional(id))
+                        }
+                    }
+                }
+                .pickerStyle(.menu)
             }
 
             let needsLinking = visibleIds.contains { id in
@@ -162,6 +215,17 @@ private struct ModelDownloadSection: View {
         .padding()
         .background(Color(uiColor: .secondarySystemBackground))
         .cornerRadius(12)
+    }
+
+    /// Cached whisperBase models from the visible list, for the STT model
+    /// picker. Order follows `visibleIds` (download priority).
+    private var cachedWhisperModels: [ModelID] {
+        visibleIds.filter { id in
+            guard ModelCatalog.entry(for: id)?.kind == .whisperBase else {
+                return false
+            }
+            return coordinator.modelStore.isCached(id)
+        }
     }
 
     /// Whether the *runtime* for this kind is linked into the app. Model on

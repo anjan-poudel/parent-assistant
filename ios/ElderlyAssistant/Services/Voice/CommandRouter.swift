@@ -53,6 +53,23 @@ final class CommandRouter {
     func route(transcript raw: String) -> RoutingResult {
         coordinator?.recordTranscript(raw)
 
+        // Whisper hallucination guard: a repetition loop, low-entropy
+        // spam, or absurd length means the STT decoded noise as text.
+        // Speak a re-prompt and skip routing so we don't feed garbage
+        // into the LLM or the sensitive-action keywords.
+        if case .reject(let reason) = TranscriptSanityGuard.check(raw) {
+            observabilityBus.emit(ObservabilityEvent(
+                component: "command_router",
+                eventType: "gibberish_rejected",
+                durationMs: nil,
+                outcome: "rejected",
+                errorCode: reason.rawValue,
+                metadata: [:]
+            ))
+            speak("माफ गर्नुहोस्, मैले बुझिनँ। कृपया फेरि भन्नुहोस्।")
+            return .unrecognised(transcript: raw)
+        }
+
         // Confirmation-follow-up path: if a challenge is outstanding,
         // treat this transcript as the user's yes/no response, not a new
         // command. Runs the dementia-aware `acknowledgeWithConfirmation`
@@ -101,23 +118,57 @@ final class CommandRouter {
 
     // MARK: - Keyword fallback
 
+    /// Substring matching for multi-word phrases — STT output varies in
+    /// spacing and inflection, so phrases need containment matching. Never
+    /// use this for single words (see `containsToken`).
+    private static func containsPhrase(_ phrase: String, in text: String) -> Bool {
+        text.contains(phrase)
+    }
+
+    /// Whole-token matching for single words. Substring matching on short
+    /// tokens is dangerous: Nepali "खाए" sits inside "नखाए" (not eaten) and
+    /// "भयो" inside "भएन" (didn't happen) — a containment match turns a
+    /// refusal into a medication acknowledgement. Tokens are split on
+    /// whitespace and punctuation.
+    private static func containsToken(_ token: String, in text: String) -> Bool {
+        text
+            .components(separatedBy: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+            .contains { $0 == token }
+    }
+
     @discardableResult
     private func routeKeyword(_ raw: String) -> RoutingResult {
         let text = raw
             .lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // Guard first: explicit negations must never fall through to the
+        // ack list, because refusal words contain ack words as substrings
+        // ("नखाए" ⊃ "खाए", "भएन" ⊃ "भयो").
+        let denialPhrases = [
+            "i didn't", "i did not", "not yet", "haven't", "havent",
+            "औषधि खाएको छैन", "औषधी खाएको छैन", "खाएको छैन",
+            "नखाए", "नखाएको", "लिएको छैन", "भएन", "छैन"
+        ]
+        if denialPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
+            emit(eventType: "command_ack_denied_keyword", outcome: "info")
+            speak("ठीक छ, म पछि फेरि सम्झाउँछु।")
+            return .unrecognised(transcript: raw)
+        }
+
         let ackPhrases = [
             "i took", "i've taken", "ive taken", "took my medication",
             "took my medicine", "taken my medication", "taken my medicine",
-            "done", "yes i took it",
+            "yes i took it",
             "औषधि खाएँ", "औषधि खाए", "औषधी खाएँ", "औषधी खाए",
             "दवाई खाएँ", "दवाई खाए", "दबाइ खाएँ", "दबाइ खाए",
             "औषधि लिएको छु", "औषधी लिएको छु", "दवाई लिएको छु",
-            "लिइसकेँ", "लिइसकें", "खाइसकेँ", "खाइसकें",
-            "खाएँ", "खाए", "भयो"
+            "लिइसकेँ", "लिइसकें", "खाइसकेँ", "खाइसकें"
         ]
-        if ackPhrases.contains(where: { text.contains($0) }) {
+        let ackTokens = ["done", "taken", "took", "ate",
+                         "खाएँ", "खाए", "भयो"]
+        if ackPhrases.contains(where: { Self.containsPhrase($0, in: text) })
+            || ackTokens.contains(where: { Self.containsToken($0, in: text) }) {
             handleMedicationAcknowledgement()
             return .acknowledgedMedication
         }
@@ -126,7 +177,7 @@ final class CommandRouter {
             "call", "phone", "facetime", "messenger", "whatsapp",
             "फोन", "कल", "भिडियो कल", "म्यासेन्जर", "व्हाट्सएप", "वाट्सएप"
         ]
-        if sensitiveCallPhrases.contains(where: { text.contains($0) }) {
+        if sensitiveCallPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
             emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
             speak("माफ गर्नुहोस्, अहिले फोन वा सन्देश पठाउने सुविधा सुरक्षित प्रमाणीकरण तयार नभएसम्म बन्द छ।")
             return .blockedSensitiveAction
@@ -189,18 +240,26 @@ final class CommandRouter {
         speak(replyOverride ?? "ठीक छ, औषधि लिएको भनेर राखेँ।")
     }
 
+    /// Whole-token match — the ONLY safe way to match "हो" (yes), because
+    /// "होइन" (no) and "होइनन्" contain it as a substring. Checking no-before-
+    /// yes at the call site is not sufficient on its own: an utterance like
+    /// "हो… होइन" (yes… no — user correcting themselves mid-sentence) contains
+    /// both, and token matching alone can't order intent. So: any negation
+    /// token present at all → treated as a no (conservative, safe direction
+    /// for medication confirmation).
     private static func isYesResponse(_ raw: String) -> Bool {
         let t = raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let phrases = ["yes", "yeah", "yep", "yup", "correct", "right",
+        if isNoResponse(t) { return false }
+        let phrases = ["yes", "yeah", "yep", "yup", "correct",
                        "हो", "हजुर"]   // Nepali: ho, hajur
-        return phrases.contains(where: { t.contains($0) })
+        return phrases.contains(where: { containsToken($0, in: t) })
     }
 
     private static func isNoResponse(_ raw: String) -> Bool {
         let t = raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let phrases = ["no", "nope", "not", "wrong",
-                       "छैन", "होइन"]   // Nepali: chhaina, hoina
-        return phrases.contains(where: { t.contains($0) })
+        let phrases = ["no", "nope", "wrong",
+                       "छैन", "होइन", "होइनन्"]   // Nepali: chhaina, hoina, hoinan
+        return phrases.contains(where: { containsToken($0, in: t) })
     }
 
     // MARK: - Helpers

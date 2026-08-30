@@ -27,11 +27,17 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         let fallbackLanguage: String?
         /// Maximum utterance length before we auto-finish, seconds.
         let maxUtteranceSeconds: TimeInterval
+        /// When true, force `primaryLanguage` on genuine Nepali fine-tunes
+        /// only. Stock multilingual small/base-en run with auto-detect —
+        /// forcing "ne" on English/noise is how Whisper hallucinates
+        /// Devanagari garbage.
+        let forcePrimaryLanguage: Bool
 
         static let `default` = Config(
             primaryLanguage: "ne",
             fallbackLanguage: "en",
-            maxUtteranceSeconds: 10
+            maxUtteranceSeconds: 10,
+            forcePrimaryLanguage: true
         )
     }
 
@@ -55,6 +61,13 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
     /// without the SwiftWhisper package present; the real cast to
     /// `SwiftWhisper.Whisper` happens inside the `#if canImport` guards.
     private var whisperInstance: Any?
+    /// Which model `whisperInstance` was loaded from — a context binds one
+    /// set of weights, so a user switching models forces a reload.
+    private var loadedModelId: ModelID?
+
+    /// User's STT model choice from the UI picker (nil = automatic).
+    /// Set by AppCoordinator and persisted there across launches.
+    private var preferredModelID: ModelID?
 
     let ownsAudioCapture = false
 
@@ -81,6 +94,44 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
         self.config = config
+    }
+
+    // MARK: - Model preference (UI selection)
+
+    /// Applies the user's model choice. Takes effect on the next
+    /// utterance; dropping the cached context when the model changed
+    /// frees the old weights and makes the next inference pay the
+    /// one-time load cost instead of running the wrong model.
+    func setPreferredModel(_ id: ModelID?) {
+        guard id != preferredModelID else { return }
+        preferredModelID = id
+        if whisperInstance != nil, loadedModelId != id {
+            whisperInstance = nil
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "whisper_stt",
+            eventType: "preference_changed",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: ["state": id?.rawValue ?? "automatic"]
+        ))
+    }
+
+    /// The model the next utterance will use: the user's pick when it's
+    /// cached, else the automatic order. Mirrors `selectModelId` but is
+    /// side-effect-free (no RAM gating, no events) so the UI can call it
+    /// for labels.
+    func currentModelID() -> ModelID? {
+        if let pref = preferredModelID, modelStore.isCached(pref) {
+            return pref
+        }
+        let automaticOrder: [ModelID] = [
+            ModelCatalog.whisperSmallMultilingual,
+            ModelCatalog.whisperLargeV3Nepali,
+            ModelCatalog.whisperBaseEn
+        ]
+        return automaticOrder.first { modelStore.isCached($0) }
     }
 
     // MARK: - LoRA hot-swap (skeleton)
@@ -189,14 +240,11 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         #if canImport(SwiftWhisper)
         // 1. Locate + lazily load the model. `whisperInstance` is reused
         //    across calls — loading a 150 MB Whisper context takes seconds.
-        let modelId: ModelID
-        if modelStore.isCached(ModelCatalog.whisperLargeV3Nepali) {
-            modelId = ModelCatalog.whisperLargeV3Nepali
-        } else if modelStore.isCached(ModelCatalog.whisperSmallMultilingual) {
-            modelId = ModelCatalog.whisperSmallMultilingual
-        } else if modelStore.isCached(ModelCatalog.whisperBaseEn) {
-            modelId = ModelCatalog.whisperBaseEn
-        } else {
+        //    Priority: small-multilingual first (validated + safe on all
+        //    devices), then large-Nepali when RAM allows, then base-en.
+        //    Large-v3-Nepali is downranked until the offline validation in
+        //    docs/voice-gibberish-transcript-fix-plan.md §4 passes.
+        guard let modelId = selectModelId() else {
             emit("model_missing", errorCode: "no_cached_model")
             completion(.failure(.localeUnsupported))
             return
@@ -208,7 +256,7 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         }
 
         let whisper: Whisper
-        if let existing = whisperInstance as? Whisper {
+        if let existing = whisperInstance as? Whisper, loadedModelId == modelId {
             whisper = existing
         } else {
             // Sanity-check the file before handing to SwiftWhisper. A bad
@@ -228,20 +276,55 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
             // could be mutated by other consumers, silently clobbering
             // our language setting.
             let params = WhisperParams(strategy: .greedy)
-            if let lang = config.primaryLanguage {
+            // Force `primaryLanguage` on the genuine Nepali fine-tune
+            // only (kiranpantha large-v3, standard tokenizer). The stock
+            // small multilingual runs with auto-detect: forcing "ne" on
+            // English/noise is exactly how Whisper hallucinates
+            // Devanagari garbage (gibberish plan §5.1).
+            // TranscriptSanityGuard stays as the downstream backstop.
+            // Toggle via `Config.forcePrimaryLanguage`.
+            let usePrimary = modelId == ModelCatalog.whisperLargeV3Nepali
+                && config.forcePrimaryLanguage
+            let langCode: String
+            if usePrimary, let lang = config.primaryLanguage {
                 params.language = WhisperLanguage(rawValue: lang) ?? .auto
+                langCode = (params.language == .auto) ? "auto" : lang
             } else {
                 params.language = .auto
+                langCode = "auto"
             }
-            // Force transcription (not translation-to-English) and
-            // disable auto language detection so the language above
-            // actually applies.
+            // Force transcription (not translation-to-English).
             params.translate = false
             params.no_context = true
             params.suppress_blank = true
+            let loadStart = CFAbsoluteTimeGetCurrent()
             whisper = Whisper(fromFileURL: modelURL, withParams: params)
+            let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
             whisperInstance = whisper
-            emit("model_loaded", errorCode: nil)
+            loadedModelId = modelId
+            // `backend` reflects whether the CoreML encoder is installed
+            // for this model — "ane" says whisper.cpp will attempt ANE,
+            // "cpu" says it won't. WHISPER_COREML_ALLOW_FALLBACK means an
+            // ANE-attempted load can still silently land on CPU, so the
+            // label is "intent", not guaranteed runtime. The first load
+            // after installing the encoder pays the one-time CoreML
+            // compile here (minutes for large-v3 fp16).
+            let backend = modelStore.isCoreMLCached(modelId) ? "ane" : "cpu"
+            observabilityBus.emit(ObservabilityEvent(
+                component: "whisper_stt",
+                eventType: "model_loaded",
+                durationMs: loadMs,
+                outcome: "info",
+                errorCode: nil,
+                metadata: [
+                    "model_id": modelId.rawValue,
+                    "language": langCode,
+                    "backend": backend,
+                    "load_ms": "\(loadMs)"
+                ]
+            ))
+            print("[whisper_stt] model_loaded id=\(modelId.rawValue) "
+                + "backend=\(backend) load_ms=\(loadMs)")
         }
 
         // 2. Int16 [-32768, 32767] → Float32 [-1, 1] as SwiftWhisper expects.
@@ -251,22 +334,45 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         //    `whisper_full` under the hood and returns segment text on
         //    completion.
         Task { [weak self] in
+            let audioSeconds = Double(pcm.count) / 16_000.0
+            print("[whisper_stt] transcribing id=\(modelId.rawValue) "
+                + "audio_seconds=\(String(format: "%.1f", audioSeconds))")
+            let start = CFAbsoluteTimeGetCurrent()
             do {
                 let segments = try await whisper.transcribe(audioFrames: floats)
+                let ms = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
                 let joined = segments.map(\.text).joined(separator: " ")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 if joined.isEmpty {
                     self?.emit("empty_transcript", errorCode: "empty")
+                    print("[whisper_stt] empty_transcript duration_ms=\(ms)")
                     completion(.failure(.recognitionFailed(
                         NSError(domain: "WhisperSTT", code: -2,
                                 userInfo: [NSLocalizedDescriptionKey: "empty transcript"])
                     )))
                 } else {
                     self?.emit("transcribed", errorCode: nil)
+                    self?.observabilityBus.emit(ObservabilityEvent(
+                        component: "whisper_stt",
+                        eventType: "inference_timing",
+                        durationMs: ms,
+                        outcome: "info",
+                        errorCode: nil,
+                        metadata: [
+                            "model_id": modelId.rawValue,
+                            "audio_seconds": String(format: "%.1f", audioSeconds),
+                            "chars": "\(joined.count)"
+                        ]
+                    ))
+                    print("[whisper_stt] transcribed duration_ms=\(ms) "
+                        + "audio_seconds=\(String(format: "%.1f", audioSeconds)) "
+                        + "chars=\(joined.count)")
                     completion(.success(joined))
                 }
             } catch {
+                let ms = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
                 self?.emit("inference_failed", errorCode: "whisper_error")
+                print("[whisper_stt] inference_failed duration_ms=\(ms) \(error)")
                 completion(.failure(.recognitionFailed(error)))
             }
         }
@@ -274,6 +380,57 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         emit("inference_unavailable", errorCode: "runtime_missing")
         completion(.failure(.localeUnsupported))
         #endif
+    }
+
+    /// Pick which cached Whisper model to run.
+    ///
+    ///   1. The user's explicit pick from the UI (RAM-gated only for the
+    ///      1.9 GB large-v3; the small models fit every supported device).
+    ///   2. Automatic order: stock small multilingual (auto-detect, the
+    ///      lightweight default), then the large-v3 Nepali fine-tune only
+    ///      if the current process memory ceiling can hold it (gated to
+    ///      6 GB-class devices — we emit `model_skipped_ram` and drop
+    ///      through), then base-en.
+    private func selectModelId() -> ModelID? {
+        if let pref = preferredModelID {
+            if modelStore.isCached(pref) {
+                if pref != ModelCatalog.whisperLargeV3Nepali
+                    || fitsRAM(ModelCatalog.whisperLargeV3Nepali) {
+                    return pref
+                }
+            } else {
+                emit("preferred_model_not_cached", errorCode: "not_cached")
+            }
+        }
+        if modelStore.isCached(ModelCatalog.whisperSmallMultilingual) {
+            return ModelCatalog.whisperSmallMultilingual
+        }
+        if modelStore.isCached(ModelCatalog.whisperLargeV3Nepali),
+           fitsRAM(ModelCatalog.whisperLargeV3Nepali) {
+            return ModelCatalog.whisperLargeV3Nepali
+        }
+        if modelStore.isCached(ModelCatalog.whisperBaseEn) {
+            return ModelCatalog.whisperBaseEn
+        }
+        return nil
+    }
+
+    /// True when the device's memory ceiling can hold the model. Emits
+    /// `model_skipped_ram` when it can't.
+    private func fitsRAM(_ id: ModelID) -> Bool {
+        guard let entry = ModelCatalog.entry(for: id),
+              MemoryProbe.canFit(entry.minDeviceRAMBytes) else {
+            observabilityBus.emit(ObservabilityEvent(
+                component: "whisper_stt",
+                eventType: "model_skipped_ram",
+                durationMs: nil,
+                outcome: "info",
+                errorCode: "ram_insufficient",
+                metadata: ["state": id.rawValue]
+            ))
+            return false
+        }
+        return true
     }
 
     /// Peek at the first bytes of the file to catch obvious junk

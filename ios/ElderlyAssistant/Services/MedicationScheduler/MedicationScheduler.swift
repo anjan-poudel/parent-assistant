@@ -12,6 +12,10 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
     private let familyNotifier: FamilyNotifierProtocol
 
     private var entries: [UUID: MedicationEntry] = [:]
+    /// Escalation engines are keyed by REMINDER id, not medication entry id.
+    /// A twice-daily entry produces two concurrent reminders; keying by entry
+    /// id makes the second overwrite the first, corrupting the morning dose's
+    /// escalation math (review finding C4).
     private var engines: [UUID: EscalationEngine] = [:]
     private var adherenceLog: [MedicationAdherenceLog] = []
     private var pendingRemindersList: [UUID: ScheduledReminder] = [:]
@@ -71,7 +75,8 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
             return .failure(.reminderPersistenceFailed)
         }
 
-        guard let engine = engines[entryId] else {
+        guard let reminderId = activeReminderId(for: entryId),
+              let engine = engines[reminderId] else {
             return .failure(.reminderPersistenceFailed)
         }
 
@@ -151,11 +156,11 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         }
 
         let engine: EscalationEngine
-        if let existing = engines[reminder.medicationEntryId] {
+        if let existing = engines[reminderId] {
             engine = existing
         } else {
             engine = makeEngine(for: entry, from: reminder)
-            engines[reminder.medicationEntryId] = engine
+            engines[reminderId] = engine
             _ = engine.start()
         }
 
@@ -193,7 +198,7 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
             return
         }
 
-        guard let engine = engines[reminder.medicationEntryId] else {
+        guard let engine = engines[reminderId] else {
             return
         }
 
@@ -264,10 +269,11 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         at acknowledgedAt: Date,
         refireCount: Int
     ) -> Result<Void, SafetyError> {
+        let reminderId = activeReminderId(for: entryId)
         let logEntry = MedicationAdherenceLog(
             id: UUID(),
             medicationEntryId: entryId,
-            scheduledAt: engines[entryId]?.scheduledTime ?? Date(),
+            scheduledAt: reminderId.flatMap { engines[$0]?.scheduledTime } ?? Date(),
             acknowledgedAt: acknowledgedAt,
             refireCount: refireCount,
             status: .acknowledged,
@@ -284,17 +290,16 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
             return .failure(.reminderPersistenceFailed)
         }
 
-        // Clean up pending reminder
-        if let reminderId = pendingRemindersList.first(where: { $0.value.medicationEntryId == entryId })?.key {
+        // Clean up pending reminder + its engine
+        if let reminderId = reminderId {
             pendingRemindersList.removeValue(forKey: reminderId)
             alarmScheduler.cancelReminder(reminderId: reminderId)
+            if let engine = engines.removeValue(forKey: reminderId) {
+                _ = engine.markCompleted()
+            }
         }
 
         persistReminders()
-
-        if let engine = engines[entryId] {
-            _ = engine.markCompleted()
-        }
 
         emit("acknowledged", metadata: [
             "entry_id_hash": idHash(entryId),
@@ -352,15 +357,16 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
             entry: entry,
             entryId: entryId,
             at: acknowledgedAt,
-            refireCount: engines[entryId]?.currentRefireCount ?? 0
+            refireCount: activeReminderId(for: entryId).flatMap { engines[$0]?.currentRefireCount } ?? 0
         )
     }
 
     private func recordMissedDose(entryId: UUID, entry: MedicationEntry) {
+        let reminderId = activeReminderId(for: entryId)
         let logEntry = MedicationAdherenceLog(
             id: UUID(),
             medicationEntryId: entryId,
-            scheduledAt: engines[entryId]?.scheduledTime ?? Date(),
+            scheduledAt: reminderId.flatMap { engines[$0]?.scheduledTime } ?? Date(),
             acknowledgedAt: nil,
             refireCount: entry.maxRefireCount,
             status: .missed,
@@ -373,9 +379,10 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         adherenceLog.append(logEntry)
         _ = storage.write(key: storageKeyAdherenceLog, value: adherenceLog)
 
-        // Remove pending reminder
-        if let reminderId = pendingRemindersList.first(where: { $0.value.medicationEntryId == entryId })?.key {
+        // Remove pending reminder + its engine
+        if let reminderId = reminderId {
             pendingRemindersList.removeValue(forKey: reminderId)
+            engines.removeValue(forKey: reminderId)
             alarmScheduler.cancelReminder(reminderId: reminderId)
         }
         persistReminders()
@@ -393,7 +400,8 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
     }
 
     private func reEnterEscalation(entryId: UUID, entry: MedicationEntry) -> Result<Void, SafetyError> {
-        guard let engine = engines[entryId] else {
+        guard let reminderId = activeReminderId(for: entryId),
+              let engine = engines[reminderId] else {
             return .failure(.reminderPersistenceFailed)
         }
 
@@ -401,14 +409,12 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         let nextTime = engine.nextRefireTime(after: Date())
 
         if Date() < engine.escalationDeadline {
-            if let reminderId = pendingRemindersList.first(where: { $0.value.medicationEntryId == entryId })?.key {
-                alarmScheduler.scheduleReminder(
-                    reminderId: reminderId,
-                    entryId: entryId,
-                    medicationName: entry.medicationName,
-                    at: nextTime
-                )
-            }
+            alarmScheduler.scheduleReminder(
+                reminderId: reminderId,
+                entryId: entryId,
+                medicationName: entry.medicationName,
+                at: nextTime
+            )
         }
 
         return .success(())
@@ -463,15 +469,40 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
                 continue
             }
 
+            // Never-fire reminders (state == .pending) are future doses.
+            // They must be re-armed for their scheduled time, NOT fired now
+            // — otherwise every app relaunch prompts early medication.
+            if reminder.state == .pending {
+                if reminder.scheduledAt > now {
+                    alarmScheduler.scheduleReminder(
+                        reminderId: reminderId,
+                        entryId: entry.id,
+                        medicationName: entry.medicationName,
+                        at: reminder.scheduledAt
+                    )
+                } else {
+                    // Scheduled time passed while the app was dead and the
+                    // platform alarm never delivered (or was lost). Start the
+                    // escalation cycle now so the dose is not silently skipped.
+                    triggerReminder(for: reminderId)
+                }
+                continue
+            }
+
             let engine = makeEngine(for: entry, from: reminder)
-            engines[reminder.medicationEntryId] = engine
+            engines[reminderId] = engine
 
             let recoveryResult = engine.recover(from: reminder, at: now)
 
             switch recoveryResult.action {
             case .fireReminder:
-                // Re-fire immediately
-                triggerReminder(for: reminderId)
+                // Fired before the kill; delivery not confirmed. Re-fire now
+                // if still within the escalation window (FR-029).
+                if now < engine.escalationDeadline {
+                    triggerReminder(for: reminderId)
+                } else {
+                    recordMissedDose(entryId: entry.id, entry: entry)
+                }
 
             case .escalateToFamilyNotifier:
                 if now >= engine.escalationDeadline {
@@ -504,7 +535,9 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
                     acknowledgedAt: nil
                 )
                 pendingRemindersList[reminder.id] = reminder
-                engines[entry.id] = makeEngine(for: entry, from: reminder)
+                // Engines are keyed per-reminder (C4) — a twice-daily entry
+                // gets two independent escalation engines.
+                engines[reminder.id] = makeEngine(for: entry, from: reminder)
             }
         }
 
@@ -541,6 +574,17 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
             maxRefireCount: entry.maxRefireCount,
             escalationWindowMinutes: entry.escalationWindowMinutes
         )
+    }
+
+    /// The reminder currently tracking `entryId`'s dose. An entry with
+    /// multiple daily times may have several pending reminders; the active
+    /// one is the earliest-scheduled. Engine lookups must go through this
+    /// rather than assuming `engines[entryId]` exists (C4).
+    private func activeReminderId(for entryId: UUID) -> UUID? {
+        pendingRemindersList
+            .filter { $0.value.medicationEntryId == entryId }
+            .sorted { $0.value.scheduledAt < $1.value.scheduledAt }
+            .first?.key
     }
 
     @discardableResult

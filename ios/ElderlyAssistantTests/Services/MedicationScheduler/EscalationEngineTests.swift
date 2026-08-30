@@ -134,21 +134,26 @@ final class EscalationEngineTests: XCTestCase {
     }
 
     func testRecoverFromPendingState() {
-        let engine = EscalationEngine(scheduledTime: Date())
+        // A .pending reminder is scheduled for a FUTURE time — firing it
+        // on recovery would prompt an early dose (patient-safety bug, see
+        // EscalationEngine.recover's .pending branch). Expect no action;
+        // the caller re-arms the platform alarm instead.
+        let now = Date()
+        let engine = EscalationEngine(scheduledTime: now)
         let storedReminder = ScheduledReminder(
             id: UUID(),
             medicationEntryId: UUID(),
-            scheduledAt: Date(),
+            scheduledAt: now.addingTimeInterval(3600),
             refireCount: 0,
-            escalationDeadline: Date().addingTimeInterval(3600),
+            escalationDeadline: now.addingTimeInterval(7200),
             state: .pending,
             lastFiredAt: nil,
             acknowledgedAt: nil
         )
 
-        let result = engine.recover(from: storedReminder, at: Date())
+        let result = engine.recover(from: storedReminder, at: now)
 
-        XCTAssertEqual(result.action, .fireReminder(refireCount: 0))
+        XCTAssertEqual(result.action, .noAction)
     }
 
     func testRecoverFromAcknowledgedDoesNothing() {

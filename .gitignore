@@ -4,6 +4,9 @@
 # Local agent/editor state
 .serena/
 
+# Backup snapshots
+ios.bak/
+
 # Apple / Xcode
 ios/build/
 ios/DerivedData/

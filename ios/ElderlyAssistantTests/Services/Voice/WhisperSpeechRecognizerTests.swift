@@ -73,6 +73,68 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
         XCTAssertFalse(stt.isAvailable)
     }
 
+    // MARK: - Model selection
+
+    /// Stages a fake model file so `isCached` is true. Content is a stub —
+    /// selection logic never reads the file (checksum policy is `.skip`).
+    private func stageFakeModel(_ id: ModelID) throws {
+        let staged = try store.stagingURL(for: id)
+        try Data("stub".utf8).write(to: staged)
+        _ = try store.finalize(id)
+    }
+
+    func testCurrentModelIDNilWhenNothingCached() {
+        let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        XCTAssertNil(stt.currentModelID(),
+            "No cached model, nothing to select.")
+    }
+
+    func testAutomaticOrderPrefersSmallMultilingual() throws {
+        try stageFakeModel(ModelCatalog.whisperSmallMultilingual)
+        let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        XCTAssertEqual(stt.currentModelID(), ModelCatalog.whisperSmallMultilingual)
+    }
+
+    func testAutomaticOrderFallsBackToLargeV3Nepali() throws {
+        try stageFakeModel(ModelCatalog.whisperLargeV3Nepali)
+        let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        XCTAssertEqual(stt.currentModelID(), ModelCatalog.whisperLargeV3Nepali)
+    }
+
+    func testUserPreferenceOverridesAutomaticOrder() throws {
+        try stageFakeModel(ModelCatalog.whisperSmallMultilingual)
+        try stageFakeModel(ModelCatalog.whisperBaseEn)
+        let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        stt.setPreferredModel(ModelCatalog.whisperBaseEn)
+        XCTAssertEqual(stt.currentModelID(), ModelCatalog.whisperBaseEn,
+            "An explicit user pick must win over the automatic order.")
+    }
+
+    func testUncachedPreferenceFallsBackToAutomatic() throws {
+        try stageFakeModel(ModelCatalog.whisperSmallMultilingual)
+        let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        stt.setPreferredModel(ModelCatalog.whisperLargeV3Nepali) // not cached
+        XCTAssertEqual(stt.currentModelID(), ModelCatalog.whisperSmallMultilingual,
+            "A preference for a missing model must not wedge selection.")
+    }
+
+    func testClearingPreferenceReturnsToAutomatic() throws {
+        try stageFakeModel(ModelCatalog.whisperSmallMultilingual)
+        try stageFakeModel(ModelCatalog.whisperBaseEn)
+        let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        stt.setPreferredModel(ModelCatalog.whisperBaseEn)
+        stt.setPreferredModel(nil)
+        XCTAssertEqual(stt.currentModelID(), ModelCatalog.whisperSmallMultilingual)
+    }
+
+    func testPreferenceChangeEmitsEvent() {
+        let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        stt.setPreferredModel(ModelCatalog.whisperLargeV3Nepali)
+        let events = bus.emittedEvents.filter { $0.eventType == "preference_changed" }
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.metadata["state"], ModelCatalog.whisperLargeV3Nepali.rawValue)
+    }
+
     // MARK: - LoRA skeleton
 
     func testApplyLoRALogsButChangesNothingObservable() {

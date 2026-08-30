@@ -32,6 +32,39 @@ struct ModelCatalogEntry: Codable, Identifiable {
     /// LoRAs point at the base they patch. Nil for base models.
     let dependsOn: ModelID?
 
+    /// Optional CoreML encoder companion. When present, whisper.cpp will
+    /// run the encoder on the Neural Engine (ANE) — typically 3–5× faster
+    /// than pure CPU on iPhone. See
+    /// `docs/whisper-coreml-acceleration-plan.md`.
+    ///
+    /// The mlmodelc is shipped as a zip that expands to a directory named
+    /// `<filename-without-.bin>-encoder.mlmodelc`, dropped next to the
+    /// ggml `.bin` on disk. In M1 the zip is bundled inside the app;
+    /// downloaded delivery arrives in M2.
+    let coreMLEncoderBundledName: String?
+
+    init(id: ModelID,
+         kind: ModelKind,
+         displayName: String,
+         filename: String,
+         downloadURL: URL,
+         sizeBytes: Int64,
+         sha256: String,
+         minDeviceRAMBytes: UInt64,
+         dependsOn: ModelID? = nil,
+         coreMLEncoderBundledName: String? = nil) {
+        self.id = id
+        self.kind = kind
+        self.displayName = displayName
+        self.filename = filename
+        self.downloadURL = downloadURL
+        self.sizeBytes = sizeBytes
+        self.sha256 = sha256
+        self.minDeviceRAMBytes = minDeviceRAMBytes
+        self.dependsOn = dependsOn
+        self.coreMLEncoderBundledName = coreMLEncoderBundledName
+    }
+
     var id_: ModelID { id }
 }
 
@@ -42,6 +75,11 @@ enum ModelCatalog {
     // MARK: - Well-known IDs
     static let whisperLargeV3Nepali = ModelID("whisper-large-v3-nepali-ggml")
     static let whisperSmallMultilingual = ModelID("whisper-small-multilingual-q5_1")
+    // NOTE: no viable small Devanagari Nepali fine-tune exists publicly —
+    // see docs/whisper-small-nepali-integration-plan.md §7. The popular
+    // small fine-tunes (Dragneel et al.) use a GPT-2 tokenizer and emit
+    // romanized Latin, which the Devanagari voice pipeline can't use.
+    // Kept as an alias so existing references stay valid.
     static let whisperSmallNepali = whisperLargeV3Nepali
     static let whisperBaseEn      = ModelID("whisper-base-en-q5_1")
     static let llama3_2_1B        = ModelID("llama-3.2-1b-instruct-q4km")
@@ -56,13 +94,26 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperLargeV3Nepali,
             kind: .whisperBase,
-            displayName: "Nepali speech recognition (large v3, experimental)",
-            filename: "whisper-large-v3-nepali-ggml.bin",
-            downloadURL: URL(string: "https://huggingface.co/officialuser/whisper-large-v3-nepali-ggml/resolve/main/whisper-large-v3-nepali-ggml.bin")!,
-            sizeBytes: 3_095_033_483,
-            sha256: "d30e633353d7aa7ccb685461f2572c796a11a28ae750c9629add7442eae484de",
-            minDeviceRAMBytes: 7_000_000_000,
-            dependsOn: nil
+            displayName: "Nepali speech recognition (large v3, Devanagari)",
+            // Self-converted from kiranpantha/whisper-large-v3-nepali —
+            // the only popular Nepali fine-tune that keeps the standard
+            // multilingual tokenizer (see docs/whisper-small-nepali-
+            // integration-plan.md §7). Replaces the unvalidated
+            // third-party 3.09 GB ggml (gibberish plan §4, H1).
+            filename: "whisper-large-v3-nepali-q5_1.bin",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v1/whisper-large-v3-nepali-q5_1.bin")!,
+            // sha256 + size pinned from the local conversion run — see
+            // docs/whisper-small-nepali-integration-plan.md. Validated on
+            // an SLR54 clip: outputs Devanagari (e.g. "छिमेकी मौन्ग
+            // भारतको" vs reference "छिमेकी मुलुक भारतको").
+            sizeBytes: 1_177_039_883,
+            sha256: "a7fb84d98928c873bf6383023bfffe3ec777a5c4bf6d71068a3de6cffeb613fb",
+            // q5_1 keeps the ~1.9 GB file mmap-able, but peak use on a
+            // 4 GB device (iPhone 12) is too tight once the app runs —
+            // gate it to 6 GB-class devices; others use the small model.
+            minDeviceRAMBytes: 4_500_000_000,
+            dependsOn: nil,
+            coreMLEncoderBundledName: "whisper-large-v3-nepali-q5_1-encoder"
         ),
         ModelCatalogEntry(
             id: whisperSmallMultilingual,
@@ -73,7 +124,11 @@ enum ModelCatalog {
             sizeBytes: 190_085_487,
             sha256: "ae85e4a935d7a567bd102fe55afc16bb595bdb618e11b2fc7591bc08120411bb",
             minDeviceRAMBytes: 2_500_000_000,
-            dependsOn: nil
+            dependsOn: nil,
+            // Drop `ggml-small-q5_1-encoder.mlmodelc/` into
+            // ElderlyAssistant/Resources/CoreML/ per the coreml plan
+            // §4. Absent = model still works, just on CPU.
+            coreMLEncoderBundledName: "ggml-small-q5_1-encoder"
         ),
         ModelCatalogEntry(
             id: whisperBaseEn,

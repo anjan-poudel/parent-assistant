@@ -189,8 +189,13 @@ final class EscalationEngine {
             return EscalationResult(state: state, action: .noAction, nextFireAt: nil)
 
         case .pending:
-            // Reminder was persisted but never fired -- kick off the fire cycle.
-            return start()
+            // Reminder was persisted but never fired -- i.e. it is scheduled
+            // for some FUTURE time (e.g. tonight's 20:00 dose created this
+            // morning). Firing it now would prompt the user to take medication
+            // early, which is a patient-safety bug. Stay idle and let the
+            // caller re-arm the platform alarm for its scheduled time.
+            state = .idle
+            return EscalationResult(state: state, action: .noAction, nextFireAt: nil)
 
         case .fired:
             // Fired before the process was killed; delivery not confirmed. Re-fire now.
