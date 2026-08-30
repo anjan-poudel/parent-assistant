@@ -63,10 +63,10 @@ tokenizer files, so the conversion must borrow the full standard set
   `kiranpantha/whisper-large-v3-nepali` → GGML q5_1 (~1.9 GB) hosted on
   the `anjan-poudel/elderly-ai-assistant-models` GitHub release. This
   replaces the unvalidated third-party 3.09 GB ggml (H1).
-- **Defaults:** automatic order = stock small multilingual (auto-detect,
-  lightweight default) → large-v3 Nepali (RAM-gated to 6 GB-class
-  devices) → base-en. The UI picker (added this session) lets the user
-  choose any cached model.
+- **Defaults:** automatic order is device-tier-aware — large-v3 Nepali
+  first on 6 GB-class devices (stock small is Latin-gibberish on Nepali,
+  109% WER), small multilingual as the low-RAM fallback, base-en last.
+  The UI picker (added this session) overrides any of it.
 - **Language forcing:** forced `ne` only for the large-v3 fine-tune;
   stock small stays auto-detect (gibberish plan §5.1).
 
@@ -132,7 +132,7 @@ whisper.cpp (a 2023 snapshot; upstream SwiftWhisper is unmaintained):
    `ModelStore.coreMLBundleFinalURL` + catalog names + bundled dirs.
 
 **Durable fix:** the app's SwiftWhisper dependency now points at
-`anjan-poudel/SwiftWhisper@n-mels-fix` — the fork vendors whisper.cpp
+`anjan-poudel/SwiftWhisper@metal-experiment` (which includes the n-mels fix) — the fork vendors whisper.cpp
 @ 0de8582f as real files (no submodule), with init calls adapted to the
 `_with_params` API. Offline validation: the fixed build transcribes the
 SLR54 clip to `छिमेकी मोलुक भारतको` (was: crash).
