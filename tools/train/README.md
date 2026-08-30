@@ -26,7 +26,7 @@ source .venv/bin/activate
 pip install --upgrade pip
 
 # 3. CUDA deps (torch 2.4 + cu121, pinned — matches research doc §12.3)
-pip install -r requirements.txt --index-url https://download.pytorch.org/whl/cu121
+pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu121
 
 # 4. Verify CUDA
 python -c "import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0))"
