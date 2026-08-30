@@ -124,4 +124,41 @@ final class ModelStoreTests: XCTestCase {
         // Impossibly large should never fit.
         XCTAssertFalse(MemoryProbe.canFit(UInt64.max / 2))
     }
+
+
+    // MARK: - Stale CoreML bundle removal
+
+    func testRemoveStaleCoreMLBundlesDeletesUnbundledEncodersOnly() throws {
+        let store = try ModelStore(observabilityBus: bus,
+                                   rootDirectoryOverride: tmpRoot,
+                                   checksumPolicy: .skip)
+
+        // Stage both whisper models so their final dirs exist.
+        for id in [ModelCatalog.whisperLargeV3Nepali,
+                   ModelCatalog.whisperSmallMultilingual] {
+            let staged = try store.stagingURL(for: id)
+            try Data("fake".utf8).write(to: staged)
+            _ = try store.finalize(id)
+        }
+
+        // Fabricate encoder dirs at the derived paths for both models.
+        let largeURL = tmpRoot
+            .appendingPathComponent("whisperBase")
+            .appendingPathComponent("whisper-large-v3-nepali-encoder.mlmodelc")
+        let smallURL = tmpRoot
+            .appendingPathComponent("whisperBase")
+            .appendingPathComponent("ggml-small-encoder.mlmodelc")
+        for url in [largeURL, smallURL] {
+            try FileManager.default.createDirectory(at: url,
+                                                    withIntermediateDirectories: true)
+        }
+
+        store.removeStaleCoreMLBundles()
+
+        // large-v3 ships no encoder → its dir must go; small keeps its
+        // bundled one.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: largeURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: smallURL.path))
+    }
+
 }

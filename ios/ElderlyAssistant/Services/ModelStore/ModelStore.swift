@@ -94,6 +94,14 @@ final class ModelStore {
               entry.coreMLEncoderBundledName != nil else {
             return nil
         }
+        return derivedCoreMLBundleURL(for: entry)
+    }
+
+    /// The whisper.cpp-derived encoder path regardless of whether the
+    /// catalog ships one — used to REMOVE stale encoders left by older
+    /// builds (whisper.cpp auto-loads whatever dir is on disk, and a
+    /// hung encoder beats the catalog's "run on CPU" decision).
+    private func derivedCoreMLBundleURL(for entry: ModelCatalogEntry) -> URL {
         let ggmlURL = finalURL(for: entry)
         var stem: String
         if ggmlURL.pathExtension == "bin" {
@@ -111,6 +119,21 @@ final class ModelStore {
         return ggmlURL
             .deletingLastPathComponent()
             .appendingPathComponent("\(stem)-encoder.mlmodelc", isDirectory: true)
+    }
+
+    /// Deletes `-encoder.mlmodelc` dirs for catalog entries that no
+    /// longer ship an encoder. Idempotent; called at app launch so old
+    /// installs stop auto-loading encoders we've since unbundled.
+    func removeStaleCoreMLBundles() {
+        for entry in ModelCatalog.all
+        where entry.kind == .whisperBase && entry.coreMLEncoderBundledName == nil {
+            let url = derivedCoreMLBundleURL(for: entry)
+            if fileManager.fileExists(atPath: url.path) {
+                try? fileManager.removeItem(at: url)
+                emit("coreml_encoder_removed", outcome: "success",
+                     modelId: entry.id, errorCode: nil)
+            }
+        }
     }
 
     /// True when the mlmodelc directory exists on disk next to the ggml.

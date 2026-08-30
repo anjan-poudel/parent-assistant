@@ -139,6 +139,10 @@ final class AppCoordinator: ObservableObject {
         for entry in ModelCatalog.entries(kind: .whisperBase) {
             modelStore.installBundledCoreMLEncoder(for: entry.id)
         }
+        // And the reverse: entries we no longer ship an encoder for
+        // (large-v3 — its CoreML path hangs on-device) get their stale
+        // encoder dir deleted, or whisper.cpp auto-loads it anyway.
+        modelStore.removeStaleCoreMLBundles()
 
         // Restore and re-arm any outstanding medication reminders
         medicationScheduler.scheduleAll()
