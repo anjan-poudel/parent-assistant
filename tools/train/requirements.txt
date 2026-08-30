@@ -1,0 +1,13 @@
+# Pinned for the 4090/CUDA box (see research doc §12.3).
+# Install with: pip install -r requirements.txt --index-url https://download.pytorch.org/whl/cu121
+torch==2.4.0
+transformers==4.44.2
+accelerate==0.34.2
+datasets==2.20.0
+evaluate==0.4.2
+jiwer==3.0.3
+librosa==0.10.2.post1
+soundfile==0.12.1
+huggingface_hub==0.24.6
+pyyaml==6.0.2
+tqdm==4.66.5

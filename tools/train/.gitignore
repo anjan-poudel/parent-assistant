@@ -1,0 +1,8 @@
+# Generated training artifacts (all resumable — safe to delete)
+data/
+checkpoints/
+models/
+.venv/
+eval_results.csv
+__pycache__/
+*.pyc

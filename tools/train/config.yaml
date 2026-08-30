@@ -1,0 +1,48 @@
+# Central config for the Nepali whisper-small distillation pipeline.
+# Every key is overridable on the CLI of each script.
+
+# --- Paths (relative to tools/train/) ---
+data_dir: data
+checkpoint_dir: checkpoints
+pseudolabel_file: data/pseudolabels.jsonl
+output_model: models/whisper-small-ne-distilled
+# HF id or local directory of the teacher checkpoint
+teacher: kiranpantha/whisper-large-v3-nepali
+# NOTE: the student keeps the TEACHER's width (d_model 1280) with 12 enc
+# / 4 dec layers (~250 M params, whisper-small class) so teacher encoder
+# layers can be copied directly — see src/student_init.py.
+student_arch: openai/whisper-small
+
+# --- Data sources ---
+slr54_base_url: http://www.openslr.org/resources/54
+fleurs_repo: google/fleurs
+# Optional: folder of audio.wav + audio.txt pairs, or manifest.csv with
+# `audio,text` columns. Empty = skipped.
+custom_data: ""
+
+# --- Distillation (stage 3b) ---
+distill:
+  max_steps: 20000
+  batch_size: 8
+  grad_accum: 4
+  lr: 1e-4
+  warmup_steps: 500
+  temperature: 2.0
+  alpha: 0.5            # 1.0 = CE only, 0.0 = KL only
+  freeze_encoder_steps: 0
+  save_steps: 500
+  logging_steps: 25
+  save_total_limit: 3
+  seed: 42
+
+# --- Fine-tune (stage 4) ---
+finetune:
+  epochs: 3
+  batch_size: 16
+  grad_accum: 2
+  lr: 5e-6
+  warmup_steps: 500
+  save_steps: 500
+  logging_steps: 25
+  save_total_limit: 3
+  seed: 42
