@@ -254,8 +254,11 @@ final class AppCoordinator: ObservableObject {
 
     /// Called by CommandRouter with the raw transcript so ContentView can
     /// display it. Avoids depending on the TTS/notification path for
-    /// visible feedback.
+    /// visible feedback. Also drops the Whisper context — its ~1.5 GB
+    /// (large-v3) would otherwise stay resident while LLaMA runs and
+    /// crash llama.cpp's output buffer reservation on 6 GB devices.
     func recordTranscript(_ text: String) {
+        whisperSpeechRecognizer.releaseModel()
         DispatchQueue.main.async { [weak self] in
             self?.lastTranscript = text
         }

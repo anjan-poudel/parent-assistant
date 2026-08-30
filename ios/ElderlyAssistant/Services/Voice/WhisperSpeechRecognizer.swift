@@ -134,6 +134,19 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         return automaticOrder.first { modelStore.isCached($0) }
     }
 
+    /// Frees the loaded Whisper context. The next utterance reloads it
+    /// lazily (a few seconds on CPU after the one-time CoreML compile).
+    /// The router calls this once the transcript is in hand: large-v3
+    /// (~1.5 GB resident) plus the LLaMA interpreter (~1.4 GB with its
+    /// 2048-token compute buffer) together exceed the app's memory
+    /// ceiling on 6 GB devices and crash llama.cpp's `output_reserve`.
+    func releaseModel() {
+        inferenceQueue.async { [weak self] in
+            self?.whisperInstance = nil
+            self?.loadedModelId = nil
+        }
+    }
+
     // MARK: - LoRA hot-swap (skeleton)
 
     /// Applies a language / dialect / persona LoRA to the active Whisper

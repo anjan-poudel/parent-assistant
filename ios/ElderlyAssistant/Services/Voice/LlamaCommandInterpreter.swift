@@ -231,7 +231,13 @@ final class LlamaCommandInterpreter: CommandInterpreter {
                 stopSequence: "<|eot_id|>",
                 systemPrompt: "You are Sahayak, a personal assistant. Reply ONLY with a JSON object matching the schema. No other text."
             )
-            guard let created = LLM(from: modelURL, template: llama3Template) else {
+            // 1024-token context (default 2048): our prompts are ~150
+            // tokens + 128 output, and the smaller n_batch halves
+            // llama.cpp's compute buffers — with Whisper resident,
+            // 2048 overflowed the app's memory ceiling and crashed
+            // `llama_context::output_reserve` on 6 GB devices.
+            guard let created = LLM(from: modelURL, template: llama3Template,
+                                    maxTokenCount: 1024) else {
                 emit("model_load_failed", outcome: "failure")
                 completion(nil)
                 return
