@@ -68,8 +68,8 @@ def main() -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
     model.eval()
-    forced = processor.get_decoder_prompt_ids(language=LANG, task=TASK)
-    model.config.forced_decoder_ids = forced
+    # task/language are set on the processor itself;
+    # forced_decoder_ids would conflict (transformers warns + ignores).
 
     results_path = ROOT / "eval_results.csv"
     seen = set()

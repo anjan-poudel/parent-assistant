@@ -63,8 +63,8 @@ def pseudo_labels(cfg, data_dir, teacher, processor, smoke=False):
                          data_dir / "cache")
     device = next(teacher.parameters()).device
     collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
-    forced = processor.get_decoder_prompt_ids(language=LANG, task=TASK)
-    teacher.config.forced_decoder_ids = forced
+    # task/language are set on the processor itself;
+    # forced_decoder_ids would conflict (transformers warns + ignores).
 
     batch, batch_ids = [], []
     added = 0
