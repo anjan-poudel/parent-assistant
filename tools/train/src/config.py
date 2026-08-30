@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 from pathlib import Path
 
 import yaml
@@ -91,3 +92,46 @@ def load_processor(teacher_id: str):
               "borrowing openai/whisper-large-v3's")
         return WhisperProcessor.from_pretrained("openai/whisper-large-v3",
                                                 language="ne", task="transcribe")
+
+
+# --- Progress heartbeat -------------------------------------------------
+# Every stage writes timestamped lines here (flushed), so a stalled run
+# is distinguishable from a crashed one at a glance:
+#   tail -f progress.log
+
+_progress_t0 = time.time()
+
+
+def progress_file() -> Path:
+    return ROOT / "progress.log"
+
+
+def log_progress(msg: str) -> None:
+    elapsed = time.time() - _progress_t0
+    line = f"[{time.strftime('%H:%M:%S')}] +{elapsed:9.0f}s {msg}"
+    print(line, flush=True)
+    with open(progress_file(), "a") as f:
+        f.write(line + "\n")
+
+
+class ProgressCallback:
+    """Trainer heartbeat: step/loss/rate/ETA every logging interval."""
+
+    def __init__(self, total_steps: int):
+        self.total_steps = max(1, total_steps)
+        self.t0 = time.time()
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        logs = logs or {}
+        loss = logs.get("loss")
+        step = state.global_step
+        if step <= 0 or loss is None:
+            return
+        elapsed = time.time() - self.t0
+        rate = step / elapsed if elapsed > 0 else 0.0
+        eta_min = ((self.total_steps - step) / rate / 60
+                   if rate > 0 else float("inf"))
+        log_progress(
+            f"train step {step}/{self.total_steps} "
+            f"loss={loss:.4f} rate={rate:.3f} steps/s "
+            f"eta={eta_min:.1f} min")

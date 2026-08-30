@@ -21,7 +21,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
-from config import ROOT, abs_path, add_common, apply_common, load_config
+from config import ROOT, abs_path, add_common, apply_common, load_config, log_progress
 
 
 def norm_text(s: str) -> str:
@@ -119,6 +119,9 @@ def build_slr54(cfg: dict, data_dir: Path, known: set[str], out: Path) -> int:
                                  "text": norm_text(parts[2]),
                                  "source": "slr54", "split": "train"})
                 added += 1
+                if added % 5000 == 0:
+                    log_progress(f"slr54: {added} rows added")
+        log_progress(f"slr54 zip {i}/5 done (+{added} total)")
     return added
 
 

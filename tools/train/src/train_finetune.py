@@ -17,8 +17,9 @@ from transformers import (
     WhisperForConditionalGeneration,
 )
 
-from config import (abs_path, add_common, apply_common, load_config,
-                   load_processor, set_determinism)
+from config import (ProgressCallback, abs_path, add_common,
+                   apply_common, load_config, load_processor,
+                   log_progress, set_determinism)
 from dataset import DataCollatorSpeechSeq2SeqWithPadding, prepare_dataset
 
 LANG, TASK = "ne", "transcribe"
@@ -74,12 +75,18 @@ def main() -> None:
         report_to=[],
         seed=seed,
     )
+    total_steps = (len(ds) // int(cfg["finetune.batch_size"])
+                   * max(1, int(cfg["finetune.grad_accum"]))
+                   * max(1, int(float(cfg["finetune.epochs"]))))
+    log_progress(f"fine-tune starting: {len(ds)} rows, "
+                 f"~{total_steps} steps planned")
     trainer = Seq2SeqTrainer(
         model=model,
         args=train_args,
         train_dataset=ds,
         data_collator=DataCollatorSpeechSeq2SeqWithPadding(processor=processor),
         tokenizer=processor,
+        callbacks=[ProgressCallback(total_steps)],
     )
     resume = (not args.no_resume) and latest_checkpoint(out_dir)
     if resume:

@@ -29,8 +29,9 @@ from transformers import (
     WhisperProcessor,
 )
 
-from config import (abs_path, add_common, apply_common, load_config,
-                   load_processor, set_determinism)
+from config import (ProgressCallback, abs_path, add_common,
+                   apply_common, load_config, load_processor,
+                   log_progress, set_determinism)
 from dataset import DataCollatorSpeechSeq2SeqWithPadding, prepare_dataset
 
 LANG, TASK = "ne", "transcribe"
@@ -86,6 +87,8 @@ def pseudo_labels(cfg, data_dir, teacher, processor, smoke=False):
                 f.flush()
                 done.add(row_id)
                 added += 1
+        log_progress(f"pseudo-labels: +{added} so far "
+                     f"({len(done)}/{len(ds)} clips labeled)")
         batch.clear()
         batch_ids.clear()
 
@@ -241,7 +244,8 @@ def main() -> None:
         args=train_args,
         train_dataset=ds,
         data_collator=DataCollatorSpeechSeq2SeqWithPadding(processor=processor),
-        callbacks=[FreezeEncoderCallback(int(cfg["distill.freeze_encoder_steps"]))],
+        callbacks=[FreezeEncoderCallback(int(cfg["distill.freeze_encoder_steps"])),
+                   ProgressCallback(int(args.max_steps or cfg["distill.max_steps"]))],
     )
     resume = (not args.no_resume) and latest_checkpoint(out_dir)
     if resume:
