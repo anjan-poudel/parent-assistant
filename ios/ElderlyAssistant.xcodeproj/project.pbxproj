@@ -47,6 +47,7 @@
 		CF1D61DC1AE25927611816F8 /* MedicationSchedulerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A97FCC20DC139A6F36EF5884 /* MedicationSchedulerProtocol.swift */; };
 		D6835191986FBF797464B5BD /* ModelDownloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7665911F65DF1CD61EC44277 /* ModelDownloadService.swift */; };
 		EAA4C9A61CDA5778686FDA76 /* EscalationEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5B0563FB83838D506EA5E4 /* EscalationEngineTests.swift */; };
+		B1FB4C7FDFCE4D0BBA1EB478 /* default.metallib in Resources */ = {isa = PBXBuildFile; fileRef = 36B698344D474554ABAF9EA3 /* default.metallib */; };
 		F200FB06833F10743C65EF74 /* ggml-small-encoder.mlmodelc in Resources */ = {isa = PBXBuildFile; fileRef = 8C06C6328EED789FA5A827B2 /* ggml-small-encoder.mlmodelc */; };
 		F2545B47080302C2D47C85BB /* WhisperSpeechRecognizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EF74EEC9797CDE01B05BAA0 /* WhisperSpeechRecognizerTests.swift */; };
 		F46656314EF3B024F5871089 /* AudioSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54BA14F8D657DC91DFCC22AF /* AudioSessionManager.swift */; };
@@ -92,6 +93,7 @@
 		875C3FEBDCA672D2C9E0E7F2 /* FamilyNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyNotifier.swift; sourceTree = "<group>"; };
 		89ED4B2E4128B4CFA0B6365B /* ConfirmationChallengeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationChallengeTests.swift; sourceTree = "<group>"; };
 		8C06C6328EED789FA5A827B2 /* ggml-small-encoder.mlmodelc */ = {isa = PBXFileReference; lastKnownFileType = wrapper; path = "ggml-small-encoder.mlmodelc"; sourceTree = "<group>"; };
+		36B698344D474554ABAF9EA3 /* default.metallib */ = {isa = PBXFileReference; lastKnownFileType = file; path = "default.metallib"; sourceTree = "<group>"; };
 		90995C4CAB955FB574BB07C6 /* CommandRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRouter.swift; sourceTree = "<group>"; };
 		91DDA75BE5CF8691D09075D6 /* IdHashing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdHashing.swift; sourceTree = "<group>"; };
 		A5FEB104D893654A4F159A51 /* ModelStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStore.swift; sourceTree = "<group>"; };
@@ -129,6 +131,7 @@
 			isa = PBXGroup;
 			children = (
 				8C06C6328EED789FA5A827B2 /* ggml-small-encoder.mlmodelc */,
+				36B698344D474554ABAF9EA3 /* default.metallib */,
 				7CB5EAD9E47FF64F437F4BC8 /* README.md */,
 			);
 			path = CoreML;
@@ -403,6 +406,7 @@
 			files = (
 				AC19D7287A994FE6A8A5C3C9 /* README.md in Resources */,
 				F200FB06833F10743C65EF74 /* ggml-small-encoder.mlmodelc in Resources */,
+				B1FB4C7FDFCE4D0BBA1EB478 /* default.metallib in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
