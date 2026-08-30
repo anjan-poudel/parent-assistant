@@ -15,8 +15,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/anjan-poudel/SwiftWhisper",
       "state": {
-        "branch": "n-mels-fix",
-        "revision": "5551bf22f697863068021d0ea0ea0245dd9cd18e"
+        "branch": "metal-experiment",
+        "revision": "0f9107eefd8536a4887e09f8c0c275ddbee43e78"
       }
     }
   ],

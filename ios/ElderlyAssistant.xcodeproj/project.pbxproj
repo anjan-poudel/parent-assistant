@@ -719,7 +719,7 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/anjan-poudel/SwiftWhisper";
 			requirement = {
-				branch = "n-mels-fix";
+				branch = "metal-experiment";
 				kind = branch;
 			};
 		};
