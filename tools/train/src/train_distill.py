@@ -38,8 +38,11 @@ LANG, TASK = "ne", "transcribe"
 
 
 def load_teacher(cfg):
-    print(f"loading teacher: {cfg['teacher']}")
-    teacher = WhisperForConditionalGeneration.from_pretrained(cfg["teacher"])
+    print(f"loading teacher: {cfg['teacher']} (bf16)")
+    # bf16 halves the teacher's VRAM (fp32 large-v3 alone is ~6 GB) —
+    # with batch-8 activations it OOMed the 24 GB card.
+    teacher = WhisperForConditionalGeneration.from_pretrained(
+        cfg["teacher"], torch_dtype=torch.bfloat16)
     teacher.eval()
     for p in teacher.parameters():
         p.requires_grad = False
@@ -191,6 +194,9 @@ def main() -> None:
         abs_path(cfg, "checkpoint_dir") / "student-init")
     print(f"loading student from: {student_init}")
     model = WhisperForConditionalGeneration.from_pretrained(student_init)
+    # Student is the model we backprop through — checkpoint its
+    # activations to cut VRAM.
+    model.gradient_checkpointing_enable()
 
     manifest = "smoke-manifest.jsonl" if args.smoke else "manifest.jsonl"
     ds = prepare_dataset(data_dir / manifest, processor,

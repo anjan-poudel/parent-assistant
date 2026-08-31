@@ -23,8 +23,8 @@ custom_data: ""
 # --- Distillation (stage 3b) ---
 distill:
   max_steps: 20000
-  batch_size: 8
-  grad_accum: 4
+  batch_size: 4
+  grad_accum: 8
   lr: 1e-4
   warmup_steps: 500
   temperature: 2.0
