@@ -70,7 +70,7 @@ def main() -> None:
         save_total_limit=int(cfg["finetune.save_total_limit"]),
         predict_with_generate=True,
         generation_max_length=448,
-        fp16=torch.cuda.is_available(),
+        bf16=torch.cuda.is_available(),
         remove_unused_columns=False,
         report_to=[],
         seed=seed,

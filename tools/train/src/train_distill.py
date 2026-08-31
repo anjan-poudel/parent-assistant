@@ -126,7 +126,8 @@ class DistillTrainer(Trainer):
             self.teacher.to(dev)
         with torch.no_grad():
             teacher_out = self.teacher(
-                input_features=inputs["input_features"],
+                input_features=inputs["input_features"].to(
+                    next(self.teacher.parameters()).dtype),
                 labels=inputs["labels"],
             )
         t = self.temperature
@@ -236,7 +237,7 @@ def main() -> None:
         logging_steps=int(cfg["distill.logging_steps"]),
         save_steps=int(cfg["distill.save_steps"]),
         save_total_limit=int(cfg["distill.save_total_limit"]),
-        fp16=torch.cuda.is_available(),
+        bf16=torch.cuda.is_available(),
         remove_unused_columns=False,
         report_to=[],
         seed=seed,
