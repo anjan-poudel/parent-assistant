@@ -54,7 +54,11 @@ def prepare_dataset(manifest_path: Path,
                     processor,
                     cache_dir: Path,
                     include_labels: bool = False,
-                    max_input_length: int = 30 * 16000) -> Dataset:
+                    # Mel frames, not samples: 30 s of 16 kHz audio = 3000
+                    # mel frames = 1500 encoder positions (conv stride 2).
+                    # Longer clips index past whisper's positional embedding
+                    # and assert "index out of bounds" on CUDA.
+                    max_input_length: int = 3000) -> Dataset:
     cache_dir.mkdir(parents=True, exist_ok=True)
     ds = load_manifest(manifest_path)
     ds = ds.cast_column("audio", Audio(sampling_rate=16000))
@@ -65,6 +69,10 @@ def prepare_dataset(manifest_path: Path,
         features = processor.feature_extractor(
             audio["array"], sampling_rate=audio["sampling_rate"],
             return_tensors="np").input_features[0]
+        # Hard-cap at 3000 mel frames: exactly-30-s audio can round up to
+        # 3001 frames = 1501 encoder positions = positional-embedding OOB.
+        if features.shape[1] > max_input_length:
+            features = features[:, :max_input_length]
         item["input_features"] = features
         item["input_length"] = features.shape[1]
         if include_labels and "sentence" in item:
