@@ -59,6 +59,19 @@ Stages in order (each is individually re-runnable and resumable):
 | 5. Eval | `python src/eval_checkpoint.py --model checkpoints/finetune-final --test-set fleurs` | `eval_results.csv` | append-only; already-scored (model, set) pairs skipped (`--force` to redo) |
 | 6. Export | `python src/export_ggml.py --model checkpoints/finetune-final` | `models/*-q5_1.bin` + sha256 | skipped if the output exists |
 
+## Running it unattended (survives SSH drops)
+
+```bash
+./run_detached.sh            # start — nohup + setsid, detached from the terminal
+./run_detached.sh status     # pid + log path
+./run_detached.sh stop       # kill the whole stage group (safe anytime)
+./run_detached.sh restart    # stop + start with a fresh log file
+```
+
+Each start writes stdout+stderr to `logs/run_stages_<timestamp>.log`.
+Closing the SSH session does not affect the run. Stopping is safe at any
+time — stages resume from the latest checkpoint on the next start.
+
 ## Shutdown & resume (the important bit)
 
 **Kill anything at any time** (Ctrl-C, power loss, nightly shutdown).
