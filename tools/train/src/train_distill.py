@@ -124,7 +124,9 @@ class DistillTrainer(Trainer):
         dev = inputs["input_features"].device
         if next(self.teacher.parameters()).device != dev:
             self.teacher.to(dev)
-        with torch.no_grad():
+        with torch.no_grad(), torch.autocast(
+                device_type="cuda", dtype=torch.bfloat16,
+                enabled=torch.cuda.is_available()):
             teacher_out = self.teacher(
                 input_features=inputs["input_features"].to(
                     next(self.teacher.parameters()).dtype),
@@ -237,7 +239,10 @@ def main() -> None:
         logging_steps=int(cfg["distill.logging_steps"]),
         save_steps=int(cfg["distill.save_steps"]),
         save_total_limit=int(cfg["distill.save_total_limit"]),
-        bf16=torch.cuda.is_available(),
+        # Trainer-level amp stays OFF for the distillation trainer: the
+        # student runs fp32 (fits with batch 4 + grad checkpointing) and
+        # the teacher carries its own autocast block — mixing the two
+        # contexts produced CUDA corruption on the 4090.
         remove_unused_columns=False,
         report_to=[],
         seed=seed,
