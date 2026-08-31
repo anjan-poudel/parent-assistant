@@ -7,6 +7,9 @@ cd "$(dirname "$0")"
 # Avoid PyTorch's NVML assert when the box can't init NVML (containers /
 # driver mismatches): query device capability from the driver instead.
 export PYTORCH_NVML_BASED_CUDA_DEVICE_CAP=0
+# Synchronous CUDA errors: the traceback then names the REAL failing
+# kernel (async reporting blames the next innocent API call).
+export CUDA_LAUNCH_BLOCKING=1
 
 if [ ! -d ".venv" ]; then
     echo "no .venv — run: python3.11 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt"
