@@ -31,6 +31,11 @@ pip install -r requirements.txt --extra-index-url https://download.pytorch.org/w
 # 4. Verify CUDA
 python -c "import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0))"
 # → NVIDIA GeForce RTX 4090
+#
+# If you see "Can't initialize NVML" / NVML assert crashes: nvidia-smi
+# must work on the box (container GPUs need --gpus all + utility
+# capability); run_stages.sh already sets
+# PYTORCH_NVML_BASED_CUDA_DEVICE_CAP=0 to sidestep the NVML lookup.
 
 # 5. Optional but recommended: whisper.cpp for stage 6 (GGML export only)
 git clone https://github.com/ggml-org/whisper.cpp ~/whisper.cpp

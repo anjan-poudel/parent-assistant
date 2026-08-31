@@ -4,6 +4,9 @@
 # training resumes from the latest checkpoint.
 set -euo pipefail
 cd "$(dirname "$0")"
+# Avoid PyTorch's NVML assert when the box can't init NVML (containers /
+# driver mismatches): query device capability from the driver instead.
+export PYTORCH_NVML_BASED_CUDA_DEVICE_CAP=0
 
 if [ ! -d ".venv" ]; then
     echo "no .venv — run: python3.11 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt"
