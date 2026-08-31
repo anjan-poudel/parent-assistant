@@ -94,6 +94,8 @@ def load_processor(teacher_id: str):
                                                 language="ne", task="transcribe")
 
 
+from transformers import TrainerCallback
+
 # --- Progress heartbeat -------------------------------------------------
 # Every stage writes timestamped lines here (flushed), so a stalled run
 # is distinguishable from a crashed one at a glance:
@@ -114,7 +116,7 @@ def log_progress(msg: str) -> None:
         f.write(line + "\n")
 
 
-class ProgressCallback:
+class ProgressCallback(TrainerCallback):
     """Trainer heartbeat: step/loss/rate/ETA every logging interval."""
 
     def __init__(self, total_steps: int):
