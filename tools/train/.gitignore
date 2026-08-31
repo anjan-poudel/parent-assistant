@@ -3,6 +3,7 @@ data/
 checkpoints/
 models/
 .venv/
+logs/
 eval_results.csv
 __pycache__/
 *.pyc
