@@ -85,7 +85,10 @@ def prepare_dataset(manifest_path: Path,
         return item
 
     mtime = manifest_path.stat().st_mtime
-    cache = cache_dir / f"tokenized-{manifest_path.stem}-{mtime:.0f}"
+    # TOKENIZER_VERSION must be bumped whenever tokenize() changes —
+    # the cache otherwise survives code fixes (it did once already).
+    TOKENIZER_VERSION = "v2-truncate-30s"
+    cache = cache_dir / f"tokenized-{manifest_path.stem}-{mtime:.0f}-{TOKENIZER_VERSION}"
     keep = ["id", "sentence"]
     ds = ds.map(tokenize,
                 remove_columns=[c for c in ds.column_names if c not in keep],
