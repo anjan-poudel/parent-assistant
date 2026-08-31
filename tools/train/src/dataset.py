@@ -80,8 +80,9 @@ def prepare_dataset(manifest_path: Path,
             # (WhisperProcessor has no as_target_processor in 4.44).
             prompt = [tid for _, tid in processor.get_decoder_prompt_ids(
                 language="ne", task="transcribe")]
-            item["labels"] = prompt + processor.tokenizer(
+            labs = prompt + processor.tokenizer(
                 item["sentence"], padding=False).input_ids[0]
+            item["labels"] = labs[:447]  # decoder position table = 448 rows
         return item
 
     mtime = manifest_path.stat().st_mtime

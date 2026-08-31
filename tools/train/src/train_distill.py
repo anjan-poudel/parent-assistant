@@ -81,7 +81,7 @@ def pseudo_labels(cfg, data_dir, teacher, processor, smoke=False):
         inputs = collator(batch)
         inputs = {k: v.to(device) for k, v in inputs.items() if k != "labels"}
         with torch.no_grad():
-            gen = teacher.generate(**inputs, max_new_tokens=444)
+            gen = teacher.generate(**inputs, max_new_tokens=440)
         texts = processor.batch_decode(gen, skip_special_tokens=True)
         for row_id, text in zip(batch_ids, texts):
             if row_id not in done and text.strip():
@@ -221,12 +221,19 @@ def main() -> None:
         tok = processor.tokenizer(labels[row["id"]], padding=False).input_ids
         if tok and isinstance(tok[0], list):
             tok = tok[0]
+        # Decoder position table is 448 rows; prompt(4)+tokens must stay
+        # <= 447 or embed_positions indexes OOB (the step-5 CUDA assert).
+        tok = tok[:447 - len(prompt)]
         feats = row["input_features"]
         if hasattr(feats, "tolist"):
             feats = feats.tolist()
         rows.append({"input_features": feats,
                      "labels": prompt + tok})
     ds = Dataset.from_list(rows)
+    max_lab = max(len(r["labels"]) for r in rows)
+    max_feat = max(len(r["input_features"][0]) for r in rows)
+    log_progress(f"distillation set: {len(ds)} rows, "
+                 f"max_label_tokens={max_lab}, max_feature_frames={max_feat}")
     print(f"distillation set: {len(ds)} rows")
 
     train_args = TrainingArguments(
