@@ -62,13 +62,26 @@ def main() -> None:
                          data_dir / "cache", include_labels=True)
     print(f"fine-tune set: {len(ds)} rows")
 
+    batch = args.batch_size or int(cfg["finetune.batch_size"])
+    accum = int(cfg["finetune.grad_accum"])
+    epochs = args.epochs or float(cfg["finetune.epochs"])
+    # Real optimizer-update count (ceil on batches per step); a warmup
+    # longer than the whole run starves the LR (stage 4 ran 141 updates
+    # with warmup 500 -> effective lr ~1.25e-6, 2026-09-01).
+    updates_per_epoch = max(1, -(-len(ds) // (batch * accum)))
+    total_updates = max(1, int(updates_per_epoch * epochs))
+    warmup = min(int(cfg["finetune.warmup_steps"]), max(1, total_updates // 5))
+    if warmup != int(cfg["finetune.warmup_steps"]):
+        print(f"warmup clamped {cfg['finetune.warmup_steps']} -> {warmup} "
+              f"({total_updates} updates planned)")
+
     train_args = Seq2SeqTrainingArguments(
         output_dir=str(out_dir),
-        per_device_train_batch_size=args.batch_size or int(cfg["finetune.batch_size"]),
-        gradient_accumulation_steps=int(cfg["finetune.grad_accum"]),
+        per_device_train_batch_size=batch,
+        gradient_accumulation_steps=accum,
         learning_rate=args.lr if args.lr is not None else float(cfg["finetune.lr"]),
-        warmup_steps=int(cfg["finetune.warmup_steps"]),
-        num_train_epochs=args.epochs or float(cfg["finetune.epochs"]),
+        warmup_steps=warmup,
+        num_train_epochs=epochs,
         logging_steps=int(cfg["finetune.logging_steps"]),
         save_steps=int(cfg["finetune.save_steps"]),
         save_total_limit=int(cfg["finetune.save_total_limit"]),
@@ -79,18 +92,15 @@ def main() -> None:
         report_to=[],
         seed=seed,
     )
-    total_steps = (len(ds) // int(cfg["finetune.batch_size"])
-                   * max(1, int(cfg["finetune.grad_accum"]))
-                   * max(1, int(float(cfg["finetune.epochs"]))))
     log_progress(f"fine-tune starting: {len(ds)} rows, "
-                 f"~{total_steps} steps planned")
+                 f"~{total_updates} steps planned")
     trainer = Seq2SeqTrainer(
         model=model,
         args=train_args,
         train_dataset=ds,
         data_collator=DataCollatorSpeechSeq2SeqWithPadding(processor=processor),
         tokenizer=processor,
-        callbacks=[ProgressCallback(total_steps)],
+        callbacks=[ProgressCallback(total_updates)],
     )
     resume = (not args.no_resume) and latest_checkpoint(out_dir)
     if resume:

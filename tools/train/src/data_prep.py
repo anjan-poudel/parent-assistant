@@ -93,35 +93,39 @@ def build_slr54(cfg: dict, data_dir: Path, known: set[str], out: Path) -> int:
         zip_path = data_dir / "downloads" / zip_name
         download(f"{base}/{zip_name}", zip_path)
         extract_zip(zip_path, audio_dir, "*.flac")
-
-        # Each zip carries the full corpus TSV; parse + dedupe by utt id.
-        tsv_tmp = data_dir / "downloads" / f"utt_spk_text_{i}.tsv"
+        # Each zip carries the full corpus TSV (same content in all five).
         extract_zip(zip_path, data_dir / "downloads", "*/utt_spk_text.tsv")
-        if tsv_tmp.exists() or True:
-            # unzip -n places it under a subdir; find it
-            candidates = list((data_dir / "downloads").rglob("utt_spk_text.tsv"))
-            if not candidates:
-                print("warning: no utt_spk_text.tsv in zip, skipping transcripts")
+        log_progress(f"slr54 zip {i}/5 extracted")
+
+    # unzip preserves the archive's sharded layout:
+    # audio/slr54/asr_nepali/data/xx/yy/<uid>.flac — index it once.
+    flac_index = {}
+    for p in audio_dir.rglob("*.flac"):
+        flac_index[p.stem] = p
+    tsv_paths = sorted({str(p) for p in
+                        (data_dir / "downloads").rglob("utt_spk_text.tsv")})
+    if not tsv_paths:
+        print("warning: no utt_spk_text.tsv extracted, skipping transcripts")
+        return 0
+    for tsv in tsv_paths[:1]:
+        for line in open(tsv, encoding="utf-8"):
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 3:
                 continue
-        for tsv in candidates:
-            for line in open(tsv, encoding="utf-8"):
-                parts = line.rstrip("\n").split("\t")
-                if len(parts) < 3:
-                    continue
-                uid = parts[0]
-                if uid in known:
-                    continue
-                audio = audio_dir / f"{uid}.flac"
-                if not audio.exists():
-                    continue  # clip belongs to another split
-                known.add(uid)
-                append_row(out, {"id": f"slr54-{uid}", "audio": str(audio),
-                                 "text": norm_text(parts[2]),
-                                 "source": "slr54", "split": "train"})
-                added += 1
-                if added % 5000 == 0:
-                    log_progress(f"slr54: {added} rows added")
-        log_progress(f"slr54 zip {i}/5 done (+{added} total)")
+            uid = parts[0]
+            row_id = f"slr54-{uid}"
+            if row_id in known:
+                continue
+            audio = flac_index.get(uid)
+            if audio is None:
+                continue  # clip belongs to another split
+            known.add(row_id)
+            append_row(out, {"id": row_id, "audio": str(audio),
+                             "text": norm_text(parts[2]),
+                             "source": "slr54", "split": "train"})
+            added += 1
+            if added % 5000 == 0:
+                log_progress(f"slr54: {added} rows added")
     return added
 
 
