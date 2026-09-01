@@ -52,11 +52,13 @@ final class AppCoordinator: ObservableObject {
     private let fallbackSpeechRecognizer: OnDeviceSpeechRecognizer
 
     /// The IDs the first-run flow will download by default. Order matters —
-    /// STT unlocks the whole voice path so the ~190 MB stock small model
-    /// goes first. The 1.9 GB large-v3 Nepali fine-tune stays in the list
-    /// (user-choosable, per the model-picker decision) but last so it
-    /// never blocks the LLM/TTS downloads; it can be cancelled from the UI.
+    /// STT unlocks the whole voice path so the distilled small Nepali
+    /// model goes first (~327 MB, fast on Metal). The 1.9 GB large-v3
+    /// Nepali fine-tune stays in the list (user-choosable, per the
+    /// model-picker decision) but last so it never blocks the
+    /// LLM/TTS downloads; it can be cancelled from the UI.
     let requiredModelIds: [ModelID] = [
+        ModelCatalog.whisperSmallNepali,
         ModelCatalog.whisperSmallMultilingual,
         ModelCatalog.llama3_2_1B,
         ModelCatalog.piperNepali,
@@ -245,6 +247,8 @@ final class AppCoordinator: ObservableObject {
 
     private func sttName(for id: ModelID?) -> String {
         switch id {
+        case ModelCatalog.whisperSmallNepali:
+            return "Whisper (Nepali small, distilled)"
         case ModelCatalog.whisperLargeV3Nepali:
             return "Whisper (Nepali large v3)"
         case ModelCatalog.whisperSmallMultilingual:
