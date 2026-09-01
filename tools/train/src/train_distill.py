@@ -214,51 +214,55 @@ def main() -> None:
     manifest = "smoke-manifest.jsonl" if args.smoke else "manifest.jsonl"
     ds = prepare_dataset(data_dir / manifest, processor,
                          data_dir / "cache")
-    # Attach pseudo-labels as labels (explicit from_list: pyarrow map
-    # chokes mixing ragged list columns with numpy feature arrays).
+    # Attach labels: teacher pseudo-labels where present, else the row's
+    # ground-truth transcript (SLR54). Done via a batched map so the
+    # feature arrays stay in arrow — materializing them as Python lists
+    # for Dataset.from_list needs ~10 MB/row and systemd-oomd killed the
+    # 50k-row run silently (2026-09-02).
     labels = {}
     pf = abs_path(cfg, "pseudolabel_file")
     if pf.exists():
         for line in open(pf, encoding="utf-8"):
             row = json.loads(line)
             labels[row["id"]] = row["text"]
+    gt = {}
+    for row in ds:
+        if row["id"] not in labels:
+            text = (row.get("sentence") or "").strip()
+            if text:
+                gt[row["id"]] = text
 
     sot_id = processor.tokenizer.convert_tokens_to_ids("<|startoftranscript|>")
-    rows = []
-    for row in ds:
-        text = labels.get(row["id"])
-        if text is None:
-            # Rows without teacher pseudo-labels (SLR54) fall back to
-            # their ground-truth transcripts — better CE targets than
-            # hours of teacher re-decoding, and the standard
-            # distil-whisper recipe uses GT for the CE term anyway.
-            text = (row.get("sentence") or "").strip()
-            if not text:
-                continue
-        # The processor was created with language/task set, so the
-        # tokenizer already prepends the decoder prompt tokens. Strip the
-        # leading sot (shift_tokens_right re-adds it): keeping it shifts
-        # every position by 1 vs generate()'s forced ids and the
-        # teacher's native format (measured teacher CE 2.60 vs 1.52
-        # aligned), which poisons the teacher-KL — the distilled decoder
-        # learned a fluent but audio-detached text prior (FLEURS WER
-        # 104%, 2026-09-01).
-        tok = processor.tokenizer(text, padding=False).input_ids
-        if tok and isinstance(tok[0], list):
-            tok = tok[0]
-        if tok and tok[0] == sot_id:
-            tok = tok[1:]
-        # Decoder position table is 448 rows — keep labels <= 447 or
-        # embed_positions indexes OOB (the step-5 CUDA assert).
-        tok = tok[:447]
-        feats = row["input_features"]
-        if hasattr(feats, "tolist"):
-            feats = feats.tolist()
-        rows.append({"input_features": feats,
-                     "labels": tok})
-    ds = Dataset.from_list(rows)
-    max_lab = max(len(r["labels"]) for r in rows)
-    max_feat = max(len(r["input_features"][0]) for r in rows)
+
+    def attach_labels(batch):
+        labs = []
+        for rid in batch["id"]:
+            # The processor was created with language/task set, so the
+            # tokenizer already prepends the decoder prompt tokens. Strip
+            # the leading sot (shift_tokens_right re-adds it): keeping it
+            # shifts every position by 1 vs generate()'s forced ids and
+            # the teacher's native format (measured teacher CE 2.60 vs
+            # 1.52 aligned), which poisons the teacher-KL — the
+            # distilled decoder learned a fluent but audio-detached text
+            # prior (FLEURS WER 104%, 2026-09-01).
+            text = labels.get(rid, gt.get(rid, ""))
+            tok = processor.tokenizer(text, padding=False).input_ids
+            if tok and isinstance(tok[0], list):
+                tok = tok[0]
+            if tok and tok[0] == sot_id:
+                tok = tok[1:]
+            # Decoder position table is 448 rows — keep labels <= 447 or
+            # embed_positions indexes OOB (the step-5 CUDA assert).
+            labs.append(tok[:447])
+        return {"labels": labs}
+
+    ds = ds.map(attach_labels, batched=True, batch_size=512,
+                load_from_cache_file=False, desc="attach labels")
+    ds = ds.filter(lambda x: len(x["labels"]) > 0, num_proc=1)
+    ds = ds.remove_columns([c for c in ds.column_names
+                            if c not in ("input_features", "labels")])
+    max_lab = max(len(r["labels"]) for r in ds)
+    max_feat = max(len(r["input_features"][0]) for r in ds)
     log_progress(f"distillation set: {len(ds)} rows, "
                  f"max_label_tokens={max_lab}, max_feature_frames={max_feat}")
     print(f"distillation set: {len(ds)} rows")
