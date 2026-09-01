@@ -87,7 +87,11 @@ def main() -> None:
         refs, hyps = [], []
         for i in range(0, len(ds), args.batch_size):
             chunk = ds[i:i + args.batch_size]
-            feats = processor(chunk["audio"], sampling_rate=16000,
+            # The Audio feature column yields {'array', 'sampling_rate'}
+            # dicts — pass the decoded arrays to the feature extractor
+            # (raw dicts break np.asarray in WhisperFeatureExtractor).
+            arrays = [a["array"] for a in chunk["audio"]]
+            feats = processor(arrays, sampling_rate=16000,
                               return_tensors="pt").input_features.to(device)
             with torch.no_grad():
                 gen = model.generate(feats, max_new_tokens=444)
