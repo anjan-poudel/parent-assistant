@@ -78,10 +78,18 @@ def prepare_dataset(manifest_path: Path,
         if include_labels and "sentence" in item:
             # The processor was created with language/task set, so the
             # tokenizer already prepends the decoder prompt tokens
-            # (startoftranscript/ne/transcribe) — tokenize as-is, don't
-            # prepend them again (padding=False returns a flat list).
+            # (startoftranscript/ne/transcribe/notimestamps). Strip the
+            # leading sot: shift_tokens_right re-adds it, and keeping it
+            # shifts every position by 1 vs generate()'s forced ids and
+            # the teacher's native format (measured teacher CE 2.60 vs
+            # 1.52 aligned) — the +1 shift poisons the stage-3 KL and
+            # produces salad (FLEURS WER 104%, 2026-09-01).
+            sot_id = processor.tokenizer.convert_tokens_to_ids(
+                "<|startoftranscript|>")
             labs = processor.tokenizer(
                 item["sentence"], padding=False).input_ids
+            if labs and labs[0] == sot_id:
+                labs = labs[1:]
             item["labels"] = labs[:447]  # decoder position table = 448 rows
         return item
 

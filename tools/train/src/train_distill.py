@@ -213,20 +213,24 @@ def main() -> None:
             row = json.loads(line)
             labels[row["id"]] = row["text"]
 
+    sot_id = processor.tokenizer.convert_tokens_to_ids("<|startoftranscript|>")
     rows = []
     for row in ds:
         if row["id"] not in labels:
             continue
         # The processor was created with language/task set, so the
-        # tokenizer already prepends the decoder prompt tokens — do NOT
-        # prepend them again. The old prompt+ prepend shifted every label
-        # position by 4, poisoning both the CE targets and the teacher-KL
-        # (teacher logits landed on shifted positions): the distilled
-        # decoder learned a fluent but audio-detached text prior
-        # (FLEURS WER 104%, 2026-09-01).
+        # tokenizer already prepends the decoder prompt tokens. Strip the
+        # leading sot (shift_tokens_right re-adds it): keeping it shifts
+        # every position by 1 vs generate()'s forced ids and the
+        # teacher's native format (measured teacher CE 2.60 vs 1.52
+        # aligned), which poisons the teacher-KL — the distilled decoder
+        # learned a fluent but audio-detached text prior (FLEURS WER
+        # 104%, 2026-09-01).
         tok = processor.tokenizer(labels[row["id"]], padding=False).input_ids
         if tok and isinstance(tok[0], list):
             tok = tok[0]
+        if tok and tok[0] == sot_id:
+            tok = tok[1:]
         # Decoder position table is 448 rows — keep labels <= 447 or
         # embed_positions indexes OOB (the step-5 CUDA assert).
         tok = tok[:447]
