@@ -81,7 +81,12 @@ def pseudo_labels(cfg, data_dir, teacher, processor, smoke=False):
         inputs = collator(batch)
         inputs = {k: v.to(device) for k, v in inputs.items() if k != "labels"}
         with torch.no_grad():
-            gen = teacher.generate(**inputs, max_new_tokens=440)
+            # Teacher is loaded bf16 (load_teacher); collator output is
+            # fp32 — conv1d rejects the mixed dtype (first real run of
+            # this path crashed here 2026-09-02).
+            feats = inputs["input_features"].to(
+                next(teacher.parameters()).dtype)
+            gen = teacher.generate(feats, max_new_tokens=440)
         texts = processor.batch_decode(gen, skip_special_tokens=True)
         for row_id, text in zip(batch_ids, texts):
             if row_id not in done and text.strip():
