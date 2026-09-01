@@ -226,8 +226,15 @@ def main() -> None:
     sot_id = processor.tokenizer.convert_tokens_to_ids("<|startoftranscript|>")
     rows = []
     for row in ds:
-        if row["id"] not in labels:
-            continue
+        text = labels.get(row["id"])
+        if text is None:
+            # Rows without teacher pseudo-labels (SLR54) fall back to
+            # their ground-truth transcripts — better CE targets than
+            # hours of teacher re-decoding, and the standard
+            # distil-whisper recipe uses GT for the CE term anyway.
+            text = (row.get("sentence") or "").strip()
+            if not text:
+                continue
         # The processor was created with language/task set, so the
         # tokenizer already prepends the decoder prompt tokens. Strip the
         # leading sot (shift_tokens_right re-adds it): keeping it shifts
@@ -236,7 +243,7 @@ def main() -> None:
         # aligned), which poisons the teacher-KL — the distilled decoder
         # learned a fluent but audio-detached text prior (FLEURS WER
         # 104%, 2026-09-01).
-        tok = processor.tokenizer(labels[row["id"]], padding=False).input_ids
+        tok = processor.tokenizer(text, padding=False).input_ids
         if tok and isinstance(tok[0], list):
             tok = tok[0]
         if tok and tok[0] == sot_id:
