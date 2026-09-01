@@ -225,27 +225,25 @@ def main() -> None:
         for line in open(pf, encoding="utf-8"):
             row = json.loads(line)
             labels[row["id"]] = row["text"]
-    gt = {}
-    for row in ds:
-        if row["id"] not in labels:
-            text = (row.get("sentence") or "").strip()
-            if text:
-                gt[row["id"]] = text
 
     sot_id = processor.tokenizer.convert_tokens_to_ids("<|startoftranscript|>")
 
     def attach_labels(batch):
         labs = []
-        for rid in batch["id"]:
-            # The processor was created with language/task set, so the
-            # tokenizer already prepends the decoder prompt tokens. Strip
-            # the leading sot (shift_tokens_right re-adds it): keeping it
-            # shifts every position by 1 vs generate()'s forced ids and
-            # the teacher's native format (measured teacher CE 2.60 vs
-            # 1.52 aligned), which poisons the teacher-KL — the
-            # distilled decoder learned a fluent but audio-detached text
-            # prior (FLEURS WER 104%, 2026-09-01).
-            text = labels.get(rid, gt.get(rid, ""))
+        for rid, sent in zip(batch["id"], batch["sentence"]):
+            # Teacher pseudo-label where present, else the row's
+            # ground-truth transcript (SLR54). The processor was created
+            # with language/task set, so the tokenizer already prepends
+            # the decoder prompt tokens. Strip the leading sot
+            # (shift_tokens_right re-adds it): keeping it shifts every
+            # position by 1 vs generate()'s forced ids and the teacher's
+            # native format (measured teacher CE 2.60 vs 1.52 aligned),
+            # which poisons the teacher-KL — the distilled decoder
+            # learned a fluent but audio-detached text prior (FLEURS WER
+            # 104%, 2026-09-01).
+            text = labels.get(rid)
+            if text is None:
+                text = (sent or "").strip()
             tok = processor.tokenizer(text, padding=False).input_ids
             if tok and isinstance(tok[0], list):
                 tok = tok[0]
