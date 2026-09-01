@@ -3,6 +3,7 @@
 
 # Local agent/editor state
 .serena/
+.superpowers/
 
 # Backup snapshots
 ios.bak/
