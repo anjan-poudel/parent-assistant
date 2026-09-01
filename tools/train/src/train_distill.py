@@ -53,6 +53,10 @@ def load_teacher(cfg):
 
 def pseudo_labels(cfg, data_dir, teacher, processor, smoke=False):
     """Greedy teacher decode; append to JSONL skipping existing ids."""
+    # load_teacher leaves the model on CPU (the distill path moves it
+    # per-batch in compute_loss) — decode on GPU or 49k clips take days.
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    teacher = teacher.to(device)
     out_file = abs_path(cfg, "pseudolabel_file")
     out_file.parent.mkdir(parents=True, exist_ok=True)
     done = set()
@@ -67,6 +71,7 @@ def pseudo_labels(cfg, data_dir, teacher, processor, smoke=False):
                          data_dir / "cache")
     device = next(teacher.parameters()).device
     collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
+    batch_limit = max(8, int(cfg["distill.batch_size"]))
     # task/language are set on the processor itself;
     # forced_decoder_ids would conflict (transformers warns + ignores).
 
@@ -106,7 +111,7 @@ def pseudo_labels(cfg, data_dir, teacher, processor, smoke=False):
             continue
         batch.append(row)
         batch_ids.append(row_id)
-        if len(batch) >= max(1, int(cfg["distill.batch_size"])):
+        if len(batch) >= batch_limit:
             flush()
     flush()
     f.close()
