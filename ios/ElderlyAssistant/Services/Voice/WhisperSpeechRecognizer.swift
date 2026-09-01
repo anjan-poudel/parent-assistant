@@ -313,7 +313,12 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
             params.no_context = true
             params.suppress_blank = true
             let loadStart = CFAbsoluteTimeGetCurrent()
-            whisper = Whisper(fromFileURL: modelURL, withParams: params)
+            // The distilled student's 80-dim heads hang the 2023-era
+            // Metal kernels — run it on CPU (415M params is fast enough
+            // there); every other model keeps the GPU.
+            let useGPU = modelId != ModelCatalog.whisperSmallNepali
+            whisper = Whisper(fromFileURL: modelURL, withParams: params,
+                              useGPU: useGPU)
             let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
             whisperInstance = whisper
             loadedModelId = modelId
