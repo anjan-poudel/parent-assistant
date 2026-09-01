@@ -76,7 +76,8 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         // package is present in the build. The runtime check is a
         // `#if canImport(SwiftWhisper)` in the actual inference path; without
         // it we short-circuit `startListening` with .localeUnsupported.
-        guard modelStore.isCached(ModelCatalog.whisperLargeV3Nepali) ||
+        guard modelStore.isCached(ModelCatalog.whisperSmallNepali) ||
+              modelStore.isCached(ModelCatalog.whisperLargeV3Nepali) ||
               modelStore.isCached(ModelCatalog.whisperSmallMultilingual) ||
               modelStore.isCached(ModelCatalog.whisperBaseEn) else {
             return false
@@ -289,14 +290,15 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
             // could be mutated by other consumers, silently clobbering
             // our language setting.
             let params = WhisperParams(strategy: .greedy)
-            // Force `primaryLanguage` on the genuine Nepali fine-tune
-            // only (kiranpantha large-v3, standard tokenizer). The stock
-            // small multilingual runs with auto-detect: forcing "ne" on
-            // English/noise is exactly how Whisper hallucinates
-            // Devanagari garbage (gibberish plan §5.1).
-            // TranscriptSanityGuard stays as the downstream backstop.
-            // Toggle via `Config.forcePrimaryLanguage`.
-            let usePrimary = modelId == ModelCatalog.whisperLargeV3Nepali
+            // Force `primaryLanguage` on the genuine Nepali fine-tunes
+            // (kiranpantha large-v3 and the distilled small — both
+            // standard tokenizer). The stock small multilingual runs
+            // with auto-detect: forcing "ne" on English/noise is exactly
+            // how Whisper hallucinates Devanagari garbage (gibberish
+            // plan §5.1). TranscriptSanityGuard stays as the downstream
+            // backstop. Toggle via `Config.forcePrimaryLanguage`.
+            let usePrimary = (modelId == ModelCatalog.whisperLargeV3Nepali
+                              || modelId == ModelCatalog.whisperSmallNepali)
                 && config.forcePrimaryLanguage
             let langCode: String
             if usePrimary, let lang = config.primaryLanguage {

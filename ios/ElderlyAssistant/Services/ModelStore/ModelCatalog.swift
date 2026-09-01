@@ -75,12 +75,12 @@ enum ModelCatalog {
     // MARK: - Well-known IDs
     static let whisperLargeV3Nepali = ModelID("whisper-large-v3-nepali-ggml")
     static let whisperSmallMultilingual = ModelID("whisper-small-multilingual-q5_1")
-    // NOTE: no viable small Devanagari Nepali fine-tune exists publicly —
-    // see docs/whisper-small-nepali-integration-plan.md §7. The popular
-    // small fine-tunes (Dragneel et al.) use a GPT-2 tokenizer and emit
-    // romanized Latin, which the Devanagari voice pipeline can't use.
-    // Kept as an alias so existing references stay valid.
-    static let whisperSmallNepali = whisperLargeV3Nepali
+    /// The distilled small Devanagari Nepali model (415M params, 12 enc /
+    /// 4 dec layers, distilled from kiranpantha large-v3 — see
+    /// tools/train/README.md and docs/whisper-small-nepali-integration-
+    /// plan.md §8). This is the real `whisperSmallNepali`: a small,
+    /// fast, genuinely Nepali fine-tune.
+    static let whisperSmallNepali = ModelID("whisper-distill-ne-q5_1")
     static let whisperBaseEn      = ModelID("whisper-base-en-q5_1")
     static let llama3_2_1B        = ModelID("llama-3.2-1b-instruct-q4km")
     static let llama3_2_3B        = ModelID("llama-3.2-3b-instruct-q4km")
@@ -91,6 +91,20 @@ enum ModelCatalog {
 
     /// Every entry the app can request. Order matters only for UI display.
     static let all: [ModelCatalogEntry] = [
+        ModelCatalogEntry(
+            id: whisperSmallNepali,
+            kind: .whisperBase,
+            displayName: "Nepali speech recognition (small, distilled)",
+            filename: "whisper-distill-ne-q5_1.bin",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v1/whisper-distill-ne-q5_1.bin")!,
+            // Converted from tools/train checkpoint-4000 (mid-training
+            // distill; fine-tune stage will replace this later).
+            sizeBytes: 327_910_175,
+            sha256: "2eb3d790b4945525afa81a70a18b0b766f63f9f8ff9113ff1ac62a2495e9d01f",
+            minDeviceRAMBytes: 2_500_000_000,
+            dependsOn: nil,
+            coreMLEncoderBundledName: nil
+        ),
         ModelCatalogEntry(
             id: whisperLargeV3Nepali,
             kind: .whisperBase,
