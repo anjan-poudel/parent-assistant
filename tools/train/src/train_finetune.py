@@ -51,6 +51,10 @@ def main() -> None:
     base = args.model or str(abs_path(cfg, "checkpoint_dir") / "distill-final")
     print(f"loading base model: {base}")
     model = WhisperForConditionalGeneration.from_pretrained(base)
+    # Same as distillation: the teacher-width student's activations at
+    # batch 16 don't fit 24 GB without checkpointing (stage-4 OOM,
+    # 2026-09-01).
+    model.gradient_checkpointing_enable()
     processor = load_processor(cfg["teacher"])
 
     manifest = "smoke-manifest.jsonl" if args.smoke else "manifest.jsonl"
