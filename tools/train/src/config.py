@@ -129,8 +129,20 @@ class ProgressCallback(TrainerCallback):
         step = state.global_step
         if step <= 0 or loss is None:
             return
-        elapsed = time.time() - self.t0
-        rate = step / elapsed if elapsed > 0 else 0.0
+        # Rate from the delta since the previous heartbeat — resume-safe
+        # (dividing total step count by post-resume time lies after a
+        # resume_from_checkpoint).
+        now = time.time()
+        last_step = getattr(self, "_last_step", None)
+        last_t = getattr(self, "_last_t", None)
+        rate = 0.0
+        if last_step is not None and now > last_t:
+            d_step = step - last_step
+            d_t = now - last_t
+            if d_t > 0 and d_step > 0:
+                rate = d_step / d_t
+        self._last_step = step
+        self._last_t = now
         eta_min = ((self.total_steps - step) / rate / 60
                    if rate > 0 else float("inf"))
         log_progress(
