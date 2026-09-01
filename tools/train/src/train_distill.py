@@ -246,10 +246,11 @@ def main() -> None:
         logging_steps=int(cfg["distill.logging_steps"]),
         save_steps=int(cfg["distill.save_steps"]),
         save_total_limit=int(cfg["distill.save_total_limit"]),
-        # Trainer-level amp stays OFF for the distillation trainer: the
-        # student runs fp32 (fits with batch 4 + grad checkpointing) and
-        # the teacher carries its own autocast block — mixing the two
-        # contexts produced CUDA corruption on the 4090.
+        # bf16 autocast for the student (3090 tensor cores). The earlier
+        # "corruption" turned out to be the label OOB bug — bf16 is the
+        # standard whisper FT config. The teacher keeps its own explicit
+        # bf16 block in compute_loss.
+        bf16=torch.cuda.is_available(),
         remove_unused_columns=False,
         report_to=[],
         seed=seed,

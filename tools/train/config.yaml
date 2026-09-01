@@ -22,7 +22,7 @@ custom_data: ""
 
 # --- Distillation (stage 3b) ---
 distill:
-  max_steps: 20000
+  max_steps: 8000
   batch_size: 4
   grad_accum: 8
   lr: 1e-4
