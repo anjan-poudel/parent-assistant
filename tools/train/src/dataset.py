@@ -76,12 +76,12 @@ def prepare_dataset(manifest_path: Path,
         item["input_features"] = features
         item["input_length"] = features.shape[1]
         if include_labels and "sentence" in item:
-            # Whisper labels start with the decoder prompt tokens
-            # (WhisperProcessor has no as_target_processor in 4.44).
-            prompt = [tid for _, tid in processor.get_decoder_prompt_ids(
-                language="ne", task="transcribe")]
-            labs = prompt + processor.tokenizer(
-                item["sentence"], padding=False).input_ids[0]
+            # The processor was created with language/task set, so the
+            # tokenizer already prepends the decoder prompt tokens
+            # (startoftranscript/ne/transcribe) — tokenize as-is, don't
+            # prepend them again (padding=False returns a flat list).
+            labs = processor.tokenizer(
+                item["sentence"], padding=False).input_ids
             item["labels"] = labs[:447]  # decoder position table = 448 rows
         return item
 
@@ -89,7 +89,13 @@ def prepare_dataset(manifest_path: Path,
     # TOKENIZER_VERSION must be bumped whenever tokenize() changes —
     # the cache otherwise survives code fixes (it did once already).
     TOKENIZER_VERSION = "v2-truncate-30s"
-    cache = cache_dir / f"tokenized-{manifest_path.stem}-{mtime:.0f}-{TOKENIZER_VERSION}"
+    # The key must also distinguish label-ed vs label-less tokenization:
+    # cache_file_name bypasses HF fingerprinting, so stages 3 (no labels)
+    # and 4 (labels) collided on the same file and stage 4 trained on
+    # batches without labels (decoder ValueError) — 2026-09-01.
+    cache = cache_dir / (
+        f"tokenized-{manifest_path.stem}-{mtime:.0f}-{TOKENIZER_VERSION}"
+        + ("-labels" if include_labels else ""))
     keep = ["id", "sentence"]
     ds = ds.map(tokenize,
                 remove_columns=[c for c in ds.column_names if c not in keep],
