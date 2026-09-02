@@ -159,17 +159,19 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
     /// encoder can serve. `usesANEBackend` mirrors the C++ dims guard in
     /// vendored whisper.cpp (`whisper_init_state`) that pins such models to
     /// the CPU encoder — the ANE is only ever handed stock-dim models.
-    func testDistilledModelForcedToCPU() throws {
+    func testANEBackendFollowsStoredEncoderState() throws {
         try stageFakeModel(ModelCatalog.whisperSmallNepali)
         let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        // No encoder staged for the distilled model (the catalog ships
+        // none) — the mirror reports CPU, which is the honest label.
         XCTAssertFalse(stt.usesANEBackend(ModelCatalog.whisperSmallNepali))
     }
 
-    func testDistilledModelStaysCPUWithStaleEncoderOnDisk() throws {
+    func testSiblingEncoderOnDiskDoesNotFlipStoreState() throws {
         // whisper.cpp auto-loads whatever `-encoder.mlmodelc` sits next to
-        // the .bin regardless of the catalog, so stage one the way the C++
-        // derives the path and assert the Swift mirror still pins the
-        // distilled model to CPU.
+        // the .bin regardless of the catalog — but the Swift mirror reads
+        // the STORE's staged-encoder state, so a stray sibling on disk
+        // must not change the reported backend.
         try stageFakeModel(ModelCatalog.whisperSmallNepali)
         guard let modelURL = store.path(for: ModelCatalog.whisperSmallNepali) else {
             return XCTFail("staged model must have a path")
@@ -187,7 +189,7 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
                                                 withIntermediateDirectories: true)
         let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
         XCTAssertFalse(stt.usesANEBackend(ModelCatalog.whisperSmallNepali),
-            "A stale on-disk encoder must not change the distilled model's CPU pin.")
+            "A sibling encoder on disk must not change the store-reported backend.")
     }
 
     func testANEBackendOnlyWhenEncoderStagedForStockModel() throws {
@@ -330,7 +332,7 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
 
     // MARK: - Consecutive-timeout throttle
 
-    func testConsecutiveTimeoutsThrottleDriverAndReleaseModelResets() throws {
+    func testConsecutiveTimeoutsDownshiftToFallbackModel() throws {
         try stageFakeModel(ModelCatalog.whisperBaseEn)
         let stt = WhisperSpeechRecognizer(modelStore: store,
                                           observabilityBus: bus,
@@ -348,17 +350,52 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
             }
         }
 
-        // Third attempt: throttled — fails fast with .timedOut and must not
-        // reach the driver (each wedged attempt leaks a ~1.5 GB context).
+        // Third attempt: the model has proven it wedges — DOWN-SHIFT to the
+        // cached fallback (base-en) and run the driver with it instead of
+        // failing fast (that produced the "unstuck but back to the start"
+        // loop on device).
+        let third = driveUtterance(stt, waitFor: 3) { recognizer, _, attemptID in
+            driverCalls += 1
+            recognizer.settleAttempt(attemptID, with: .success("back"),
+                                     timedOut: false)
+        }
+        guard case .success(let text)? = third.result else {
+            return XCTFail("downshifted attempt must reach the driver, got "
+                + String(describing: third.result))
+        }
+        XCTAssertEqual(text, "back")
+        XCTAssertEqual(driverCalls, 3,
+            "the downshifted attempt invokes the driver with the fallback model")
+    }
+
+    func testConsecutiveTimeoutsFailFastWhenNoFallbackCached() throws {
+        try stageFakeModel(ModelCatalog.whisperSmallNepali)
+        let stt = WhisperSpeechRecognizer(modelStore: store,
+                                          observabilityBus: bus,
+                                          config: fastConfig(timeout: 0.2))
+        stt.setPreferredModel(ModelCatalog.whisperSmallNepali)
+        var driverCalls = 0
+
+        for index in 0..<2 {
+            let outcome = driveUtterance(stt, waitFor: 3) { _, _, _ in
+                driverCalls += 1
+            }
+            guard case .failure(.timedOut)? = outcome.result else {
+                return XCTFail("wedge \(index) must time out, got "
+                    + String(describing: outcome.result))
+            }
+        }
+
+        // No fallback model is cached → fail fast without the driver.
         let third = driveUtterance(stt, waitFor: 3) { _, _, _ in
             driverCalls += 1
         }
         guard case .failure(.timedOut)? = third.result else {
-            return XCTFail("throttled attempt must report .timedOut, got "
+            return XCTFail("no-fallback attempt must report .timedOut, got "
                 + String(describing: third.result))
         }
         XCTAssertEqual(driverCalls, 2,
-            "the throttled attempt must not invoke the driver")
+            "with no fallback cached the attempt must not invoke the driver")
 
         // A routed transcript calls releaseModel(): completion is possible
         // again, so the streak resets and the driver is reached.
@@ -378,10 +415,10 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
 
     func testSetPreferredModelResetsTimeoutStreak() throws {
         try stageFakeModel(ModelCatalog.whisperBaseEn)
-        try stageFakeModel(ModelCatalog.whisperSmallMultilingual)
         let stt = WhisperSpeechRecognizer(modelStore: store,
                                           observabilityBus: bus,
                                           config: fastConfig(timeout: 0.2))
+        stt.setPreferredModel(ModelCatalog.whisperBaseEn)
         var driverCalls = 0
         for index in 0..<2 {
             let outcome = driveUtterance(stt, waitFor: 3) { _, _, _ in
@@ -392,12 +429,13 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
                     + String(describing: outcome.result))
             }
         }
-        // Third attempt throttled — the driver is not called.
+        // No OTHER fallback cached (small-multilingual missing, base-en is
+        // the current pick) → fail fast — the driver is not called.
         let throttled = driveUtterance(stt, waitFor: 3) { _, _, _ in
             driverCalls += 1
         }
         guard case .failure(.timedOut)? = throttled.result else {
-            return XCTFail("expected throttle, got "
+            return XCTFail("expected fail-fast, got "
                 + String(describing: throttled.result))
         }
         XCTAssertEqual(driverCalls, 2)

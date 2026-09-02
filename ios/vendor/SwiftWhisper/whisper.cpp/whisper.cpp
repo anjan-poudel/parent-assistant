@@ -2711,11 +2711,18 @@ struct whisper_state * whisper_init_state(whisper_context * ctx) {
     }
 
 #ifdef WHISPER_USE_COREML
-    if (!whisper_hparams_has_standard_dims(ctx->model.hparams)) {
-        fprintf(stderr, "%s: non-standard model dims (n_audio_state=%d, n_audio_head=%d, n_text_head=%d, n_text_layer=%d) - Core ML encoder disabled, encoder runs on CPU\n",
-                __func__, ctx->model.hparams.n_audio_state, ctx->model.hparams.n_audio_head,
-                ctx->model.hparams.n_text_head, ctx->model.hparams.n_text_layer);
-    } else {
+    // NOTE (elderly-ai-assistant, 2026-09-02): an earlier revision
+    // disabled the Core ML encoder for non-standard dims (the distilled
+    // student) because of a hang theory borrowed from the Metal training
+    // kernels. Device evidence said otherwise: transcription WORKED with
+    // the distilled model before that change, and the real crashes were
+    // the ggml memory pools (fixed elsewhere in this file). The encoder
+    // path is therefore restored unconditionally — whisper_coreml_init
+    // loads the sibling -encoder.mlmodelc when it exists and falls back
+    // to CPU (WHISPER_COREML_ALLOW_FALLBACK) when it does not. The
+    // recognizer-level watchdog + model downshift remain as the recovery
+    // net for any true wedge.
+    {
         const auto path_coreml = whisper_get_coreml_path_encoder(ctx->path_model);
 
         fprintf(stderr, "%s: loading Core ML model from '%s'\n", __func__, path_coreml.c_str());

@@ -38,9 +38,11 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         /// to wedge forever on device (distilled model + ANE/Metal hang
         /// class). When the deadline expires the attempt is abandoned, the
         /// wedged context is dropped, and the pipeline receives
-        /// `.timedOut` so the voice UI recovers. 30 s covers the slow
-        /// first load (328 MB mmap + one-time CoreML compile); steady-state
-        /// utterances finish in seconds.
+        /// `.timedOut` so the voice UI recovers. 90 s: the distilled
+        /// model's CPU encoder measured 76–96 s PER PASS on a desktop Mac
+        /// — a 30 s budget can never succeed on the phone and only
+        /// produced a timeout loop. Two strikes still downshift to the
+        /// cheaper model (see the throttle path).
         let inferenceTimeoutSeconds: TimeInterval
 
         static let `default` = Config(
@@ -48,7 +50,7 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
             fallbackLanguage: "en",
             maxUtteranceSeconds: 10,
             forcePrimaryLanguage: true,
-            inferenceTimeoutSeconds: 30
+            inferenceTimeoutSeconds: 90
         )
     }
 
@@ -355,22 +357,32 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         registerAttempt(attemptID, completion: completion)
 
         #if canImport(SwiftWhisper)
-        // Fail fast after repeated watchdog kills: a device/model that
-        // wedges twice in a row will wedge every time, and each wedged
-        // attempt keeps its (up to ~1.5 GB) context resident forever.
-        // Report .timedOut immediately instead — the pipeline recovers,
-        // and a model change (setPreferredModel) or a routed transcript
-        // (releaseModel) resets the streak. Checked before the test seam
-        // so a throttled attempt never reaches the driver at all.
+        // After two consecutive watchdog kills the selected model has
+        // proven it can't finish in budget. DOWN-SHIFT to the next cached
+        // model in the safe order (small-multilingual → base-en) and
+        // retry immediately with it — fail-fast here only turned the
+        // timeout loop into an instant-failure loop ("unstuck but back to
+        // where it started"). If nothing else is cached, fail fast as
+        // before; a model change or a routed transcript resets the streak.
         stateLock.lock()
         let throttled = consecutiveTimeouts >= maxConsecutiveTimeouts
         stateLock.unlock()
         if throttled {
-            emit("inference_throttled", errorCode: "timed_out")
-            print("[whisper_stt] inference_throttled consecutive=\(consecutiveTimeouts) "
-                + "attempt=\(attemptID)")
-            settleAttempt(attemptID, with: .failure(.timedOut), timedOut: true)
-            return
+            if downshiftModel() {
+                stateLock.lock()
+                consecutiveTimeouts = 0
+                stateLock.unlock()
+                emit("inference_downshifted", errorCode: nil)
+                print("[whisper_stt] inference_downshifted consecutive=\(consecutiveTimeouts) "
+                    + "attempt=\(attemptID) model=\(preferredModelID?.rawValue ?? "nil")")
+                // Fall through to the normal path with the new model.
+            } else {
+                emit("inference_throttled", errorCode: "timed_out")
+                print("[whisper_stt] inference_throttled consecutive=\(consecutiveTimeouts) "
+                    + "attempt=\(attemptID)")
+                settleAttempt(attemptID, with: .failure(.timedOut), timedOut: true)
+                return
+            }
         }
 
         // Test seam (unit tests only) — replaces load + transcribe.
@@ -629,9 +641,12 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
     /// 16 text heads) and is pinned to CPU. This Swift-side mirror drives
     /// the observability label and unit tests — the C++ dims guard is the
     /// enforcement.
+    /// Whether the ANE (CoreML) encoder is staged for this model. The
+    /// distilled model is no longer pinned to CPU here — device evidence
+    /// showed it transcribing fine before the pin, and whisper.cpp now
+    /// loads whatever sibling encoder exists with CPU fallback.
     func usesANEBackend(_ modelId: ModelID) -> Bool {
-        guard modelId != ModelCatalog.whisperSmallNepali else { return false }
-        return modelStore.isCoreMLCached(modelId)
+        modelStore.isCoreMLCached(modelId)
     }
 
     /// Best-effort abort of the in-flight SwiftWhisper transcribe.
@@ -648,6 +663,22 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         guard let candidate else { return }
         try? candidate.cancel {}
         #endif
+    }
+
+    /// Recovery downshift: the selected model timed out twice in a row —
+    /// switch to the next cached model in the safe order so the loop
+    /// becomes "slower but working" instead of fail-fast forever.
+    /// Returns false when no alternative is cached.
+    private func downshiftModel() -> Bool {
+        let fallbacks: [ModelID] = [
+            ModelCatalog.whisperSmallMultilingual,
+            ModelCatalog.whisperBaseEn
+        ]
+        for id in fallbacks where id != preferredModelID && modelStore.isCached(id) {
+            preferredModelID = id
+            return true
+        }
+        return false
     }
 
     /// Pick which cached Whisper model to run.
