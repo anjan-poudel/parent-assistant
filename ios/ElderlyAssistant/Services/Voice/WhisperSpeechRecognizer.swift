@@ -324,6 +324,8 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         stateLock.lock()
         attemptSequence += 1
         let attemptID = attemptSequence
+        print("[whisper_stt] attempt \(attemptID) start samples=\(audio.count) "
+            + "audio_seconds=\(String(format: "%.2f", Double(audio.count) / 16_000.0))")
         attemptQueue = DispatchQueue(label: "whisper.stt.a\(attemptID)",
                                      qos: .userInitiated)
         let queue = attemptQueue
@@ -367,6 +369,8 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         // the early-failure and throttle paths) must settle the attempt,
         // or the watchdog would fire a second completion later.
         registerAttempt(attemptID, completion: completion)
+        print("[whisper_stt] attempt \(attemptID) watchdog armed "
+            + "deadline=\(config.inferenceTimeoutSeconds)s")
 
         #if canImport(SwiftWhisper)
         // Cap leaked contexts BEFORE anything that loads a model: two
@@ -499,6 +503,8 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         // only add seams + per-call overhead, so leave them defaulted.
         if !usesANEBackend(modelId) {
             params.audio_ctx = Int32(Self.audioContextTokens(sampleCount: pcm.count))
+            print("[whisper_stt] attempt \(attemptID) window audio_ctx=\(params.audio_ctx) "
+                + "samples=\(pcm.count)")
         }
         let loadStart = CFAbsoluteTimeGetCurrent()
         let whisper = Whisper(fromFileURL: modelURL, withParams: params)
