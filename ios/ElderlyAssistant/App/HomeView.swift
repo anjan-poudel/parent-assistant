@@ -108,12 +108,17 @@ struct HomeView: View {
                         switch session.state {
                         case .idle:
                             coordinator.simulateWakeWordDetection()
-                        case .listening, .transcribing, .understanding:
+                        case .listening, .transcribing, .understanding, .speaking:
                             // Manual escape hatch: tapping mid-cycle cancels
                             // and recycles the pipeline (the watchdog does
                             // the same automatically after 15s).
                             coordinator.recoverVoiceCycle()
-                        default:
+                        case .error, .stopped:
+                            // Boot-time start failed (mic denied, speech
+                            // denied, no audio input) — tapping retries
+                            // the pipeline start instead of staying dead.
+                            coordinator.recoverVoiceCycle()
+                        case .awaitingConfirmation:
                             break
                         }
                     }
@@ -281,10 +286,11 @@ struct TalkButton: View {
                 }
             }
             .buttonStyle(.plain)
-            // Enabled in every state except stopped (nothing to cancel)
-            // and awaitingConfirmation (the yes/no chips own the UI):
-            // tapping mid-cycle is the manual recovery escape hatch.
-            .disabled(session.state == .stopped || session.state == .awaitingConfirmation)
+            // Enabled in every state except awaitingConfirmation (the
+            // yes/no chips own the UI): tapping mid-cycle is the manual
+            // recovery escape hatch, and tapping in error/stopped retries
+            // the failed boot-time pipeline start.
+            .disabled(session.state == .awaitingConfirmation)
             .accessibilityLabel(Text(session.state.buttonText(locale: locale)))
 
             Text(session.state.statusText(locale: locale))
