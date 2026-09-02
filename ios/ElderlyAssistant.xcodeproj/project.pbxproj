@@ -127,6 +127,7 @@
 		6EF74EEC9797CDE01B05BAA0 /* WhisperSpeechRecognizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperSpeechRecognizerTests.swift; sourceTree = "<group>"; };
 		7665911F65DF1CD61EC44277 /* ModelDownloadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadService.swift; sourceTree = "<group>"; };
 		7A8D077C9DB0C95CE97542AE /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		8680FE2847368F1B8EAD81DD /* SwiftWhisper */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SwiftWhisper; path = vendor/SwiftWhisper; sourceTree = SOURCE_ROOT; };
 		875C3FEBDCA672D2C9E0E7F2 /* FamilyNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyNotifier.swift; sourceTree = "<group>"; };
 		89ED4B2E4128B4CFA0B6365B /* ConfirmationChallengeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationChallengeTests.swift; sourceTree = "<group>"; };
 		8B5BB54D9A2270F690D50B65 /* ElderlyAssistantUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ElderlyAssistantUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -151,7 +152,7 @@
 		C9B3203338B37AF2615B9D88 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		D42344465731A5DA5ABD125C /* DoubleDoseDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoubleDoseDetector.swift; sourceTree = "<group>"; };
 		D4F45398E4D634DDBCE65A38 /* SileroVAD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SileroVAD.swift; sourceTree = "<group>"; };
-		E0D51BFE01BE4E11E7CA840E /* ElderlyAssistant.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ElderlyAssistant.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E0D51BFE01BE4E11E7CA840E /* ElderlyAssistant.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ElderlyAssistant.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E3ABF1E7E6E221112999571F /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		EC9012024C4815BFC474C722 /* TranscriptSanityGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSanityGuard.swift; sourceTree = "<group>"; };
 		F034BA7E282AAE5BE838BE8F /* InputSanitiser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSanitiser.swift; sourceTree = "<group>"; };
@@ -179,6 +180,14 @@
 				3B8ACA4236E037E41C5E53D9 /* LogSanitiser.swift */,
 			);
 			path = Observability;
+			sourceTree = "<group>";
+		};
+		44885FA0BDC4F6D217E100C1 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				8680FE2847368F1B8EAD81DD /* SwiftWhisper */,
+			);
+			name = Packages;
 			sourceTree = "<group>";
 		};
 		532DAB8D89B5BE790DC133D2 /* ModelStore */ = {
@@ -221,6 +230,7 @@
 				7DDF55B3BBF81B10A9E7B21F /* ElderlyAssistant */,
 				EAA2EE60AA1C50B2F502C77E /* ElderlyAssistantTests */,
 				DFA5957912EBDD950A4CB4DA /* ElderlyAssistantUITests */,
+				44885FA0BDC4F6D217E100C1 /* Packages */,
 				BC857D1BA3EF841D00FB2AF4 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -472,6 +482,7 @@
 						TestTargetID = 9967E45A189F990A572818AA;
 					};
 					9967E45A189F990A572818AA = {
+						DevelopmentTeam = BUKS428XA3;
 						ProvisioningStyle = Automatic;
 					};
 					DD44C866B90F5DD4A561A04E = {
@@ -490,8 +501,8 @@
 			mainGroup = 933D20AA23A788790BFBF3D0;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM" */,
-				7B16D8138C2ED1D8657D75EC /* XCRemoteSwiftPackageReference "SwiftWhisper" */,
+				6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM.swift" */,
+				B0F090E9C591EB9468ABD2A5 /* XCLocalSwiftPackageReference "vendor/SwiftWhisper" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = BC857D1BA3EF841D00FB2AF4 /* Products */;
@@ -797,7 +808,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = BKXWPS4X87;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ElderlyAssistant/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -817,7 +827,6 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
-				DEVELOPMENT_TEAM = BKXWPS4X87;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ElderlyAssistant/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -890,20 +899,19 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		B0F090E9C591EB9468ABD2A5 /* XCLocalSwiftPackageReference "vendor/SwiftWhisper" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = vendor/SwiftWhisper;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
-		6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM" */ = {
+		6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM.swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/eastriverlee/LLM.swift";
 			requirement = {
 				branch = main;
-				kind = branch;
-			};
-		};
-		7B16D8138C2ED1D8657D75EC /* XCRemoteSwiftPackageReference "SwiftWhisper" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/exPHAT/SwiftWhisper";
-			requirement = {
-				branch = master;
 				kind = branch;
 			};
 		};
@@ -912,12 +920,11 @@
 /* Begin XCSwiftPackageProductDependency section */
 		785605133017A7EB4690010A /* LLM */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM" */;
+			package = 6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM.swift" */;
 			productName = LLM;
 		};
 		8A067B2B3D4535E50D1CCB35 /* SwiftWhisper */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 7B16D8138C2ED1D8657D75EC /* XCRemoteSwiftPackageReference "SwiftWhisper" */;
 			productName = SwiftWhisper;
 		};
 /* End XCSwiftPackageProductDependency section */

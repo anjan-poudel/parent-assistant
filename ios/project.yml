@@ -31,11 +31,12 @@ settings:
 # AppCoordinator hot-swaps it in over the SFSpeechRecognizer fallback.
 packages:
   # whisper.cpp itself has no Package.swift at repo root — use exPHAT's
-  # community wrapper, which is a well-maintained Swift binding around
-  # whisper.cpp with iOS + Accelerate + optional CoreML.
+  # community wrapper (Swift binding around whisper.cpp with iOS +
+  # Accelerate + optional CoreML), VENDORED so we can carry the compute-
+  # pool headroom patch for the distilled student's non-standard dims
+  # (vendor/SwiftWhisper/whisper.cpp/whisper.cpp, "HEADROOM PATCH").
   SwiftWhisper:
-    url: https://github.com/exPHAT/SwiftWhisper
-    branch: master
+    path: vendor/SwiftWhisper
   # Thin Swift wrapper around llama.cpp with Metal. Provides the `LLM`
   # module and a Template abstraction (llama3, chatML, etc). Used by
   # LlamaCommandInterpreter to run LLaMA 3.2 on-device.
