@@ -126,6 +126,11 @@ final class AppCoordinator: ObservableObject {
     private var lastPipelineState: VoicePipeline.State = .stopped
     private var speakingCount = 0
     private var voiceWatchdog: DispatchWorkItem?
+    /// Guards `VoicePipeline.start`: its only async gap is the
+    /// mic-permission callback, which can silently never fire — leaving
+    /// the session stuck in `.stopped` with no outcome. The watchdog
+    /// surfaces that as an error with a truthful caption.
+    private var voiceStartWatchdog: DispatchWorkItem?
 
     /// `start()` is idempotent — the onboarding wizard and Home both call
     /// it (spec §4.2: wizard runs before voice engages).
@@ -316,6 +321,7 @@ final class AppCoordinator: ObservableObject {
                                                locale: self.activeLocale)
             }
         }
+        armVoiceStartWatchdog()
         voicePipeline.start { [weak self] result in
             guard let self else { return }
             switch result {
@@ -361,6 +367,7 @@ final class AppCoordinator: ObservableObject {
         case .idle:
             voiceSession.transition(to: speakingCount > 0 ? .speaking : .idle)
             cancelVoiceWatchdog()
+            cancelVoiceStartWatchdog()
         case .capturingCommand:
             voiceSession.transition(to: .listening)
             armVoiceWatchdog()
@@ -371,25 +378,30 @@ final class AppCoordinator: ObservableObject {
         case .error:
             voiceSession.transition(to: .error)
             cancelVoiceWatchdog()
+            cancelVoiceStartWatchdog()
         }
     }
 
     // MARK: - Voice cycle watchdog ("stuck in listening" guard)
 
-    /// Arms a watchdog when a talk cycle starts. Normal cycles complete in
-    /// <10s (5s STT timeout + routing + TTS). If the session is still
-    /// listening/transcribing/understanding after 15s, something wedged —
-    /// recycle the pipeline and re-prompt instead of staying stuck.
+    /// Arms a watchdog when a talk cycle starts. Its job is narrowly to
+    /// break a wedged *capture*: if the session is still `.listening` 15s
+    /// after the tap, the mic pipeline never moved on — recycle and
+    /// re-prompt. It deliberately does NOT fire on `.transcribing` or
+    /// `.understanding`: transcription of a long utterance on the
+    /// CPU-pinned distilled model takes well over 15s on device, and
+    /// recycling mid-flight there was exactly the "stuck/sorry-please-
+    /// say-again" failure this cycle guard was mis-firing on. Recovery for
+    /// a genuinely wedged transcription is owned by the STT layer (its own
+    /// 30s inference timeout + 2-strike throttle), and routing has its own
+    /// deadlines; those layers settle the cycle without this UI guard.
     private func armVoiceWatchdog() {
         cancelVoiceWatchdog()
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            switch self.voiceSession.state {
-            case .listening, .transcribing, .understanding:
+            if self.voiceSession.state == .listening {
                 print("[AppCoordinator] voice cycle watchdog fired — recycling pipeline")
                 self.recoverVoiceCycle()
-            default:
-                break
             }
         }
         voiceWatchdog = work
@@ -409,6 +421,7 @@ final class AppCoordinator: ObservableObject {
         cancelVoiceWatchdog()
         print("[AppCoordinator] recovering voice cycle — recycling pipeline")
         voicePipeline?.stop()
+        armVoiceStartWatchdog()
         voicePipeline?.start { [weak self] result in
             guard let self else { return }
             switch result {
@@ -420,6 +433,29 @@ final class AppCoordinator: ObservableObject {
             }
         }
         speak(key: "router.reprompt")
+    }
+
+    // MARK: - Pipeline start watchdog
+
+    /// If a pipeline start attempt produces no outcome within 10s (the
+    /// mic-permission callback can silently never fire), surface an error
+    /// state with the audio-unavailable caption instead of leaving the
+    /// session silently stuck in `.stopped`.
+    private func armVoiceStartWatchdog() {
+        cancelVoiceStartWatchdog()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.voiceSession.state == .stopped else { return }
+            print("[AppCoordinator] voice start watchdog fired — no pipeline outcome")
+            self.voiceError = "audio session: no response"
+            self.voiceSession.transition(to: .error)
+        }
+        voiceStartWatchdog = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: work)
+    }
+
+    private func cancelVoiceStartWatchdog() {
+        voiceStartWatchdog?.cancel()
+        voiceStartWatchdog = nil
     }
 
     /// Called by `CommandRouter` when a speak begins/ends — drives the
