@@ -55,6 +55,10 @@ packages:
   LLM:
     url: https://github.com/eastriverlee/LLM.swift
     branch: main
+  # Zip extraction for the downloadable ANE encoder delivery (M2).
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation
+    from: 0.9.19
   # Porcupine:
   #   url: https://github.com/Picovoice/porcupine.git
   #   from: 3.0.0
@@ -90,6 +94,8 @@ targets:
       - package: SwiftWhisper
       - package: LLM
         product: LLM
+      - package: ZIPFoundation
+        product: ZIPFoundation
 
   ElderlyAssistantTests:
     type: bundle.unit-test

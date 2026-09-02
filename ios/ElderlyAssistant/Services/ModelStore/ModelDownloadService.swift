@@ -142,6 +142,9 @@ final class ModelDownloadService: NSObject, ObservableObject {
             _ = try store.finalize(id)
             update(id, .completed)
             emit("download_completed", outcome: "success", modelId: id, errorCode: nil)
+            // M2: after the model lands, fetch the ANE encoder zip and
+            // unpack it next to the model (whisper.cpp auto-loads it).
+            fetchEncoderIfNeeded(for: id)
         } catch ModelStoreError.checksumMismatch {
             update(id, .failed(reason: "checksum failed"))
             emit("download_checksum_failed", outcome: "failure", modelId: id, errorCode: "checksum")
@@ -150,6 +153,33 @@ final class ModelDownloadService: NSObject, ObservableObject {
             emit("download_finalize_failed", outcome: "failure", modelId: id, errorCode: "finalize")
         }
         tasks[id] = nil
+    }
+
+    /// Downloads and installs the optional ANE encoder companion. Best-
+    /// effort: a failure here leaves the model fully usable on CPU, so it
+    /// logs and moves on rather than marking the model failed.
+    private func fetchEncoderIfNeeded(for id: ModelID) {
+        guard let entry = ModelCatalog.entry(for: id),
+              let encoderURL = entry.coreMLEncoderDownloadURL,
+              !store.isCoreMLCached(id) else { return }
+        emit("encoder_download_start", outcome: "info", modelId: id, errorCode: nil)
+        let session = URLSession(configuration: .default)
+        let task = session.downloadTask(with: encoderURL) { [weak self] zipURL, _, error in
+            guard let self, let zipURL else {
+                self?.emit("encoder_download_failed", outcome: "failure",
+                           modelId: id, errorCode: "transport")
+                return
+            }
+            do {
+                _ = try self.store.installCoreMLEncoder(fromZip: zipURL, for: id)
+                self.emit("encoder_download_completed", outcome: "success",
+                          modelId: id, errorCode: nil)
+            } catch {
+                self.emit("encoder_download_failed", outcome: "failure",
+                          modelId: id, errorCode: "unzip")
+            }
+        }
+        task.resume()
     }
 
     fileprivate func handleError(_ id: ModelID, _ error: Error) {

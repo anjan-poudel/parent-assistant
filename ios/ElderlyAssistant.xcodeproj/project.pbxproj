@@ -32,6 +32,7 @@
 		5FC266A49696E92A57F6F704 /* SwiftWhisper in Frameworks */ = {isa = PBXBuildFile; productRef = 8A067B2B3D4535E50D1CCB35 /* SwiftWhisper */; };
 		5FF89DF6EC03BA9412F1D1AA /* CommandRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FF305EE75985E7F2B131DD2 /* CommandRouterTests.swift */; };
 		6892C759DC267D3FB01A108E /* GoldenCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AB9DEC12FB14373288BA403 /* GoldenCorpusTests.swift */; };
+		6D76A837CA7B0A4DD05892F0 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E6911EDC6A72A09AAE433AFA /* ZIPFoundation */; };
 		72C5DCF0A0774E359FF6167C /* MemoryProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA1D94894BBEEB22126873C /* MemoryProbe.swift */; };
 		7721DD8366DF52E918926DA8 /* KeychainEncryptedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF694F3FBB8E78AF5BBCC74 /* KeychainEncryptedStorage.swift */; };
 		77513354E6D2333576B5A9FA /* OnboardingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3EB972E8CC8D69D5ABE0BF7 /* OnboardingState.swift */; };
@@ -170,6 +171,7 @@
 			files = (
 				5FC266A49696E92A57F6F704 /* SwiftWhisper in Frameworks */,
 				C9EB06ED68AC62EB0872C5D1 /* LLM in Frameworks */,
+				6D76A837CA7B0A4DD05892F0 /* ZIPFoundation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -447,6 +449,7 @@
 			packageProductDependencies = (
 				8A067B2B3D4535E50D1CCB35 /* SwiftWhisper */,
 				785605133017A7EB4690010A /* LLM */,
+				E6911EDC6A72A09AAE433AFA /* ZIPFoundation */,
 			);
 			productName = ElderlyAssistant;
 			productReference = E0D51BFE01BE4E11E7CA840E /* ElderlyAssistant.app */;
@@ -505,6 +508,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM.swift" */,
+				8782A0C21196AEAC267497D9 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 				B0F090E9C591EB9468ABD2A5 /* XCLocalSwiftPackageReference "vendor/SwiftWhisper" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -919,6 +923,14 @@
 				kind = branch;
 			};
 		};
+		8782A0C21196AEAC267497D9 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/weichsel/ZIPFoundation";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.19;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -930,6 +942,11 @@
 		8A067B2B3D4535E50D1CCB35 /* SwiftWhisper */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SwiftWhisper;
+		};
+		E6911EDC6A72A09AAE433AFA /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 8782A0C21196AEAC267497D9 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

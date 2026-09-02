@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import ZIPFoundation
 
 enum ModelStoreError: Error {
     case unknownModel
@@ -91,10 +92,38 @@ final class ModelStore {
     /// q5_1-preserving name here is silently ignored by the runtime.
     func coreMLBundleFinalURL(for id: ModelID) -> URL? {
         guard let entry = ModelCatalog.entry(for: id),
-              entry.coreMLEncoderBundledName != nil else {
+              entry.coreMLEncoderBundledName != nil
+                || entry.coreMLEncoderDownloadURL != nil else {
             return nil
         }
         return derivedCoreMLBundleURL(for: entry)
+    }
+
+    /// Unpacks a downloaded encoder zip (M2 delivery) into the
+    /// whisper.cpp-derived `<stem>-encoder.mlmodelc` location next to the
+    /// model. Returns the installed directory URL, nil on failure.
+    func installCoreMLEncoder(fromZip zipURL: URL, for id: ModelID) throws -> URL? {
+        guard let dest = coreMLBundleFinalURL(for: id) else { return nil }
+        let unzipDir = zipURL.deletingLastPathComponent()
+            .appendingPathComponent("encoder-unzip-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: unzipDir) }
+        try fileManager.createDirectory(at: unzipDir, withIntermediateDirectories: true)
+        try fileManager.unzipItem(at: zipURL, to: unzipDir)
+        // The zip contains a single `<stem>-encoder.mlmodelc` directory.
+        let extracted = try fileManager.contentsOfDirectory(at: unzipDir,
+            includingPropertiesForKeys: nil).first {
+            $0.lastPathComponent.hasSuffix(".mlmodelc")
+        }
+        guard let extracted else {
+            throw NSError(domain: "ModelStore", code: 6,
+                          userInfo: [NSLocalizedDescriptionKey:
+                                     "encoder zip did not contain an .mlmodelc directory"])
+        }
+        try? fileManager.removeItem(at: dest)
+        try fileManager.moveItem(at: extracted, to: dest)
+        emit("coreml_encoder_installed", outcome: "success", modelId: id,
+             errorCode: nil)
+        return dest
     }
 
     /// The whisper.cpp-derived encoder path regardless of whether the

@@ -43,6 +43,13 @@ struct ModelCatalogEntry: Codable, Identifiable {
     /// downloaded delivery arrives in M2.
     let coreMLEncoderBundledName: String?
 
+    /// Downloadable ANE encoder (M2 delivery): a zip of the
+    /// `<stem>-encoder.mlmodelc` directory, fetched after the model
+    /// download completes and unpacked next to the ggml `.bin`.
+    let coreMLEncoderDownloadURL: URL?
+    /// Expected size of the encoder zip (drives progress; 0 = unknown).
+    let coreMLEncoderZipBytes: Int64
+
     init(id: ModelID,
          kind: ModelKind,
          displayName: String,
@@ -52,7 +59,9 @@ struct ModelCatalogEntry: Codable, Identifiable {
          sha256: String,
          minDeviceRAMBytes: UInt64,
          dependsOn: ModelID? = nil,
-         coreMLEncoderBundledName: String? = nil) {
+         coreMLEncoderBundledName: String? = nil,
+         coreMLEncoderDownloadURL: URL? = nil,
+         coreMLEncoderZipBytes: Int64 = 0) {
         self.id = id
         self.kind = kind
         self.displayName = displayName
@@ -63,6 +72,8 @@ struct ModelCatalogEntry: Codable, Identifiable {
         self.minDeviceRAMBytes = minDeviceRAMBytes
         self.dependsOn = dependsOn
         self.coreMLEncoderBundledName = coreMLEncoderBundledName
+        self.coreMLEncoderDownloadURL = coreMLEncoderDownloadURL
+        self.coreMLEncoderZipBytes = coreMLEncoderZipBytes
     }
 
     var id_: ModelID { id }
@@ -110,7 +121,9 @@ enum ModelCatalog {
             sha256: "a800c5a4a2be66b8cc164003c4088c19c22fcdc41e194d3301177b0c38372410",
             minDeviceRAMBytes: 2_500_000_000,
             dependsOn: nil,
-            coreMLEncoderBundledName: nil
+            coreMLEncoderBundledName: nil,
+            coreMLEncoderDownloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v2/whisper-finetuned-ne-encoder.mlmodelc.zip")!,
+            coreMLEncoderZipBytes: 448_793_282
         ),
         ModelCatalogEntry(
             id: whisperFinetunedNepaliQ8,

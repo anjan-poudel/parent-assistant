@@ -1,4 +1,7 @@
 import argparse
+import json
+import os
+import re
 import torch
 import torch.nn.functional as F
 import coremltools as ct
@@ -252,7 +255,10 @@ class WhisperANE(Whisper):
 def convert_encoder(hparams, model, quantize=False):
     model.eval()
 
-    input_shape = (1, 80, 3000)
+    # elderly-ai-assistant patch: example input shaped from the model's
+    # own dims (the distilled/fine-tuned student has n_mels=128, not the
+    # stock 80 the upstream script assumes).
+    input_shape = (1, hparams.n_mels, 3000)
     input_data = torch.randn(input_shape)
     traced_model = torch.jit.trace(model, input_data)
 
@@ -302,10 +308,73 @@ if __name__ == "__main__":
     parser.add_argument("--optimize-ane", type=bool, help="optimize for ANE execution (currently broken)", default=False)
     args = parser.parse_args()
 
-    if args.model not in ["tiny", "tiny.en", "base", "base.en", "small", "small.en", "medium", "medium.en", "large", "large-v1"]:
-        raise ValueError("Invalid model name")
+    if args.model in ["tiny", "tiny.en", "base", "base.en", "small", "small.en",
+                      "medium", "medium.en", "large", "large-v1"]:
+        whisper = load_model(args.model).cpu()
+    elif os.path.isdir(args.model):
+        # elderly-ai-assistant patch: load a HuggingFace checkpoint
+        # directory (config.json + model.safetensors) into the
+        # openai-whisper model classes so non-stock architectures (the
+        # 1280-wide distilled/fine-tuned student) can be converted.
+        import safetensors.torch
+        cfg = json.load(open(os.path.join(args.model, "config.json")))
+        dims = ModelDimensions(
+            n_mels=cfg["num_mel_bins"],
+            n_audio_ctx=cfg["max_source_positions"],
+            n_audio_state=cfg["d_model"],
+            n_audio_head=cfg["encoder_attention_heads"],
+            n_audio_layer=cfg["encoder_layers"],
+            n_vocab=cfg["vocab_size"],
+            n_text_ctx=cfg["max_target_positions"],
+            n_text_state=cfg["d_model"],
+            n_text_head=cfg["decoder_attention_heads"],
+            n_text_layer=cfg["decoder_layers"],
+        )
+        whisper = Whisper(dims)
+        state = safetensors.torch.load_file(
+            os.path.join(args.model, "model.safetensors"))
 
-    whisper = load_model(args.model).cpu()
+        def hf_to_whisper(key):
+            # HuggingFace → openai-whisper parameter names.
+            key = key.removeprefix("model.")
+            if key == "proj_out.weight":
+                return "decoder.token_embedding.weight"
+            block = re.match(r"(encoder|decoder)\.layers\.(\d+)\.(.*)", key)
+            if block:
+                side, idx, rest = block.groups()
+                mapping = [
+                    ("self_attn.q_proj", "attn.query"),
+                    ("self_attn.k_proj", "attn.key"),
+                    ("self_attn.v_proj", "attn.value"),
+                    ("self_attn.out_proj", "attn.out"),
+                    ("self_attn_layer_norm", "attn_ln"),
+                    ("encoder_attn.q_proj", "cross_attn.query"),
+                    ("encoder_attn.k_proj", "cross_attn.key"),
+                    ("encoder_attn.v_proj", "cross_attn.value"),
+                    ("encoder_attn.out_proj", "cross_attn.out"),
+                    ("encoder_attn_layer_norm", "cross_attn_ln"),
+                    ("fc1", "mlp.0"),
+                    ("fc2", "mlp.2"),
+                    ("final_layer_norm", "mlp_ln"),
+                ]
+                for hf, ow in mapping:
+                    if rest == hf + ".weight" or rest == hf + ".bias":
+                        return f"{side}.blocks.{idx}.{ow}" + rest[len(hf):]
+            tops = {
+                "encoder.embed_positions.weight": "encoder.positional_embedding",
+                "encoder.layer_norm.weight": "encoder.ln_post.weight",
+                "encoder.layer_norm.bias": "encoder.ln_post.bias",
+                "decoder.embed_positions.weight": "decoder.positional_embedding",
+                "decoder.embed_tokens.weight": "decoder.token_embedding.weight",
+                "decoder.layer_norm.weight": "decoder.ln.weight",
+                "decoder.layer_norm.bias": "decoder.ln.bias",
+            }
+            return tops.get(key, key)
+
+        remapped = {hf_to_whisper(k): v for k, v in state.items()}
+        whisper.load_state_dict(remapped)
+    else:
+        raise ValueError("Invalid model name")
     hparams = whisper.dims
     print(hparams)
 
@@ -321,11 +390,12 @@ if __name__ == "__main__":
 
     # Convert encoder
     encoder = convert_encoder(hparams, encoder, quantize=args.quantize)
-    encoder.save(f"models/coreml-encoder-{args.model}.mlpackage")
+    out_name = os.path.basename(args.model.rstrip("/"))
+    encoder.save(f"models/coreml-encoder-{out_name}.mlpackage")
 
     if args.encoder_only is False:
         # Convert decoder
         decoder = convert_decoder(hparams, decoder, quantize=args.quantize)
-        decoder.save(f"models/coreml-decoder-{args.model}.mlpackage")
+        decoder.save(f"models/coreml-decoder-{out_name}.mlpackage")
 
     print("done converting")
