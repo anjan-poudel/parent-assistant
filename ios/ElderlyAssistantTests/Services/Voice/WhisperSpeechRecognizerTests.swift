@@ -332,43 +332,41 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
 
     // MARK: - Consecutive-timeout throttle
 
-    func testConsecutiveTimeoutsDownshiftToFallbackModel() throws {
+    func testSingleTimeoutDownshiftsToFallbackModel() throws {
         try stageFakeModel(ModelCatalog.whisperBaseEn)
         let stt = WhisperSpeechRecognizer(modelStore: store,
                                           observabilityBus: bus,
                                           config: fastConfig(timeout: 0.2))
         var driverCalls = 0
 
-        // Two wedged attempts → two watchdog kills.
-        for index in 0..<2 {
-            let outcome = driveUtterance(stt, waitFor: 3) { _, _, _ in
-                driverCalls += 1
-            }
-            guard case .failure(.timedOut)? = outcome.result else {
-                return XCTFail("wedge \(index) must time out, got "
-                    + String(describing: outcome.result))
-            }
+        // One wedged attempt → one watchdog kill.
+        let wedge = driveUtterance(stt, waitFor: 3) { _, _, _ in
+            driverCalls += 1
+        }
+        guard case .failure(.timedOut)? = wedge.result else {
+            return XCTFail("wedge must time out, got "
+                + String(describing: wedge.result))
         }
 
-        // Third attempt: the model has proven it wedges — DOWN-SHIFT to the
-        // cached fallback (base-en) and run the driver with it instead of
-        // failing fast (that produced the "unstuck but back to the start"
-        // loop on device).
-        let third = driveUtterance(stt, waitFor: 3) { recognizer, _, attemptID in
+        // Second attempt: the model has proven it wedges — DOWN-SHIFT to
+        // the cached fallback (base-en) and run the driver with it instead
+        // of failing fast (that produced the "unstuck but back to the
+        // start" loop on device).
+        let second = driveUtterance(stt, waitFor: 3) { recognizer, _, attemptID in
             driverCalls += 1
             recognizer.settleAttempt(attemptID, with: .success("back"),
                                      timedOut: false)
         }
-        guard case .success(let text)? = third.result else {
+        guard case .success(let text)? = second.result else {
             return XCTFail("downshifted attempt must reach the driver, got "
-                + String(describing: third.result))
+                + String(describing: second.result))
         }
         XCTAssertEqual(text, "back")
-        XCTAssertEqual(driverCalls, 3,
+        XCTAssertEqual(driverCalls, 2,
             "the downshifted attempt invokes the driver with the fallback model")
     }
 
-    func testConsecutiveTimeoutsFailFastWhenNoFallbackCached() throws {
+    func testWedgedContextCapFailsFastUntilRelaunch() throws {
         try stageFakeModel(ModelCatalog.whisperSmallNepali)
         let stt = WhisperSpeechRecognizer(modelStore: store,
                                           observabilityBus: bus,
@@ -376,41 +374,47 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
         stt.setPreferredModel(ModelCatalog.whisperSmallNepali)
         var driverCalls = 0
 
+        // Attempt 1 wedges (context 1 leaks). Attempt 2: downshift finds
+        // no fallback cached → fast-fails WITHOUT the driver (context 2
+        // never loads). Attempts 3+ hit the wedged-context cap. The
+        // driver runs exactly once.
         for index in 0..<2 {
             let outcome = driveUtterance(stt, waitFor: 3) { _, _, _ in
                 driverCalls += 1
             }
             guard case .failure(.timedOut)? = outcome.result else {
-                return XCTFail("wedge \(index) must time out, got "
+                return XCTFail("attempt \(index) must time out, got "
                     + String(describing: outcome.result))
             }
         }
+        XCTAssertEqual(driverCalls, 1,
+            "the no-fallback fast-fail must not invoke the driver")
 
-        // No fallback model is cached → fail fast without the driver.
+        // Third attempt: two wedged slots are accounted for (~1 GB) — a
+        // third load would risk the jetsam kill that ended the "stuck on
+        // transcribing, then crash" loop. Fail fast without the driver.
         let third = driveUtterance(stt, waitFor: 3) { _, _, _ in
             driverCalls += 1
         }
         guard case .failure(.timedOut)? = third.result else {
-            return XCTFail("no-fallback attempt must report .timedOut, got "
+            return XCTFail("context-capped attempt must report .timedOut, got "
                 + String(describing: third.result))
         }
-        XCTAssertEqual(driverCalls, 2,
-            "with no fallback cached the attempt must not invoke the driver")
+        XCTAssertEqual(driverCalls, 1,
+            "with two wedged slots the attempt must not invoke the driver")
 
-        // A routed transcript calls releaseModel(): completion is possible
-        // again, so the streak resets and the driver is reached.
+        // The cap persists until relaunch — releaseModel frees the healthy
+        // context but NOT the wedged ones, so no further load is allowed.
         stt.releaseModel()
-        let fourth = driveUtterance(stt, waitFor: 3) { recognizer, _, attemptID in
+        let fourth = driveUtterance(stt, waitFor: 3) { _, _, _ in
             driverCalls += 1
-            recognizer.settleAttempt(attemptID, with: .success("back"),
-                                     timedOut: false)
         }
-        guard case .success(let text)? = fourth.result else {
-            return XCTFail("post-release attempt must reach the driver, got "
+        guard case .failure(.timedOut)? = fourth.result else {
+            return XCTFail("post-release attempt must still be capped, got "
                 + String(describing: fourth.result))
         }
-        XCTAssertEqual(text, "back")
-        XCTAssertEqual(driverCalls, 3)
+        XCTAssertEqual(driverCalls, 1,
+            "the wedged-context cap must survive releaseModel")
     }
 
     func testSetPreferredModelResetsTimeoutStreak() throws {
@@ -420,27 +424,18 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
                                           config: fastConfig(timeout: 0.2))
         stt.setPreferredModel(ModelCatalog.whisperBaseEn)
         var driverCalls = 0
-        for index in 0..<2 {
-            let outcome = driveUtterance(stt, waitFor: 3) { _, _, _ in
-                driverCalls += 1
-            }
-            guard case .failure(.timedOut)? = outcome.result else {
-                return XCTFail("pre-wedge \(index) failed: "
-                    + String(describing: outcome.result))
-            }
-        }
-        // No OTHER fallback cached (small-multilingual missing, base-en is
-        // the current pick) → fail fast — the driver is not called.
-        let throttled = driveUtterance(stt, waitFor: 3) { _, _, _ in
+        let wedge = driveUtterance(stt, waitFor: 3) { _, _, _ in
             driverCalls += 1
         }
-        guard case .failure(.timedOut)? = throttled.result else {
-            return XCTFail("expected fail-fast, got "
-                + String(describing: throttled.result))
+        guard case .failure(.timedOut)? = wedge.result else {
+            return XCTFail("wedge must time out, got "
+                + String(describing: wedge.result))
         }
-        XCTAssertEqual(driverCalls, 2)
+        XCTAssertEqual(driverCalls, 1)
 
-        // A model change gives the new model a fresh attempt budget.
+        // A model change before the second attempt gives the new model a
+        // fresh attempt budget (and the one wedged context is under the
+        // cap).
         stt.setPreferredModel(ModelCatalog.whisperSmallMultilingual)
         let outcome = driveUtterance(stt, waitFor: 3) { recognizer, _, attemptID in
             driverCalls += 1
@@ -452,7 +447,7 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
                 + String(describing: outcome.result))
         }
         XCTAssertEqual(text, "switched")
-        XCTAssertEqual(driverCalls, 3)
+        XCTAssertEqual(driverCalls, 2)
     }
 
     // MARK: - Helpers

@@ -122,6 +122,15 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
     /// Consecutive attempts killed by the watchdog (see throttle above).
     private var consecutiveTimeouts = 0
     private let maxConsecutiveTimeouts = 2
+    /// Contexts leaked by watchdog-killed attempts. whisper_free under a
+    /// running whisper_full crashes, so a wedged context can never be
+    /// freed — each one keeps its ~500 MB resident until the app dies.
+    /// Recoveries that keep loading fresh contexts therefore OOM-kill the
+    /// app (the "stuck on transcribing, then crashes" loop). Cap new
+    /// loads once two contexts have leaked; further attempts fail fast
+    /// until relaunch, bounding the damage at ~1 GB.
+    private var wedgedContextCount = 0
+    private let maxWedgedContexts = 2
 
     /// Test seam: replaces the whisper.cpp driver (model load + transcribe
     /// + settle) for one attempt. Signature: recognizer, pcm, attemptID.
@@ -360,15 +369,31 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         registerAttempt(attemptID, completion: completion)
 
         #if canImport(SwiftWhisper)
-        // After two consecutive watchdog kills the selected model has
-        // proven it can't finish in budget. DOWN-SHIFT to the next cached
-        // model in the safe order (small-multilingual → base-en) and
-        // retry immediately with it — fail-fast here only turned the
-        // timeout loop into an instant-failure loop ("unstuck but back to
-        // where it started"). If nothing else is cached, fail fast as
-        // before; a model change or a routed transcript resets the streak.
+        // Cap leaked contexts BEFORE anything that loads a model: two
+        // wedged contexts are already ~1 GB of unfreeable memory — a
+        // third load risks the jetsam kill that ended the "stuck on
+        // transcribing, then crash" loop. Fail fast until relaunch.
         stateLock.lock()
-        let throttled = consecutiveTimeouts >= maxConsecutiveTimeouts
+        let contextCapped = wedgedContextCount >= maxWedgedContexts
+        stateLock.unlock()
+        if contextCapped {
+            emit("inference_context_cap", errorCode: "timed_out")
+            print("[whisper_stt] inference_context_cap wedged=\(wedgedContextCount) "
+                + "attempt=\(attemptID) — failing fast to avoid OOM")
+            settleAttempt(attemptID, with: .failure(.timedOut), timedOut: false)
+            return
+        }
+
+        // After the FIRST watchdog kill the selected model has proven it
+        // can't finish in budget. DOWN-SHIFT to the next cached model in
+        // the safe order (small-multilingual → base-en) and retry with it
+        // — failing fast only turned the timeout loop into an
+        // instant-failure loop ("unstuck but back to where it started").
+        // Downshifting immediately also keeps the total at TWO loaded
+        // contexts, staying under the wedged-context cap above. A model
+        // change or a routed transcript resets the streak.
+        stateLock.lock()
+        let throttled = consecutiveTimeouts >= 1
         stateLock.unlock()
         if throttled {
             if downshiftModel() {
@@ -614,7 +639,12 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
             return false
         }
         inFlightWhisper = nil
-        if timedOut { consecutiveTimeouts += 1 } else { consecutiveTimeouts = 0 }
+        if timedOut {
+            consecutiveTimeouts += 1
+            wedgedContextCount += 1
+        } else {
+            consecutiveTimeouts = 0
+        }
         stateLock.unlock()
         record.watchdog.cancel()
         DispatchQueue.main.async { record.completion(result) }
