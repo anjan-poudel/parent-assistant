@@ -2613,6 +2613,33 @@ static std::string whisper_get_coreml_path_encoder(std::string path_bin) {
 }
 #endif
 
+// CPU BACKEND GUARD (elderly-ai-assistant): whisper_init_state() below
+// auto-loads a sibling "-encoder.mlmodelc" whenever one sits next to the
+// .bin, handing the encoder to the ANE. The CoreML encoder embeds the
+// *stock* architecture's tensor shapes, so it is only correct for models
+// whose dims exactly match the OpenAI archetype. The distilled small-Nepali
+// student has non-standard dims (1280-wide states, 20 audio heads, 16 text
+// heads, 12 enc / 4 dec layers) and must never be paired with one — an
+// ANE prediction on mismatched shapes hangs the first inference (same hang
+// class as the 80-head dims on the 2023 Metal kernels; this app already
+// saw a stock-dim fp16 encoder "load on device but never return from the
+// first prediction", see f878d2e). Anything non-standard is pinned to the
+// CPU backend here so no per-model Swift API is needed.
+static bool whisper_hparams_has_standard_dims(const struct whisper_hparams & h) {
+    int n_state = 0, n_head = 0;
+    switch (h.n_audio_layer) {
+        case 4:  n_state = 384;  n_head = 6;  break; // tiny
+        case 6:  n_state = 512;  n_head = 8;  break; // base
+        case 12: n_state = 768;  n_head = 12; break; // small
+        case 24: n_state = 1024; n_head = 16; break; // medium
+        case 32: n_state = 1280; n_head = 20; break; // large
+        default: return false;
+    }
+    return h.n_audio_state == n_state && h.n_text_state == n_state &&
+           h.n_audio_head  == n_head  && h.n_text_head  == n_head  &&
+           h.n_text_layer  == h.n_audio_layer;
+}
+
 struct whisper_state * whisper_init_state(whisper_context * ctx) {
     whisper_state * state = new whisper_state;
 
@@ -2641,19 +2668,25 @@ struct whisper_state * whisper_init_state(whisper_context * ctx) {
     }
 
 #ifdef WHISPER_USE_COREML
-    const auto path_coreml = whisper_get_coreml_path_encoder(ctx->path_model);
-
-    fprintf(stderr, "%s: loading Core ML model from '%s'\n", __func__, path_coreml.c_str());
-    fprintf(stderr, "%s: first run on a device may take a while ...\n", __func__);
-
-    state->ctx_coreml = whisper_coreml_init(path_coreml.c_str());
-    if (!state->ctx_coreml) {
-        fprintf(stderr, "%s: failed to load Core ML model from '%s'\n", __func__, path_coreml.c_str());
-#ifndef WHISPER_COREML_ALLOW_FALLBACK
-        return nullptr;
-#endif
+    if (!whisper_hparams_has_standard_dims(ctx->model.hparams)) {
+        fprintf(stderr, "%s: non-standard model dims (n_audio_state=%d, n_audio_head=%d, n_text_head=%d, n_text_layer=%d) - Core ML encoder disabled, encoder runs on CPU\n",
+                __func__, ctx->model.hparams.n_audio_state, ctx->model.hparams.n_audio_head,
+                ctx->model.hparams.n_text_head, ctx->model.hparams.n_text_layer);
     } else {
-        fprintf(stderr, "%s: Core ML model loaded\n", __func__);
+        const auto path_coreml = whisper_get_coreml_path_encoder(ctx->path_model);
+
+        fprintf(stderr, "%s: loading Core ML model from '%s'\n", __func__, path_coreml.c_str());
+        fprintf(stderr, "%s: first run on a device may take a while ...\n", __func__);
+
+        state->ctx_coreml = whisper_coreml_init(path_coreml.c_str());
+        if (!state->ctx_coreml) {
+            fprintf(stderr, "%s: failed to load Core ML model from '%s'\n", __func__, path_coreml.c_str());
+#ifndef WHISPER_COREML_ALLOW_FALLBACK
+            return nullptr;
+#endif
+        } else {
+            fprintf(stderr, "%s: Core ML model loaded\n", __func__);
+        }
     }
 #endif
 

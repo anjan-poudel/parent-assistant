@@ -14,6 +14,15 @@ options:
     iOS: "16.0"
   createIntermediateGroups: true
   generateEmptyDirectories: true
+  # Foundation's bundle lookup ignores lproj folders not listed here
+  # (CFBundleLocalizations) — without "ne", String(localized:locale:)
+  # falls back to English even though ne.lproj ships in the bundle,
+  # while SwiftUI's Text(catalog) path resolves it (the split where the
+  # Talk button was English but the hub cards were Nepali).
+  knownRegions:
+    - Base
+    - en
+    - ne
 
 settings:
   base:

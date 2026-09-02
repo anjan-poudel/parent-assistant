@@ -152,6 +152,232 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
         XCTAssertEqual(events.first?.metadata["state"], "none")
     }
 
+    // MARK: - CPU-backend forcing (distilled model)
+
+    /// The distilled small-Nepali student has non-standard dims (1280-wide
+    /// states, 20 audio heads, 16 text heads) that no stock-shape CoreML
+    /// encoder can serve. `usesANEBackend` mirrors the C++ dims guard in
+    /// vendored whisper.cpp (`whisper_init_state`) that pins such models to
+    /// the CPU encoder — the ANE is only ever handed stock-dim models.
+    func testDistilledModelForcedToCPU() throws {
+        try stageFakeModel(ModelCatalog.whisperSmallNepali)
+        let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        XCTAssertFalse(stt.usesANEBackend(ModelCatalog.whisperSmallNepali))
+    }
+
+    func testDistilledModelStaysCPUWithStaleEncoderOnDisk() throws {
+        // whisper.cpp auto-loads whatever `-encoder.mlmodelc` sits next to
+        // the .bin regardless of the catalog, so stage one the way the C++
+        // derives the path and assert the Swift mirror still pins the
+        // distilled model to CPU.
+        try stageFakeModel(ModelCatalog.whisperSmallNepali)
+        guard let modelURL = store.path(for: ModelCatalog.whisperSmallNepali) else {
+            return XCTFail("staged model must have a path")
+        }
+        var stem = modelURL.deletingPathExtension().lastPathComponent
+        if let dash = stem.lastIndex(of: "-") {
+            let suffix = Array(stem[dash...])
+            if suffix.count == 5, suffix[1] == "q", suffix[3] == "_" {
+                stem = String(stem[..<dash])
+            }
+        }
+        let encoderDir = modelURL.deletingLastPathComponent()
+            .appendingPathComponent("\(stem)-encoder.mlmodelc", isDirectory: true)
+        try FileManager.default.createDirectory(at: encoderDir,
+                                                withIntermediateDirectories: true)
+        let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        XCTAssertFalse(stt.usesANEBackend(ModelCatalog.whisperSmallNepali),
+            "A stale on-disk encoder must not change the distilled model's CPU pin.")
+    }
+
+    func testANEBackendOnlyWhenEncoderStagedForStockModel() throws {
+        try stageFakeModel(ModelCatalog.whisperSmallMultilingual)
+        let stt = WhisperSpeechRecognizer(modelStore: store, observabilityBus: bus)
+        XCTAssertFalse(stt.usesANEBackend(ModelCatalog.whisperSmallMultilingual),
+            "No encoder dir on disk — encoder runs on CPU.")
+        guard let encoderURL = store.coreMLBundleFinalURL(
+            for: ModelCatalog.whisperSmallMultilingual) else {
+            return XCTFail("small multilingual must have a derived encoder URL")
+        }
+        try FileManager.default.createDirectory(at: encoderURL,
+                                                withIntermediateDirectories: true)
+        XCTAssertTrue(store.isCoreMLCached(ModelCatalog.whisperSmallMultilingual))
+        XCTAssertTrue(stt.usesANEBackend(ModelCatalog.whisperSmallMultilingual),
+            "With the stock-shape encoder in place the ANE path is legitimate.")
+    }
+
+    // MARK: - Inference watchdog + per-attempt isolation
+
+    func testWedgedAttemptTimesOutAndNextAttemptRecoversOnFreshQueue() throws {
+        try stageFakeModel(ModelCatalog.whisperBaseEn)
+        let stt = WhisperSpeechRecognizer(modelStore: store,
+                                          observabilityBus: bus,
+                                          config: fastConfig(timeout: 0.25))
+        var driverCalls = 0
+
+        // Attempt 1: the driver wedges (never settles). The watchdog must
+        // settle the attempt with .timedOut so the pipeline recovers.
+        let first = driveUtterance(stt, waitFor: 3) { _, _, _ in
+            driverCalls += 1
+        }
+        guard case .failure(.timedOut)? = first.result else {
+            return XCTFail("wedged attempt must time out, got "
+                + String(describing: first.result))
+        }
+
+        // Attempt 2: same recognizer, fresh queue + fresh context — the
+        // driver completes normally.
+        let second = driveUtterance(stt, waitFor: 3) { recognizer, _, attemptID in
+            driverCalls += 1
+            recognizer.settleAttempt(attemptID, with: .success("namaste"),
+                                     timedOut: false)
+        }
+        guard case .success(let text)? = second.result else {
+            return XCTFail("recovery attempt must succeed, got "
+                + String(describing: second.result))
+        }
+        XCTAssertEqual(text, "namaste")
+        XCTAssertEqual(driverCalls, 2)
+        XCTAssertEqual(first.completions, 1)
+        XCTAssertEqual(second.completions, 1)
+    }
+
+    func testDriverSettleCancelsWatchdog() throws {
+        try stageFakeModel(ModelCatalog.whisperBaseEn)
+        let stt = WhisperSpeechRecognizer(modelStore: store,
+                                          observabilityBus: bus,
+                                          config: fastConfig(timeout: 0.25))
+        // Driver settles well inside the deadline. A watchdog that was not
+        // cancelled would fire .timedOut at 0.25 s and double-settle the
+        // attempt (a second completion delivery).
+        let outcome = driveUtterance(stt, waitFor: 3) { recognizer, _, attemptID in
+            recognizer.settleAttempt(attemptID, with: .success("fast"),
+                                     timedOut: false)
+        }
+        guard case .success(let text)? = outcome.result else {
+            return XCTFail("expected success before the deadline, got "
+                + String(describing: outcome.result))
+        }
+        XCTAssertEqual(text, "fast")
+        XCTAssertEqual(outcome.completions, 1)
+    }
+
+    func testLateSettleAfterWatchdogIsDropped() throws {
+        try stageFakeModel(ModelCatalog.whisperBaseEn)
+        let stt = WhisperSpeechRecognizer(modelStore: store,
+                                          observabilityBus: bus,
+                                          config: fastConfig(timeout: 0.2))
+        let lateRan = expectation(description: "late settle executed")
+        var lateResult: Bool?
+        let outcome = driveUtterance(stt, waitFor: 3) { recognizer, _, attemptID in
+            // Returns long after the watchdog has settled the attempt —
+            // the real-world analogue of a whisper_full that eventually
+            // returns after the deadline.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 1.0) {
+                lateResult = recognizer.settleAttempt(
+                    attemptID, with: .success("late"), timedOut: false)
+                lateRan.fulfill()
+            }
+        }
+        guard case .failure(.timedOut)? = outcome.result else {
+            return XCTFail("watchdog must win the race, got "
+                + String(describing: outcome.result))
+        }
+        wait(for: [lateRan], timeout: 3)
+        XCTAssertEqual(lateResult, false,
+            "a call returning after the watchdog fired must be a no-op")
+        XCTAssertEqual(outcome.completions, 1)
+    }
+
+    // MARK: - Consecutive-timeout throttle
+
+    func testConsecutiveTimeoutsThrottleDriverAndReleaseModelResets() throws {
+        try stageFakeModel(ModelCatalog.whisperBaseEn)
+        let stt = WhisperSpeechRecognizer(modelStore: store,
+                                          observabilityBus: bus,
+                                          config: fastConfig(timeout: 0.2))
+        var driverCalls = 0
+
+        // Two wedged attempts → two watchdog kills.
+        for index in 0..<2 {
+            let outcome = driveUtterance(stt, waitFor: 3) { _, _, _ in
+                driverCalls += 1
+            }
+            guard case .failure(.timedOut)? = outcome.result else {
+                return XCTFail("wedge \(index) must time out, got "
+                    + String(describing: outcome.result))
+            }
+        }
+
+        // Third attempt: throttled — fails fast with .timedOut and must not
+        // reach the driver (each wedged attempt leaks a ~1.5 GB context).
+        let third = driveUtterance(stt, waitFor: 3) { _, _, _ in
+            driverCalls += 1
+        }
+        guard case .failure(.timedOut)? = third.result else {
+            return XCTFail("throttled attempt must report .timedOut, got "
+                + String(describing: third.result))
+        }
+        XCTAssertEqual(driverCalls, 2,
+            "the throttled attempt must not invoke the driver")
+
+        // A routed transcript calls releaseModel(): completion is possible
+        // again, so the streak resets and the driver is reached.
+        stt.releaseModel()
+        let fourth = driveUtterance(stt, waitFor: 3) { recognizer, _, attemptID in
+            driverCalls += 1
+            recognizer.settleAttempt(attemptID, with: .success("back"),
+                                     timedOut: false)
+        }
+        guard case .success(let text)? = fourth.result else {
+            return XCTFail("post-release attempt must reach the driver, got "
+                + String(describing: fourth.result))
+        }
+        XCTAssertEqual(text, "back")
+        XCTAssertEqual(driverCalls, 3)
+    }
+
+    func testSetPreferredModelResetsTimeoutStreak() throws {
+        try stageFakeModel(ModelCatalog.whisperBaseEn)
+        try stageFakeModel(ModelCatalog.whisperSmallMultilingual)
+        let stt = WhisperSpeechRecognizer(modelStore: store,
+                                          observabilityBus: bus,
+                                          config: fastConfig(timeout: 0.2))
+        var driverCalls = 0
+        for index in 0..<2 {
+            let outcome = driveUtterance(stt, waitFor: 3) { _, _, _ in
+                driverCalls += 1
+            }
+            guard case .failure(.timedOut)? = outcome.result else {
+                return XCTFail("pre-wedge \(index) failed: "
+                    + String(describing: outcome.result))
+            }
+        }
+        // Third attempt throttled — the driver is not called.
+        let throttled = driveUtterance(stt, waitFor: 3) { _, _, _ in
+            driverCalls += 1
+        }
+        guard case .failure(.timedOut)? = throttled.result else {
+            return XCTFail("expected throttle, got "
+                + String(describing: throttled.result))
+        }
+        XCTAssertEqual(driverCalls, 2)
+
+        // A model change gives the new model a fresh attempt budget.
+        stt.setPreferredModel(ModelCatalog.whisperSmallMultilingual)
+        let outcome = driveUtterance(stt, waitFor: 3) { recognizer, _, attemptID in
+            driverCalls += 1
+            recognizer.settleAttempt(attemptID, with: .success("switched"),
+                                     timedOut: false)
+        }
+        guard case .success(let text)? = outcome.result else {
+            return XCTFail("post-switch attempt must reach the driver, got "
+                + String(describing: outcome.result))
+        }
+        XCTAssertEqual(text, "switched")
+        XCTAssertEqual(driverCalls, 3)
+    }
+
     // MARK: - Helpers
 
     private func makePCMBuffer(samples: Int) -> AVAudioPCMBuffer {
@@ -163,5 +389,39 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
                                       frameCapacity: AVAudioFrameCount(samples))!
         buffer.frameLength = AVAudioFrameCount(samples)
         return buffer
+    }
+
+    /// Config with a short inference deadline so watchdog tests run fast.
+    private func fastConfig(timeout: TimeInterval) -> WhisperSpeechRecognizer.Config {
+        WhisperSpeechRecognizer.Config(primaryLanguage: "ne",
+                                       fallbackLanguage: "en",
+                                       maxUtteranceSeconds: 10,
+                                       forcePrimaryLanguage: true,
+                                       inferenceTimeoutSeconds: timeout)
+    }
+
+    /// Runs one full utterance (startListening → feed → finish) through the
+    /// given `driver` seam and waits for the completion. `completions` lets
+    /// tests assert exactly-once settlement: an attempt that double-settles
+    /// also double-fulfills the expectation, which XCTest flags.
+    private func driveUtterance(
+        _ stt: WhisperSpeechRecognizer,
+        waitFor seconds: TimeInterval = 5,
+        driver: @escaping (WhisperSpeechRecognizer, [Int16], Int) -> Void
+    ) -> (result: Result<String, RecognitionError>?, completions: Int) {
+        let exp = expectation(description: "utterance completion")
+        var captured: Result<String, RecognitionError>?
+        var completions = 0
+        stt.inferenceDriverOverride = driver
+        stt.startListening(timeout: 5.0) { result in
+            completions += 1
+            captured = result
+            exp.fulfill()
+        }
+        stt.feed(makePCMBuffer(samples: 4096))
+        stt.finish()
+        wait(for: [exp], timeout: seconds)
+        stt.inferenceDriverOverride = nil
+        return (captured, completions)
     }
 }

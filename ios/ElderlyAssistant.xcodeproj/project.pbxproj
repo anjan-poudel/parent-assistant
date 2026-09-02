@@ -39,6 +39,7 @@
 		7A821335546B5C53D68FD5C0 /* SileroVAD.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F45398E4D634DDBCE65A38 /* SileroVAD.swift */; };
 		7DEDF2D378FEA4B0ECAC05D0 /* AppCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030DDED1BA852B1A12ABABBE /* AppCoordinator.swift */; };
 		85B42C13987E77A9592E8572 /* DoubleDoseDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B3C30966EA4E8B1E94A6917 /* DoubleDoseDetectorTests.swift */; };
+		877A9EAB9ADF74AF1E7DC12B /* VoiceSessionBindingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CD2468FE69CCF128862DE28 /* VoiceSessionBindingTests.swift */; };
 		8B5593B7AEDF4E0D815FA1BC /* MedicationSchedulerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B6FEFA69334CCBC0A933E9 /* MedicationSchedulerTests.swift */; };
 		8CD67C3B34F99F3EC51312F9 /* FamilyNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 875C3FEBDCA672D2C9E0E7F2 /* FamilyNotifier.swift */; };
 		92252E31AFFAA415D171810A /* OnboardingStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B80BB3C068100E30CFD3B9C /* OnboardingStateTests.swift */; };
@@ -106,6 +107,7 @@
 		36D579A260BDE663399BB7BC /* FamilyContactStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyContactStoreTests.swift; sourceTree = "<group>"; };
 		3AF7478D117F7C991FC99A68 /* EscalationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EscalationEngine.swift; sourceTree = "<group>"; };
 		3B8ACA4236E037E41C5E53D9 /* LogSanitiser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogSanitiser.swift; sourceTree = "<group>"; };
+		3CD2468FE69CCF128862DE28 /* VoiceSessionBindingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionBindingTests.swift; sourceTree = "<group>"; };
 		3CF694F3FBB8E78AF5BBCC74 /* KeychainEncryptedStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainEncryptedStorage.swift; sourceTree = "<group>"; };
 		4099370DD1353BABBAF99588 /* EnergyVADTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnergyVADTests.swift; sourceTree = "<group>"; };
 		426B00DB54390C484D152534 /* WhisperSpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperSpeechRecognizer.swift; sourceTree = "<group>"; };
@@ -350,6 +352,7 @@
 			children = (
 				FD91B4512067275A5059F95A /* DesignTokensTests.swift */,
 				5B80BB3C068100E30CFD3B9C /* OnboardingStateTests.swift */,
+				3CD2468FE69CCF128862DE28 /* VoiceSessionBindingTests.swift */,
 				C3E07CFBA211DF9E699627A4 /* VoiceSessionStateMachineTests.swift */,
 			);
 			path = App;
@@ -606,6 +609,7 @@
 				92252E31AFFAA415D171810A /* OnboardingStateTests.swift in Sources */,
 				FD0C74053396420771C700C1 /* SpeakerTests.swift in Sources */,
 				B32BE0328D7BA52A2E4C4C5D /* TranscriptSanityGuardTests.swift in Sources */,
+				877A9EAB9ADF74AF1E7DC12B /* VoiceSessionBindingTests.swift in Sources */,
 				36126C14FF50D0FDE355FC76 /* VoiceSessionStateMachineTests.swift in Sources */,
 				F2545B47080302C2D47C85BB /* WhisperSpeechRecognizerTests.swift in Sources */,
 			);
