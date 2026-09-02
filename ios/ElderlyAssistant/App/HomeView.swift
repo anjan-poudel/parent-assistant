@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Leaf destinations reachable from the hub cards (spec §4.3).
 enum LeafDestination: Identifiable {
@@ -104,7 +105,8 @@ struct HomeView: View {
                 ConfirmationChips(statusKey: "state.awaitingConfirmation.status")
             } else {
                 VStack(spacing: 14) {
-                    TalkButton(session: session) {
+                    TalkButton(session: session,
+                               statusOverride: session.state == .error ? errorStatusText : nil) {
                         switch session.state {
                         case .idle:
                             coordinator.simulateWakeWordDetection()
@@ -122,9 +124,45 @@ struct HomeView: View {
                             break
                         }
                     }
+                    if session.state == .error,
+                       coordinator.voiceErrorKind == .permission {
+                        openSettingsButton
+                    }
                 }
             }
         }
+    }
+
+    /// The error status line says what actually happened (spec §7) —
+    /// permission guidance, audio-unavailable notice, or the generic
+    /// re-prompt — instead of always claiming a misheard utterance.
+    private var errorStatusText: String {
+        let locale = coordinator.appLanguage.locale
+        switch coordinator.voiceErrorKind {
+        case .permission:
+            return L10n.str("state.error.permission", locale: locale)
+        case .audioUnavailable:
+            return L10n.str("state.error.audio", locale: locale)
+        case .other:
+            return L10n.str("state.error.status", locale: locale)
+        }
+    }
+
+    private var openSettingsButton: some View {
+        Button {
+            if let url = URL(string: UIApplication.openSettingsURLString) {
+                UIApplication.shared.open(url)
+            }
+        } label: {
+            Label("state.error.openSettings", systemImage: "gear")
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .foregroundColor(DesignTokens.accent)
+                .padding(.horizontal, 16)
+                .frame(height: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.card)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
     }
 
     private var conversationCard: some View {
@@ -254,6 +292,9 @@ struct TalkButton: View {
     @ObservedObject var session: VoiceSessionStateMachine
     @Environment(\.locale) private var locale
     let onTap: () -> Void
+    /// Replaces the state-bound status line when set (used for the
+    /// error state's failure-specific caption).
+    var statusOverride: String? = nil
 
     var body: some View {
         VStack(spacing: 12) {
@@ -293,7 +334,7 @@ struct TalkButton: View {
             .disabled(session.state == .awaitingConfirmation)
             .accessibilityLabel(Text(session.state.buttonText(locale: locale)))
 
-            Text(session.state.statusText(locale: locale))
+            Text(statusOverride ?? session.state.statusText(locale: locale))
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .medium))
                 .foregroundColor(DesignTokens.textSecondary)
                 .multilineTextAlignment(.center)

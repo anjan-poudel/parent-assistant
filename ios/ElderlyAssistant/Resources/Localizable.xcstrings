@@ -1779,6 +1779,27 @@
         }
       }
     },
+    "state.error.permission" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Microphone access is turned off. Allow it in Settings to talk." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "माइक बन्द छ। कुरा गर्न सेटिङबाट खोल्नुहोस्।" } }
+      }
+    },
+    "state.error.audio" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The microphone is not available right now. Try again in a moment." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "अहिले माइक उपलब्ध छैन। केही बेरपछि फेरि प्रयास गर्नुहोस्।" } }
+      }
+    },
+    "state.error.openSettings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Settings" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सेटिङ खोल्नुहोस्" } }
+      }
+    },
     "state.idle.button" : {
       "extractionState" : "manual",
       "localizations" : {

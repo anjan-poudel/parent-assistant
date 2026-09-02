@@ -14,6 +14,29 @@ final class AppCoordinator: ObservableObject {
     @Published var isInitialized = false
     @Published var voiceState: VoicePipeline.State = .stopped
     @Published var voiceError: String?
+
+    /// How a voice START failure should be presented (spec §7: error
+    /// surfaces are localized and say what actually happened).
+    enum VoiceErrorKind {
+        /// Mic/speech permission denied — show Settings guidance.
+        case permission
+        /// Audio session / input unavailable — transient, retry later.
+        case audioUnavailable
+        /// Anything else — the generic re-prompt.
+        case other
+    }
+
+    var voiceErrorKind: VoiceErrorKind {
+        guard let voiceError else { return .other }
+        let lower = voiceError.lowercased()
+        if lower.contains("denied") || lower.contains("notauthorized") {
+            return .permission
+        }
+        if lower.contains("audio session") || lower.contains("mic tap") {
+            return .audioUnavailable
+        }
+        return .other
+    }
     /// Catalog KEY naming the active STT — resolved in the UI's locale
     /// (spec §3.2; no hardcoded English labels).
     @Published var activeSTTNameKey: String = "stt.name.sfs"
