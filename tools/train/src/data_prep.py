@@ -169,11 +169,21 @@ def build_fleurs(cfg: dict, data_dir: Path, known: set[str]) -> tuple[int, int]:
 
 def build_common_voice(cfg: dict, data_dir: Path, known: set[str], out: Path) -> int:
     """Common Voice 17 ne (CC0) — crowd-sourced conversational speech.
-    Downloaded as parquet via HF datasets (no audio bundling needed)."""
+
+    NOTE (2026-09-03): since October 2025 Mozilla Common Voice datasets
+    are only available through the Mozilla Data Collective; the HF repo
+    is empty and the S3 buckets 403. The loader therefore fails
+    gracefully and adds nothing — restore this builder when a corpus
+    mirror is available.
+    """
     from datasets import load_dataset
 
-    ds = load_dataset("mozilla-foundation/common_voice_17_0", "ne",
-                      split="train+validated", trust_remote_code=False)
+    try:
+        ds = load_dataset("mozilla-foundation/common_voice_17_0", "ne",
+                          split="train+validated", trust_remote_code=False)
+    except Exception as e:
+        print(f"warning: common-voice unavailable ({e}) — skipping")
+        return 0
     added = 0
     for row in ds:
         path = row.get("path") or (row.get("audio") or {}).get("path")
