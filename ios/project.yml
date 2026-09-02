@@ -28,7 +28,10 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
-    DEVELOPMENT_TEAM: "BUKS428XA3"
+    # The team whose Apple ID is signed into Xcode on this machine
+    # (Xcode's automatic signing selected BKXWPS4X87 for device builds;
+    # the older BUKS428XA3 cert belongs to a previous session).
+    DEVELOPMENT_TEAM: "BKXWPS4X87"
     CODE_SIGN_STYLE: Automatic
     ENABLE_USER_SCRIPT_SANDBOXING: YES
 
