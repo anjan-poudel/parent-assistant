@@ -208,6 +208,7 @@ def build_common_voice(cfg: dict, data_dir: Path, known: set[str], out: Path) ->
 def build_slr43(cfg: dict, data_dir: Path, known: set[str], out: Path) -> int:
     """SLR43 ne_np_female (CC BY-SA 4.0) — Google-collected Nepali
     read speech with line_index.tsv transcript pairing."""
+    known = known | load_ids(out)  # re-runs must not duplicate rows
     url = "https://openslr.trmal.net/resources/43/ne_np_female.zip"
     zip_path = data_dir / "downloads" / "ne_np_female.zip"
     download(url, zip_path)
@@ -215,7 +216,8 @@ def build_slr43(cfg: dict, data_dir: Path, known: set[str], out: Path) -> int:
     extract_zip(zip_path, audio_dir, "*.wav")
     extract_zip(zip_path, data_dir / "downloads", "*line_index.tsv")
 
-    tsvs = list((data_dir / "downloads").rglob("*line_index.tsv"))
+    tsvs = [p for p in (data_dir / "downloads").rglob("*line_index.tsv")
+            if not p.name.startswith("._")]
     if not tsvs:
         print("warning: no line_index.tsv in slr43 zip, skipping")
         return 0
@@ -245,6 +247,7 @@ def build_slr143(cfg: dict, data_dir: Path, known: set[str], out: Path) -> int:
     """SLR143 male+female Nepali speech (CC BY-NC-SA — NON-COMMERCIAL:
     rows are tagged source=slr143 so they can be excluded before any
     commercial release)."""
+    known = known | load_ids(out)  # re-runs must not duplicate rows
     url = "https://openslr.trmal.net/resources/143/male-female-data.tgz"
     tar_path = data_dir / "downloads" / "male-female-data.tgz"
     download(url, tar_path)
@@ -252,9 +255,13 @@ def build_slr143(cfg: dict, data_dir: Path, known: set[str], out: Path) -> int:
     extract_tar(tar_path, audio_dir)
 
     wav_index = {p.stem: p for p in audio_dir.rglob("*.wav")}
+    # The tar ships macOS AppleDouble junk (._*.tsv binary files) next to
+    # the real TSVs — skip those.
+    tsvs = [p for p in sorted(audio_dir.rglob("*.tsv"))
+            if not p.name.startswith("._")]
     added = 0
-    for tsv in sorted(audio_dir.rglob("*.tsv")):
-        for line in open(tsv, encoding="utf-8"):
+    for tsv in tsvs:
+        for line in open(tsv, encoding="utf-8", errors="replace"):
             parts = line.rstrip("\n").split("\t")
             if len(parts) < 2:
                 continue
