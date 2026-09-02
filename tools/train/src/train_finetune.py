@@ -89,6 +89,11 @@ def main() -> None:
         generation_max_length=448,
         bf16=torch.cuda.is_available(),
         remove_unused_columns=False,
+        # The 50k-row dataset lives in a ~78 GB arrow file; main-process
+        # loading starves the GPU between steps (stage 3b ran 6 s/step
+        # with 56% util). Workers keep batches pre-fetched.
+        dataloader_num_workers=4,
+        dataloader_prefetch_factor=2,
         report_to=[],
         seed=seed,
     )
