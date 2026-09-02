@@ -206,6 +206,45 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
             "With the stock-shape encoder in place the ANE path is legitimate.")
     }
 
+    // MARK: - Encoder windowing (audio_ctx)
+
+    /// Whisper's `audio_ctx` is in encoder tokens; 16 kHz PCM maps at
+    /// 320 samples/token (20 ms). Utterances at or under the 300-token
+    /// (~6 s) ceiling pass through untouched so they run exactly as the
+    /// stock full-window path would.
+    func testAudioContextSingleWindowBelowCeiling() {
+        // 2 s of speech: 32 000 samples → 100 tokens, no capping.
+        XCTAssertEqual(WhisperSpeechRecognizer.audioContextTokens(sampleCount: 32_000), 100)
+        // 5 s: 80 000 → 250 tokens.
+        XCTAssertEqual(WhisperSpeechRecognizer.audioContextTokens(sampleCount: 80_000), 250)
+        // Exactly the 6 s ceiling boundary: 96 000 samples → 300 tokens.
+        XCTAssertEqual(WhisperSpeechRecognizer.audioContextTokens(sampleCount: 96_000), 300)
+    }
+
+    /// A capture that outlived the speech (VAD tail, background noise)
+    /// must be capped so the CPU encoder's quadratic window cost stays
+    /// bounded — the whole point of the audio_ctx change.
+    func testAudioContextLongCaptureCappedAtCeiling() {
+        XCTAssertEqual(WhisperSpeechRecognizer.audioContextTokens(sampleCount: 120_000), 300)
+        XCTAssertEqual(WhisperSpeechRecognizer.audioContextTokens(sampleCount: 480_000), 300)
+        XCTAssertEqual(WhisperSpeechRecognizer.audioContextTokens(sampleCount: 1_000_000), 300)
+    }
+
+    /// Sub-token samples and empty buffers still land on a sane window.
+    func testAudioContextTinyAndEmptyFloor() {
+        XCTAssertEqual(WhisperSpeechRecognizer.audioContextTokens(sampleCount: 0), 8)
+        XCTAssertEqual(WhisperSpeechRecognizer.audioContextTokens(sampleCount: 100), 8)
+        XCTAssertEqual(WhisperSpeechRecognizer.audioContextTokens(sampleCount: 2_560), 8)
+        // 2 561 samples is one full token past the floor.
+        XCTAssertEqual(WhisperSpeechRecognizer.audioContextTokens(sampleCount: 2_561), 9)
+    }
+
+    func testAudioContextRoundingUp() {
+        // A 319-sample remainder still costs a whole encoder token.
+        XCTAssertEqual(WhisperSpeechRecognizer.audioContextTokens(sampleCount: 32_319), 101)
+        XCTAssertEqual(WhisperSpeechRecognizer.audioContextTokens(sampleCount: 32_001), 101)
+    }
+
     // MARK: - Inference watchdog + per-attempt isolation
 
     func testWedgedAttemptTimesOutAndNextAttemptRecoversOnFreshQueue() throws {

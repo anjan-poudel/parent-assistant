@@ -388,7 +388,11 @@ struct whisper_vocab {
     static const id token_transcribe = 50359;
 
     bool is_multilingual() const {
-        return n_vocab == 51865;
+        // elderly-ai-assistant: accept large-v3-sized vocabularies too. Stock
+        // v1/v2 multilingual models have 51865 tokens; the distilled Nepali
+        // student derives from a large-v3-style tokenizer with 51866, and was
+        // previously misclassified as English-only (no language conditioning).
+        return n_vocab >= 51865;
     }
 };
 
@@ -1105,6 +1109,31 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
         ctx_size += (15 + 15*n_audio_layer + 24*n_text_layer)*512; // object overhead
 
         fprintf(stderr, "%s: model ctx     = %7.2f MB\n", __func__, ctx_size/(1024.0*1024.0));
+    }
+
+    // MODEL POOL FIX (elderly-ai-assistant): MEM_REQ_MODEL is keyed by the
+    // static model-type archetypes, matched here by n_audio_layer alone.
+    // Distilled students keep an archetype's layer count but widen the state
+    // (this Nepali model: 1280-wide states on the 12-layer "small" archetype),
+    // so the q5_1 table entry (182 MB) is far smaller than the model's real
+    // tensor payload (~312 MB - the "model ctx" figure above). ggml then
+    // aborted the process during weight loading:
+    //   "ggml_new_tensor_impl: not enough space in the context's memory pool
+    //    (needed 191297792, available 190840832)"
+    // ctx_size above is computed from the real hparams with the exact same
+    // tensor shapes/types the loader creates below, so it is the authoritative
+    // figure: top the pool up to it whenever the archetype table undershoots.
+    // Stock models are unaffected (their ctx_size sits well inside the table
+    // entry). The 1 MB slack covers per-tensor headers/alignment on top of the
+    // formula's 512-byte-per-object allowance.
+    {
+        const size_t pool_table = wctx.model.buf->size();
+        const size_t pool_exact = ctx_size + 1ull*MB;
+        if (pool_exact > pool_table) {
+            wctx.model.buf->resize(pool_exact);
+            fprintf(stderr, "%s: model ctx pool raised from %.2f MB to %.2f MB (model wider than the %d-layer archetype table)\n",
+                    __func__, pool_table/(1024.0*1024.0), pool_exact/(1024.0*1024.0), model.hparams.n_audio_layer);
+        }
     }
 
     // create the ggml context
@@ -2625,6 +2654,20 @@ static std::string whisper_get_coreml_path_encoder(std::string path_bin) {
 // saw a stock-dim fp16 encoder "load on device but never return from the
 // first prediction", see f878d2e). Anything non-standard is pinned to the
 // CPU backend here so no per-model Swift API is needed.
+
+// the state width each model-type archetype's MEM_REQ_* rows are sized for
+// (mirror of the layer-count mapping in whisper_hparams_has_standard_dims)
+static int whisper_model_type_state_width(const e_model type) {
+    switch (type) {
+        case e_model::MODEL_TINY:   return 384;
+        case e_model::MODEL_BASE:   return 512;
+        case e_model::MODEL_SMALL:  return 768;
+        case e_model::MODEL_MEDIUM: return 1024;
+        case e_model::MODEL_LARGE:  return 1280;
+        default:                    return 0;
+    }
+}
+
 static bool whisper_hparams_has_standard_dims(const struct whisper_hparams & h) {
     int n_state = 0, n_head = 0;
     switch (h.n_audio_layer) {
@@ -2700,21 +2743,34 @@ struct whisper_state * whisper_init_state(whisper_context * ctx) {
     state->decoders[0].probs.reserve(ctx->vocab.n_vocab);
     state->decoders[0].logits.reserve(ctx->vocab.n_vocab);
     state->decoders[0].logprobs.reserve(ctx->vocab.n_vocab);
-    // HEADROOM PATCH (elderly-ai-assistant): the MEM_REQ tables are keyed
-    // by the static model-type archetypes, but the distilled student has
-    // non-standard dims (1280-wide encoder, 16 text heads, 448 text ctx)
-    // that need ~0.25% more than the table estimate. The undershoot made
-    // ggml_new_tensor_impl abort the process mid-transcription:
-    //   "not enough space in the context's memory pool
-    //    (needed 191297792, available 190840832)"
-    // A 6% margin matches the weights-pool headroom the upstream fork
-    // already applies for the same reason.
-    state->buf_compute.resize(size_t(1.06 * (scale * std::max(MEM_REQ_ENCODE.at(ctx->model.type), MEM_REQ_DECODE.at(ctx->model.type)))));
-
-    state->buf_scratch[0].resize(MEM_REQ_SCRATCH0.at(ctx->model.type));
-    state->buf_scratch[1].resize(MEM_REQ_SCRATCH1.at(ctx->model.type));
-    state->buf_scratch[2].resize(MEM_REQ_SCRATCH2.at(ctx->model.type));
-    state->buf_scratch[3].resize(MEM_REQ_SCRATCH3.at(ctx->model.type));
+    // BUFFER SIZING FIX (elderly-ai-assistant): the MEM_REQ_* tables above
+    // are keyed by static model-type archetypes, so every state buffer below
+    // assumes the matched archetype's width. The 12-layer distilled Nepali
+    // student maps to MODEL_SMALL, whose rows are sized for the stock 768-wide
+    // small, but its states are 1280 wide (large-v3 width) and its graph
+    // tensors scale linearly with that width. The un-scaled buffers made
+    // ggml_new_tensor_impl abort mid-transcription:
+    //   "not enough space in the context's memory pool (needed ..., available ...)"
+    //   "not enough space in the scratch memory (need 8331264 more, ...)"
+    // Scale every archetype-sized buffer by the width ratio (1.0 for stock
+    // models - untouched). The 6% factor keeps the headroom the vendoring
+    // commit applied for stock-dim runs.
+    {
+        const int arch_state = whisper_model_type_state_width(ctx->model.type);
+        const double width_ratio = arch_state > 0
+                ? double(ctx->model.hparams.n_audio_state) / double(arch_state)
+                : 1.0;
+        if (width_ratio > 1.01) {
+            fprintf(stderr, "%s: model wider than the %d-layer archetype (state %d vs %d) - scaling compute/scratch buffers by %.2fx\n",
+                    __func__, ctx->model.hparams.n_audio_layer,
+                    ctx->model.hparams.n_audio_state, arch_state, width_ratio);
+        }
+        state->buf_compute.resize(size_t(1.06 * width_ratio * (scale * std::max(MEM_REQ_ENCODE.at(ctx->model.type), MEM_REQ_DECODE.at(ctx->model.type)))));
+        state->buf_scratch[0].resize(size_t(width_ratio * MEM_REQ_SCRATCH0.at(ctx->model.type)));
+        state->buf_scratch[1].resize(size_t(width_ratio * MEM_REQ_SCRATCH1.at(ctx->model.type)));
+        state->buf_scratch[2].resize(size_t(width_ratio * MEM_REQ_SCRATCH2.at(ctx->model.type)));
+        state->buf_scratch[3].resize(size_t(width_ratio * MEM_REQ_SCRATCH3.at(ctx->model.type)));
+    }
 
     state->rng = std::mt19937(0);
 
@@ -2895,7 +2951,12 @@ void whisper_free(struct whisper_context * ctx) {
 }
 
 int whisper_pcm_to_mel_with_state(struct whisper_context * ctx, struct whisper_state * state, const float * samples, int n_samples, int n_threads) {
-    if (!log_mel_spectrogram(*state, samples, n_samples, WHISPER_SAMPLE_RATE, WHISPER_N_FFT, WHISPER_HOP_LENGTH, WHISPER_N_MEL, n_threads, ctx->model.filters, false, state->mel)) {
+    // elderly-ai-assistant: the mel band count must come from the model, not
+    // the compile-time WHISPER_N_MEL (80): the distilled Nepali student is
+    // large-v3-shaped with 128 mel bands (its filterbank ships in the model
+    // file). Mel spectrograms computed with the wrong band count fail the
+    // encoder's n_mels check and abort the process.
+    if (!log_mel_spectrogram(*state, samples, n_samples, WHISPER_SAMPLE_RATE, WHISPER_N_FFT, WHISPER_HOP_LENGTH, ctx->model.filters.n_mel, n_threads, ctx->model.filters, false, state->mel)) {
         fprintf(stderr, "%s: failed to compute mel spectrogram\n", __func__);
         return -1;
     }
@@ -2909,7 +2970,7 @@ int whisper_pcm_to_mel(struct whisper_context * ctx, const float * samples, int 
 
 // same as whisper_pcm_to_mel, but applies a Phase Vocoder to speed up the audio x2
 int whisper_pcm_to_mel_phase_vocoder_with_state(struct whisper_context * ctx, struct whisper_state * state, const float * samples, int n_samples, int n_threads) {
-    if (!log_mel_spectrogram(*state, samples, n_samples, WHISPER_SAMPLE_RATE, 2 * WHISPER_N_FFT, 2 * WHISPER_HOP_LENGTH, WHISPER_N_MEL, n_threads, ctx->model.filters, true, state->mel)) {
+    if (!log_mel_spectrogram(*state, samples, n_samples, WHISPER_SAMPLE_RATE, 2 * WHISPER_N_FFT, 2 * WHISPER_HOP_LENGTH, ctx->model.filters.n_mel, n_threads, ctx->model.filters, true, state->mel)) {
         fprintf(stderr, "%s: failed to compute mel spectrogram\n", __func__);
         return -1;
     }
@@ -2923,13 +2984,13 @@ int whisper_pcm_to_mel_phase_vocoder(struct whisper_context * ctx, const float *
 }
 
 int whisper_set_mel_with_state(
-        struct whisper_context * /*ctx*/,
+        struct whisper_context * ctx,
           struct whisper_state * state,
                    const float * data,
                            int   n_len,
                            int   n_mel) {
-    if (n_mel != WHISPER_N_MEL) {
-        fprintf(stderr, "%s: invalid number of mel bands: %d (expected %d)\n", __func__, n_mel, WHISPER_N_MEL);
+    if (n_mel != ctx->model.filters.n_mel) {
+        fprintf(stderr, "%s: invalid number of mel bands: %d (expected %d)\n", __func__, n_mel, ctx->model.filters.n_mel);
         return -1;
     }
 

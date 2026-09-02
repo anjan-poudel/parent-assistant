@@ -445,6 +445,20 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         params.translate = false
         params.no_context = true
         params.suppress_blank = true
+        // Window the CPU encoder. whisper_full's default (audio_ctx == 0)
+        // feeds the WHOLE capture through the encoder as one window, and
+        // encode cost grows roughly quadratically with the window — on the
+        // CPU-pinned distilled model (1280-wide states, 12 layers) a
+        // capture that runs long (VAD tail, noise holding the capture
+        // open) can take minutes, and every attempt then dies to the STT
+        // watchdog. Splitting at ~6 s bounds the cost of a long capture
+        // while sub-6 s utterances stay on the default path (a single
+        // window behaves exactly like audio_ctx == 0). ANE encoders are
+        // cheap per call and take the full window — chunking there would
+        // only add seams + per-call overhead, so leave them defaulted.
+        if !usesANEBackend(modelId) {
+            params.audio_ctx = Int32(Self.audioContextTokens(sampleCount: pcm.count))
+        }
         let loadStart = CFAbsoluteTimeGetCurrent()
         let whisper = Whisper(fromFileURL: modelURL, withParams: params)
         let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
@@ -709,6 +723,18 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         let ggjt = Data([0x74, 0x6a, 0x67, 0x67])   // "ggjt" LE uint32
         let gguf = Data([0x47, 0x47, 0x55, 0x46])   // "GGUF" (byte string)
         return magic == ggml || magic == ggla || magic == ggjt || magic == gguf
+    }
+
+    /// Maps a captured sample count onto whisper's `audio_ctx` window cap
+    /// (encoder tokens — 1 token per 320 samples at 16 kHz, i.e. 20 ms).
+    /// The floor (8 tokens) keeps tiny/noise captures on a sane window and
+    /// the 300-token cap (~6 s) is the CPU-encode budget ceiling described
+    /// at the call site. whisper_full rejects audio_ctx > n_audio_ctx
+    /// (1500) with an error, so the cap is well inside the limit.
+    static func audioContextTokens(sampleCount: Int) -> Int {
+        guard sampleCount > 0 else { return 8 }
+        let tokens = (sampleCount + 319) / 320
+        return min(max(tokens, 8), 300)
     }
 
     // MARK: - Observability
