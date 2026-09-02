@@ -2073,6 +2073,90 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Whisper (English)" } },
         "ne" : { "stringUnit" : { "state" : "translated", "value" : "Whisper (अंग्रेजी)" } }
       }
+    },
+    "family.alertConfigurationApplied" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Configuration update has been applied successfully." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "नयाँ सेटिङ सफलतापूर्वक लागू भयो।" } }
+      }
+    },
+    "family.alertEmergency" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Emergency alert: Your family member's health threshold has been exceeded. Emergency services are being contacted." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "आपतकालीन सूचना: तपाईंको परिवारका सदस्यको स्वास्थ्य सीमा नाघेको छ। आपतकालीन सेवालाई खबर गरिँदैछ।" } }
+      }
+    },
+    "family.alertHealthMonitoringInterrupted" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Health monitoring for your family member has been interrupted." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "तपाईंको परिवारका सदस्यको स्वास्थ्य अनुगमन रोकिएको छ।" } }
+      }
+    },
+    "family.alertInactivity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your family member has not interacted with their assistant for an extended period." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "तपाईंको परिवारका सदस्यले लामो समयदेखि सहायकसँग कुराकानी गर्नुभएको छैन।" } }
+      }
+    },
+    "family.alertMissedMedication" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your family member has missed a scheduled medication." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "तपाईंको परिवारका सदस्यले तोकिएको औषधि खानुभएन।" } }
+      }
+    },
+    "family.alertPossibleDoubleDose" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Alert: Your family member may have attempted to take medication twice." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सूचना: तपाईंको परिवारका सदस्यले औषधि दुई पटक खान खोज्नुभएको हुनसक्छ।" } }
+      }
+    },
+    "meds.challengePrompt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Did you take your %@ just now?" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "के तपाईंले भर्खरै %@ खानुभयो?" } }
+      }
+    },
+    "meds.challengePromptWithDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "You said you've taken your %@. Is that the %@?" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "तपाईंले %@ खाएको बताउनुभयो। के त्यो %@ हो?" } }
+      }
+    },
+    "meds.checkNotificationBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Did you take your medication?" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "तपाईंले औषधि खानुभयो?" } }
+      }
+    },
+    "meds.checkNotificationTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Medication Check" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "औषधि जाँच" } }
+      }
+    },
+    "meds.reminderNotificationBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Time to take your %@" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "तपाईंको %@ खाने समय भयो" } }
+      }
+    },
+    "meds.reminderNotificationTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Medication Reminder" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "औषधिको सम्झना" } }
+      }
     }
   },
   "version" : "1.0"

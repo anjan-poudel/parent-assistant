@@ -29,7 +29,20 @@ final class UNNotificationScheduler: PlatformAlarmScheduler {
     private let center = UNUserNotificationCenter.current()
     private var registeredCategories: Set<String> = []
 
-    init() {
+    /// Locale notification titles/bodies and the acknowledge-action title
+    /// resolve against (spec §3.2). `AppCoordinator` keeps it in sync with
+    /// the app language; on change the categories are re-registered so the
+    /// action title stays localized. The English default matches the
+    /// legacy hardcoded strings.
+    var locale: Locale {
+        didSet {
+            guard locale != oldValue else { return }
+            registerNotificationCategories()
+        }
+    }
+
+    init(locale: Locale = Locale(identifier: "en")) {
+        self.locale = locale
         requestAuthorization()
         registerNotificationCategories()
     }
@@ -46,7 +59,7 @@ final class UNNotificationScheduler: PlatformAlarmScheduler {
         // Category for medication reminder with acknowledgement actions
         let acknowledgeAction = UNNotificationAction(
             identifier: "ACKNOWLEDGE_MEDICATION",
-            title: "Taken",
+            title: L10n.str("meds.taken", locale: locale),
             options: [.foreground]
         )
         let category = UNNotificationCategory(
@@ -65,8 +78,8 @@ final class UNNotificationScheduler: PlatformAlarmScheduler {
         at scheduledTime: Date
     ) {
         let content = UNMutableNotificationContent()
-        content.title = "Medication Reminder"
-        content.body = "Time to take your \(medicationName)"
+        content.title = L10n.str("meds.reminderNotificationTitle", locale: locale)
+        content.body = L10n.fmt("meds.reminderNotificationBody", locale: locale, medicationName)
         content.sound = .default
         content.categoryIdentifier = "MEDICATION_REMINDER"
         content.userInfo = [
@@ -100,8 +113,8 @@ final class UNNotificationScheduler: PlatformAlarmScheduler {
         deadline: Date
     ) {
         let content = UNMutableNotificationContent()
-        content.title = "Medication Check"
-        content.body = "Did you take your medication?"
+        content.title = L10n.str("meds.checkNotificationTitle", locale: locale)
+        content.body = L10n.str("meds.checkNotificationBody", locale: locale)
         content.sound = nil   // silent check
         content.userInfo = [
             "reminder_id": reminderId.uuidString,

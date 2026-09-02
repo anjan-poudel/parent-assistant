@@ -22,19 +22,16 @@ enum VoiceSessionState: Equatable {
         switch self {
         case .idle:
             return [.listening, .awaitingConfirmation, .error, .stopped].contains(newState)
-        case .listening:
-            return [.transcribing, .error, .idle].contains(newState)
-        case .transcribing:
-            return [.understanding, .error, .idle].contains(newState)
-        case .understanding:
-            // The confirmation challenge is issued while the router is
-            // still "understanding" the utterance — so awaitingConfirmation
-            // must be reachable from here as well as from idle.
-            return [.speaking, .awaitingConfirmation, .error, .idle].contains(newState)
-        case .speaking:
-            return [.idle, .error].contains(newState)
+        case .listening, .transcribing, .understanding, .speaking:
+            // Busy states accept .stopped — the manual escape hatch:
+            // tapping the Talk button mid-cycle cancels and recycles the
+            // pipeline (same recovery as the watchdog). They also accept
+            // .awaitingConfirmation: the medication challenge is issued
+            // while the router is still "understanding" the utterance.
+            return [.transcribing, .understanding, .speaking, .idle,
+                    .awaitingConfirmation, .error, .stopped].contains(newState)
         case .awaitingConfirmation:
-            return [.idle, .error].contains(newState)
+            return [.idle, .error, .stopped].contains(newState)
         case .error:
             return [.idle, .stopped].contains(newState)
         case .stopped:

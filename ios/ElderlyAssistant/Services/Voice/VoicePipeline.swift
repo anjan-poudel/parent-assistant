@@ -125,7 +125,12 @@ final class VoicePipeline {
         vad?.stop()
         speechRecognizer.cancel()
         if audioEngine.isRunning { audioEngine.stop() }
-        audioEngine.inputNode.removeTap(onBus: 0)
+        // inputNode aborts the whole process when the audio server is
+        // unresponsive (AudioToolbox _ReportRPCTimeout) — never touch it
+        // without the input-availability check.
+        if audioSession.isInputAvailable {
+            audioEngine.inputNode.removeTap(onBus: 0)
+        }
         audioSession.deactivate()
         state = .stopped
         emit("pipeline_stopped", outcome: "success")
@@ -238,8 +243,12 @@ final class VoicePipeline {
             // Legacy path: STT owns the input node. Tear down our tap and
             // let it install its own. This is what happens when no VAD is
             // configured and the STT is SFSpeechRecognizer in owned-tap
-            // mode.
-            audioEngine.inputNode.removeTap(onBus: 0)
+            // mode. Both recognizers are push-mode now, so this branch is
+            // dormant — but keep the inputNode guard for the same
+            // _ReportRPCTimeout abort as installMicTap/stop.
+            if audioSession.isInputAvailable {
+                audioEngine.inputNode.removeTap(onBus: 0)
+            }
             if audioEngine.isRunning { audioEngine.stop() }
         } else {
             // Push mode: our tap stays live. Prime the VAD.

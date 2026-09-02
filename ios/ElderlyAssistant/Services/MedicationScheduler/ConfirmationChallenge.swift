@@ -19,19 +19,26 @@ enum ConfirmationAction: Equatable {
 
 final class ConfirmationChallenge {
     let challengeTimeoutSeconds: TimeInterval   // default: 30 per FR-D02
+    /// Locale the spoken challenge prompts resolve against (spec §3.2).
+    /// Injected by `MedicationScheduler` from `AppCoordinator.activeLocale`;
+    /// the English default keeps unit-test prompts deterministic.
+    private let locale: Locale
     private(set) var state: ConfirmationState
 
-    init(challengeTimeoutSeconds: TimeInterval = 30) {
+    init(challengeTimeoutSeconds: TimeInterval = 30,
+         locale: Locale = Locale(identifier: "en")) {
         self.challengeTimeoutSeconds = challengeTimeoutSeconds
+        self.locale = locale
         self.state = .idle
     }
 
     func start(medicationName: String, confirmationDescription: String?) -> ConfirmationAction {
         let prompt: String
         if let desc = confirmationDescription, !desc.isEmpty {
-            prompt = "You said you've taken your \(medicationName). Is that the \(desc)?"
+            prompt = L10n.fmt("meds.challengePromptWithDescription", locale: locale,
+                              medicationName, desc)
         } else {
-            prompt = "Did you take your \(medicationName) just now?"
+            prompt = L10n.fmt("meds.challengePrompt", locale: locale, medicationName)
         }
         let deadline = Date().addingTimeInterval(challengeTimeoutSeconds)
         state = .awaitingResponse(deadline: deadline)

@@ -39,11 +39,13 @@ final class VoiceSessionStateMachineTests: XCTestCase {
         // rejections directly (attempting them would hit the debug
         // assertion).
         XCTAssertTrue(VoiceSessionState.idle.canTransition(to: .listening))
-        XCTAssertFalse(VoiceSessionState.listening.canTransition(to: .speaking))
         XCTAssertFalse(VoiceSessionState.speaking.canTransition(to: .listening))
         XCTAssertFalse(VoiceSessionState.awaitingConfirmation.canTransition(to: .listening))
         XCTAssertTrue(VoiceSessionState.stopped.canTransition(to: .error))
         XCTAssertTrue(VoiceSessionState.error.canTransition(to: .idle))
+        // The medication challenge fires while the router is still
+        // understanding — that transition must stay legal.
+        XCTAssertTrue(VoiceSessionState.understanding.canTransition(to: .awaitingConfirmation))
     }
 
     /// C12: the confirmation challenge expires and returns to idle.

@@ -14,6 +14,11 @@ final class APNsFamilyNotifier: FamilyNotifierProtocol {
     private var contacts: [EmergencyContact]
     private let apnsProvider: APNsProvider
 
+    /// Locale the family-facing alert bodies resolve against (spec §3.2).
+    /// Kept in sync with the app language by `AppCoordinator`; the English
+    /// default matches the legacy hardcoded strings.
+    var locale: Locale = Locale(identifier: "en")
+
     init(contacts: [EmergencyContact], apnsProvider: APNsProvider = APNsProvider()) {
         self.contacts = contacts.filter { $0.isFamilyNotificationTarget }
         self.apnsProvider = apnsProvider
@@ -75,17 +80,17 @@ final class APNsFamilyNotifier: FamilyNotifierProtocol {
     private func alertBody(for alertType: FamilyAlertType) -> String {
         switch alertType {
         case .emergencyCall:
-            return "Emergency alert: Your family member's health threshold has been exceeded. Emergency services are being contacted."
+            return L10n.str("family.alertEmergency", locale: locale)
         case .missedMedication:
-            return "Your family member has missed a scheduled medication."
+            return L10n.str("family.alertMissedMedication", locale: locale)
         case .healthMonitoringInterrupted:
-            return "Health monitoring for your family member has been interrupted."
+            return L10n.str("family.alertHealthMonitoringInterrupted", locale: locale)
         case .configurationUpdateApplied:
-            return "Configuration update has been applied successfully."
+            return L10n.str("family.alertConfigurationApplied", locale: locale)
         case .possibleDoubleDose:
-            return "Alert: Your family member may have attempted to take medication twice."
+            return L10n.str("family.alertPossibleDoubleDose", locale: locale)
         case .inactivityAlert:
-            return "Your family member has not interacted with their assistant for an extended period."
+            return L10n.str("family.alertInactivity", locale: locale)
         }
     }
 

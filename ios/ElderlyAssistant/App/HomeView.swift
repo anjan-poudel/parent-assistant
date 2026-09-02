@@ -105,8 +105,16 @@ struct HomeView: View {
             } else {
                 VStack(spacing: 14) {
                     TalkButton(session: session) {
-                        if session.state == .idle {
+                        switch session.state {
+                        case .idle:
                             coordinator.simulateWakeWordDetection()
+                        case .listening, .transcribing, .understanding:
+                            // Manual escape hatch: tapping mid-cycle cancels
+                            // and recycles the pipeline (the watchdog does
+                            // the same automatically after 15s).
+                            coordinator.recoverVoiceCycle()
+                        default:
+                            break
                         }
                     }
                 }
@@ -273,7 +281,10 @@ struct TalkButton: View {
                 }
             }
             .buttonStyle(.plain)
-            .disabled(session.state != .idle)
+            // Enabled in every state except stopped (nothing to cancel)
+            // and awaitingConfirmation (the yes/no chips own the UI):
+            // tapping mid-cycle is the manual recovery escape hatch.
+            .disabled(session.state == .stopped || session.state == .awaitingConfirmation)
             .accessibilityLabel(Text(session.state.buttonText(locale: locale)))
 
             Text(session.state.statusText(locale: locale))

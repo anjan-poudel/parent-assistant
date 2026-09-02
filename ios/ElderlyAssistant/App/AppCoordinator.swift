@@ -20,13 +20,29 @@ final class AppCoordinator: ObservableObject {
 
     /// Active display/spoken language (spec §3.2). Single source of truth
     /// for the `.locale` injected at the app root; persisted in UserDefaults.
+    /// On change, the user-facing strings built by non-View services
+    /// (notifications, spoken challenges, family alerts) follow along.
     @Published var appLanguage: AppLanguage {
-        didSet { appLanguage.persist() }
+        didSet {
+            appLanguage.persist()
+            syncServiceLocales()
+        }
     }
 
     /// The locale every piece of non-View code (router speech, formatters)
     /// resolves against.
     var activeLocale: Locale { appLanguage.locale }
+
+    /// Pushes the active language into the services that build user-facing
+    /// strings at call time — platform notifications, spoken confirmation
+    /// challenges, and family alert payloads (spec §3.2). Runs once at the
+    /// end of `init` (after the persisted language is restored; didSet does
+    /// not fire for the initial assignment) and on every language change.
+    private func syncServiceLocales() {
+        alarmScheduler.locale = activeLocale
+        medicationScheduler.locale = activeLocale
+        familyNotifier.locale = activeLocale
+    }
 
     /// First-run onboarding progress (spec §4.2). Persisted per step.
     let onboardingState = OnboardingState()
@@ -63,7 +79,7 @@ final class AppCoordinator: ObservableObject {
     private let storage: EncryptedLocalStorage
     private let observabilityBus: ObservabilityBus
     private let medicationScheduler: MedicationScheduler
-    private let alarmScheduler: PlatformAlarmScheduler
+    private let alarmScheduler: UNNotificationScheduler
     private let familyNotifier: APNsFamilyNotifier
 
     /// Family contacts (spec §4.4.2) — persisted encrypted, feeds the
@@ -164,11 +180,17 @@ final class AppCoordinator: ObservableObject {
         self.voiceActivityDetector = EnergyVAD()
         // Two STTs are constructed up-front:
         // - fallback (SFSpeechRecognizer, en-US) — used while Whisper is
-        //   downloading; owns its input tap.
+        //   downloading. PUSH MODE: audio arrives via feed() from the
+        //   pipeline's permanent tap. Owned-tap mode made the recognizer
+        //   tear down and reinstall the shared tap + restart the engine on
+        //   every utterance — that churn wedged the audio server and
+        //   AudioToolbox's _ReportRPCTimeout then ABORTED the process
+        //   (7 crash reports, 2026-09-02).
         // - Whisper — used once its model is cached; push mode + VAD-gated.
         self.fallbackSpeechRecognizer = OnDeviceSpeechRecognizer(
             audioEngine: audioEngine,
-            observabilityBus: bus
+            observabilityBus: bus,
+            pushMode: true
         )
         self.whisperSpeechRecognizer = WhisperSpeechRecognizer(
             modelStore: modelStore,
@@ -194,6 +216,10 @@ final class AppCoordinator: ObservableObject {
                 self.speak(key: "router.confirmationTimeout")
             }
         }
+
+        // All stored properties are initialised — push the restored
+        // language into services that build user-facing strings.
+        syncServiceLocales()
     }
 
     func start() {
@@ -338,18 +364,7 @@ final class AppCoordinator: ObservableObject {
             switch self.voiceSession.state {
             case .listening, .transcribing, .understanding:
                 print("[AppCoordinator] voice cycle watchdog fired — recycling pipeline")
-                self.voicePipeline?.stop()
-                self.voicePipeline?.start { [weak self] result in
-                    guard let self else { return }
-                    switch result {
-                    case .success:
-                        self.voiceState = .idle
-                    case .failure(let err):
-                        self.voiceError = "\(err)"
-                        self.voiceState = .error("\(err)")
-                    }
-                }
-                self.speak(key: "router.reprompt")
+                self.recoverVoiceCycle()
             default:
                 break
             }
@@ -361,6 +376,27 @@ final class AppCoordinator: ObservableObject {
     private func cancelVoiceWatchdog() {
         voiceWatchdog?.cancel()
         voiceWatchdog = nil
+    }
+
+    /// Stops and restarts the voice pipeline — the recovery path for a
+    /// wedged talk cycle. Also the manual escape hatch: the Talk button
+    /// calls this when tapped mid-cycle. Spoken re-prompt included so the
+    /// user knows the assistant is listening again.
+    func recoverVoiceCycle() {
+        cancelVoiceWatchdog()
+        print("[AppCoordinator] recovering voice cycle — recycling pipeline")
+        voicePipeline?.stop()
+        voicePipeline?.start { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.voiceState = .idle
+            case .failure(let err):
+                self.voiceError = "\(err)"
+                self.voiceState = .error("\(err)")
+            }
+        }
+        speak(key: "router.reprompt")
     }
 
     /// Called by `CommandRouter` when a speak begins/ends — drives the

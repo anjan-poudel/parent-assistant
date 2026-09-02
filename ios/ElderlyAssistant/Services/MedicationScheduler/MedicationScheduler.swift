@@ -22,6 +22,12 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
     private var confirmationChallenges: [UUID: ConfirmationChallenge] = [:]
     private var didRestore = false
 
+    /// Active locale for user-facing text produced by this service (the
+    /// confirmation-challenge prompts). Injected by `AppCoordinator` from
+    /// `activeLocale`; the English default matches the legacy hardcoded
+    /// strings.
+    var locale: Locale = Locale(identifier: "en")
+
     private let storageKeyReminders = "medication.pending_reminders"
     private let storageKeyAdherenceLog = "medication.adherence_log"
     private let storageKeyEntries = "medication.entries"
@@ -121,7 +127,7 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         // call again with the answer. Silently accepting the first response
         // would defeat the dementia FR-D01 confirmation guarantee.
         let challenge = confirmationChallenges[entryId] ?? {
-            let new = ConfirmationChallenge()
+            let new = ConfirmationChallenge(locale: locale)
             confirmationChallenges[entryId] = new
             _ = new.start(
                 medicationName: entry.medicationName,
@@ -251,7 +257,7 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         guard let entry = entries[entryId] else { return nil }
 
         let challenge = confirmationChallenges[entryId] ?? {
-            let new = ConfirmationChallenge()
+            let new = ConfirmationChallenge(locale: locale)
             confirmationChallenges[entryId] = new
             return new
         }()
