@@ -38,6 +38,7 @@ def main() -> None:
                         help="base for fine-tune (default: distilled final)")
     parser.add_argument("--epochs", type=float, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--grad-accum", type=int, default=None)
     parser.add_argument("--lr", type=float, default=None)
     parser.add_argument("--no-resume", action="store_true")
     args, cfg = load_config(parser)
@@ -63,7 +64,7 @@ def main() -> None:
     print(f"fine-tune set: {len(ds)} rows")
 
     batch = args.batch_size or int(cfg["finetune.batch_size"])
-    accum = int(cfg["finetune.grad_accum"])
+    accum = args.grad_accum or int(cfg["finetune.grad_accum"])
     epochs = args.epochs or float(cfg["finetune.epochs"])
     # Real optimizer-update count (ceil on batches per step); a warmup
     # longer than the whole run starves the LR (stage 4 ran 141 updates
