@@ -370,6 +370,7 @@ private struct FamilyContactStep: View {
 
 private struct ModelsStep: View {
     @EnvironmentObject var coordinator: AppCoordinator
+    @EnvironmentObject var downloads: ModelDownloadService
     let onFinish: () -> Void
 
     @State private var started = false
@@ -392,7 +393,7 @@ private struct ModelsStep: View {
                 if let entry = ModelCatalog.entry(for: ModelCatalog.whisperFinetunedNepali) {
                     ModelProgressRow(
                         entry: entry,
-                        state: coordinator.modelDownloadService.states[ModelCatalog.whisperFinetunedNepali]
+                        state: downloads.states[ModelCatalog.whisperFinetunedNepali]
                             ?? (coordinator.modelStore.isCached(ModelCatalog.whisperFinetunedNepali)
                                 ? .completed : .notStarted)
                     )
@@ -410,9 +411,9 @@ private struct ModelsStep: View {
             started = true
             let id = ModelCatalog.whisperFinetunedNepali
             let already = coordinator.modelStore.isCached(id)
-                || coordinator.modelDownloadService.states[id] != nil
+                || downloads.states[id] != nil
             if !already {
-                coordinator.modelDownloadService.start(id)
+                downloads.start(id)
             }
         }
     }

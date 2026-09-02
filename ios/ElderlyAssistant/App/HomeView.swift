@@ -55,6 +55,7 @@ struct HomeView: View {
                 OnboardingWizardView(startingAt: coordinator.onboardingState.firstPendingStep)
                     .environmentObject(coordinator)
                     .environmentObject(session)
+                    .environmentObject(coordinator.modelDownloadService)
                     .environment(\.locale, coordinator.appLanguage.locale)
             }
         }

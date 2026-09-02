@@ -381,6 +381,9 @@ struct MedicationScheduleSettingsView: View {
 
 struct AIModelsSettingsView: View {
     @EnvironmentObject var coordinator: AppCoordinator
+    // Observed DIRECTLY — the service publishes download state changes;
+    // reading through the coordinator never re-renders the rows.
+    @EnvironmentObject var downloads: ModelDownloadService
 
     var body: some View {
         LeafScreen(titleKey: "settings.ai.title") {
@@ -421,14 +424,14 @@ struct AIModelsSettingsView: View {
                         if let entry = ModelCatalog.entry(for: id) {
                             ModelManagementRow(
                                 entry: entry,
-                                state: coordinator.modelDownloadService.states[id]
+                                state: downloads.states[id]
                                     ?? (coordinator.modelStore.isCached(id)
                                         ? .completed : .notStarted),
-                                onStart: { coordinator.modelDownloadService.start(id) },
-                                onCancel: { coordinator.modelDownloadService.cancel(id) },
+                                onStart: { downloads.start(id) },
+                                onCancel: { downloads.cancel(id) },
                                 onDelete: {
                                     try? coordinator.modelStore.delete(id)
-                                    coordinator.modelDownloadService.reset(id)
+                                    downloads.reset(id)
                                     if coordinator.sttModelPreference == id {
                                         coordinator.sttModelPreference = nil
                                     }
