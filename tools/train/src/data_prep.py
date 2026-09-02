@@ -167,6 +167,101 @@ def build_fleurs(cfg: dict, data_dir: Path, known: set[str]) -> tuple[int, int]:
     return n_train, n_test
 
 
+def build_common_voice(cfg: dict, data_dir: Path, known: set[str], out: Path) -> int:
+    """Common Voice 17 ne (CC0) — crowd-sourced conversational speech.
+    Downloaded as parquet via HF datasets (no audio bundling needed)."""
+    from datasets import load_dataset
+
+    ds = load_dataset("mozilla-foundation/common_voice_17_0", "ne",
+                      split="train+validated", trust_remote_code=False)
+    added = 0
+    for row in ds:
+        path = row.get("path") or (row.get("audio") or {}).get("path")
+        if not path or not Path(path).exists():
+            continue
+        rid = f"cv-{row['client_id']}"
+        if rid in known:
+            continue
+        sentence = norm_text(row.get("sentence", ""))
+        if not sentence:
+            continue
+        known.add(rid)
+        append_row(out, {"id": rid, "audio": str(Path(path).resolve()),
+                         "text": sentence, "source": "common-voice",
+                         "split": "train"})
+        added += 1
+        if added % 2000 == 0:
+            log_progress(f"common-voice: {added} rows added")
+    return added
+
+
+def build_slr43(cfg: dict, data_dir: Path, known: set[str], out: Path) -> int:
+    """SLR43 ne_np_female (CC BY-SA 4.0) — Google-collected Nepali
+    read speech with line_index.tsv transcript pairing."""
+    url = "https://openslr.trmal.net/resources/43/ne_np_female.zip"
+    zip_path = data_dir / "downloads" / "ne_np_female.zip"
+    download(url, zip_path)
+    audio_dir = data_dir / "audio" / "slr43"
+    extract_zip(zip_path, audio_dir, "*.wav")
+    extract_zip(zip_path, data_dir / "downloads", "*line_index.tsv")
+
+    tsvs = list((data_dir / "downloads").rglob("*line_index.tsv"))
+    if not tsvs:
+        print("warning: no line_index.tsv in slr43 zip, skipping")
+        return 0
+    wav_index = {p.name: p for p in audio_dir.rglob("*.wav")}
+    added = 0
+    for tsv in tsvs[:1]:
+        for line in open(tsv, encoding="utf-8"):
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 2:
+                continue
+            fname = parts[0] if parts[0].endswith(".wav") else parts[0] + ".wav"
+            audio = wav_index.get(fname)
+            if audio is None:
+                continue
+            rid = f"slr43-{fname[:-4]}"
+            if rid in known:
+                continue
+            known.add(rid)
+            append_row(out, {"id": rid, "audio": str(audio),
+                             "text": norm_text(parts[1]),
+                             "source": "slr43", "split": "train"})
+            added += 1
+    return added
+
+
+def build_slr143(cfg: dict, data_dir: Path, known: set[str], out: Path) -> int:
+    """SLR143 male+female Nepali speech (CC BY-NC-SA — NON-COMMERCIAL:
+    rows are tagged source=slr143 so they can be excluded before any
+    commercial release)."""
+    url = "https://openslr.trmal.net/resources/143/male-female-data.tgz"
+    tar_path = data_dir / "downloads" / "male-female-data.tgz"
+    download(url, tar_path)
+    audio_dir = data_dir / "audio" / "slr143"
+    extract_tar(tar_path, audio_dir)
+
+    wav_index = {p.stem: p for p in audio_dir.rglob("*.wav")}
+    added = 0
+    for tsv in sorted(audio_dir.rglob("*.tsv")):
+        for line in open(tsv, encoding="utf-8"):
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 2:
+                continue
+            audio = wav_index.get(parts[0])
+            if audio is None:
+                continue
+            rid = f"slr143-{parts[0]}"
+            if rid in known:
+                continue
+            known.add(rid)
+            append_row(out, {"id": rid, "audio": str(audio),
+                             "text": norm_text(parts[1]),
+                             "source": "slr143", "split": "train"})
+            added += 1
+    return added
+
+
 def build_custom(cfg: dict, data_dir: Path, known: set[str]) -> int:
     src = Path(cfg["custom_data"] or "")
     if not src or not src.exists():
@@ -203,7 +298,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Build resumable training manifests")
     add_common(parser)
     parser.add_argument("--skip", nargs="*", default=[],
-                        choices=["slr54", "fleurs", "custom"],
+                        choices=["slr54", "fleurs", "custom",
+                                 "cv", "slr43", "slr143"],
                         help="sources to skip")
     parser.add_argument("--smoke-pairs", type=str, default=None,
                         help="file with '<audio><TAB><text>' lines for smoke mode")
@@ -232,13 +328,23 @@ def main() -> None:
     if "fleurs" not in args.skip:
         n_tr, n_te = build_fleurs(cfg, data_dir, known)
         print(f"fleurs: +{n_tr} train, +{n_te} test")
+    if "cv" not in args.skip:
+        n = build_common_voice(cfg, data_dir, known, data_dir / "common-voice.jsonl")
+        print(f"common-voice: +{n} rows")
+    if "slr43" not in args.skip:
+        n = build_slr43(cfg, data_dir, known, data_dir / "slr43.jsonl")
+        print(f"slr43: +{n} rows")
+    if "slr143" not in args.skip:
+        n = build_slr143(cfg, data_dir, known, data_dir / "slr143.jsonl")
+        print(f"slr143: +{n} rows")
     if "custom" not in args.skip:
         n = build_custom(cfg, data_dir, known)
         print(f"custom: +{n} rows")
 
     # Union of train parts for stages 2–5.
     parts = [data_dir / "slr54.jsonl", data_dir / "fleurs-train.jsonl",
-             data_dir / "custom.jsonl"]
+             data_dir / "common-voice.jsonl", data_dir / "slr43.jsonl",
+             data_dir / "slr143.jsonl", data_dir / "custom.jsonl"]
     seen = set()
     with open(union, "w", encoding="utf-8") as f:
         for part in parts:
