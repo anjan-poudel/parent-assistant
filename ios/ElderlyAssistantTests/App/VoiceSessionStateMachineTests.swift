@@ -46,6 +46,9 @@ final class VoiceSessionStateMachineTests: XCTestCase {
         // The medication challenge fires while the router is still
         // understanding — that transition must stay legal.
         XCTAssertTrue(VoiceSessionState.understanding.canTransition(to: .awaitingConfirmation))
+        // Async replies and re-prompts speak AFTER the pipeline is back
+        // at idle — that transition must stay legal too.
+        XCTAssertTrue(VoiceSessionState.idle.canTransition(to: .speaking))
     }
 
     /// C12: the confirmation challenge expires and returns to idle.

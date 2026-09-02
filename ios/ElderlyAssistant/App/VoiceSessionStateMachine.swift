@@ -21,7 +21,10 @@ enum VoiceSessionState: Equatable {
     func canTransition(to newState: VoiceSessionState) -> Bool {
         switch self {
         case .idle:
-            return [.listening, .awaitingConfirmation, .error, .stopped].contains(newState)
+            // .speaking is reachable from idle: async replies (LLM) and
+            // re-prompts arrive AFTER the pipeline has returned to idle.
+            return [.listening, .speaking, .awaitingConfirmation, .error,
+                    .stopped].contains(newState)
         case .listening, .transcribing, .understanding, .speaking:
             // Busy states accept .stopped — the manual escape hatch:
             // tapping the Talk button mid-cycle cancels and recycles the
