@@ -4,7 +4,6 @@ import SwiftUI
 /// emergency contacts, Medication schedule, AI मोडेल, Privacy & about.
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var section: SettingsSection?
 
     enum SettingsSection: Identifiable {
         case language, family, meds, aiModels, privacy
@@ -58,30 +57,22 @@ struct SettingsView: View {
             }
         }
         .navigationBarHidden(true)
-        .navigationDestination(isPresented: sectionPresented) {
+        // Value-based navigation (iOS 16 pattern) — see HomeView: the
+        // isPresented + derived-binding form is fragile on iOS 16.
+        .navigationDestination(for: SettingsSection.self) { section in
             switch section {
             case .language: LanguageSettingsView()
             case .family: FamilyContactsSettingsView()
             case .meds: MedicationScheduleSettingsView()
             case .aiModels: AIModelsSettingsView()
             case .privacy: PrivacySettingsView()
-            case nil: EmptyView()
             }
         }
     }
 
-    private var sectionPresented: Binding<Bool> {
-        Binding(
-            get: { section != nil },
-            set: { if !$0 { section = nil } }
-        )
-    }
-
     private func sectionRow(_ section: SettingsSection, icon: String,
                             titleKey: String) -> some View {
-        Button {
-            self.section = section
-        } label: {
+        NavigationLink(value: section) {
             HStack(spacing: 14) {
                 Image(systemName: icon)
                     .font(.system(size: 26))

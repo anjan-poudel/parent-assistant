@@ -35,6 +35,14 @@ final class AudioSessionManager {
         }
     }
 
+    /// True when an input route exists (mic available). Check this BEFORE
+    /// touching AVAudioEngine.inputNode: when the audio server is
+    /// unresponsive, accessing inputNode ABORTS the process via
+    /// AudioToolbox's _ReportRPCTimeout (uncatchable — 2026-09-02).
+    var isInputAvailable: Bool {
+        session.isInputAvailable
+    }
+
     /// Requests mic permission and activates the audio session. The completion
     /// runs on the main queue.
     func activate(completion: @escaping (Result<Void, ActivationError>) -> Void) {

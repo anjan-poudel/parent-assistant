@@ -92,6 +92,18 @@ targets:
     dependencies:
       - target: ElderlyAssistant
 
+  ElderlyAssistantUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: ElderlyAssistantUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.elderlyassistant.app.uitests
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: ElderlyAssistant
+
 schemes:
   ElderlyAssistant:
     build:
@@ -104,6 +116,7 @@ schemes:
       config: Debug
       targets:
         - ElderlyAssistantTests
+        - ElderlyAssistantUITests
     profile:
       config: Release
     analyze:

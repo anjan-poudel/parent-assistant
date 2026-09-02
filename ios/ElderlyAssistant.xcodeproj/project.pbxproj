@@ -44,6 +44,7 @@
 		92252E31AFFAA415D171810A /* OnboardingStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B80BB3C068100E30CFD3B9C /* OnboardingStateTests.swift */; };
 		94095F9C5AC0B9770AB6CE8D /* ModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03E5F94D893E4006B4C592D /* ModelCatalog.swift */; };
 		9497ADB708770761092DB791 /* DesignTokensTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD91B4512067275A5059F95A /* DesignTokensTests.swift */; };
+		A210B049A6DCC42049F7BD09 /* ElderlyAssistantUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B871A07DB2851ECD2A47836D /* ElderlyAssistantUITests.swift */; };
 		A27B946B5069859CBE902720 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51DDA7082A80F1D235E7A006 /* DesignTokens.swift */; };
 		A83A346A8F1366347514E5AF /* MedicationScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0776B7C899783B35B84D499A /* MedicationScheduler.swift */; };
 		AC9D73FF2FCE028F85DCF9E0 /* GoldenCorpus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 476E2E6BBD5358CE33C61EC6 /* GoldenCorpus.swift */; };
@@ -75,6 +76,13 @@
 
 /* Begin PBXContainerItemProxy section */
 		79F74A39F60644EE114EA6D4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1814F1FD1E452A3F842D4F73 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9967E45A189F990A572818AA;
+			remoteInfo = ElderlyAssistant;
+		};
+		98B291BA129498195F4522BC /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 1814F1FD1E452A3F842D4F73 /* Project object */;
 			proxyType = 1;
@@ -121,6 +129,7 @@
 		7A8D077C9DB0C95CE97542AE /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		875C3FEBDCA672D2C9E0E7F2 /* FamilyNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyNotifier.swift; sourceTree = "<group>"; };
 		89ED4B2E4128B4CFA0B6365B /* ConfirmationChallengeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationChallengeTests.swift; sourceTree = "<group>"; };
+		8B5BB54D9A2270F690D50B65 /* ElderlyAssistantUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ElderlyAssistantUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		90995C4CAB955FB574BB07C6 /* CommandRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRouter.swift; sourceTree = "<group>"; };
 		91DDA75BE5CF8691D09075D6 /* IdHashing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdHashing.swift; sourceTree = "<group>"; };
 		9C2189211917E1D9BEE932FB /* LeafViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeafViews.swift; sourceTree = "<group>"; };
@@ -134,6 +143,7 @@
 		A9F9D2C931DA6AAFA3A23B6C /* ModelStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStoreTests.swift; sourceTree = "<group>"; };
 		AA7962DC2383BB09B89340F5 /* Speaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Speaker.swift; sourceTree = "<group>"; };
 		AD5B0563FB83838D506EA5E4 /* EscalationEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EscalationEngineTests.swift; sourceTree = "<group>"; };
+		B871A07DB2851ECD2A47836D /* ElderlyAssistantUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElderlyAssistantUITests.swift; sourceTree = "<group>"; };
 		C2AB3C99F28EE6B02B39ECEB /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
 		C3E07CFBA211DF9E699627A4 /* VoiceSessionStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionStateMachineTests.swift; sourceTree = "<group>"; };
 		C51E1D3A1B144677E2F3A616 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
@@ -141,7 +151,7 @@
 		C9B3203338B37AF2615B9D88 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		D42344465731A5DA5ABD125C /* DoubleDoseDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoubleDoseDetector.swift; sourceTree = "<group>"; };
 		D4F45398E4D634DDBCE65A38 /* SileroVAD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SileroVAD.swift; sourceTree = "<group>"; };
-		E0D51BFE01BE4E11E7CA840E /* ElderlyAssistant.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ElderlyAssistant.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E0D51BFE01BE4E11E7CA840E /* ElderlyAssistant.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ElderlyAssistant.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E3ABF1E7E6E221112999571F /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		EC9012024C4815BFC474C722 /* TranscriptSanityGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSanityGuard.swift; sourceTree = "<group>"; };
 		F034BA7E282AAE5BE838BE8F /* InputSanitiser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSanitiser.swift; sourceTree = "<group>"; };
@@ -210,6 +220,7 @@
 			children = (
 				7DDF55B3BBF81B10A9E7B21F /* ElderlyAssistant */,
 				EAA2EE60AA1C50B2F502C77E /* ElderlyAssistantTests */,
+				DFA5957912EBDD950A4CB4DA /* ElderlyAssistantUITests */,
 				BC857D1BA3EF841D00FB2AF4 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -268,6 +279,7 @@
 			children = (
 				E0D51BFE01BE4E11E7CA840E /* ElderlyAssistant.app */,
 				0079B2DA884AD6CEC405B03C /* ElderlyAssistantTests.xctest */,
+				8B5BB54D9A2270F690D50B65 /* ElderlyAssistantUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -313,6 +325,14 @@
 				426B00DB54390C484D152534 /* WhisperSpeechRecognizer.swift */,
 			);
 			path = Voice;
+			sourceTree = "<group>";
+		};
+		DFA5957912EBDD950A4CB4DA /* ElderlyAssistantUITests */ = {
+			isa = PBXGroup;
+			children = (
+				B871A07DB2851ECD2A47836D /* ElderlyAssistantUITests.swift */,
+			);
+			path = ElderlyAssistantUITests;
 			sourceTree = "<group>";
 		};
 		E0942917D161FFBAE466E71F /* App */ = {
@@ -380,6 +400,24 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		36E854FB6B15BEC4FE4ACBFB /* ElderlyAssistantUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1273027821719A76DAFD0DEA /* Build configuration list for PBXNativeTarget "ElderlyAssistantUITests" */;
+			buildPhases = (
+				8EFE0E3B39C8FB24C6F4B7BA /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D04BD76913FD0050039ECBD4 /* PBXTargetDependency */,
+			);
+			name = ElderlyAssistantUITests;
+			packageProductDependencies = (
+			);
+			productName = ElderlyAssistantUITests;
+			productReference = 8B5BB54D9A2270F690D50B65 /* ElderlyAssistantUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		9967E45A189F990A572818AA /* ElderlyAssistant */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 5AA32E54ED416816598D5D4B /* Build configuration list for PBXNativeTarget "ElderlyAssistant" */;
@@ -428,8 +466,12 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
-					9967E45A189F990A572818AA = {
+					36E854FB6B15BEC4FE4ACBFB = {
 						DevelopmentTeam = BUKS428XA3;
+						ProvisioningStyle = Automatic;
+						TestTargetID = 9967E45A189F990A572818AA;
+					};
+					9967E45A189F990A572818AA = {
 						ProvisioningStyle = Automatic;
 					};
 					DD44C866B90F5DD4A561A04E = {
@@ -448,7 +490,7 @@
 			mainGroup = 933D20AA23A788790BFBF3D0;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM.swift" */,
+				6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM" */,
 				7B16D8138C2ED1D8657D75EC /* XCRemoteSwiftPackageReference "SwiftWhisper" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -458,6 +500,7 @@
 			targets = (
 				9967E45A189F990A572818AA /* ElderlyAssistant */,
 				DD44C866B90F5DD4A561A04E /* ElderlyAssistantTests */,
+				36E854FB6B15BEC4FE4ACBFB /* ElderlyAssistantUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -523,6 +566,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		8EFE0E3B39C8FB24C6F4B7BA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A210B049A6DCC42049F7BD09 /* ElderlyAssistantUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		AA46568A664D5F471CD93E05 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -552,6 +603,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		D04BD76913FD0050039ECBD4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9967E45A189F990A572818AA /* ElderlyAssistant */;
+			targetProxy = 98B291BA129498195F4522BC /* PBXContainerItemProxy */;
+		};
 		EFF73D9F761CB6FD5D31670B /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 9967E45A189F990A572818AA /* ElderlyAssistant */;
@@ -719,11 +775,29 @@
 			};
 			name = Debug;
 		};
+		6D1988D698A665C7726CB179 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.elderlyassistant.app.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = ElderlyAssistant;
+			};
+			name = Release;
+		};
 		7542A3C41B25B5B324990BDC /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = BKXWPS4X87;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ElderlyAssistant/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -743,6 +817,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = BKXWPS4X87;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ElderlyAssistant/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -757,9 +832,35 @@
 			};
 			name = Debug;
 		};
+		9A0DBDAD60775F22C6CFF5BE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.elderlyassistant.app.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = ElderlyAssistant;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		1273027821719A76DAFD0DEA /* Build configuration list for PBXNativeTarget "ElderlyAssistantUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9A0DBDAD60775F22C6CFF5BE /* Debug */,
+				6D1988D698A665C7726CB179 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		2D10CA6CF225346C3FD27F0C /* Build configuration list for PBXNativeTarget "ElderlyAssistantTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -790,7 +891,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM.swift" */ = {
+		6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/eastriverlee/LLM.swift";
 			requirement = {
@@ -811,7 +912,7 @@
 /* Begin XCSwiftPackageProductDependency section */
 		785605133017A7EB4690010A /* LLM */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM.swift" */;
+			package = 6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM" */;
 			productName = LLM;
 		};
 		8A067B2B3D4535E50D1CCB35 /* SwiftWhisper */ = {

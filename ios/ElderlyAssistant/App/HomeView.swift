@@ -23,7 +23,6 @@ struct HomeView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @EnvironmentObject var session: VoiceSessionStateMachine
 
-    @State private var leaf: LeafDestination?
     @State private var showWizard = false
 
     var body: some View {
@@ -46,11 +45,11 @@ struct HomeView: View {
                 }
             }
             .navigationBarHidden(true)
-            .navigationDestination(isPresented: leafPresented) {
-                if let leaf {
-                    leafView(for: leaf)
-                }
-            }
+            // Value-based navigation (iOS 16 pattern). The previous
+            // navigationDestination(isPresented:) with a derived binding
+            // is fragile — it silently fails to present on some iOS 16
+            // builds, which presented as "hub buttons do nothing".
+            .navigationDestination(for: LeafDestination.self) { leafView(for: $0) }
             .fullScreenCover(isPresented: $showWizard) {
                 OnboardingWizardView(startingAt: coordinator.onboardingState.firstPendingStep)
                     .environmentObject(coordinator)
@@ -58,13 +57,6 @@ struct HomeView: View {
                     .environment(\.locale, coordinator.appLanguage.locale)
             }
         }
-    }
-
-    private var leafPresented: Binding<Bool> {
-        Binding(
-            get: { leaf != nil },
-            set: { if !$0 { leaf = nil } }
-        )
     }
 
     // MARK: - Sections
@@ -187,9 +179,7 @@ struct HomeView: View {
 
     private func hubCard(_ destination: LeafDestination,
                          icon: String, titleKey: String) -> some View {
-        Button {
-            leaf = destination
-        } label: {
+        NavigationLink(value: destination) {
             VStack(spacing: 10) {
                 Image(systemName: icon)
                     .font(.system(size: 34))

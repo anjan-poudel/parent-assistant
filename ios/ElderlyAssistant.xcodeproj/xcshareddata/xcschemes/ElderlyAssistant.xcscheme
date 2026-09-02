@@ -64,6 +64,17 @@
                ReferencedContainer = "container:ElderlyAssistant.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "36E854FB6B15BEC4FE4ACBFB"
+               BuildableName = "ElderlyAssistantUITests.xctest"
+               BlueprintName = "ElderlyAssistantUITests"
+               ReferencedContainer = "container:ElderlyAssistant.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

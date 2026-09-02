@@ -139,6 +139,14 @@ final class VoicePipeline {
     // MARK: - Tap installation
 
     private func installMicTap() throws {
+        // Accessing inputNode when the audio server is unresponsive
+        // ABORTS the process (AudioToolbox _ReportRPCTimeout — seen on
+        // the simulator 2026-09-02). Fail gracefully instead.
+        guard audioSession.isInputAvailable else {
+            throw NSError(domain: "VoicePipeline", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey:
+                                     "no audio input available"])
+        }
         let input = audioEngine.inputNode
         let hardwareFormat = input.outputFormat(forBus: 0)
 
