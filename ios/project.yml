@@ -19,7 +19,7 @@ settings:
   base:
     SWIFT_VERSION: "5.9"
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: "BUKS428XA3"
     CODE_SIGN_STYLE: Automatic
     ENABLE_USER_SCRIPT_SANDBOXING: YES
 
@@ -55,8 +55,12 @@ targets:
         excludes:
           - "Info.plist"
           - "Resources"
-    resources:
+      # String Catalog — a resources build phase is NOT auto-assigned to a
+      # single-file `resources:` entry, so declare it as a source with an
+      # explicit buildPhase. Without this the catalog never lands in the
+      # app bundle and every Text("key") renders as the raw key.
       - path: ElderlyAssistant/Resources/Localizable.xcstrings
+        buildPhase: resources
     # Do NOT add an `info:` block here — that would make XcodeGen overwrite
     # ElderlyAssistant/Info.plist on every `./build.sh generate`, wiping the
     # real permission descriptions and BGTaskScheduler identifiers. Instead,
