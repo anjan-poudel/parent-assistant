@@ -149,10 +149,11 @@ final class AppCoordinator: ObservableObject {
     /// model-picker decision) but last so it never blocks the
     /// LLM/TTS downloads; it can be cancelled from the UI.
     let requiredModelIds: [ModelID] = [
-        ModelCatalog.whisperSmallNepali,
+        ModelCatalog.whisperFinetunedNepali,
         ModelCatalog.whisperSmallMultilingual,
         ModelCatalog.llama3_2_1B,
         ModelCatalog.piperNepali,
+        ModelCatalog.whisperFinetunedNepaliQ8,
         ModelCatalog.whisperLargeV3Nepali
     ]
 
@@ -229,9 +230,14 @@ final class AppCoordinator: ObservableObject {
         // pushes it to the recognizer and refreshes the label. Unknown
         // IDs (a model removed from the catalog, or a bad stored value)
         // are ignored so a stale preference can't wedge the picker.
+        // Migration: the mid-training distill is superseded by the
+        // stage-4 fine-tune.
         if let raw = UserDefaults.standard.string(forKey: Self.sttPreferenceKey),
            ModelCatalog.entry(for: ModelID(rawValue: raw)) != nil {
-            self.sttModelPreference = ModelID(rawValue: raw)
+            let stored = ModelID(rawValue: raw)
+            self.sttModelPreference = (stored == ModelCatalog.whisperSmallNepali)
+                ? ModelCatalog.whisperFinetunedNepali
+                : stored
         }
 
         // C12: the confirmation challenge expires — clear the pending entry
@@ -530,6 +536,10 @@ final class AppCoordinator: ObservableObject {
     /// Catalog key naming the active STT (resolved in the UI's locale).
     private func sttNameKey(for id: ModelID?) -> String {
         switch id {
+        case ModelCatalog.whisperFinetunedNepali:
+            return "stt.name.whisperFinetunedNepali"
+        case ModelCatalog.whisperFinetunedNepaliQ8:
+            return "stt.name.whisperFinetunedNepaliQ8"
         case ModelCatalog.whisperSmallNepali:
             return "stt.name.whisperNepaliSmall"
         case ModelCatalog.whisperLargeV3Nepali:

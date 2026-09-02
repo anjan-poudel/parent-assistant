@@ -2004,6 +2004,20 @@
         }
       }
     },
+    "model.name.whisper-finetuned-ne-q5_1" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Nepali speech recognition (small, fine-tuned)" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "नेपाली आवाज पहिचान (सानो, फाइनट्युन्ड)" } }
+      }
+    },
+    "model.name.whisper-finetuned-ne-q8_0" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Nepali speech recognition (small, fine-tuned, high quality)" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "नेपाली आवाज पहिचान (सानो, फाइनट्युन्ड, उच्च गुणस्तर)" } }
+      }
+    },
     "model.name.whisper-distill-ne-q5_1" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2065,6 +2079,20 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "SFSpeechRecognizer (English fallback)" } },
         "ne" : { "stringUnit" : { "state" : "translated", "value" : "SFSpeechRecognizer (अंग्रेजी फलब्याक)" } }
+      }
+    },
+    "stt.name.whisperFinetunedNepali" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Whisper (Nepali small, fine-tuned)" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "Whisper (नेपाली सानो, फाइनट्युन्ड)" } }
+      }
+    },
+    "stt.name.whisperFinetunedNepaliQ8" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Whisper (Nepali small, fine-tuned q8)" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "Whisper (नेपाली सानो, फाइनट्युन्ड q8)" } }
       }
     },
     "stt.name.whisperNepaliSmall" : {
