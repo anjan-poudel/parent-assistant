@@ -14,7 +14,9 @@ final class AppCoordinator: ObservableObject {
     @Published var isInitialized = false
     @Published var voiceState: VoicePipeline.State = .stopped
     @Published var voiceError: String?
-    @Published var activeSTTName: String = "SFSpeechRecognizer (English fallback)"
+    /// Catalog KEY naming the active STT — resolved in the UI's locale
+    /// (spec §3.2; no hardcoded English labels).
+    @Published var activeSTTNameKey: String = "stt.name.sfs"
 
     /// Active display/spoken language (spec §3.2). Single source of truth
     /// for the `.locale` injected at the app root; persisted in UserDefaults.
@@ -84,6 +86,7 @@ final class AppCoordinator: ObservableObject {
     /// is derived, not a pipeline state.
     private var lastPipelineState: VoicePipeline.State = .stopped
     private var speakingCount = 0
+    private var voiceWatchdog: DispatchWorkItem?
 
     /// `start()` is idempotent — the onboarding wizard and Home both call
     /// it (spec §4.2: wizard runs before voice engages).
@@ -305,17 +308,59 @@ final class AppCoordinator: ObservableObject {
         switch state {
         case .stopped:
             voiceSession.transition(to: .stopped)
+            cancelVoiceWatchdog()
         case .idle:
             voiceSession.transition(to: speakingCount > 0 ? .speaking : .idle)
+            cancelVoiceWatchdog()
         case .capturingCommand:
             voiceSession.transition(to: .listening)
+            armVoiceWatchdog()
         case .processing:
             voiceSession.transition(to: .transcribing)
         case .routing:
             voiceSession.transition(to: .understanding)
         case .error:
             voiceSession.transition(to: .error)
+            cancelVoiceWatchdog()
         }
+    }
+
+    // MARK: - Voice cycle watchdog ("stuck in listening" guard)
+
+    /// Arms a watchdog when a talk cycle starts. Normal cycles complete in
+    /// <10s (5s STT timeout + routing + TTS). If the session is still
+    /// listening/transcribing/understanding after 15s, something wedged —
+    /// recycle the pipeline and re-prompt instead of staying stuck.
+    private func armVoiceWatchdog() {
+        cancelVoiceWatchdog()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            switch self.voiceSession.state {
+            case .listening, .transcribing, .understanding:
+                print("[AppCoordinator] voice cycle watchdog fired — recycling pipeline")
+                self.voicePipeline?.stop()
+                self.voicePipeline?.start { [weak self] result in
+                    guard let self else { return }
+                    switch result {
+                    case .success:
+                        self.voiceState = .idle
+                    case .failure(let err):
+                        self.voiceError = "\(err)"
+                        self.voiceState = .error("\(err)")
+                    }
+                }
+                self.speak(key: "router.reprompt")
+            default:
+                break
+            }
+        }
+        voiceWatchdog = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: work)
+    }
+
+    private func cancelVoiceWatchdog() {
+        voiceWatchdog?.cancel()
+        voiceWatchdog = nil
     }
 
     /// Called by `CommandRouter` when a speak begins/ends — drives the
@@ -378,27 +423,28 @@ final class AppCoordinator: ObservableObject {
         whisperSpeechRecognizer.currentModelID()
     }
 
-    /// Keeps `activeSTTName` honest: explicit pick first, then whatever
+    /// Keeps `activeSTTNameKey` honest: explicit pick first, then whatever
     /// the recognizer would auto-select, then the SFSpeech fallback.
     private func updateActiveSTTName() {
         let resolved = sttModelPreference
             .flatMap { modelStore.isCached($0) ? $0 : nil }
             ?? whisperSpeechRecognizer.currentModelID()
-        activeSTTName = sttName(for: resolved)
+        activeSTTNameKey = sttNameKey(for: resolved)
     }
 
-    private func sttName(for id: ModelID?) -> String {
+    /// Catalog key naming the active STT (resolved in the UI's locale).
+    private func sttNameKey(for id: ModelID?) -> String {
         switch id {
         case ModelCatalog.whisperSmallNepali:
-            return "Whisper (Nepali small, distilled)"
+            return "stt.name.whisperNepaliSmall"
         case ModelCatalog.whisperLargeV3Nepali:
-            return "Whisper (Nepali large v3)"
+            return "stt.name.whisperLargeNepali"
         case ModelCatalog.whisperSmallMultilingual:
-            return "Whisper (multilingual fallback)"
+            return "stt.name.whisperMultilingual"
         case ModelCatalog.whisperBaseEn:
-            return "Whisper (English)"
+            return "stt.name.whisperEnglish"
         default:
-            return "SFSpeechRecognizer (English fallback)"
+            return "stt.name.sfs"
         }
     }
 

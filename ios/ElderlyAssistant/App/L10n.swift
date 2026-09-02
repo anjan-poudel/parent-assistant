@@ -17,3 +17,15 @@ enum L10n {
         return String(format: format, arguments: arguments)
     }
 }
+
+extension ModelCatalogEntry {
+    /// Localized model display name: catalog key `model.name.<id>`
+    /// resolved in `locale`; falls back to the English `displayName` for
+    /// models without a catalog entry (spec §3.2 — no hardcoded English
+    /// in the UI).
+    func displayName(locale: Locale) -> String {
+        let key = "model.name.\(id.rawValue)"
+        let value = L10n.str(key, locale: locale)
+        return value == key ? displayName : value
+    }
+}

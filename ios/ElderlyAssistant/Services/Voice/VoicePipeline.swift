@@ -243,9 +243,16 @@ final class VoicePipeline {
         // capturingCommand, the STT's own timeout has fired finish() and
         // is now grinding through inference. Flip the state so the UI
         // stops saying "Listening for your command…".
+        //
+        // AND force the recognizer to produce its completion: a recognizer
+        // that hangs without honouring its timeout (SFSpeech waiting on
+        // its on-device model, Whisper push-mode without a VAD end) would
+        // otherwise wedge the pipeline in this state forever ("stuck in
+        // listening"). cancel() triggers the completion path.
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.1) { [weak self] in
             guard let self, self.state == .capturingCommand else { return }
             self.state = .processing
+            self.speechRecognizer.cancel()
         }
 
         speechRecognizer.startListening(timeout: 5.0) { [weak self] result in

@@ -408,7 +408,8 @@ struct AIModelsSettingsView: View {
                             Text("settings.ai.automatic").tag(Optional<ModelID>.none)
                             ForEach(cachedWhisperModels, id: \.rawValue) { id in
                                 if let entry = ModelCatalog.entry(for: id) {
-                                    Text(entry.displayName).tag(Optional(id))
+                                    Text(entry.displayName(locale: coordinator.appLanguage.locale))
+                                        .tag(Optional(id))
                                 }
                             }
                         }
@@ -449,7 +450,8 @@ struct AIModelsSettingsView: View {
                         Image(systemName: "waveform.badge.magnifyingglass")
                             .foregroundColor(DesignTokens.textSecondary)
                         Text(L10n.fmt("model.sttInUse", locale: coordinator.appLanguage.locale,
-                                     coordinator.activeSTTName))
+                                     L10n.str(coordinator.activeSTTNameKey,
+                                              locale: coordinator.appLanguage.locale)))
                             .font(.system(size: DesignTokens.minCaptionPointSize))
                             .foregroundColor(DesignTokens.textSecondary)
                     }
@@ -484,7 +486,7 @@ private struct ModelManagementRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(entry.displayName)
+                Text(entry.displayName(locale: locale))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
                 Spacer()

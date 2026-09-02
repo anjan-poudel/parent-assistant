@@ -427,7 +427,7 @@ private struct ModelProgressRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(entry.displayName)
+            Text(entry.displayName(locale: locale))
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                 .foregroundColor(DesignTokens.textPrimary)
             switch state {
