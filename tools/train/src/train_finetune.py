@@ -40,6 +40,9 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--grad-accum", type=int, default=None)
     parser.add_argument("--lr", type=float, default=None)
+    parser.add_argument("--fleurs-weight", type=int, default=None,
+                        help="duplicate FLEURS-train rows N times to upweight "
+                             "conversational speech vs SLR54 read speech")
     parser.add_argument("--no-resume", action="store_true")
     args, cfg = load_config(parser)
     cfg = apply_common(cfg, args)
@@ -61,7 +64,25 @@ def main() -> None:
     manifest = "smoke-manifest.jsonl" if args.smoke else "manifest.jsonl"
     ds = prepare_dataset(data_dir / manifest, processor,
                          data_dir / "cache", include_labels=True)
-    print(f"fine-tune set: {len(ds)} rows")
+    if args.fleurs_weight and args.fleurs_weight > 1 and not args.smoke:
+        # FLEURS is conversational multi-speaker speech; SLR54 is clean
+        # read speech and dominates ~97% of the manifest, so the model
+        # overfits the clean distribution (fine-tune v1: train loss
+        # 0.118 but held-out WER only 63.6 -> 59.2). Duplicate FLEURS
+        # rows to rebalance the mix. Rows are identified by id prefix —
+        # no cache invalidation needed.
+        import numpy as np
+        from datasets import concatenate_datasets
+
+        is_fleurs = np.array([rid.startswith("fleurs-") for rid in ds["id"]])
+        fleurs_idx = np.nonzero(is_fleurs)[0].tolist()
+        rest_idx = np.nonzero(~is_fleurs)[0].tolist()
+        parts = [ds.select(rest_idx)] + [ds.select(fleurs_idx)] * args.fleurs_weight
+        ds = concatenate_datasets(parts)
+        print(f"fine-tune set: {len(ds)} rows "
+              f"(FLEURS x{args.fleurs_weight} upweighted)")
+    else:
+        print(f"fine-tune set: {len(ds)} rows")
 
     batch = args.batch_size or int(cfg["finetune.batch_size"])
     accum = args.grad_accum or int(cfg["finetune.grad_accum"])
