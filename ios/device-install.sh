@@ -19,8 +19,10 @@ echo "[1/4] Regenerating project from project.yml..."
 xcodegen generate >/dev/null
 
 echo "[2/4] Finding connected iPhone..."
+# Device state varies: "available (paired)" when fully paired,
+# "connected" when freshly attached/locked — accept both.
 DEVICE_ID="$(xcrun devicectl list devices 2>/dev/null \
-    | awk '/available \(paired\)/ {print $3; exit}')"
+    | awk '/available \(paired\)|connected/ {print $3; exit}')"
 if [ -z "$DEVICE_ID" ]; then
     echo "ERROR: no paired iPhone found. Plug it in and tap Trust."
     exit 1
