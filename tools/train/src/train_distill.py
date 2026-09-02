@@ -184,6 +184,7 @@ def main() -> None:
     parser.add_argument("--pseudolabel-only", action="store_true")
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--grad-accum", type=int, default=None)
     parser.add_argument("--lr", type=float, default=None)
     parser.add_argument("--student-init", type=str, default=None,
                         help="override path to stage-2 student init")
@@ -268,7 +269,7 @@ def main() -> None:
     train_args = TrainingArguments(
         output_dir=str(out_dir),
         per_device_train_batch_size=args.batch_size or int(cfg["distill.batch_size"]),
-        gradient_accumulation_steps=int(cfg["distill.grad_accum"]),
+        gradient_accumulation_steps=args.grad_accum or int(cfg["distill.grad_accum"]),
         learning_rate=args.lr if args.lr is not None else float(cfg["distill.lr"]),
         warmup_steps=int(cfg["distill.warmup_steps"]),
         max_steps=args.max_steps or int(cfg["distill.max_steps"]),
