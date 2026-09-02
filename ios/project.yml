@@ -54,7 +54,9 @@ targets:
       - path: ElderlyAssistant
         excludes:
           - "Info.plist"
-    resources: []
+          - "Resources"
+    resources:
+      - path: ElderlyAssistant/Resources/Localizable.xcstrings
     # Do NOT add an `info:` block here — that would make XcodeGen overwrite
     # ElderlyAssistant/Info.plist on every `./build.sh generate`, wiping the
     # real permission descriptions and BGTaskScheduler identifiers. Instead,

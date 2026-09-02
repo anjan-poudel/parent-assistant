@@ -10,8 +10,7 @@ final class CommandRouterTests: XCTestCase {
         let router = CommandRouter(
             coordinator: coordinator,
             observabilityBus: MockObservabilityBus(),
-            speaker: MockSpeaker(),
-            replyLocale: Locale(identifier: "ne-NP")
+            speaker: MockSpeaker()
         )
 
         let result = router.route(transcript: "मैले औषधि खाएँ")
@@ -29,8 +28,7 @@ final class CommandRouterTests: XCTestCase {
         let router = CommandRouter(
             coordinator: coordinator,
             observabilityBus: bus,
-            speaker: speaker,
-            replyLocale: Locale(identifier: "ne-NP")
+            speaker: speaker
         )
 
         let result = router.route(transcript: "छोरालाई फोन गर")
@@ -52,6 +50,9 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
     var confirmationResponses: [ConfirmationResponse] = []
     var confirmationPrompt: String? = "के तपाईंले औषधि अहिले लिनुभएको हो?"
     var isAwaitingConfirmation = false
+    var addedReminders: [(title: String, time: DateComponents)] = []
+
+    var activeLocale: Locale { Locale(identifier: "ne-NP") }
 
     func recordTranscript(_ text: String) {
         recordedTranscripts.append(text)
@@ -74,6 +75,14 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
     func handleConfirmationResponse(_ response: ConfirmationResponse) {
         confirmationResponses.append(response)
         isAwaitingConfirmation = false
+    }
+
+    func noteSpeakingStarted() {}
+    func noteSpeakingEnded() {}
+    func noteAssistantSpoke(_ text: String) {}
+
+    func addVoiceReminder(title: String, time: DateComponents) {
+        addedReminders.append((title, time))
     }
 }
 

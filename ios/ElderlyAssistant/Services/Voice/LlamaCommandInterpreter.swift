@@ -5,18 +5,21 @@ import LLM
 
 /// LLM-driven interpretation of a transcript into a structured command.
 ///
-/// Runs LLaMA 3.2 (1B or 3B) on-device via llama.cpp with GBNF grammar
-/// constraint so the output is *always* well-formed JSON matching the
-/// schema below. That eliminates a whole class of production bugs (partial
-/// output, hallucinated fields, wrong casing) and is the reason we use a
-/// small LLM here at all — an intent classifier can't handle the indirect,
-/// underspecified, code-switched utterances elderly users produce.
+/// Runs LLaMA 3.2 (1B or 3B) on-device via llama.cpp. The GBNF grammar
+/// below is the single source of truth for the JSON schema; LLM.swift does
+/// not expose sampler-level grammar constraints, so well-formedness is
+/// enforced here by strict decoding against the same schema plus a
+/// defensive JSON-object extraction — and any parse failure falls back to
+/// the router's keyword layer (review H2's "enforce or drop the claim":
+/// the claim is enforced as output validation, and the grammar stays
+/// unit-tested as the schema definition).
 ///
 /// The interpreter sits BEHIND `CommandRouter`. Router calls it first;
 /// falls back to keyword matching on:
 ///   - interpreter unavailable (model not cached, runtime not linked)
 ///   - confidence < confidenceThreshold
-///   - JSON somehow doesn't parse (defensive — GBNF should make it moot)
+///   - inference timeout (spec §5.2 — new failure path, default 10s)
+///   - JSON doesn't parse (defensive)
 protocol CommandInterpreter: AnyObject {
     var isAvailable: Bool { get }
     /// Interpret a transcript. Nil result = "I couldn't parse this,
@@ -33,33 +36,49 @@ struct InterpreterContext {
     let userLanguageHint: String       // "ne" or "en"
 }
 
-/// Structured command emitted by the LLM. Matches the GBNF grammar exactly.
+/// Structured command emitted by the LLM. Matches the GBNF grammar exactly
+/// (spec §5.1 catalog, §5.2 entities).
 struct InterpretedCommand: Equatable {
     enum Action: String, Codable {
         case ackMed = "ack_med"
         case call
+        case emergency
+        case setReminder = "set_reminder"
+        case healthQuery = "health_query"
+        case music
         case query
         case none
     }
     let action: Action
     let entryId: String?
     let contact: String?
+    /// Entity: a time expression as spoken ("बिहान ८ बजे", "8:00") —
+    /// resolved by `NepaliTimeParser` in the `set_reminder` handler.
+    let time: String?
+    /// Entity: medication name, matched against the scheduler's list by
+    /// the handler when available.
+    let medication: String?
     let confidence: Double
     let reply: String
 }
 
 // MARK: - GBNF grammar
 
-/// The llama.cpp grammar handed to the sampler. Kept as source so it can be
-/// unit-tested and version-bumped alongside the schema.
+/// The llama.cpp grammar handed to the sampler where the runtime supports
+/// it. Kept as source so it can be unit-tested and version-bumped
+/// alongside the schema.
 enum LlamaGrammar {
     static let commandJSON: String = """
     root   ::= "{" ws "\\"action\\"" ws ":" ws action ws "," ws
                     "\\"entryId\\"" ws ":" ws maybeString ws "," ws
                     "\\"contact\\"" ws ":" ws maybeString ws "," ws
+                    "\\"time\\"" ws ":" ws maybeString ws "," ws
+                    "\\"medication\\"" ws ":" ws maybeString ws "," ws
                     "\\"confidence\\"" ws ":" ws number ws "," ws
                     "\\"reply\\"" ws ":" ws string ws "}"
-    action ::= "\\"ack_med\\"" | "\\"call\\"" | "\\"query\\"" | "\\"none\\""
+    action ::= "\\"ack_med\\"" | "\\"call\\"" | "\\"emergency\\""
+             | "\\"set_reminder\\"" | "\\"health_query\\"" | "\\"music\\""
+             | "\\"query\\"" | "\\"none\\""
     maybeString ::= "null" | string
     string ::= "\\"" ([^"\\\\] | "\\\\" .)* "\\""
     number ::= ("0" | [1-9][0-9]*) ("." [0-9]+)?
@@ -93,9 +112,14 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         let confidenceThreshold: Double
         let maxTokens: Int
         let temperature: Float
+        /// Inference timeout (spec §5.2, review H2). On expiry the
+        /// interpreter reports nil so the router falls back to keyword
+        /// matching — this is a NEW failure path, not preserved behavior.
+        let timeoutSeconds: Double
         static let `default` = Config(confidenceThreshold: 0.7,
                                       maxTokens: 128,
-                                      temperature: 0.2)
+                                      temperature: 0.2,
+                                      timeoutSeconds: 10)
     }
 
     private let modelStore: ModelStore
@@ -156,7 +180,14 @@ final class LlamaCommandInterpreter: CommandInterpreter {
             DispatchQueue.main.async { completion(nil) }
             return
         }
-        let prompt = Self.buildPrompt(transcript: transcript, context: context)
+        // Sanitise BEFORE the transcript reaches any prompt string
+        // (NFR-013 / review H3 / spec §5.2).
+        let clean = InputSanitiser.sanitise(transcript, level: .quarantine)
+        guard !clean.isEmpty else {
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
+        let prompt = Self.buildPrompt(transcript: clean, context: context)
 
         inferenceQueue.async { [weak self] in
             self?.runInference(prompt: prompt) { json in
@@ -186,17 +217,23 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         The user's pending medications are: \(meds).
         The user's language hint is: \(context.userLanguageHint).
         Reply with a single JSON object matching the tool schema.
-        Set action to "ack_med" if the user is confirming they took their
-        medication, "call" if they want to make a call, "query" if they are
-        asking a question, otherwise "none". Set entryId and contact to null
-        unless you can identify a specific target. Set confidence to your
-        certainty in [0, 1]. Set reply to a short response in the user's
-        language.
+        Set action to "ack_med" if the user confirms they took medication,
+        "emergency" if they ask for help in an emergency, "call" if they
+        want to make a call, "set_reminder" if they want a reminder at a
+        time, "health_query" if they ask about their health, "music" if
+        they ask for a song or bhajan, "query" for any other question,
+        otherwise "none".
+        For "set_reminder", set time to the time expression they used
+        (keep the original wording, e.g. "बिहान ८ बजे") and medication to
+        the medication name if mentioned, else null.
+        Set entryId and contact to null unless you can identify a specific
+        target. Set confidence to your certainty in [0, 1]. Set reply to a
+        short response in the user's language.
         User said: "\(transcript)"
         """
     }
 
-    // MARK: - Inference (guarded)
+    // MARK: - Inference (guarded, with timeout — spec §5.2)
 
     private func runInference(prompt: String,
                               completion: @escaping (String?) -> Void) {
@@ -265,19 +302,28 @@ final class LlamaCommandInterpreter: CommandInterpreter {
 
         """
 
-        Task { [weak self] in
-            let output = await llm.getCompletion(from: formattedPrompt)
-            let preview = output.replacingOccurrences(of: "\n", with: " ")
-                .prefix(160)
-            self?.observabilityBus.emit(ObservabilityEvent(
-                component: "llama_interpreter",
-                eventType: "inference_done",
-                durationMs: nil,
-                outcome: "success",
-                errorCode: nil,
-                metadata: ["state": String(preview)]
-            ))
-            completion(output)
+        Task {
+            await withTaskGroup(of: String??.self) { group in
+                group.addTask {
+                    await llm.getCompletion(from: formattedPrompt) as String??
+                }
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: UInt64(self.config.timeoutSeconds * 1_000_000_000))
+                    return nil
+                }
+                // First result wins; on timeout the sleep task returns nil
+                // first and the interpreter reports "not confident" so the
+                // router falls back to keyword matching.
+                let result = await group.next() ?? nil
+                group.cancelAll()
+                if let output = (result ?? nil) as? String?, let output {
+                    emit("inference_done", outcome: "success")
+                    completion(output)
+                } else {
+                    emit("inference_timeout", outcome: "failure")
+                    completion(nil)
+                }
+            }
         }
         #else
         _ = prompt
@@ -304,6 +350,8 @@ final class LlamaCommandInterpreter: CommandInterpreter {
                 action: action,
                 entryId: decoded.entryId,
                 contact: decoded.contact,
+                time: decoded.time,
+                medication: decoded.medication,
                 confidence: clamped,
                 reply: decoded.reply
             )
@@ -349,12 +397,16 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         let action: String
         let entryId: String?
         let contact: String?
+        let time: String?
+        let medication: String?
         let confidence: Double
         let reply: String
     }
 
     // MARK: - Observability
 
+    /// Emits an event with NO transcript or output content — review C9:
+    /// metadata must not carry transcript-derived PII.
     private func emit(_ eventType: String, outcome: String) {
         observabilityBus.emit(ObservabilityEvent(
             component: "llama_interpreter",

@@ -6,14 +6,38 @@ import Combine
 /// Central coordinator that wires all services together.
 /// Starts safety-critical services first (medication scheduler, health monitor),
 /// then voice pipeline, then LLM.
+///
+/// UI/UX spec (docs/superpowers/specs/2026-09-02-ui-ux-and-intents-design-claude.md):
+/// the coordinator is the composition root for `AppLanguage` (§3.2), the
+/// `VoiceSessionState` machine (§3.3), and `OnboardingState` (§4.2).
 final class AppCoordinator: ObservableObject {
     @Published var isInitialized = false
     @Published var voiceState: VoicePipeline.State = .stopped
     @Published var voiceError: String?
     @Published var activeSTTName: String = "SFSpeechRecognizer (English fallback)"
+
+    /// Active display/spoken language (spec §3.2). Single source of truth
+    /// for the `.locale` injected at the app root; persisted in UserDefaults.
+    @Published var appLanguage: AppLanguage {
+        didSet { appLanguage.persist() }
+    }
+
+    /// The locale every piece of non-View code (router speech, formatters)
+    /// resolves against.
+    var activeLocale: Locale { appLanguage.locale }
+
+    /// First-run onboarding progress (spec §4.2). Persisted per step.
+    let onboardingState = OnboardingState()
+
+    /// UI-facing voice session machine (spec §3.3). Mutations are confined
+    /// to the main queue (this class routes every published mutation
+    /// through `DispatchQueue.main.async` — review H1).
+    let voiceSession = VoiceSessionStateMachine()
+
     /// User's STT model pick from the UI. Nil = automatic selection.
     /// Persisted in UserDefaults (a UI preference, not a secret) and
     /// pushed to WhisperSpeechRecognizer so it survives restarts.
+    /// (Spec §4.4.4 — the Settings AI मोडेल section is this picker's home.)
     @Published var sttModelPreference: ModelID? {
         didSet {
             UserDefaults.standard.set(sttModelPreference?.rawValue,
@@ -23,11 +47,15 @@ final class AppCoordinator: ObservableObject {
         }
     }
     private static let sttPreferenceKey = "sttModelPreference"
+
+    /// Last user utterance and assistant reply — the Home conversation
+    /// card (spec §4.1.4).
     @Published var lastTranscript: String?
+    @Published var lastAssistantReply: String?
+
     /// While non-nil, a confirmation challenge is awaiting the user's
-    /// yes/no follow-up. Set by `startVoiceAckConfirmation` and cleared by
-    /// `handleConfirmationResponse`. Voice router uses this to route the
-    /// next transcript as a confirmation answer instead of a new command.
+    /// yes/no follow-up. Set by `startVoiceAckConfirmation`, cleared by
+    /// `handleConfirmationResponse` or the session-machine timeout (C12).
     @Published var pendingConfirmationEntryId: UUID?
 
     private let storage: EncryptedLocalStorage
@@ -35,6 +63,11 @@ final class AppCoordinator: ObservableObject {
     private let medicationScheduler: MedicationScheduler
     private let alarmScheduler: PlatformAlarmScheduler
     private let familyNotifier: APNsFamilyNotifier
+
+    /// Family contacts (spec §4.4.2) — persisted encrypted, feeds the
+    /// notifier whenever the list changes.
+    let familyContactStore: FamilyContactStore
+    @Published private(set) var familyContacts: [FamilyContact]
 
     // Voice
     private let audioEngine: AVAudioEngine
@@ -44,8 +77,19 @@ final class AppCoordinator: ObservableObject {
     private var voicePipeline: VoicePipeline!
     private var voiceStateCancellable: AnyCancellable?
     private var whisperSwapCancellable: AnyCancellable?
+    private var speaker: Speaker?
 
-    // Model store — exposed to ContentView for the first-run download UI.
+    /// Voice-session derivation state (spec §3.3): the last pipeline state
+    /// plus how many `speak()` calls are currently in flight. `speaking`
+    /// is derived, not a pipeline state.
+    private var lastPipelineState: VoicePipeline.State = .stopped
+    private var speakingCount = 0
+
+    /// `start()` is idempotent — the onboarding wizard and Home both call
+    /// it (spec §4.2: wizard runs before voice engages).
+    private var started = false
+
+    // Model store — exposed to the UI for download/selection surfaces.
     let modelStore: ModelStore
     let modelDownloadService: ModelDownloadService
     private let whisperSpeechRecognizer: WhisperSpeechRecognizer
@@ -73,8 +117,12 @@ final class AppCoordinator: ObservableObject {
         self.storage = KeychainEncryptedStorage()
         self.observabilityBus = bus
         self.alarmScheduler = UNNotificationScheduler()
+        let contactStore = FamilyContactStore(storage: storage)
+        self.familyContactStore = contactStore
+        let loadedContacts = contactStore.load()
+        self.familyContacts = loadedContacts
         self.familyNotifier = APNsFamilyNotifier(
-            contacts: [],
+            contacts: Self.emergencyContacts(from: loadedContacts),
             apnsProvider: APNsProvider()
         )
 
@@ -85,6 +133,10 @@ final class AppCoordinator: ObservableObject {
             observabilityBus: bus,
             familyNotifier: familyNotifier
         )
+
+        // Language — restore the persisted choice, defaulting to the Nepali
+        // pilot language (spec §3.2).
+        self.appLanguage = AppLanguage.persisted()
 
         // Model store + download service. First-run UI drives downloads
         // via `modelDownloadService`; the coordinator watches state changes
@@ -128,9 +180,23 @@ final class AppCoordinator: ObservableObject {
            ModelCatalog.entry(for: ModelID(rawValue: raw)) != nil {
             self.sttModelPreference = ModelID(rawValue: raw)
         }
+
+        // C12: the confirmation challenge expires — clear the pending entry
+        // and tell the user (spec §3.3). The machine already dispatches to
+        // main; keep this body main-safe regardless.
+        voiceSession.onConfirmationTimeout = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.pendingConfirmationEntryId = nil
+                self.speak(key: "router.confirmationTimeout")
+            }
+        }
     }
 
     func start() {
+        guard !started else { return }
+        started = true
+
         // Register background tasks (iOS)
         registerBackgroundTasks()
 
@@ -159,6 +225,7 @@ final class AppCoordinator: ObservableObject {
             fallback: systemSpeaker,
             observabilityBus: observabilityBus
         )
+        self.speaker = speaker
         // LLM interpreter. `isAvailable` stays false until (a) the model is
         // cached, (b) the llama.cpp SPM package is linked. Router treats
         // that as "fall through to keyword matching".
@@ -170,8 +237,7 @@ final class AppCoordinator: ObservableObject {
             coordinator: self,
             observabilityBus: observabilityBus,
             speaker: speaker,
-            interpreter: interpreter,
-            replyLocale: Locale(identifier: "ne-NP")
+            interpreter: interpreter
         )
         // Start with the fallback STT. Whisper is swapped in below when
         // (a) its model is cached AND (b) the whisper runtime is linked.
@@ -186,9 +252,17 @@ final class AppCoordinator: ObservableObject {
         )
         voiceStateCancellable = voicePipeline.$state
             .receive(on: DispatchQueue.main)
-            .assign(to: \.voiceState, on: self)
+            .sink { [weak self] state in
+                self?.handlePipelineState(state)
+            }
         voicePipeline.onSTTError = { [weak self] msg in
-            self?.lastTranscript = "⚠️ \(msg)"
+            guard let self else { return }
+            // Spec §7: error surfaces are localized, not raw pipeline text.
+            DispatchQueue.main.async {
+                self.voiceError = msg
+                self.lastTranscript = L10n.str("state.error.status",
+                                               locale: self.activeLocale)
+            }
         }
         voicePipeline.start { [weak self] result in
             guard let self else { return }
@@ -217,6 +291,74 @@ final class AppCoordinator: ObservableObject {
 
         isInitialized = true
         print("[AppCoordinator] Elderly AI Assistant started")
+    }
+
+    // MARK: - Voice session state (spec §3.3)
+
+    /// Maps pipeline states onto the UI session machine. `speaking` is
+    /// derived from the speaker lifecycle; `awaitingConfirmation` owns the
+    /// UI until yes/no/timeout (pipeline events don't clobber it).
+    private func handlePipelineState(_ state: VoicePipeline.State) {
+        lastPipelineState = state
+        voiceState = state
+        guard voiceSession.state != .awaitingConfirmation else { return }
+        switch state {
+        case .stopped:
+            voiceSession.transition(to: .stopped)
+        case .idle:
+            voiceSession.transition(to: speakingCount > 0 ? .speaking : .idle)
+        case .capturingCommand:
+            voiceSession.transition(to: .listening)
+        case .processing:
+            voiceSession.transition(to: .transcribing)
+        case .routing:
+            voiceSession.transition(to: .understanding)
+        case .error:
+            voiceSession.transition(to: .error)
+        }
+    }
+
+    /// Called by `CommandRouter` when a speak begins/ends — drives the
+    /// derived `speaking` state. Callers may be on any queue; mutations
+    /// are pinned to main (H1).
+    func noteSpeakingStarted() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.speakingCount += 1
+            self.handlePipelineState(self.lastPipelineState)
+        }
+    }
+
+    func noteSpeakingEnded() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.speakingCount = max(0, self.speakingCount - 1)
+            self.handlePipelineState(self.lastPipelineState)
+        }
+    }
+
+    /// Called by `CommandRouter` with the text being spoken so the Home
+    /// conversation card can show the assistant's reply (spec §4.1.4).
+    func noteAssistantSpoke(_ text: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.lastAssistantReply = text
+        }
+    }
+
+    /// Speaks a catalog key in the active language (used by the yes/no
+    /// chips and the confirmation timeout — router speech goes through the
+    /// same `speak` helper there).
+    func speak(key: String) {
+        guard let speaker else { return }
+        let text = L10n.str(key, locale: activeLocale)
+        guard !text.isEmpty else { return }
+        noteAssistantSpoke(text)
+        noteSpeakingStarted()
+        let locale = activeLocale
+        Task {
+            await speaker.speak(text, locale: locale)
+            self.noteSpeakingEnded()
+        }
     }
 
     /// Attempts to move the pipeline off the SFSpeechRecognizer fallback
@@ -260,16 +402,111 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    /// Called by CommandRouter with the raw transcript so ContentView can
-    /// display it. Avoids depending on the TTS/notification path for
-    /// visible feedback. Also drops the Whisper context — its ~1.5 GB
-    /// (large-v3) would otherwise stay resident while LLaMA runs and
-    /// crash llama.cpp's output buffer reservation on 6 GB devices.
+    /// Called by CommandRouter with the raw transcript so the Home
+    /// conversation card can display it. Avoids depending on the
+    /// TTS/notification path for visible feedback. Also drops the Whisper
+    /// context — its ~1.5 GB (large-v3) would otherwise stay resident
+    /// while LLaMA runs and crash llama.cpp's output buffer reservation
+    /// on 6 GB devices.
     func recordTranscript(_ text: String) {
         whisperSpeechRecognizer.releaseModel()
         DispatchQueue.main.async { [weak self] in
             self?.lastTranscript = text
         }
+    }
+
+    // MARK: - Family contacts (spec §4.4.2)
+
+    /// Maps stored family contacts onto the notifier's contact type.
+    /// Device tokens stay unprovisioned until the broker relay exists
+    /// (review C6) — the list itself is real and wired.
+    private static func emergencyContacts(from contacts: [FamilyContact]) -> [EmergencyContact] {
+        contacts.map {
+            EmergencyContact(
+                id: $0.id,
+                displayName: $0.name,
+                deviceToken: "",
+                isEmergencyContact: true,
+                isFamilyNotificationTarget: true
+            )
+        }
+    }
+
+    @discardableResult
+    func addFamilyContact(name: String, phone: String, relationship: String) -> Bool {
+        let contact = FamilyContact(name: name, phone: phone, relationship: relationship)
+        guard familyContactStore.add(contact) else { return false }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.familyContacts = self.familyContactStore.load()
+            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts))
+        }
+        return true
+    }
+
+    func removeFamilyContact(id: UUID) {
+        familyContactStore.remove(id: id)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.familyContacts = self.familyContactStore.load()
+            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts))
+        }
+    }
+
+    // MARK: - Medication schedule surface (spec §4.3, §4.4.3)
+
+    /// Reminders currently waiting (pending or fired, not yet completed).
+    var pendingReminders: [ScheduledReminder] { medicationScheduler.pendingReminders }
+
+    /// Configured medication entries — read-only view for the Settings
+    /// editor and the Meds leaf.
+    var medicationEntries: [MedicationEntry] { medicationScheduler.medicationEntries() }
+
+    func medicationName(for entryId: UUID) -> String {
+        medicationScheduler.medicationEntries()
+            .first { $0.id == entryId }?
+            .medicationName ?? ""
+    }
+
+    /// Adds or validates a medication schedule entry from the Settings
+    /// editor. Returns a catalog key on validation failure, nil on success.
+    /// Success persists via `loadSchedule` and re-arms alarms (spec §4.4.3).
+    @discardableResult
+    func addMedication(name: String, time: DateComponents) -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "settings.meds.nameRequired" }
+        let duplicate = medicationScheduler.medicationEntries().contains { entry in
+            entry.medicationName == trimmed && entry.scheduleTimes.contains(time)
+        }
+        guard !duplicate else { return "settings.meds.duplicateError" }
+
+        var entries = medicationScheduler.medicationEntries()
+        let entry = MedicationEntry(
+            id: UUID(),
+            userProfileId: UUID(),
+            medicationName: trimmed,
+            doseDescription: "",
+            scheduleTimes: [time],
+            frequency: .daily,
+            ackWindowMinutes: 5,
+            maxRefireCount: 5,
+            escalationWindowMinutes: 60,
+            doubleDoseWindowHours: 4,
+            photoVerificationEnabled: false,
+            confirmationDescription: nil
+        )
+        entries.append(entry)
+        medicationScheduler.loadSchedule(entries: entries)
+        medicationScheduler.scheduleAll()
+        return nil
+    }
+
+    /// Removes a medication entry and re-arms (spec §4.4.3).
+    func removeMedication(id: UUID) {
+        var entries = medicationScheduler.medicationEntries()
+        entries.removeAll { $0.id == id }
+        medicationScheduler.loadSchedule(entries: entries)
+        medicationScheduler.scheduleAll()
     }
 
     // MARK: - Public API for voice commands
@@ -302,6 +539,7 @@ final class AppCoordinator: ObservableObject {
         }
         DispatchQueue.main.async { [weak self] in
             self?.pendingConfirmationEntryId = entryId
+            self?.voiceSession.transition(to: .awaitingConfirmation)
         }
         return prompt
     }
@@ -309,7 +547,8 @@ final class AppCoordinator: ObservableObject {
     /// User's yes/no follow-up to a pending confirmation challenge.
     /// Routes through the scheduler's dementia path so the double-dose
     /// check fires and the log is written with `confirmationPassed`
-    /// reflecting reality.
+    /// reflecting reality. The session machine returns to idle (and its
+    /// timeout timer is cancelled — C12).
     func handleConfirmationResponse(_ response: ConfirmationResponse) {
         guard let entryId = pendingConfirmationEntryId else { return }
         _ = medicationScheduler.acknowledgeWithConfirmation(
@@ -319,6 +558,7 @@ final class AppCoordinator: ObservableObject {
         )
         DispatchQueue.main.async { [weak self] in
             self?.pendingConfirmationEntryId = nil
+            self?.voiceSession.transition(to: .idle)
         }
     }
 
@@ -332,6 +572,30 @@ final class AppCoordinator: ObservableObject {
             .sorted { $0.scheduledAt < $1.scheduledAt }
             .first?
             .medicationEntryId
+    }
+
+    /// Creates a reminder entry through the scheduler storage (spec §5.1,
+    /// `set_reminder`). Builds a `MedicationEntry` so the existing
+    /// scheduler handles alarm + escalation for it.
+    func addVoiceReminder(title: String, time: DateComponents) {
+        var entries = medicationScheduler.medicationEntries()
+        let entry = MedicationEntry(
+            id: UUID(),
+            userProfileId: UUID(),
+            medicationName: title,
+            doseDescription: "",
+            scheduleTimes: [time],
+            frequency: .daily,
+            ackWindowMinutes: 5,
+            maxRefireCount: 5,
+            escalationWindowMinutes: 60,
+            doubleDoseWindowHours: 4,
+            photoVerificationEnabled: false,
+            confirmationDescription: nil
+        )
+        entries.append(entry)
+        medicationScheduler.loadSchedule(entries: entries)
+        medicationScheduler.scheduleAll()
     }
 
     /// Called by the debug button in `ContentView` to test the pipeline

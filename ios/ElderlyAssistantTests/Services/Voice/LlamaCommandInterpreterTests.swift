@@ -90,12 +90,28 @@ final class LlamaCommandInterpreterTests: XCTestCase {
         XCTAssertTrue(g.contains("\\\"action\\\""))
         XCTAssertTrue(g.contains("\\\"entryId\\\""))
         XCTAssertTrue(g.contains("\\\"contact\\\""))
+        XCTAssertTrue(g.contains("\\\"time\\\""))
+        XCTAssertTrue(g.contains("\\\"medication\\\""))
         XCTAssertTrue(g.contains("\\\"confidence\\\""))
         XCTAssertTrue(g.contains("\\\"reply\\\""))
         // Actions enumerated exactly.
         XCTAssertTrue(g.contains("\\\"ack_med\\\""))
         XCTAssertTrue(g.contains("\\\"call\\\""))
+        XCTAssertTrue(g.contains("\\\"emergency\\\""))
+        XCTAssertTrue(g.contains("\\\"set_reminder\\\""))
+        XCTAssertTrue(g.contains("\\\"health_query\\\""))
+        XCTAssertTrue(g.contains("\\\"music\\\""))
         XCTAssertTrue(g.contains("\\\"query\\\""))
         XCTAssertTrue(g.contains("\\\"none\\\""))
+    }
+
+    func testParseExtractsTimeAndMedicationEntities() {
+        let json = """
+        {"action":"set_reminder","entryId":null,"contact":null,"time":"बिहान ८ बजे","medication":"प्रेसरको औषधि","confidence":0.92,"reply":"ठीक छ"}
+        """
+        let cmd = LlamaCommandInterpreter.parse(json: json)
+        XCTAssertEqual(cmd?.action, .setReminder)
+        XCTAssertEqual(cmd?.time, "बिहान ८ बजे")
+        XCTAssertEqual(cmd?.medication, "प्रेसरको औषधि")
     }
 }

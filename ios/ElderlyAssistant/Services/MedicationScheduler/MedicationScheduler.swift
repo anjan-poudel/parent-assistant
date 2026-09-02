@@ -30,6 +30,13 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         Array(pendingRemindersList.values).filter { $0.state != .completed }
     }
 
+    /// Configured medication entries — used by the Settings medication
+    /// schedule editor and the voice `set_reminder` path to read/append
+    /// entries through the same storage the scheduler persists to.
+    func medicationEntries() -> [MedicationEntry] {
+        Array(entries.values).sorted { $0.medicationName < $1.medicationName }
+    }
+
     init(
         storage: EncryptedLocalStorage,
         alarmScheduler: PlatformAlarmScheduler,

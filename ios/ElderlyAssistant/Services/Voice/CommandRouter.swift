@@ -3,12 +3,24 @@ import UserNotifications
 
 protocol VoiceCommandCoordinating: AnyObject {
     var isAwaitingConfirmation: Bool { get }
+    /// The locale all spoken replies resolve against (spec §3.2 — the
+    /// coordinator's `AppLanguage` is the source of truth).
+    var activeLocale: Locale { get }
 
     func recordTranscript(_ text: String)
     func oldestPendingReminderEntryId() -> UUID?
     func handleMedicationAcknowledgement(entryId: UUID)
     func startVoiceAckConfirmation(for entryId: UUID) -> String?
     func handleConfirmationResponse(_ response: ConfirmationResponse)
+
+    // Voice-session feedback (spec §3.3): the derived `speaking` state and
+    // the Home conversation card's assistant bubble.
+    func noteSpeakingStarted()
+    func noteSpeakingEnded()
+    func noteAssistantSpoke(_ text: String)
+
+    /// `set_reminder` intent: creates a reminder through scheduler storage.
+    func addVoiceReminder(title: String, time: DateComponents)
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -16,13 +28,16 @@ protocol VoiceCommandCoordinating: AnyObject {
 /// Routing order:
 ///  1. LLM interpreter (`CommandInterpreter`), if available and confident.
 ///  2. Keyword-matching fallback for a small, safety-critical vocabulary.
-///  3. "I didn't understand" — spoken back, plus a debug notification.
+///  3. "I didn't understand" — spoken back (localized).
 ///
 /// Keeping the keyword layer around after the LLM lands is deliberate:
-///  - it's the safety net if the LLM is warming up, unavailable, or the
-///    device is low on memory,
+///  - it's the safety net if the LLM is warming up, unavailable, times out,
+///    or the device is low on memory,
 ///  - it handles the tiny set of utterances we never want to depend on an
 ///    LLM being warm for ("emergency", explicit medication acks).
+///
+/// All fixed strings are catalog keys resolved against the coordinator's
+/// active locale (spec §3.2); only LLM-generated replies are raw text.
 final class CommandRouter {
 
     enum RoutingResult: Equatable {
@@ -35,18 +50,15 @@ final class CommandRouter {
     private let observabilityBus: ObservabilityBus
     private let speaker: Speaker?
     private let interpreter: CommandInterpreter
-    var replyLocale: Locale
 
     init(coordinator: VoiceCommandCoordinating,
          observabilityBus: ObservabilityBus,
          speaker: Speaker? = nil,
-         interpreter: CommandInterpreter = NullCommandInterpreter(),
-         replyLocale: Locale = Locale(identifier: "ne-NP")) {
+         interpreter: CommandInterpreter = NullCommandInterpreter()) {
         self.coordinator = coordinator
         self.observabilityBus = observabilityBus
         self.speaker = speaker
         self.interpreter = interpreter
-        self.replyLocale = replyLocale
     }
 
     @discardableResult
@@ -66,7 +78,7 @@ final class CommandRouter {
                 errorCode: reason.rawValue,
                 metadata: [:]
             ))
-            speak("माफ गर्नुहोस्, मैले बुझिनँ। कृपया फेरि भन्नुहोस्।")
+            speak(key: "router.reprompt")
             return .unrecognised(transcript: raw)
         }
 
@@ -78,18 +90,18 @@ final class CommandRouter {
             if Self.isYesResponse(raw) {
                 coordinator?.handleConfirmationResponse(.yes)
                 emit(eventType: "confirmation_yes", outcome: "success")
-                speak("Okay, marked as taken.")
+                speak(key: "router.confirmationYes")
                 return .acknowledgedMedication
             }
             if Self.isNoResponse(raw) {
                 coordinator?.handleConfirmationResponse(.no)
                 emit(eventType: "confirmation_no", outcome: "success")
-                speak("Understood. I'll remind you again shortly.")
+                speak(key: "router.confirmationNo")
                 return .unrecognised(transcript: raw)
             }
             // Ambiguous response — re-prompt.
             emit(eventType: "confirmation_ambiguous", outcome: "info")
-            speak("Please answer with yes or no.")
+            speak(key: "router.confirmationAmbiguous")
             return .unrecognised(transcript: raw)
         }
 
@@ -98,7 +110,7 @@ final class CommandRouter {
         if interpreter.isAvailable {
             let context = InterpreterContext(
                 pendingMedications: [],
-                userLanguageHint: replyLocale.languageCode ?? "en"
+                userLanguageHint: coordinator?.activeLocale.languageCode ?? "en"
             )
             interpreter.interpret(transcript: raw, context: context) { [weak self] command in
                 if let command = command {
@@ -152,7 +164,7 @@ final class CommandRouter {
         ]
         if denialPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
             emit(eventType: "command_ack_denied_keyword", outcome: "info")
-            speak("ठीक छ, म पछि फेरि सम्झाउँछु।")
+            speak(key: "router.ackDenied")
             return .unrecognised(transcript: raw)
         }
 
@@ -179,13 +191,12 @@ final class CommandRouter {
         ]
         if sensitiveCallPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
             emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
-            speak("माफ गर्नुहोस्, अहिले फोन वा सन्देश पठाउने सुविधा सुरक्षित प्रमाणीकरण तयार नभएसम्म बन्द छ।")
+            speak(key: "router.sensitiveBlocked")
             return .blockedSensitiveAction
         }
 
         emit(eventType: "command_unrecognised", outcome: "info")
-        postDebugNotification(title: "Heard command", body: "I heard: \(raw)")
-        speak("माफ गर्नुहोस्, मैले बुझिनँ। कृपया फेरि भन्नुहोस्।")
+        speak(key: "router.reprompt")
         return .unrecognised(transcript: raw)
     }
 
@@ -195,27 +206,69 @@ final class CommandRouter {
         switch command.action {
         case .ackMed:
             handleMedicationAcknowledgement(replyOverride: command.reply)
+        case .emergency:
+            // Safety path with NO auth gate (spec §5.1, constitution:
+            // emergency must never be blocked by auth or a busy LLM).
+            // Today: spoken ack + event + local alert — the broker relay
+            // and emergency-call module don't exist yet.
+            emit(eventType: "command_emergency", outcome: "success")
+            postLocalizedNotification(titleKey: "notif.emergencyAck.title",
+                                      bodyKey: "notif.emergencyAck.body")
+            speak(key: "router.emergencyAck")
         case .call:
             emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
-            speak("माफ गर्नुहोस्, अहिले फोन वा सन्देश पठाउने सुविधा सुरक्षित प्रमाणीकरण तयार नभएसम्म बन्द छ।")
+            speak(key: "router.sensitiveBlocked")
+        case .setReminder:
+            handleSetReminder(command)
+        case .healthQuery:
+            // First-class stub intent — honest "not yet" (spec §5.1).
+            emit(eventType: "command_health_query_stub", outcome: "info")
+            speak(key: "router.healthNotAvailable")
+        case .music:
+            // First-class stub intent (spec §5.1).
+            emit(eventType: "command_music_stub", outcome: "info")
+            speak(key: "router.musicStub")
         case .query:
             emit(eventType: "command_llm_query", outcome: "info")
-            speak(command.reply)
+            speak(text: command.reply)
         case .none:
             emit(eventType: "command_llm_no_action", outcome: "info")
-            speak(command.reply)
+            speak(text: command.reply)
         }
+    }
+
+    /// `set_reminder`: parse the spoken time expression, create the
+    /// reminder via scheduler storage, and confirm with the time spoken
+    /// back (spec §5.1, §5.2).
+    private func handleSetReminder(_ command: InterpretedCommand) {
+        guard let timeString = command.time,
+              let time = NepaliTimeParser.parse(timeString) else {
+            emit(eventType: "command_set_reminder_no_time", outcome: "info")
+            speak(key: "router.reminderNoTime")
+            return
+        }
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let title = command.medication ?? L10n.str("reminder.defaultTitle", locale: locale)
+        coordinator?.addVoiceReminder(title: title, time: time)
+        emit(eventType: "command_set_reminder", outcome: "success")
+        let spokenTime = formattedTime(time, locale: locale)
+        speak(text: L10n.fmt("router.reminderSet", locale: locale, spokenTime))
+    }
+
+    private func formattedTime(_ components: DateComponents, locale: Locale) -> String {
+        let calendar = Calendar.current
+        guard let date = calendar.date(from: components) else { return "" }
+        return date.formatted(Date.FormatStyle(date: .omitted, time: .shortened)
+            .locale(locale))
     }
 
     private func handleMedicationAcknowledgement(replyOverride: String? = nil) {
         guard let coordinator = coordinator,
               let oldest = coordinator.oldestPendingReminderEntryId() else {
-            postDebugNotification(
-                title: "Nothing to acknowledge",
-                body: "There are no medication reminders waiting."
-            )
+            postLocalizedNotification(titleKey: "notif.nothingToAcknowledge.title",
+                                      bodyKey: "notif.nothingToAcknowledge.body")
             emit(eventType: "command_ack_no_pending", outcome: "info")
-            speak("अहिले पर्खिरहेको औषधिको सम्झना छैन।")
+            speak(key: "router.noPendingReminder")
             return
         }
 
@@ -226,18 +279,21 @@ final class CommandRouter {
         // challenge cannot be issued (no pending reminder, etc).
         if let prompt = coordinator.startVoiceAckConfirmation(for: oldest) {
             emit(eventType: "command_ack_challenge_issued", outcome: "success")
-            postDebugNotification(title: "Confirming dose", body: prompt)
-            speak(prompt)
+            postLocalizedNotification(titleKey: "notif.confirmingDose.title",
+                                      body: prompt)
+            speak(text: prompt)
             return
         }
 
         coordinator.handleMedicationAcknowledgement(entryId: oldest)
         emit(eventType: "command_ack_medication_baseline", outcome: "success")
-        postDebugNotification(
-            title: "Medication acknowledged",
-            body: "Marked as taken (baseline path — no challenge available)."
-        )
-        speak(replyOverride ?? "ठीक छ, औषधि लिएको भनेर राखेँ।")
+        postLocalizedNotification(titleKey: "notif.medicationAcknowledged.title",
+                                  bodyKey: "notif.medicationAcknowledged.body")
+        if let replyOverride {
+            speak(text: replyOverride)
+        } else {
+            speak(key: "router.confirmationYes")
+        }
     }
 
     /// Whole-token match — the ONLY safe way to match "हो" (yes), because
@@ -262,18 +318,43 @@ final class CommandRouter {
         return phrases.contains(where: { containsToken($0, in: t) })
     }
 
-    // MARK: - Helpers
+    // MARK: - Speech (localized — spec §3.2)
 
-    private func speak(_ text: String) {
-        guard let speaker = speaker, !text.isEmpty else { return }
-        let locale = replyLocale
-        Task { await speaker.speak(text, locale: locale) }
+    /// Speaks a catalog key resolved in the coordinator's active locale.
+    private func speak(key: String) {
+        guard let speaker else { return }
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let text = L10n.str(key, locale: locale)
+        guard !text.isEmpty else { return }
+        speak(text: text, locale: locale)
     }
 
-    private func postDebugNotification(title: String, body: String) {
+    /// Speaks dynamic text (LLM-generated replies, scheduler challenge
+    /// prompts) — no catalog lookup, already in the right language.
+    private func speak(text: String, locale: Locale? = nil) {
+        guard let speaker, !text.isEmpty else { return }
+        let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        coordinator?.noteAssistantSpoke(text)
+        coordinator?.noteSpeakingStarted()
+        Task {
+            await speaker.speak(text, locale: locale)
+            coordinator?.noteSpeakingEnded()
+        }
+    }
+
+    // MARK: - Notifications (localized, no raw transcripts — C9)
+
+    private func postLocalizedNotification(titleKey: String,
+                                           bodyKey: String? = nil,
+                                           body: String? = nil) {
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         let content = UNMutableNotificationContent()
-        content.title = title
-        content.body = body
+        content.title = L10n.str(titleKey, locale: locale)
+        if let bodyKey {
+            content.body = L10n.str(bodyKey, locale: locale)
+        } else if let body {
+            content.body = body
+        }
         content.sound = nil
         let request = UNNotificationRequest(
             identifier: UUID().uuidString,

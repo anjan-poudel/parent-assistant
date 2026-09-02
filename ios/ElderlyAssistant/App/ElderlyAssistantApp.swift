@@ -8,9 +8,11 @@ struct ElderlyAssistantApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(appCoordinator)
-                .onAppear {
-                    appCoordinator.start()
-                }
+                .environmentObject(appCoordinator.voiceSession)
+                // Spec §3.2: AppLanguage drives `.locale` directly at the
+                // root. Every Text/catalog lookup, date, and number
+                // formatter below this point follows it automatically.
+                .environment(\.locale, appCoordinator.appLanguage.locale)
         }
     }
 }

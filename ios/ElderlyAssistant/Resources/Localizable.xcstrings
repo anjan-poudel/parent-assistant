@@ -1,0 +1,818 @@
+{
+  "sourceLanguage" : "en",
+  "version" : "1.0",
+  "strings" : {
+    "language.nepali" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Nepali" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "नेपाली" } }
+      }
+    },
+    "language.english" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "English" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "English" } }
+      }
+    },
+    "state.idle.button" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Talk" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "बोल्नुहोस्" } }
+      }
+    },
+    "state.idle.status" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "I'm ready" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "तयार छु" } }
+      }
+    },
+    "state.listening.button" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Listening…" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सुन्दै छु…" } }
+      }
+    },
+    "state.listening.status" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Go ahead, I'm listening" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "बोल्नुहोस्, म सुन्दै छु" } }
+      }
+    },
+    "state.transcribing.button" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Writing…" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "लिख्दै छु…" } }
+      }
+    },
+    "state.transcribing.status" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "I heard you, writing it down" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "भर्खरै सुनें, लेख्दै छु" } }
+      }
+    },
+    "state.understanding.button" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Thinking…" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "बुझ्दै छु…" } }
+      }
+    },
+    "state.understanding.status" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Let me understand that" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "के भन्नुभयो, बुझ्दै छु" } }
+      }
+    },
+    "state.speaking.button" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Speaking" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "बोल्दै छु" } }
+      }
+    },
+    "state.speaking.status" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Assistant is replying" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सहायकले जवाफ दिँदैछ" } }
+      }
+    },
+    "state.awaitingConfirmation.chipYes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Yes" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "हो" } }
+      }
+    },
+    "state.awaitingConfirmation.chipNo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "होइन" } }
+      }
+    },
+    "state.awaitingConfirmation.status" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Did you take your medicine?" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "औषधि खानुभयो?" } }
+      }
+    },
+    "state.error.button" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Try again" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "फेरि प्रयास गर्नुहोस्" } }
+      }
+    },
+    "state.error.status" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sorry, please say that again" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "माफ गर्नुहोस्, फेरि भन्नुहोस्" } }
+      }
+    },
+    "state.stopped.button" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Voice off" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "आवाज बन्द" } }
+      }
+    },
+    "state.stopped.status" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Voice is off" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "आवाज बन्द छ" } }
+      }
+    },
+    "home.greeting.time" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hello, %@" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "नमस्ते, %@" } }
+      }
+    },
+    "home.greeting.morning" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Good morning" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "शुभ प्रभात" } }
+      }
+    },
+    "home.greeting.night" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Good evening" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "शुभ रात्री" } }
+      }
+    },
+    "home.setupRemaining" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld setup steps left" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "अझै %lld काम बाँकी" } }
+      }
+    },
+    "home.setupCardHint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Tap to continue setup" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "थिचेर सेटअप पूरा गर्नुहोस्" } }
+      }
+    },
+    "home.hub.meds" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Medication" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "औषधि" } }
+      }
+    },
+    "home.hub.reminders" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reminders" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सम्झना" } }
+      }
+    },
+    "home.hub.call" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Call" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "फोन" } }
+      }
+    },
+    "home.hub.settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Settings" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सेटिङ" } }
+      }
+    },
+    "home.conversation.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Last conversation" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "पछिल्लो कुराकानी" } }
+      }
+    },
+    "home.conversation.user" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "You" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "तपाईं" } }
+      }
+    },
+    "home.conversation.assistant" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Assistant" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सहायक" } }
+      }
+    },
+    "home.conversation.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No conversation yet. Tap the button and talk to me." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "अहिलेसम्म कुनै कुराकानी भएको छैन। बटन थिचेर कुरा गर्नुहोस्।" } }
+      }
+    },
+    "onboarding.skip" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Skip" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "छाड्नुहोस्" } }
+      }
+    },
+    "onboarding.next" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Next" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "अर्को" } }
+      }
+    },
+    "onboarding.stepLanguage.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose language" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "भाषा छान्नुहोस्" } }
+      }
+    },
+    "onboarding.stepLanguage.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Which language should the assistant talk in?" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "कुन भाषामा सहायकसँग कुरा गर्ने?" } }
+      }
+    },
+    "onboarding.stepPermissions.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow permissions" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "अनुमति दिनुहोस्" } }
+      }
+    },
+    "onboarding.stepPermissions.micBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Microphone — so the assistant can hear you. Your voice never leaves this phone." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "माइक — तपाईंको आवाज सुन्नलाई। आवाज फोनबाट बाहिर जाँदैन।" } }
+      }
+    },
+    "onboarding.stepPermissions.notifBody" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Notifications — for medication reminders." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सूचना — औषधिको सम्झनाको लागि।" } }
+      }
+    },
+    "onboarding.stepPermissions.allow" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Allow" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "दिनुहोस्" } }
+      }
+    },
+    "onboarding.stepPermissions.deniedHint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enable from iOS Settings → Privacy" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "iOS सेटिङबाट खोल्नुहोस् → गोपनीयता" } }
+      }
+    },
+    "onboarding.stepFamily.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Family contact" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "परिवारको सम्पर्क" } }
+      }
+    },
+    "onboarding.stepFamily.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The person to notify if something goes wrong." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "समस्या परेमा खबर पाउने मान्छे।" } }
+      }
+    },
+    "onboarding.stepFamily.name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Name" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "नाम" } }
+      }
+    },
+    "onboarding.stepFamily.phone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Phone number" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "फोन नम्बर" } }
+      }
+    },
+    "onboarding.stepFamily.relationship" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Relationship" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "नाता" } }
+      }
+    },
+    "onboarding.stepFamily.save" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Save" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "राख्नुहोस्" } }
+      }
+    },
+    "onboarding.stepFamily.laterNote" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "You can add this later from Settings" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "पछि सेटिङबाट थप्न सकिन्छ" } }
+      }
+    },
+    "onboarding.stepModels.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Setting up" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "तयारी हुँदैछ" } }
+      }
+    },
+    "onboarding.stepModels.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloading the assistant's models. You can keep using the phone meanwhile." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सहायकका मोडलहरू डाउनलोड हुँदैछन्। यसबेला अरू काम गर्न मिल्छ।" } }
+      }
+    },
+    "onboarding.stepModels.goHome" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Go to Home" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "घर जानुहोस्" } }
+      }
+    },
+    "common.back" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Back" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "पछाडि" } }
+      }
+    },
+    "settings.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Settings" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सेटिङ" } }
+      }
+    },
+    "settings.language.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Language & region" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "भाषा र क्षेत्र" } }
+      }
+    },
+    "settings.language.region" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Region: Nepal (ne-NP)" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "क्षेत्र: नेपाल (ne-NP)" } }
+      }
+    },
+    "settings.family.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Family & emergency contacts" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "परिवारको सम्पर्क" } }
+      }
+    },
+    "settings.family.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No contacts yet" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "अहिलेसम्म कुनै सम्पर्क छैन" } }
+      }
+    },
+    "settings.family.add" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Add contact" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सम्पर्क थप्नुहोस्" } }
+      }
+    },
+    "settings.family.delete" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "मेटाउनुहोस्" } }
+      }
+    },
+    "settings.meds.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Medication schedule" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "औषधि तालिका" } }
+      }
+    },
+    "settings.meds.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No medications scheduled yet" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "कुनै औषधि तालिका छैन" } }
+      }
+    },
+    "settings.meds.add" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Add medication" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "औषधि थप्नुहोस्" } }
+      }
+    },
+    "settings.meds.name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Medication name" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "औषधिको नाम" } }
+      }
+    },
+    "settings.meds.time" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Time" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "समय" } }
+      }
+    },
+    "settings.meds.save" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Save" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "राख्नुहोस्" } }
+      }
+    },
+    "settings.meds.nameRequired" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Please enter a name" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "नाम लेख्नुहोस्" } }
+      }
+    },
+    "settings.meds.duplicateError" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A medication with this name and time already exists" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "यो नाम र समयको औषधि पहिल्यै छ" } }
+      }
+    },
+    "settings.ai.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "AI models" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "AI मोडेल" } }
+      }
+    },
+    "settings.ai.selection" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Speech recognition model" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "आवाज पहिचान मोडेल" } }
+      }
+    },
+    "settings.ai.automatic" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "स्वचालित" } }
+      }
+    },
+    "settings.ai.downloads" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloads & storage" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "डाउनलोड र भण्डारण" } }
+      }
+    },
+    "settings.privacy.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Privacy" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "गोपनीयता" } }
+      }
+    },
+    "settings.privacy.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your voice, health information, contacts, and conversations stay on this phone. Nothing is sent to the cloud for AI processing. Health data is only read from HealthKit with your permission. Family notifications are sent only when a configured alert fires." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "तपाईंको आवाज, स्वास्थ्य जानकारी, सम्पर्क र कुराकानी यही फोनमा रहन्छन्। AI प्रशोधनका लागि कुनै पनि कुरा क्लाउडमा पठाइँदैन। स्वास्थ्य जानकारी तपाईंको अनुमतिमा मात्र HealthKit बाट पढिन्छ। परिवारलाई सूचना तोकिएको अलर्ट सक्रिय भएमा मात्र पठाइन्छ।" } }
+      }
+    },
+    "settings.about.version" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Version %@" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "संस्करण %@" } }
+      }
+    },
+    "meds.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Today's medication" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "आजको औषधि" } }
+      }
+    },
+    "meds.taken" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Taken" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "लिइयो" } }
+      }
+    },
+    "meds.pending" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Waiting" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "बाँकी" } }
+      }
+    },
+    "meds.iTookIt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "I took it" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "लिएँ" } }
+      }
+    },
+    "meds.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No medication today" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "आज कुनै औषधि छैन" } }
+      }
+    },
+    "reminders.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Today's reminders" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "आजका सम्झनाहरू" } }
+      }
+    },
+    "reminders.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No reminders today" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "आज कुनै सम्झना छैन" } }
+      }
+    },
+    "call.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Make a call" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "फोन गर्नुहोस्" } }
+      }
+    },
+    "call.blocked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Calling and messaging stay off until secure authentication is ready." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सुरक्षित प्रमाणीकरण तयार नभएसम्म फोन र सन्देश बन्द रहन्छ।" } }
+      }
+    },
+    "call.comingSoon" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "You'll be able to call once secure authentication is ready" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सुरक्षित प्रमाणीकरण तयार भएपछि फोन गर्न मिल्नेछ" } }
+      }
+    },
+    "router.reprompt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sorry, I didn't understand. Please say that again." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "माफ गर्नुहोस्, मैले बुझिनँ। कृपया फेरि भन्नुहोस्।" } }
+      }
+    },
+    "router.confirmationYes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Okay, marked as taken." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "ठीक छ, औषधि लिएको भनेर राखेँ।" } }
+      }
+    },
+    "router.confirmationNo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Understood. I'll remind you again shortly." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "बुझें। म पछि फेरि सम्झाउँछु।" } }
+      }
+    },
+    "router.confirmationAmbiguous" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Please answer with yes or no." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "हो वा होइन भन्नुहोस्।" } }
+      }
+    },
+    "router.confirmationTimeout" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Time is up. I'll remind you again." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "समय सकियो, फेरि सम्झाउँछु।" } }
+      }
+    },
+    "router.ackDenied" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Okay, I'll remind you again later." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "ठीक छ, म पछि फेरि सम्झाउँछु।" } }
+      }
+    },
+    "router.sensitiveBlocked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sorry, calling and messaging stay off until secure authentication is ready." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "माफ गर्नुहोस्, अहिले फोन वा सन्देश पठाउने सुविधा सुरक्षित प्रमाणीकरण तयार नभएसम्म बन्द छ।" } }
+      }
+    },
+    "router.noPendingReminder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "There are no medication reminders waiting." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "अहिले पर्खिरहेको औषधिको सम्झना छैन।" } }
+      }
+    },
+    "router.emergencyAck" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Help is on the way. I'm notifying your family." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सहायता सुरु भयो। परिवारलाई खबर पठाउँदैछु।" } }
+      }
+    },
+    "router.healthNotAvailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Health information isn't available yet. It's coming soon." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "स्वास्थ्य जानकारी अहिले उपलब्ध छैन। चाँडै आउनेछ।" } }
+      }
+    },
+    "router.musicStub" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Music isn't ready yet. Coming soon." } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "संगीत सुविधा अहिले तयार छैन। चाँडै आउनेछ।" } }
+      }
+    },
+    "router.reminderSet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reminder set: %@" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सम्झना राखियो: %@" } }
+      }
+    },
+    "router.reminderNoTime" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "At what time should I remind you?" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "कुन समयमा सम्झाउने?" } }
+      }
+    },
+    "notif.confirmingDose.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Confirming your dose" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "औषधि पुष्टि गर्दै" } }
+      }
+    },
+    "notif.medicationAcknowledged.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Medication acknowledged" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "औषधि राखियो" } }
+      }
+    },
+    "notif.medicationAcknowledged.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your medication was marked as taken" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "औषधि लिएको भनेर राखियो" } }
+      }
+    },
+    "notif.nothingToAcknowledge.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Nothing to acknowledge" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "पुष्टि गर्ने केही छैन" } }
+      }
+    },
+    "notif.nothingToAcknowledge.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No medication reminders are waiting" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "पर्खिरहेको औषधिको सम्झना छैन" } }
+      }
+    },
+    "model.download" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Download" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "डाउनलोड" } }
+      }
+    },
+    "model.cancel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancel" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "रोक्नुहोस्" } }
+      }
+    },
+    "model.queued" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Queued…" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "पर्खिरहेको…" } }
+      }
+    },
+    "model.verifying" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Verifying…" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "जाँच गर्दै…" } }
+      }
+    },
+    "model.ready" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Ready" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "तयार" } }
+      }
+    },
+    "model.notDownloaded" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not downloaded yet" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "डाउनलोड भएको छैन" } }
+      }
+    },
+    "model.failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Failed: %@" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "असफल: %@" } }
+      }
+    },
+    "model.cancelled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancelled" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "रोकियो" } }
+      }
+    },
+    "model.active" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Active" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सक्रिय" } }
+      }
+    },
+    "model.runtimeNotLinked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Downloaded, runtime not linked (%@)" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "डाउनलोड भयो, रनटाइम जोडिएको छैन (%@)" } }
+      }
+    },
+    "model.sttInUse" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "STT in use: %@" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "प्रयोगमा रहेको आवाज पहिचान: %@" } }
+      }
+    },
+    "reminder.defaultTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reminder" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सम्झना" } }
+      }
+    },
+    "notif.emergencyAck.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Help requested" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "सहायता सुरु भयो" } }
+      }
+    },
+    "notif.emergencyAck.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Notifying your family" } },
+        "ne" : { "stringUnit" : { "state" : "translated", "value" : "परिवारलाई खबर पठाउँदैछु" } }
+      }
+    }
+  }
+}

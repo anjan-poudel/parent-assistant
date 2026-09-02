@@ -11,12 +11,20 @@ protocol FamilyNotifierProtocol {
 #if os(iOS)
 final class APNsFamilyNotifier: FamilyNotifierProtocol {
 
-    private let contacts: [EmergencyContact]
+    private var contacts: [EmergencyContact]
     private let apnsProvider: APNsProvider
 
     init(contacts: [EmergencyContact], apnsProvider: APNsProvider = APNsProvider()) {
         self.contacts = contacts.filter { $0.isFamilyNotificationTarget }
         self.apnsProvider = apnsProvider
+    }
+
+    /// Replaces the contact list — called by `AppCoordinator` when the
+    /// Settings family-contacts section changes. Until the broker relay
+    /// provisions device tokens (review C6), pushes have no destination;
+    /// the list is still kept real so the wiring is in place.
+    func updateContacts(_ newContacts: [EmergencyContact]) {
+        contacts = newContacts.filter { $0.isFamilyNotificationTarget }
     }
 
     func notifyAll(alertType: FamilyAlertType, at timestamp: Date) async -> [NotificationResult] {
