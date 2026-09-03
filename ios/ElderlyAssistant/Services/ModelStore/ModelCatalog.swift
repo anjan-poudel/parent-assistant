@@ -122,8 +122,12 @@ enum ModelCatalog {
             minDeviceRAMBytes: 2_500_000_000,
             dependsOn: nil,
             coreMLEncoderBundledName: nil,
-            coreMLEncoderDownloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v2/whisper-finetuned-ne-encoder.mlmodelc.zip")!,
-            coreMLEncoderZipBytes: 448_793_282
+            // DISABLED 2026-09-03: the hand-generated ANE encoder produced
+            // gibberish or crashed whisper.cpp's CoreML path on-device
+            // (its I/O contract is exacting). CPU transcription is stable
+            // while the WhisperKit runtime migration replaces this path.
+            coreMLEncoderDownloadURL: nil,
+            coreMLEncoderZipBytes: 0
         ),
         ModelCatalogEntry(
             id: whisperFinetunedNepaliQ8,
