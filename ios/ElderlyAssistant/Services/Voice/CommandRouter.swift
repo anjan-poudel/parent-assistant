@@ -428,12 +428,23 @@ final class CommandRouter {
     /// Speaks dynamic text (LLM-generated replies, scheduler challenge
     /// prompts) — no catalog lookup, already in the right language.
     private func speak(text: String, locale: Locale? = nil) {
-        guard let speaker, !text.isEmpty else { return }
+        #if DEBUG
+        print("[command_router][DEBUG] speak() called, speaker=\(speaker != nil), text=\"\(text)\"")
+        #endif
+        guard let speaker, !text.isEmpty else {
+            #if DEBUG
+            print("[command_router][DEBUG] speak() BAILED — speaker nil or text empty")
+            #endif
+            return
+        }
         let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         coordinator?.noteAssistantSpoke(text)
         coordinator?.noteSpeakingStarted()
         Task {
             await speaker.speak(text, locale: locale)
+            #if DEBUG
+            print("[command_router][DEBUG] speaker.speak() returned (finished or cancelled)")
+            #endif
             coordinator?.noteSpeakingEnded()
         }
     }
