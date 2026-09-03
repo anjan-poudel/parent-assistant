@@ -215,7 +215,11 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
 
                 let start = CFAbsoluteTimeGetCurrent()
                 print("[whisperkit_stt] transcribing samples=\(audio.count)")
-                let results = try await kit.transcribe(audioArrays: [audio])
+                // Force Nepali transcription — auto language detection on
+                // short utterances produced English (translate-ish) output.
+                let options = DecodingOptions(task: .transcribe, language: "ne")
+                let results = try await kit.transcribe(audioArrays: [audio],
+                                                       decodeOptions: options)
                 let ms = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
                 let joined = results.first??.map(\.text).joined(separator: " ")
                     .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
