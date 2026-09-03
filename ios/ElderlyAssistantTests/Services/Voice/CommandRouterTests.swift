@@ -40,6 +40,78 @@ final class CommandRouterTests: XCTestCase {
             $0.eventType == "command_sensitive_blocked_auth_unavailable"
         })
     }
+
+    // MARK: - Trial wiring: voice call / send message (LLM-interpreted path)
+
+    func testCallWithResolvedContactPlacesRealCall() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.callShouldSucceed = true
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .call, entryId: nil, contact: "छोरा", time: nil, medication: nil,
+            message: nil, confidence: 0.95, reply: "ठिक छ, फोन गर्दैछु"
+        )
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "छोरालाई फोन गर")
+
+        XCTAssertEqual(coordinator.placedCalls, ["छोरा"])
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_call_placed" })
+    }
+
+    func testCallWithUnresolvedContactStaysBlocked() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.callShouldSucceed = false
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .call, entryId: nil, contact: "अज्ञात व्यक्ति", time: nil, medication: nil,
+            message: nil, confidence: 0.95, reply: "ठिक छ"
+        )
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "फोन गर")
+
+        XCTAssertEqual(coordinator.placedCalls, ["अज्ञात व्यक्ति"])
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "command_sensitive_blocked_auth_unavailable"
+        })
+    }
+
+    func testSendMessageWithResolvedContactPresentsComposeSheet() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.messageShouldSucceed = true
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .sendMessage, entryId: nil, contact: "छोरी", time: nil, medication: nil,
+            message: "म राम्रो छु", confidence: 0.95, reply: "सन्देश तयार छ"
+        )
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "छोरीलाई सन्देश पठाऊ, म राम्रो छु")
+
+        XCTAssertEqual(coordinator.composedMessages.count, 1)
+        XCTAssertEqual(coordinator.composedMessages.first?.contact, "छोरी")
+        XCTAssertEqual(coordinator.composedMessages.first?.body, "म राम्रो छु")
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_message_composing" })
+    }
+}
+
+/// Deterministic `CommandInterpreter` double: fires its completion
+/// synchronously so tests don't need to await a dispatch gap.
+private final class FakeCommandInterpreter: CommandInterpreter {
+    var isAvailable = true
+    var nextCommand: InterpretedCommand?
+
+    func interpret(transcript: String, context: InterpreterContext,
+                   completion: @escaping (InterpretedCommand?) -> Void) {
+        completion(nextCommand)
+    }
 }
 
 private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
@@ -83,6 +155,20 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
 
     func addVoiceReminder(title: String, time: DateComponents) {
         addedReminders.append((title, time))
+    }
+
+    var placedCalls: [String?] = []
+    var callShouldSucceed = false
+    func placeCall(toContactNamed name: String?) -> Bool {
+        placedCalls.append(name)
+        return callShouldSucceed
+    }
+
+    var composedMessages: [(contact: String?, body: String)] = []
+    var messageShouldSucceed = false
+    func composeMessage(toContactNamed name: String?, body: String) -> Bool {
+        composedMessages.append((name, body))
+        return messageShouldSucceed
     }
 }
 

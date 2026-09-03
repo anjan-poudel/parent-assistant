@@ -1116,6 +1116,23 @@
         }
       }
     },
+    "model.name.whisper-medium-ne-q5_1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nepali speech recognition (medium, fine-tuned)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नेपाली आवाज पहिचान (मध्यम, फाइनट्युन्ड)"
+          }
+        }
+      }
+    },
     "model.name.whisper-small-multilingual-q5_1": {
       "extractionState": "manual",
       "localizations": {
@@ -1547,13 +1564,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Downloading the assistant's models. You can keep using the phone meanwhile."
+            "value": "Ask a family member to paste in a Gemini API key so the assistant can understand speech and answer questions. You can skip this and add it later from Settings."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "सहायकका मोडलहरू डाउनलोड हुँदैछन्। यसबेला अरू काम गर्न मिल्छ।"
+            "value": "सहायकले बोली बुझ्न र प्रश्नको जवाफ दिन सकोस् भनेर परिवारको कसैलाई जेमिनी API कुञ्जी हाल्न भन्नुहोस्। यो पछि सेटिङबाट पनि थप्न सकिन्छ, अहिले छाड्न पनि सकिन्छ।"
           }
         }
       }
@@ -1581,13 +1598,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Setting up"
+            "value": "Connect Gemini AI"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "तयारी हुँदैछ"
+            "value": "जेमिनी AI जोड्नुहोस्"
           }
         }
       }
@@ -2132,6 +2149,159 @@
           "stringUnit": {
             "state": "translated",
             "value": "परिवारको सम्पर्क"
+          }
+        }
+      }
+    },
+    "settings.gemini.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sahayak understands speech and answers questions using Google's Gemini AI. A family member needs to add an API key here once — without it, only basic commands (medicine, emergency) work."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायकले बोली बुझ्न र प्रश्नको जवाफ दिन Google को Gemini AI प्रयोग गर्छ। परिवारको कसैले यहाँ एकपटक API कुञ्जी थप्नुपर्छ — नभए औषधि र आपतकालीन जस्ता आधारभूत आदेशहरू मात्र काम गर्छन्।"
+          }
+        }
+      }
+    },
+    "settings.gemini.fieldLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini API key"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जेमिनी API कुञ्जी"
+          }
+        }
+      }
+    },
+    "settings.gemini.fieldPlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste the API key here"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यहाँ API कुञ्जी टाँस्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.gemini.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove key"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कुञ्जी हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "settings.gemini.removeConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove the Gemini API key? The assistant will fall back to basic commands only."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जेमिनी API कुञ्जी हटाउने हो? सहायक आधारभूत आदेशमा मात्र सीमित हुनेछ।"
+          }
+        }
+      }
+    },
+    "settings.gemini.save": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुरक्षित गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.gemini.statusConnected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जोडिएको"
+          }
+        }
+      }
+    },
+    "settings.gemini.statusMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Setup needed"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सेटअप चाहिन्छ"
+          }
+        }
+      }
+    },
+    "settings.gemini.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini AI"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जेमिनी AI"
           }
         }
       }
@@ -2697,6 +2867,23 @@
         }
       }
     },
+    "stt.name.gemini": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini (online)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जेमिनी (अनलाइन)"
+          }
+        }
+      }
+    },
     "stt.name.sfs": {
       "extractionState": "manual",
       "localizations": {
@@ -2782,6 +2969,23 @@
         }
       }
     },
+    "stt.name.whisperMediumFinetunedNepali": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper (Nepali medium, fine-tuned)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper (नेपाली मध्यम, फाइनट्युन्ड)"
+          }
+        }
+      }
+    },
     "stt.name.whisperMultilingual": {
       "extractionState": "manual",
       "localizations": {
@@ -2812,40 +3016,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Whisper (नेपाली सानो, डिस्टिल्ड)"
-          }
-        }
-      }
-    },
-    "model.name.whisper-medium-ne-q5_1": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nepali speech recognition (medium, fine-tuned)"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "नेपाली आवाज पहिचान (मध्यम, फाइनट्युन्ड)"
-          }
-        }
-      }
-    },
-    "stt.name.whisperMediumFinetunedNepali": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Whisper (Nepali medium, fine-tuned)"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Whisper (नेपाली मध्यम, फाइनट्युन्ड)"
           }
         }
       }

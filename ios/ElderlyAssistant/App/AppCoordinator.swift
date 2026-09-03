@@ -167,7 +167,7 @@ final class AppCoordinator: ObservableObject {
     private let voiceActivityDetector: VoiceActivityDetector
     private var voicePipeline: VoicePipeline!
     private var voiceStateCancellable: AnyCancellable?
-    private var whisperSwapCancellable: AnyCancellable?
+    private var geminiSwapCancellable: AnyCancellable?
     private var speaker: Speaker?
 
     /// Voice-session derivation state (spec §3.3): the last pipeline state
@@ -186,18 +186,27 @@ final class AppCoordinator: ObservableObject {
     /// it (spec §4.2: wizard runs before voice engages).
     private var started = false
 
-    // Model store — exposed to the UI for download/selection surfaces.
+    // Model store — kept for now (v1 on-device Whisper/LLaMA machinery is
+    // superseded, not deleted, by the v2 Gemini pivot; see
+    // docs/superpowers/specs/2026-09-03-v2-gemini-pivot-design.md §8).
+    // Nothing in `start()` requires these anymore — the onboarding models
+    // step no longer downloads anything by default (see
+    // `OnboardingWizardView.ModelsStep`, repurposed for the Gemini API key).
     let modelStore: ModelStore
     let modelDownloadService: ModelDownloadService
     private let whisperSpeechRecognizer: WhisperSpeechRecognizer
     private let fallbackSpeechRecognizer: OnDeviceSpeechRecognizer
 
-    /// The IDs the first-run flow will download by default. Order matters —
-    /// STT unlocks the whole voice path so the distilled small Nepali
-    /// model goes first (~327 MB, fast on Metal). The 1.9 GB large-v3
-    /// Nepali fine-tune stays in the list (user-choosable, per the
-    /// model-picker decision) but last so it never blocks the
-    /// LLM/TTS downloads; it can be cancelled from the UI.
+    /// v2: the Gemini API key + client (see `GeminiConfigStore`,
+    /// `GeminiClient`). `geminiConfigStore` is exposed for the Settings
+    /// screen that lets a family member paste in the key.
+    let geminiConfigStore: GeminiConfigStore
+    private let geminiClient: GeminiClient
+    private let geminiSpeechRecognizer: GeminiSpeechRecognizer
+
+    /// Legacy v1 on-device model catalog — kept only so the buried
+    /// "AI मोडेल" settings screen still functions as a manual fallback.
+    /// No longer downloaded automatically at first run (v2 pivot).
     let requiredModelIds: [ModelID] = [
         ModelCatalog.whisperMediumFinetunedNepali,
         ModelCatalog.whisperSmallMultilingual,
@@ -249,6 +258,14 @@ final class AppCoordinator: ObservableObject {
             store: modelStore,
             observabilityBus: bus
         )
+
+        // v2 pivot: Gemini API key + client. The key is entered via
+        // Settings (or the repurposed onboarding "models" step) by a
+        // family member — see GeminiConfigStore's doc comment.
+        let geminiConfig = GeminiConfigStore(storage: storage)
+        self.geminiConfigStore = geminiConfig
+        self.geminiClient = GeminiClient(configStore: geminiConfig, observabilityBus: bus)
+        self.geminiSpeechRecognizer = GeminiSpeechRecognizer(client: geminiClient, observabilityBus: bus)
 
         // Voice pipeline. Uses NullWakeWordEngine unless the Porcupine SPM
         // package is present AND a valid access key / .ppn file are found —
@@ -343,11 +360,12 @@ final class AppCoordinator: ObservableObject {
             observabilityBus: observabilityBus
         )
         self.speaker = speaker
-        // LLM interpreter. `isAvailable` stays false until (a) the model is
-        // cached, (b) the llama.cpp SPM package is linked. Router treats
-        // that as "fall through to keyword matching".
-        let interpreter = LlamaCommandInterpreter(
-            modelStore: modelStore,
+        // v2 pivot: Gemini interpreter. `isAvailable` stays false until an
+        // API key is configured (GeminiConfigStore) — CommandRouter treats
+        // that exactly like the old "LLM not linked" case: fall through to
+        // keyword matching.
+        let interpreter = GeminiCommandInterpreter(
+            client: geminiClient,
             observabilityBus: observabilityBus
         )
         let router = CommandRouter(
@@ -356,8 +374,8 @@ final class AppCoordinator: ObservableObject {
             speaker: speaker,
             interpreter: interpreter
         )
-        // Start with the fallback STT. Whisper is swapped in below when
-        // (a) its model is cached AND (b) the whisper runtime is linked.
+        // Start with the fallback STT. Gemini is swapped in below once an
+        // API key is configured.
         voicePipeline = VoicePipeline(
             audioSession: audioSessionManager,
             audioEngine: audioEngine,
@@ -387,24 +405,20 @@ final class AppCoordinator: ObservableObject {
             switch result {
             case .success:
                 self.voiceState = .idle
-                self.trySwapToWhisper()  // one-shot at startup
+                self.trySwapToGemini()  // one-shot at startup, in case a key is already saved
             case .failure(let err):
                 self.voiceError = "\(err)"
                 self.voiceState = .error("\(err)")
             }
         }
 
-        // Hot-swap trigger: whenever the whisper model transitions to
-        // "completed" via ModelDownloadService, retry the swap.
-        whisperSwapCancellable = modelDownloadService.$states
+        // Hot-swap trigger: as soon as a Gemini API key is saved (Settings
+        // or onboarding), swap the fallback SFSpeechRecognizer for the real
+        // recognizer without tearing down the wake-word loop.
+        geminiSwapCancellable = geminiConfigStore.$apiKey
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] states in
-                guard let self else { return }
-                if states[ModelCatalog.whisperSmallNepali] == .completed ||
-                   states[ModelCatalog.whisperLargeV3Nepali] == .completed ||
-                   states[ModelCatalog.whisperSmallMultilingual] == .completed {
-                    self.trySwapToWhisper()
-                }
+            .sink { [weak self] _ in
+                self?.trySwapToGemini()
             }
 
         isInitialized = true
@@ -567,56 +581,30 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Attempts to move the pipeline off the SFSpeechRecognizer fallback
-    /// onto WhisperSpeechRecognizer. Idempotent.
-    private func trySwapToWhisper() {
-        // Bench hook (WhisperKit ANE path): launch with WK_TURBO=1 to
-        // hot-swap the WhisperKit recognizer on the official pre-converted
-        // large-v3-turbo bundle (SDK-downloaded) — the first on-device
-        // latency measurement while the custom teacher bundle conversion
-        // is sorted out.
-        if ProcessInfo.processInfo.environment["WK_TURBO"] == "1",
-           let wk = makeWhisperKitBenchRecognizer() {
-            voicePipeline?.setSpeechRecognizer(wk)
-            // Preload + prewarm off the critical path so the first
-            // utterance doesn't pay the model load + CoreML
-            // specialization.
-            wk.prepare()
-            DispatchQueue.main.async { [weak self] in
-                self?.updateActiveSTTName()
-            }
-            return
-        }
-        guard whisperSpeechRecognizer.isAvailable else { return }
-        voicePipeline?.setSpeechRecognizer(whisperSpeechRecognizer)
+    /// onto the Gemini recognizer (v2 pivot). Idempotent.
+    private func trySwapToGemini() {
+        guard geminiSpeechRecognizer.isAvailable else { return }
+        voicePipeline?.setSpeechRecognizer(geminiSpeechRecognizer)
         DispatchQueue.main.async { [weak self] in
             self?.updateActiveSTTName()
         }
     }
 
-    private func makeWhisperKitBenchRecognizer() -> WhisperKitSpeechRecognizer? {
-        guard ProcessInfo.processInfo.environment["WK_MODEL"] != nil ||
-              ProcessInfo.processInfo.environment["WK_TURBO"] == "1" else { return nil }
-        let recognizer = WhisperKitSpeechRecognizer(observabilityBus: observabilityBus)
-        if let folder = ProcessInfo.processInfo.environment["WK_MODEL_FOLDER"] {
-            recognizer.modelFolderURL = URL(fileURLWithPath: folder)
-        } else {
-            // Full (uncompressed) variant: the compressed 626MB build
-            // prunes Devanagari tokens and outputs roman transliteration.
-            recognizer.modelName = "large-v3_turbo"
-        }
-        return recognizer
-    }
-
-    /// Model the recognizer will use for the next utterance — the user's
-    /// pick when cached, else the automatic order. Exposed for the UI's
-    /// ANE/CPU label so it reports the engine that will actually run.
+    /// Model the legacy on-device recognizer would use if manually
+    /// selected from the buried "AI मोडेल" screen — exposed for that
+    /// screen's ANE/CPU label. Irrelevant once Gemini is configured.
     var resolvedSTTModelID: ModelID? {
         whisperSpeechRecognizer.currentModelID()
     }
 
-    /// Keeps `activeSTTNameKey` honest: explicit pick first, then whatever
-    /// the recognizer would auto-select, then the SFSpeech fallback.
+    /// Keeps `activeSTTNameKey` honest: Gemini first once configured
+    /// (v2 pivot), else whatever the legacy on-device picker resolves to,
+    /// else the SFSpeech fallback.
     private func updateActiveSTTName() {
+        if geminiSpeechRecognizer.isAvailable {
+            activeSTTNameKey = "stt.name.gemini"
+            return
+        }
         let resolved = sttModelPreference
             .flatMap { modelStore.isCached($0) ? $0 : nil }
             ?? whisperSpeechRecognizer.currentModelID()

@@ -47,6 +47,7 @@ struct InterpretedCommand: Equatable {
         case healthQuery = "health_query"
         case music
         case query
+        case sendMessage = "send_message"
         case none
     }
     let action: Action
@@ -58,6 +59,10 @@ struct InterpretedCommand: Equatable {
     /// Entity: medication name, matched against the scheduler's list by
     /// the handler when available.
     let medication: String?
+    /// Entity: the message body for `send_message`, in the user's
+    /// language, as dictated (trial wiring — spec: presents the native
+    /// compose sheet pre-filled, since iOS never sends SMS silently).
+    let message: String?
     let confidence: Double
     let reply: String
 }
@@ -74,11 +79,12 @@ enum LlamaGrammar {
                     "\\"contact\\"" ws ":" ws maybeString ws "," ws
                     "\\"time\\"" ws ":" ws maybeString ws "," ws
                     "\\"medication\\"" ws ":" ws maybeString ws "," ws
+                    "\\"message\\"" ws ":" ws maybeString ws "," ws
                     "\\"confidence\\"" ws ":" ws number ws "," ws
                     "\\"reply\\"" ws ":" ws string ws "}"
     action ::= "\\"ack_med\\"" | "\\"call\\"" | "\\"emergency\\""
              | "\\"set_reminder\\"" | "\\"health_query\\"" | "\\"music\\""
-             | "\\"query\\"" | "\\"none\\""
+             | "\\"send_message\\"" | "\\"query\\"" | "\\"none\\""
     maybeString ::= "null" | string
     string ::= "\\"" ([^"\\\\] | "\\\\" .)* "\\""
     number ::= ("0" | [1-9][0-9]*) ("." [0-9]+)?
@@ -219,16 +225,22 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         Reply with a single JSON object matching the tool schema.
         Set action to "ack_med" if the user confirms they took medication,
         "emergency" if they ask for help in an emergency, "call" if they
-        want to make a call, "set_reminder" if they want a reminder at a
+        want to make a phone call, "send_message" if they want to send a
+        text message, "set_reminder" if they want a reminder at a
         time, "health_query" if they ask about their health, "music" if
         they ask for a song or bhajan, "query" for any other question,
         otherwise "none".
         For "set_reminder", set time to the time expression they used
         (keep the original wording, e.g. "बिहान ८ बजे") and medication to
         the medication name if mentioned, else null.
-        Set entryId and contact to null unless you can identify a specific
-        target. Set confidence to your certainty in [0, 1]. Set reply to a
-        short response in the user's language.
+        For "call" and "send_message", set contact to who they named or
+        described (a name, or a relationship like "son"/"छोरा"/"daughter"),
+        else null.
+        For "send_message", set message to the message body they dictated,
+        in their own words, else null.
+        Set entryId to null unless you can identify a specific target.
+        Set confidence to your certainty in [0, 1]. Set reply to a short
+        response in the user's language.
         User said: "\(transcript)"
         """
     }
@@ -352,6 +364,7 @@ final class LlamaCommandInterpreter: CommandInterpreter {
                 contact: decoded.contact,
                 time: decoded.time,
                 medication: decoded.medication,
+                message: decoded.message,
                 confidence: clamped,
                 reply: decoded.reply
             )
@@ -399,6 +412,7 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         let contact: String?
         let time: String?
         let medication: String?
+        let message: String?
         let confidence: Double
         let reply: String
     }

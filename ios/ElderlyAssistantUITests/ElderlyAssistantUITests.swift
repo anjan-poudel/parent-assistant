@@ -102,14 +102,18 @@ final class ElderlyAssistantUITests: XCTestCase {
 
         let settings = app.buttons["सेटिङ"]
         XCTAssertTrue(settings.waitForExistence(timeout: 15),
-                      "Settings hub card should be reachable from Home")
+                      "Settings dock item should be reachable from Home")
         settings.tap()
 
-        // Settings screen: the AI models row.
-        let aiModels = app.buttons["AI मोडेल"]
-        XCTAssertTrue(aiModels.waitForExistence(timeout: 10),
-                      "Tapping the Settings hub card should push Settings")
-        aiModels.tap()
+        // Settings screen title. AI Models is intentionally NOT a normal
+        // row here (redesign 2026-09-03 §3.3 — buried behind a long-press
+        // since there's no caregiver app yet to hand it off to).
+        let title = app.staticTexts["सेटिङ"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 10),
+                      "Tapping the Settings dock item should push Settings")
+        XCTAssertFalse(app.buttons["AI मोडेल"].exists,
+                       "AI Models must not be a plain visible row")
+        title.press(forDuration: 1.6)
 
         // Model management screen: automatic-selection row or empty state.
         let automatic = app.buttons.matching(NSPredicate(
@@ -117,6 +121,6 @@ final class ElderlyAssistantUITests: XCTestCase {
         let downloaded = app.staticTexts["डाउनलोड भएको छैन"].firstMatch
         XCTAssertTrue(automatic.waitForExistence(timeout: 10) ||
                       downloaded.waitForExistence(timeout: 10),
-                      "Tapping AI models should push the model screen")
+                      "Long-pressing the Settings title should reveal the model screen")
     }
 }

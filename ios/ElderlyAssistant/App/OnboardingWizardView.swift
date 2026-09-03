@@ -366,14 +366,14 @@ private struct FamilyContactStep: View {
     }
 }
 
-// MARK: - Step 4: Models (default model only — no variant picker)
+// MARK: - Step 4: Gemini API key (v2 pivot — replaces the v1 model-download
+// step; see docs/superpowers/specs/2026-09-03-v2-gemini-pivot-design.md)
 
 private struct ModelsStep: View {
     @EnvironmentObject var coordinator: AppCoordinator
-    @EnvironmentObject var downloads: ModelDownloadService
     let onFinish: () -> Void
 
-    @State private var started = false
+    @State private var draftKey: String = ""
 
     var body: some View {
         VStack(spacing: 24) {
@@ -387,93 +387,45 @@ private struct ModelsStep: View {
                     .foregroundColor(DesignTokens.textSecondary)
                     .multilineTextAlignment(.center)
             }
-            // Spec §4.5: default model progress only — no variant picker
-            // at first run (that lives in Settings → AI मोडेल).
-            VStack(spacing: 12) {
-                if let entry = ModelCatalog.entry(for: ModelCatalog.whisperMediumFinetunedNepali) {
-                    ModelProgressRow(
-                        entry: entry,
-                        state: downloads.states[ModelCatalog.whisperMediumFinetunedNepali]
-                            ?? (coordinator.modelStore.isCached(ModelCatalog.whisperMediumFinetunedNepali)
-                                ? .completed : .notStarted)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("settings.gemini.fieldLabel")
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                    .foregroundColor(DesignTokens.textSecondary)
+                SecureField("settings.gemini.fieldPlaceholder", text: $draftKey)
+                    .font(.system(size: DesignTokens.minBodyPointSize, design: .monospaced))
+                    .padding(14)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
+                    .background(DesignTokens.background)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
+                            .stroke(DesignTokens.textSecondary.opacity(0.25), lineWidth: 1)
                     )
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                if coordinator.geminiConfigStore.isConfigured {
+                    Label("settings.gemini.statusConnected", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.accent)
                 }
             }
             .padding(16)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(DesignTokens.card)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
 
-            primaryButton(key: "onboarding.stepModels.goHome", action: onFinish)
-        }
-        .onAppear {
-            guard !started else { return }
-            started = true
-            let id = ModelCatalog.whisperMediumFinetunedNepali
-            let already = coordinator.modelStore.isCached(id)
-                || downloads.states[id] != nil
-            if !already {
-                downloads.start(id)
+            primaryButton(key: "onboarding.stepModels.goHome") {
+                if !draftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    coordinator.geminiConfigStore.save(draftKey)
+                }
+                onFinish()
             }
         }
     }
 }
 
 // MARK: - Shared pieces
-
-private struct ModelProgressRow: View {
-    @Environment(\.locale) private var locale
-    let entry: ModelCatalogEntry
-    let state: ModelDownloadState
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(entry.displayName(locale: locale))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.textPrimary)
-            switch state {
-            case .notStarted:
-                Text("model.notDownloaded")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
-            case .queued:
-                Text("model.queued")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
-            case .downloading(let received, let total):
-                let ratio = total > 0 ? Double(received) / Double(total) : 0
-                ProgressView(value: ratio)
-                    .tint(DesignTokens.accent)
-                Text("\(bytes(received)) / \(bytes(total))")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
-            case .verifying:
-                Text("model.verifying")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
-            case .completed:
-                Label("model.ready", systemImage: "checkmark.seal.fill")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.accent)
-            case .failed(let reason):
-                Text(L10n.fmt("model.failed", locale: locale, reason))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.stateError)
-            case .cancelled:
-                Text("model.cancelled")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
-            }
-        }
-        .padding(.vertical, 4)
-    }
-
-    private func bytes(_ n: Int64) -> String {
-        let fmt = ByteCountFormatter()
-        fmt.countStyle = .file
-        return fmt.string(fromByteCount: n)
-    }
-}
 
 /// Big primary button used across the wizard — ≥60pt tall (spec §4.2).
 private func primaryButton(key: String, action: @escaping () -> Void) -> some View {

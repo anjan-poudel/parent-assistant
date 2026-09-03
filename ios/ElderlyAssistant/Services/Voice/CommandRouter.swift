@@ -21,6 +21,20 @@ protocol VoiceCommandCoordinating: AnyObject {
 
     /// `set_reminder` intent: creates a reminder through scheduler storage.
     func addVoiceReminder(title: String, time: DateComponents)
+
+    /// `call` intent (trial wiring). Resolves `name` (a contact's name OR
+    /// relationship, e.g. "छोरा") against family contacts and places a
+    /// real phone call. Returns false when no contact can be resolved —
+    /// the router falls back to the existing blocked/unrecognised
+    /// message rather than claiming success.
+    func placeCall(toContactNamed name: String?) -> Bool
+
+    /// `send_message` intent (trial wiring). iOS never lets a third-party
+    /// app send SMS silently — `MFMessageComposeViewController` always
+    /// requires the user's own tap on Send — so this resolves the contact
+    /// and presents the native compose sheet pre-filled with `body`.
+    /// Returns false when no contact can be resolved.
+    func composeMessage(toContactNamed name: String?, body: String) -> Bool
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -216,8 +230,7 @@ final class CommandRouter {
                                       bodyKey: "notif.emergencyAck.body")
             speak(key: "router.emergencyAck")
         case .call:
-            emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
-            speak(key: "router.sensitiveBlocked")
+            handleCall(command)
         case .setReminder:
             handleSetReminder(command)
         case .healthQuery:
@@ -228,6 +241,8 @@ final class CommandRouter {
             // First-class stub intent (spec §5.1).
             emit(eventType: "command_music_stub", outcome: "info")
             speak(key: "router.musicStub")
+        case .sendMessage:
+            handleSendMessage(command)
         case .query:
             emit(eventType: "command_llm_query", outcome: "info")
             speak(text: command.reply)
@@ -253,6 +268,35 @@ final class CommandRouter {
         emit(eventType: "command_set_reminder", outcome: "success")
         let spokenTime = formattedTime(time, locale: locale)
         speak(text: L10n.fmt("router.reminderSet", locale: locale, spokenTime))
+    }
+
+    /// `call` (trial wiring, LLM-interpreted path only — the deterministic
+    /// keyword layer keeps blocking ANY call-ish phrase unconditionally
+    /// since it has no entity extraction to identify a real target; see
+    /// `routeKeyword`'s `sensitiveCallPhrases`, unchanged). Only a
+    /// specifically-resolved contact gets dialed for real.
+    private func handleCall(_ command: InterpretedCommand) {
+        guard coordinator?.placeCall(toContactNamed: command.contact) == true else {
+            emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
+            speak(key: "router.sensitiveBlocked")
+            return
+        }
+        emit(eventType: "command_call_placed", outcome: "success")
+        speak(text: command.reply)
+    }
+
+    /// `send_message` (trial wiring). Never claims the message was SENT —
+    /// only that it's ready, since the user still has to tap Send on the
+    /// native compose sheet.
+    private func handleSendMessage(_ command: InterpretedCommand) {
+        guard let body = command.message, !body.isEmpty,
+              coordinator?.composeMessage(toContactNamed: command.contact, body: body) == true else {
+            emit(eventType: "command_message_unresolved", outcome: "blocked")
+            speak(key: "router.messageContactNotFound")
+            return
+        }
+        emit(eventType: "command_message_composing", outcome: "success")
+        speak(text: command.reply)
     }
 
     private func formattedTime(_ components: DateComponents, locale: Locale) -> String {

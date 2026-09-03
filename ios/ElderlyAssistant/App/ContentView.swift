@@ -19,5 +19,13 @@ struct ContentView: View {
                 coordinator.start()
             }
         }
+        // send_message trial wiring (AppCoordinator.composeMessage): the
+        // native SMS compose sheet, presented app-wide so it can surface
+        // regardless of which screen the voice command landed on.
+        .sheet(item: $coordinator.pendingMessageDraft) { draft in
+            MessageComposeView(draft: draft) {
+                coordinator.pendingMessageDraft = nil
+            }
+        }
     }
 }

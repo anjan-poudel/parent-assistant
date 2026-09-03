@@ -1,7 +1,13 @@
 import SwiftUI
+import UIKit
 
 /// Shared leaf-screen chrome: huge back button, single-purpose layout
 /// (spec §4.3). Every hub leaf uses this.
+///
+/// Redesign spec §3.2: this is a PLAIN full-screen page — no Talk hero, no
+/// hint carousel, no dock. The one exception is the Emergency icon, which
+/// persists on every screen because it's a safety invariant, not
+/// conversational voice chrome.
 struct LeafScreen<Content: View>: View {
     @Environment(\.dismiss) private var dismiss
     let titleKey: String
@@ -31,6 +37,7 @@ struct LeafScreen<Content: View>: View {
                         .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
                         .foregroundColor(DesignTokens.textPrimary)
                     Spacer()
+                    EmergencyIconButton()
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
@@ -165,30 +172,78 @@ struct RemindersView: View {
     }
 }
 
-// MARK: - Call (फोन) — fail-closed placeholder, spec §4.3
+// MARK: - Call (फोन) — redesign spec §3.2
 
+/// Replaces the old fail-closed placeholder. `CommandRouter`'s `.call`
+/// handling (voice-triggered "call X") stays blocked, unchanged, pending
+/// voice-biometric auth — that's a `CommandRouter`/pipeline concern this
+/// redesign does not touch. TAPPING a contact here is a different trust
+/// model: it's the user's own hand on their own unlocked phone, the same
+/// as any contacts app, so it places a real call directly.
 struct CallView: View {
+    @EnvironmentObject var coordinator: AppCoordinator
+
     var body: some View {
         LeafScreen(titleKey: "call.title") {
-            VStack(spacing: 20) {
-                Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 56))
+            if coordinator.familyContacts.isEmpty {
+                Text("call.contactsEmpty")
+                    .font(.system(size: DesignTokens.minBodyPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
-                Text("call.blocked")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
                     .multilineTextAlignment(.center)
-                Text("call.comingSoon")
+                    .padding(32)
+                    .frame(maxWidth: .infinity)
+                    .background(DesignTokens.card)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            } else {
+                VStack(spacing: 12) {
+                    ForEach(coordinator.familyContacts) { contact in
+                        ContactTile(contact: contact)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Face/initial avatar + name, with a real tap-to-dial action — no list
+/// picker in between (redesign spec §3.1 "one face, one tap").
+struct ContactTile: View {
+    let contact: FamilyContact
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        HStack(spacing: 14) {
+            FaceAvatar(name: contact.name, diameter: 52)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(contact.name)
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Text(contact.relationship)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
-                    .multilineTextAlignment(.center)
             }
-            .padding(24)
-            .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .padding(.top, 32)
+            Spacer()
+            Button(action: call) {
+                Image(systemName: "phone.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: DesignTokens.minTapTargetSize, height: DesignTokens.minTapTargetSize)
+                    .background(DesignTokens.accent)
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(L10n.fmt("call.callButtonLabel", locale: locale, contact.name)))
         }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
+    }
+
+    private func call() {
+        guard let url = PhoneDialer.url(for: contact.phone) else { return }
+        UIApplication.shared.open(url)
     }
 }
 
