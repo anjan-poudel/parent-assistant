@@ -334,24 +334,25 @@ Gemini-specific; all of it is still exactly right.
 
 ## 10. Open decisions requiring explicit sign-off
 
-Nothing below was silently assumed — each has a stated recommendation, but all six are
-genuine calls that shape scope materially:
+Each has a stated recommendation; two are now confirmed, four remain open:
 
 1. **Accept the cloud-AI architecture reversal as a real product decision.** Update
    `constitution.md`'s Architecture Constraint #1 to reflect it, or keep v2 permanently
    separate from `main` as an experimental track? This is the single biggest decision in this
-   document.
+   document. **Still open.**
 2. **TTS**: stay local (recommended — free, instant, offline-safe) vs. adopt Gemini audio-out
-   (better/more natural voice, adds latency and cost to every reply)?
-3. **WhatsApp/Messenger calling**: accept it's not achievable on iOS and reframe those two
-   brief items (§4.3), or drop them from scope entirely rather than partially implementing?
+   (better/more natural voice, adds latency and cost to every reply)? **Still open.**
+3. ~~**WhatsApp/Messenger calling**~~ **RESOLVED (2026-09-04): confirmed not achievable on
+   iOS — dropped from scope.** WhatsApp stays outbound-text-only (§4.3); Messenger dropped
+   entirely.
 4. **Nepali religious calendar**: subscribe to a community ICS feed (recommended — fast, but
    depends on an external source's accuracy) vs. build BS/Panchanga date math ourselves
    (accurate to our own verification, slow to build correctly)? If the ICS route, which
-   specific feed — needs picking and vetting, not just "one exists somewhere."
-5. **Appliance manuals**: answer from Gemini's own knowledge + photo only (recommended for
-   v2.0) vs. build automated manual retrieval/scraping now?
+   specific feed — needs picking and vetting, not just "one exists somewhere." **Still open.**
+5. ~~**Appliance manuals**~~ **RESOLVED (2026-09-04): coordinate-grounding + client-side
+   overlay confirmed over image generation (§3.1/§4.4)**; automated manual retrieval/scraping
+   stays out of scope for v2.0 — Gemini answers from its own knowledge + the photo.
 6. **Gemini API terms tier**: confirm and select the specific billing/terms tier that disables
    using submitted content for model training before any real user's medication-adjacent
    conversations reach the API. This is a compliance gate, not a nice-to-have — needs an
-   explicit answer, not a default assumption.
+   explicit answer, not a default assumption. **Still open.**
