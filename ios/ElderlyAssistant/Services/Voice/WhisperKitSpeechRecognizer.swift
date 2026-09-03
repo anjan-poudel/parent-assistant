@@ -213,6 +213,14 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
                     loadedDescriptor = descriptor
                     emit("model_loaded", errorCode: nil)
                     print("[whisperkit_stt] model_loaded \(descriptor) load_ms=\(loadMs)")
+                    // What hardware the components will actually run on.
+                    // NE = Neural Engine (ANE). The simulator forces
+                    // .cpuOnly — real devices get the NE path.
+                    let compute = config.computeOptions ?? ModelComputeOptions()
+                    print("[whisperkit_stt] compute audioEncoder=\(compute.audioEncoderCompute) "
+                        + "textDecoder=\(compute.textDecoderCompute) "
+                        + "mel=\(compute.melCompute) "
+                        + "simulator=\(WhisperKit.isRunningOnSimulator)")
                     kit = created
                 }
 
