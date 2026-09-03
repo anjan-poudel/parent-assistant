@@ -85,6 +85,10 @@ enum ModelCatalog {
 
     // MARK: - Well-known IDs
     static let whisperLargeV3Nepali = ModelID("whisper-large-v3-nepali-ggml")
+    /// WhisperKit-format Nepali model (directory artifact, zip-delivered)
+    /// — the ANE-accelerated path that replaces the ggml STT entries.
+    /// Placeholder until the teacher conversion lands (see migration).
+    static let whisperKitNepali = ModelID("whisperkit-ne-teacher")
     static let whisperSmallMultilingual = ModelID("whisper-small-multilingual-q5_1")
     /// The FINISHED small Devanagari Nepali model: stage-4 fine-tune on
     /// labeled Devanagari transcripts, started from the distilled

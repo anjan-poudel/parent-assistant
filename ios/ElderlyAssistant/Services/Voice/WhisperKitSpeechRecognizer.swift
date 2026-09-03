@@ -4,64 +4,72 @@ import AVFoundation
 import WhisperKit
 #endif
 
-/// ANE-accelerated STT via WhisperKit (CoreML) — replaces SwiftWhisper on
-/// the on-device path. Push-mode: the pipeline feeds PCM buffers and calls
-/// `finish()` on end-of-utterance, the same contract as the SwiftWhisper
-/// adapter, so the VAD-gated capture flow is unchanged.
+/// ANE-accelerated recognizer on the WhisperKit runtime (memory:
+/// ios-stt-runtime-decision — the vendored whisper.cpp predates Metal,
+/// WhisperKit is the maintained CoreML/ANE path for 128-mel models).
 ///
-/// Model loading is lazy on first use. The model folder is a converted
-/// WhisperKit CoreML bundle (see docs/voice-pipeline-setup.md — generated
-/// with `whisperkit generate model`); ModelCatalog/download plumbing for
-/// bundle artifacts lands separately.
+/// Push-mode like `WhisperSpeechRecognizer`: the pipeline's tap feeds
+/// int16 PCM via `feed(_:)`, `finish()` runs transcription. The
+/// `#if canImport(WhisperKit)` guard keeps this file compilable before
+/// the package product is linked.
 final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
 
-    /// Location of the converted WhisperKit model bundle. Nil until the
-    /// catalog/download service provides bundle artifacts.
-    var modelFolderURL: URL?
+    let ownsAudioCapture = false
 
-    /// Alternative: a WhisperKit HF model name backed by an official
-    /// pre-converted bundle (e.g. "large-v3-turbo") — the SDK downloads
-    /// it itself. Used for the first on-device latency bench while the
-    /// custom teacher bundle conversion is sorted out.
+    private let modelStore: ModelStore?
+    private let observabilityBus: ObservabilityBus
+
+    /// Which catalog artifact (a directory) to load in normal mode.
+    private let preferredModelID: ModelID
+
+    // Bench hooks (env-driven, set by AppCoordinator's
+    // makeWhisperKitBenchRecognizer): use a local folder or a named
+    // model that WhisperKit downloads itself (e.g. "large-v3-turbo").
+    var modelFolderURL: URL?
     var modelName: String?
+
+    /// Held as `Any?` so this file compiles without the package; cast to
+    /// `WhisperKit.WhisperKit` inside the guards.
+    private var kitInstance: Any?
+    private var loadedDescriptor: String?
+
+    private var utteranceBuffer: [Float] = []
+    private var completion: ((Result<String, RecognitionError>) -> Void)?
+    private var timeoutWork: DispatchWorkItem?
+    private var listeningActive = false
+    private let inferenceQueue = DispatchQueue(label: "whisperkit.stt",
+                                               qos: .userInitiated)
 
     var isAvailable: Bool {
         #if canImport(WhisperKit)
-        return modelFolderURL != nil || modelName != nil
+        if modelFolderURL != nil || modelName != nil {
+            return true   // bench mode
+        }
+        guard let modelStore,
+              modelStore.directoryURL(for: preferredModelID) != nil else {
+            return false
+        }
+        return true
         #else
         return false
         #endif
     }
 
-    let ownsAudioCapture = false
-
-    private let observabilityBus: ObservabilityBus
-    private let inferenceQueue = DispatchQueue(label: "whisperkit.stt",
-                                               qos: .userInteractive)
-    private var listeningActive = false
-    private var utteranceBuffer: [Int16] = []
-    private var completion: ((Result<String, RecognitionError>) -> Void)?
-    private var timeoutWork: DispatchWorkItem?
-
-    #if canImport(WhisperKit)
-    private var whisperKit: WhisperKit?
-    private var initTask: Task<WhisperKit?, Never>?
-    #endif
-
-    init(observabilityBus: ObservabilityBus) {
+    init(observabilityBus: ObservabilityBus,
+         modelStore: ModelStore? = nil,
+         preferredModelID: ModelID = ModelCatalog.whisperKitNepali) {
+        self.modelStore = modelStore
         self.observabilityBus = observabilityBus
+        self.preferredModelID = preferredModelID
     }
 
-    // MARK: - Auth
+    // MARK: - SpeechRecognizerProtocol
 
     func requestAuthorization(_ callback: @escaping (Bool) -> Void) {
-        // WhisperKit reads audio buffers we feed it — the mic permission
-        // gate is owned by the pipeline's AudioSessionManager, same as
-        // the SwiftWhisper adapter (no separate speech-recognition gate).
+        // Mic permission is handled by the audio session; WhisperKit has
+        // no separate gate.
         DispatchQueue.main.async { callback(true) }
     }
-
-    // MARK: - Capture lifecycle
 
     func startListening(timeout: TimeInterval,
                         completion: @escaping (Result<String, RecognitionError>) -> Void) {
@@ -74,6 +82,7 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         utteranceBuffer.removeAll()
         self.completion = completion
 
+        // Hard cap in case VAD doesn't fire finish().
         let work = DispatchWorkItem { [weak self] in
             self?.emit("timeout", errorCode: "timed_out")
             self?.finish()
@@ -86,8 +95,9 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         guard listeningActive else { return }
         guard let channelData = buffer.int16ChannelData?.pointee else { return }
         let count = Int(buffer.frameLength)
-        utteranceBuffer.append(contentsOf: UnsafeBufferPointer(start: channelData,
-                                                               count: count))
+        let floats = UnsafeBufferPointer(start: channelData, count: count)
+            .map { Float($0) / 32_768.0 }
+        utteranceBuffer.append(contentsOf: floats)
     }
 
     func finish() {
@@ -96,19 +106,17 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         timeoutWork?.cancel()
         timeoutWork = nil
 
-        let samples = utteranceBuffer
+        let audio = utteranceBuffer
         utteranceBuffer.removeAll()
         let completion = self.completion
         self.completion = nil
 
-        emit("finish", errorCode: nil)
-        guard !samples.isEmpty else {
-            DispatchQueue.main.async { completion?(.failure(.timedOut)) }
-            return
-        }
+        emit("finish", errorCode: audio.isEmpty ? "empty_buffer" : nil)
+        print("[whisperkit_stt] finish samples=\(audio.count) "
+            + "audio_seconds=\(String(format: "%.2f", Double(audio.count) / 16_000.0))")
 
         inferenceQueue.async { [weak self] in
-            self?.runInference(samples) { result in
+            self?.runInference(audio) { result in
                 DispatchQueue.main.async { completion?(result) }
             }
         }
@@ -119,61 +127,78 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         timeoutWork?.cancel()
         timeoutWork = nil
         utteranceBuffer.removeAll()
-        if let completion = completion {
+        if let completion {
             self.completion = nil
             DispatchQueue.main.async { completion(.failure(.cancelled)) }
         }
     }
 
-    // MARK: - Inference
+    // MARK: - Inference (guarded)
 
-    private func runInference(_ samples: [Int16],
+    private func runInference(_ audio: [Float],
                               completion: @escaping (Result<String, RecognitionError>) -> Void) {
         #if canImport(WhisperKit)
-        guard let folder = modelFolderURL else {
+        // Resolve the load descriptor: bench folder/name first, then the
+        // catalog directory artifact.
+        let descriptor: String
+        let config = WhisperKitConfig()
+        config.verbose = true
+        if let folder = modelFolderURL {
+            descriptor = "folder:\(folder.path)"
+            config.modelFolder = folder.path
+        } else if let name = modelName {
+            descriptor = "name:\(name)"
+            config.model = name
+        } else if let url = modelStore?.directoryURL(for: preferredModelID) {
+            descriptor = "artifact:\(preferredModelID.rawValue)"
+            config.modelFolder = url.path
+        } else {
+            emit("model_path_missing", errorCode: "no_path")
             completion(.failure(.localeUnsupported))
             return
         }
-
-        let floatSamples = samples.map { Float($0) / 32768.0 }
-
         Task { [weak self] in
             guard let self else { return }
             do {
                 let kit: WhisperKit
-                if let existing = whisperKit {
+                if let existing = kitInstance as? WhisperKit,
+                   loadedDescriptor == descriptor {
                     kit = existing
                 } else {
-                    // First use: load the model (cached thereafter).
-                    // Prefer the local converted bundle; fall back to the
-                    // SDK's built-in download for official model names.
-                    let loaded: WhisperKit?
-                    if let folder = modelFolderURL {
-                        loaded = try await WhisperKit(modelFolder: folder.path)
-                    } else if let name = modelName {
-                        loaded = try await WhisperKit(model: name)
-                    } else {
-                        loaded = nil
-                    }
-                    guard let loaded else {
-                        completion(.failure(.localeUnsupported))
-                        return
-                    }
-                    whisperKit = loaded
-                    kit = loaded
+                    let loadStart = CFAbsoluteTimeGetCurrent()
+                    let created = try await WhisperKit(config)
+                    let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
+                    kitInstance = created
+                    loadedDescriptor = descriptor
                     emit("model_loaded", errorCode: nil)
+                    print("[whisperkit_stt] model_loaded \(descriptor) load_ms=\(loadMs)")
+                    kit = created
                 }
-                let result = try await kit.transcribe(audioArray: floatSamples)
-                let text = result.first?.text ?? ""
-                emit("inference_done", errorCode: nil)
-                completion(.success(text))
+
+                let start = CFAbsoluteTimeGetCurrent()
+                print("[whisperkit_stt] transcribing samples=\(audio.count)")
+                let results = try await kit.transcribe(audioArrays: [audio])
+                let ms = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
+                let joined = results.first??.map(\.text).joined(separator: " ")
+                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if joined.isEmpty {
+                    print("[whisperkit_stt] empty_transcript duration_ms=\(ms)")
+                    completion(.failure(.recognitionFailed(
+                        NSError(domain: "WhisperKitSTT", code: -2,
+                                userInfo: [NSLocalizedDescriptionKey: "empty transcript"]))))
+                } else {
+                    print("[whisperkit_stt] transcribed duration_ms=\(ms) chars=\(joined.count)")
+                    print("[whisperkit_stt] transcript=" + joined)
+                    completion(.success(joined))
+                }
             } catch {
-                emit("inference_failed", errorCode: String(describing: error))
+                emit("inference_failed", errorCode: "whisperkit_error")
+                print("[whisperkit_stt] inference_failed \(error)")
                 completion(.failure(.recognitionFailed(error)))
             }
         }
         #else
-        emit("inference_unavailable", errorCode: nil)
+        emit("inference_unavailable", errorCode: "runtime_missing")
         completion(.failure(.localeUnsupported))
         #endif
     }
@@ -185,7 +210,7 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
             component: "whisperkit_stt",
             eventType: eventType,
             durationMs: nil,
-            outcome: errorCode == nil ? "success" : "failure",
+            outcome: errorCode == nil ? "info" : "failure",
             errorCode: errorCode,
             metadata: [:]
         ))

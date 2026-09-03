@@ -321,6 +321,51 @@ final class ModelStore {
         return total
     }
 
+    // MARK: - WhisperKit directory artifacts
+
+    /// URL of an installed WhisperKit-style model DIRECTORY (not a single
+    /// file). Nil when never installed.
+    func directoryURL(for id: ModelID) -> URL? {
+        let url = rootDirectory
+            .appendingPathComponent("whisperKit", isDirectory: true)
+            .appendingPathComponent(id.rawValue, isDirectory: true)
+        var isDir: ObjCBool = false
+        return fileManager.fileExists(atPath: url.path, isDirectory: &isDir)
+            && isDir.boolValue ? url : nil
+    }
+
+    /// Unpacks a zip of a WhisperKit model directory into
+    /// `directoryURL(for:)`. The zip contains a single top-level model
+    /// folder; its contents become the installed directory.
+    func installWhisperKitModel(fromZip zipURL: URL, for id: ModelID) throws -> URL? {
+        let dest = rootDirectory
+            .appendingPathComponent("whisperKit", isDirectory: true)
+            .appendingPathComponent(id.rawValue, isDirectory: true)
+        let unzipDir = zipURL.deletingLastPathComponent()
+            .appendingPathComponent("wk-unzip-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: unzipDir) }
+        try fileManager.createDirectory(at: unzipDir, withIntermediateDirectories: true)
+        try fileManager.unzipItem(at: zipURL, to: unzipDir)
+        // The zip holds one top-level model directory.
+        let extracted = try fileManager.contentsOfDirectory(at: unzipDir,
+            includingPropertiesForKeys: nil).first { url in
+            var isDir: ObjCBool = false
+            fileManager.fileExists(atPath: url.path, isDirectory: &isDir)
+            return isDir.boolValue
+        }
+        guard let extracted else {
+            throw NSError(domain: "ModelStore", code: 7,
+                          userInfo: [NSLocalizedDescriptionKey:
+                                     "WhisperKit zip did not contain a model directory"])
+        }
+        try? fileManager.removeItem(at: dest)
+        try ensureDirectory(dest.deletingLastPathComponent())
+        try fileManager.moveItem(at: extracted, to: dest)
+        emit("whisperkit_model_installed", outcome: "success", modelId: id,
+             errorCode: nil)
+        return dest
+    }
+
     // MARK: - Internals
 
     private func finalURL(for entry: ModelCatalogEntry) -> URL {
