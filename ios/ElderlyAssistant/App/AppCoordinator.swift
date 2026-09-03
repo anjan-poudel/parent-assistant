@@ -510,11 +510,36 @@ final class AppCoordinator: ObservableObject {
     /// Attempts to move the pipeline off the SFSpeechRecognizer fallback
     /// onto WhisperSpeechRecognizer. Idempotent.
     private func trySwapToWhisper() {
+        // Bench hook (WhisperKit ANE path): launch with WK_TURBO=1 to
+        // hot-swap the WhisperKit recognizer on the official pre-converted
+        // large-v3-turbo bundle (SDK-downloaded) — the first on-device
+        // latency measurement while the custom teacher bundle conversion
+        // is sorted out.
+        if ProcessInfo.processInfo.environment["WK_TURBO"] == "1",
+           let wk = makeWhisperKitBenchRecognizer() {
+            voicePipeline?.setSpeechRecognizer(wk)
+            DispatchQueue.main.async { [weak self] in
+                self?.updateActiveSTTName()
+            }
+            return
+        }
         guard whisperSpeechRecognizer.isAvailable else { return }
         voicePipeline?.setSpeechRecognizer(whisperSpeechRecognizer)
         DispatchQueue.main.async { [weak self] in
             self?.updateActiveSTTName()
         }
+    }
+
+    private func makeWhisperKitBenchRecognizer() -> WhisperKitSpeechRecognizer? {
+        guard ProcessInfo.processInfo.environment["WK_MODEL"] != nil ||
+              ProcessInfo.processInfo.environment["WK_TURBO"] == "1" else { return nil }
+        let recognizer = WhisperKitSpeechRecognizer(observabilityBus: observabilityBus)
+        if let folder = ProcessInfo.processInfo.environment["WK_MODEL_FOLDER"] {
+            recognizer.modelFolderURL = URL(fileURLWithPath: folder)
+        } else {
+            recognizer.modelName = "large-v3-turbo"
+        }
+        return recognizer
     }
 
     /// Model the recognizer will use for the next utterance — the user's

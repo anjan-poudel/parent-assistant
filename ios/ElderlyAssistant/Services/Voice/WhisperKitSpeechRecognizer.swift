@@ -19,9 +19,15 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     /// catalog/download service provides bundle artifacts.
     var modelFolderURL: URL?
 
+    /// Alternative: a WhisperKit HF model name backed by an official
+    /// pre-converted bundle (e.g. "large-v3-turbo") — the SDK downloads
+    /// it itself. Used for the first on-device latency bench while the
+    /// custom teacher bundle conversion is sorted out.
+    var modelName: String?
+
     var isAvailable: Bool {
         #if canImport(WhisperKit)
-        return modelFolderURL != nil
+        return modelFolderURL != nil || modelName != nil
         #else
         return false
         #endif
@@ -138,9 +144,21 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
                 if let existing = whisperKit {
                     kit = existing
                 } else {
-                    // First use: load the converted bundle (seconds for a
-                    // q8/large model; cached thereafter).
-                    let loaded = try await WhisperKit(modelFolder: folder.path)
+                    // First use: load the model (cached thereafter).
+                    // Prefer the local converted bundle; fall back to the
+                    // SDK's built-in download for official model names.
+                    let loaded: WhisperKit?
+                    if let folder = modelFolderURL {
+                        loaded = try await WhisperKit(modelFolder: folder.path)
+                    } else if let name = modelName {
+                        loaded = try await WhisperKit(model: name)
+                    } else {
+                        loaded = nil
+                    }
+                    guard let loaded else {
+                        completion(.failure(.localeUnsupported))
+                        return
+                    }
                     whisperKit = loaded
                     kit = loaded
                     emit("model_loaded", errorCode: nil)
