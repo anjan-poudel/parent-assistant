@@ -160,7 +160,6 @@ struct HintCarousel: View {
 struct LiveCaptionPill: View {
     let placeholderKey: String
     let transcript: String?
-    @State private var revealedCount = 0
 
     private var readyText: String? {
         guard let transcript, !transcript.isEmpty else { return nil }
@@ -173,17 +172,20 @@ struct LiveCaptionPill: View {
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                 .foregroundColor(DesignTokens.textSecondary)
             if let text = readyText {
-                Text(String(text.prefix(revealedCount)))
+                // Full text, immediately — NOT a per-character typewriter.
+                // A prior version revealed this a character at a time, but
+                // `feedbackArea` switches away from this view the instant
+                // routing finishes (which can land mid-reveal, especially
+                // once the second Gemini call completes) — the animation
+                // got cut off mid-sentence, which read as garbled/
+                // "disappearing" text (2026-09-04 field report). The real
+                // transcript is still fully preserved either way in
+                // `AppCoordinator.conversationHistory`; this just stops
+                // showing a deliberately-incomplete slice of it.
+                Text(text)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
-                    .task(id: text) {
-                        revealedCount = 0
-                        for i in 1...text.count {
-                            try? await Task.sleep(nanoseconds: 18_000_000)
-                            guard !Task.isCancelled else { return }
-                            revealedCount = i
-                        }
-                    }
+                    .transition(.opacity)
             } else {
                 Text(LocalizedStringKey(placeholderKey))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
@@ -195,6 +197,7 @@ struct LiveCaptionPill: View {
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
         .shadow(color: .black.opacity(0.1), radius: 10, y: 4)
+        .animation(.easeInOut(duration: 0.15), value: readyText)
     }
 }
 

@@ -44,9 +44,8 @@ final class GeminiClient {
     }
 
     struct Config {
-        var model: String
         var timeoutSeconds: TimeInterval
-        static let `default` = Config(model: "gemini-2.5-flash-lite", timeoutSeconds: 6)
+        static let `default` = Config(timeoutSeconds: 6)
     }
 
     private let configStore: GeminiConfigStore
@@ -119,7 +118,7 @@ final class GeminiClient {
             throw GeminiClientError.notConfigured
         }
         guard let url = URL(string:
-            "https://generativelanguage.googleapis.com/v1beta/models/\(config.model):generateContent?key=\(apiKey)"
+            "https://generativelanguage.googleapis.com/v1beta/models/\(configStore.model):generateContent?key=\(apiKey)"
         ) else {
             throw GeminiClientError.invalidURL
         }

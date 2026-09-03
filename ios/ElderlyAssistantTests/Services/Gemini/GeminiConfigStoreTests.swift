@@ -31,6 +31,30 @@ final class GeminiConfigStoreTests: XCTestCase {
         XCTAssertFalse(store.isConfigured)
     }
 
+    func testDefaultsToFlashLiteModel() {
+        let store = GeminiConfigStore(storage: GeminiInMemoryStorage())
+        XCTAssertEqual(store.model, GeminiConfigStore.defaultModel)
+    }
+
+    func testSaveModelPersistsAndUpdates() {
+        let store = GeminiConfigStore(storage: GeminiInMemoryStorage())
+        store.saveModel("gemini-2.5-pro")
+        XCTAssertEqual(store.model, "gemini-2.5-pro")
+    }
+
+    func testSaveModelIgnoresBlankInput() {
+        let store = GeminiConfigStore(storage: GeminiInMemoryStorage())
+        store.saveModel("gemini-2.5-flash")
+        store.saveModel("   ")
+        XCTAssertEqual(store.model, "gemini-2.5-flash", "blank input should not overwrite a real selection")
+    }
+
+    func testModelPersistsAcrossInstances() {
+        let storage = GeminiInMemoryStorage()
+        GeminiConfigStore(storage: storage).saveModel("gemini-flash-latest")
+        XCTAssertEqual(GeminiConfigStore(storage: storage).model, "gemini-flash-latest")
+    }
+
     func testPersistsAcrossInstancesOverTheSameStorage() {
         let storage = GeminiInMemoryStorage()
         GeminiConfigStore(storage: storage).save("persisted-key")

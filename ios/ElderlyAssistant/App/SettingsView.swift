@@ -214,6 +214,11 @@ struct GeminiAPISettingsView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @State private var draftKey: String = ""
     @State private var showClearConfirm = false
+    @State private var customModel: String = ""
+
+    private var isCustomModelSelected: Bool {
+        !GeminiModelCatalog.entries.contains { $0.id == coordinator.geminiConfigStore.model }
+    }
 
     var body: some View {
         LeafScreen(titleKey: "settings.gemini.title") {
@@ -221,6 +226,8 @@ struct GeminiAPISettingsView: View {
                 Text("settings.gemini.explanation")
                     .font(.system(size: DesignTokens.minBodyPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
+
+                modelPicker
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text("settings.gemini.fieldLabel")
@@ -285,6 +292,68 @@ struct GeminiAPISettingsView: View {
             }
             Button("common.back", role: .cancel) {}
         }
+    }
+
+    /// Model picker (2026-09-04 field request — "let me try different
+    /// options"). Curated list (`GeminiModelCatalog`) plus a free-text
+    /// override for anything else, since the full live model catalog
+    /// includes image/TTS/preview entries not worth enumerating here.
+    private var modelPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("settings.gemini.modelLabel")
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textSecondary)
+            ForEach(GeminiModelCatalog.entries) { entry in
+                modelRow(id: entry.id, labelKey: entry.labelKey, descriptionKey: entry.descriptionKey)
+            }
+            modelRow(id: nil, labelKey: "settings.gemini.model.custom", descriptionKey: "settings.gemini.model.custom.desc")
+            if isCustomModelSelected || !customModel.isEmpty {
+                TextField("settings.gemini.model.customPlaceholder", text: $customModel)
+                    .font(.system(size: DesignTokens.minBodyPointSize, design: .monospaced))
+                    .padding(12)
+                    .background(DesignTokens.background)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                    .onSubmit {
+                        coordinator.geminiConfigStore.saveModel(customModel)
+                    }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// `id == nil` renders the "custom" row, selected whenever the active
+    /// model isn't one of the curated entries.
+    private func modelRow(id: String?, labelKey: String, descriptionKey: String) -> some View {
+        let isSelected = id == nil ? isCustomModelSelected : coordinator.geminiConfigStore.model == id
+        return Button {
+            if let id {
+                customModel = ""
+                coordinator.geminiConfigStore.saveModel(id)
+            }
+            // Selecting "custom" just reveals the text field above —
+            // saving happens on submit once they've typed something.
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundColor(isSelected ? DesignTokens.accent : DesignTokens.textSecondary.opacity(0.5))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(LocalizedStringKey(labelKey))
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                    Text(LocalizedStringKey(descriptionKey))
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+                Spacer()
+            }
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+        }
+        .buttonStyle(.plain)
     }
 }
 

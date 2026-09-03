@@ -2204,6 +2204,244 @@
         }
       }
     },
+    "settings.gemini.model.custom": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom model ID"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आफ्नै मोडेल ID"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.custom.desc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type any Gemini model name to try it."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जुनसुकै जेमिनी मोडेलको नाम टाइप गरेर जाँच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.customPlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "e.g. gemini-2.5-flash"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जस्तै gemini-2.5-flash"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flash": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flash (more capable)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फ्ल्यास (बढी सक्षम)"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flash.desc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Better at tricky questions, costs a bit more."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जटिल प्रश्नमा राम्रो, अलि बढी लागत।"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flashLatest": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flash (always newest)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फ्ल्यास (सधैं नयाँ)"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flashLatest.desc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically tracks Google's newest Flash release."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google को नयाँ फ्ल्यास संस्करण स्वतः पछ्याउँछ।"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flashLite": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flash-Lite (cheapest, fastest)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फ्ल्यास-लाइट (सबैभन्दा सस्तो, छिटो)"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flashLite.desc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Best default — lowest cost, good enough for most commands."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उत्तम डिफल्ट — सबैभन्दा कम लागत, धेरैजसो आदेशका लागि पर्याप्त।"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flashLiteLatest": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flash-Lite (always newest)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फ्ल्यास-लाइट (सधैं नयाँ)"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flashLiteLatest.desc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically tracks Google's newest Flash-Lite release."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google को नयाँ फ्ल्यास-लाइट संस्करण स्वतः पछ्याउँछ।"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.pro": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pro (most capable)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "प्रो (सबैभन्दा सक्षम)"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.pro.desc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Highest quality, slower and most expensive — use for testing only."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उच्चतम गुणस्तर, ढिलो र सबैभन्दा महँगो — जाँचका लागि मात्र प्रयोग गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "settings.gemini.modelLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI model"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI मोडेल"
+          }
+        }
+      }
+    },
     "settings.gemini.remove": {
       "extractionState": "manual",
       "localizations": {
