@@ -151,7 +151,8 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         // package is present in the build. The runtime check is a
         // `#if canImport(SwiftWhisper)` in the actual inference path; without
         // it we short-circuit `startListening` with .localeUnsupported.
-        guard modelStore.isCached(ModelCatalog.whisperFinetunedNepali) ||
+        guard modelStore.isCached(ModelCatalog.whisperMediumFinetunedNepali) ||
+              modelStore.isCached(ModelCatalog.whisperFinetunedNepali) ||
               modelStore.isCached(ModelCatalog.whisperFinetunedNepaliQ8) ||
               modelStore.isCached(ModelCatalog.whisperSmallNepali) ||
               modelStore.isCached(ModelCatalog.whisperLargeV3Nepali) ||
@@ -209,6 +210,7 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         }
         let automaticOrder: [ModelID] = [
             ModelCatalog.whisperLargeV3Nepali,
+            ModelCatalog.whisperMediumFinetunedNepali,
             ModelCatalog.whisperFinetunedNepali,
             ModelCatalog.whisperSmallMultilingual,
             ModelCatalog.whisperBaseEn
@@ -475,6 +477,7 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         // plan §5.1). TranscriptSanityGuard stays as the downstream
         // backstop. Toggle via `Config.forcePrimaryLanguage`.
         let usePrimary = (modelId == ModelCatalog.whisperLargeV3Nepali
+                          || modelId == ModelCatalog.whisperMediumFinetunedNepali
                           || modelId == ModelCatalog.whisperFinetunedNepali
                           || modelId == ModelCatalog.whisperSmallNepali)
             && config.forcePrimaryLanguage
@@ -585,6 +588,10 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
                     print("[whisper_stt] transcribed attempt=\(attemptID) duration_ms=\(ms) "
                         + "audio_seconds=\(String(format: "%.1f", audioSeconds)) "
                         + "chars=\(joined.count)")
+                    // Transcript content on the console (requested for
+                    // on-device WER review) — dev-facing print, not the
+                    // sanitised observability bus.
+                    print("[whisper_stt] transcript=" + joined)
                     self?.settleAttempt(attemptID, with: .success(joined), timedOut: false)
                 }
             } catch {
@@ -745,6 +752,9 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
                 return ModelCatalog.whisperLargeV3Nepali
             }
             // fitsRAM emitted model_skipped_ram — drop through to small.
+        }
+        if modelStore.isCached(ModelCatalog.whisperMediumFinetunedNepali) {
+            return ModelCatalog.whisperMediumFinetunedNepali
         }
         if modelStore.isCached(ModelCatalog.whisperFinetunedNepali) {
             return ModelCatalog.whisperFinetunedNepali

@@ -95,6 +95,9 @@ enum ModelCatalog {
 
     // MARK: - Well-known IDs
     static let whisperLargeV3Nepali = ModelID("whisper-large-v3-nepali-ggml")
+    /// The MEDIUM-class fine-tune (stock medium geometry, 24 enc layers,
+    /// 80-mel — training-model-size-findings bet). The new default.
+    static let whisperMediumFinetunedNepali = ModelID("whisper-medium-ne-q5_1")
     /// WhisperKit-format Nepali model (directory artifact, zip-delivered)
     /// — the ANE-accelerated path that replaces the ggml STT entries.
     /// Placeholder until the teacher conversion lands (see migration).
@@ -123,6 +126,19 @@ enum ModelCatalog {
 
     /// Every entry the app can request. Order matters only for UI display.
     static let all: [ModelCatalogEntry] = [
+        ModelCatalogEntry(
+            id: whisperMediumFinetunedNepali,
+            kind: .whisperBase,
+            displayName: "Nepali speech recognition (medium, fine-tuned)",
+            filename: "whisper-medium-ne-q5_1.bin",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v3/whisper-medium-ne-q5_1.bin")!,
+            // Stock-medium fine-tune (checkpoint-5028, 2026-09-03).
+            sizeBytes: 586_572_036,
+            sha256: "ae119191928484edb913cf9f1325d86738df9b528cd03b14f946528e5c0e7c98",
+            minDeviceRAMBytes: 3_500_000_000,
+            dependsOn: nil,
+            coreMLEncoderBundledName: nil
+        ),
         ModelCatalogEntry(
             id: whisperFinetunedNepali,
             kind: .whisperBase,

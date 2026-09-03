@@ -390,11 +390,11 @@ private struct ModelsStep: View {
             // Spec §4.5: default model progress only — no variant picker
             // at first run (that lives in Settings → AI मोडेल).
             VStack(spacing: 12) {
-                if let entry = ModelCatalog.entry(for: ModelCatalog.whisperFinetunedNepali) {
+                if let entry = ModelCatalog.entry(for: ModelCatalog.whisperMediumFinetunedNepali) {
                     ModelProgressRow(
                         entry: entry,
-                        state: downloads.states[ModelCatalog.whisperFinetunedNepali]
-                            ?? (coordinator.modelStore.isCached(ModelCatalog.whisperFinetunedNepali)
+                        state: downloads.states[ModelCatalog.whisperMediumFinetunedNepali]
+                            ?? (coordinator.modelStore.isCached(ModelCatalog.whisperMediumFinetunedNepali)
                                 ? .completed : .notStarted)
                     )
                 }
@@ -409,7 +409,7 @@ private struct ModelsStep: View {
         .onAppear {
             guard !started else { return }
             started = true
-            let id = ModelCatalog.whisperFinetunedNepali
+            let id = ModelCatalog.whisperMediumFinetunedNepali
             let already = coordinator.modelStore.isCached(id)
                 || downloads.states[id] != nil
             if !already {

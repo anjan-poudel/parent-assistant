@@ -2,6 +2,9 @@ import Foundation
 import AVFoundation
 import BackgroundTasks
 import Combine
+import UserNotifications
+import UIKit
+import MessageUI
 
 /// Central coordinator that wires all services together.
 /// Starts safety-critical services first (medication scheduler, health monitor),
@@ -94,6 +97,53 @@ final class AppCoordinator: ObservableObject {
     @Published var lastTranscript: String?
     @Published var lastAssistantReply: String?
 
+    // MARK: - Conversation history & outcome (redesign spec §3.1, §5)
+
+    enum ExchangeRole { case user, assistant }
+
+    struct Exchange: Identifiable {
+        let id = UUID()
+        let role: ExchangeRole
+        let text: String
+        let timestamp: Date
+    }
+
+    /// A concrete, real result of a voice action — shown as the Home
+    /// outcome card (redesign spec §3.1). `undo` is non-nil ONLY when a
+    /// genuine reversible operation backs it (e.g. a just-created voice
+    /// reminder); it stays nil for actions with no real undo path (e.g.
+    /// medication acknowledgement) rather than faking one (redesign spec
+    /// §6).
+    struct OutcomeSummary: Identifiable {
+        let id = UUID()
+        let icon: String
+        let text: String
+        let timestamp: Date
+        let undo: (() -> Void)?
+    }
+
+    /// Ring buffer backing the on-demand history sheet (redesign spec
+    /// §3.1) — replaces the old always-visible conversation card.
+    @Published private(set) var conversationHistory: [Exchange] = []
+    private static let maxHistory = 20
+
+    @Published var lastOutcome: OutcomeSummary?
+
+    private func appendHistory(_ role: ExchangeRole, _ text: String) {
+        conversationHistory.append(Exchange(role: role, text: text, timestamp: Date()))
+        if conversationHistory.count > Self.maxHistory {
+            conversationHistory.removeFirst(conversationHistory.count - Self.maxHistory)
+        }
+    }
+
+    /// Sets the Home outcome card. Always dispatched to main (H1) since
+    /// callers may run on the router's queue, not just main.
+    private func setOutcome(icon: String, text: String, undo: (() -> Void)? = nil) {
+        DispatchQueue.main.async { [weak self] in
+            self?.lastOutcome = OutcomeSummary(icon: icon, text: text, timestamp: Date(), undo: undo)
+        }
+    }
+
     /// While non-nil, a confirmation challenge is awaiting the user's
     /// yes/no follow-up. Set by `startVoiceAckConfirmation`, cleared by
     /// `handleConfirmationResponse` or the session-machine timeout (C12).
@@ -149,7 +199,7 @@ final class AppCoordinator: ObservableObject {
     /// model-picker decision) but last so it never blocks the
     /// LLM/TTS downloads; it can be cancelled from the UI.
     let requiredModelIds: [ModelID] = [
-        ModelCatalog.whisperFinetunedNepali,
+        ModelCatalog.whisperMediumFinetunedNepali,
         ModelCatalog.whisperSmallMultilingual,
         ModelCatalog.llama3_2_1B,
         ModelCatalog.piperNepali,
@@ -235,8 +285,12 @@ final class AppCoordinator: ObservableObject {
         if let raw = UserDefaults.standard.string(forKey: Self.sttPreferenceKey),
            ModelCatalog.entry(for: ModelID(rawValue: raw)) != nil {
             let stored = ModelID(rawValue: raw)
-            self.sttModelPreference = (stored == ModelCatalog.whisperSmallNepali)
-                ? ModelCatalog.whisperFinetunedNepali
+            // Superseded models migrate forward to the current default:
+            // mid-training distill → stage-4 fine-tune → medium fine-tune.
+            self.sttModelPreference =
+                (stored == ModelCatalog.whisperSmallNepali
+                 || stored == ModelCatalog.whisperFinetunedNepali)
+                ? ModelCatalog.whisperMediumFinetunedNepali
                 : stored
         }
 
@@ -375,6 +429,10 @@ final class AppCoordinator: ObservableObject {
             cancelVoiceWatchdog()
             cancelVoiceStartWatchdog()
         case .capturingCommand:
+            // Redesign spec §3.1/§6: the live-caption pill must not show
+            // the PREVIOUS utterance's transcript while a new one is being
+            // captured — clear it at the start of every capture cycle.
+            lastTranscript = nil
             voiceSession.transition(to: .listening)
             armVoiceWatchdog()
         case .processing:
@@ -488,6 +546,7 @@ final class AppCoordinator: ObservableObject {
     func noteAssistantSpoke(_ text: String) {
         DispatchQueue.main.async { [weak self] in
             self?.lastAssistantReply = text
+            self?.appendHistory(.assistant, text)
         }
     }
 
@@ -567,6 +626,8 @@ final class AppCoordinator: ObservableObject {
     /// Catalog key naming the active STT (resolved in the UI's locale).
     private func sttNameKey(for id: ModelID?) -> String {
         switch id {
+        case ModelCatalog.whisperMediumFinetunedNepali:
+            return "stt.name.whisperMediumFinetunedNepali"
         case ModelCatalog.whisperFinetunedNepali:
             return "stt.name.whisperFinetunedNepali"
         case ModelCatalog.whisperFinetunedNepaliQ8:
@@ -594,6 +655,7 @@ final class AppCoordinator: ObservableObject {
         whisperSpeechRecognizer.releaseModel()
         DispatchQueue.main.async { [weak self] in
             self?.lastTranscript = text
+            self?.appendHistory(.user, text)
         }
     }
 
@@ -633,6 +695,92 @@ final class AppCoordinator: ObservableObject {
             self.familyContacts = self.familyContactStore.load()
             self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts))
         }
+    }
+
+    // MARK: - Emergency (redesign spec §3.1/§3.2 — persistent icon everywhere)
+
+    /// The contact the Emergency affordance calls. Every stored family
+    /// contact is already treated as an emergency target (see
+    /// `emergencyContacts(from:)` above) — there's no separate
+    /// "designate as emergency contact" flag yet, so this is simply the
+    /// first configured contact. Nil when none is configured, which the
+    /// view surfaces honestly instead of pretending an action is available.
+    var emergencyContact: FamilyContact? { familyContacts.first }
+
+    /// Posts the same local notification `CommandRouter` already posts for
+    /// a voice-triggered emergency, and speaks the ack — reused here so the
+    /// touch and voice paths produce identical, real behavior. Does NOT
+    /// place the call itself (that's a `UIApplication.open(tel:)` at the
+    /// view layer, same pattern as `CallView`'s tap-to-dial) since this
+    /// class stays UIKit-free.
+    func emergencyNotify() {
+        let locale = activeLocale
+        let content = UNMutableNotificationContent()
+        content.title = L10n.str("notif.emergencyAck.title", locale: locale)
+        content.body = L10n.str("notif.emergencyAck.body", locale: locale)
+        content.sound = .defaultCritical
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString,
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
+        )
+        UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+        speak(key: "router.emergencyAck")
+    }
+
+    // MARK: - Voice-triggered call & message (trial wiring)
+    //
+    // Deliberately scoped to the LLM-interpreted path only —
+    // `CommandRouter.routeKeyword`'s blunt "call"/"phone" catch-all stays
+    // blocked unconditionally (constitution: no auth yet), because it has
+    // no entity extraction and can't identify a specific target. These
+    // only act when a specific, resolvable contact was named.
+
+    /// Matches a spoken name OR relationship ("छोरा"/"son") against family
+    /// contacts. Case-insensitive substring match in both directions so
+    /// "सुनिता" matches a contact named "सुनिता आचार्य" and vice versa.
+    private func matchContact(_ query: String) -> FamilyContact? {
+        let q = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return nil }
+        return familyContacts.first {
+            $0.name.lowercased().contains(q) || q.contains($0.name.lowercased())
+            || $0.relationship.lowercased().contains(q) || q.contains($0.relationship.lowercased())
+        }
+    }
+
+    /// Real `tel:` dialing for a voice-resolved contact. Returns false —
+    /// no side effects — when nothing matches, so the router's caller
+    /// falls back to its existing blocked/unrecognised message instead of
+    /// claiming success.
+    func placeCall(toContactNamed query: String?) -> Bool {
+        guard let query, let contact = matchContact(query),
+              let url = PhoneDialer.url(for: contact.phone) else { return false }
+        DispatchQueue.main.async { UIApplication.shared.open(url) }
+        setOutcome(icon: "phone.fill",
+                   text: L10n.fmt("home.outcome.callPlaced", locale: activeLocale, contact.name))
+        return true
+    }
+
+    /// A pending SMS draft — presented as `MessageComposeView` from
+    /// `ContentView`. Never auto-sent: `MFMessageComposeViewController`
+    /// requires the user's own tap on Send (Apple platform constraint,
+    /// not a design choice), so this is as real as the feature can be.
+    struct MessageDraft: Identifiable {
+        let id = UUID()
+        let recipients: [String]
+        let body: String
+    }
+    @Published var pendingMessageDraft: MessageDraft?
+
+    func composeMessage(toContactNamed query: String?, body: String) -> Bool {
+        guard MFMessageComposeViewController.canSendText(),
+              let query, let contact = matchContact(query) else { return false }
+        DispatchQueue.main.async { [weak self] in
+            self?.pendingMessageDraft = MessageDraft(recipients: [contact.phone], body: body)
+        }
+        setOutcome(icon: "message.fill",
+                   text: L10n.fmt("home.outcome.messageReady", locale: activeLocale, contact.name))
+        return true
     }
 
     // MARK: - Medication schedule surface (spec §4.3, §4.4.3)
@@ -698,6 +846,12 @@ final class AppCoordinator: ObservableObject {
     /// FR-D01 (challenge) and FR-D03 (double-dose check) actually run.
     func handleMedicationAcknowledgement(entryId: UUID) {
         _ = medicationScheduler.acknowledge(entryId: entryId, at: Date())
+        // No undo here — the scheduler has no reversal operation for a
+        // recorded dose, and faking one would be exactly the kind of mocked
+        // affordance the redesign is trying to avoid (spec §6).
+        setOutcome(icon: "checkmark.circle.fill",
+                   text: L10n.fmt("home.outcome.medAck", locale: activeLocale,
+                                  medicationName(for: entryId)))
     }
 
     func handleMedicationConfirmation(entryId: UUID, response: ConfirmationResponse) {
@@ -738,6 +892,15 @@ final class AppCoordinator: ObservableObject {
             at: Date(),
             confirmationResponse: response
         )
+        let name = medicationName(for: entryId)
+        switch response {
+        case .yes:
+            setOutcome(icon: "checkmark.circle.fill",
+                       text: L10n.fmt("home.outcome.medAck", locale: activeLocale, name))
+        case .no:
+            setOutcome(icon: "xmark.circle.fill",
+                       text: L10n.fmt("home.outcome.medDenied", locale: activeLocale, name))
+        }
         DispatchQueue.main.async { [weak self] in
             self?.pendingConfirmationEntryId = nil
             self?.voiceSession.transition(to: .idle)
@@ -778,6 +941,17 @@ final class AppCoordinator: ObservableObject {
         entries.append(entry)
         medicationScheduler.loadSchedule(entries: entries)
         medicationScheduler.scheduleAll()
+        // Genuinely reversible — `removeMedication` already exists and
+        // re-arms alarms, so the outcome card's undo link does real work
+        // (redesign spec §6), unlike the medication-ack outcomes above.
+        let entryId = entry.id
+        setOutcome(icon: "clock.badge.checkmark.fill",
+                   text: L10n.fmt("home.outcome.reminderSet", locale: activeLocale, title),
+                   undo: { [weak self] in
+                       self?.removeMedication(id: entryId)
+                       self?.setOutcome(icon: "arrow.uturn.backward.circle.fill",
+                                         text: L10n.str("home.outcome.undone", locale: self?.activeLocale ?? Locale(identifier: "ne-NP")))
+                   })
     }
 
     /// Called by the debug button in `ContentView` to test the pipeline
