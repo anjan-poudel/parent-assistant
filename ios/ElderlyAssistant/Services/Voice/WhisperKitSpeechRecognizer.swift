@@ -226,6 +226,10 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
 
                 let start = CFAbsoluteTimeGetCurrent()
                 print("[whisperkit_stt] transcribing samples=\(audio.count)")
+                let compute = config.computeOptions ?? ModelComputeOptions()
+                print("[whisperkit_stt] GPU/ANE: audioEncoder=\(compute.audioEncoderCompute) "
+                    + "textDecoder=\(compute.textDecoderCompute) mel=\(compute.melCompute) "
+                    + "simulator=\(WhisperKit.isRunningOnSimulator)")
                 // Force Nepali transcription — auto language detection on
                 // short utterances produced English (translate-ish) output.
                 let options = DecodingOptions(task: .transcribe, language: "ne")
