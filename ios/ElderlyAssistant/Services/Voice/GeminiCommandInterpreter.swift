@@ -100,12 +100,24 @@ final class GeminiCommandInterpreter: CommandInterpreter {
         }
 
         Set action to "ack_med" if the user confirms they took medication,
-        "emergency" if they ask for help in an emergency, "call" if they
-        want to make a phone call, "send_message" if they want to send a
-        text message, "set_reminder" if they want a reminder at a time,
-        "health_query" if they ask about their health, "music" if they ask
-        for a song or bhajan, "query" for any other question, otherwise
-        "none".
+        "call" if they want to make a phone call, "send_message" if they
+        want to send a text message, "set_reminder" if they want a
+        reminder at a time, "music" if they ask for a song or bhajan,
+        "query" for any other question, otherwise "none".
+
+        Set action to "emergency" for ANY plea for help, urgent pain,
+        injury, a fall, feeling unable to breathe, chest pain, or fear for
+        their safety — even if it's phrased as a question or mentions a
+        symptom. Err toward "emergency" whenever there is real ambiguity
+        between "emergency" and "health_query": a false alarm just causes
+        one extra reassurance message, but missing a real emergency is
+        far worse. For example, "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ"
+        (help, my kidney hurts) is "emergency", NOT "health_query" — it is
+        a plea for help attached to pain, not a calm question about
+        health. Reserve "health_query" for calm, non-urgent questions
+        about health with no help-seeking or pain/injury/danger involved
+        (e.g. "मेरो रक्तचाप कस्तो हुनुपर्छ" — what should my blood pressure
+        be).
         For "set_reminder", set time to the time expression they used
         (keep the original wording, e.g. "बिहान ८ बजे") and medication to
         the medication name if mentioned, else null.

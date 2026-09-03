@@ -57,6 +57,7 @@ final class CommandRouter {
     enum RoutingResult: Equatable {
         case acknowledgedMedication
         case blockedSensitiveAction
+        case emergencyTriggered
         case unrecognised(transcript: String)
     }
 
@@ -162,11 +163,38 @@ final class CommandRouter {
             .contains { $0 == token }
     }
 
+    /// Checked BEFORE anything else in `routeKeyword` — and independent of
+    /// whether the LLM path is available at all — because this is the one
+    /// gap the constitution calls out by name: "Emergency calling logic...
+    /// must not be blocked by the on-device LLM being busy or
+    /// unavailable." Live testing against the real Gemini API (2026-09-04)
+    /// found the LLM itself can misclassify a distress utterance as
+    /// `health_query` ("मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ" — help, my
+    /// kidney hurts — came back `health_query`, not `emergency`) — this
+    /// deterministic net is the backstop for exactly that failure mode,
+    /// not just for "LLM unavailable." Deliberately broad/token-based: a
+    /// false positive here costs one extra spoken reassurance + local
+    /// notification (see `handleEmergency`); a false negative costs a
+    /// genuine emergency going unanswered. That asymmetry is why this
+    /// errs toward over-triggering.
+    private static let emergencyPhrases = [
+        "help", "emergency", "i fell", "fell down", "chest pain",
+        "can't breathe", "cant breathe",
+        "मद्दत", "सहयोग गर", "बचाउ", "आपतकाल", "लडेँ", "लडें",
+        "लड्नुभयो", "सास फेर्न सकिन", "सास फेर्न गाह्रो", "छाती दुख्यो"
+    ]
+
     @discardableResult
     private func routeKeyword(_ raw: String) -> RoutingResult {
         let text = raw
             .lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if Self.emergencyPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
+            emit(eventType: "command_emergency_keyword", outcome: "success")
+            handleEmergency()
+            return .emergencyTriggered
+        }
 
         // Guard first: explicit negations must never fall through to the
         // ack list, because refusal words contain ack words as substrings
@@ -221,14 +249,8 @@ final class CommandRouter {
         case .ackMed:
             handleMedicationAcknowledgement(replyOverride: command.reply)
         case .emergency:
-            // Safety path with NO auth gate (spec §5.1, constitution:
-            // emergency must never be blocked by auth or a busy LLM).
-            // Today: spoken ack + event + local alert — the broker relay
-            // and emergency-call module don't exist yet.
             emit(eventType: "command_emergency", outcome: "success")
-            postLocalizedNotification(titleKey: "notif.emergencyAck.title",
-                                      bodyKey: "notif.emergencyAck.body")
-            speak(key: "router.emergencyAck")
+            handleEmergency()
         case .call:
             handleCall(command)
         case .setReminder:
@@ -268,6 +290,18 @@ final class CommandRouter {
         emit(eventType: "command_set_reminder", outcome: "success")
         let spokenTime = formattedTime(time, locale: locale)
         speak(text: L10n.fmt("router.reminderSet", locale: locale, spokenTime))
+    }
+
+    /// Safety path with NO auth gate (spec §5.1, constitution: emergency
+    /// must never be blocked by auth or a busy/unavailable LLM) — shared
+    /// by both the deterministic keyword path (`routeKeyword`) and the
+    /// LLM-interpreted path (`dispatchInterpreted`) so they produce
+    /// identical behavior. Today: spoken ack + local notification — the
+    /// broker relay and a real emergency-call module don't exist yet.
+    private func handleEmergency() {
+        postLocalizedNotification(titleKey: "notif.emergencyAck.title",
+                                  bodyKey: "notif.emergencyAck.body")
+        speak(key: "router.emergencyAck")
     }
 
     /// `call` (trial wiring, LLM-interpreted path only — the deterministic

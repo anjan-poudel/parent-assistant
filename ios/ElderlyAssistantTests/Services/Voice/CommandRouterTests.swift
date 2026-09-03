@@ -21,6 +21,46 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertEqual(coordinator.recordedTranscripts, ["मैले औषधि खाएँ"])
     }
 
+    // MARK: - Emergency (deterministic keyword net — see CommandRouter.emergencyPhrases)
+
+    /// Regression for a real bug found via live testing against the Gemini
+    /// API (2026-09-04): "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ" (help, my
+    /// kidney hurts) was classified `health_query` by the LLM, not
+    /// `emergency`. This deterministic net must catch it independent of
+    /// the LLM's classification, since it never even reaches the LLM
+    /// (`NullCommandInterpreter` in this test — the router falls straight
+    /// to `routeKeyword`).
+    func testDistressPhraseWithSymptomTriggersEmergencyDeterministically() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let bus = MockObservabilityBus()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus, speaker: MockSpeaker())
+
+        let result = router.route(transcript: "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ")
+
+        XCTAssertEqual(result, .emergencyTriggered)
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_emergency_keyword" })
+    }
+
+    func testEnglishHelpPhraseTriggersEmergency() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: MockObservabilityBus(), speaker: MockSpeaker())
+
+        let result = router.route(transcript: "please help me")
+
+        XCTAssertEqual(result, .emergencyTriggered)
+    }
+
+    func testEmergencyIsCheckedBeforeMedicationAckSoItCannotBeShadowed() {
+        // A distress phrase must win even if it happens to also contain an
+        // ack-shaped word — emergency is checked first in routeKeyword.
+        let coordinator = MockVoiceCommandCoordinator()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: MockObservabilityBus(), speaker: MockSpeaker())
+
+        let result = router.route(transcript: "सहयोग गर्नुहोस्, मैले औषधि खाएँ तर लडेँ")
+
+        XCTAssertEqual(result, .emergencyTriggered)
+    }
+
     func testSensitiveCallCommandIsBlockedUntilAuthExists() async {
         let coordinator = MockVoiceCommandCoordinator()
         let speaker = MockSpeaker()
