@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		02543E15FCD856AFA17311CC /* TranscriptSanityGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC9012024C4815BFC474C722 /* TranscriptSanityGuard.swift */; };
 		030616993A706F818B3E2C87 /* PlatformAlarmScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53B1F7C24D2C273993F61341 /* PlatformAlarmScheduler.swift */; };
+		052113CFB87090EC64FBC483 /* WhisperKitSpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A801C3C923FF4C4ECE4BE7C /* WhisperKitSpeechRecognizer.swift */; };
 		0D70DE412C00001898760AF5 /* ElderlyAssistantApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 050315DE680CE94C0C4594A5 /* ElderlyAssistantApp.swift */; };
 		10EA5C912EBE32CCBCF134CE /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8795B5A15D4AED56559D46B /* L10n.swift */; };
 		16CDB50A84CA31870D3C4DDC /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = C51E1D3A1B144677E2F3A616 /* Localizable.xcstrings */; };
@@ -62,6 +63,7 @@
 		C9EB06ED68AC62EB0872C5D1 /* LLM in Frameworks */ = {isa = PBXBuildFile; productRef = 785605133017A7EB4690010A /* LLM */; };
 		CCCF817EA766F6043F60C9E5 /* ModelStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5FEB104D893654A4F159A51 /* ModelStore.swift */; };
 		CF1D61DC1AE25927611816F8 /* MedicationSchedulerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A97FCC20DC139A6F36EF5884 /* MedicationSchedulerProtocol.swift */; };
+		D0B6412C394AFDFACC01762B /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9DBFB1B9C8D62BE5420E62FB /* WhisperKit */; };
 		D198F3FBC006A1F667C0F4A0 /* FamilyContactStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1681B7F77E2119291C04249C /* FamilyContactStore.swift */; };
 		D30A7382558EDC4BFCD5E331 /* InputSanitiser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F034BA7E282AAE5BE838BE8F /* InputSanitiser.swift */; };
 		D6835191986FBF797464B5BD /* ModelDownloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7665911F65DF1CD61EC44277 /* ModelDownloadService.swift */; };
@@ -104,6 +106,7 @@
 		1681B7F77E2119291C04249C /* FamilyContactStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyContactStore.swift; sourceTree = "<group>"; };
 		1AFE0B77607ED7DA0553D6F0 /* WakeWordEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeWordEngine.swift; sourceTree = "<group>"; };
 		1BAE18E00C74B295000808E2 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		2A801C3C923FF4C4ECE4BE7C /* WhisperKitSpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperKitSpeechRecognizer.swift; sourceTree = "<group>"; };
 		2CA1D94894BBEEB22126873C /* MemoryProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryProbe.swift; sourceTree = "<group>"; };
 		36D579A260BDE663399BB7BC /* FamilyContactStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyContactStoreTests.swift; sourceTree = "<group>"; };
 		3AF7478D117F7C991FC99A68 /* EscalationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EscalationEngine.swift; sourceTree = "<group>"; };
@@ -172,6 +175,7 @@
 				5FC266A49696E92A57F6F704 /* SwiftWhisper in Frameworks */,
 				C9EB06ED68AC62EB0872C5D1 /* LLM in Frameworks */,
 				6D76A837CA7B0A4DD05892F0 /* ZIPFoundation in Frameworks */,
+				D0B6412C394AFDFACC01762B /* WhisperKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -336,6 +340,7 @@
 				EC9012024C4815BFC474C722 /* TranscriptSanityGuard.swift */,
 				680AAA1A7F05226F9618CE82 /* VoicePipeline.swift */,
 				1AFE0B77607ED7DA0553D6F0 /* WakeWordEngine.swift */,
+				2A801C3C923FF4C4ECE4BE7C /* WhisperKitSpeechRecognizer.swift */,
 				426B00DB54390C484D152534 /* WhisperSpeechRecognizer.swift */,
 			);
 			path = Voice;
@@ -450,6 +455,7 @@
 				8A067B2B3D4535E50D1CCB35 /* SwiftWhisper */,
 				785605133017A7EB4690010A /* LLM */,
 				E6911EDC6A72A09AAE433AFA /* ZIPFoundation */,
+				9DBFB1B9C8D62BE5420E62FB /* WhisperKit */,
 			);
 			productName = ElderlyAssistant;
 			productReference = E0D51BFE01BE4E11E7CA840E /* ElderlyAssistant.app */;
@@ -508,6 +514,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM.swift" */,
+				55D6BE42A20BFED57539F6D8 /* XCRemoteSwiftPackageReference "WhisperKit" */,
 				8782A0C21196AEAC267497D9 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 				B0F090E9C591EB9468ABD2A5 /* XCLocalSwiftPackageReference "vendor/SwiftWhisper" */,
 			);
@@ -580,6 +587,7 @@
 				B54AE9405FEBDBD383BEFD87 /* VoicePipeline.swift in Sources */,
 				C0DFD8590612F9867C54D747 /* VoiceSessionStateMachine.swift in Sources */,
 				38EA930604B28AB2BF63DF05 /* WakeWordEngine.swift in Sources */,
+				052113CFB87090EC64FBC483 /* WhisperKitSpeechRecognizer.swift in Sources */,
 				47965D07120D816E5424A120 /* WhisperSpeechRecognizer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -915,6 +923,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		55D6BE42A20BFED57539F6D8 /* XCRemoteSwiftPackageReference "WhisperKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/argmaxinc/WhisperKit.git";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
 		6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM.swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/eastriverlee/LLM.swift";
@@ -942,6 +958,11 @@
 		8A067B2B3D4535E50D1CCB35 /* SwiftWhisper */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SwiftWhisper;
+		};
+		9DBFB1B9C8D62BE5420E62FB /* WhisperKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 55D6BE42A20BFED57539F6D8 /* XCRemoteSwiftPackageReference "WhisperKit" */;
+			productName = WhisperKit;
 		};
 		E6911EDC6A72A09AAE433AFA /* ZIPFoundation */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -55,6 +55,15 @@ packages:
   LLM:
     url: https://github.com/eastriverlee/LLM.swift
     branch: main
+  # ANE-accelerated whisper runtime (Apple's CoreML path). Replaces
+  # SwiftWhisper for STT: the vendored whisper.cpp predates Metal, and
+  # ANE beats the iPhone GPU for whisper workloads (see
+  # docs / memory ios-stt-runtime-decision). Supports 128-mel models
+  # (built around large-v3-turbo) — the 128-mel Nepali teacher converts
+  # directly.
+  WhisperKit:
+    url: https://github.com/argmaxinc/WhisperKit.git
+    branch: main
   # Zip extraction for the downloadable ANE encoder delivery (M2).
   ZIPFoundation:
     url: https://github.com/weichsel/ZIPFoundation
@@ -96,6 +105,8 @@ targets:
         product: LLM
       - package: ZIPFoundation
         product: ZIPFoundation
+      - package: WhisperKit
+        product: WhisperKit
 
   ElderlyAssistantTests:
     type: bundle.unit-test
