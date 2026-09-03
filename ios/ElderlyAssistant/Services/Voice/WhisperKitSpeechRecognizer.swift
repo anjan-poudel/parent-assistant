@@ -37,6 +37,13 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     private var completion: ((Result<String, RecognitionError>) -> Void)?
     private var timeoutWork: DispatchWorkItem?
     private var listeningActive = false
+    /// Main-queue watchdog that guarantees the pipeline completion fires
+    /// even if WhisperKit hangs (or the first-run model download stalls).
+    private var inferenceWatchdog: DispatchWorkItem?
+    /// The attempt's pending pipeline completion — settled exactly once
+    /// by the inference result or the watchdog.
+    private var pendingCompletion: ((Result<String, RecognitionError>) -> Void)?
+    private var settled = false
     private let inferenceQueue = DispatchQueue(label: "whisperkit.stt",
                                                qos: .userInitiated)
 
@@ -115,11 +122,42 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         print("[whisperkit_stt] finish samples=\(audio.count) "
             + "audio_seconds=\(String(format: "%.2f", Double(audio.count) / 16_000.0))")
 
+        pendingCompletion = completion
+        settled = false
+        armInferenceWatchdog()
         inferenceQueue.async { [weak self] in
             self?.runInference(audio) { result in
-                DispatchQueue.main.async { completion?(result) }
+                self?.settle(with: result)
             }
         }
+    }
+
+    /// Single-shot settlement: the first result (real or watchdog) wins.
+    private func settle(with result: Result<String, RecognitionError>) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard !self.settled else { return }
+            guard let completion = self.pendingCompletion else { return }
+            self.settled = true
+            self.inferenceWatchdog?.cancel()
+            self.inferenceWatchdog = nil
+            self.pendingCompletion = nil
+            completion(result)
+        }
+    }
+
+    /// 300 s covers the first-run on-device model download (~954 MB);
+    /// once a model is loaded, 60 s is generous for ANE inference.
+    private func armInferenceWatchdog() {
+        inferenceWatchdog?.cancel()
+        let budget: TimeInterval = loadedDescriptor == nil ? 300 : 60
+        let work = DispatchWorkItem { [weak self] in
+            print("[whisperkit_stt] inference_timeout budget=\(budget)s")
+            self?.emit("inference_timeout", errorCode: "timed_out")
+            self?.settle(with: .failure(.timedOut))
+        }
+        inferenceWatchdog = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + budget, execute: work)
     }
 
     func cancel() {
