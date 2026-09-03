@@ -46,6 +46,22 @@ def abs_path(cfg: dict, key: str) -> Path:
     return p if p.is_absolute() else (ROOT / p)
 
 
+# Devanagari digits → ASCII (the paper's WER artifact: ३ vs 3 counts as a
+# full word error). Applied to train labels AND eval refs/hyps so both
+# sides measure the same script.
+_DEVANAGARI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
+
+
+def canonicalize(s: str) -> str:
+    """NFC + whitespace + digit canonicalization for labels/eval text."""
+    import unicodedata
+
+    out = unicodedata.normalize("NFC", s.strip())
+    out = out.replace("​", "").replace("‌", "").replace("‍", "")
+    out = " ".join(out.split())
+    return out.translate(_DEVANAGARI_DIGITS)
+
+
 def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--teacher", type=str, default=None,
                         help="override config teacher (HF id or local dir)")

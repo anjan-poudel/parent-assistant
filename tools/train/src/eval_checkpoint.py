@@ -20,13 +20,13 @@ from jiwer import cer, wer
 from transformers import WhisperForConditionalGeneration, WhisperProcessor
 
 from config import (ROOT, abs_path, add_common, apply_common,
-                   load_config, load_processor)
+                   canonicalize, load_config, load_processor)
 
 LANG, TASK = "ne", "transcribe"
 
 
 def norm(s: str) -> str:
-    return unicodedata.normalize("NFC", s.strip())
+    return canonicalize(s)
 
 
 def load_eval_set(data_dir: Path, name: str) -> Dataset:

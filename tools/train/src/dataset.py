@@ -20,13 +20,28 @@ from datasets import Audio, Dataset, DatasetDict, concatenate_datasets
 class DataCollatorSpeechSeq2SeqWithPadding:
     """Pads input_features with the feature extractor and labels with the
     tokenizer (the collator from the HF Whisper fine-tuning blog — it is
-    not shipped by transformers itself)."""
+    not shipped by transformers itself).
+
+    `noise_aug=True` adds white noise at a random SNR (3-15 dB) to half
+    the batch — the paper's only augmentation, ~4% WER consistently, and
+    the right robustness for real-room mics. Training-only: evals and
+    distillation leave it off.
+    """
 
     processor: Any
+    noise_aug: bool = False
 
     def __call__(self, features):
         input_features = [{"input_features": f["input_features"]} for f in features]
         batch = self.processor.feature_extractor.pad(input_features, return_tensors="pt")
+        if self.noise_aug:
+            x = batch["input_features"]
+            mask = torch.rand(x.size(0)) < 0.5
+            for i in mask.nonzero(as_tuple=True)[0].tolist():
+                power = (x[i] ** 2).mean()
+                snr_db = float(torch.empty(1).uniform_(3.0, 15.0))
+                noise_power = power / (10 ** (snr_db / 10.0))
+                x[i] = x[i] + torch.randn_like(x[i]) * noise_power.sqrt()
 
         # Label-less batches (teacher pseudo-labeling) only pad inputs.
         if "labels" in features[0]:

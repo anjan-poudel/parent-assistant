@@ -21,13 +21,12 @@ import sys
 import unicodedata
 from pathlib import Path
 
-from config import ROOT, abs_path, add_common, apply_common, load_config, log_progress
+from config import (ROOT, abs_path, add_common, apply_common,
+                   canonicalize, load_config, log_progress)
 
 
 def norm_text(s: str) -> str:
-    s = unicodedata.normalize("NFC", s.strip())
-    s = s.replace("​", "").replace("‌", "").replace("‍", "")
-    return " ".join(s.split())
+    return canonicalize(s)
 
 
 def load_ids(path: Path) -> set[str]:
