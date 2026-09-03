@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 import torch
 from transformers import (
@@ -43,12 +44,18 @@ def main() -> None:
     parser.add_argument("--fleurs-weight", type=int, default=None,
                         help="duplicate FLEURS-train rows N times to upweight "
                              "conversational speech vs SLR54 read speech")
+    parser.add_argument("--processor", type=str, default="teacher",
+                        choices=["teacher", "medium"],
+                        help="feature extractor to use: the 128-mel teacher "
+                             "processor or the 80-mel stock-medium one")
+    parser.add_argument("--out", type=str, default="finetune",
+                        help="checkpoint subdir name (default: finetune)")
     parser.add_argument("--no-resume", action="store_true")
     args, cfg = load_config(parser)
     cfg = apply_common(cfg, args)
 
     data_dir = abs_path(cfg, "data_dir")
-    out_dir = abs_path(cfg, "checkpoint_dir") / "finetune"
+    out_dir = abs_path(cfg, "checkpoint_dir") / args.out
     seed = int(cfg["finetune.seed"])
     set_determinism(seed)
 
@@ -59,7 +66,14 @@ def main() -> None:
     # batch 16 don't fit 24 GB without checkpointing (stage-4 OOM,
     # 2026-09-01).
     model.gradient_checkpointing_enable()
-    processor = load_processor(cfg["teacher"])
+    if args.processor == "medium":
+        # Stock whisper-medium is a standard 80-mel model — the teacher's
+        # 128-mel featurizer would produce features its conv1 rejects.
+        from transformers import WhisperProcessor
+        processor = WhisperProcessor.from_pretrained(
+            "openai/whisper-medium", language="ne", task="transcribe")
+    else:
+        processor = load_processor(cfg["teacher"])
 
     manifest = "smoke-manifest.jsonl" if args.smoke else "manifest.jsonl"
     ds = prepare_dataset(data_dir / manifest, processor,
@@ -133,7 +147,7 @@ def main() -> None:
     if resume:
         print(f"resuming from: {resume}")
     trainer.train(resume_from_checkpoint=resume if resume else None)
-    trainer.save_model(str(abs_path(cfg, "checkpoint_dir") / "finetune-final"))
+    trainer.save_model(str(Path(str(out_dir) + "-final")))
     return 0
 
 

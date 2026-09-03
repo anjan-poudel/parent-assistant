@@ -101,9 +101,13 @@ def prepare_dataset(manifest_path: Path,
     # cache_file_name bypasses HF fingerprinting, so stages 3 (no labels)
     # and 4 (labels) collided on the same file and stage 4 trained on
     # batches without labels (decoder ValueError) — 2026-09-01.
+    # And the mel count: the 128-mel teacher processor and the 80-mel
+    # stock-medium processor produce different input_features from the
+    # same manifest, so the key must carry the feature size.
+    mel = getattr(processor.feature_extractor, "feature_size", 0)
     cache = cache_dir / (
         f"tokenized-{manifest_path.stem}-{mtime:.0f}-{TOKENIZER_VERSION}"
-        + ("-labels" if include_labels else ""))
+        f"-{mel}mel" + ("-labels" if include_labels else ""))
     keep = ["id", "sentence"]
     ds = ds.map(tokenize,
                 remove_columns=[c for c in ds.column_names if c not in keep],

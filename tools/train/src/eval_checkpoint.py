@@ -59,12 +59,21 @@ def main() -> None:
                         help="fleurs | smoke | path to a manifest jsonl")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--processor", type=str, default="teacher",
+                        choices=["teacher", "medium"],
+                        help="match the model under test: 128-mel teacher "
+                             "processor or 80-mel stock-medium one")
     args, cfg = load_config(parser)
     cfg = apply_common(cfg, args)
 
     data_dir = abs_path(cfg, "data_dir")
     model = WhisperForConditionalGeneration.from_pretrained(args.model)
-    processor = load_processor(cfg["teacher"])
+    if args.processor == "medium":
+        from transformers import WhisperProcessor
+        processor = WhisperProcessor.from_pretrained(
+            "openai/whisper-medium", language="ne", task="transcribe")
+    else:
+        processor = load_processor(cfg["teacher"])
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
     model.eval()
