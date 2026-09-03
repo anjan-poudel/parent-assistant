@@ -49,12 +49,29 @@ final class GeminiCommandInterpreter: CommandInterpreter {
             return
         }
 
+        #if DEBUG
+        // Debug-build-only, per explicit request while diagnosing a live
+        // bug (2026-09-04) — never compiled into Release. Logs what's
+        // ACTUALLY sent (post-sanitisation) vs. the raw transcript, since
+        // InputSanitiser could itself be the bug.
+        if clean != transcript {
+            print("[gemini_interpreter][DEBUG] sanitised transcript changed: raw=\"\(transcript)\" clean=\"\(clean)\"")
+        }
+        #endif
+
         let prompt = Self.buildPrompt(transcript: clean, context: context)
         Task { [weak self] in
             guard let self else { return }
             do {
                 let raw = try await self.client.generateJSON(prompt: prompt)
+                #if DEBUG
+                print("[gemini_interpreter][DEBUG] raw JSON=\"\(raw)\"")
+                #endif
                 let parsed = LlamaCommandInterpreter.parse(json: raw)
+                #if DEBUG
+                print("[gemini_interpreter][DEBUG] parsed action=\(parsed?.action.rawValue ?? "nil") "
+                      + "confidence=\(parsed?.confidence ?? -1) reply=\"\(parsed?.reply ?? "nil")\"")
+                #endif
                 self.emit("interpret_done", outcome: parsed == nil ? "parse_failed" : "success")
                 await MainActor.run {
                     if let parsed, parsed.confidence < self.config.confidenceThreshold {

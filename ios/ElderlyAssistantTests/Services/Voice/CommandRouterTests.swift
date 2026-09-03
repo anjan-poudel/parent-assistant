@@ -121,6 +121,26 @@ final class CommandRouterTests: XCTestCase {
         })
     }
 
+    /// Regression: a plain Q&A reply (`.query`/`.none`) previously had NO
+    /// visible trace at all — only the tracked actions (ack/reminder/
+    /// call/message) produced an outcome card. Found via a real device
+    /// test where the user reported "no transcript got written" for an
+    /// ordinary question.
+    func testQueryReplyProducesAVisibleGenericOutcome() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .query, entryId: nil, contact: nil, time: nil, medication: nil,
+            message: nil, confidence: 0.9, reply: "आज घमाइलो छ।"
+        )
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: MockObservabilityBus(),
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "आजको मौसम कस्तो छ")
+
+        XCTAssertEqual(coordinator.genericReplies, ["आज घमाइलो छ।"])
+    }
+
     func testSendMessageWithResolvedContactPresentsComposeSheet() {
         let coordinator = MockVoiceCommandCoordinator()
         coordinator.messageShouldSucceed = true
@@ -192,6 +212,8 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
     func noteSpeakingStarted() {}
     func noteSpeakingEnded() {}
     func noteAssistantSpoke(_ text: String) {}
+    var genericReplies: [String] = []
+    func noteGenericReply(_ text: String) { genericReplies.append(text) }
 
     func addVoiceReminder(title: String, time: DateComponents) {
         addedReminders.append((title, time))

@@ -6,20 +6,16 @@ struct ElderlyAssistantApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if #available(iOS 16.1, *) {
-                    // Redesign (2026-09-03 UI spec §2): SF Rounded app-wide
-                    // for body/label text. Font.system(design:) calls that
-                    // specify an explicit design (the serif greeting) are
-                    // unaffected — this environment value only resolves for
-                    // text that doesn't already pin a design. `.fontDesign`
-                    // itself needs iOS 16.1 (deployment target is 16.0), so
-                    // pre-16.1 devices just keep the default SF Pro body.
-                    ContentView().fontDesign(.rounded)
-                } else {
-                    ContentView()
-                }
-            }
+            // NOTE: previously applied `.fontDesign(.rounded)` app-wide here
+            // for a warmer look (redesign spec §2). Reverted 2026-09-04:
+            // SF Rounded's Devanagari glyph coverage is not reliably
+            // verified across iOS versions, and this was never visually
+            // confirmed against real Nepali text before landing — not
+            // worth risking tofu/fallback glyphs on dynamic (Gemini-
+            // generated, non-catalog) Nepali text for a cosmetic font
+            // choice. Revisit only after confirming full Devanagari
+            // coverage under SF Rounded on the actual target OS versions.
+            ContentView()
             .environmentObject(appCoordinator)
             .environmentObject(appCoordinator.voiceSession)
             .environmentObject(appCoordinator.modelDownloadService)

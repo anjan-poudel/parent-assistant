@@ -19,6 +19,11 @@ protocol VoiceCommandCoordinating: AnyObject {
     func noteSpeakingEnded()
     func noteAssistantSpoke(_ text: String)
 
+    /// Generic dual-channel confirmation for replies with no more specific
+    /// tracked outcome (plain Q&A, stub replies) — see
+    /// `AppCoordinator.noteGenericReply` for why this exists.
+    func noteGenericReply(_ text: String)
+
     /// `set_reminder` intent: creates a reminder through scheduler storage.
     func addVoiceReminder(title: String, time: DateComponents)
 
@@ -258,18 +263,20 @@ final class CommandRouter {
         case .healthQuery:
             // First-class stub intent — honest "not yet" (spec §5.1).
             emit(eventType: "command_health_query_stub", outcome: "info")
-            speak(key: "router.healthNotAvailable")
+            speakWithVisibleOutcome(key: "router.healthNotAvailable")
         case .music:
             // First-class stub intent (spec §5.1).
             emit(eventType: "command_music_stub", outcome: "info")
-            speak(key: "router.musicStub")
+            speakWithVisibleOutcome(key: "router.musicStub")
         case .sendMessage:
             handleSendMessage(command)
         case .query:
             emit(eventType: "command_llm_query", outcome: "info")
+            coordinator?.noteGenericReply(command.reply)
             speak(text: command.reply)
         case .none:
             emit(eventType: "command_llm_no_action", outcome: "info")
+            coordinator?.noteGenericReply(command.reply)
             speak(text: command.reply)
         }
     }
@@ -404,6 +411,17 @@ final class CommandRouter {
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         let text = L10n.str(key, locale: locale)
         guard !text.isEmpty else { return }
+        speak(text: text, locale: locale)
+    }
+
+    /// Same as `speak(key:)` but also surfaces the resolved text as a
+    /// visible outcome card — for stub replies (health/music) that would
+    /// otherwise be spoken-only, same rationale as `noteGenericReply`.
+    private func speakWithVisibleOutcome(key: String) {
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let text = L10n.str(key, locale: locale)
+        guard !text.isEmpty else { return }
+        coordinator?.noteGenericReply(text)
         speak(text: text, locale: locale)
     }
 

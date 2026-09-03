@@ -144,6 +144,21 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// Generic dual-channel confirmation for replies that aren't a
+    /// specific tracked action (general Q&A `query`/`none`, and the
+    /// `health_query`/`music` stub replies) — without this, only
+    /// medication-ack/reminder-set/call/message ever produced a visible
+    /// outcome card, leaving the single most common interaction (plain
+    /// conversation) with no visual trace at all, defeating the whole
+    /// "don't rely on hearing alone" point of the redesign. Called
+    /// explicitly by `CommandRouter` only for those specific cases (not
+    /// from `noteAssistantSpoke` generally) so it can never clobber a
+    /// more specific outcome set moments earlier in the same turn.
+    func noteGenericReply(_ text: String) {
+        guard !text.isEmpty else { return }
+        setOutcome(icon: "bubble.left.and.bubble.right.fill", text: text)
+    }
+
     /// While non-nil, a confirmation challenge is awaiting the user's
     /// yes/no follow-up. Set by `startVoiceAckConfirmation`, cleared by
     /// `handleConfirmationResponse` or the session-machine timeout (C12).

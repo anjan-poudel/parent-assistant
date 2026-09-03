@@ -76,6 +76,11 @@ final class GeminiSpeechRecognizer: SpeechRecognizerProtocol {
                 let transcript = try await self.client.transcribe(
                     audioData: wav, mimeType: "audio/wav", languageHint: self.languageHint)
                 self.emit("transcribed", outcome: "success")
+                #if DEBUG
+                // Debug-build-only, per explicit request while diagnosing
+                // a live bug (2026-09-04) — never compiled into Release.
+                print("[gemini_stt][DEBUG] transcript=\"\(transcript)\"")
+                #endif
                 self.settle(.success(transcript))
             } catch {
                 self.emit("transcribe_failed", outcome: "failure", errorCode: String(describing: error))
