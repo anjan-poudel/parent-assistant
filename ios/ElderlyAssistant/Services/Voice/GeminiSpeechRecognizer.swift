@@ -84,10 +84,20 @@ final class GeminiSpeechRecognizer: SpeechRecognizerProtocol {
         }
     }
 
+    /// Soft cancel — mirrors `WhisperSpeechRecognizer.cancel()`'s contract:
+    /// settle the CALLER immediately with `.cancelled` so `VoicePipeline`
+    /// never blocks on this, but let any in-flight network request run to
+    /// its own natural conclusion (success, or `GeminiClient`'s own HTTP
+    /// timeout) instead of hard-aborting it. `Task.cancel()` would
+    /// propagate to the underlying `URLSessionTask` and throw it away — if
+    /// that request was about to succeed, hard-aborting wastes a real
+    /// answer for nothing, since a network call (unlike a wedged on-device
+    /// whisper.cpp call) will terminate on its own regardless. The
+    /// eventual result is simply discarded: `settle` is single-shot and
+    /// `completion` is already nil by the time it would fire.
     func cancel() {
         listening = false
         cancelTimeout()
-        inFlightTask?.cancel()
         inFlightTask = nil
         utteranceBuffer.removeAll()
         settle(.failure(.cancelled))
