@@ -154,9 +154,24 @@ final class AppCoordinator: ObservableObject {
     /// explicitly by `CommandRouter` only for those specific cases (not
     /// from `noteAssistantSpoke` generally) so it can never clobber a
     /// more specific outcome set moments earlier in the same turn.
+    ///
+    /// Includes `lastTranscript` (already set by `recordTranscript` at the
+    /// top of every `route()` call, so it's available here) alongside the
+    /// reply — repeated field reports (2026-09-04) made clear that only
+    /// ever showing the ASSISTANT's reply, with the user's own transcript
+    /// visible for barely a second during capture and never again, reads
+    /// as "no transcript showing" even though routing worked correctly.
+    /// Showing both together, persistently, is the actual fix — not a UI
+    /// timing tweak.
     func noteGenericReply(_ text: String) {
         guard !text.isEmpty else { return }
-        setOutcome(icon: "bubble.left.and.bubble.right.fill", text: text)
+        let display: String
+        if let heard = lastTranscript, !heard.isEmpty {
+            display = "\u{201C}\(heard)\u{201D}\n\(text)"
+        } else {
+            display = text
+        }
+        setOutcome(icon: "bubble.left.and.bubble.right.fill", text: display)
     }
 
     /// While non-nil, a confirmation challenge is awaiting the user's
