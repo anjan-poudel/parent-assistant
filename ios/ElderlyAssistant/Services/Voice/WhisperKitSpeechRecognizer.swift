@@ -181,6 +181,9 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         let descriptor: String
         let config = WhisperKitConfig()
         config.verbose = true
+        // Absorb the one-time CoreML specialization into model load so the
+        // first utterance doesn't pay it.
+        config.prewarm = true
         if let folder = modelFolderURL {
             descriptor = "folder:\(folder.path)"
             config.modelFolder = folder.path
