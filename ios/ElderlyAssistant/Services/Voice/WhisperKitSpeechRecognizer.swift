@@ -173,27 +173,77 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
 
     // MARK: - Inference (guarded)
 
-    private func runInference(_ audio: [Float],
-                              completion: @escaping (Result<String, RecognitionError>) -> Void) {
+    /// Preloads the model off the critical path: call at hot-swap time so
+    /// the first utterance doesn't pay the load + CoreML specialization.
+    func prepare() {
         #if canImport(WhisperKit)
-        // Resolve the load descriptor: bench folder/name first, then the
-        // catalog directory artifact.
-        let descriptor: String
+        guard let (descriptor, config) = loadDescriptor() else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            _ = try? await self.loadKit(descriptor: descriptor, config: config)
+        }
+        #endif
+    }
+
+    /// Resolves the load descriptor: bench folder/name first, then the
+    /// catalog directory artifact.
+    private func loadDescriptor() -> (String, WhisperKitConfig)? {
+        #if canImport(WhisperKit)
         let config = WhisperKitConfig()
         config.verbose = true
         // Absorb the one-time CoreML specialization into model load so the
         // first utterance doesn't pay it.
         config.prewarm = true
         if let folder = modelFolderURL {
-            descriptor = "folder:\(folder.path)"
-            config.modelFolder = folder.path
-        } else if let name = modelName {
-            descriptor = "name:\(name)"
-            config.model = name
-        } else if let url = modelStore?.directoryURL(for: preferredModelID) {
-            descriptor = "artifact:\(preferredModelID.rawValue)"
-            config.modelFolder = url.path
-        } else {
+            return ("folder:\(folder.path)", {
+                config.modelFolder = folder.path
+                return config
+            }())
+        }
+        if let name = modelName {
+            return ("name:\(name)", {
+                config.model = name
+                return config
+            }())
+        }
+        if let url = modelStore?.directoryURL(for: preferredModelID) {
+            return ("artifact:\(preferredModelID.rawValue)", {
+                config.modelFolder = url.path
+                return config
+            }())
+        }
+        #endif
+        return nil
+    }
+
+    /// Loads (or reuses) the WhisperKit instance for a descriptor.
+    private func loadKit(descriptor: String, config: WhisperKitConfig) async throws -> WhisperKit {
+        if let existing = kitInstance as? WhisperKit,
+           loadedDescriptor == descriptor {
+            return existing
+        }
+        let loadStart = CFAbsoluteTimeGetCurrent()
+        let created = try await WhisperKit(config)
+        let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
+        kitInstance = created
+        loadedDescriptor = descriptor
+        emit("model_loaded", errorCode: nil)
+        print("[whisperkit_stt] model_loaded \(descriptor) load_ms=\(loadMs)")
+        // What hardware the components will actually run on.
+        // NE = Neural Engine (ANE). The simulator forces
+        // .cpuOnly — real devices get the NE path.
+        let compute = config.computeOptions ?? ModelComputeOptions()
+        print("[whisperkit_stt] GPU/ANE: audioEncoder=\(compute.audioEncoderCompute) "
+            + "textDecoder=\(compute.textDecoderCompute) "
+            + "mel=\(compute.melCompute) "
+            + "simulator=\(WhisperKit.isRunningOnSimulator)")
+        return created
+    }
+
+    private func runInference(_ audio: [Float],
+                              completion: @escaping (Result<String, RecognitionError>) -> Void) {
+        #if canImport(WhisperKit)
+        guard let (descriptor, config) = loadDescriptor() else {
             emit("model_path_missing", errorCode: "no_path")
             completion(.failure(.localeUnsupported))
             return
@@ -201,28 +251,7 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let kit: WhisperKit
-                if let existing = kitInstance as? WhisperKit,
-                   loadedDescriptor == descriptor {
-                    kit = existing
-                } else {
-                    let loadStart = CFAbsoluteTimeGetCurrent()
-                    let created = try await WhisperKit(config)
-                    let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
-                    kitInstance = created
-                    loadedDescriptor = descriptor
-                    emit("model_loaded", errorCode: nil)
-                    print("[whisperkit_stt] model_loaded \(descriptor) load_ms=\(loadMs)")
-                    // What hardware the components will actually run on.
-                    // NE = Neural Engine (ANE). The simulator forces
-                    // .cpuOnly — real devices get the NE path.
-                    let compute = config.computeOptions ?? ModelComputeOptions()
-                    print("[whisperkit_stt] compute audioEncoder=\(compute.audioEncoderCompute) "
-                        + "textDecoder=\(compute.textDecoderCompute) "
-                        + "mel=\(compute.melCompute) "
-                        + "simulator=\(WhisperKit.isRunningOnSimulator)")
-                    kit = created
-                }
+                let kit = try await self.loadKit(descriptor: descriptor, config: config)
 
                 let start = CFAbsoluteTimeGetCurrent()
                 print("[whisperkit_stt] transcribing samples=\(audio.count)")

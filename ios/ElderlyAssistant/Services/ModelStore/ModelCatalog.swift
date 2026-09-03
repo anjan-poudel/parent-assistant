@@ -50,6 +50,12 @@ struct ModelCatalogEntry: Codable, Identifiable {
     /// Expected size of the encoder zip (drives progress; 0 = unknown).
     let coreMLEncoderZipBytes: Int64
 
+    /// WhisperKit-format model delivered as a zip of the model directory
+    /// (the ANE path — see ios-stt-runtime-decision memory).
+    let whisperKitZipURL: URL?
+    /// Expected size of the WhisperKit zip (0 = unknown).
+    let whisperKitZipBytes: Int64
+
     init(id: ModelID,
          kind: ModelKind,
          displayName: String,
@@ -61,7 +67,9 @@ struct ModelCatalogEntry: Codable, Identifiable {
          dependsOn: ModelID? = nil,
          coreMLEncoderBundledName: String? = nil,
          coreMLEncoderDownloadURL: URL? = nil,
-         coreMLEncoderZipBytes: Int64 = 0) {
+         coreMLEncoderZipBytes: Int64 = 0,
+         whisperKitZipURL: URL? = nil,
+         whisperKitZipBytes: Int64 = 0) {
         self.id = id
         self.kind = kind
         self.displayName = displayName
@@ -74,6 +82,8 @@ struct ModelCatalogEntry: Codable, Identifiable {
         self.coreMLEncoderBundledName = coreMLEncoderBundledName
         self.coreMLEncoderDownloadURL = coreMLEncoderDownloadURL
         self.coreMLEncoderZipBytes = coreMLEncoderZipBytes
+        self.whisperKitZipURL = whisperKitZipURL
+        self.whisperKitZipBytes = whisperKitZipBytes
     }
 
     var id_: ModelID { id }

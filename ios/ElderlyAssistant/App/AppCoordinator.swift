@@ -518,6 +518,10 @@ final class AppCoordinator: ObservableObject {
         if ProcessInfo.processInfo.environment["WK_TURBO"] == "1",
            let wk = makeWhisperKitBenchRecognizer() {
             voicePipeline?.setSpeechRecognizer(wk)
+            // Preload + prewarm off the critical path so the first
+            // utterance doesn't pay the model load + CoreML
+            // specialization.
+            wk.prepare()
             DispatchQueue.main.async { [weak self] in
                 self?.updateActiveSTTName()
             }
