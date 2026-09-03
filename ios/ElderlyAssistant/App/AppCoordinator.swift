@@ -537,7 +537,9 @@ final class AppCoordinator: ObservableObject {
         if let folder = ProcessInfo.processInfo.environment["WK_MODEL_FOLDER"] {
             recognizer.modelFolderURL = URL(fileURLWithPath: folder)
         } else {
-            recognizer.modelName = "large-v3-v20240930_626MB"
+            // Full (uncompressed) variant: the compressed 626MB build
+            // prunes Devanagari tokens and outputs roman transliteration.
+            recognizer.modelName = "large-v3_turbo"
         }
         return recognizer
     }
