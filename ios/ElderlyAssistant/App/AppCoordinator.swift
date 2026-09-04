@@ -370,6 +370,9 @@ final class AppCoordinator: ObservableObject {
         // one. Idempotent — no-op when the target already exists.
         for entry in ModelCatalog.entries(kind: .whisperBase) {
             modelStore.installBundledCoreMLEncoder(for: entry.id)
+            // Bundled ggml models (the default medium) install the same
+            // way — first run never downloads them.
+            modelStore.installBundledModel(for: entry.id)
         }
         // And the reverse: entries we no longer ship an encoder for
         // (large-v3 — its CoreML path hangs on-device) get their stale
@@ -503,6 +506,27 @@ final class AppCoordinator: ObservableObject {
     /// a genuinely wedged transcription is owned by the STT layer (its own
     /// 30s inference timeout + 2-strike throttle), and routing has its own
     /// deadlines; those layers settle the cycle without this UI guard.
+    /// MUST stay longer than (max speech capture time) + (GeminiClient's
+    /// own HTTP timeout) — i.e. longer than the worst-case legitimate
+    /// duration of a single turn — or this destructive watchdog (full
+    /// pipeline stop/restart + spoken reprompt) fires on a request that
+    /// was still genuinely working, not actually wedged.
+    ///
+    /// This exact bug happened twice in a row (2026-09-04): first when
+    /// `VoicePipeline`'s internal 18s wedge-guard window was widened for
+    /// Gemini but this watchdog was left at the old 15s, so it fired
+    /// FIRST and tore down in-flight requests before the (harmless)
+    /// internal one ever got a chance to just flip the UI to
+    /// `.transcribing`. Then again after bumping `GeminiClient`'s HTTP
+    /// timeout from 6s to 25s for the (slower) gemini-2.5-pro model —
+    /// confirmed via a real device log showing `NSURLErrorDomain
+    /// Code=-1001 "The request timed out."` — without also widening this
+    /// watchdog to match. The three numbers (this constant,
+    /// `VoicePipeline`'s capture+wedge-guard window, and
+    /// `GeminiClient.Config.timeoutSeconds`) are coupled and MUST be
+    /// re-checked together any time one of them changes.
+    private static let voiceWatchdogSeconds: TimeInterval = 40
+
     private func armVoiceWatchdog() {
         cancelVoiceWatchdog()
         let work = DispatchWorkItem { [weak self] in
@@ -513,7 +537,7 @@ final class AppCoordinator: ObservableObject {
             }
         }
         voiceWatchdog = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.voiceWatchdogSeconds, execute: work)
     }
 
     private func cancelVoiceWatchdog() {

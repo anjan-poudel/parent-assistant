@@ -45,7 +45,16 @@ final class GeminiClient {
 
     struct Config {
         var timeoutSeconds: TimeInterval
-        static let `default` = Config(timeoutSeconds: 6)
+        /// 6s was sized for gemini-2.5-flash-lite's typical latency and
+        /// was too short the moment the model picker (2026-09-04) let
+        /// this point at gemini-2.5-pro — confirmed live via a real
+        /// device log: `NSURLErrorDomain Code=-1001 "The request timed
+        /// out."` against `gemini-2.5-pro:generateContent`. 25s
+        /// comfortably covers the slowest curated model
+        /// (`GeminiModelCatalog`); `AppCoordinator.voiceWatchdogSeconds`
+        /// must stay longer than this PLUS max capture time, or the same
+        /// class of bug recurs from the other direction.
+        static let `default` = Config(timeoutSeconds: 25)
     }
 
     private let configStore: GeminiConfigStore
