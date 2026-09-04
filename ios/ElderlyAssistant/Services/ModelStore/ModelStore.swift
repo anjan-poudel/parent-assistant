@@ -321,6 +321,35 @@ final class ModelStore {
         return total
     }
 
+    // MARK: - Bundled models
+
+    /// Copies an app-bundled model into place next to the ggml files.
+    /// Idempotent — no-op when the target already exists. Used for the
+    /// default medium model so first-run never downloads it.
+    func installBundledModel(for id: ModelID, bundle: Bundle = .main) -> URL? {
+        guard let entry = ModelCatalog.entry(for: id),
+              let resourceName = entry.bundledResourceName,
+              let source = bundle.url(forResource: resourceName,
+                                      withExtension: "bin") else {
+            return nil
+        }
+        let dest = finalURL(for: entry)
+        if fileManager.fileExists(atPath: dest.path) {
+            return dest
+        }
+        do {
+            try ensureDirectory(dest.deletingLastPathComponent())
+            try fileManager.copyItem(at: source, to: dest)
+            emit("bundled_model_installed", outcome: "success", modelId: id,
+                 errorCode: nil)
+            return dest
+        } catch {
+            emit("bundled_model_install_failed", outcome: "failure",
+                 modelId: id, errorCode: "copy")
+            return nil
+        }
+    }
+
     // MARK: - WhisperKit directory artifacts
 
     /// URL of an installed WhisperKit-style model DIRECTORY (not a single

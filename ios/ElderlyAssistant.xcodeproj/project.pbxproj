@@ -86,6 +86,7 @@
 		F46656314EF3B024F5871089 /* AudioSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54BA14F8D657DC91DFCC22AF /* AudioSessionManager.swift */; };
 		FAF5990EE46B3F7B950249B2 /* DependencyProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50EFF6165E6175FF1A801198 /* DependencyProtocols.swift */; };
 		FD0C74053396420771C700C1 /* SpeakerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A94328FF3C48D674B487DD12 /* SpeakerTests.swift */; };
+		FF6D253A37F069880D322578 /* whisper-medium-ne-q5_1.bin in Resources */ = {isa = PBXBuildFile; fileRef = 1EA39CCC1D20F069F694CF9D /* whisper-medium-ne-q5_1.bin */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -117,6 +118,7 @@
 		1681B7F77E2119291C04249C /* FamilyContactStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyContactStore.swift; sourceTree = "<group>"; };
 		1AFE0B77607ED7DA0553D6F0 /* WakeWordEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeWordEngine.swift; sourceTree = "<group>"; };
 		1BAE18E00C74B295000808E2 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		1EA39CCC1D20F069F694CF9D /* whisper-medium-ne-q5_1.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; path = "whisper-medium-ne-q5_1.bin"; sourceTree = "<group>"; };
 		2A801C3C923FF4C4ECE4BE7C /* WhisperKitSpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperKitSpeechRecognizer.swift; sourceTree = "<group>"; };
 		2CA1D94894BBEEB22126873C /* MemoryProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryProbe.swift; sourceTree = "<group>"; };
 		36D579A260BDE663399BB7BC /* FamilyContactStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyContactStoreTests.swift; sourceTree = "<group>"; };
@@ -251,6 +253,14 @@
 			path = FamilyNotifier;
 			sourceTree = "<group>";
 		};
+		76398CBD05D4B8E57B2A58CB /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				1EA39CCC1D20F069F694CF9D /* whisper-medium-ne-q5_1.bin */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
 		7DDF55B3BBF81B10A9E7B21F /* ElderlyAssistant */ = {
 			isa = PBXGroup;
 			children = (
@@ -299,6 +309,7 @@
 			isa = PBXGroup;
 			children = (
 				C51E1D3A1B144677E2F3A616 /* Localizable.xcstrings */,
+				76398CBD05D4B8E57B2A58CB /* Models */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -582,6 +593,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				16CDB50A84CA31870D3C4DDC /* Localizable.xcstrings in Resources */,
+				FF6D253A37F069880D322578 /* whisper-medium-ne-q5_1.bin in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
