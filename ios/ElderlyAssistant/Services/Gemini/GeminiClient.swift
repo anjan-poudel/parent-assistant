@@ -166,7 +166,12 @@ final class GeminiClient {
 
     // MARK: - Transport
 
-    private func send(_ body: GeminiRequest) async throws -> String {
+    /// Module-internal (not private) so the vision surface in
+    /// `GeminiClient+Vision.swift` funnels through the exact same
+    /// auth/timeout/observability chokepoint as every other call —
+    /// including the shared per-day cost counter the parent design
+    /// requires to live at this single point (design §8).
+    func send(_ body: GeminiRequest) async throws -> String {
         guard let apiKey = configStore.apiKey, !apiKey.isEmpty else {
             throw GeminiClientError.notConfigured
         }
@@ -209,14 +214,18 @@ final class GeminiClient {
         return text
     }
 
-    private func emit(_ eventType: String, outcome: String, durationMs: Int, errorCode: String? = nil) {
+    /// Module-internal for the same reason as `send(_:)` — vision calls
+    /// emit feature-level events (`gemini_vision_identify`, …) on top of
+    /// the transport-level events `send` already emits.
+    func emit(_ eventType: String, outcome: String, durationMs: Int, errorCode: String? = nil,
+              metadata: [String: String] = [:]) {
         observabilityBus.emit(ObservabilityEvent(
             component: "gemini_client",
             eventType: eventType,
             durationMs: durationMs,
             outcome: outcome,
             errorCode: errorCode,
-            metadata: [:]
+            metadata: metadata
         ))
     }
 }

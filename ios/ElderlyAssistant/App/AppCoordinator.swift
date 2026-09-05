@@ -402,7 +402,7 @@ final class AppCoordinator: ObservableObject {
         // composition, and CommandRouter gets it for .plugin dispatch.
         let pluginRegistry = PluginRegistry(observabilityBus: bus)
         pluginRegistry.register(NepaliCalendarPlugin(storage: storage))
-        pluginRegistry.register(ApplianceHelperPlugin())
+        pluginRegistry.register(ApplianceHelperPlugin(storage: storage))
         self.pluginRegistry = pluginRegistry
 
         self.llamaCommandInterpreter = LlamaCommandInterpreter(
@@ -497,6 +497,12 @@ final class AppCoordinator: ObservableObject {
             modelStore: modelStore
         )
         self.speaker = speaker
+        // The registry is built in init but the speaker only exists now —
+        // hand it to the appliance plugin so guidance summaries are spoken
+        // by the same voice everything else uses.
+        pluginRegistry.plugins
+            .compactMap { $0 as? ApplianceHelperPlugin }
+            .forEach { $0.speaker = speaker }
         // v2 pivot: Gemini interpreter. `isAvailable` stays false until an
         // API key is configured (GeminiConfigStore) — CommandRouter treats
         // that exactly like the old "LLM not linked" case: fall through to
