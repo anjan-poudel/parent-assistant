@@ -57,14 +57,16 @@ def predict_gguf(utterance: str, cfg: dict, model_path: str) -> dict:
 
 
 def predict_gemini(utterance: str, cfg: dict) -> dict:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
 
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    model = genai.GenerativeModel(str(cfg["gemini.model"]))
+    if not hasattr(predict_gemini, "_client"):
+        predict_gemini._client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
     template = (Path(__file__).parent.parent / "seeds" / "prompt_template.txt").read_text(encoding="utf-8")
-    resp = model.generate_content(
-        template.replace("{transcript}", utterance),
-        generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+    resp = predict_gemini._client.models.generate_content(
+        model=str(cfg["gemini.model"]),
+        contents=template.replace("{transcript}", utterance),
+        config=types.GenerateContentConfig(response_mime_type="application/json"),
     )
     return json.loads(resp.text)
 

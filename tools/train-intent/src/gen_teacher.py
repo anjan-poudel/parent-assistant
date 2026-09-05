@@ -103,14 +103,18 @@ the app; emergency recall-first (plea+pain = emergency)."""
 
 
 def call_teacher(prompt: str, cfg: dict) -> list[dict]:
-    """One Gemini call. Imported lazily so the script loads without the SDK."""
-    import google.generativeai as genai  # pip install google-generativeai
+    """One Gemini call via the current google-genai SDK (pip install
+    google-genai — the legacy google-generativeai package is EOL).
+    Imported lazily so the script loads without the SDK."""
+    from google import genai
+    from google.genai import types
 
-    genai.configure(api_key=os.environ["GEMINI_API_KEY"])
-    model = genai.GenerativeModel(str(cfg["gemini.model"]))
-    resp = model.generate_content(
-        prompt,
-        generation_config=genai.GenerationConfig(
+    if not hasattr(call_teacher, "_client"):
+        call_teacher._client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    resp = call_teacher._client.models.generate_content(
+        model=str(cfg["gemini.model"]),
+        contents=prompt,
+        config=types.GenerateContentConfig(
             max_output_tokens=int(cfg["gemini.max_output_tokens"]),
             temperature=float(cfg["gemini.temperature"]),
             response_mime_type="application/json",
