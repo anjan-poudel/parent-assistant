@@ -81,8 +81,8 @@ struct HomeView: View {
             // The date/greeting area doubles as the calendar's entry
             // point (2026-09-06: calendar lives ON the home screen via
             // this tap target, NOT as a 5th dock item — the dock stays
-            // at four clean entries per the "keep dock items clean"
-            // direction).
+            // at three clean entries per the "keep dock items clean"
+            // direction; settings moved to the top bar 2026-09-06).
             NavigationLink(value: LeafDestination.calendar) {
                 Text(greetingText)
                     .font(DesignTokens.greetingFont(size: 22))
@@ -91,9 +91,14 @@ struct HomeView: View {
             }
             .accessibilityLabel(Text("home.hub.calendar"))
             Spacer()
-            // Settings has exactly one entry point (the dock below) —
-            // deliberately not duplicated up here, so there's only ever
-            // one "सेटिङ" to find, by voice or by touch.
+            // Settings moved to the top bar (2026-09-06): a bottom-dock
+            // slot is too valuable for something used occasionally.
+            // Still exactly one entry point, by voice or by touch.
+            NavigationLink(value: LeafDestination.settings) {
+                IconBadge(systemImage: "gearshape.fill", tint: .settings, diameter: 32)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(LocalizedStringKey("home.hub.settings")))
             EmergencyIconButton()
         }
         .padding(.top, 8)
@@ -285,7 +290,6 @@ struct HomeView: View {
             dockItem(.meds, icon: "pills.fill", tint: .meds, titleKey: "home.hub.meds")
             dockItem(.reminders, icon: "clock.fill", tint: .reminders, titleKey: "home.hub.reminders")
             dockCallItem
-            dockItem(.settings, icon: "gearshape.fill", tint: .settings, titleKey: "home.hub.settings")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 10)
@@ -584,7 +588,8 @@ extension VoiceSessionState {
 
     var color: Color {
         switch self {
-        case .idle, .speaking: return DesignTokens.stateIdle
+        case .idle: return DesignTokens.stateIdle
+        case .speaking: return DesignTokens.stateSpeaking
         case .listening: return DesignTokens.stateListening
         case .transcribing: return DesignTokens.stateTranscribing
         case .understanding: return DesignTokens.stateUnderstanding

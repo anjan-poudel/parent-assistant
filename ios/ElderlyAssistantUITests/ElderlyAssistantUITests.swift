@@ -102,7 +102,7 @@ final class ElderlyAssistantUITests: XCTestCase {
 
         let settings = app.buttons["सेटिङ"]
         XCTAssertTrue(settings.waitForExistence(timeout: 15),
-                      "Settings dock item should be reachable from Home")
+                      "Settings entry should be reachable from Home")
         settings.tap()
 
         // Settings screen title. AI Models is intentionally NOT a normal

@@ -307,6 +307,11 @@ final class AppCoordinator: ObservableObject {
                                                      historyStore: confirmedMethodHistory)
     private lazy var intentCache = IntentCommandCache(storage: storage)
     private lazy var repetitionGuard = RepetitionGuard(storage: storage)
+    /// Numbers this app has genuinely dialed, newest first — the ranking
+    /// index for the Phone leaf's system-contacts search ("most recently
+    /// used first", system-contacts search task 2026-09-06). Same
+    /// encrypted storage channel as the repetition guard above.
+    private lazy var callRecencyStore = CallRecencyStore(storage: storage)
     /// Flywheel intent log (spec §11) — feeds the family review screen
     /// (Settings) and the export→retrain loop.
     private(set) lazy var intentLogStore = IntentLogStore()
@@ -693,8 +698,14 @@ final class AppCoordinator: ObservableObject {
         case .capturingCommand:
             // Redesign spec §3.1/§6: the live-caption pill must not show
             // the PREVIOUS utterance's transcript while a new one is being
-            // captured — clear it at the start of every capture cycle.
+            // captured — clear BOTH transcript buffers at the start of
+            // every capture cycle. livePartialTranscript matters too: a
+            // failed/cancelled capture skips recordTranscript's clear, so
+            // the last Gemini partial survives into every later capture
+            // and pins the pill to the first conversation forever
+            // (2026-09-06 field report).
             lastTranscript = nil
+            livePartialTranscript = nil
             voiceSession.transition(to: .listening)
             armVoiceWatchdog()
         case .processing:
@@ -1252,6 +1263,7 @@ final class AppCoordinator: ObservableObject {
         switch action.method {
         case .phone:
             callLinks.openPhone(action.contact.phone)
+            contactNumberUsed(action.contact.phone)
             setOutcome(icon: "phone.fill",
                        text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
             speak(text: L10n.fmt("router.call.calling", locale: locale, action.contact.name))
@@ -1264,6 +1276,7 @@ final class AppCoordinator: ObservableObject {
                            text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
                 speak(text: L10n.fmt("router.call.calling", locale: locale, action.contact.name))
                 noteConfirmedCallExecution(action)
+                contactNumberUsed(action.contact.phone)
             case .unavailable, .invalidHandle:
                 // FaceTime absent is near-impossible on a real iPhone but
                 // real on simulator — say what actually happened, and
@@ -1355,6 +1368,7 @@ final class AppCoordinator: ObservableObject {
                 setOutcome(icon: "video.fill",
                            text: L10n.fmt("home.outcome.callPlaced", locale: locale, contact.name))
                 speak(text: L10n.fmt("call.announce.faceTimeVideo", locale: locale, contact.name))
+                contactNumberUsed(contact.phone)
             case .unavailable, .invalidHandle:
                 setOutcome(icon: "exclamationmark.triangle.fill",
                            text: L10n.str("router.call.facetimeUnavailable", locale: locale))
@@ -1365,6 +1379,7 @@ final class AppCoordinator: ObservableObject {
                 announceNoUsableNumber(contact: contact, locale: locale)
                 return
             }
+            contactNumberUsed(contact.phone)
             setOutcome(icon: "phone.fill",
                        text: L10n.fmt("home.outcome.callPlaced", locale: locale, contact.name))
             speak(text: L10n.fmt("router.call.calling", locale: locale, contact.name))
@@ -1401,6 +1416,45 @@ final class AppCoordinator: ObservableObject {
             }
         }
     }
+
+    /// Dial a SYSTEM-address-book search result (Phone leaf search,
+    /// system-contacts search task 2026-09-06) — plain GSM audio call,
+    /// the one surface a random phone-book row implies (there is no
+    /// per-contact `FamilyContact` preference behind it). Dialed through
+    /// `PhoneDialer.url(for:)`, the helper the emergency icon in the same
+    /// leaf chrome already uses (`RedesignComponents`) — per the task;
+    /// the family paths keep dialing via `CallLinks`, which builds the
+    /// same `tel:` with stricter '+' handling. A dialable row can't
+    /// really fail, but if it somehow does, say so aloud instead of
+    /// going silent. The number enters the recency ranking only after
+    /// the dial actually opened.
+    func performSystemContactCall(name: String, phone: String) {
+        guard let url = PhoneDialer.url(for: phone) else {
+            setOutcome(icon: "exclamationmark.triangle.fill",
+                       text: L10n.fmt("call.announce.noPhoneNumber", locale: activeLocale, name))
+            speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: activeLocale, name))
+            return
+        }
+        DispatchQueue.main.async { UIApplication.shared.open(url) }
+        contactNumberUsed(phone)
+        setOutcome(icon: "phone.fill",
+                   text: L10n.fmt("home.outcome.callPlaced", locale: activeLocale, name))
+        speak(text: L10n.fmt("router.call.calling", locale: activeLocale, name))
+    }
+
+    /// Recency hook for the Phone leaf's search ranking: every number a
+    /// call was genuinely placed to from this app — voice flow, family
+    /// tiles, system-contact search rows — lands in `callRecencyStore`.
+    /// One line per OPENED call, never for a failed one: a call that
+    /// didn't happen must not make its number look recently used.
+    private func contactNumberUsed(_ phone: String) {
+        callRecencyStore.record(phone: phone)
+    }
+
+    /// Normalized-number → last-call-date index for ranking search
+    /// results ("most recently used first"). The CallView loads it once
+    /// per screen visit, not per keystroke.
+    var contactCallRecency: [String: Date] { callRecencyStore.recentCalls() }
 
     /// Shared honest line for a contact whose stored phone normalizes to
     /// nothing dialable — defensive (the editors require a number), but a

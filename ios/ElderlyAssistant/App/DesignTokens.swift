@@ -20,6 +20,11 @@ enum DesignTokens {
 
     // Voice-session state colors (§3.3)
     static let stateIdle = accent
+    /// Assistant-is-speaking state. Call-blue (#2A5F8F, the same blue as
+    /// the call badge tint) instead of the idle color so rest vs speak
+    /// are distinguishable at a glance — they previously rendered too
+    /// close to tell apart (2026-09-06 field report).
+    static let stateSpeaking = Color(red: 0.165, green: 0.373, blue: 0.561)
     static let stateListening = Color(red: 0.780, green: 0.498, blue: 0.161)  // #C77F2A
     static let stateTranscribing = Color(red: 0.541, green: 0.427, blue: 0.231) // #8A6D3B
     static let stateUnderstanding = Color(red: 0.361, green: 0.353, blue: 0.541) // #5C5A8A
