@@ -379,8 +379,6 @@ struct ContactTile: View {
 /// anywhere: sections that have no real content are simply omitted.
 struct CalendarView: View {
     @EnvironmentObject var coordinator: AppCoordinator
-    @State private var nepaliDateText: String?
-    @State private var nepaliDateLoaded = false
 
     private var todaysReminders: [ScheduledReminder] {
         coordinator.pendingReminders
@@ -391,25 +389,42 @@ struct CalendarView: View {
     var body: some View {
         LeafScreen(titleKey: "calendar.title") {
             VStack(spacing: 12) {
-                dateCard
-                if let nepaliDateText {
-                    infoCard(titleKey: "calendar.nepaliDate", text: nepaliDateText)
+                bsDateCard
+                if !(coordinator.festivalCalendar.todayOverlay()?.festivals.isEmpty ?? true) {
+                    festivalTodayCard
                 }
+                upcomingCard
                 scheduleSection
             }
         }
-        .task { await loadNepaliDate() }
     }
 
-    private var dateCard: some View {
-        VStack(spacing: 6) {
-            Text(Date().formatted(.dateTime.weekday(.wide).locale(coordinator.activeLocale)))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.textSecondary)
-            Text(Date().formatted(.dateTime.day().month(.wide).year().locale(coordinator.activeLocale)))
-                .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                .foregroundColor(DesignTokens.textPrimary)
-                .multilineTextAlignment(.center)
+    /// The BS-first date card (2026-09-06 product direction: Nepali
+    /// calendar shows Bikram Sambat dates, not Gregorian, in Nepali
+    /// numerals — with the Hindu tithi overlay on every day).
+    private var bsDateCard: some View {
+        let overlay = coordinator.festivalCalendar.todayOverlay()
+        return VStack(spacing: 8) {
+            if let overlay {
+                Text(overlay.weekdayNepali)
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textSecondary)
+                Text(BikramSambat.nepaliString(overlay.bsDate))
+                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                    .foregroundColor(DesignTokens.textPrimary)
+                    .multilineTextAlignment(.center)
+                // Tithi overlay — every day, per product requirement.
+                Text(overlay.tithi.displayNepali)
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.accent)
+                Text(Date().formatted(.dateTime.day().month(.wide).year().locale(coordinator.activeLocale)))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+            } else {
+                Text("calendar.bsUnavailable")
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
         }
         .padding(18)
         .frame(maxWidth: .infinity)
@@ -417,14 +432,28 @@ struct CalendarView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
-    private func infoCard(titleKey: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(LocalizedStringKey(titleKey))
+    /// Festival(s) falling today, with their tithi labels.
+    private var festivalTodayCard: some View {
+        let festivals = coordinator.festivalCalendar.todayOverlay()?.festivals ?? []
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("calendar.festivalToday")
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                 .foregroundColor(DesignTokens.textSecondary)
-            Text(text)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.textPrimary)
+            ForEach(festivals, id: \.id) { festival in
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkles")
+                        .foregroundColor(DesignTokens.accent)
+                    Text(festival.nameNepali)
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                    Spacer()
+                    if let tithi = festival.tithiNepali {
+                        Text(tithi)
+                            .font(.system(size: DesignTokens.minCaptionPointSize))
+                            .foregroundColor(DesignTokens.textSecondary)
+                    }
+                }
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -432,19 +461,50 @@ struct CalendarView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
+    /// Upcoming festivals (next 5) with BS dates and days-away.
+    private var upcomingCard: some View {
+        let upcoming = coordinator.festivalCalendar.upcoming(limit: 5)
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("calendar.upcomingFestivals")
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textSecondary)
+            ForEach(upcoming, id: \.festival.id) { item in
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.festival.nameNepali)
+                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                            .foregroundColor(DesignTokens.textPrimary)
+                        Text(BikramSambat.nepaliString(item.bsDate))
+                            .font(.system(size: DesignTokens.minCaptionPointSize))
+                            .foregroundColor(DesignTokens.textSecondary)
+                    }
+                    Spacer()
+                    Text(daysAwayText(item.daysAway))
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.accent)
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    private func daysAwayText(_ days: Int) -> String {
+        if days == 0 { return L10n.str("calendar.today", locale: coordinator.activeLocale) }
+        if days == 1 { return L10n.str("calendar.tomorrow", locale: coordinator.activeLocale) }
+        return L10n.fmt("calendar.inDays", locale: coordinator.activeLocale,
+                        BikramSambat.devanagariDigits(days))
+    }
+
     @ViewBuilder
     private var scheduleSection: some View {
-        if todaysReminders.isEmpty {
-            Text("calendar.noScheduleToday")
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(24)
-                .frame(maxWidth: .infinity)
-                .background(DesignTokens.card)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        } else {
-            VStack(spacing: 12) {
+        if !todaysReminders.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("calendar.todaySchedule")
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                    .foregroundColor(DesignTokens.textSecondary)
                 ForEach(todaysReminders) { reminder in
                     HStack(spacing: 12) {
                         IconBadge(systemImage: "clock.fill", tint: .reminders)
@@ -464,19 +524,6 @@ struct CalendarView: View {
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
                 }
             }
-        }
-    }
-
-    /// Asks the NepaliCalendarPlugin (via the coordinator) for today's
-    /// Nepali date. Only attempts when the plugin applies (Nepali
-    /// locale) and the assistant is configured — otherwise the section
-    /// stays hidden rather than showing an error or placeholder.
-    private func loadNepaliDate() async {
-        guard !nepaliDateLoaded else { return }
-        nepaliDateLoaded = true
-        if let answer = await coordinator.nepaliCalendarAnswer(
-            question: L10n.str("calendar.todayQuestion", locale: coordinator.activeLocale)) {
-            await MainActor.run { nepaliDateText = answer }
         }
     }
 }

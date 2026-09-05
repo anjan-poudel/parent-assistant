@@ -549,6 +549,11 @@ final class AppCoordinator: ObservableObject {
         // Same re-queue for routine reminders (FR-025)
         routineScheduler.scheduleAll()
 
+        // Festival notifications (BS calendar, 2026-09-06): day-of for
+        // every catalog festival + advance N-day reminders for important
+        // ones (default 2, Settings-configurable). Idempotent rebuild.
+        festivalCalendar.scheduleAll()
+
         // Voice pipeline is built lazily here so the CommandRouter can hold a
         // weak ref back to this fully-initialised coordinator.
         let systemSpeaker = SystemSpeechSpeaker(observabilityBus: observabilityBus)
@@ -1450,30 +1455,21 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var homeCalendarLine: String?
     private static let homeCalendarLineDefaultsKey = "homeCalendarLine.v1"
 
-    /// Refreshes `homeCalendarLine` if today's line isn't cached yet.
-    /// Called from HomeView on appear — cheap no-op after the first
-    /// successful fetch of the day.
+    /// Refreshes `homeCalendarLine` — fully OFFLINE since the BS
+    /// calendar work (2026-09-06): BS date + tithi + any festival today,
+    /// computed locally (BikramSambat/TithiCalculator/FestivalCalendarService).
+    /// No network, no cache, no cost, correct every day. The previous
+    /// search-grounded answer was slower, cost a call a day, and couldn't
+    /// show tithi at all.
     func refreshHomeCalendarLineIfNeeded() {
         guard homeCalendarLine == nil else { return }
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        let todayKey = Self.homeCalendarLineDefaultsKey + "." + f.string(from: Date())
-        if let cached = UserDefaults.standard.string(forKey: todayKey), !cached.isEmpty {
-            homeCalendarLine = cached
-            return
+        guard let overlay = festivalCalendar.todayOverlay() else { return }
+        var parts = ["\(overlay.weekdayNepali), \(BikramSambat.nepaliString(overlay.bsDate))"]
+        parts.append(overlay.tithi.displayNepali)
+        if let festival = overlay.festivals.first {
+            parts.append(festival.nameNepali)
         }
-        guard geminiConfigStore.isConfigured,
-              pluginRegistry?.plugin(handling: "nepali_calendar.query",
-                                     locale: activeLocale) != nil else { return }
-        let question = L10n.str("home.calendarLine.question", locale: activeLocale)
-        Task { [weak self] in
-            guard let self,
-                  let answer = await self.nepaliCalendarAnswer(question: question) else { return }
-            await MainActor.run {
-                UserDefaults.standard.set(answer, forKey: todayKey)
-                self.homeCalendarLine = answer
-            }
-        }
+        homeCalendarLine = parts.joined(separator: " • ")
     }
 
     /// A plugin-provided view awaiting presentation (`.plugin` intent,
@@ -1610,6 +1606,10 @@ final class AppCoordinator: ObservableObject {
     /// natively — the parallel tag-store approach from the same merge
     /// was dropped in favor of it).
     private(set) lazy var calendarSync = CalendarSyncService(observabilityBus: observabilityBus)
+
+    /// Offline Bikram Sambat + tithi + festival overlay and festival
+    /// notification scheduling (2026-09-06 BS calendar feature).
+    private(set) lazy var festivalCalendar = FestivalCalendarService(observabilityBus: observabilityBus)
 
     /// Settings toggle handler: enable calendar mirroring (requests
     /// EventKit access at point of use) or disable it.

@@ -682,6 +682,7 @@ struct MedicationScheduleSettingsView: View {
                     }
                 }
                 addForm
+                festivalReminderCard
                 calendarSyncCard
             }
         }
@@ -782,6 +783,41 @@ struct MedicationScheduleSettingsView: View {
             }
             .tint(DesignTokens.accent)
             Text(statusText)
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// Advance-reminder days for important festivals (BS calendar,
+    /// 2026-09-06) — default 2, family-configurable. Changing it
+    /// reschedules festival notifications immediately.
+    private var festivalReminderCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("festival.reminderTitle", systemImage: "bell.badge")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundColor(DesignTokens.textPrimary)
+            HStack {
+                Text("festival.reminderDays")
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Spacer()
+                Stepper(value: Binding(
+                    get: { coordinator.festivalCalendar.advanceReminderDays },
+                    set: { newValue in
+                        coordinator.festivalCalendar.advanceReminderDays = newValue
+                        coordinator.festivalCalendar.scheduleAll()
+                    }
+                ), in: 0...7) {
+                    Text(BikramSambat.devanagariDigits(coordinator.festivalCalendar.advanceReminderDays))
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundColor(DesignTokens.accent)
+                }
+            }
+            Text("festival.reminderHint")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
                 .foregroundColor(DesignTokens.textSecondary)
         }
