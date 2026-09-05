@@ -1711,6 +1711,91 @@
         }
       }
     },
+    "plugin.applianceHelper.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appliance help"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उपकरण सहायता"
+          }
+        }
+      }
+    },
+    "plugin.applianceHelper.notReady": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That feature isn't ready yet — it will be able to guide you with your appliances soon."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यो सुविधा अहिले तयार छैन — चाँडै तपाईंलाई उपकरण चलाउन सिकाउनेछ।"
+          }
+        }
+      }
+    },
+    "plugin.nepaliCalendar.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nepali calendar"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नेपाली पात्रो"
+          }
+        }
+      }
+    },
+    "plugin.nepaliCalendar.noQuestion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I didn't catch what you wanted to know about the calendar."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंले पात्रोबारे के जान्न चाहनुभयो, मैले बुझिनँ।"
+          }
+        }
+      }
+    },
+    "plugin.nepaliCalendar.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I couldn't find that out right now. Please try again later."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मैले अहिले त्यो पत्ता लगाउन सकिनँ। कृपया पछि फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
     "reminder.defaultTitle": {
       "extractionState": "manual",
       "localizations": {
@@ -2081,6 +2166,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "अहिले पर्खिरहेको औषधिको सम्झना छैन।"
+          }
+        }
+      }
+    },
+    "router.pluginUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sorry, I can't do that right now."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस्, म अहिले त्यो गर्न सक्दिनँ।"
           }
         }
       }

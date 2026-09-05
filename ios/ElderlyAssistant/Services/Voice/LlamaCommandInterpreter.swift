@@ -54,6 +54,12 @@ struct InterpretedCommand: Equatable, Codable {
         case guide
         case createCalendarEvent = "create_calendar_event"
         case suggestVideo = "suggest_video"
+        /// Escape hatch for capability contributed by a registered
+        /// `AssistantPlugin` (see Services/Plugins). Core never learns
+        /// plugin action names — they travel in `pluginAction`, and this
+        /// single case is the only core change a plugin ever needs
+        /// (docs/superpowers/specs/2026-09-05-plugin-architecture-design.md).
+        case plugin = "plugin"
         case none
     }
     let action: Action
@@ -88,6 +94,14 @@ struct InterpretedCommand: Equatable, Codable {
     /// separation is what stops a generated "step 3: open whatsapp://…"
     /// from ever being treated as a device action).
     let steps: [String]?
+    /// Only meaningful when action == .plugin — the plugin-namespaced
+    /// action to dispatch (e.g. "nepali_calendar.query").
+    let pluginAction: String?
+    /// Generic entity bag for plugin actions — plugins declare the keys
+    /// they need in their own prompt fragment rather than growing named
+    /// optional fields here per feature (that would recreate the
+    /// "core file grows per feature" problem the plugin system avoids).
+    let pluginEntities: [String: String]?
     let confidence: Double
     let reply: String
 
@@ -97,6 +111,7 @@ struct InterpretedCommand: Equatable, Codable {
     init(action: Action, entryId: String?, contact: String?, time: String?,
          medication: String?, message: String?, callType: String?,
          requestedApp: String?, topic: String? = nil, steps: [String]? = nil,
+         pluginAction: String? = nil, pluginEntities: [String: String]? = nil,
          confidence: Double, reply: String) {
         self.action = action
         self.entryId = entryId
@@ -108,6 +123,8 @@ struct InterpretedCommand: Equatable, Codable {
         self.requestedApp = requestedApp
         self.topic = topic
         self.steps = steps
+        self.pluginAction = pluginAction
+        self.pluginEntities = pluginEntities
         self.confidence = confidence
         self.reply = reply
     }
@@ -130,15 +147,18 @@ enum LlamaGrammar {
                     "\\"requestedApp\\"" ws ":" ws maybeString ws "," ws
                     "\\"topic\\"" ws ":" ws maybeString ws "," ws
                     "\\"steps\\"" ws ":" ws maybeStringArray ws "," ws
+                    "\\"pluginAction\\"" ws ":" ws maybeString ws "," ws
+                    "\\"pluginEntities\\"" ws ":" ws entityMap ws "," ws
                     "\\"confidence\\"" ws ":" ws number ws "," ws
                     "\\"reply\\"" ws ":" ws string ws "}"
     action ::= "\\"ack_med\\"" | "\\"call\\"" | "\\"emergency\\""
              | "\\"set_reminder\\"" | "\\"health_query\\"" | "\\"music\\""
              | "\\"send_message\\"" | "\\"guide\\""
              | "\\"create_calendar_event\\"" | "\\"suggest_video\\""
-             | "\\"query\\"" | "\\"none\\""
+             | "\\"query\\"" | "\\"plugin\\"" | "\\"none\\""
     maybeString ::= "null" | string
-    maybeStringArray ::= "null" | "[" ws (string ("," ws string)*)? "]" 
+    maybeStringArray ::= "null" | "[" ws (string ("," ws string)*)? "]"
+    entityMap ::= "null" | "{" ws ("\\"" ([^"\\\\] | "\\\\" .)* "\\"" ws ":" ws string (ws "," ws "\\"" ([^"\\\\] | "\\\\" .)* "\\"" ws ":" ws string)*)? ws "}"
     string ::= "\\"" ([^"\\\\] | "\\\\" .)* "\\""
     number ::= ("0" | [1-9][0-9]*) ("." [0-9]+)?
     ws     ::= [ \\t\\n]*
@@ -184,6 +204,9 @@ final class LlamaCommandInterpreter: CommandInterpreter {
     private let modelStore: ModelStore
     private let observabilityBus: ObservabilityBus
     private let config: Config
+    /// Optional — when set, prompt composition includes applicable
+    /// plugins' intent fragments (see `IntentPrompt.build`).
+    private let pluginRegistry: PluginRegistry?
     private let inferenceQueue = DispatchQueue(label: "llama.command",
                                                qos: .userInitiated)
 
@@ -192,6 +215,26 @@ final class LlamaCommandInterpreter: CommandInterpreter {
     private let preferredBaseId: ModelID
     /// Last requested LoRA — Phase-1 skeleton only.
     private var activeLoRA: ModelID?
+
+    /// The single template-level system prompt used for BOTH the
+    /// `Template(systemPrompt:)` handed to `LLM(from:)` and the manually
+    /// formatted chat header in `runInference` — previously duplicated as
+    /// two inline copies that could drift apart. Kept deliberately SHORT:
+    /// the on-device model is 1B and long system prompts hurt it. The
+    /// detailed schema/entity instructions live in the user turn via
+    /// `IntentPrompt.build` — this string only carries identity, the two
+    /// operating modes, output discipline, and the reply style, matching
+    /// the elderly-assistance customization in `IntentPrompt`.
+    private static let chatSystemPrompt = """
+    You are Sahayak, a voice assistant for an elderly speaker who is not \
+    a native English speaker and finds technology difficult. You operate \
+    in exactly two modes: (1) deciphering the user's intent into a \
+    structured command, or (2) answering an open-form question or \
+    statement. Reply ONLY with a single JSON object matching the schema \
+    in the user's message — no other text. Write the reply field in \
+    plain, simple language with short sentences, warm and respectful, in \
+    the user's own language — it will be spoken aloud to them.
+    """
 
     /// Cached LLM handle. Held as `Any?` so this file compiles without
     /// the LLM package present. Casts to `LLM.LLM` inside `#if canImport`.
@@ -209,11 +252,13 @@ final class LlamaCommandInterpreter: CommandInterpreter {
     init(modelStore: ModelStore,
          observabilityBus: ObservabilityBus,
          preferredBaseId: ModelID = ModelCatalog.llama3_2_1B,
-         config: Config = .default) {
+         config: Config = .default,
+         pluginRegistry: PluginRegistry? = nil) {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
         self.preferredBaseId = preferredBaseId
         self.config = config
+        self.pluginRegistry = pluginRegistry
     }
 
     // MARK: - LoRA skeleton
@@ -246,7 +291,10 @@ final class LlamaCommandInterpreter: CommandInterpreter {
             DispatchQueue.main.async { completion(nil) }
             return
         }
-        let prompt = IntentPrompt.build(transcript: clean, context: context)
+        let activePlugins = pluginRegistry?.activePlugins(
+            for: Locale(identifier: context.userLanguageHint)) ?? []
+        let prompt = IntentPrompt.build(transcript: clean, context: context,
+                                        activePlugins: activePlugins)
 
         inferenceQueue.async { [weak self] in
             self?.runInference(prompt: prompt) { json in
@@ -295,7 +343,7 @@ final class LlamaCommandInterpreter: CommandInterpreter {
                     "<|eot_id|>"
                 ),
                 stopSequence: "<|eot_id|>",
-                systemPrompt: "You are Sahayak, a personal assistant. Reply ONLY with a JSON object matching the schema. No other text."
+                systemPrompt: Self.chatSystemPrompt
             )
             // 1024-token context (default 2048): our prompts are ~150
             // tokens + 128 output, and the smaller n_batch halves
@@ -320,7 +368,7 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         // prompt, and instruction-following falls apart.
         //
         // Manually format with LLaMA 3.2's official chat scheme instead.
-        let systemPrompt = "You are Sahayak, a personal assistant. Reply ONLY with a JSON object matching the schema. No other text."
+        let systemPrompt = Self.chatSystemPrompt
         let formattedPrompt = """
         <|begin_of_text|><|start_header_id|>system<|end_header_id|>
 
@@ -386,6 +434,8 @@ final class LlamaCommandInterpreter: CommandInterpreter {
                 requestedApp: decoded.requestedApp,
                 topic: decoded.topic,
                 steps: decoded.steps,
+                pluginAction: decoded.pluginAction,
+                pluginEntities: decoded.pluginEntities,
                 confidence: clamped,
                 reply: decoded.reply
             )
@@ -440,6 +490,8 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         // never carried these keys) still decode.
         let topic: String?
         let steps: [String]?
+        let pluginAction: String?
+        let pluginEntities: [String: String]?
         let confidence: Double
         let reply: String
     }

@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import ElderlyAssistant
 
 final class CommandRouterTests: XCTestCase {
@@ -95,7 +96,7 @@ final class CommandRouterTests: XCTestCase {
         let interpreter = FakeCommandInterpreter()
         interpreter.nextCommand = InterpretedCommand(
             action: .call, entryId: nil, contact: "छोरा", time: nil, medication: nil,
-            message: nil, callType: "voice", requestedApp: nil, confidence: 0.95, reply: "ठिक छ, फोन गर्दैछु"
+            message: nil, callType: "voice", requestedApp: nil, pluginAction: nil, pluginEntities: nil, confidence: 0.95, reply: "ठिक छ, फोन गर्दैछु"
         )
         let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
                                    speaker: MockSpeaker(), interpreter: interpreter)
@@ -115,7 +116,7 @@ final class CommandRouterTests: XCTestCase {
         let interpreter = FakeCommandInterpreter()
         interpreter.nextCommand = InterpretedCommand(
             action: .call, entryId: nil, contact: "अज्ञात व्यक्ति", time: nil, medication: nil,
-            message: nil, callType: nil, requestedApp: nil, confidence: 0.95, reply: "ठिक छ"
+            message: nil, callType: nil, requestedApp: nil, pluginAction: nil, pluginEntities: nil, confidence: 0.95, reply: "ठिक छ"
         )
         let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
                                    speaker: MockSpeaker(), interpreter: interpreter)
@@ -159,7 +160,7 @@ final class CommandRouterTests: XCTestCase {
         let interpreter = FakeCommandInterpreter()
         interpreter.nextCommand = InterpretedCommand(
             action: .query, entryId: nil, contact: nil, time: nil, medication: nil,
-            message: nil, callType: nil, requestedApp: nil, confidence: 0.9, reply: "आज घमाइलो छ।"
+            message: nil, callType: nil, requestedApp: nil, pluginAction: nil, pluginEntities: nil, confidence: 0.9, reply: "आज घमाइलो छ।"
         )
         let router = CommandRouter(coordinator: coordinator, observabilityBus: MockObservabilityBus(),
                                    speaker: MockSpeaker(), interpreter: interpreter)
@@ -169,6 +170,71 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertEqual(coordinator.genericReplies, ["आज घमाइलो छ।"])
     }
 
+    // MARK: - .plugin dispatch (plugin architecture, 2026-09-05)
+
+    func testPluginIntentDispatchesToRegisteredPlugin() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let registry = PluginRegistry()
+        let plugin = FakePlugin(id: "test_plugin", actionNames: ["test.action"], applicableToNepali: false)
+        registry.register(plugin)
+        let store = GeminiConfigStore(storage: GeminiInMemoryStorage())
+        store.save("fake-key")
+        let client = GeminiClient(configStore: store, observabilityBus: MockObservabilityBus(),
+                                  transport: FakeGeminiTransport())
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .plugin, entryId: nil, contact: nil, time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil,
+            pluginAction: "test.action", pluginEntities: ["foo": "bar"],
+            confidence: 0.9, reply: ""
+        )
+        let bus = MockObservabilityBus()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter,
+                                   pluginRegistry: registry, geminiClient: client)
+
+        _ = router.route(transcript: "do the test thing")
+
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_plugin_dispatched" })
+        // handle() runs in a Task — give it a turn to land.
+        let exp = expectation(description: "plugin handled")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp.fulfill() }
+        wait(for: [exp], timeout: 2.0)
+        XCTAssertEqual(plugin.handledCommands.count, 1)
+        XCTAssertEqual(plugin.handledCommands.first?.actionName, "test.action")
+        XCTAssertEqual(plugin.handledCommands.first?.entities["foo"], "bar")
+    }
+
+    func testPluginIntentWithUnknownActionSpeaksUnavailable() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let registry = PluginRegistry()   // nothing registered
+        let store = GeminiConfigStore(storage: GeminiInMemoryStorage())
+        store.save("fake-key")
+        let client = GeminiClient(configStore: store, observabilityBus: MockObservabilityBus(),
+                                  transport: FakeGeminiTransport())
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .plugin, entryId: nil, contact: nil, time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil,
+            pluginAction: "nope.action", pluginEntities: nil,
+            confidence: 0.9, reply: ""
+        )
+        let bus = MockObservabilityBus()
+        let speaker = MockSpeaker()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: speaker, interpreter: interpreter,
+                                   pluginRegistry: registry, geminiClient: client)
+
+        _ = router.route(transcript: "do something unsupported")
+
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_plugin_unresolved" })
+        // speak() dispatches to a Task — let it land before asserting.
+        let exp = expectation(description: "speak delivered")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp.fulfill() }
+        wait(for: [exp], timeout: 2.0)
+        XCTAssertEqual(speaker.utterances.count, 1, "the unavailable message must actually be spoken")
+    }
+
     func testSendMessageWithResolvedContactPresentsComposeSheet() {
         let coordinator = MockVoiceCommandCoordinator()
         coordinator.messageShouldSucceed = true
@@ -176,7 +242,7 @@ final class CommandRouterTests: XCTestCase {
         let interpreter = FakeCommandInterpreter()
         interpreter.nextCommand = InterpretedCommand(
             action: .sendMessage, entryId: nil, contact: "छोरी", time: nil, medication: nil,
-            message: "म राम्रो छु", callType: nil, requestedApp: nil, confidence: 0.95, reply: "सन्देश तयार छ"
+            message: "म राम्रो छु", callType: nil, requestedApp: nil, pluginAction: nil, pluginEntities: nil, confidence: 0.95, reply: "सन्देश तयार छ"
         )
         let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
                                    speaker: MockSpeaker(), interpreter: interpreter)
@@ -269,6 +335,9 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
         composedMessages.append((name, body))
         return messageShouldSucceed
     }
+
+    var presentedPluginViews: [AnyView] = []
+    func presentPluginView(_ view: AnyView) { presentedPluginViews.append(view) }
 }
 
 private final class MockSpeaker: Speaker {

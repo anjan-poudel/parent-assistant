@@ -1,5 +1,6 @@
 import Foundation
 import UserNotifications
+import SwiftUI
 
 protocol VoiceCommandCoordinating: AnyObject {
     var isAwaitingConfirmation: Bool { get }
@@ -63,6 +64,11 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// and presents the native compose sheet pre-filled with `body`.
     /// Returns false when no contact can be resolved.
     func composeMessage(toContactNamed name: String?, body: String) -> Bool
+
+    /// `.plugin` intent: presents a plugin-provided view (e.g. the
+    /// appliance photo + overlay). AppCoordinator publishes it;
+    /// ContentView renders the sheet.
+    func presentPluginView(_ view: AnyView)
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -94,15 +100,25 @@ final class CommandRouter {
     private let observabilityBus: ObservabilityBus
     private let speaker: Speaker?
     private let interpreter: CommandInterpreter
+    /// Optional — `.plugin` dispatch needs both: the registry to resolve
+    /// pluginAction names, and the client to build each plugin's
+    /// `PluginExecutionContext`. Nil preserves pre-plugin behavior
+    /// (plugin intents resolve to the "unavailable" message).
+    private let pluginRegistry: PluginRegistry?
+    private let geminiClient: GeminiClient?
 
     init(coordinator: VoiceCommandCoordinating,
          observabilityBus: ObservabilityBus,
          speaker: Speaker? = nil,
-         interpreter: CommandInterpreter = NullCommandInterpreter()) {
+         interpreter: CommandInterpreter = NullCommandInterpreter(),
+         pluginRegistry: PluginRegistry? = nil,
+         geminiClient: GeminiClient? = nil) {
         self.coordinator = coordinator
         self.observabilityBus = observabilityBus
         self.speaker = speaker
         self.interpreter = interpreter
+        self.pluginRegistry = pluginRegistry
+        self.geminiClient = geminiClient
     }
 
     @discardableResult
@@ -393,6 +409,8 @@ final class CommandRouter {
             emit(eventType: "command_llm_no_action", outcome: "info")
             coordinator?.noteGenericReply(command.reply)
             speak(text: command.reply)
+        case .plugin:
+            handlePluginCommand(command)
         }
     }
 
@@ -467,6 +485,47 @@ final class CommandRouter {
         }
         emit(eventType: "command_message_composing", outcome: "success")
         speak(text: command.reply)
+    }
+
+    /// `.plugin` intent (plugin architecture, 2026-09-05). Resolves the
+    /// pluginAction through the registry — core never knows plugin
+    /// action names statically — and dispatches to the plugin's
+    /// `handle`. Result delivery mirrors every other action's: generic
+    /// outcome card + spoken text, plus an optional presented view.
+    private func handlePluginCommand(_ command: InterpretedCommand) {
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        guard let registry = pluginRegistry,
+              let geminiClient = geminiClient,
+              let actionName = command.pluginAction,
+              let plugin = registry.plugin(handling: actionName, locale: locale) else {
+            emit(eventType: "command_plugin_unresolved", outcome: "blocked")
+            speak(key: "router.pluginUnavailable")
+            return
+        }
+        emit(eventType: "command_plugin_dispatched", outcome: "success")
+        let pluginCommand = PluginCommand(
+            actionName: actionName,
+            transcript: "",
+            entities: command.pluginEntities ?? [:],
+            confidence: command.confidence
+        )
+        let execContext = PluginExecutionContext(
+            locale: locale,
+            geminiClient: geminiClient,
+            observabilityBus: observabilityBus
+        )
+        Task { [weak self] in
+            guard let self else { return }
+            let result = await plugin.handle(pluginCommand, context: execContext)
+            let view = plugin.presentationView(for: result)
+            await MainActor.run {
+                self.coordinator?.noteGenericReply(result.spokenText)
+                if let view {
+                    self.coordinator?.presentPluginView(view)
+                }
+                self.speak(text: result.spokenText)
+            }
+        }
     }
 
     private func formattedTime(_ components: DateComponents, locale: Locale) -> String {

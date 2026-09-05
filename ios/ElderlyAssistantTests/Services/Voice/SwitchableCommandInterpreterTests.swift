@@ -77,6 +77,7 @@ final class SwitchableCommandInterpreterTests: XCTestCase {
         let expected = InterpretedCommand(
             action: .call, entryId: nil, contact: "छोरा", time: nil,
             medication: nil, message: nil, callType: "voice", requestedApp: nil,
+            pluginAction: nil, pluginEntities: nil,
             confidence: 0.9, reply: "ठिक छ"
         )
         let spy = SpyCommandInterpreter(isAvailable: true, nextCommand: expected)
