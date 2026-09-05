@@ -1,0 +1,56 @@
+# Intent model training suite configuration. Paths are relative to
+# tools/train-intent/.
+
+gemini:
+  # Teacher model for data generation (spec §9.2). Reads GEMINI_API_KEY
+  # from the environment — never hardcode keys.
+  model: gemini-2.5-flash-lite
+  # Paraphrase variants requested per seed template per register.
+  variants_per_seed: 6
+  max_output_tokens: 4096
+  temperature: 0.8      # diversity for paraphrases; labels are verified after
+  requests_per_minute: 25
+
+stt_noise:
+  # The STT model the app ACTUALLY ships (spec §9.2: train on what STT
+  # emits). Path to a whisper.cpp-compatible binary + model on the
+  # training box (same medium Nepali fine-tune bundled in the app).
+  whisper_cpp: ~/whisper.cpp/build/bin/whisper-cli
+  whisper_model: ~/models/whisper-medium-ne-q5_1.bin
+  tts_voice: hi-IN    # piper voice used to synthesize seed audio (nearest available to ne)
+  sample_rate: 16000
+  variants_per_utterance: 2
+
+mixture:
+  # Final mixture targets (spec §9.2).
+  stt_noised: 0.60
+  clean_devanagari: 0.25
+  romanized_codeswitched: 0.15
+  valid_fraction: 0.05
+  seed: 42
+
+training:
+  # QLoRA recipe (spec §9.5) — consumed by the external trainer
+  # (axolotl/unsloth), documented here as the single source of truth.
+  base_models:
+    - google/gemma-3-1b-it
+    - Qwen/Qwen3-1.7B
+  lora_r: 16
+  lora_alpha: 32
+  lr: 1.5e-4
+  epochs: 3
+  bf16: true
+  target_modules: all-linear
+  max_seq_len: 1024
+
+export:
+  quant: Q4_K_M
+  out_dir: models
+
+gates:
+  # Ship gates (spec §10) — eval_golden.py fails non-zero below these.
+  closed_intent_accuracy: 0.95
+  slot_f1: 0.90
+  emergency_recall: 1.00       # hard gate, no compromise
+  side_effect_precision: 0.97  # call + send_message
+  max_gap_vs_gemini: 0.03

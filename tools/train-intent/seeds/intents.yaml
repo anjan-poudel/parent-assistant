@@ -1,0 +1,112 @@
+# Seed taxonomy (spec §9.1, ~11k target examples after teacher expansion).
+# Each intent: target count, entity banks, and seed templates in Nepali
+# (Devanagari + romanized + code-switched). {slots} are filled from the
+# entity banks combinatorially before teacher paraphrasing.
+#
+# Edge classes live at the bottom — they are FIRST-CLASS intents of the
+# training mixture (abstention is a feature; spec §9.3).
+
+entity_banks:
+  contact_names: [माइया, सुनिता, राम, हरि, गीता, कृष्ण, सरस्वती, दिल, सिमा]
+  contact_relationships: [छोरा, छोरी, आमा, बुबा, दिदी, दाइ, बहिनी, भाइ, नाति, नातिनी]
+  contact_names_latin: [maiya, sunita, ram, hari, gita, krishna, saraswati, dil, sima]
+  contact_relationships_latin: [chhora, chhori, aama, buwa, didi, dai, bahini, bhai, nati, natini]
+  medications: [औषधि, दवाई, प्रेसरको औषधि, सुगरको औषधि, भिटामिन]
+  times: [बिहान ८ बजे, दिउँसो २ बजे, बेलुका ७ बजे, राति ९ बजे, साढे ८, अब, भोलि बिहान]
+  apps: [फेसटाइम, वाट्सएप, facetime, whatsapp]
+  appliances: [माइक्रोवेभ, वासिङ मेसिन, टिभी रिमोट, डिशवासर, microwave, tv remote]
+  bhajans: [भजन, श्रीमद्भगवद्गीता, ओम मणि पद्मे हूँ, गायत्री मन्त्र]
+
+intents:
+  call:
+    target: 1500
+    templates:
+      - "{contact} लाई फोन गर"
+      - "{contact} लाई कल गरनुहोस्"
+      - "{contact} लाई {app} मा फोन गर"
+      - "{contact} लाई भिडियो कल गर"
+      - "{contact_latin} lai phone gara"
+      - "{contact_latin} lai {app} ma call gara"
+      - "मलाई {contact} सँग कुराकानी गर्नु छ"
+  send_message:
+    target: 1000
+    templates:
+      - "{contact} लाई मेसेज गर"
+      - "{contact} लाई '{message}' भनेर मेसेज पठाउ"
+      - "{contact_latin} lai message patha"
+  set_reminder:
+    target: 1200
+    templates:
+      - "{time} {medication} खान सम्झाउनु"
+      - "{time} मलाई सम्झना गराउनुहोस्"
+      - "हरेक {time} पानी खान सम्झाउनु"
+  emergency:
+    target: 1000
+    templates:
+      - "मद्दत गर्नुहोस्"
+      - "मलाई बचाउनुहोस्"
+      - "म लडेँ, मद्दत चाहियो"
+      - "छाती धेरै दुख्यो, मद्दत गर्नुहोस्"
+      - "सास फेर्न सकिन"
+      # Boundary pairs (spec §9.4): plea+pain is emergency; the SAME pain
+      # phrased calmly is health_query. Both must exist, labelled right.
+      - "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ"
+  health_query:
+    target: 700
+    templates:
+      - "मेरो रक्तचाप कस्तो हुनुपर्छ"
+      - "मिर्गौला दुख्दा के गर्नुपर्छ"
+      - "सुगर कति हुँदा ठीक हुन्छ"
+  music:
+    target: 600
+    templates:
+      - "भजन बजाउनुस्"
+      - "{bhajan} बजाउ"
+      - "गीत चलाउ"
+      - "bhajan bajaunu"
+  guide:
+    target: 600
+    templates:
+      - "{appliance} कसरी चलाउने"
+      - "{appliance} मा के बटन थिच्ने"
+      - "माइक्रोवेभमा चिया कसरी तताउने"
+  query:
+    target: 1000
+    templates:
+      - "भोलि मौसम कस्तो हुन्छ"
+      - "आज के दिन हो"
+      - "नेपालको राजधानी कहाँ हो"
+  none:
+    target: 500
+    templates:
+      - "हँ"
+      - "अहो"
+      - "के थाहा"
+
+edge_classes:
+  abstain_low_confidence:
+    target: 800
+    note: >
+      Ambiguous, fragmentary, conflicting, or out-of-scope utterances.
+      Label: action "none" (or the guessed action) with confidence BELOW
+      0.4. The 0.7/0.4 thresholds only work if the model is calibrated to
+      abstain — an overconfident small model is worse than no model (spec
+      §9.3).
+    templates:
+      - "ऊ... त्यो... के भनें..."
+      - "फोन... अरे होइन... के गर्ने भनेको थिएँ"
+  gibberish_to_none:
+    target: 400
+    note: >
+      STT noise, repetition loops, non-speech decoded as text. Label:
+      action "none", confidence < 0.2.
+  corrections_overrides:
+    target: 400
+    note: >
+      No-with-amendment patterns ("होइन, फोन नै गर") — the flywheel's gold
+      samples; teaches the model that these are method overrides, not
+      rejections (spec §7.2 correction protocol).
+    templates:
+      - "होइन, फोन नै गर"
+      - "होइन, वाट्सएपमा गर"
+      - "होइनन्, भिडियो कलमा"
