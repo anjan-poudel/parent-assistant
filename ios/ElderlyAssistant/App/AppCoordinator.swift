@@ -453,12 +453,14 @@ final class AppCoordinator: ObservableObject {
         // Voice pipeline is built lazily here so the CommandRouter can hold a
         // weak ref back to this fully-initialised coordinator.
         let systemSpeaker = SystemSpeechSpeaker(observabilityBus: observabilityBus)
-        // PiperVoiceSpeaker is a Phase-4 stub — it just delegates to system
-        // TTS today. Wired here so upstream code lives against the same
-        // `Speaker` type it will use in production.
+        // PiperVoiceSpeaker is the production speaker: on-device Piper
+        // VITS via sherpa-onnx (Nepali + English voices bundled), with
+        // SystemSpeechSpeaker as the automatic fallback whenever a voice
+        // is not installed — see docs/tts-implementation-plan.md.
         let speaker: Speaker = PiperVoiceSpeaker(
             fallback: systemSpeaker,
-            observabilityBus: observabilityBus
+            observabilityBus: observabilityBus,
+            modelStore: modelStore
         )
         self.speaker = speaker
         // v2 pivot: Gemini interpreter. `isAvailable` stays false until an

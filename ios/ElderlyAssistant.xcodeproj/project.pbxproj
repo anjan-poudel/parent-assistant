@@ -11,6 +11,7 @@
 		030616993A706F818B3E2C87 /* PlatformAlarmScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53B1F7C24D2C273993F61341 /* PlatformAlarmScheduler.swift */; };
 		052113CFB87090EC64FBC483 /* WhisperKitSpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A801C3C923FF4C4ECE4BE7C /* WhisperKitSpeechRecognizer.swift */; };
 		0848BC9BF00BD20B7DE1653B /* GeminiConfigStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF539F81F76209D893CF81A8 /* GeminiConfigStore.swift */; };
+		0B4FA65A956BC4B9BCE7E658 /* PiperVoiceSpeakerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1EFF324CC36FB7B56F7FA15 /* PiperVoiceSpeakerTests.swift */; };
 		0D70DE412C00001898760AF5 /* ElderlyAssistantApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 050315DE680CE94C0C4594A5 /* ElderlyAssistantApp.swift */; };
 		10EA5C912EBE32CCBCF134CE /* L10n.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8795B5A15D4AED56559D46B /* L10n.swift */; };
 		14863E9A4965CD4A4D24D5F2 /* GeminiClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC5A9F12844B0E88FDE85416 /* GeminiClient.swift */; };
@@ -36,10 +37,12 @@
 		5F3A3D7F5EE0797E87B0559A /* GeminiSpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D97B2DE62692EBEEE135ED3 /* GeminiSpeechRecognizer.swift */; };
 		5FC266A49696E92A57F6F704 /* SwiftWhisper in Frameworks */ = {isa = PBXBuildFile; productRef = 8A067B2B3D4535E50D1CCB35 /* SwiftWhisper */; };
 		5FF89DF6EC03BA9412F1D1AA /* CommandRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FF305EE75985E7F2B131DD2 /* CommandRouterTests.swift */; };
+		60C4D792AAC8EB983EC74C85 /* sherpa-onnx in Frameworks */ = {isa = PBXBuildFile; productRef = 0FF0D45C4E6548287910C557 /* sherpa-onnx */; };
 		6327B3F4991396B26F8E1A3D /* WhisperKitSpeechRecognizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7126457D1955E4801E720A0C /* WhisperKitSpeechRecognizerTests.swift */; };
 		6892C759DC267D3FB01A108E /* GoldenCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AB9DEC12FB14373288BA403 /* GoldenCorpusTests.swift */; };
 		6D76A837CA7B0A4DD05892F0 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E6911EDC6A72A09AAE433AFA /* ZIPFoundation */; };
 		72C5DCF0A0774E359FF6167C /* MemoryProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA1D94894BBEEB22126873C /* MemoryProbe.swift */; };
+		763161FE0570CCACDD200538 /* SherpaTTSEngineSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DFB692BA73C236DF16E7B0 /* SherpaTTSEngineSmokeTests.swift */; };
 		7721DD8366DF52E918926DA8 /* KeychainEncryptedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF694F3FBB8E78AF5BBCC74 /* KeychainEncryptedStorage.swift */; };
 		77513354E6D2333576B5A9FA /* OnboardingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3EB972E8CC8D69D5ABE0BF7 /* OnboardingState.swift */; };
 		79D094F839936BD503BA7800 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3ABF1E7E6E221112999571F /* Models.swift */; };
@@ -83,6 +86,7 @@
 		D6835191986FBF797464B5BD /* ModelDownloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7665911F65DF1CD61EC44277 /* ModelDownloadService.swift */; };
 		DAB4D2CA398AD66F4496B04E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BAE18E00C74B295000808E2 /* SettingsView.swift */; };
 		E1766AE6441AE64DFC6D6DA9 /* FamilyContactStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36D579A260BDE663399BB7BC /* FamilyContactStoreTests.swift */; };
+		E4A41DDD8D18E332FADFAAED /* tts in Resources */ = {isa = PBXBuildFile; fileRef = 4EC24DBE5F87FAAC400D41EA /* tts */; };
 		E623147E0CF99748C7B6A338 /* AppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CD2AC05E4A8FC9B884539C1 /* AppLanguage.swift */; };
 		E8C639597E665201247E6605 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A8D077C9DB0C95CE97542AE /* HomeView.swift */; };
 		EAA4C9A61CDA5778686FDA76 /* EscalationEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5B0563FB83838D506EA5E4 /* EscalationEngineTests.swift */; };
@@ -135,6 +139,7 @@
 		426B00DB54390C484D152534 /* WhisperSpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperSpeechRecognizer.swift; sourceTree = "<group>"; };
 		459B50A39CF4B7C83A674894 /* LlamaCommandInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaCommandInterpreter.swift; sourceTree = "<group>"; };
 		476E2E6BBD5358CE33C61EC6 /* GoldenCorpus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoldenCorpus.swift; sourceTree = "<group>"; };
+		4EC24DBE5F87FAAC400D41EA /* tts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = tts; path = ElderlyAssistant/Resources/Models/tts; sourceTree = SOURCE_ROOT; };
 		4FF305EE75985E7F2B131DD2 /* CommandRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRouterTests.swift; sourceTree = "<group>"; };
 		5037C77CFB1853F53CE7B8B6 /* TranscriptSanityGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSanityGuardTests.swift; sourceTree = "<group>"; };
 		50EFF6165E6175FF1A801198 /* DependencyProtocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyProtocols.swift; sourceTree = "<group>"; };
@@ -173,6 +178,8 @@
 		A9F9D2C931DA6AAFA3A23B6C /* ModelStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStoreTests.swift; sourceTree = "<group>"; };
 		AA7962DC2383BB09B89340F5 /* Speaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Speaker.swift; sourceTree = "<group>"; };
 		AD5B0563FB83838D506EA5E4 /* EscalationEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EscalationEngineTests.swift; sourceTree = "<group>"; };
+		B1EFF324CC36FB7B56F7FA15 /* PiperVoiceSpeakerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiperVoiceSpeakerTests.swift; sourceTree = "<group>"; };
+		B5DFB692BA73C236DF16E7B0 /* SherpaTTSEngineSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SherpaTTSEngineSmokeTests.swift; sourceTree = "<group>"; };
 		B871A07DB2851ECD2A47836D /* ElderlyAssistantUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElderlyAssistantUITests.swift; sourceTree = "<group>"; };
 		BC5A9F12844B0E88FDE85416 /* GeminiClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiClient.swift; sourceTree = "<group>"; };
 		C2AB3C99F28EE6B02B39ECEB /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
@@ -208,6 +215,7 @@
 				C9EB06ED68AC62EB0872C5D1 /* LLM in Frameworks */,
 				6D76A837CA7B0A4DD05892F0 /* ZIPFoundation in Frameworks */,
 				D0B6412C394AFDFACC01762B /* WhisperKit in Frameworks */,
+				60C4D792AAC8EB983EC74C85 /* sherpa-onnx in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -266,6 +274,7 @@
 		76398CBD05D4B8E57B2A58CB /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				4EC24DBE5F87FAAC400D41EA /* tts */,
 				1EA39CCC1D20F069F694CF9D /* whisper-medium-ne-q5_1.bin */,
 			);
 			path = Models;
@@ -445,6 +454,8 @@
 				53F8ADF917B01F1AF93CBE4D /* IntentPromptTests.swift */,
 				5F1E8CAFF81975F728099576 /* LlamaCommandInterpreterTests.swift */,
 				1464699EC23E298FC82EAF23 /* NepaliTimeParserTests.swift */,
+				B1EFF324CC36FB7B56F7FA15 /* PiperVoiceSpeakerTests.swift */,
+				B5DFB692BA73C236DF16E7B0 /* SherpaTTSEngineSmokeTests.swift */,
 				A94328FF3C48D674B487DD12 /* SpeakerTests.swift */,
 				DBF8D15A8CBEB370AE0487CE /* SwitchableCommandInterpreterTests.swift */,
 				5037C77CFB1853F53CE7B8B6 /* TranscriptSanityGuardTests.swift */,
@@ -528,6 +539,7 @@
 				785605133017A7EB4690010A /* LLM */,
 				E6911EDC6A72A09AAE433AFA /* ZIPFoundation */,
 				9DBFB1B9C8D62BE5420E62FB /* WhisperKit */,
+				0FF0D45C4E6548287910C557 /* sherpa-onnx */,
 			);
 			productName = ElderlyAssistant;
 			productReference = E0D51BFE01BE4E11E7CA840E /* ElderlyAssistant.app */;
@@ -588,6 +600,7 @@
 				6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM.swift" */,
 				55D6BE42A20BFED57539F6D8 /* XCRemoteSwiftPackageReference "WhisperKit" */,
 				8782A0C21196AEAC267497D9 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
+				052EB73C8AC29CD43C9679AB /* XCRemoteSwiftPackageReference "sherpa-onnx" */,
 				B0F090E9C591EB9468ABD2A5 /* XCLocalSwiftPackageReference "vendor/SwiftWhisper" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -608,6 +621,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				16CDB50A84CA31870D3C4DDC /* Localizable.xcstrings in Resources */,
+				E4A41DDD8D18E332FADFAAED /* tts in Resources */,
 				FF6D253A37F069880D322578 /* whisper-medium-ne-q5_1.bin in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -705,6 +719,8 @@
 				3FE394412AC1FB089526F43C /* ModelStoreTests.swift in Sources */,
 				4E2531A97C5980C0611CB470 /* NepaliTimeParserTests.swift in Sources */,
 				92252E31AFFAA415D171810A /* OnboardingStateTests.swift in Sources */,
+				0B4FA65A956BC4B9BCE7E658 /* PiperVoiceSpeakerTests.swift in Sources */,
+				763161FE0570CCACDD200538 /* SherpaTTSEngineSmokeTests.swift in Sources */,
 				FD0C74053396420771C700C1 /* SpeakerTests.swift in Sources */,
 				88AB55B2E56480BD97A927CC /* SwitchableCommandInterpreterTests.swift in Sources */,
 				B32BE0328D7BA52A2E4C4C5D /* TranscriptSanityGuardTests.swift in Sources */,
@@ -1011,6 +1027,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		052EB73C8AC29CD43C9679AB /* XCRemoteSwiftPackageReference "sherpa-onnx" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/k2-fsa/sherpa-onnx";
+			requirement = {
+				kind = exactVersion;
+				version = 1.13.7;
+			};
+		};
 		55D6BE42A20BFED57539F6D8 /* XCRemoteSwiftPackageReference "WhisperKit" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/argmaxinc/WhisperKit.git";
@@ -1038,6 +1062,11 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		0FF0D45C4E6548287910C557 /* sherpa-onnx */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 052EB73C8AC29CD43C9679AB /* XCRemoteSwiftPackageReference "sherpa-onnx" */;
+			productName = "sherpa-onnx";
+		};
 		785605133017A7EB4690010A /* LLM */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM.swift" */;

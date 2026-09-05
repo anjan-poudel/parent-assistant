@@ -75,7 +75,54 @@ final class ModelStore {
     }
 
     func isCached(_ id: ModelID) -> Bool {
-        path(for: id) != nil
+        if let entry = ModelCatalog.entry(for: id), entry.kind == .tts {
+            return ttsVoiceDirectory(for: id) != nil
+        }
+        return path(for: id) != nil
+    }
+
+    // MARK: - TTS voices (sherpa-layout directories)
+
+    /// URL of an installed TTS voice directory (contains model.onnx,
+    /// tokens.txt, espeak-ng-data/). Nil when never installed.
+    func ttsVoiceDirectory(for id: ModelID) -> URL? {
+        guard let entry = ModelCatalog.entry(for: id),
+              entry.kind == .tts else { return nil }
+        let dir = rootDirectory
+            .appendingPathComponent("tts", isDirectory: true)
+            .appendingPathComponent(entry.filename, isDirectory: true)
+        return fileManager.fileExists(atPath: dir.path) ? dir : nil
+    }
+
+    /// Installs a bundled TTS voice directory (Resources/Models/tts/<name>)
+    /// into the ModelStore. Idempotent — returns the existing directory
+    /// when already installed, nil when the catalog/bundle has no such
+    /// voice (the caller then falls back to system TTS).
+    func installBundledTTSVoice(for id: ModelID, bundle: Bundle = .main) -> URL? {
+        guard let entry = ModelCatalog.entry(for: id),
+              entry.kind == .tts,
+              let resourceName = entry.bundledResourceName,
+              let source = bundle.url(forResource: resourceName,
+                                      withExtension: nil,
+                                      subdirectory: "tts") else {
+            return nil
+        }
+        let parent = rootDirectory.appendingPathComponent("tts", isDirectory: true)
+        let dest = parent.appendingPathComponent(entry.filename, isDirectory: true)
+        if fileManager.fileExists(atPath: dest.path) {
+            return dest
+        }
+        do {
+            try ensureDirectory(parent)
+            try fileManager.copyItem(at: source, to: dest)
+            emit("bundled_tts_voice_installed", outcome: "success", modelId: id,
+                 errorCode: nil)
+            return dest
+        } catch {
+            emit("bundled_tts_voice_install_failed", outcome: "failure",
+                 modelId: id, errorCode: "copy")
+            return nil
+        }
     }
 
     // MARK: - CoreML encoder companion
