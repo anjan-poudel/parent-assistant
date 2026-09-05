@@ -5467,6 +5467,40 @@
           }
         }
       }
+    },
+    "widgets.medsStatus": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ of %2$@ doses taken today"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आज %2$@ मध्ये %1$@ खुराक लिइयो"
+          }
+        }
+      }
+    },
+    "widgets.nextReminder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next: %1$@ at %2$@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अर्को: %1$@ — %2$@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
