@@ -95,12 +95,27 @@ final class IntentRouterTests: XCTestCase {
         XCTAssertEqual(interpret(router, "call maiya"), cmd)
     }
 
-    func testRephraseBandDropsTierFreeActions() {
-        // Same band, tier-`free` action: dropped (no confirmation exists
-        // to catch a wrong guess) → falls through, here to nil.
+    func testRephraseBandReturnsTierFreeWhenFinal() {
+        // Mid-band tier-`free`: dropped for ESCALATION (another layer
+        // could do better) but RETURNED when final — the router turns it
+        // into a rephrase-as-question (spec §4 decision #6).
         let (router, _) = makeRouter()
+        let cmd = makeCommand(action: .music, confidence: 0.5)
+        router.localBrain = StubCommandInterpreter(result: cmd)
+        XCTAssertEqual(interpret(router, "play a bhajan maybe"), cmd)
+    }
+
+    func testRephraseBandTierFreeStillEscalatesWhenCloudCanAnswer() {
+        // The local brain's mid-band tier-free is NOT final while cloud
+        // remains: escalation gives the cloud its chance first.
+        let (router, _) = makeRouter()
+        let cloudAnswer = makeCommand(action: .music, confidence: 0.9)
+        let cloud = StubCommandInterpreter(result: cloudAnswer)
         router.localBrain = StubCommandInterpreter(result: makeCommand(action: .music, confidence: 0.5))
-        XCTAssertNil(interpret(router, "play a bhajan maybe"))
+        router.cloudBrain = cloud
+        router.cloudEnabled = true
+        XCTAssertEqual(interpret(router, "play a bhajan maybe"), cloudAnswer)
+        XCTAssertEqual(cloud.callCount, 1)
     }
 
     func testBelowRephraseFloorAbstains() {

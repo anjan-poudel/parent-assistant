@@ -342,6 +342,17 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
 
     var presentedPluginViews: [AnyView] = []
     func presentPluginView(_ view: AnyView) { presentedPluginViews.append(view) }
+
+    var pendingRephraseCommand: InterpretedCommand? { rephrasePended?.command }
+    private(set) var rephrasePended: (command: InterpretedCommand, sourceTranscript: String?)?
+    func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?) {
+        rephrasePended = (command, sourceTranscript)
+    }
+    func takePendingRephraseCommand() -> (command: InterpretedCommand, sourceTranscript: String?)? {
+        let taken = rephrasePended
+        rephrasePended = nil
+        return taken
+    }
 }
 
 private final class MockSpeaker: Speaker {
