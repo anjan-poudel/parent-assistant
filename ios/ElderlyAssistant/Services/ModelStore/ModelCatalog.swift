@@ -56,6 +56,10 @@ struct ModelCatalogEntry: Codable, Identifiable {
     /// Expected size of the WhisperKit zip (0 = unknown).
     let whisperKitZipBytes: Int64
 
+    /// Bundled-in-the-app resource name (installed into the ModelStore
+    /// on first launch instead of downloading).
+    let bundledResourceName: String?
+
     init(id: ModelID,
          kind: ModelKind,
          displayName: String,
@@ -69,7 +73,8 @@ struct ModelCatalogEntry: Codable, Identifiable {
          coreMLEncoderDownloadURL: URL? = nil,
          coreMLEncoderZipBytes: Int64 = 0,
          whisperKitZipURL: URL? = nil,
-         whisperKitZipBytes: Int64 = 0) {
+         whisperKitZipBytes: Int64 = 0,
+         bundledResourceName: String? = nil) {
         self.id = id
         self.kind = kind
         self.displayName = displayName
@@ -84,6 +89,7 @@ struct ModelCatalogEntry: Codable, Identifiable {
         self.coreMLEncoderZipBytes = coreMLEncoderZipBytes
         self.whisperKitZipURL = whisperKitZipURL
         self.whisperKitZipBytes = whisperKitZipBytes
+        self.bundledResourceName = bundledResourceName
     }
 
     var id_: ModelID { id }
@@ -137,7 +143,8 @@ enum ModelCatalog {
             sha256: "ae119191928484edb913cf9f1325d86738df9b528cd03b14f946528e5c0e7c98",
             minDeviceRAMBytes: 3_500_000_000,
             dependsOn: nil,
-            coreMLEncoderBundledName: nil
+            coreMLEncoderBundledName: nil,
+            bundledResourceName: "whisper-medium-ne-q5_1"
         ),
         ModelCatalogEntry(
             id: whisperFinetunedNepali,

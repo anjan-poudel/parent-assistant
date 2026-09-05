@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Leaf destinations reachable from the hub cards (spec §4.3).
+/// Leaf destinations reachable from the dock (spec §4.3).
 enum LeafDestination: Identifiable {
     case meds
     case reminders
@@ -18,32 +18,37 @@ enum LeafDestination: Identifiable {
     }
 }
 
-/// Home (spec §4.1): greeting, setup-reminder card, hero Talk button with
-/// state bindings, latest conversation card, 2×2 hub cards.
+/// Home (redesign spec 2026-09-03): the ONLY screen with voice UI — the
+/// breathing Talk hero, the hint carousel, the live-caption/outcome
+/// feedback loop, and the shortcut dock. Every other screen is a plain
+/// full-screen page (see `LeafScreen` in `LeafViews.swift`) — this
+/// separation is deliberate (redesign spec §3.2), not an oversight.
 struct HomeView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @EnvironmentObject var session: VoiceSessionStateMachine
 
     @State private var showWizard = false
+    @State private var showHistory = false
+    @State private var outcomeExpanded = true
 
     var body: some View {
         NavigationStack {
             ZStack {
                 DesignTokens.background.ignoresSafeArea()
-                ScrollView {
-                    VStack(spacing: 20) {
-                        greeting
-                        if !coordinator.onboardingState.pendingSteps.isEmpty {
-                            setupReminderCard
-                        }
-                        talkSection
-                        conversationCard
-                        hubGrid
+                VStack(spacing: 14) {
+                    topBar
+                    if !coordinator.onboardingState.pendingSteps.isEmpty {
+                        setupStrip
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.top, 24)
-                    .padding(.bottom, 32)
+                    Spacer(minLength: 0)
+                    talkStage
+                    Spacer(minLength: 0)
+                    feedbackArea
+                    dock
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
             }
             .navigationBarHidden(true)
             // Value-based navigation (iOS 16 pattern). The previous
@@ -58,54 +63,62 @@ struct HomeView: View {
                     .environmentObject(coordinator.modelDownloadService)
                     .environment(\.locale, coordinator.appLanguage.locale)
             }
+            .sheet(isPresented: $showHistory) {
+                ConversationHistorySheet(exchanges: coordinator.conversationHistory)
+            }
         }
     }
 
-    // MARK: - Sections
+    // MARK: - Top bar (redesign spec §3.1)
 
-    private var greeting: some View {
-        Text(greetingText)
-            .font(DesignTokens.greetingFont())
-            .foregroundColor(DesignTokens.textPrimary)
-            .multilineTextAlignment(.center)
-            .padding(.top, 8)
+    private var topBar: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(greetingText)
+                .font(DesignTokens.greetingFont(size: 22))
+                .foregroundColor(DesignTokens.textPrimary)
+                .multilineTextAlignment(.leading)
+            Spacer()
+            // Settings has exactly one entry point (the dock below) —
+            // deliberately not duplicated up here, so there's only ever
+            // one "सेटिङ" to find, by voice or by touch.
+            EmergencyIconButton()
+        }
+        .padding(.top, 8)
     }
 
-    private var setupReminderCard: some View {
-        Button {
-            showWizard = true
-        } label: {
-            HStack(spacing: 12) {
+    /// Slim, dismissible-by-navigation strip (redesign spec §3.1) —
+    /// replaces the old full-width card so it doesn't compete with the
+    /// Talk hero for vertical space.
+    private var setupStrip: some View {
+        Button { showWizard = true } label: {
+            HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.circle.fill")
-                    .font(.system(size: 24))
+                    .font(.system(size: 14))
                     .foregroundColor(DesignTokens.accent)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(remainingText)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                        .foregroundColor(DesignTokens.textPrimary)
-                    Text("home.setupCardHint")
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
-                }
+                Text(remainingText)
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 22, weight: .bold))
+                    .font(.system(size: 12, weight: .bold))
                     .foregroundColor(DesignTokens.textSecondary)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 14)
+            .frame(height: DesignTokens.minTapTargetSize)
             .background(DesignTokens.setupReminder)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .clipShape(Capsule())
         }
         .buttonStyle(.plain)
     }
 
-    private var talkSection: some View {
+    // MARK: - Talk stage (redesign spec §3.1)
+
+    private var talkStage: some View {
         Group {
             if session.state == .awaitingConfirmation {
                 ConfirmationChips(statusKey: "state.awaitingConfirmation.status")
             } else {
-                VStack(spacing: 14) {
+                VStack(spacing: 18) {
                     TalkButton(session: session,
                                statusOverride: session.state == .error ? errorStatusText : nil) {
                         switch session.state {
@@ -124,6 +137,9 @@ struct HomeView: View {
                         case .awaitingConfirmation:
                             break
                         }
+                    }
+                    if session.state == .idle {
+                        HintCarousel()
                     }
                     if session.state == .error,
                        coordinator.voiceErrorKind == .permission {
@@ -166,85 +182,104 @@ struct HomeView: View {
         .buttonStyle(.plain)
     }
 
-    private var conversationCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("home.conversation.title")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.textSecondary)
-            if coordinator.lastTranscript == nil && coordinator.lastAssistantReply == nil {
-                Text("home.conversation.empty")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 10)
-            } else {
-                if let user = coordinator.lastTranscript {
-                    bubble(text: user, labelKey: "home.conversation.user",
-                           background: DesignTokens.userBubble,
-                           alignment: .leading)
+    // MARK: - Feedback area: live caption while capturing, outcome after
+    // (redesign spec §3.1, §6 — replaces the old always-visible
+    // conversation card entirely)
+
+    @ViewBuilder
+    private var feedbackArea: some View {
+        switch session.state {
+        case .listening, .transcribing, .understanding:
+            LiveCaptionPill(placeholderKey: capturePlaceholderKey, transcript: coordinator.lastTranscript)
+        default:
+            if let outcome = coordinator.lastOutcome {
+                OutcomeCardView(outcome: outcome, expanded: outcomeExpanded) {
+                    showHistory = true
                 }
-                if let reply = coordinator.lastAssistantReply {
-                    bubble(text: reply, labelKey: "home.conversation.assistant",
-                           background: DesignTokens.accent,
-                           alignment: .trailing)
+                .task(id: outcome.id) {
+                    outcomeExpanded = true
+                    try? await Task.sleep(nanoseconds: 6_000_000_000)
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.easeInOut) { outcomeExpanded = false }
                 }
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
-    }
-
-    private func bubble(text: String, labelKey: String,
-                        background: Color, alignment: HorizontalAlignment) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(LocalizedStringKey(labelKey))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundColor(alignment == .leading
-                                 ? DesignTokens.textSecondary
-                                 : Color.white.opacity(0.85))
-            Text(text)
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(alignment == .leading ? DesignTokens.textPrimary : .white)
-                .multilineTextAlignment(.leading)
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
-        .background(background)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
-    }
-
-    private var hubGrid: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 12) {
-                hubCard(.meds, icon: "pills.fill", titleKey: "home.hub.meds")
-                hubCard(.reminders, icon: "clock.fill", titleKey: "home.hub.reminders")
-            }
-            HStack(spacing: 12) {
-                hubCard(.call, icon: "phone.fill", titleKey: "home.hub.call")
-                hubCard(.settings, icon: "gearshape.fill", titleKey: "home.hub.settings")
+            } else if !coordinator.conversationHistory.isEmpty {
+                // No outcome yet this session, but there is history —
+                // still offer the on-demand sheet rather than nothing.
+                historyChip
             }
         }
     }
 
-    private func hubCard(_ destination: LeafDestination,
-                         icon: String, titleKey: String) -> some View {
+    private var historyChip: some View {
+        Button { showHistory = true } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 11, weight: .bold))
+                Text("home.conversation.title")
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+            }
+            .foregroundColor(DesignTokens.textSecondary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(DesignTokens.card)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var capturePlaceholderKey: String {
+        switch session.state {
+        case .transcribing: return "state.transcribing.status"
+        case .understanding: return "state.understanding.status"
+        default: return "state.listening.status"
+        }
+    }
+
+    // MARK: - Dock (redesign spec §3.1 — replaces the 2×2 hub grid; Home
+    // is the only screen that shows it)
+
+    private var dock: some View {
+        HStack(spacing: 2) {
+            dockItem(.meds, icon: "pills.fill", tint: .meds, titleKey: "home.hub.meds")
+            dockItem(.reminders, icon: "clock.fill", tint: .reminders, titleKey: "home.hub.reminders")
+            dockCallItem
+            dockItem(.settings, icon: "gearshape.fill", tint: .settings, titleKey: "home.hub.settings")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 22))
+    }
+
+    private func dockItem(_ destination: LeafDestination, icon: String,
+                          tint: DesignTokens.BadgeTint, titleKey: String) -> some View {
         NavigationLink(value: destination) {
-            VStack(spacing: 10) {
-                Image(systemName: icon)
-                    .font(.system(size: 34))
-                    .foregroundColor(DesignTokens.accent)
+            VStack(spacing: 4) {
+                IconBadge(systemImage: icon, tint: tint, diameter: 36)
                 Text(LocalizedStringKey(titleKey))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
             }
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: DesignTokens.hubCardMinHeight)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Uses the top family contact's face instead of a generic phone icon
+    /// when one is configured (redesign spec §3.1/§3.2).
+    private var dockCallItem: some View {
+        NavigationLink(value: LeafDestination.call) {
+            VStack(spacing: 4) {
+                if let first = coordinator.familyContacts.first {
+                    FaceAvatar(name: first.name, diameter: 36)
+                } else {
+                    IconBadge(systemImage: "phone.fill", tint: .call, diameter: 36)
+                }
+                Text(LocalizedStringKey("home.hub.call"))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+            }
+            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
         }
         .buttonStyle(.plain)
     }
@@ -287,20 +322,28 @@ struct HomeView: View {
     }
 }
 
-// MARK: - Talk button (spec §3.3, D5)
+// MARK: - Talk button (spec §3.3, D5; redesign spec §2 — breathing glow)
 
 struct TalkButton: View {
     @ObservedObject var session: VoiceSessionStateMachine
     @Environment(\.locale) private var locale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let onTap: () -> Void
     /// Replaces the state-bound status line when set (used for the
     /// error state's failure-specific caption).
     var statusOverride: String? = nil
 
+    @State private var breathe = false
+
+    private var isGlowing: Bool { session.state == .idle || session.state == .listening }
+
     var body: some View {
         VStack(spacing: 12) {
             Button(action: onTap) {
                 ZStack {
+                    if isGlowing && !reduceMotion {
+                        breathingRings
+                    }
                     if session.state == .listening || session.state == .speaking {
                         Circle()
                             .stroke(session.state.color.opacity(0.28), lineWidth: 10)
@@ -308,7 +351,7 @@ struct TalkButton: View {
                                    height: DesignTokens.talkButtonDiameter + 28)
                     }
                     Circle()
-                        .fill(session.state.color)
+                        .fill(heroFill)
                         .frame(width: DesignTokens.talkButtonDiameter,
                                height: DesignTokens.talkButtonDiameter)
                         .shadow(color: session.state.color.opacity(0.35), radius: 10, y: 4)
@@ -340,6 +383,42 @@ struct TalkButton: View {
                 .foregroundColor(DesignTokens.textSecondary)
                 .multilineTextAlignment(.center)
         }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
+                breathe = true
+            }
+        }
+    }
+
+    /// Amber gradient only while idle/listening (redesign spec §2 —
+    /// "listening/live"); other states keep the existing semantic color so
+    /// error/speaking/etc. stay legible against their own state color.
+    private var heroFill: AnyShapeStyle {
+        guard isGlowing else { return AnyShapeStyle(session.state.color) }
+        return AnyShapeStyle(
+            RadialGradient(colors: [DesignTokens.talkGlowStart, DesignTokens.talkGlowEnd],
+                           center: UnitPoint(x: 0.35, y: 0.3),
+                           startRadius: 4,
+                           endRadius: DesignTokens.talkButtonDiameter * 0.7)
+        )
+    }
+
+    /// Two concentric rings that breathe outward and fade — the
+    /// "signature" motion element (redesign spec §2). Respects
+    /// `accessibilityReduceMotion` (checked by the caller before this is
+    /// even placed in the view tree).
+    private var breathingRings: some View {
+        ZStack {
+            Circle()
+                .stroke(DesignTokens.talkGlowEnd.opacity(breathe ? 0.05 : 0.35), lineWidth: 2)
+                .frame(width: breathe ? DesignTokens.talkButtonDiameter + 90 : DesignTokens.talkButtonDiameter + 20,
+                       height: breathe ? DesignTokens.talkButtonDiameter + 90 : DesignTokens.talkButtonDiameter + 20)
+            Circle()
+                .stroke(DesignTokens.talkGlowEnd.opacity(breathe ? 0.02 : 0.22), lineWidth: 2)
+                .frame(width: breathe ? DesignTokens.talkButtonDiameter + 130 : DesignTokens.talkButtonDiameter + 40,
+                       height: breathe ? DesignTokens.talkButtonDiameter + 130 : DesignTokens.talkButtonDiameter + 40)
+        }
     }
 }
 
@@ -348,20 +427,32 @@ struct TalkButton: View {
 /// Big yes/no chips shown instead of the Talk button while a medication
 /// confirmation challenge is outstanding. Voice still works too — the
 /// router routes the next transcript as a yes/no answer.
+///
+/// Redesign spec §3.1 "confirm what I heard": the actual challenge prompt
+/// (already spoken via `CommandRouter.speak(text:)`, which already stores
+/// it in `lastAssistantReply`) is shown here so the user can SEE what
+/// they're confirming, not just hear it — no new pipeline data needed.
 struct ConfirmationChips: View {
     @EnvironmentObject var coordinator: AppCoordinator
     let statusKey: String
 
     var body: some View {
         VStack(spacing: 16) {
-            HStack(spacing: 8) {
-                Image(systemName: "questionmark.circle.fill")
-                    .font(.system(size: 28))
-                    .foregroundColor(DesignTokens.stateUnderstanding)
-                Text(LocalizedStringKey(statusKey))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-                    .multilineTextAlignment(.center)
+            VStack(spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "questionmark.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundColor(DesignTokens.stateUnderstanding)
+                    Text(LocalizedStringKey(statusKey))
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+                if let prompt = coordinator.lastAssistantReply, !prompt.isEmpty {
+                    Text(prompt)
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                        .multilineTextAlignment(.center)
+                }
             }
             HStack(spacing: 16) {
                 chip(key: "state.awaitingConfirmation.chipYes", isYes: true)
@@ -377,9 +468,19 @@ struct ConfirmationChips: View {
 
     private func chip(key: String, isYes: Bool) -> some View {
         Button {
+            // Same bug class as CommandRouter's voice-path fix: a call
+            // confirmation speaks its OWN contextual response inside
+            // performCallAction (e.g. "Calling Maiya"). Speaking the
+            // generic medication-flavored text here afterward would
+            // cancel that correct utterance (SystemSpeechSpeaker.speak()
+            // cancels whatever's currently speaking) — checked BEFORE
+            // handleConfirmationResponse, which clears pendingCallAction.
+            let isCall = coordinator.isAwaitingCallConfirmation
             let response: ConfirmationResponse = isYes ? .yes : .no
             coordinator.handleConfirmationResponse(response)
-            coordinator.speak(key: isYes ? "router.confirmationYes" : "router.confirmationNo")
+            if !isCall {
+                coordinator.speak(key: isYes ? "router.confirmationYes" : "router.confirmationNo")
+            }
         } label: {
             Text(LocalizedStringKey(key))
                 .font(.system(size: 24, weight: .bold))

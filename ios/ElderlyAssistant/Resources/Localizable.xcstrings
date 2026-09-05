@@ -623,6 +623,23 @@
         }
       }
     },
+    "home.outcome.whatsappOpened": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WhatsApp opened for %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को लागि ह्वाट्सएप खोलियो"
+          }
+        }
+      }
+    },
     "home.setupCardHint": {
       "extractionState": "manual",
       "localizations": {
@@ -1116,6 +1133,23 @@
         }
       }
     },
+    "model.name.whisper-medium-ne-q5_1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nepali speech recognition (medium, fine-tuned)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नेपाली आवाज पहिचान (मध्यम, फाइनट्युन्ड)"
+          }
+        }
+      }
+    },
     "model.name.whisper-small-multilingual-q5_1": {
       "extractionState": "manual",
       "localizations": {
@@ -1547,13 +1581,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Downloading the assistant's models. You can keep using the phone meanwhile."
+            "value": "Ask a family member to paste in a Gemini API key so the assistant can understand speech and answer questions. You can skip this and add it later from Settings."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "सहायकका मोडलहरू डाउनलोड हुँदैछन्। यसबेला अरू काम गर्न मिल्छ।"
+            "value": "सहायकले बोली बुझ्न र प्रश्नको जवाफ दिन सकोस् भनेर परिवारको कसैलाई जेमिनी API कुञ्जी हाल्न भन्नुहोस्। यो पछि सेटिङबाट पनि थप्न सकिन्छ, अहिले छाड्न पनि सकिन्छ।"
           }
         }
       }
@@ -1581,13 +1615,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Setting up"
+            "value": "Connect Gemini AI"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "तयारी हुँदैछ"
+            "value": "जेमिनी AI जोड्नुहोस्"
           }
         }
       }
@@ -1741,6 +1775,159 @@
           "stringUnit": {
             "state": "translated",
             "value": "ठीक छ, म पछि फेरि सम्झाउँछु।"
+          }
+        }
+      }
+    },
+    "router.call.appUnsupportedNotice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't call directly through %@, so I'll use FaceTime instead."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ बाट सिधै कल गर्न सकिँदैन, त्यसैले फेसटाइम प्रयोग गर्दैछु।"
+          }
+        }
+      }
+    },
+    "router.call.calling": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Okay, calling %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठिक छ, %@ लाई कल गर्दैछु।"
+          }
+        }
+      }
+    },
+    "router.call.cancelled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Okay, cancelled calling %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठिक छ, %@ लाई कल गर्ने रद्द गरियो।"
+          }
+        }
+      }
+    },
+    "router.call.confirmQuestion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Make %2$@ to %1$@?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ लाई %@ गर्ने हो?"
+          }
+        }
+      }
+    },
+    "router.call.contactNotFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I couldn't find %@ in your family contacts. Add them in Settings first."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मैले %@ लाई तपाईंको पारिवारिक सम्पर्कमा भेटिनँ। पहिले सेटिङमा थप्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.call.methodVideo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "a video call"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भिडियो कल"
+          }
+        }
+      }
+    },
+    "router.call.methodVoice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "a phone call"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोन कल"
+          }
+        }
+      }
+    },
+    "router.call.methodWhatsAppChat": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "their WhatsApp chat"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ह्वाट्सएपमा कुराकानी"
+          }
+        }
+      }
+    },
+    "router.call.whatsappOpened": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I've opened WhatsApp for %@ — please tap the call button yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को लागि ह्वाट्सएप खोलियो — कृपया आफैं कल बटन थिच्नुहोस्।"
           }
         }
       }
@@ -2136,6 +2323,397 @@
         }
       }
     },
+    "settings.gemini.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sahayak understands speech and answers questions using Google's Gemini AI. A family member needs to add an API key here once — without it, only basic commands (medicine, emergency) work."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायकले बोली बुझ्न र प्रश्नको जवाफ दिन Google को Gemini AI प्रयोग गर्छ। परिवारको कसैले यहाँ एकपटक API कुञ्जी थप्नुपर्छ — नभए औषधि र आपतकालीन जस्ता आधारभूत आदेशहरू मात्र काम गर्छन्।"
+          }
+        }
+      }
+    },
+    "settings.gemini.fieldLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini API key"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जेमिनी API कुञ्जी"
+          }
+        }
+      }
+    },
+    "settings.gemini.fieldPlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste the API key here"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यहाँ API कुञ्जी टाँस्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.custom": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom model ID"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आफ्नै मोडेल ID"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.custom.desc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Type any Gemini model name to try it."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जुनसुकै जेमिनी मोडेलको नाम टाइप गरेर जाँच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.customPlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "e.g. gemini-2.5-flash"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जस्तै gemini-2.5-flash"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flash": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flash (more capable)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फ्ल्यास (बढी सक्षम)"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flash.desc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Better at tricky questions, costs a bit more."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जटिल प्रश्नमा राम्रो, अलि बढी लागत।"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flashLatest": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flash (always newest)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फ्ल्यास (सधैं नयाँ)"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flashLatest.desc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically tracks Google's newest Flash release."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google को नयाँ फ्ल्यास संस्करण स्वतः पछ्याउँछ।"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flashLite": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flash-Lite (cheapest, fastest)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फ्ल्यास-लाइट (सबैभन्दा सस्तो, छिटो)"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flashLite.desc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Best default — lowest cost, good enough for most commands."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उत्तम डिफल्ट — सबैभन्दा कम लागत, धेरैजसो आदेशका लागि पर्याप्त।"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flashLiteLatest": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Flash-Lite (always newest)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फ्ल्यास-लाइट (सधैं नयाँ)"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.flashLiteLatest.desc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically tracks Google's newest Flash-Lite release."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google को नयाँ फ्ल्यास-लाइट संस्करण स्वतः पछ्याउँछ।"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.pro": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pro (most capable)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "प्रो (सबैभन्दा सक्षम)"
+          }
+        }
+      }
+    },
+    "settings.gemini.model.pro.desc": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Highest quality, slower and most expensive — use for testing only."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उच्चतम गुणस्तर, ढिलो र सबैभन्दा महँगो — जाँचका लागि मात्र प्रयोग गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "settings.gemini.modelLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI model"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI मोडेल"
+          }
+        }
+      }
+    },
+    "settings.gemini.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove key"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कुञ्जी हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "settings.gemini.removeConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove the Gemini API key? The assistant will fall back to basic commands only."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जेमिनी API कुञ्जी हटाउने हो? सहायक आधारभूत आदेशमा मात्र सीमित हुनेछ।"
+          }
+        }
+      }
+    },
+    "settings.gemini.save": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुरक्षित गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.gemini.statusConnected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जोडिएको"
+          }
+        }
+      }
+    },
+    "settings.gemini.statusMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Setup needed"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सेटअप चाहिन्छ"
+          }
+        }
+      }
+    },
+    "settings.gemini.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini AI"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जेमिनी AI"
+          }
+        }
+      }
+    },
     "settings.language.region": {
       "extractionState": "manual",
       "localizations": {
@@ -2353,6 +2931,176 @@
           "stringUnit": {
             "state": "translated",
             "value": "सेटिङ"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose which assistant engine runs your voice commands. Gemini uses the internet; On-device works fully offline once its models are downloaded."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको आवाज आदेश कुन इन्जिनले चलाउने छनौट गर्नुहोस्। जेमिनीले इन्टरनेट प्रयोग गर्छ; यन्त्रमै भने मोडेलहरू डाउनलोड भइसकेपछि पूर्ण रूपमा इन्टरनेट बिना काम गर्छ।"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.gemini": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini (cloud)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जेमिनी (क्लाउड)"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.gemini.notReady": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs setup — add an API key in Gemini AI settings first"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सेटअप चाहिन्छ — पहिले जेमिनी AI सेटिङमा API कुञ्जी थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.gemini.ready": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready — API key is configured"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तयार — API कुञ्जी सेटअप गरिएको छ"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.onDevice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On-device (offline)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यन्त्रमै (अफलाइन)"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.onDevice.notReady": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not downloaded yet — long-press the Settings title to open AI मोडेल and download it first"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अझै डाउनलोड गरिएको छैन — पहिले AI मोडेल खोल्न सेटिङ शीर्षकमा लामो थिच्नुहोस् र डाउनलोड गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.onDevice.ready": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready — models are downloaded"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तयार — मोडेलहरू डाउनलोड भइसकेका छन्"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.statusGemini": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini (cloud)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जेमिनी (क्लाउड)"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.statusOnDevice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On-device"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यन्त्रमै"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice Engine"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज इन्जिन"
           }
         }
       }
@@ -2697,6 +3445,23 @@
         }
       }
     },
+    "stt.name.gemini": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini (online)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जेमिनी (अनलाइन)"
+          }
+        }
+      }
+    },
     "stt.name.sfs": {
       "extractionState": "manual",
       "localizations": {
@@ -2782,6 +3547,23 @@
         }
       }
     },
+    "stt.name.whisperMediumFinetunedNepali": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper (Nepali medium, fine-tuned)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper (नेपाली मध्यम, फाइनट्युन्ड)"
+          }
+        }
+      }
+    },
     "stt.name.whisperMultilingual": {
       "extractionState": "manual",
       "localizations": {
@@ -2812,40 +3594,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Whisper (नेपाली सानो, डिस्टिल्ड)"
-          }
-        }
-      }
-    },
-    "model.name.whisper-medium-ne-q5_1": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nepali speech recognition (medium, fine-tuned)"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "नेपाली आवाज पहिचान (मध्यम, फाइनट्युन्ड)"
-          }
-        }
-      }
-    },
-    "stt.name.whisperMediumFinetunedNepali": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Whisper (Nepali medium, fine-tuned)"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Whisper (नेपाली मध्यम, फाइनट्युन्ड)"
           }
         }
       }

@@ -40,6 +40,17 @@ final class VoicePipeline {
     private let audioEngine: AVAudioEngine
     private let processingQueue = DispatchQueue(label: "voice.pipeline.processing",
                                                 qos: .userInteractive)
+
+    /// Max time the user can keep talking before capture is force-ended
+    /// (VAD normally ends it much sooner). Also the `timeout` handed to
+    /// `SpeechRecognizerProtocol.startListening`.
+    private static let captureTimeoutSeconds: TimeInterval = 8.0
+    /// Extra grace period, ON TOP of `captureTimeoutSeconds`, before the
+    /// "stuck in listening" watchdog force-cancels the recognizer. Must
+    /// comfortably exceed the slowest recognizer's own worst-case latency
+    /// (a cloud recognizer's full network round-trip, not just on-device
+    /// inference) — see the wiring comment at the watchdog's call site.
+    private static let wedgeGuardMarginSeconds: TimeInterval = 10.0
     private var pcmBuffer: [Int16] = []
     /// Held only during the VAD-gated capture phase — how far past silence
     /// onset we've counted before firing `finish()`.
@@ -256,23 +267,36 @@ final class VoicePipeline {
             vad?.start(endOfUtteranceMs: 200)
         }
 
-        // 5.1s after startListening, if we haven't already exited
-        // capturingCommand, the STT's own timeout has fired finish() and
-        // is now grinding through inference. Flip the state so the UI
-        // stops saying "Listening for your command…".
+        // `Self.captureTimeoutSeconds` after startListening, if we haven't
+        // already exited capturingCommand, the STT's own timeout has fired
+        // finish() and is now grinding through inference/a network call.
+        // Flip the state so the UI stops saying "Listening for your
+        // command…".
         //
         // AND force the recognizer to produce its completion: a recognizer
         // that hangs without honouring its timeout (SFSpeech waiting on
-        // its on-device model, Whisper push-mode without a VAD end) would
-        // otherwise wedge the pipeline in this state forever ("stuck in
-        // listening"). cancel() triggers the completion path.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 5.1) { [weak self] in
+        // its on-device model, Whisper push-mode without a VAD end, or a
+        // cloud recognizer whose HTTP call never returns) would otherwise
+        // wedge the pipeline in this state forever ("stuck in listening").
+        // cancel() triggers the completion path.
+        //
+        // `wedgeGuardMarginSeconds` on top of the capture timeout is
+        // deliberately generous — wide enough to cover a full network
+        // round-trip for a cloud-backed recognizer (GeminiSpeechRecognizer)
+        // on top of the max capture time, not just on-device inference.
+        // A tighter margin here (previously a hardcoded 5.1s/5.0s pair)
+        // was measured on-device to cancel legitimate in-flight Gemini
+        // requests before they could return — see the 2026-09-04 fix.
+        // On-device recognizers finish well within this and are
+        // unaffected; this only widens the worst-case "truly wedged"
+        // ceiling, it doesn't change the common-case latency.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.captureTimeoutSeconds + Self.wedgeGuardMarginSeconds) { [weak self] in
             guard let self, self.state == .capturingCommand else { return }
             self.state = .processing
             self.speechRecognizer.cancel()
         }
 
-        speechRecognizer.startListening(timeout: 5.0) { [weak self] result in
+        speechRecognizer.startListening(timeout: Self.captureTimeoutSeconds) { [weak self] result in
             guard let self else { return }
             self.vad?.stop()
             self.state = .routing

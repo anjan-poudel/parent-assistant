@@ -3,6 +3,12 @@ import UserNotifications
 
 protocol VoiceCommandCoordinating: AnyObject {
     var isAwaitingConfirmation: Bool { get }
+    /// True only while a `call` intent is specifically awaiting its
+    /// yes/no — lets `CommandRouter` skip its generic confirmation speech
+    /// and let the coordinator speak its own call-specific response
+    /// instead, without touching the existing medication-confirmation
+    /// wiring at all.
+    var isAwaitingCallConfirmation: Bool { get }
     /// The locale all spoken replies resolve against (spec §3.2 — the
     /// coordinator's `AppLanguage` is the source of truth).
     var activeLocale: Locale { get }
@@ -19,8 +25,30 @@ protocol VoiceCommandCoordinating: AnyObject {
     func noteSpeakingEnded()
     func noteAssistantSpoke(_ text: String)
 
+    /// Generic dual-channel confirmation for replies with no more specific
+    /// tracked outcome (plain Q&A, stub replies) — see
+    /// `AppCoordinator.noteGenericReply` for why this exists.
+    func noteGenericReply(_ text: String)
+
     /// `set_reminder` intent: creates a reminder through scheduler storage.
     func addVoiceReminder(title: String, time: DateComponents)
+
+    /// `call` intent (2026-09-05: "ai determines intent, then ask
+    /// permission and execute"). Resolves `name` (a contact's name OR
+    /// relationship, e.g. "छोरा") against family contacts, picks the best
+    /// REAL method for `requestedApp`/`callType` (see
+    /// `AppCoordinator.CallMethod`), and returns the confirmation prompt
+    /// to speak. Returns nil when no contact can be resolved — the router
+    /// falls back to the existing blocked/unrecognised message rather
+    /// than claiming success. Nothing is dialed until the user says yes.
+    func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?) -> String?
+
+    /// `send_message` intent (trial wiring). iOS never lets a third-party
+    /// app send SMS silently — `MFMessageComposeViewController` always
+    /// requires the user's own tap on Send — so this resolves the contact
+    /// and presents the native compose sheet pre-filled with `body`.
+    /// Returns false when no contact can be resolved.
+    func composeMessage(toContactNamed name: String?, body: String) -> Bool
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -43,6 +71,8 @@ final class CommandRouter {
     enum RoutingResult: Equatable {
         case acknowledgedMedication
         case blockedSensitiveAction
+        case emergencyTriggered
+        case callConfirmed
         case unrecognised(transcript: String)
     }
 
@@ -87,16 +117,25 @@ final class CommandRouter {
         // command. Runs the dementia-aware `acknowledgeWithConfirmation`
         // path with the double-dose check.
         if coordinator?.isAwaitingConfirmation == true {
+            // Call confirmations speak their own contextual response
+            // (AppCoordinator.handleConfirmationResponse) — the generic
+            // "confirmationYes"/"confirmationNo" catalog text below is
+            // medication-flavored and would be wrong here.
+            let isCallConfirmation = coordinator?.isAwaitingCallConfirmation == true
             if Self.isYesResponse(raw) {
                 coordinator?.handleConfirmationResponse(.yes)
                 emit(eventType: "confirmation_yes", outcome: "success")
-                speak(key: "router.confirmationYes")
-                return .acknowledgedMedication
+                if !isCallConfirmation {
+                    speak(key: "router.confirmationYes")
+                }
+                return isCallConfirmation ? .callConfirmed : .acknowledgedMedication
             }
             if Self.isNoResponse(raw) {
                 coordinator?.handleConfirmationResponse(.no)
                 emit(eventType: "confirmation_no", outcome: "success")
-                speak(key: "router.confirmationNo")
+                if !isCallConfirmation {
+                    speak(key: "router.confirmationNo")
+                }
                 return .unrecognised(transcript: raw)
             }
             // Ambiguous response — re-prompt.
@@ -148,11 +187,38 @@ final class CommandRouter {
             .contains { $0 == token }
     }
 
+    /// Checked BEFORE anything else in `routeKeyword` — and independent of
+    /// whether the LLM path is available at all — because this is the one
+    /// gap the constitution calls out by name: "Emergency calling logic...
+    /// must not be blocked by the on-device LLM being busy or
+    /// unavailable." Live testing against the real Gemini API (2026-09-04)
+    /// found the LLM itself can misclassify a distress utterance as
+    /// `health_query` ("मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ" — help, my
+    /// kidney hurts — came back `health_query`, not `emergency`) — this
+    /// deterministic net is the backstop for exactly that failure mode,
+    /// not just for "LLM unavailable." Deliberately broad/token-based: a
+    /// false positive here costs one extra spoken reassurance + local
+    /// notification (see `handleEmergency`); a false negative costs a
+    /// genuine emergency going unanswered. That asymmetry is why this
+    /// errs toward over-triggering.
+    private static let emergencyPhrases = [
+        "help", "emergency", "i fell", "fell down", "chest pain",
+        "can't breathe", "cant breathe",
+        "मद्दत", "सहयोग गर", "बचाउ", "आपतकाल", "लडेँ", "लडें",
+        "लड्नुभयो", "सास फेर्न सकिन", "सास फेर्न गाह्रो", "छाती दुख्यो"
+    ]
+
     @discardableResult
     private func routeKeyword(_ raw: String) -> RoutingResult {
         let text = raw
             .lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if Self.emergencyPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
+            emit(eventType: "command_emergency_keyword", outcome: "success")
+            handleEmergency()
+            return .emergencyTriggered
+        }
 
         // Guard first: explicit negations must never fall through to the
         // ack list, because refusal words contain ack words as substrings
@@ -207,32 +273,29 @@ final class CommandRouter {
         case .ackMed:
             handleMedicationAcknowledgement(replyOverride: command.reply)
         case .emergency:
-            // Safety path with NO auth gate (spec §5.1, constitution:
-            // emergency must never be blocked by auth or a busy LLM).
-            // Today: spoken ack + event + local alert — the broker relay
-            // and emergency-call module don't exist yet.
             emit(eventType: "command_emergency", outcome: "success")
-            postLocalizedNotification(titleKey: "notif.emergencyAck.title",
-                                      bodyKey: "notif.emergencyAck.body")
-            speak(key: "router.emergencyAck")
+            handleEmergency()
         case .call:
-            emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
-            speak(key: "router.sensitiveBlocked")
+            handleCall(command)
         case .setReminder:
             handleSetReminder(command)
         case .healthQuery:
             // First-class stub intent — honest "not yet" (spec §5.1).
             emit(eventType: "command_health_query_stub", outcome: "info")
-            speak(key: "router.healthNotAvailable")
+            speakWithVisibleOutcome(key: "router.healthNotAvailable")
         case .music:
             // First-class stub intent (spec §5.1).
             emit(eventType: "command_music_stub", outcome: "info")
-            speak(key: "router.musicStub")
+            speakWithVisibleOutcome(key: "router.musicStub")
+        case .sendMessage:
+            handleSendMessage(command)
         case .query:
             emit(eventType: "command_llm_query", outcome: "info")
+            coordinator?.noteGenericReply(command.reply)
             speak(text: command.reply)
         case .none:
             emit(eventType: "command_llm_no_action", outcome: "info")
+            coordinator?.noteGenericReply(command.reply)
             speak(text: command.reply)
         }
     }
@@ -253,6 +316,60 @@ final class CommandRouter {
         emit(eventType: "command_set_reminder", outcome: "success")
         let spokenTime = formattedTime(time, locale: locale)
         speak(text: L10n.fmt("router.reminderSet", locale: locale, spokenTime))
+    }
+
+    /// Safety path with NO auth gate (spec §5.1, constitution: emergency
+    /// must never be blocked by auth or a busy/unavailable LLM) — shared
+    /// by both the deterministic keyword path (`routeKeyword`) and the
+    /// LLM-interpreted path (`dispatchInterpreted`) so they produce
+    /// identical behavior. Today: spoken ack + local notification — the
+    /// broker relay and a real emergency-call module don't exist yet.
+    private func handleEmergency() {
+        postLocalizedNotification(titleKey: "notif.emergencyAck.title",
+                                  bodyKey: "notif.emergencyAck.body")
+        speak(key: "router.emergencyAck")
+    }
+
+    /// `call` (trial wiring, LLM-interpreted path only — the deterministic
+    /// keyword layer keeps blocking ANY call-ish phrase unconditionally
+    /// since it has no entity extraction to identify a real target; see
+    /// `routeKeyword`'s `sensitiveCallPhrases`, unchanged). Only a
+    /// specifically-resolved contact gets dialed for real.
+    private func handleCall(_ command: InterpretedCommand) {
+        guard let prompt = coordinator?.requestCallConfirmation(
+            contactQuery: command.contact, callType: command.callType, requestedApp: command.requestedApp
+        ) else {
+            // Distinguish WHY it failed instead of one generic "blocked"
+            // message: a name was extracted but didn't match anyone in
+            // family contacts (fixable by the user — add the contact) is
+            // a different situation from no name being understood at all
+            // (fixable by re-phrasing), and neither should sound like a
+            // permissions/auth problem, since neither is one.
+            if let contact = command.contact, !contact.isEmpty {
+                emit(eventType: "command_call_contact_not_found", outcome: "blocked")
+                speak(text: L10n.fmt("router.call.contactNotFound", locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"), contact))
+            } else {
+                emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
+                speak(key: "router.sensitiveBlocked")
+            }
+            return
+        }
+        emit(eventType: "command_call_confirmation_requested", outcome: "success")
+        speak(text: prompt)
+    }
+
+    /// `send_message` (trial wiring). Never claims the message was SENT —
+    /// only that it's ready, since the user still has to tap Send on the
+    /// native compose sheet.
+    private func handleSendMessage(_ command: InterpretedCommand) {
+        guard let body = command.message, !body.isEmpty,
+              coordinator?.composeMessage(toContactNamed: command.contact, body: body) == true else {
+            emit(eventType: "command_message_unresolved", outcome: "blocked")
+            speak(key: "router.messageContactNotFound")
+            return
+        }
+        emit(eventType: "command_message_composing", outcome: "success")
+        speak(text: command.reply)
     }
 
     private func formattedTime(_ components: DateComponents, locale: Locale) -> String {
@@ -329,15 +446,37 @@ final class CommandRouter {
         speak(text: text, locale: locale)
     }
 
+    /// Same as `speak(key:)` but also surfaces the resolved text as a
+    /// visible outcome card — for stub replies (health/music) that would
+    /// otherwise be spoken-only, same rationale as `noteGenericReply`.
+    private func speakWithVisibleOutcome(key: String) {
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let text = L10n.str(key, locale: locale)
+        guard !text.isEmpty else { return }
+        coordinator?.noteGenericReply(text)
+        speak(text: text, locale: locale)
+    }
+
     /// Speaks dynamic text (LLM-generated replies, scheduler challenge
     /// prompts) — no catalog lookup, already in the right language.
     private func speak(text: String, locale: Locale? = nil) {
-        guard let speaker, !text.isEmpty else { return }
+        #if DEBUG
+        print("[command_router][DEBUG] speak() called, speaker=\(speaker != nil), text=\"\(text)\"")
+        #endif
+        guard let speaker, !text.isEmpty else {
+            #if DEBUG
+            print("[command_router][DEBUG] speak() BAILED — speaker nil or text empty")
+            #endif
+            return
+        }
         let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         coordinator?.noteAssistantSpoke(text)
         coordinator?.noteSpeakingStarted()
         Task {
             await speaker.speak(text, locale: locale)
+            #if DEBUG
+            print("[command_router][DEBUG] speaker.speak() returned (finished or cancelled)")
+            #endif
             coordinator?.noteSpeakingEnded()
         }
     }

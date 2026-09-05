@@ -92,6 +92,22 @@ final class AppCoordinator: ObservableObject {
     }
     private static let sttPreferenceKey = "sttModelPreference"
 
+    /// Which voice engine stack is active: on-device Whisper+LLaMA, or the
+    /// cloud Gemini pivot (default). A UI preference, not a secret —
+    /// persisted in UserDefaults the same way as `sttModelPreference` — so
+    /// the household can A/B test both without rebuilding. Setting this
+    /// hot-swaps both the STT (`voicePipeline.setSpeechRecognizer`, the
+    /// same mechanism `trySwapToGemini()` already uses) and the LLM
+    /// interpreter (via `switchableInterpreter`, since `CommandRouter`
+    /// holds its interpreter as an immutable `private let`).
+    @Published var voiceEngineStack: VoiceEngineStack {
+        didSet {
+            UserDefaults.standard.set(voiceEngineStack.rawValue, forKey: Self.voiceEngineStackKey)
+            applyVoiceEngineStack()
+        }
+    }
+    private static let voiceEngineStackKey = "voiceEngineStack"
+
     /// Last user utterance and assistant reply — the Home conversation
     /// card (spec §4.1.4).
     @Published var lastTranscript: String?
@@ -144,6 +160,36 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// Generic dual-channel confirmation for replies that aren't a
+    /// specific tracked action (general Q&A `query`/`none`, and the
+    /// `health_query`/`music` stub replies) — without this, only
+    /// medication-ack/reminder-set/call/message ever produced a visible
+    /// outcome card, leaving the single most common interaction (plain
+    /// conversation) with no visual trace at all, defeating the whole
+    /// "don't rely on hearing alone" point of the redesign. Called
+    /// explicitly by `CommandRouter` only for those specific cases (not
+    /// from `noteAssistantSpoke` generally) so it can never clobber a
+    /// more specific outcome set moments earlier in the same turn.
+    ///
+    /// Includes `lastTranscript` (already set by `recordTranscript` at the
+    /// top of every `route()` call, so it's available here) alongside the
+    /// reply — repeated field reports (2026-09-04) made clear that only
+    /// ever showing the ASSISTANT's reply, with the user's own transcript
+    /// visible for barely a second during capture and never again, reads
+    /// as "no transcript showing" even though routing worked correctly.
+    /// Showing both together, persistently, is the actual fix — not a UI
+    /// timing tweak.
+    func noteGenericReply(_ text: String) {
+        guard !text.isEmpty else { return }
+        let display: String
+        if let heard = lastTranscript, !heard.isEmpty {
+            display = "\u{201C}\(heard)\u{201D}\n\(text)"
+        } else {
+            display = text
+        }
+        setOutcome(icon: "bubble.left.and.bubble.right.fill", text: display)
+    }
+
     /// While non-nil, a confirmation challenge is awaiting the user's
     /// yes/no follow-up. Set by `startVoiceAckConfirmation`, cleared by
     /// `handleConfirmationResponse` or the session-machine timeout (C12).
@@ -167,7 +213,7 @@ final class AppCoordinator: ObservableObject {
     private let voiceActivityDetector: VoiceActivityDetector
     private var voicePipeline: VoicePipeline!
     private var voiceStateCancellable: AnyCancellable?
-    private var whisperSwapCancellable: AnyCancellable?
+    private var geminiSwapCancellable: AnyCancellable?
     private var speaker: Speaker?
 
     /// Voice-session derivation state (spec §3.3): the last pipeline state
@@ -186,18 +232,42 @@ final class AppCoordinator: ObservableObject {
     /// it (spec §4.2: wizard runs before voice engages).
     private var started = false
 
-    // Model store — exposed to the UI for download/selection surfaces.
+    // Model store — kept for now (v1 on-device Whisper/LLaMA machinery is
+    // superseded, not deleted, by the v2 Gemini pivot; see
+    // docs/superpowers/specs/2026-09-03-v2-gemini-pivot-design.md §8).
+    // Nothing in `start()` requires these anymore — the onboarding models
+    // step no longer downloads anything by default (see
+    // `OnboardingWizardView.ModelsStep`, repurposed for the Gemini API key).
     let modelStore: ModelStore
     let modelDownloadService: ModelDownloadService
     private let whisperSpeechRecognizer: WhisperSpeechRecognizer
     private let fallbackSpeechRecognizer: OnDeviceSpeechRecognizer
 
-    /// The IDs the first-run flow will download by default. Order matters —
-    /// STT unlocks the whole voice path so the distilled small Nepali
-    /// model goes first (~327 MB, fast on Metal). The 1.9 GB large-v3
-    /// Nepali fine-tune stays in the list (user-choosable, per the
-    /// model-picker decision) but last so it never blocks the
-    /// LLM/TTS downloads; it can be cancelled from the UI.
+    /// v2: the Gemini API key + client (see `GeminiConfigStore`,
+    /// `GeminiClient`). `geminiConfigStore` is exposed for the Settings
+    /// screen that lets a family member paste in the key.
+    let geminiConfigStore: GeminiConfigStore
+    private let geminiClient: GeminiClient
+    private let geminiSpeechRecognizer: GeminiSpeechRecognizer
+
+    /// On-device LLM interpreter (v1 stack, kept alive for the
+    /// on-device/Gemini A/B toggle — `voiceEngineStack`). Constructed
+    /// up-front like `whisperSpeechRecognizer`; `isAvailable` stays false
+    /// until both the LLM.swift runtime is linked and its model is cached
+    /// (see `LlamaCommandInterpreter.isAvailable`), in which case
+    /// `CommandRouter`'s existing keyword fallback takes over — unchanged.
+    private let llamaCommandInterpreter: LlamaCommandInterpreter
+    /// Set once in `start()`. `geminiCommandInterpreter` is the concrete
+    /// Gemini-backed interpreter; `switchableInterpreter` is the single
+    /// `CommandInterpreter` handed to `CommandRouter` — it forwards to
+    /// whichever of the two concrete interpreters `voiceEngineStack`
+    /// currently selects.
+    private var geminiCommandInterpreter: GeminiCommandInterpreter!
+    private var switchableInterpreter: SwitchableCommandInterpreter!
+
+    /// Legacy v1 on-device model catalog — kept only so the buried
+    /// "AI मोडेल" settings screen still functions as a manual fallback.
+    /// No longer downloaded automatically at first run (v2 pivot).
     let requiredModelIds: [ModelID] = [
         ModelCatalog.whisperMediumFinetunedNepali,
         ModelCatalog.whisperSmallMultilingual,
@@ -253,6 +323,14 @@ final class AppCoordinator: ObservableObject {
             observabilityBus: bus
         )
 
+        // v2 pivot: Gemini API key + client. The key is entered via
+        // Settings (or the repurposed onboarding "models" step) by a
+        // family member — see GeminiConfigStore's doc comment.
+        let geminiConfig = GeminiConfigStore(storage: storage)
+        self.geminiConfigStore = geminiConfig
+        self.geminiClient = GeminiClient(configStore: geminiConfig, observabilityBus: bus)
+        self.geminiSpeechRecognizer = GeminiSpeechRecognizer(client: geminiClient, observabilityBus: bus)
+
         // Voice pipeline. Uses NullWakeWordEngine unless the Porcupine SPM
         // package is present AND a valid access key / .ppn file are found —
         // see Services/Voice/WakeWordEngine.swift for the enablement steps.
@@ -278,6 +356,20 @@ final class AppCoordinator: ObservableObject {
             modelStore: modelStore,
             observabilityBus: bus
         )
+        self.llamaCommandInterpreter = LlamaCommandInterpreter(
+            modelStore: modelStore,
+            observabilityBus: bus
+        )
+
+        // Restore the persisted voice-engine stack choice (default: the
+        // live v2 Gemini pivot, matching today's always-Gemini behavior for
+        // anyone who's never touched the toggle). Applied for real once
+        // `start()` has built the pipeline + switchable interpreter — see
+        // `applyVoiceEngineStack()`. This is the property's ONLY initial
+        // assignment, so (like `appLanguage` above) its didSet does not
+        // fire here.
+        self.voiceEngineStack = UserDefaults.standard.string(forKey: Self.voiceEngineStackKey)
+            .flatMap(VoiceEngineStack.init(rawValue:)) ?? .gemini
 
         // Restore the persisted STT model choice. The didSet observer
         // pushes it to the recognizer and refreshes the label. Unknown
@@ -326,6 +418,9 @@ final class AppCoordinator: ObservableObject {
         // one. Idempotent — no-op when the target already exists.
         for entry in ModelCatalog.entries(kind: .whisperBase) {
             modelStore.installBundledCoreMLEncoder(for: entry.id)
+            // Bundled ggml models (the default medium) install the same
+            // way — first run never downloads them.
+            modelStore.installBundledModel(for: entry.id)
         }
         // And the reverse: entries we no longer ship an encoder for
         // (large-v3 — its CoreML path hangs on-device) get their stale
@@ -346,21 +441,32 @@ final class AppCoordinator: ObservableObject {
             observabilityBus: observabilityBus
         )
         self.speaker = speaker
-        // LLM interpreter. `isAvailable` stays false until (a) the model is
-        // cached, (b) the llama.cpp SPM package is linked. Router treats
-        // that as "fall through to keyword matching".
-        let interpreter = LlamaCommandInterpreter(
-            modelStore: modelStore,
+        // v2 pivot: Gemini interpreter. `isAvailable` stays false until an
+        // API key is configured (GeminiConfigStore) — CommandRouter treats
+        // that exactly like the old "LLM not linked" case: fall through to
+        // keyword matching.
+        let geminiInterpreter = GeminiCommandInterpreter(
+            client: geminiClient,
             observabilityBus: observabilityBus
         )
+        self.geminiCommandInterpreter = geminiInterpreter
+        // CommandRouter holds its interpreter as an immutable `private let`
+        // — so it's handed ONE `SwitchableCommandInterpreter` that forwards
+        // to whichever concrete interpreter `voiceEngineStack` currently
+        // selects. `applyVoiceEngineStack()` (called below, and again on
+        // every stack change) is what actually flips `.current`.
+        let switchable = SwitchableCommandInterpreter(
+            current: voiceEngineStack == .onDevice ? llamaCommandInterpreter : geminiInterpreter
+        )
+        self.switchableInterpreter = switchable
         let router = CommandRouter(
             coordinator: self,
             observabilityBus: observabilityBus,
             speaker: speaker,
-            interpreter: interpreter
+            interpreter: switchable
         )
-        // Start with the fallback STT. Whisper is swapped in below when
-        // (a) its model is cached AND (b) the whisper runtime is linked.
+        // Start with the fallback STT. Gemini is swapped in below once an
+        // API key is configured.
         voicePipeline = VoicePipeline(
             audioSession: audioSessionManager,
             audioEngine: audioEngine,
@@ -390,24 +496,24 @@ final class AppCoordinator: ObservableObject {
             switch result {
             case .success:
                 self.voiceState = .idle
-                self.trySwapToWhisper()  // one-shot at startup
+                // One-shot at startup: puts the STT + interpreter in the
+                // state `voiceEngineStack` says they should be in (e.g. a
+                // Gemini key already saved, or the on-device stack picked
+                // last session).
+                self.applyVoiceEngineStack()
             case .failure(let err):
                 self.voiceError = "\(err)"
                 self.voiceState = .error("\(err)")
             }
         }
 
-        // Hot-swap trigger: whenever the whisper model transitions to
-        // "completed" via ModelDownloadService, retry the swap.
-        whisperSwapCancellable = modelDownloadService.$states
+        // Hot-swap trigger: as soon as a Gemini API key is saved (Settings
+        // or onboarding), swap the fallback SFSpeechRecognizer for the real
+        // recognizer without tearing down the wake-word loop.
+        geminiSwapCancellable = geminiConfigStore.$apiKey
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] states in
-                guard let self else { return }
-                if states[ModelCatalog.whisperSmallNepali] == .completed ||
-                   states[ModelCatalog.whisperLargeV3Nepali] == .completed ||
-                   states[ModelCatalog.whisperSmallMultilingual] == .completed {
-                    self.trySwapToWhisper()
-                }
+            .sink { [weak self] _ in
+                self?.trySwapToGemini()
             }
 
         isInitialized = true
@@ -462,6 +568,27 @@ final class AppCoordinator: ObservableObject {
     /// a genuinely wedged transcription is owned by the STT layer (its own
     /// 30s inference timeout + 2-strike throttle), and routing has its own
     /// deadlines; those layers settle the cycle without this UI guard.
+    /// MUST stay longer than (max speech capture time) + (GeminiClient's
+    /// own HTTP timeout) — i.e. longer than the worst-case legitimate
+    /// duration of a single turn — or this destructive watchdog (full
+    /// pipeline stop/restart + spoken reprompt) fires on a request that
+    /// was still genuinely working, not actually wedged.
+    ///
+    /// This exact bug happened twice in a row (2026-09-04): first when
+    /// `VoicePipeline`'s internal 18s wedge-guard window was widened for
+    /// Gemini but this watchdog was left at the old 15s, so it fired
+    /// FIRST and tore down in-flight requests before the (harmless)
+    /// internal one ever got a chance to just flip the UI to
+    /// `.transcribing`. Then again after bumping `GeminiClient`'s HTTP
+    /// timeout from 6s to 25s for the (slower) gemini-2.5-pro model —
+    /// confirmed via a real device log showing `NSURLErrorDomain
+    /// Code=-1001 "The request timed out."` — without also widening this
+    /// watchdog to match. The three numbers (this constant,
+    /// `VoicePipeline`'s capture+wedge-guard window, and
+    /// `GeminiClient.Config.timeoutSeconds`) are coupled and MUST be
+    /// re-checked together any time one of them changes.
+    private static let voiceWatchdogSeconds: TimeInterval = 40
+
     private func armVoiceWatchdog() {
         cancelVoiceWatchdog()
         let work = DispatchWorkItem { [weak self] in
@@ -472,7 +599,7 @@ final class AppCoordinator: ObservableObject {
             }
         }
         voiceWatchdog = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.voiceWatchdogSeconds, execute: work)
     }
 
     private func cancelVoiceWatchdog() {
@@ -559,7 +686,13 @@ final class AppCoordinator: ObservableObject {
     func speak(key: String) {
         guard let speaker else { return }
         let text = L10n.str(key, locale: activeLocale)
-        guard !text.isEmpty else { return }
+        speak(text: text)
+    }
+
+    /// Speaks dynamic, already-resolved text (e.g. a call-confirmation
+    /// prompt built from a contact's name) — no catalog lookup.
+    func speak(text: String) {
+        guard let speaker, !text.isEmpty else { return }
         noteAssistantSpoke(text)
         noteSpeakingStarted()
         let locale = activeLocale
@@ -570,56 +703,75 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Attempts to move the pipeline off the SFSpeechRecognizer fallback
-    /// onto WhisperSpeechRecognizer. Idempotent.
-    private func trySwapToWhisper() {
-        // Bench hook (WhisperKit ANE path): launch with WK_TURBO=1 to
-        // hot-swap the WhisperKit recognizer on the official pre-converted
-        // large-v3-turbo bundle (SDK-downloaded) — the first on-device
-        // latency measurement while the custom teacher bundle conversion
-        // is sorted out.
-        if ProcessInfo.processInfo.environment["WK_TURBO"] == "1",
-           let wk = makeWhisperKitBenchRecognizer() {
-            voicePipeline?.setSpeechRecognizer(wk)
-            // Preload + prewarm off the critical path so the first
-            // utterance doesn't pay the model load + CoreML
-            // specialization.
-            wk.prepare()
-            DispatchQueue.main.async { [weak self] in
-                self?.updateActiveSTTName()
-            }
-            return
-        }
-        guard whisperSpeechRecognizer.isAvailable else { return }
-        voicePipeline?.setSpeechRecognizer(whisperSpeechRecognizer)
+    /// onto the Gemini recognizer (v2 pivot). Idempotent. Guarded on
+    /// `voiceEngineStack` so that saving/rotating a Gemini API key while
+    /// the user has explicitly picked the on-device stack doesn't silently
+    /// yank them back onto Gemini — `applyVoiceEngineStack()` is what
+    /// actually decides which stack is live.
+    private func trySwapToGemini() {
+        guard voiceEngineStack == .gemini, geminiSpeechRecognizer.isAvailable else { return }
+        voicePipeline?.setSpeechRecognizer(geminiSpeechRecognizer)
         DispatchQueue.main.async { [weak self] in
             self?.updateActiveSTTName()
         }
     }
 
-    private func makeWhisperKitBenchRecognizer() -> WhisperKitSpeechRecognizer? {
-        guard ProcessInfo.processInfo.environment["WK_MODEL"] != nil ||
-              ProcessInfo.processInfo.environment["WK_TURBO"] == "1" else { return nil }
-        let recognizer = WhisperKitSpeechRecognizer(observabilityBus: observabilityBus)
-        if let folder = ProcessInfo.processInfo.environment["WK_MODEL_FOLDER"] {
-            recognizer.modelFolderURL = URL(fileURLWithPath: folder)
-        } else {
-            // Full (uncompressed) variant: the compressed 626MB build
-            // prunes Devanagari tokens and outputs roman transliteration.
-            recognizer.modelName = "large-v3_turbo"
+    /// Applies `voiceEngineStack` to both halves of the pipeline: the STT
+    /// (hot-swapped via `VoicePipeline.setSpeechRecognizer`, same
+    /// mechanism `trySwapToGemini()` uses) and the LLM interpreter (via
+    /// `switchableInterpreter.current`, since `CommandRouter` can't have
+    /// its interpreter swapped directly). Called once at startup and again
+    /// on every `voiceEngineStack` change. No-ops harmlessly if called
+    /// before `start()` has built the pipeline/switchable interpreter.
+    private func applyVoiceEngineStack() {
+        switch voiceEngineStack {
+        case .gemini:
+            switchableInterpreter?.current = geminiCommandInterpreter
+            trySwapToGemini()
+        case .onDevice:
+            switchableInterpreter?.current = llamaCommandInterpreter
+            // Whisper if its model is actually cached and the runtime is
+            // linked; else the SFSpeechRecognizer fallback rather than
+            // silently doing nothing (spec §7: no dead-end states).
+            voicePipeline?.setSpeechRecognizer(
+                whisperSpeechRecognizer.isAvailable ? whisperSpeechRecognizer : fallbackSpeechRecognizer
+            )
+            DispatchQueue.main.async { [weak self] in
+                self?.updateActiveSTTName()
+            }
         }
-        return recognizer
     }
 
-    /// Model the recognizer will use for the next utterance — the user's
-    /// pick when cached, else the automatic order. Exposed for the UI's
-    /// ANE/CPU label so it reports the engine that will actually run.
+    /// Whether the on-device stack (Whisper STT + LLaMA interpreter) is
+    /// actually ready to use — both its runtime package linked AND its
+    /// model downloaded (see `LlamaCommandInterpreter.isAvailable` /
+    /// `WhisperSpeechRecognizer.isAvailable`). Exposed for the Settings
+    /// voice-engine picker, which points the user at the buried "AI
+    /// मोडेल" screen when this is false rather than silently switching to
+    /// a non-functional stack.
+    var isOnDeviceStackReady: Bool {
+        llamaCommandInterpreter.isAvailable && whisperSpeechRecognizer.isAvailable
+    }
+
+    /// Model the legacy on-device recognizer would use if manually
+    /// selected from the buried "AI मोडेल" screen — exposed for that
+    /// screen's ANE/CPU label. Irrelevant once Gemini is configured.
     var resolvedSTTModelID: ModelID? {
         whisperSpeechRecognizer.currentModelID()
     }
 
-    /// Keeps `activeSTTNameKey` honest: explicit pick first, then whatever
-    /// the recognizer would auto-select, then the SFSpeech fallback.
+    /// Keeps `activeSTTNameKey` honest: Gemini when that's the selected
+    /// stack AND it's configured (v2 pivot), else whatever the on-device
+    /// picker resolves to, else the SFSpeech fallback. Checking
+    /// `voiceEngineStack` (not just `isAvailable`) matters once the
+    /// on-device/Gemini toggle exists — a configured Gemini key shouldn't
+    /// make this claim "Gemini" while the user has explicitly picked
+    /// on-device.
     private func updateActiveSTTName() {
+        if voiceEngineStack == .gemini, geminiSpeechRecognizer.isAvailable {
+            activeSTTNameKey = "stt.name.gemini"
+            return
+        }
         let resolved = sttModelPreference
             .flatMap { modelStore.isCached($0) ? $0 : nil }
             ?? whisperSpeechRecognizer.currentModelID()
@@ -751,17 +903,111 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    /// Real `tel:` dialing for a voice-resolved contact. Returns false —
-    /// no side effects — when nothing matches, so the router's caller
-    /// falls back to its existing blocked/unrecognised message instead of
-    /// claiming success.
-    func placeCall(toContactNamed query: String?) -> Bool {
-        guard let query, let contact = matchContact(query),
-              let url = PhoneDialer.url(for: contact.phone) else { return false }
-        DispatchQueue.main.async { UIApplication.shared.open(url) }
-        setOutcome(icon: "phone.fill",
-                   text: L10n.fmt("home.outcome.callPlaced", locale: activeLocale, contact.name))
-        return true
+    /// Real, one-tap-completable outbound methods (2026-09-05 "intent is
+    /// king" routing). FaceTime deep links genuinely place the call;
+    /// WhatsApp has no public call-initiation API on iOS at all — `.chat`
+    /// only opens the conversation, the user still taps the call icon
+    /// themselves inside WhatsApp. Messenger and Viber have no
+    /// integration point whatsoever (confirmed in
+    /// docs/messaging-calling-platform-research.md, already agreed out of
+    /// scope) — requesting either falls back to FaceTime, disclosed out
+    /// loud, never silently.
+    enum CallMethod {
+        case facetimeVideo
+        case facetimeAudio
+        case whatsappChat
+    }
+
+    struct PendingCallAction {
+        let contact: FamilyContact
+        let method: CallMethod
+        /// Set when the user asked for an app we can't actually call
+        /// through (e.g. "messenger"), so we fell back to FaceTime —
+        /// named here so the confirmation prompt can disclose it.
+        let unsupportedRequestedApp: String?
+    }
+
+    @Published private(set) var pendingCallAction: PendingCallAction?
+    var isAwaitingCallConfirmation: Bool { pendingCallAction != nil }
+
+    /// `call` intent — resolves the contact and picks the best REAL
+    /// method (see `CallMethod`), then asks for voice confirmation before
+    /// doing anything (2026-09-05: "ai determines intent, then ask
+    /// permission and execute"). Returns the prompt to speak; nil if no
+    /// contact could be resolved, so the caller falls back to its
+    /// existing blocked/unrecognised message.
+    func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?) -> String? {
+        guard let contactQuery, let contact = matchContact(contactQuery) else { return nil }
+        let (method, unsupported) = Self.resolveCallMethod(requestedApp: requestedApp, callType: callType)
+        let action = PendingCallAction(contact: contact, method: method, unsupportedRequestedApp: unsupported)
+        pendingCallAction = action
+        DispatchQueue.main.async { [weak self] in
+            self?.voiceSession.transition(to: .awaitingConfirmation)
+        }
+        return confirmationPrompt(for: action)
+    }
+
+    /// Maps (requestedApp, callType) to a real, achievable method.
+    /// `requestedApp`/`callType` are free-form strings the LLM extracted
+    /// from speech (e.g. "whatsapp", "video") — matched loosely in both
+    /// English and Nepali since that's what actually shows up.
+    private static func resolveCallMethod(requestedApp: String?, callType: String?) -> (CallMethod, unsupportedRequestedApp: String?) {
+        let isVideo = callType.map { $0.lowercased().contains("video") || $0.contains("भिडियो") } ?? false
+        guard let app = requestedApp?.lowercased(), !app.isEmpty else {
+            return (isVideo ? .facetimeVideo : .facetimeAudio, nil)
+        }
+        if app.contains("facetime") || app.contains("फेसटाइम") {
+            return (isVideo ? .facetimeVideo : .facetimeAudio, nil)
+        }
+        if app.contains("whatsapp") || app.contains("ह्वाट्सएप") || app.contains("वाट्सएप") {
+            return (.whatsappChat, nil)
+        }
+        // Messenger, Viber, or anything else with no real integration —
+        // fall back to FaceTime, but say so.
+        return (isVideo ? .facetimeVideo : .facetimeAudio, requestedApp)
+    }
+
+    private func confirmationPrompt(for action: PendingCallAction) -> String {
+        let locale = activeLocale
+        var parts: [String] = []
+        if let unsupported = action.unsupportedRequestedApp {
+            parts.append(L10n.fmt("router.call.appUnsupportedNotice", locale: locale, unsupported))
+        }
+        let methodKey: String
+        switch action.method {
+        case .facetimeVideo: methodKey = "router.call.methodVideo"
+        case .facetimeAudio: methodKey = "router.call.methodVoice"
+        case .whatsappChat: methodKey = "router.call.methodWhatsAppChat"
+        }
+        let methodText = L10n.str(methodKey, locale: locale)
+        parts.append(L10n.fmt("router.call.confirmQuestion", locale: locale, action.contact.name, methodText))
+        return parts.joined(separator: " ")
+    }
+
+    /// Actually places the call/opens the chat — only ever reached after
+    /// the user said yes (`handleConfirmationResponse`). Never claims
+    /// WhatsApp "called" — it only opened a chat, and says so.
+    private func performCallAction(_ action: PendingCallAction) {
+        let locale = activeLocale
+        switch action.method {
+        case .facetimeVideo, .facetimeAudio:
+            let scheme = action.method == .facetimeVideo ? "facetime" : "facetime-audio"
+            let digits = action.contact.phone.filter { $0.isNumber || $0 == "+" }
+            if !digits.isEmpty, let url = URL(string: "\(scheme)://\(digits)") {
+                DispatchQueue.main.async { UIApplication.shared.open(url) }
+            }
+            setOutcome(icon: action.method == .facetimeVideo ? "video.fill" : "phone.fill",
+                       text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
+            speak(text: L10n.fmt("router.call.calling", locale: locale, action.contact.name))
+        case .whatsappChat:
+            let digits = action.contact.phone.filter { $0.isNumber }
+            if !digits.isEmpty, let url = URL(string: "https://wa.me/\(digits)") {
+                DispatchQueue.main.async { UIApplication.shared.open(url) }
+            }
+            setOutcome(icon: "message.fill",
+                       text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, action.contact.name))
+            speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, action.contact.name))
+        }
     }
 
     /// A pending SMS draft — presented as `MessageComposeView` from
@@ -889,6 +1135,23 @@ final class AppCoordinator: ObservableObject {
     /// reflecting reality. The session machine returns to idle (and its
     /// timeout timer is cancelled — C12).
     func handleConfirmationResponse(_ response: ConfirmationResponse) {
+        // Call confirmations are a separate, additive flow (2026-09-05) —
+        // checked first and returned early so the medication path below
+        // is completely untouched (safety-critical, 100%-covered code;
+        // not worth any risk to it for an unrelated feature).
+        if let action = pendingCallAction {
+            pendingCallAction = nil
+            switch response {
+            case .yes:
+                performCallAction(action)
+            case .no:
+                speak(text: L10n.fmt("router.call.cancelled", locale: activeLocale, action.contact.name))
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.voiceSession.transition(to: .idle)
+            }
+            return
+        }
         guard let entryId = pendingConfirmationEntryId else { return }
         _ = medicationScheduler.acknowledgeWithConfirmation(
             entryId: entryId,
@@ -911,7 +1174,7 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Whether a confirmation follow-up is currently expected.
-    var isAwaitingConfirmation: Bool { pendingConfirmationEntryId != nil }
+    var isAwaitingConfirmation: Bool { pendingConfirmationEntryId != nil || pendingCallAction != nil }
 
     /// Used by `CommandRouter` to identify what "I took my medication" refers
     /// to when the user hasn't specified which reminder.

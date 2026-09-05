@@ -50,7 +50,7 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
             fallbackLanguage: "en",
             maxUtteranceSeconds: 10,
             forcePrimaryLanguage: true,
-            inferenceTimeoutSeconds: 90
+            inferenceTimeoutSeconds: 180
         )
     }
 

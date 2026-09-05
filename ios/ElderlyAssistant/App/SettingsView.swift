@@ -4,16 +4,23 @@ import SwiftUI
 /// emergency contacts, Medication schedule, AI मोडेल, Privacy & about.
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    /// Redesign spec §3.3: AI Models is buried behind a long-press on the
+    /// title, not a normal row — there's no caregiver app yet for someone
+    /// to manage STT/LLM downloads through, so the capability has to stay
+    /// reachable, just not one plain tap away from an elderly user's
+    /// normal navigation.
+    @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case language, family, meds, aiModels, privacy
+        case language, family, meds, geminiAI, voiceEngine, privacy
 
         var id: String {
             switch self {
             case .language: return "language"
             case .family: return "family"
             case .meds: return "meds"
-            case .aiModels: return "ai"
+            case .geminiAI: return "geminiAI"
+            case .voiceEngine: return "voiceEngine"
             case .privacy: return "privacy"
             }
         }
@@ -37,7 +44,11 @@ struct SettingsView: View {
                     Text("settings.title")
                         .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
                         .foregroundColor(DesignTokens.textPrimary)
+                        .onLongPressGesture(minimumDuration: 1.5) {
+                            showHiddenAIModels = true
+                        }
                     Spacer()
+                    EmergencyIconButton()
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
@@ -46,10 +57,16 @@ struct SettingsView: View {
                 ScrollView {
                     VStack(spacing: 12) {
                         sectionRow(.language, icon: "globe", titleKey: "settings.language.title")
+                        geminiSectionRow
+                        voiceEngineSectionRow
                         sectionRow(.family, icon: "person.2.fill", titleKey: "settings.family.title")
                         sectionRow(.meds, icon: "pills.fill", titleKey: "settings.meds.title")
-                        sectionRow(.aiModels, icon: "brain.head.profile", titleKey: "settings.ai.title")
                         sectionRow(.privacy, icon: "lock.shield.fill", titleKey: "settings.privacy.title")
+                        Text("settings.ai.hiddenHint")
+                            .font(.system(size: 11))
+                            .foregroundColor(DesignTokens.textSecondary.opacity(0.6))
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 8)
                     }
                     .padding(.horizontal, 20)
                     .padding(.bottom, 32)
@@ -64,10 +81,90 @@ struct SettingsView: View {
             case .language: LanguageSettingsView()
             case .family: FamilyContactsSettingsView()
             case .meds: MedicationScheduleSettingsView()
-            case .aiModels: AIModelsSettingsView()
+            case .geminiAI: GeminiAPISettingsView()
+            case .voiceEngine: VoiceEngineSettingsView()
             case .privacy: PrivacySettingsView()
             }
         }
+        .sheet(isPresented: $showHiddenAIModels) {
+            NavigationStack { AIModelsSettingsView() }
+        }
+    }
+
+    /// Visible, not buried — unlike the legacy on-device AI Models screen,
+    /// this is load-bearing infrastructure in v2 (no key = no assistant),
+    /// so it stays a normal, prominent row with a live status indicator.
+    @EnvironmentObject private var coordinator: AppCoordinator
+    private var geminiSectionRow: some View {
+        NavigationLink(value: SettingsSection.geminiAI) {
+            HStack(spacing: 14) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 26))
+                    .foregroundColor(DesignTokens.accent)
+                    .frame(width: 40)
+                Text("settings.gemini.title")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Spacer()
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(coordinator.geminiConfigStore.isConfigured ? DesignTokens.accent : DesignTokens.stateError)
+                        .frame(width: 8, height: 8)
+                    Text(coordinator.geminiConfigStore.isConfigured
+                         ? "settings.gemini.statusConnected"
+                         : "settings.gemini.statusMissing")
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// On-device vs Gemini A/B toggle. Visible (not buried) like the
+    /// Gemini row above it — this is the control that actually decides
+    /// which of the two live, since flipping it doesn't require a
+    /// restart (see `AppCoordinator.applyVoiceEngineStack`).
+    private var voiceEngineSectionRow: some View {
+        NavigationLink(value: SettingsSection.voiceEngine) {
+            HStack(spacing: 14) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 26))
+                    .foregroundColor(DesignTokens.accent)
+                    .frame(width: 40)
+                Text("settings.voiceEngine.title")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Spacer()
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(DesignTokens.accent)
+                        .frame(width: 8, height: 8)
+                    Text(coordinator.voiceEngineStack == .gemini
+                         ? "settings.voiceEngine.statusGemini"
+                         : "settings.voiceEngine.statusOnDevice")
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
     }
 
     private func sectionRow(_ section: SettingsSection, icon: String,
@@ -134,6 +231,231 @@ struct LanguageSettingsView: View {
             }
             .padding(18)
             .frame(maxWidth: .infinity)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius)
+                    .stroke(isSelected ? DesignTokens.accent : Color.clear, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Gemini API key (v2 pivot — see
+// docs/superpowers/specs/2026-09-03-v2-gemini-pivot-design.md §3.2)
+
+/// Lets a family member paste in the Gemini API key that powers the whole
+/// v2 assistant (STT + intent understanding). Unlike the legacy on-device
+/// "AI मोडेल" screen, this is NOT buried — without a key configured here,
+/// the assistant falls all the way back to the deterministic keyword
+/// layer and the English-only SFSpeechRecognizer bootstrap, so it needs
+/// to be easy to find during setup.
+struct GeminiAPISettingsView: View {
+    @EnvironmentObject var coordinator: AppCoordinator
+    @State private var draftKey: String = ""
+    @State private var showClearConfirm = false
+    @State private var customModel: String = ""
+
+    private var isCustomModelSelected: Bool {
+        !GeminiModelCatalog.entries.contains { $0.id == coordinator.geminiConfigStore.model }
+    }
+
+    var body: some View {
+        LeafScreen(titleKey: "settings.gemini.title") {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("settings.gemini.explanation")
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+
+                modelPicker
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("settings.gemini.fieldLabel")
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                        .foregroundColor(DesignTokens.textSecondary)
+                    SecureField("settings.gemini.fieldPlaceholder", text: $draftKey)
+                        .font(.system(size: DesignTokens.minBodyPointSize, design: .monospaced))
+                        .padding(14)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
+                        .background(DesignTokens.background)
+                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
+                                .stroke(DesignTokens.textSecondary.opacity(0.25), lineWidth: 1)
+                        )
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(DesignTokens.card)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+
+                Button {
+                    coordinator.geminiConfigStore.save(draftKey)
+                    draftKey = ""
+                } label: {
+                    Text("settings.gemini.save")
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: DesignTokens.minTapTargetSize)
+                        .background(draftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    ? DesignTokens.textSecondary.opacity(0.4) : DesignTokens.accent)
+                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                }
+                .buttonStyle(.plain)
+                .disabled(draftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if coordinator.geminiConfigStore.isConfigured {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(DesignTokens.accent)
+                        Text("settings.gemini.statusConnected")
+                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                            .foregroundColor(DesignTokens.textSecondary)
+                        Spacer()
+                        Button(role: .destructive) {
+                            showClearConfirm = true
+                        } label: {
+                            Text("settings.gemini.remove")
+                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                }
+            }
+        }
+        .confirmationDialog("settings.gemini.removeConfirm", isPresented: $showClearConfirm) {
+            Button("settings.gemini.remove", role: .destructive) {
+                coordinator.geminiConfigStore.clear()
+            }
+            Button("common.back", role: .cancel) {}
+        }
+    }
+
+    /// Model picker (2026-09-04 field request — "let me try different
+    /// options"). Curated list (`GeminiModelCatalog`) plus a free-text
+    /// override for anything else, since the full live model catalog
+    /// includes image/TTS/preview entries not worth enumerating here.
+    private var modelPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("settings.gemini.modelLabel")
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textSecondary)
+            ForEach(GeminiModelCatalog.entries) { entry in
+                modelRow(id: entry.id, labelKey: entry.labelKey, descriptionKey: entry.descriptionKey)
+            }
+            modelRow(id: nil, labelKey: "settings.gemini.model.custom", descriptionKey: "settings.gemini.model.custom.desc")
+            if isCustomModelSelected || !customModel.isEmpty {
+                TextField("settings.gemini.model.customPlaceholder", text: $customModel)
+                    .font(.system(size: DesignTokens.minBodyPointSize, design: .monospaced))
+                    .padding(12)
+                    .background(DesignTokens.background)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                    .onSubmit {
+                        coordinator.geminiConfigStore.saveModel(customModel)
+                    }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// `id == nil` renders the "custom" row, selected whenever the active
+    /// model isn't one of the curated entries.
+    private func modelRow(id: String?, labelKey: String, descriptionKey: String) -> some View {
+        let isSelected = id == nil ? isCustomModelSelected : coordinator.geminiConfigStore.model == id
+        return Button {
+            if let id {
+                customModel = ""
+                coordinator.geminiConfigStore.saveModel(id)
+            }
+            // Selecting "custom" just reveals the text field above —
+            // saving happens on submit once they've typed something.
+        } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundColor(isSelected ? DesignTokens.accent : DesignTokens.textSecondary.opacity(0.5))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(LocalizedStringKey(labelKey))
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                    Text(LocalizedStringKey(descriptionKey))
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+                Spacer()
+            }
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - On-device vs Gemini voice-engine toggle
+//
+// Lets the household A/B test the two voice engine stacks without
+// rebuilding: the cloud v2 Gemini pivot (default) versus the legacy
+// on-device Whisper+LLaMA pipeline it superseded (still present in the
+// build, see `AppCoordinator.llamaCommandInterpreter` /
+// `whisperSpeechRecognizer`). Switching is instant — no restart — via
+// `AppCoordinator.applyVoiceEngineStack()`.
+struct VoiceEngineSettingsView: View {
+    @EnvironmentObject var coordinator: AppCoordinator
+
+    var body: some View {
+        LeafScreen(titleKey: "settings.voiceEngine.title") {
+            VStack(spacing: 16) {
+                Text("settings.voiceEngine.explanation")
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+
+                stackRow(
+                    .gemini,
+                    titleKey: "settings.voiceEngine.gemini",
+                    subtitleKey: coordinator.geminiConfigStore.isConfigured
+                        ? "settings.voiceEngine.gemini.ready"
+                        : "settings.voiceEngine.gemini.notReady"
+                )
+
+                stackRow(
+                    .onDevice,
+                    titleKey: "settings.voiceEngine.onDevice",
+                    subtitleKey: coordinator.isOnDeviceStackReady
+                        ? "settings.voiceEngine.onDevice.ready"
+                        : "settings.voiceEngine.onDevice.notReady"
+                )
+            }
+        }
+    }
+
+    private func stackRow(_ stack: VoiceEngineStack, titleKey: String, subtitleKey: String) -> some View {
+        let isSelected = coordinator.voiceEngineStack == stack
+        return Button {
+            coordinator.voiceEngineStack = stack
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22))
+                    .foregroundColor(isSelected ? DesignTokens.accent : DesignTokens.textSecondary.opacity(0.5))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LocalizedStringKey(titleKey))
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                    Text(LocalizedStringKey(subtitleKey))
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+                Spacer()
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(DesignTokens.card)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
             .overlay(

@@ -22,8 +22,12 @@ final class DesignTokensTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(DesignTokens.talkButtonDiameter, 120)
     }
 
-    func testHubCardsAreAtLeast100ptTall() {
-        XCTAssertGreaterThanOrEqual(DesignTokens.hubCardMinHeight, 100)
+    /// Redesign 2026-09-03: the 2×2 hub grid became the bottom dock — its
+    /// items rely on `minTapTargetSize` directly (see `HomeView.dockItem`),
+    /// so this covers what `hubCardMinHeight` used to: the dock itself
+    /// stays tall enough to comfortably hold a ≥44pt tap target per item.
+    func testDockIsAtLeastTapTargetTall() {
+        XCTAssertGreaterThanOrEqual(DesignTokens.dockHeight, DesignTokens.minTapTargetSize)
     }
 
     func testConfirmationChipsAreAtLeast60ptTall() {

@@ -50,6 +50,9 @@ def main() -> None:
                              "processor or the 80-mel stock-medium one")
     parser.add_argument("--out", type=str, default="finetune",
                         help="checkpoint subdir name (default: finetune)")
+    parser.add_argument("--noise-aug", action="store_true",
+                        help="white-noise augmentation at 3-15 dB SNR on "
+                             "half the batch (paper's ~4% robustness gain)")
     parser.add_argument("--bf16-weights", action="store_true",
                         help="load base weights in bf16 — required for the "
                              "1.5B teacher (fp32 weights + AdamW states OOM "
@@ -144,7 +147,8 @@ def main() -> None:
         model=model,
         args=train_args,
         train_dataset=ds,
-        data_collator=DataCollatorSpeechSeq2SeqWithPadding(processor=processor),
+        data_collator=DataCollatorSpeechSeq2SeqWithPadding(
+            processor=processor, noise_aug=args.noise_aug),
         tokenizer=processor,
         callbacks=[ProgressCallback(total_updates)],
     )
