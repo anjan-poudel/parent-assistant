@@ -41,3 +41,4 @@ android/local.properties
 !.env.example
 *.p8
 *.mobileprovision
+__pycache__/
