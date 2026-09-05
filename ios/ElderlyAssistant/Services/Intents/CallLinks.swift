@@ -410,6 +410,8 @@ final class CallLinks {
             opener.open(webURL)
         }
         return .fellBackToWeb
+    }
+
     /// Opens Messenger for a per-contact call button (contact-call-
     /// buttons task). No public API deep-links a Messenger call by phone
     /// number, so this opens the app's chat surface and the user taps
