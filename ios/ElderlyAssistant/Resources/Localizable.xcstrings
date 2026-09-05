@@ -4991,6 +4991,23 @@
           }
         }
       }
+    },
+    "onboarding.stepFamily.messengerHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Their Messenger username — the tail of their Facebook profile link (facebook.com/username), or their numeric ID. Only needed for Messenger calls."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उनीहरूको म्यासेन्जर प्रयोगकर्तानाम — फेसबुक प्रोफाइल लिङ्कको अन्तिम भाग (facebook.com/username) वा संख्यात्मक आईडी। म्यासेन्जर कलका लागि मात्र चाहिन्छ।"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
