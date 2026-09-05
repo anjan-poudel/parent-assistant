@@ -1269,6 +1269,125 @@
         }
       }
     },
+    "intentLog.clearCancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "रद्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "intentLog.clearConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "intentLog.clearTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear activity log?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गतिविधि लग हटाउने?"
+          }
+        }
+      }
+    },
+    "intentLog.confirmed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ confirmed: %2$@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ स्वीकृत: %2$@"
+          }
+        }
+      }
+    },
+    "intentLog.corrected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Corrected to %2$@ for %1$@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ को लागि %2$@ मा सच्याइयो"
+          }
+        }
+      }
+    },
+    "intentLog.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No activity yet"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिलेसम्म कुनै गतिविधि छैन"
+          }
+        }
+      }
+    },
+    "intentLog.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistant activity"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायकको गतिविधि"
+          }
+        }
+      }
+    },
     "language.english": {
       "extractionState": "manual",
       "localizations": {
@@ -2064,6 +2183,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "म्यासेन्जर प्रयोगकर्ता नाम (ऐच्छिक)"
+          }
+        }
+      }
+    },
+    "onboarding.stepFamily.messengerHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Their Messenger username — the tail of their Facebook profile link (facebook.com/username), or their numeric ID. Only needed for Messenger calls."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उनीहरूको म्यासेन्जर प्रयोगकर्तानाम — फेसबुक प्रोफाइल लिङ्कको अन्तिम भाग (facebook.com/username) वा संख्यात्मक आईडी। म्यासेन्जर कलका लागि मात्र चाहिन्छ।"
           }
         }
       }
@@ -3241,6 +3377,40 @@
         }
       }
     },
+    "router.rephrase.discard": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Okay, never mind. Please tell me again what you'd like."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठीक छ, बिर्सिनुहोस्। के चाहनुहुन्छ, फेरि भन्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.rephrase.question": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Did I understand that correctly? Please say yes or no."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "के मैले ठीक बुझें? हो वा होइन भन्नुहोस्।"
+          }
+        }
+      }
+    },
     "router.reprompt": {
       "extractionState": "manual",
       "localizations": {
@@ -4036,6 +4206,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "जेमिनी AI"
+          }
+        }
+      }
+    },
+    "settings.intentLog.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistant activity"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायकको गतिविधि"
           }
         }
       }
@@ -5090,176 +5277,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Whisper (नेपाली सानो, डिस्टिल्ड)"
-          }
-        }
-      }
-    },
-    "router.rephrase.question": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Did I understand that correctly? Please say yes or no."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "के मैले ठीक बुझें? हो वा होइन भन्नुहोस्।"
-          }
-        }
-      }
-    },
-    "router.rephrase.discard": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Okay, never mind. Please tell me again what you'd like."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ठीक छ, बिर्सिनुहोस्। के चाहनुहुन्छ, फेरि भन्नुहोस्।"
-          }
-        }
-      }
-    },
-    "settings.intentLog.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Assistant activity"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "सहायकको गतिविधि"
-          }
-        }
-      }
-    },
-    "intentLog.title": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Assistant activity"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "सहायकको गतिविधि"
-          }
-        }
-      }
-    },
-    "intentLog.empty": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No activity yet"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "अहिलेसम्म कुनै गतिविधि छैन"
-          }
-        }
-      }
-    },
-    "intentLog.confirmed": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@ confirmed: %2$@"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@ स्वीकृत: %2$@"
-          }
-        }
-      }
-    },
-    "intentLog.corrected": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Corrected to %2$@ for %1$@"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@ को लागि %2$@ मा सच्याइयो"
-          }
-        }
-      }
-    },
-    "intentLog.clearTitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clear activity log?"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "गतिविधि लग हटाउने?"
-          }
-        }
-      }
-    },
-    "intentLog.clearConfirm": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Clear"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "हटाउनुहोस्"
-          }
-        }
-      }
-    },
-    "intentLog.clearCancel": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cancel"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "रद्द गर्नुहोस्"
           }
         }
       }
