@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 @testable import ElderlyAssistant
 
 /// Shared in-memory `EncryptedLocalStorage` for intent-layer tests — the
@@ -126,4 +127,5 @@ final class StubCoordinator: VoiceCommandCoordinating {
     }
     func handleCallConfirmationOverride(_ utterance: String) -> Bool { false }
     func composeMessage(toContactNamed name: String?, body: String) -> Bool { false }
+    func presentPluginView(_ view: AnyView) {}
 }
