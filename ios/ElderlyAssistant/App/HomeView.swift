@@ -231,7 +231,8 @@ struct HomeView: View {
     private var feedbackArea: some View {
         switch session.state {
         case .listening, .transcribing, .understanding:
-            LiveCaptionPill(placeholderKey: capturePlaceholderKey, transcript: coordinator.lastTranscript)
+            LiveCaptionPill(placeholderKey: capturePlaceholderKey,
+                            transcript: coordinator.livePartialTranscript ?? coordinator.lastTranscript)
         default:
             if let outcome = coordinator.lastOutcome {
                 OutcomeCardView(outcome: outcome, expanded: outcomeExpanded) {

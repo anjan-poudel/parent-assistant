@@ -12,6 +12,18 @@ extension URLSession: GeminiTransport {
     }
 }
 
+/// Streaming counterpart — testable seam for the SSE path
+/// (`streamGenerateContent`). URLSession conforms for free.
+protocol GeminiStreamingTransport {
+    func bytes(for request: URLRequest) async throws -> (URLSession.AsyncBytes, URLResponse)
+}
+
+extension URLSession: GeminiStreamingTransport {
+    func bytes(for request: URLRequest) async throws -> (URLSession.AsyncBytes, URLResponse) {
+        try await bytes(for: request, delegate: nil)
+    }
+}
+
 /// REST client for the Gemini Generative Language API
 /// (`generativelanguage.googleapis.com/v1beta`). This is the v2 pivot's
 /// replacement for `LlamaCommandInterpreter` + `WhisperSpeechRecognizer` —
@@ -60,15 +72,18 @@ final class GeminiClient {
     private let configStore: GeminiConfigStore
     private let observabilityBus: ObservabilityBus
     private let transport: GeminiTransport
+    private let streamingTransport: GeminiStreamingTransport
     private let config: Config
 
     init(configStore: GeminiConfigStore,
          observabilityBus: ObservabilityBus,
          transport: GeminiTransport = URLSession.shared,
+         streamingTransport: GeminiStreamingTransport = URLSession.shared,
          config: Config = .default) {
         self.configStore = configStore
         self.observabilityBus = observabilityBus
         self.transport = transport
+        self.streamingTransport = streamingTransport
         self.config = config
     }
 
@@ -149,6 +164,113 @@ final class GeminiClient {
     /// through `LlamaCommandInterpreter.parse(json:)`, whose Codable shape
     /// ignores the extra `transcript` key for free.
     private struct TranscriptProbe: Decodable { let transcript: String? }
+
+    /// Streaming variant of `understand` (spec §3.3 + collapse #1):
+    /// `streamGenerateContent` (SSE). The response is ONE JSON object
+    /// streamed in chunks; each chunk's partial text is accumulated, and
+    /// the transcript-so-far is reported via `onPartialTranscript` as it
+    /// grows — the live-caption pill gets progressively-revealed text,
+    /// which batch whisper.cpp could never offer. The final parse is
+    /// identical to the non-streaming path (no new failure shapes).
+    func understandStreaming(audioData: Data, mimeType: String,
+                             context: InterpreterContext,
+                             onPartialTranscript: @escaping (String) -> Void
+    ) async throws -> GeminiUnderstanding {
+        guard let apiKey = configStore.apiKey, !apiKey.isEmpty else {
+            throw GeminiClientError.notConfigured
+        }
+        guard let url = URL(string:
+            "https://generativelanguage.googleapis.com/v1beta/models/\(configStore.model):streamGenerateContent?alt=sse&key=\(apiKey)"
+        ) else {
+            throw GeminiClientError.invalidURL
+        }
+        let prompt = IntentPrompt.buildUnderstanding(context: context)
+        let body = GeminiRequest(
+            contents: [.init(parts: [
+                .text(prompt),
+                .inlineData(mimeType: mimeType, data: audioData.base64EncodedString())
+            ])],
+            generationConfig: .init(responseMimeType: "application/json")
+        )
+        var request = URLRequest(url: url, timeoutInterval: config.timeoutSeconds)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let start = Date()
+        var accumulated = ""
+        var lastReported = ""
+        let (bytes, response) = try await streamingTransport.bytes(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            emit("gemini_http_error", outcome: "failure", durationMs: 0,
+                 errorCode: String((response as? HTTPURLResponse)?.statusCode ?? -1))
+            throw GeminiClientError.invalidResponse
+        }
+        for try await line in bytes.lines {
+            guard let chunk = Self.parseSSELine(line) else { continue }
+            accumulated += chunk
+            if let partial = Self.extractPartialTranscript(from: accumulated),
+               partial != lastReported {
+                lastReported = partial
+                onPartialTranscript(partial)
+            }
+        }
+        emit("gemini_call", outcome: "success",
+             durationMs: Int(Date().timeIntervalSince(start) * 1000))
+        let transcript = (try? JSONDecoder().decode(TranscriptProbe.self, from: Data(accumulated.utf8)))?.transcript ?? lastReported
+        let command = LlamaCommandInterpreter.parse(json: accumulated)
+        return GeminiUnderstanding(transcript: transcript, command: command)
+    }
+
+    /// One SSE frame → the chunk's text. Frames are `data: {json}`; the
+    /// terminal `data: [DONE]` and blanks/comments return nil.
+    static func parseSSELine(_ line: String) -> String? {
+        guard line.hasPrefix("data:") else { return nil }
+        let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+        guard !payload.isEmpty, payload != "[DONE]" else { return nil }
+        guard let data = payload.data(using: .utf8),
+              let response = try? JSONDecoder().decode(GeminiResponse.self, from: data) else {
+            return nil
+        }
+        return response.candidates?.first?.content?.parts?
+            .compactMap { $0.text }.joined()
+    }
+
+    /// The transcript-so-far out of an accumulated PARTIAL JSON string —
+    /// matches `"transcript": "…` with JSON-string escapes honored,
+    /// tolerant of the string being unterminated (stream still open).
+    static func extractPartialTranscript(from text: String) -> String? {
+        guard let keyRange = text.range(of: "\"transcript\""),
+              let colonRange = text.range(of: ":", range: keyRange.upperBound..<text.endIndex),
+              let quoteIndex = text[colonRange.upperBound...].firstIndex(of: "\"") else {
+            return nil
+        }
+        var out = ""
+        var escaped = false
+        var idx = text.index(after: quoteIndex)
+        while idx < text.endIndex {
+            let c = text[idx]
+            if escaped {
+                switch c {
+                case "n": out.append("\n")
+                case "t": out.append("\t")
+                case "\"": out.append("\"")
+                case "\\": out.append("\\")
+                case "u": break  // \uXXXX — rare in Nepali transcripts mid-stream; skip
+                default: out.append(c)
+                }
+                escaped = false
+            } else if c == "\\" {
+                escaped = true
+            } else if c == "\"" {
+                return out  // string closed — full transcript so far
+            } else {
+                out.append(c)
+            }
+            idx = text.index(after: idx)
+        }
+        return out.isEmpty ? nil : out
+    }
 
     /// Vision call: identify/describe `imageData` in response to `prompt`.
     /// Used by the (not-yet-built) appliance/TV Visual Helper — exposed

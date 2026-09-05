@@ -99,7 +99,10 @@ final class RecordingObservabilityBus: ObservabilityBus {
 /// Minimal `VoiceCommandCoordinating` — every method a no-op with
 /// recording, except the few the safety-net tests script explicitly.
 final class StubCoordinator: VoiceCommandCoordinating {
-    var isAwaitingConfirmation = false
+    var manualAwaitingConfirmation = false
+    var isAwaitingConfirmation: Bool {
+        manualAwaitingConfirmation || rephrasePended != nil
+    }
     var isAwaitingCallConfirmation = false
     var activeLocale = Locale(identifier: "ne-NP")
 
@@ -134,4 +137,15 @@ final class StubCoordinator: VoiceCommandCoordinating {
         return composeMessageOutcome
     }
     func presentPluginView(_ view: AnyView) {}
+
+    var pendingRephraseCommand: InterpretedCommand? { rephrasePended?.command }
+    private(set) var rephrasePended: (command: InterpretedCommand, sourceTranscript: String?)?
+    func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?) {
+        rephrasePended = (command, sourceTranscript)
+    }
+    func takePendingRephraseCommand() -> (command: InterpretedCommand, sourceTranscript: String?)? {
+        let taken = rephrasePended
+        rephrasePended = nil
+        return taken
+    }
 }

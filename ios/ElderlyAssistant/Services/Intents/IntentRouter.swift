@@ -116,18 +116,26 @@ final class IntentRouter: CommandInterpreter {
         // result). Band policy applies the same as any brain output.
         if let pre = takePreparsed(matching: transcript) {
             emit("cloud_preparse_used", outcome: "success")
-            DispatchQueue.main.async { completion(self.bandChecked(pre, source: "preparse")) }
+            DispatchQueue.main.async { completion(self.bandChecked(pre, source: "preparse", final: true)) }
             return
         }
 
         // Layer 4 — local brain.
         if let local = localBrain, local.isAvailable {
+            // Is escalation actually possible? A mid-band tier-free answer
+            // is dropped for escalation ONLY when a cloud layer exists;
+            // otherwise local is the final layer and the answer becomes
+            // the rephrase question (spec §4 decision #6).
+            let canEscalate = cloudEnabled && cloudBrain?.isAvailable == true
             local.interpret(transcript: transcript, context: context) { [weak self] command in
                 guard let self else { completion(nil); return }
-                if let command, let accepted = self.bandChecked(command, source: "local") {
+                if let command, let accepted = self.bandChecked(command, source: "local",
+                                                                final: !canEscalate) {
                     completion(accepted)
-                } else {
+                } else if canEscalate {
                     self.escalateToCloud(transcript: transcript, context: context, completion: completion)
+                } else {
+                    completion(nil)
                 }
             }
             return
@@ -139,13 +147,23 @@ final class IntentRouter: CommandInterpreter {
 
     // MARK: - Band policy
 
-    /// ACCEPT at ≥acceptThreshold; REPHRASE band dispatches only
+    /// ACCEPT at ≥acceptThreshold; REPHRASE band dispatches
     /// tier-`confirm` actions (their confirmation question verifies the
-    /// interpretation out loud); anything weaker → nil = fall through.
-    private func bandChecked(_ command: InterpretedCommand, source: String) -> InterpretedCommand? {
+    /// interpretation out loud); mid-band tier-`free` actions are dropped
+    /// ONLY while another layer could still do better (escalation). When
+    /// `final` is true — no more layers — a mid-band tier-`free` command
+    /// is RETURNED, and `CommandRouter` turns it into a yes/no
+    /// rephrase-as-question (spec §4 REPHRASE band, open decision #6):
+    /// asking costs one exchange; dropping costs the whole command.
+    private func bandChecked(_ command: InterpretedCommand, source: String,
+                             final: Bool = false) -> InterpretedCommand? {
         if command.confidence >= config.acceptThreshold { return command }
         guard command.confidence >= config.rephraseThreshold else { return nil }
         guard ConfirmationTier.tier(for: command.action) == .confirm else {
+            if final {
+                emit("rephrase_band_question", outcome: "info")
+                return command
+            }
             emit("rephrase_band_dropped", outcome: "info")
             return nil
         }
@@ -162,7 +180,7 @@ final class IntentRouter: CommandInterpreter {
         }
         cloud.interpret(transcript: transcript, context: context) { [weak self] command in
             guard let self else { completion(nil); return }
-            completion(command.flatMap { self.bandChecked($0, source: "cloud") })
+            completion(command.flatMap { self.bandChecked($0, source: "cloud", final: true) })
         }
     }
 

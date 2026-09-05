@@ -93,3 +93,64 @@ final class CommandRouterSafetyNetTests: XCTestCase {
         XCTAssertTrue(bus.contains("command_sensitive_blocked_auth_unavailable"))
     }
 }
+
+extension CommandRouterSafetyNetTests {
+
+    /// REPHRASE-as-question (spec §4 decision #6): a mid-band tier-free
+    /// command is stated as a yes/no question, not dropped, not dispatched.
+    func testMidBandTierFreeBecomesAQuestion() {
+        let interpreter = StubCommandInterpreter(
+            result: makeCommand(action: .music, confidence: 0.5))
+        let (router, coordinator, _) = makeRouter(interpreter: interpreter)
+
+        let exp = expectation(description: "async interpret")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp.fulfill() }
+        _ = router.route(transcript: "केही भजन जस्तो बजाउनुस्")
+        waitForExpectations(timeout: 2)
+
+        XCTAssertNotNil(coordinator.rephrasePended,
+                        "mid-band tier-free must pend as a question, not dispatch")
+        XCTAssertEqual(coordinator.rephrasePended?.sourceTranscript, "केही भजन जस्तो बजाउनुस्")
+    }
+
+    func testRephraseYesDispatchesThePendedCommand() {
+        let interpreter = StubCommandInterpreter(
+            result: makeCommand(action: .query, confidence: 0.5, reply: "भोलि घाम लाग्नेछ।"))
+        let (router, coordinator, _) = makeRouter(interpreter: interpreter)
+
+        var exp = expectation(description: "question")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp.fulfill() }
+        _ = router.route(transcript: "मौसम कस्तो होला")
+        waitForExpectations(timeout: 2)
+        XCTAssertNotNil(coordinator.rephrasePended)
+
+        exp = expectation(description: "dispatch after yes")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { exp.fulfill() }
+        _ = router.route(transcript: "हो")
+        waitForExpectations(timeout: 2)
+
+        XCTAssertNil(coordinator.rephrasePended)
+        XCTAssertEqual(coordinator.genericReplies, ["भोलि घाम लाग्नेछ।"],
+                       "a yes must dispatch the pended command's reply")
+    }
+
+    func testRephraseNoDiscardsWithoutDispatch() {
+        let interpreter = StubCommandInterpreter(
+            result: makeCommand(action: .query, confidence: 0.5, reply: "kehi"))
+        let (router, coordinator, _) = makeRouter(interpreter: interpreter)
+
+        var exp = expectation(description: "question")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp.fulfill() }
+        _ = router.route(transcript: "kehi question hola")
+        waitForExpectations(timeout: 2)
+
+        exp = expectation(description: "discard after no")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { exp.fulfill() }
+        _ = router.route(transcript: "होइन")
+        waitForExpectations(timeout: 2)
+
+        XCTAssertNil(coordinator.rephrasePended)
+        XCTAssertTrue(coordinator.genericReplies.isEmpty,
+                      "a no must discard without dispatching")
+    }
+}

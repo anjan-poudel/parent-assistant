@@ -115,6 +115,11 @@ final class AppCoordinator: ObservableObject {
     /// card (spec §4.1.4).
     @Published var lastTranscript: String?
     @Published var lastAssistantReply: String?
+    /// Progressively-revealed transcript while the collapsed Gemini call
+    /// streams (live captions, spec §3.3) — nil once the utterance
+    /// settles and `lastTranscript` takes over. The caption pill binds
+    /// `livePartialTranscript ?? lastTranscript`.
+    @Published var livePartialTranscript: String?
 
     // MARK: - Conversation history & outcome (redesign spec §3.1, §5)
 
@@ -276,6 +281,11 @@ final class AppCoordinator: ObservableObject {
     /// (see `LlamaCommandInterpreter.isAvailable`), in which case
     /// `CommandRouter`'s existing keyword fallback takes over — unchanged.
     private let llamaCommandInterpreter: LlamaCommandInterpreter
+    /// The fine-tuned intent model (spec 2026-09-05 §8) — the local brain
+    /// `IntentRouter` prefers once its GGUF is cached. Until the bake-off
+    /// artifact ships, `isAvailable` is false and the router simply never
+    /// sees it (cloud/cache carry everything).
+    private let localIntentInterpreter: LocalIntentInterpreter
     /// Set once in `start()`. `geminiCommandInterpreter` is the concrete
     /// Gemini-backed interpreter — one of the two optional BRAINS behind
     /// `intentRouter` (spec 2026-09-05 §4.0), never installed in the
@@ -297,6 +307,9 @@ final class AppCoordinator: ObservableObject {
                                                      historyStore: confirmedMethodHistory)
     private lazy var intentCache = IntentCommandCache(storage: storage)
     private lazy var repetitionGuard = RepetitionGuard(storage: storage)
+    /// Flywheel intent log (spec §11) — feeds the family review screen
+    /// (Settings) and the export→retrain loop.
+    private(set) lazy var intentLogStore = IntentLogStore()
     /// Deep-link builder/opener for the call & message flows (v2 pivot
     /// Phase 2, §4.3) — FaceTime video/audio, WhatsApp text, tel:.
     /// Stateless, so no lazy needed; tests fake it via `CallLinkOpening`.
@@ -448,6 +461,13 @@ final class AppCoordinator: ObservableObject {
                                                    timeoutSeconds: 10),
             pluginRegistry: pluginRegistry
         )
+        self.localIntentInterpreter = LocalIntentInterpreter(
+            modelStore: modelStore,
+            observabilityBus: bus,
+            config: LocalIntentInterpreter.Config(confidenceThreshold: 0.4,
+                                                  maxTokens: 192,
+                                                  timeoutSeconds: 3)
+        )
 
         // Restore the persisted voice-engine stack choice (default: the
         // live v2 Gemini pivot, matching today's always-Gemini behavior for
@@ -484,6 +504,7 @@ final class AppCoordinator: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.pendingConfirmationEntryId = nil
+                self.pendingRephrase = nil
                 self.speak(key: "router.confirmationTimeout")
             }
         }
@@ -564,7 +585,10 @@ final class AppCoordinator: ObservableObject {
         )
         self.geminiCommandInterpreter = geminiInterpreter
         let router3 = IntentRouter(cache: intentCache, observabilityBus: observabilityBus)
-        router3.localBrain = llamaCommandInterpreter
+        // The fine-tuned intent model is the preferred local brain (spec
+        // §8); it reports isAvailable=false until its GGUF is cached, so
+        // the router's lower layers carry everything until then.
+        router3.localBrain = localIntentInterpreter
         router3.cloudBrain = geminiInterpreter
         router3.cloudEnabled = (voiceEngineStack == .gemini)
         self.intentRouter = router3
@@ -577,6 +601,9 @@ final class AppCoordinator: ObservableObject {
         }
         geminiSpeechRecognizer.onUnderstanding = { [weak self] transcript, command in
             self?.intentRouter?.noteCloudPreparsed(transcript: transcript, command: command)
+        }
+        geminiSpeechRecognizer.onPartialTranscript = { [weak self] partial in
+            DispatchQueue.main.async { self?.livePartialTranscript = partial }
         }
         let router = CommandRouter(
             coordinator: self,
@@ -956,6 +983,7 @@ final class AppCoordinator: ObservableObject {
         whisperSpeechRecognizer.releaseModel()
         whisperKitSpeechRecognizer.releaseModel()
         DispatchQueue.main.async { [weak self] in
+            self?.livePartialTranscript = nil
             self?.lastTranscript = text
             self?.appendHistory(.user, text)
         }
@@ -1070,6 +1098,30 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var pendingCallAction: PendingCallAction?
     var isAwaitingCallConfirmation: Bool { pendingCallAction != nil }
 
+    /// Rephrase-as-question state (spec §4 decision #6): a mid-band
+    /// tier-`free` interpretation pended as a yes/no question. Mutually
+    /// exclusive with the other pending confirmations by construction
+    /// (only one is ever set at a time).
+    private var pendingRephrase: (command: InterpretedCommand, sourceTranscript: String?)?
+    var pendingRephraseCommand: InterpretedCommand? { pendingRephrase?.command }
+
+    func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?) {
+        pendingRephrase = (command, sourceTranscript)
+        DispatchQueue.main.async { [weak self] in
+            self?.voiceSession.transition(to: .awaitingConfirmation)
+        }
+        speak(key: "router.rephrase.question")
+    }
+
+    func takePendingRephraseCommand() -> (command: InterpretedCommand, sourceTranscript: String?)? {
+        let taken = pendingRephrase
+        pendingRephrase = nil
+        DispatchQueue.main.async { [weak self] in
+            self?.voiceSession.transition(to: .idle)
+        }
+        return taken
+    }
+
     /// `call` intent — resolves the contact (ContactResolver, spec §6.1)
     /// and picks the best REAL method (MethodResolver chain, spec §6.2),
     /// then asks for voice confirmation before doing anything. Returns
@@ -1148,6 +1200,12 @@ final class AppCoordinator: ObservableObject {
                                         sourceTranscript: action.sourceTranscript,
                                         sourceCommand: action.sourceCommand)
         pendingCallAction = amended
+        // Flywheel gold (spec §11): original plan → corrected plan.
+        intentLogStore.append(IntentLogStore.Record(
+            path: "override", action: "call",
+            slots: ["contact": action.contact.name, "method": action.method.rawValue],
+            outcome: "corrected",
+            correctedTo: ["method": override.rawValue]))
         speak(text: confirmationPrompt(for: amended, isRepeat: false))
         return true
     }
@@ -1255,6 +1313,10 @@ final class AppCoordinator: ObservableObject {
         if let transcript = action.sourceTranscript, let command = action.sourceCommand {
             intentRouter?.recordConfirmedExecution(transcript: transcript, command: command)
         }
+        intentLogStore.append(IntentLogStore.Record(
+            path: "model", action: "call",
+            slots: ["contact": action.contact.name, "method": action.method.rawValue],
+            outcome: "confirmed"))
     }
 
     /// Tap-originated call from a ContactTile video/audio button
@@ -1681,7 +1743,9 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Whether a confirmation follow-up is currently expected.
-    var isAwaitingConfirmation: Bool { pendingConfirmationEntryId != nil || pendingCallAction != nil }
+    var isAwaitingConfirmation: Bool {
+        pendingConfirmationEntryId != nil || pendingCallAction != nil || pendingRephrase != nil
+    }
 
     /// Used by `CommandRouter` to identify what "I took my medication" refers
     /// to when the user hasn't specified which reminder.

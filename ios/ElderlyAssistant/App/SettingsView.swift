@@ -12,7 +12,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case language, family, meds, geminiAI, voiceEngine, ttsVoices, privacy
+        case language, family, meds, geminiAI, voiceEngine, ttsVoices, privacy, intentLog
 
         var id: String {
             switch self {
@@ -23,6 +23,7 @@ struct SettingsView: View {
             case .voiceEngine: return "voiceEngine"
             case .ttsVoices: return "ttsVoices"
             case .privacy: return "privacy"
+            case .intentLog: return "intentLog"
             }
         }
     }
@@ -64,6 +65,7 @@ struct SettingsView: View {
                         sectionRow(.family, icon: "person.2.fill", titleKey: "settings.family.title")
                         sectionRow(.meds, icon: "pills.fill", titleKey: "settings.meds.title")
                         sectionRow(.privacy, icon: "lock.shield.fill", titleKey: "settings.privacy.title")
+                        sectionRow(.intentLog, icon: "checklist", titleKey: "settings.intentLog.title")
                         Text("settings.ai.hiddenHint")
                             .font(.system(size: 11))
                             .foregroundColor(DesignTokens.textSecondary.opacity(0.6))
@@ -87,6 +89,7 @@ struct SettingsView: View {
             case .voiceEngine: VoiceEngineSettingsView()
             case .ttsVoices: TTSVoicesSettingsView()
             case .privacy: PrivacySettingsView()
+            case .intentLog: IntentLogReviewView()
             }
         }
         .sheet(isPresented: $showHiddenAIModels) {

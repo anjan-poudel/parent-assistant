@@ -42,6 +42,21 @@ enum NepaliTimeParser {
             return DateComponents(hour: now.hour, minute: now.minute)
         }
 
+        // "N घण्टा पछि" / "in N hours" — an absolute timestamp, returned
+        // with full date components (spec 2026-09-05 §6.3 extension).
+        if let hours = relativeHours(in: text) {
+            let target = Calendar.current.date(byAdding: .hour, value: hours, to: Date())
+                ?? Date()
+            return Calendar.current.dateComponents([.year, .month, .day, .hour, .minute],
+                                                   from: target)
+        }
+
+        // Relative days (आज/भोलि/पर्सि, today/tomorrow) and weekday names
+        // (आइतबार…शनिबार, sunday…saturday) attach a DATE to the time of
+        // day parsed below — checked here, applied at the end.
+        let dayOffset = relativeDayOffset(in: text)
+        let weekday = weekdayIndex(in: text)
+
         let period = periods.first { text.contains($0.word) }
         let isPM = text.contains("pm") || text.contains("बेलुका") || text.contains("साँझ")
             || text.contains("राति")
@@ -77,7 +92,69 @@ enum NepaliTimeParser {
         hour = min(max(hour, 0), 23)
         minute = min(max(minute, 0), 59)
 
+        // A relative day or weekday name upgrades the bare time-of-day
+        // into a full date-time (spec §6.3); otherwise the historical
+        // hour/minute-only shape is preserved for existing callers.
+        if dayOffset != nil || weekday != nil {
+            return attachDate(hour: hour, minute: minute,
+                              dayOffset: dayOffset, weekday: weekday)
+        }
         return DateComponents(hour: hour, minute: minute)
+    }
+
+    // MARK: - Spec §6.3 extensions (relative days, weekdays, hours-later)
+
+    /// "N घण्टा पछि" / "N hours later" / "in N hours" → N, else nil.
+    private static func relativeHours(in text: String) -> Int? {
+        guard text.contains("पछि") || text.contains("hours") || text.contains("hour") else {
+            return nil
+        }
+        guard text.contains("घण्टा") || text.contains("hour") else { return nil }
+        return firstInteger(in: text)
+    }
+
+    /// आज → 0, भोलि → 1, पर्सि → 2 (+ English). Nil when no relative-day
+    /// word is present — callers then leave the date components unset.
+    private static func relativeDayOffset(in text: String) -> Int? {
+        if text.contains("पर्सि") || text.contains("day after tomorrow") { return 2 }
+        if text.contains("भोलि") || text.contains("tomorrow") { return 1 }
+        if text.contains("आज") || text.contains("today") { return 0 }
+        return nil
+    }
+
+    /// Nepali and English weekday names → 0=Sunday … 6=Saturday.
+    private static let weekdays: [(word: String, index: Int)] = [
+        ("आइतबार", 0), ("सोमबार", 1), ("मंगलबार", 2), ("बुधबार", 3),
+        ("बिहीबार", 4), ("शुक्रबार", 5), ("शनिबार", 6),
+        ("sunday", 0), ("monday", 1), ("tuesday", 2), ("wednesday", 3),
+        ("thursday", 4), ("friday", 5), ("saturday", 6)
+    ]
+
+    private static func weekdayIndex(in text: String) -> Int? {
+        weekdays.first { text.contains($0.word) }?.index
+    }
+
+    /// Attaches a real date to a parsed time-of-day: dayOffset days from
+    /// today at that time, or the next occurrence of the weekday at that
+    /// time (Calendar handles "later today vs next week" via nextDate).
+    private static func attachDate(hour: Int, minute: Int,
+                                   dayOffset: Int?, weekday: Int?) -> DateComponents? {
+        let calendar = Calendar.current
+        var target: Date?
+        if let dayOffset {
+            let startOfDay = calendar.startOfDay(for: Date())
+            target = calendar.date(byAdding: .day, value: dayOffset, to: startOfDay)
+            target = target.flatMap { calendar.date(bySettingHour: hour, minute: minute, second: 0, of: $0) }
+        } else if let weekday {
+            // Calendar.weekday is 1=Sunday…7=Saturday; our index is 0-based.
+            target = calendar.nextDate(after: Date(),
+                                       matching: DateComponents(hour: hour, minute: minute,
+                                                                weekday: weekday + 1),
+                                       matchingPolicy: .nextTime)
+        }
+        guard let target else { return DateComponents(hour: hour, minute: minute) }
+        return calendar.dateComponents([.year, .month, .day, .hour, .minute, .weekday],
+                                       from: target)
     }
 
     // MARK: - Helpers
