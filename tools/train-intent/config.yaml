@@ -16,8 +16,11 @@ stt_noise:
   # emits). Path to a whisper.cpp-compatible binary + model on the
   # training box (same medium Nepali fine-tune bundled in the app).
   whisper_cpp: ~/whisper.cpp/build/bin/whisper-cli
-  whisper_model: ~/models/whisper-medium-ne-q5_1.bin
-  tts_voice: hi-IN    # piper voice used to synthesize seed audio (nearest available to ne)
+  whisper_model: /mnt/nvme2/workspace/projects/parent-assistant/tools/train/models/whisper-medium-ne-q5_1.bin
+  # GPU backend: the SAME model in HF form (the GGML above was exported
+  # from this checkpoint). Runs in the tools/train venv (torch+cuda).
+  hf_model: /mnt/nvme2/workspace/projects/parent-assistant/tools/train/checkpoints/finetune-medium-final
+  tts_voice: voices/hi_IN-pratham-medium.onnx   # piper voice (nearest to ne; relative to tools/train-intent/)
   sample_rate: 16000
   variants_per_utterance: 2
 
