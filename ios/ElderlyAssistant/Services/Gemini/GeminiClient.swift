@@ -106,6 +106,39 @@ final class GeminiClient {
         return try await send(request)
     }
 
+    /// Collapse #1 (intent-engine spec 2026-09-05 §4): ONE call does STT
+    /// + intent + reply — audio in, `{transcript, <intent fields>, reply}`
+    /// out. Replaces the two-call transcribe→interpret pair when the
+    /// Gemini recognizer is active: the transcript half feeds the
+    /// pipeline/UI as usual, the command half waits in `IntentRouter`'s
+    /// preparse slot for that same transcript, so the interpretation
+    /// layer makes ZERO additional network calls.
+    ///
+    /// The intent half is optional by construction: an utterance that
+    /// produces no parseable command still returns its transcript (the
+    /// router then falls back exactly as if interpretation had failed —
+    /// same failure shape, no new edge cases).
+    func understand(audioData: Data, mimeType: String,
+                    context: InterpreterContext) async throws -> GeminiUnderstanding {
+        let prompt = IntentPrompt.buildUnderstanding(context: context)
+        let request = GeminiRequest(
+            contents: [.init(parts: [
+                .text(prompt),
+                .inlineData(mimeType: mimeType, data: audioData.base64EncodedString())
+            ])],
+            generationConfig: .init(responseMimeType: "application/json")
+        )
+        let raw = try await send(request)
+        let transcript = (try? JSONDecoder().decode(TranscriptProbe.self, from: Data(raw.utf8)))?.transcript ?? ""
+        let command = LlamaCommandInterpreter.parse(json: raw)
+        return GeminiUnderstanding(transcript: transcript, command: command)
+    }
+
+    /// Only the transcript is probed separately; the full payload parses
+    /// through `LlamaCommandInterpreter.parse(json:)`, whose Codable shape
+    /// ignores the extra `transcript` key for free.
+    private struct TranscriptProbe: Decodable { let transcript: String? }
+
     /// Vision call: identify/describe `imageData` in response to `prompt`.
     /// Used by the (not-yet-built) appliance/TV Visual Helper — exposed
     /// now so that feature can be added without touching this client.
@@ -175,6 +208,16 @@ final class GeminiClient {
             metadata: [:]
         ))
     }
+}
+
+// MARK: - Collapsed understand result
+
+/// The two halves of one collapsed Gemini call (spec §4 collapse #1).
+/// `command` is nil when the model's intent half didn't parse — the
+/// transcript is still perfectly usable.
+struct GeminiUnderstanding {
+    let transcript: String
+    let command: InterpretedCommand?
 }
 
 // MARK: - Request/response wire types

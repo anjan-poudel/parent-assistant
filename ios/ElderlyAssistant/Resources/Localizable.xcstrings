@@ -1887,13 +1887,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "a phone call"
+            "value": "a FaceTime audio call"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "फोन कल"
+            "value": "फेसटाइम अडियो कल"
           }
         }
       }
@@ -3594,6 +3594,74 @@
           "stringUnit": {
             "state": "translated",
             "value": "Whisper (नेपाली सानो, डिस्टिल्ड)"
+          }
+        }
+      }
+    },
+    "router.call.methodPhone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "a phone call"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोन कल"
+          }
+        }
+      }
+    },
+    "router.call.recentRepeatNotice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You called %@ a little while ago."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भर्खरै %@ लाई फोन गर्नुभएको थियो।"
+          }
+        }
+      }
+    },
+    "router.call.disambiguate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I found more than one matching person (%@). Please say the full name."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ भनेर धेरै जना भेटिए। कृपया पूरा नाम भन्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.featureNotYet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That feature isn't ready yet, but it's coming."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यो सुविधा अहिले तयार छैन, तर चाँडै आउँदैछ।"
           }
         }
       }

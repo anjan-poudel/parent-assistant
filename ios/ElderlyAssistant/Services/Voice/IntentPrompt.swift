@@ -41,7 +41,8 @@ enum IntentPrompt {
         commentary) with exactly these fields:
         {
           "action": one of "ack_med", "call", "emergency", "set_reminder",
-                    "health_query", "music", "send_message", "query", "none",
+                    "health_query", "music", "send_message", "guide",
+                    "create_calendar_event", "suggest_video", "query", "none",
           "entryId": string or null,
           "contact": string or null,
           "time": string or null,
@@ -49,6 +50,8 @@ enum IntentPrompt {
           "message": string or null,
           "callType": string or null,
           "requestedApp": string or null,
+          "topic": string or null,
+          "steps": array of strings or null,
           "confidence": number from 0 to 1,
           "reply": short string, a spoken reply in the user's language
         }
@@ -57,7 +60,14 @@ enum IntentPrompt {
         "call" if they want to make a phone call, "send_message" if they
         want to send a text message, "set_reminder" if they want a
         reminder at a time, "music" if they ask for a song or bhajan,
-        "query" for any other question, otherwise "none".
+        "create_calendar_event" if they want something added to their
+        calendar (an event, not a reminder), "suggest_video" if they ask
+        to watch something or want a video suggestion, "guide" if they ask
+        HOW to do something with a physical device or appliance (for
+        "guide" set topic to the subject, e.g. "microwave" or "tv remote",
+        and steps to a short ordered list of instruction steps in the
+        user's language — steps are READ ALOUD to the user, never executed
+        by the device), "query" for any other question, otherwise "none".
 
         Set action to "emergency" for ANY plea for help, urgent pain,
         injury, a fall, feeling unable to breathe, chest pain, or fear for
@@ -104,6 +114,80 @@ enum IntentPrompt {
         to check, you are the only assistant they have.
 
         User said: "\(transcript)"
+        """
+    }
+
+    /// Collapse #1 prompt (intent-engine spec 2026-09-05 §4): audio goes
+    /// in with this prompt; ONE response carries the transcript AND the
+    /// intent AND the reply, so STT and interpretation are a single
+    /// round trip. Same schema, same classification policy as `build` —
+    /// the two prompts share every rule, only the input modality and the
+    /// extra `transcript` output field differ, so behavior can't drift
+    /// between the text and audio paths (the lesson of the pre-unify
+    /// prompt drift, applied going forward).
+    static func buildUnderstanding(context: InterpreterContext) -> String {
+        let meds = context.pendingMedications.isEmpty
+            ? "(none)"
+            : context.pendingMedications.joined(separator: ", ")
+        return """
+        You are Sahayak, an INTENT-RECOGNITION AND ENTITY-EXTRACTION engine
+        for an elderly speaker's voice assistant — you are NOT a
+        conversational chatbot. Listen to the attached audio of one
+        utterance. Transcribe it verbatim (in the language actually
+        spoken — hint: \(context.userLanguageHint), but transcribe what
+        you actually hear), then decide what the user wants DONE and
+        extract exactly the entities needed to do it. A downstream
+        on-device command executor acts on your structured output; it
+        only understands the fields below.
+        The user's pending medications are: \(meds).
+
+        Reply with ONLY a single JSON object (no markdown fences, no
+        commentary) with exactly these fields:
+        {
+          "transcript": string, the verbatim transcription,
+          "action": one of "ack_med", "call", "emergency", "set_reminder",
+                    "health_query", "music", "send_message", "guide",
+                    "create_calendar_event", "suggest_video", "query", "none",
+          "entryId": string or null,
+          "contact": string or null,
+          "time": string or null,
+          "medication": string or null,
+          "message": string or null,
+          "callType": string or null,
+          "requestedApp": string or null,
+          "topic": string or null,
+          "steps": array of strings or null,
+          "confidence": number from 0 to 1,
+          "reply": short string, a spoken reply in the user's language
+        }
+
+        Apply EXACTLY the same classification policy as the text-path
+        prompt you share rules with: "ack_med" for confirming medication
+        was taken; "call" to make a phone call (contact = who they named
+        or described; callType "video"/"voice" only when asked; requestedApp
+        only when THEY named an app — never guess one); "send_message" to
+        text someone (message = the dictated body); "set_reminder" for a
+        reminder (time = their original wording); "music" for a song or
+        bhajan; "guide" for HOW to use a physical device/appliance (topic =
+        the subject; steps = short ordered instruction steps in the user's
+        language — READ ALOUD to the user, never executed by the device);
+        "query" for any other question; otherwise "none".
+
+        "emergency" is for ANY plea for help, urgent pain, injury, a fall,
+        feeling unable to breathe, chest pain, or fear for safety — even
+        phrased as a question or with a symptom attached. Err toward
+        "emergency" over "health_query" on real ambiguity: a false alarm
+        costs one reassurance message; a miss costs far more.
+        "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ" (help, my kidney hurts)
+        is "emergency", NOT "health_query". Reserve "health_query" for
+        calm, non-urgent health questions with no help-seeking.
+
+        The "reply" field is a short FUNCTIONAL acknowledgment tied to the
+        command (confirming a call, a reminder, a dose) — except for
+        "query"/"none", where "reply" IS the response and must carry a
+        real, substantive, helpful answer in the user's language, using
+        your own best knowledge, never deflecting to another app or
+        website.
         """
     }
 }

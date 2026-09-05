@@ -40,7 +40,10 @@ is the swap point. The fine-tuned model conforms to it; `CommandRouter` never ch
    *consistently* matters more than behaving *intelligently*. Every decision that can
    be code (method selection, timeouts, confirmation policy) is code.
 3. **Fail-soft ladder.** Every stage has a defined degradation; the ladder always ends
-   at the keyword net + re-prompt, never at silence or a wrong action.
+at the keyword net + re-prompt, never at silence or a wrong action.
+3a. **Emergency outranks everything, including an outstanding confirmation.** A distress
+phrase spoken during a yes/no challenge is an emergency, not an answer (implementation
+refinement, 2026-09-05).
 4. **Privacy tiering.** The most sensitive utterances (health, family, medication)
    should never need the cloud. The cloud is for open-domain curiosity and vision.
 5. **Abstention is a feature.** A model that says "not sure" at the right time beats a
@@ -699,3 +702,36 @@ Method always disclosed in the prompt: resolution errors must be *audible*, not 
 - `ios/ElderlyAssistant/Services/Voice/{CommandRouter,GeminiCommandInterpreter,LlamaCommandInterpreter,NepaliTimeParser,TranscriptSanityGuard}.swift`
 - `ios/ElderlyAssistant/App/AppCoordinator.swift` — confirm-before-execute calling, `CallMethod`
 - `tools/train/` — training harness (4090 box, resumable stages)
+
+---
+
+## 18. Implementation notes (2026-09-05, intent-engine-impl branch)
+
+Deviations from the spec as implemented, with reasons:
+
+1. **Cache stores the InterpretedCommand only — no resolved-target snapshot.**
+   Resolution re-runs on every hit (<50ms), so a deleted contact fails gracefully
+   and a changed method preference takes effect immediately. Invalidation becomes
+   unnecessary by construction (spec §4.2 invariant 3 becomes moot rather than
+   violated). If a future revision caches snapshots, invalidation returns to being
+   mandatory.
+2. **Executor registry deferred.** The ConfirmationTier vocabulary (which drives
+   IntentRouter's REPHRASE band) shipped; the protocol+registry facade over the
+   working call/message/reminder flows is deferred until executors multiply
+   (calendar/guide/video phases) — a registry changing nothing is a dead
+   abstraction. The tier enum is its attachment point.
+3. **REPHRASE band dispatches tier-`confirm` actions into the normal confirmation
+   flow** (the confirmation question IS the rephrase-as-question); tier-`free`
+   mid-band actions still abstain until the calibrated local model lands.
+4. **Cloud escalation carries the transcript, not the audio clip, on the
+   on-device STT stack** — the pipeline does not retain clips after recognition.
+   Clip-escalation needs pipeline surgery (clip retention); the collapsed
+   understand call already eliminates STT-error compounding on the cloud stack,
+   which is where the concern primarily lived.
+5. **IntentPrompt gained a sibling `buildUnderstanding`** (audio path) sharing
+   every classification rule with `build` — the pre-unify drift lesson applied
+   going forward.
+6. **router.call.methodVoice reworded** ("a FaceTime audio call" / "फेसटाइम
+   अडियो कल") — it previously said "a phone call", which became a lie the moment
+   `tel:` existed as a distinct method. Method disclosure must name the real
+   channel.

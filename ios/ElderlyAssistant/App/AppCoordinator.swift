@@ -258,12 +258,26 @@ final class AppCoordinator: ObservableObject {
     /// `CommandRouter`'s existing keyword fallback takes over — unchanged.
     private let llamaCommandInterpreter: LlamaCommandInterpreter
     /// Set once in `start()`. `geminiCommandInterpreter` is the concrete
-    /// Gemini-backed interpreter; `switchableInterpreter` is the single
-    /// `CommandInterpreter` handed to `CommandRouter` — it forwards to
-    /// whichever of the two concrete interpreters `voiceEngineStack`
-    /// currently selects.
+    /// Gemini-backed interpreter — one of the two optional BRAINS behind
+    /// `intentRouter` (spec 2026-09-05 §4.0), never installed in the
+    /// router directly. `intentRouter` is the single `CommandInterpreter`
+    /// handed to `CommandRouter`: keyword net → intent→command cache →
+    /// cloud preparse → local brain → cloud brain (only when
+    /// `cloudEnabled`). The `voiceEngineStack` toggle now flips
+    /// `intentRouter.cloudEnabled` rather than swapping interpreters.
     private var geminiCommandInterpreter: GeminiCommandInterpreter!
-    private var switchableInterpreter: SwitchableCommandInterpreter!
+    private(set) var intentRouter: IntentRouter?
+
+    // MARK: - Intent layer services (spec 2026-09-05)
+    /// Deterministic slot resolution + learning stores. Lazy so `storage`
+    /// and `familyContacts` exist before first use.
+    private lazy var contactResolver = ContactResolver { [weak self] in self?.familyContacts ?? [] }
+    private lazy var callMethodPreferences = CallMethodPreferenceStore(storage: storage)
+    private lazy var confirmedMethodHistory = ConfirmedMethodHistoryStore(storage: storage)
+    private lazy var methodResolver = MethodResolver(preferenceStore: callMethodPreferences,
+                                                     historyStore: confirmedMethodHistory)
+    private lazy var intentCache = IntentCommandCache(storage: storage)
+    private lazy var repetitionGuard = RepetitionGuard(storage: storage)
 
     /// Legacy v1 on-device model catalog — kept only so the buried
     /// "AI मोडेल" settings screen still functions as a manual fallback.
@@ -358,7 +372,11 @@ final class AppCoordinator: ObservableObject {
         )
         self.llamaCommandInterpreter = LlamaCommandInterpreter(
             modelStore: modelStore,
-            observabilityBus: bus
+            observabilityBus: bus,
+            config: LlamaCommandInterpreter.Config(confidenceThreshold: 0.4,
+                                                   maxTokens: 128,
+                                                   temperature: 0.2,
+                                                   timeoutSeconds: 10)
         )
 
         // Restore the persisted voice-engine stack choice (default: the
@@ -445,25 +463,37 @@ final class AppCoordinator: ObservableObject {
         // API key is configured (GeminiConfigStore) — CommandRouter treats
         // that exactly like the old "LLM not linked" case: fall through to
         // keyword matching.
+        // Brains are constructed with their confidence threshold at the
+        // REPHRASE floor (0.4) so mid-confidence commands reach
+        // `IntentRouter`, which owns the band policy (spec §4): ≥0.7
+        // dispatches, 0.4–0.7 dispatches only tier-`confirm` actions
+        // (their confirmation question verifies aloud), below → abstain.
         let geminiInterpreter = GeminiCommandInterpreter(
             client: geminiClient,
-            observabilityBus: observabilityBus
+            observabilityBus: observabilityBus,
+            config: GeminiCommandInterpreter.Config(confidenceThreshold: 0.4)
         )
         self.geminiCommandInterpreter = geminiInterpreter
-        // CommandRouter holds its interpreter as an immutable `private let`
-        // — so it's handed ONE `SwitchableCommandInterpreter` that forwards
-        // to whichever concrete interpreter `voiceEngineStack` currently
-        // selects. `applyVoiceEngineStack()` (called below, and again on
-        // every stack change) is what actually flips `.current`.
-        let switchable = SwitchableCommandInterpreter(
-            current: voiceEngineStack == .onDevice ? llamaCommandInterpreter : geminiInterpreter
-        )
-        self.switchableInterpreter = switchable
+        let router3 = IntentRouter(cache: intentCache, observabilityBus: observabilityBus)
+        router3.localBrain = llamaCommandInterpreter
+        router3.cloudBrain = geminiInterpreter
+        router3.cloudEnabled = (voiceEngineStack == .gemini)
+        self.intentRouter = router3
+        // Collapse #1 (spec §4): when the Gemini recognizer is the active
+        // STT, ONE understand call does STT + intent; the command half is
+        // waiting in `intentRouter` when the transcript half routes.
+        geminiSpeechRecognizer.collapseContextProvider = { [weak self] in
+            InterpreterContext(pendingMedications: [],
+                               userLanguageHint: self?.activeLocale.languageCode ?? "ne")
+        }
+        geminiSpeechRecognizer.onUnderstanding = { [weak self] transcript, command in
+            self?.intentRouter?.noteCloudPreparsed(transcript: transcript, command: command)
+        }
         let router = CommandRouter(
             coordinator: self,
             observabilityBus: observabilityBus,
             speaker: speaker,
-            interpreter: switchable
+            interpreter: router3
         )
         // Start with the fallback STT. Gemini is swapped in below once an
         // API key is configured.
@@ -726,10 +756,13 @@ final class AppCoordinator: ObservableObject {
     private func applyVoiceEngineStack() {
         switch voiceEngineStack {
         case .gemini:
-            switchableInterpreter?.current = geminiCommandInterpreter
+            // Local-first hybrid with cloud fallback (spec §4.0): the
+            // local brain answers what it can, Gemini takes the rest.
+            intentRouter?.cloudEnabled = true
             trySwapToGemini()
         case .onDevice:
-            switchableInterpreter?.current = llamaCommandInterpreter
+            // Strictly on-device: no cloud brain even if a key exists.
+            intentRouter?.cloudEnabled = false
             // Whisper if its model is actually cached and the runtime is
             // linked; else the SFSpeechRecognizer fallback rather than
             // silently doing nothing (spec §7: no dead-end states).
@@ -845,6 +878,8 @@ final class AppCoordinator: ObservableObject {
 
     func removeFamilyContact(id: UUID) {
         familyContactStore.remove(id: id)
+        callMethodPreferences.removeAll(for: id)
+        confirmedMethodHistory.removeAll(for: id)
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.familyContacts = self.familyContactStore.load()
@@ -891,31 +926,14 @@ final class AppCoordinator: ObservableObject {
     // no entity extraction and can't identify a specific target. These
     // only act when a specific, resolvable contact was named.
 
-    /// Matches a spoken name OR relationship ("छोरा"/"son") against family
-    /// contacts. Case-insensitive substring match in both directions so
-    /// "सुनिता" matches a contact named "सुनिता आचार्य" and vice versa.
-    private func matchContact(_ query: String) -> FamilyContact? {
-        let q = query.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return nil }
-        return familyContacts.first {
-            $0.name.lowercased().contains(q) || q.contains($0.name.lowercased())
-            || $0.relationship.lowercased().contains(q) || q.contains($0.relationship.lowercased())
-        }
-    }
-
-    /// Real, one-tap-completable outbound methods (2026-09-05 "intent is
-    /// king" routing). FaceTime deep links genuinely place the call;
-    /// WhatsApp has no public call-initiation API on iOS at all — `.chat`
-    /// only opens the conversation, the user still taps the call icon
-    /// themselves inside WhatsApp. Messenger and Viber have no
-    /// integration point whatsoever (confirmed in
-    /// docs/messaging-calling-platform-research.md, already agreed out of
-    /// scope) — requesting either falls back to FaceTime, disclosed out
-    /// loud, never silently.
-    enum CallMethod {
-        case facetimeVideo
-        case facetimeAudio
-        case whatsappChat
+    /// Single-contact resolution for flows that can't disambiguate aloud
+    /// (message compose). Backed by `ContactResolver` (spec §6.1) — the
+    /// deterministic, scoring-based matcher that replaced the bare
+    /// substring check. Ambiguous → nil: the caller speaks its generic
+    /// not-found, which is honest (it can't name who it would have used).
+    private func resolveSingleContact(_ query: String?) -> FamilyContact? {
+        guard case .one(let contact) = contactResolver.resolve(query) else { return nil }
+        return contact
     }
 
     struct PendingCallAction {
@@ -925,56 +943,88 @@ final class AppCoordinator: ObservableObject {
         /// through (e.g. "messenger"), so we fell back to FaceTime —
         /// named here so the confirmation prompt can disclose it.
         let unsupportedRequestedApp: String?
+        /// The original utterance + interpreted command this action came
+        /// from — threaded through so a CONFIRMED execution can teach the
+        /// intent→command cache (spec §4.2). Nil for touch-originated
+        /// actions; overrides inherit them from the action they amend.
+        let sourceTranscript: String?
+        let sourceCommand: InterpretedCommand?
     }
 
     @Published private(set) var pendingCallAction: PendingCallAction?
     var isAwaitingCallConfirmation: Bool { pendingCallAction != nil }
 
-    /// `call` intent — resolves the contact and picks the best REAL
-    /// method (see `CallMethod`), then asks for voice confirmation before
-    /// doing anything (2026-09-05: "ai determines intent, then ask
-    /// permission and execute"). Returns the prompt to speak; nil if no
-    /// contact could be resolved, so the caller falls back to its
-    /// existing blocked/unrecognised message.
-    func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?) -> String? {
-        guard let contactQuery, let contact = matchContact(contactQuery) else { return nil }
-        let (method, unsupported) = Self.resolveCallMethod(requestedApp: requestedApp, callType: callType)
-        let action = PendingCallAction(contact: contact, method: method, unsupportedRequestedApp: unsupported)
+    /// `call` intent — resolves the contact (ContactResolver, spec §6.1)
+    /// and picks the best REAL method (MethodResolver chain, spec §6.2),
+    /// then asks for voice confirmation before doing anything. Returns
+    /// the prompt to speak; nil if no contact could be resolved, so the
+    /// caller falls back to its existing blocked/unrecognised message.
+    /// An AMBIGUOUS contact is not nil: no action is pended, and the
+    /// returned prompt asks for a fuller name instead (guessing a person
+    /// is the worst resolution error — spec §6.1).
+    func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?,
+                                 sourceTranscript: String?, sourceCommand: InterpretedCommand?) -> String? {
+        guard let contactQuery else { return nil }
+        let contact: FamilyContact
+        switch contactResolver.resolve(contactQuery) {
+        case .one(let match):
+            contact = match
+        case .ambiguous(let matches):
+            let names = matches.prefix(2).map(\.name).joined(separator: ", ")
+            return L10n.fmt("router.call.disambiguate", locale: activeLocale, names)
+        case .none:
+            return nil
+        }
+        let resolved = methodResolver.resolve(contactId: contact.id,
+                                              requestedApp: requestedApp,
+                                              callType: callType)
+        let action = PendingCallAction(contact: contact,
+                                       method: resolved.method,
+                                       unsupportedRequestedApp: resolved.unsupportedRequestedApp,
+                                       sourceTranscript: sourceTranscript,
+                                       sourceCommand: sourceCommand)
         pendingCallAction = action
+        // Dementia-loop guard (spec §7.2): same target called again
+        // within the window → the confirmation prompt says so out loud.
+        let isRepeat = repetitionGuard.isRepeat(actionKey: "call", targetId: contact.id.uuidString)
         DispatchQueue.main.async { [weak self] in
             self?.voiceSession.transition(to: .awaitingConfirmation)
         }
-        return confirmationPrompt(for: action)
+        return confirmationPrompt(for: action, isRepeat: isRepeat)
     }
 
-    /// Maps (requestedApp, callType) to a real, achievable method.
-    /// `requestedApp`/`callType` are free-form strings the LLM extracted
-    /// from speech (e.g. "whatsapp", "video") — matched loosely in both
-    /// English and Nepali since that's what actually shows up.
-    private static func resolveCallMethod(requestedApp: String?, callType: String?) -> (CallMethod, unsupportedRequestedApp: String?) {
-        let isVideo = callType.map { $0.lowercased().contains("video") || $0.contains("भिडियो") } ?? false
-        guard let app = requestedApp?.lowercased(), !app.isEmpty else {
-            return (isVideo ? .facetimeVideo : .facetimeAudio, nil)
-        }
-        if app.contains("facetime") || app.contains("फेसटाइम") {
-            return (isVideo ? .facetimeVideo : .facetimeAudio, nil)
-        }
-        if app.contains("whatsapp") || app.contains("ह्वाट्सएप") || app.contains("वाट्सएप") {
-            return (.whatsappChat, nil)
-        }
-        // Messenger, Viber, or anything else with no real integration —
-        // fall back to FaceTime, but say so.
-        return (isVideo ? .facetimeVideo : .facetimeAudio, requestedApp)
+    /// Call-confirmation correction protocol (spec §7.2): the user
+    /// answered the confirmation question with a METHOD amendment
+    /// ("होइन, फोन नै गर" — no, plain phone). Rebuilds the pending action
+    /// with the overridden method and re-confirms once — the yes/no that
+    /// follows executes as normal, and the override pair is exactly the
+    /// flywheel's gold sample. Returns false when the utterance carries
+    /// no method keyword, so the router runs the normal yes/no flow.
+    func handleCallConfirmationOverride(_ utterance: String) -> Bool {
+        guard let action = pendingCallAction,
+              let override = CallOverrideParser.parseMethodOverride(utterance) else { return false }
+        let amended = PendingCallAction(contact: action.contact,
+                                        method: override,
+                                        unsupportedRequestedApp: nil,
+                                        sourceTranscript: action.sourceTranscript,
+                                        sourceCommand: action.sourceCommand)
+        pendingCallAction = amended
+        speak(text: confirmationPrompt(for: amended, isRepeat: false))
+        return true
     }
 
-    private func confirmationPrompt(for action: PendingCallAction) -> String {
+    private func confirmationPrompt(for action: PendingCallAction, isRepeat: Bool) -> String {
         let locale = activeLocale
         var parts: [String] = []
+        if isRepeat {
+            parts.append(L10n.fmt("router.call.recentRepeatNotice", locale: locale, action.contact.name))
+        }
         if let unsupported = action.unsupportedRequestedApp {
             parts.append(L10n.fmt("router.call.appUnsupportedNotice", locale: locale, unsupported))
         }
         let methodKey: String
         switch action.method {
+        case .phone: methodKey = "router.call.methodPhone"
         case .facetimeVideo: methodKey = "router.call.methodVideo"
         case .facetimeAudio: methodKey = "router.call.methodVoice"
         case .whatsappChat: methodKey = "router.call.methodWhatsAppChat"
@@ -990,6 +1040,14 @@ final class AppCoordinator: ObservableObject {
     private func performCallAction(_ action: PendingCallAction) {
         let locale = activeLocale
         switch action.method {
+        case .phone:
+            let digits = action.contact.phone.filter { $0.isNumber || $0 == "+" }
+            if !digits.isEmpty, let url = URL(string: "tel:\(digits)") {
+                DispatchQueue.main.async { UIApplication.shared.open(url) }
+            }
+            setOutcome(icon: "phone.fill",
+                       text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
+            speak(text: L10n.fmt("router.call.calling", locale: locale, action.contact.name))
         case .facetimeVideo, .facetimeAudio:
             let scheme = action.method == .facetimeVideo ? "facetime" : "facetime-audio"
             let digits = action.contact.phone.filter { $0.isNumber || $0 == "+" }
@@ -1008,6 +1066,21 @@ final class AppCoordinator: ObservableObject {
                        text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, action.contact.name))
             speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, action.contact.name))
         }
+        noteConfirmedCallExecution(action)
+    }
+
+    /// Post-execution learning (spec §4.2 + §6.2): a CONFIRMED call is
+    /// the system's highest-quality signal — it updates the confirmed-
+    /// method history (step 3 of the method chain), feeds the dementia
+    /// repetition guard, and teaches the intent→command cache with the
+    /// original utterance (so next time the SAME words resolve with no
+    /// model at all — confirmation still applies on every cache hit).
+    private func noteConfirmedCallExecution(_ action: PendingCallAction) {
+        confirmedMethodHistory.record(action.method, for: action.contact.id)
+        repetitionGuard.record(actionKey: "call", targetId: action.contact.id.uuidString)
+        if let transcript = action.sourceTranscript, let command = action.sourceCommand {
+            intentRouter?.recordConfirmedExecution(transcript: transcript, command: command)
+        }
     }
 
     /// A pending SMS draft — presented as `MessageComposeView` from
@@ -1023,7 +1096,7 @@ final class AppCoordinator: ObservableObject {
 
     func composeMessage(toContactNamed query: String?, body: String) -> Bool {
         guard MFMessageComposeViewController.canSendText(),
-              let query, let contact = matchContact(query) else { return false }
+              let query, let contact = resolveSingleContact(query) else { return false }
         DispatchQueue.main.async { [weak self] in
             self?.pendingMessageDraft = MessageDraft(recipients: [contact.phone], body: body)
         }

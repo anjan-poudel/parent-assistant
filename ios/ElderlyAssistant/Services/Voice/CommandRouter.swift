@@ -41,7 +41,21 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// to speak. Returns nil when no contact can be resolved — the router
     /// falls back to the existing blocked/unrecognised message rather
     /// than claiming success. Nothing is dialed until the user says yes.
-    func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?) -> String?
+    /// `sourceTranscript` + `sourceCommand` thread the ORIGINAL utterance
+    /// through so a confirmed execution can teach the intent→command
+    /// cache (spec 2026-09-05 §4.2: the cache learns from confirmed
+    /// executions only) — nil when the call didn't originate from an
+    /// interpreted transcript.
+    func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?,
+                                 sourceTranscript: String?, sourceCommand: InterpretedCommand?) -> String?
+
+    /// Call-confirmation correction hook (spec §7.2 correction protocol).
+    /// While a call confirmation is outstanding, the router hands each
+    /// response utterance here FIRST: an utterance carrying a method
+    /// override ("होइन, फोन नै गर") rebuilds the pending call and
+    /// re-confirms. Returns true when it handled the utterance; false
+    /// means "not an override — run the normal yes/no flow".
+    func handleCallConfirmationOverride(_ utterance: String) -> Bool
 
     /// `send_message` intent (trial wiring). iOS never lets a third-party
     /// app send SMS silently — `MFMessageComposeViewController` always
@@ -112,11 +126,33 @@ final class CommandRouter {
             return .unrecognised(transcript: raw)
         }
 
+        // Emergency outranks even an outstanding confirmation: "मद्दत"
+        // said during a yes/no challenge is an emergency, not an answer
+        // (constitution: never blocked, by anything, ever).
+        let preText = raw
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if Self.emergencyPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
+            emit(eventType: "command_emergency_keyword", outcome: "success")
+            handleEmergency()
+            return .emergencyTriggered
+        }
+
         // Confirmation-follow-up path: if a challenge is outstanding,
         // treat this transcript as the user's yes/no response, not a new
         // command. Runs the dementia-aware `acknowledgeWithConfirmation`
         // path with the double-dose check.
         if coordinator?.isAwaitingConfirmation == true {
+            // Call-confirmation correction protocol (spec §7.2): a
+            // no-with-amendment ("होइन, फोन नै गर") is a slot override,
+            // not a rejection — checked BEFORE the plain yes/no parse,
+            // which would otherwise swallow the amendment ("होइन" ⊂ the
+            // utterance) and cancel instead of re-planning.
+            if coordinator?.isAwaitingCallConfirmation == true,
+               coordinator?.handleCallConfirmationOverride(raw) == true {
+                emit(eventType: "call_confirmation_override", outcome: "info")
+                return .unrecognised(transcript: raw)
+            }
             // Call confirmations speak their own contextual response
             // (AppCoordinator.handleConfirmationResponse) — the generic
             // "confirmationYes"/"confirmationNo" catalog text below is
@@ -144,6 +180,19 @@ final class CommandRouter {
             return .unrecognised(transcript: raw)
         }
 
+        // Deterministic safety net FIRST (spec 2026-09-05 §4 routing
+        // ladder): emergency and explicit med-ack never wait on — and
+        // never depend on the correctness of — ANY model. Live testing
+        // (2026-09-04) showed the LLM itself can misclassify a distress
+        // utterance as health_query, so "the LLM got a confident answer"
+        // is not sufficient reason to skip this net; it runs first,
+        // always. The REMAINDER of the keyword layer (sensitive-call
+        // blocking, generic unrecognised) still runs AFTER the LLM as
+        // its fallback — only the safety-critical vocabulary moved.
+        if let safetyResult = routeSafetyNet(raw) {
+            return safetyResult
+        }
+
         // Fast path — the LLM interpreter. Falls through to keyword when
         // the interpreter is unavailable or not confident.
         if interpreter.isAvailable {
@@ -153,9 +202,11 @@ final class CommandRouter {
             )
             interpreter.interpret(transcript: raw, context: context) { [weak self] command in
                 if let command = command {
+                    self?.pendingTranscript = raw
                     self?.dispatchInterpreted(command)
+                    self?.pendingTranscript = nil
                 } else {
-                    _ = self?.routeKeyword(raw)
+                    _ = self?.routeKeywordRemainder(raw)
                 }
             }
             // We can't return a synchronous result once the LLM path fires;
@@ -164,7 +215,7 @@ final class CommandRouter {
             return .unrecognised(transcript: raw)
         }
 
-        return routeKeyword(raw)
+        return routeKeywordRemainder(raw)
     }
 
     // MARK: - Keyword fallback
@@ -208,8 +259,14 @@ final class CommandRouter {
         "लड्नुभयो", "सास फेर्न सकिन", "सास फेर्न गाह्रो", "छाती दुख्यो"
     ]
 
+    /// The safety-critical slice of the keyword layer, runnable on its
+    /// own AHEAD of the LLM (spec §4 ladder: keyword net first, always).
+    /// Returns nil when nothing safety-shaped matched, so the caller can
+    /// proceed to the interpreter; the remaining keyword behavior
+    /// (sensitive-call block, unrecognised re-prompt) stays in
+    /// `routeKeywordRemainder` as the post-LLM fallback.
     @discardableResult
-    private func routeKeyword(_ raw: String) -> RoutingResult {
+    private func routeSafetyNet(_ raw: String) -> RoutingResult? {
         let text = raw
             .lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -250,6 +307,18 @@ final class CommandRouter {
             handleMedicationAcknowledgement()
             return .acknowledgedMedication
         }
+        return nil
+    }
+
+    /// Post-LLM keyword fallback — everything in the keyword layer that
+    /// is NOT safety-critical: the blunt sensitive-call block (no entity
+    /// extraction available, so any call-ish phrase is blocked rather
+    /// than acted on) and the generic unrecognised re-prompt.
+    @discardableResult
+    private func routeKeywordRemainder(_ raw: String) -> RoutingResult {
+        let text = raw
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
         let sensitiveCallPhrases = [
             "call", "phone", "facetime", "messenger", "whatsapp",
@@ -267,6 +336,13 @@ final class CommandRouter {
     }
 
     // MARK: - LLM dispatch
+
+    /// The raw transcript currently being dispatched through an
+    /// interpreted command — set by the async interpret completion and
+    /// cleared after dispatch, so handlers (e.g. `handleCall`) can thread
+    /// it to the coordinator for cache learning. Single in-flight
+    /// interpretation at a time (VoicePipeline serialises utterances).
+    private var pendingTranscript: String?
 
     private func dispatchInterpreted(_ command: InterpretedCommand) {
         switch command.action {
@@ -289,6 +365,26 @@ final class CommandRouter {
             speakWithVisibleOutcome(key: "router.musicStub")
         case .sendMessage:
             handleSendMessage(command)
+        case .guide:
+            // Guide class (spec §5): steps are READ ALOUD to the human,
+            // never executed. Cloud-only today (appliance/TV questions
+            // need the vision helper anyway) — spoken steps when present,
+            // else the model's reply.
+            emit(eventType: "command_guide", outcome: "info")
+            if let steps = command.steps, !steps.isEmpty {
+                let spoken = steps.joined(separator: ". ")
+                coordinator?.noteGenericReply(spoken)
+                speak(text: spoken)
+            } else {
+                coordinator?.noteGenericReply(command.reply)
+                speak(text: command.reply)
+            }
+        case .createCalendarEvent, .suggestVideo:
+            // Honest not-yet stubs (spec §7.3): the executors for these
+            // land with the calendar/video phases — never pretend an
+            // event was created or a video queued.
+            emit(eventType: "command_v2_stub", outcome: "info")
+            speakWithVisibleOutcome(key: "router.featureNotYet")
         case .query:
             emit(eventType: "command_llm_query", outcome: "info")
             coordinator?.noteGenericReply(command.reply)
@@ -337,7 +433,8 @@ final class CommandRouter {
     /// specifically-resolved contact gets dialed for real.
     private func handleCall(_ command: InterpretedCommand) {
         guard let prompt = coordinator?.requestCallConfirmation(
-            contactQuery: command.contact, callType: command.callType, requestedApp: command.requestedApp
+            contactQuery: command.contact, callType: command.callType, requestedApp: command.requestedApp,
+            sourceTranscript: pendingTranscript, sourceCommand: command
         ) else {
             // Distinguish WHY it failed instead of one generic "blocked"
             // message: a name was extracted but didn't match anyone in

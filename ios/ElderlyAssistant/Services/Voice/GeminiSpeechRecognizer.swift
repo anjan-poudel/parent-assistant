@@ -29,6 +29,17 @@ final class GeminiSpeechRecognizer: SpeechRecognizerProtocol {
 
     var isAvailable: Bool { client.isAvailable }
 
+    /// Collapse #1 (intent-engine spec 2026-09-05 §4): when
+    /// `collapseContextProvider` is set, `finish()` makes ONE understand
+    /// call (STT + intent + reply) instead of a bare transcribe call.
+    /// The transcript goes to the pipeline exactly as before; the command
+    /// half is handed to `onUnderstanding` (wired to `IntentRouter`'s
+    /// preparse slot), so interpretation costs zero extra round trips.
+    /// When unset the recognizer behaves exactly as it always has — the
+    /// collapse is opt-in per wiring, not a behavior change by default.
+    var collapseContextProvider: (() -> InterpreterContext)?
+    var onUnderstanding: ((String, InterpretedCommand?) -> Void)?
+
     init(client: GeminiClient, observabilityBus: ObservabilityBus, languageHint: String = "ne") {
         self.client = client
         self.observabilityBus = observabilityBus
@@ -70,18 +81,35 @@ final class GeminiSpeechRecognizer: SpeechRecognizerProtocol {
         }
 
         let wav = Self.wavData(fromPCM16: samples, sampleRate: sampleRate)
+        let collapseContext = collapseContextProvider?()
         inFlightTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let transcript = try await self.client.transcribe(
-                    audioData: wav, mimeType: "audio/wav", languageHint: self.languageHint)
-                self.emit("transcribed", outcome: "success")
-                #if DEBUG
-                // Debug-build-only, per explicit request while diagnosing
-                // a live bug (2026-09-04) — never compiled into Release.
-                print("[gemini_stt][DEBUG] transcript=\"\(transcript)\"")
-                #endif
-                self.settle(.success(transcript))
+                if let collapseContext {
+                    // Collapsed path: one call does STT + intent. The
+                    // command half fires its handler BEFORE the transcript
+                    // settles, so the preparse is already waiting when the
+                    // transcript reaches the router — ordering matters,
+                    // the router's interpret call is synchronous-after.
+                    let understanding = try await self.client.understand(
+                        audioData: wav, mimeType: "audio/wav", context: collapseContext)
+                    self.emit("understood", outcome: understanding.command == nil ? "no_command" : "success")
+                    #if DEBUG
+                    print("[gemini_stt][DEBUG] understand transcript=\"\(understanding.transcript)\"")
+                    #endif
+                    self.onUnderstanding?(understanding.transcript, understanding.command)
+                    self.settle(.success(understanding.transcript))
+                } else {
+                    let transcript = try await self.client.transcribe(
+                        audioData: wav, mimeType: "audio/wav", languageHint: self.languageHint)
+                    self.emit("transcribed", outcome: "success")
+                    #if DEBUG
+                    // Debug-build-only, per explicit request while diagnosing
+                    // a live bug (2026-09-04) — never compiled into Release.
+                    print("[gemini_stt][DEBUG] transcript=\"\(transcript)\"")
+                    #endif
+                    self.settle(.success(transcript))
+                }
             } catch {
                 self.emit("transcribe_failed", outcome: "failure", errorCode: String(describing: error))
                 self.settle(.failure(.recognitionFailed(error)))

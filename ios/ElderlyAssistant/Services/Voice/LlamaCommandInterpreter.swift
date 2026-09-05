@@ -38,7 +38,7 @@ struct InterpreterContext {
 
 /// Structured command emitted by the LLM. Matches the GBNF grammar exactly
 /// (spec §5.1 catalog, §5.2 entities).
-struct InterpretedCommand: Equatable {
+struct InterpretedCommand: Equatable, Codable {
     enum Action: String, Codable {
         case ackMed = "ack_med"
         case call
@@ -48,6 +48,12 @@ struct InterpretedCommand: Equatable {
         case music
         case query
         case sendMessage = "send_message"
+        // intent/v2 (2026-09-05 spec §5): Guide class — steps are SPOKEN to
+        // the user, never executed on-device; and the two new cloud-side
+        // helper actions from the v2 pivot catalog (§3.2 of the pivot doc).
+        case guide
+        case createCalendarEvent = "create_calendar_event"
+        case suggestVideo = "suggest_video"
         case none
     }
     let action: Action
@@ -73,8 +79,38 @@ struct InterpretedCommand: Equatable {
     /// back to FaceTime with a disclosed notice
     /// (`AppCoordinator.resolveCallMethod`).
     let requestedApp: String?
+    /// intent/v2 — entity for `guide`: the subject the user wants help
+    /// with ("microwave", "tv remote"), free-form as spoken.
+    let topic: String?
+    /// intent/v2 — payload for `guide`: short instruction steps in the
+    /// user's language. Guide steps are SPOKEN/SHOWN to the human and are
+    /// never executed as device actions (spec §5 — the Action/Guide
+    /// separation is what stops a generated "step 3: open whatsapp://…"
+    /// from ever being treated as a device action).
+    let steps: [String]?
     let confidence: Double
     let reply: String
+
+    /// Memberwise init with the intent/v2 fields defaulted — pre-v2 call
+    /// sites (and v1 test fixtures) construct commands without
+    /// topic/steps and keep compiling unchanged.
+    init(action: Action, entryId: String?, contact: String?, time: String?,
+         medication: String?, message: String?, callType: String?,
+         requestedApp: String?, topic: String? = nil, steps: [String]? = nil,
+         confidence: Double, reply: String) {
+        self.action = action
+        self.entryId = entryId
+        self.contact = contact
+        self.time = time
+        self.medication = medication
+        self.message = message
+        self.callType = callType
+        self.requestedApp = requestedApp
+        self.topic = topic
+        self.steps = steps
+        self.confidence = confidence
+        self.reply = reply
+    }
 }
 
 // MARK: - GBNF grammar
@@ -92,12 +128,17 @@ enum LlamaGrammar {
                     "\\"message\\"" ws ":" ws maybeString ws "," ws
                     "\\"callType\\"" ws ":" ws maybeString ws "," ws
                     "\\"requestedApp\\"" ws ":" ws maybeString ws "," ws
+                    "\\"topic\\"" ws ":" ws maybeString ws "," ws
+                    "\\"steps\\"" ws ":" ws maybeStringArray ws "," ws
                     "\\"confidence\\"" ws ":" ws number ws "," ws
                     "\\"reply\\"" ws ":" ws string ws "}"
     action ::= "\\"ack_med\\"" | "\\"call\\"" | "\\"emergency\\""
              | "\\"set_reminder\\"" | "\\"health_query\\"" | "\\"music\\""
-             | "\\"send_message\\"" | "\\"query\\"" | "\\"none\\""
+             | "\\"send_message\\"" | "\\"guide\\""
+             | "\\"create_calendar_event\\"" | "\\"suggest_video\\""
+             | "\\"query\\"" | "\\"none\\""
     maybeString ::= "null" | string
+    maybeStringArray ::= "null" | "[" ws (string ("," ws string)*)? "]" 
     string ::= "\\"" ([^"\\\\] | "\\\\" .)* "\\""
     number ::= ("0" | [1-9][0-9]*) ("." [0-9]+)?
     ws     ::= [ \\t\\n]*
@@ -343,6 +384,8 @@ final class LlamaCommandInterpreter: CommandInterpreter {
                 message: decoded.message,
                 callType: decoded.callType,
                 requestedApp: decoded.requestedApp,
+                topic: decoded.topic,
+                steps: decoded.steps,
                 confidence: clamped,
                 reply: decoded.reply
             )
@@ -393,6 +436,10 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         let message: String?
         let callType: String?
         let requestedApp: String?
+        // intent/v2 — optional at the wire level so v1 payloads (which
+        // never carried these keys) still decode.
+        let topic: String?
+        let steps: [String]?
         let confidence: Double
         let reply: String
     }
