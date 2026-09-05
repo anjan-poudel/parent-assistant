@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <sys/stat.h>
 #include <map>
 #include <string>
 #include <thread>
@@ -2725,17 +2726,26 @@ struct whisper_state * whisper_init_state(whisper_context * ctx) {
     {
         const auto path_coreml = whisper_get_coreml_path_encoder(ctx->path_model);
 
-        fprintf(stderr, "%s: loading Core ML model from '%s'\n", __func__, path_coreml.c_str());
-        fprintf(stderr, "%s: first run on a device may take a while ...\n", __func__);
-
-        state->ctx_coreml = whisper_coreml_init(path_coreml.c_str());
-        if (!state->ctx_coreml) {
-            fprintf(stderr, "%s: failed to load Core ML model from '%s'\n", __func__, path_coreml.c_str());
-#ifndef WHISPER_COREML_ALLOW_FALLBACK
-            return nullptr;
-#endif
+        // Only attempt the load when the encoder bundle actually exists —
+        // an absent encoder is the normal CPU-fallback case (no Nepali
+        // catalog entry ships one), and the unconditional attempt printed
+        // a scary "failed to load Core ML model" line on every CPU run.
+        struct stat st;
+        if (stat(path_coreml.c_str(), &st) != 0) {
+            fprintf(stderr, "%s: no Core ML encoder next to the model - using CPU\n", __func__);
         } else {
-            fprintf(stderr, "%s: Core ML model loaded\n", __func__);
+            fprintf(stderr, "%s: loading Core ML model from '%s'\n", __func__, path_coreml.c_str());
+            fprintf(stderr, "%s: first run on a device may take a while ...\n", __func__);
+
+            state->ctx_coreml = whisper_coreml_init(path_coreml.c_str());
+            if (!state->ctx_coreml) {
+                fprintf(stderr, "%s: failed to load Core ML model from '%s'\n", __func__, path_coreml.c_str());
+#ifndef WHISPER_COREML_ALLOW_FALLBACK
+                return nullptr;
+#endif
+            } else {
+                fprintf(stderr, "%s: Core ML model loaded\n", __func__);
+            }
         }
     }
 #endif

@@ -370,6 +370,14 @@ final class ModelStore {
         let dest = rootDirectory
             .appendingPathComponent("whisperKit", isDirectory: true)
             .appendingPathComponent(id.rawValue, isDirectory: true)
+        // Verify the zip against the catalog checksum before unpacking —
+        // same strict policy as single-file `finalize`.
+        if let entry = ModelCatalog.entry(for: id),
+           !(try verifyChecksum(at: zipURL, expected: entry.sha256)) {
+            emit("whisperkit_checksum_mismatch", outcome: "failure",
+                 modelId: id, errorCode: "checksum")
+            throw ModelStoreError.checksumMismatch
+        }
         let unzipDir = zipURL.deletingLastPathComponent()
             .appendingPathComponent("wk-unzip-\(UUID().uuidString)")
         defer { try? fileManager.removeItem(at: unzipDir) }
