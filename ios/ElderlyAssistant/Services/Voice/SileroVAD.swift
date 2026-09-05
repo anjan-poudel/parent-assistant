@@ -55,26 +55,86 @@ final class NullVAD: VoiceActivityDetector {
 // MARK: - Lightweight local VAD (MVP)
 
 /// Energy-based VAD used for the iOS MVP before the Silero runtime is linked.
-/// It is intentionally conservative: any reasonably loud frame is speech,
-/// and end-of-utterance fires only after a sustained quiet tail.
+///
+/// Two cooperating mechanisms, both adaptive — no fixed absolute levels:
+///
+/// 1. SPEECH START uses an adaptive absolute threshold: an EMA of ambient
+///    frame RMS (`noiseFloor`) tracks the room while no speech is active,
+///    and speech begins when a frame exceeds `speechMultiplier` x floor
+///    (clamped to [minSpeechThreshold, maxSpeechThreshold]).
+///
+/// 2. SPEECH END uses a RELATIVE drop: while speech is active, an EMA of
+///    the speech energy (`speechLevel`) is maintained, and any frame below
+///    `max(minSpeechThreshold, speechLevel x dropRatio)` counts toward the
+///    trailing-silence hangover. Keying off the DROP from observed speech
+///    energy — not an absolute quiet level — is what makes endpointing
+///    work in real homes: when the user stops talking, RMS falls from
+///    speech level to whatever the background is (fan/TV/street), and the
+///    end-of-utterance fires after the hangover no matter how loud that
+///    background happens to be.
+///
+/// Why: the previous fixed thresholds (0.018/0.010 RMS) silently stopped
+/// endpointing outside quiet rooms — ordinary background noise sits ABOVE
+/// a quiet-room threshold, the quiet counter kept resetting, and every
+/// capture ran out VoicePipeline's fixed 8 s timeout before transcription
+/// even started (the "constant lag" reported 2026-09-05). A first adaptive
+/// attempt that learned the floor only from below-threshold frames still
+/// failed: noise louder than the seed threshold is classified AS speech,
+/// so the floor could never rise to meet it (chicken-and-egg). The
+/// relative-drop end criterion has no such dependency.
 final class EnergyVAD: VoiceActivityDetector {
     let requiredSampleRate: Double = 16_000
     let frameLength: Int = 512
     var onSpeechStateChange: ((Bool) -> Void)?
     var onEndOfUtterance: (() -> Void)?
 
-    private let speechRMSThreshold: Float
-    private let silenceRMSThreshold: Float
+    /// Speech-start threshold = noiseFloor x this (before clamping).
+    private let speechMultiplier: Float
+    /// EMA rate for the noise floor (~1 s to converge at 31.25 fps).
+    private let floorAlpha: Float
+    /// End-of-speech level = speechLevel x this (6 dB drop), floored at
+    /// minSpeechThreshold so near-silent tails in quiet rooms still count.
+    private let dropRatio: Float
+    /// EMA rate for speechLevel while speech frames arrive.
+    private let speechLevelAlpha: Float
+    /// Absolute clamps on the speech-start threshold: keeps sensitivity in
+    /// a silent room (floor ~ 0) and bounds it in a very loud one.
+    private let minSpeechThreshold: Float
+    private let maxSpeechThreshold: Float
+    /// Ambient RMS estimate. Seeded low so first use is maximally
+    /// sensitive. NOT reset per utterance — a property of the room.
+    private var noiseFloor: Float
+    private let initialNoiseFloor: Float
+    /// Running speech-energy estimate while `speechActive`. Frozen during
+    /// the quiet tail so the drop reference can't decay into the noise it
+    /// is trying to measure against.
+    private var speechLevel: Float = 0
+
     private var running = false
     private var speechActive = false
     private var quietFrames = 0
     private var requiredQuietFrames = 8
     private var hasReportedEnd = false
 
-    init(speechRMSThreshold: Float = 0.018,
-         silenceRMSThreshold: Float = 0.010) {
-        self.speechRMSThreshold = speechRMSThreshold
-        self.silenceRMSThreshold = silenceRMSThreshold
+    init(speechMultiplier: Float = 2.5,
+         floorAlpha: Float = 0.08,
+         dropRatio: Float = 0.5,
+         speechLevelAlpha: Float = 0.3,
+         minSpeechThreshold: Float = 0.012,
+         maxSpeechThreshold: Float = 0.10,
+         initialNoiseFloor: Float = 0.005) {
+        self.speechMultiplier = speechMultiplier
+        self.floorAlpha = floorAlpha
+        self.dropRatio = dropRatio
+        self.speechLevelAlpha = speechLevelAlpha
+        self.minSpeechThreshold = minSpeechThreshold
+        self.maxSpeechThreshold = maxSpeechThreshold
+        self.initialNoiseFloor = initialNoiseFloor
+        self.noiseFloor = initialNoiseFloor
+    }
+
+    private var speechStartThreshold: Float {
+        min(maxSpeechThreshold, max(minSpeechThreshold, noiseFloor * speechMultiplier))
     }
 
     func start(endOfUtteranceMs: Int) {
@@ -90,24 +150,42 @@ final class EnergyVAD: VoiceActivityDetector {
 
     func reset() {
         speechActive = false
+        speechLevel = 0
         quietFrames = 0
         hasReportedEnd = false
+        // noiseFloor survives reset(): room calibration carries across
+        // utterances within a capture session.
     }
 
     func process(_ pcm: [Int16]) {
         guard running, !pcm.isEmpty, !hasReportedEnd else { return }
         let rms = Self.rms(pcm)
 
-        if rms >= speechRMSThreshold {
-            quietFrames = 0
-            if !speechActive {
+        if !speechActive {
+            if rms >= speechStartThreshold {
                 speechActive = true
+                speechLevel = rms
+                quietFrames = 0
                 onSpeechStateChange?(true)
+            } else {
+                noiseFloor += floorAlpha * (rms - noiseFloor)
             }
             return
         }
 
-        guard speechActive, rms <= silenceRMSThreshold else { return }
+        // Speech active: end when energy drops below a fraction of the
+        // running speech level (or the absolute minimum) for the whole
+        // hangover window.
+        let endLevel = max(minSpeechThreshold, speechLevel * dropRatio)
+        if rms >= endLevel {
+            quietFrames = 0
+            speechLevel += speechLevelAlpha * (rms - speechLevel)
+            return
+        }
+
+        // Quiet-counted frame — also teach the floor (a mid-speech gap is
+        // a sample of the room), but never the speechLevel reference.
+        noiseFloor += floorAlpha * (rms - noiseFloor)
         quietFrames += 1
         if quietFrames >= requiredQuietFrames {
             hasReportedEnd = true

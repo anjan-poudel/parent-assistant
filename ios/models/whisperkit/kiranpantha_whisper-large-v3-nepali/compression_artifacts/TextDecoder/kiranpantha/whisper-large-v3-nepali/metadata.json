@@ -1,0 +1,4 @@
+{
+  "class": "WhisperTextDecoderPalettizer",
+  "model_version": "kiranpantha/whisper-large-v3-nepali"
+}
