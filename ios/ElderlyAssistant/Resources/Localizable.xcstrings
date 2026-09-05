@@ -79,6 +79,108 @@
         }
       }
     },
+    "call.announce.faceTimeVideo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starting a FaceTime video call with %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ सँग फेसटाइम भिडियो कल सुरु गर्दैछु।"
+          }
+        }
+      }
+    },
+    "call.announce.messenger": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening Messenger for %@ — please tap the call button there yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को लागि मेसेन्जर खोल्दैछु — कृपया त्यहाँ आफैं कल बटन थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "call.announce.messengerWebFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger isn't installed, so I've opened it in the browser for %@ — please tap the call button there."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनमा मेसेन्जर छैन, त्यसैले %@ को लागि ब्राउजरमा खोलिदिएको छु — कृपया त्यहाँ आफैं कल बटन थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "call.announce.noPhoneNumber": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I don't have a usable phone number for %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को फोन नम्बर उपलब्ध छैन।"
+          }
+        }
+      }
+    },
+    "call.announce.whatsAppCopiedFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neither WhatsApp nor Messages works on this device, so I've copied %@'s number — you can paste it yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो उपकरणमा ह्वाट्सएप वा म्यासेज चल्दैन, त्यसैले %@ को नम्बर कपी गरिदिएको छु — आफैं टाँस्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "call.announce.whatsAppSmsFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WhatsApp isn't installed on this phone, so I've opened Messages for %@ instead."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनमा ह्वाट्सएप छैन, त्यसैले %@ को लागि म्यासेज खोलिदिएको छु।"
+          }
+        }
+      }
+    },
     "call.callButtonLabel": {
       "extractionState": "manual",
       "localizations": {
@@ -126,6 +228,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "फोन गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "call.videoCallButtonLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video call %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ लाई भिडियो कल गर्नुहोस्"
           }
         }
       }
@@ -755,6 +874,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ को लागि ह्वाट्सएप सन्देश तयार"
+          }
+        }
+      }
+    },
+    "home.outcome.messengerOpened": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger opened for %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को लागि मेसेन्जर खोलियो"
+          }
+        }
+      }
+    },
+    "home.outcome.numberCopied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Number copied for %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को नम्बर कपी भयो"
           }
         }
       }
