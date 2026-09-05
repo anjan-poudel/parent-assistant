@@ -11,6 +11,24 @@
         }
       },
       {
+        "package": "onnxruntime-libs",
+        "repositoryURL": "https://github.com/csukuangfj/onnxruntime-libs",
+        "state": {
+          "branch": null,
+          "revision": "5cc3d2e84d9eade2562cf29a93fa3a520a75ca57",
+          "version": "1.28.1"
+        }
+      },
+      {
+        "package": "sherpa-onnx",
+        "repositoryURL": "https://github.com/k2-fsa/sherpa-onnx",
+        "state": {
+          "branch": null,
+          "revision": "917bed95c8e5c7c18aa4d69fea42e9ef8ef0a60e",
+          "version": "1.13.7"
+        }
+      },
+      {
         "package": "swift-argument-parser",
         "repositoryURL": "https://github.com/apple/swift-argument-parser.git",
         "state": {
