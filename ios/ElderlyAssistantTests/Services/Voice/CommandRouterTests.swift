@@ -250,9 +250,17 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
     var isAwaitingCallConfirmation = false
     var callConfirmationPrompt: String? = "फोन गर्ने हो?"
     var callConfirmationRequests: [(contact: String?, callType: String?, requestedApp: String?)] = []
-    func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?) -> String? {
+    func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?,
+                                 sourceTranscript: String?, sourceCommand: InterpretedCommand?) -> String? {
         callConfirmationRequests.append((contactQuery, callType, requestedApp))
         return callConfirmationPrompt
+    }
+
+    var overrideUtterances: [String] = []
+    var overrideShouldHandle = false
+    func handleCallConfirmationOverride(_ utterance: String) -> Bool {
+        overrideUtterances.append(utterance)
+        return overrideShouldHandle
     }
 
     var composedMessages: [(contact: String?, body: String)] = []
