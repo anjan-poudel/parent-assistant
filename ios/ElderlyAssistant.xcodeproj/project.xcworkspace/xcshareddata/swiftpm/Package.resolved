@@ -2,15 +2,6 @@
   "object": {
     "pins": [
       {
-        "package": "LLM",
-        "repositoryURL": "https://github.com/eastriverlee/LLM.swift",
-        "state": {
-          "branch": "main",
-          "revision": "1d42188d5238ce4b9d25958f5444713b83d5e045",
-          "version": null
-        }
-      },
-      {
         "package": "onnxruntime-libs",
         "repositoryURL": "https://github.com/csukuangfj/onnxruntime-libs",
         "state": {

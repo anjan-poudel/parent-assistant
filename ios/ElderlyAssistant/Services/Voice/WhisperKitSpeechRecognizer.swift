@@ -64,7 +64,7 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
 
     init(observabilityBus: ObservabilityBus,
          modelStore: ModelStore? = nil,
-         preferredModelID: ModelID = ModelCatalog.whisperKitNepali) {
+         preferredModelID: ModelID = ModelCatalog.whisperKitNepaliMedium) {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
         self.preferredModelID = preferredModelID

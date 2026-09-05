@@ -108,6 +108,11 @@ enum ModelCatalog {
     /// — the ANE-accelerated path that replaces the ggml STT entries.
     /// Placeholder until the teacher conversion lands (see migration).
     static let whisperKitNepali = ModelID("whisperkit-ne-teacher")
+    /// The SHIPPING WhisperKit model today: the medium fine-tune
+    /// (checkpoint-5028) converted to fp16 CoreML — the quality bet from
+    /// the distillation findings, now interactive via ANE (~1.3 s per
+    /// utterance vs 128 s CPU, iPhone 14 Pro Max, 2026-09-05).
+    static let whisperKitNepaliMedium = ModelID("whisperkit-ne-medium")
     static let whisperSmallMultilingual = ModelID("whisper-small-multilingual-q5_1")
     /// The FINISHED small Devanagari Nepali model: stage-4 fine-tune on
     /// labeled Devanagari transcripts, started from the distilled
@@ -246,6 +251,25 @@ enum ModelCatalog {
             whisperKitZipURL: URL(string: "https://TODO-unset.example.invalid/whisperkit-ne-teacher.zip")!,
             // ESTIMATE, not measured — see sizeBytes comment above.
             whisperKitZipBytes: 3_100_000_000
+        ),
+        ModelCatalogEntry(
+            id: whisperKitNepaliMedium,
+            kind: .whisperBase,
+            displayName: "Nepali speech recognition (medium, fine-tuned, ANE)",
+            // WhisperKit directory delivery — `filename`/`downloadURL` are
+            // struct-required but unused; the zip URL below is the real one.
+            filename: "whisperkit-ne-medium",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v4/whisperkit-ne-medium.zip")!,
+            // Installed size on disk (fp16 mlmodelc trio + tokenizer).
+            sizeBytes: 1_600_000_000,
+            // SHA-256 of the release ZIP — verified by installWhisperKitModel.
+            sha256: "fc4e53bf72c4160c914e8cf149a29696a0ab5d3461d30728411b8833734d72e5",
+            // fp16 medium (769M params) + KV: live footprint ~2–2.5 GB.
+            // Validated on a 6 GB device; 4 GB floor matches the ggml gate.
+            minDeviceRAMBytes: 4_000_000_000,
+            dependsOn: nil,
+            whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v4/whisperkit-ne-medium.zip")!,
+            whisperKitZipBytes: 1_413_743_470
         ),
         ModelCatalogEntry(
             id: whisperSmallMultilingual,

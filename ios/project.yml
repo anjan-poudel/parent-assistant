@@ -51,10 +51,12 @@ packages:
     path: vendor/SwiftWhisper
   # Thin Swift wrapper around llama.cpp with Metal. Provides the `LLM`
   # module and a Template abstraction (llama3, chatML, etc). Used by
-  # LlamaCommandInterpreter to run LLaMA 3.2 on-device.
+  # LlamaCommandInterpreter to run LLaMA 3.2 on-device. VENDORED
+  # (vendor/LLM.swift) to carry the Metal offload patch — upstream pins
+  # n_gpu_layers to llama.cpp's CPU default even though the XCFramework
+  # ships Metal (vendor/LLM.swift/Sources/LLM/LLM.swift, 2026-09-06).
   LLM:
-    url: https://github.com/eastriverlee/LLM.swift
-    branch: main
+    path: vendor/LLM.swift
   # ANE-accelerated whisper runtime (Apple's CoreML path). Replaces
   # SwiftWhisper for STT: the vendored whisper.cpp predates Metal, and
   # ANE beats the iPhone GPU for whisper workloads (see

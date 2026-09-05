@@ -68,7 +68,7 @@ final class WhisperKitSpeechRecognizerTests: XCTestCase {
         // location directoryURL(for:) derives.
         let dir = tmpRoot
             .appendingPathComponent("whisperKit", isDirectory: true)
-            .appendingPathComponent(ModelCatalog.whisperKitNepali.rawValue,
+            .appendingPathComponent(ModelCatalog.whisperKitNepaliMedium.rawValue,
                                     isDirectory: true)
         try FileManager.default.createDirectory(at: dir,
                                                 withIntermediateDirectories: true)

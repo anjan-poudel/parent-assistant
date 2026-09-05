@@ -225,6 +225,7 @@
 		B4845ADE77C392C52E447EC3 /* NepaliCalendarPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliCalendarPluginTests.swift; sourceTree = "<group>"; };
 		B5DFB692BA73C236DF16E7B0 /* SherpaTTSEngineSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SherpaTTSEngineSmokeTests.swift; sourceTree = "<group>"; };
 		B871A07DB2851ECD2A47836D /* ElderlyAssistantUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElderlyAssistantUITests.swift; sourceTree = "<group>"; };
+		B898BC6B5FF4F3147C96DE78 /* LLM.swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = LLM.swift; path = vendor/LLM.swift; sourceTree = SOURCE_ROOT; };
 		BC35964D9BCD5E6FEA63005D /* ApplianceHelperPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceHelperPlugin.swift; sourceTree = "<group>"; };
 		BC5A9F12844B0E88FDE85416 /* GeminiClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiClient.swift; sourceTree = "<group>"; };
 		C2AB3C99F28EE6B02B39ECEB /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
@@ -292,6 +293,7 @@
 		44885FA0BDC4F6D217E100C1 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
+				B898BC6B5FF4F3147C96DE78 /* LLM.swift */,
 				8680FE2847368F1B8EAD81DD /* SwiftWhisper */,
 			);
 			name = Packages;
@@ -704,10 +706,10 @@
 			mainGroup = 933D20AA23A788790BFBF3D0;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM.swift" */,
 				55D6BE42A20BFED57539F6D8 /* XCRemoteSwiftPackageReference "WhisperKit" */,
 				8782A0C21196AEAC267497D9 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
 				052EB73C8AC29CD43C9679AB /* XCRemoteSwiftPackageReference "sherpa-onnx" */,
+				AA9E13532E03F8CA942DB403 /* XCLocalSwiftPackageReference "vendor/LLM.swift" */,
 				B0F090E9C591EB9468ABD2A5 /* XCLocalSwiftPackageReference "vendor/SwiftWhisper" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -1152,6 +1154,10 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
+		AA9E13532E03F8CA942DB403 /* XCLocalSwiftPackageReference "vendor/LLM.swift" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = vendor/LLM.swift;
+		};
 		B0F090E9C591EB9468ABD2A5 /* XCLocalSwiftPackageReference "vendor/SwiftWhisper" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = vendor/SwiftWhisper;
@@ -1175,14 +1181,6 @@
 				kind = branch;
 			};
 		};
-		6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM.swift" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/eastriverlee/LLM.swift";
-			requirement = {
-				branch = main;
-				kind = branch;
-			};
-		};
 		8782A0C21196AEAC267497D9 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/weichsel/ZIPFoundation";
@@ -1201,7 +1199,6 @@
 		};
 		785605133017A7EB4690010A /* LLM */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 6D5F48C55AECF687D56AC09E /* XCRemoteSwiftPackageReference "LLM.swift" */;
 			productName = LLM;
 		};
 		8A067B2B3D4535E50D1CCB35 /* SwiftWhisper */ = {

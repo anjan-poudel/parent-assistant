@@ -299,9 +299,7 @@ final class AppCoordinator: ObservableObject {
         ModelCatalog.piperNepali,
         ModelCatalog.whisperFinetunedNepaliQ8,
         ModelCatalog.whisperLargeV3Nepali,
-        // Placeholder entry — not a real download yet. See the TODO comment
-        // on this entry in ModelCatalog.swift.
-        ModelCatalog.whisperKitNepali
+        ModelCatalog.whisperKitNepaliMedium
     ]
 
     init() {
@@ -863,7 +861,7 @@ final class AppCoordinator: ObservableObject {
         // WhisperKit (ANE) wins the label whenever it's the recognizer the
         // on-device stack will actually use.
         if voiceEngineStack == .onDevice, whisperKitSpeechRecognizer.isAvailable {
-            activeSTTNameKey = sttNameKey(for: ModelCatalog.whisperKitNepali)
+            activeSTTNameKey = sttNameKey(for: ModelCatalog.whisperKitNepaliMedium)
             return
         }
         let resolved = sttModelPreference
@@ -875,7 +873,7 @@ final class AppCoordinator: ObservableObject {
     /// Catalog key naming the active STT (resolved in the UI's locale).
     private func sttNameKey(for id: ModelID?) -> String {
         switch id {
-        case ModelCatalog.whisperKitNepali:
+        case ModelCatalog.whisperKitNepaliMedium:
             return "stt.name.whisperKitNepali"
         case ModelCatalog.whisperMediumFinetunedNepali:
             return "stt.name.whisperMediumFinetunedNepali"
