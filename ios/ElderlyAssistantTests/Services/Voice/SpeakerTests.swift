@@ -17,15 +17,20 @@ final class SpeakerTests: XCTestCase {
                        "Speaker must not emit events on cancel-when-idle.")
     }
 
-    func testPiperStubDelegatesToSystemSpeaker() async {
+    func testPiperSpeakerCancelWhenIdleIsHarmless() throws {
         let bus = MockObservabilityBus()
         let system = SystemSpeechSpeaker(observabilityBus: bus)
-        let piper = PiperVoiceSpeaker(fallback: system, observabilityBus: bus)
+        let store = try ModelStore(
+            observabilityBus: bus,
+            rootDirectoryOverride: FileManager.default.temporaryDirectory
+                .appendingPathComponent("speaker-tests-\(UUID().uuidString)")
+        )
+        let piper = PiperVoiceSpeaker(fallback: system,
+                                      observabilityBus: bus,
+                                      modelStore: store)
 
-        // Cancel before speak — must not crash and must record no delegate
-        // event on its own.
+        // Cancel before speak — must not crash, must emit nothing.
         piper.cancel()
-        let delegateEvents = bus.emittedEvents.filter { $0.eventType == "piper_stub_delegate" }
-        XCTAssertTrue(delegateEvents.isEmpty)
+        XCTAssertTrue(bus.emittedEvents.isEmpty)
     }
 }

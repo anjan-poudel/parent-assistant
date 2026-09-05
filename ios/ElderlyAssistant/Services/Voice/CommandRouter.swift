@@ -342,7 +342,10 @@ final class CommandRouter {
         ]
         if sensitiveCallPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
             emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
-            speak(key: "router.sensitiveBlocked")
+            // Visible outcome, not just spoken — the live-caption pill is
+            // gone by now, so without a card the user's transcript and the
+            // refusal both vanish from the screen (field report 2026-09-05).
+            speakWithVisibleOutcome(key: "router.sensitiveBlocked")
             return .blockedSensitiveAction
         }
 
@@ -465,7 +468,7 @@ final class CommandRouter {
                 speak(text: L10n.fmt("router.call.contactNotFound", locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"), contact))
             } else {
                 emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
-                speak(key: "router.sensitiveBlocked")
+                speakWithVisibleOutcome(key: "router.sensitiveBlocked")
             }
             return
         }

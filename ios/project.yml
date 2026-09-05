@@ -68,6 +68,12 @@ packages:
   ZIPFoundation:
     url: https://github.com/weichsel/ZIPFoundation
     from: 0.9.19
+  # On-device TTS runtime (VITS + espeak-ng phonemization) — iOS static
+  # xcframework via SPM binary targets. Powers PiperVoiceSpeaker with the
+  # bundled Nepali/English Piper voices (docs/tts-implementation-plan.md).
+  sherpa-onnx:
+    url: https://github.com/k2-fsa/sherpa-onnx
+    exactVersion: 1.13.7
   # Porcupine:
   #   url: https://github.com/Picovoice/porcupine.git
   #   from: 3.0.0
@@ -92,6 +98,16 @@ targets:
       # (*.bin); re-fetch from the models release v3 to rebuild locally.
       - path: ElderlyAssistant/Resources/Models/whisper-medium-ne-q5_1.bin
         buildPhase: resources
+      # Bundled TTS voices (sherpa-layout dirs: model.onnx + tokens.txt +
+      # espeak-ng-data/), installed into the ModelStore on first speak.
+      # Gitignored — fetch with tools/fetch-tts-voices.sh before building.
+      - path: ElderlyAssistant/Resources/Models/tts
+        buildPhase: resources
+        # Blue folder reference — the whole directory lands in the bundle
+        # as tts/, preserving the sherpa layout (model + tokens +
+        # espeak-ng-data/) and avoiding flat-copy filename collisions
+        # between the two voices' identical espeak-ng-data contents.
+        type: folder
     # Do NOT add an `info:` block here — that would make XcodeGen overwrite
     # ElderlyAssistant/Info.plist on every `./build.sh generate`, wiping the
     # real permission descriptions and BGTaskScheduler identifiers. Instead,
@@ -112,6 +128,8 @@ targets:
         product: ZIPFoundation
       - package: WhisperKit
         product: WhisperKit
+      - package: sherpa-onnx
+        product: sherpa-onnx
 
   ElderlyAssistantTests:
     type: bundle.unit-test

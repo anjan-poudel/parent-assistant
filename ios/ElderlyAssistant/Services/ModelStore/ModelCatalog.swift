@@ -127,6 +127,7 @@ enum ModelCatalog {
     static let llama3_2_3B        = ModelID("llama-3.2-3b-instruct-q4km")
     static let sileroVAD          = ModelID("silero-vad-v5")
     static let piperNepali        = ModelID("piper-ne-female-v1")
+    static let piperEnglishUS     = ModelID("piper-en-us-lessac-medium-int8")
 
     // MARK: - Catalog
 
@@ -305,16 +306,35 @@ enum ModelCatalog {
             minDeviceRAMBytes: 500_000_000,
             dependsOn: nil
         ),
+        // TTS voices are sherpa-layout DIRECTORIES (model.onnx + tokens.txt
+        // + espeak-ng-data/), bundled into the app under
+        // Resources/Models/tts/ and installed by ModelStore on first use
+        // (tools/fetch-tts-voices.sh fetches them; gitignored). The
+        // downloadURL fields point at the sherpa tarballs for the future
+        // download-delivery phase (docs/tts-implementation-plan.md §5).
         ModelCatalogEntry(
             id: piperNepali,
             kind: .tts,
             displayName: "Nepali voice",
-            filename: "ne_NP-google-medium.onnx",
-            downloadURL: URL(string: "https://huggingface.co/rhasspy/piper-voices/resolve/main/ne/ne_NP/google/medium/ne_NP-google-medium.onnx")!,
-            sizeBytes: 76_766_385,
-            sha256: "e3ff3cbf97a7c01ebf29263c7fa1899ebed15e27a2d819b93dcfb86e10d39eaa",
-            minDeviceRAMBytes: 1_500_000_000,
-            dependsOn: nil
+            filename: "ne_NP-google-medium-int8",
+            downloadURL: URL(string: "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-ne_NP-google-medium-int8.tar.bz2")!,
+            sizeBytes: 23_618_640,
+            sha256: "",
+            minDeviceRAMBytes: 500_000_000,
+            dependsOn: nil,
+            bundledResourceName: "ne_NP-google-medium-int8"
+        ),
+        ModelCatalogEntry(
+            id: piperEnglishUS,
+            kind: .tts,
+            displayName: "English voice (US)",
+            filename: "en_US-lessac-medium-int8",
+            downloadURL: URL(string: "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-medium-int8.tar.bz2")!,
+            sizeBytes: 20_969_179,
+            sha256: "",
+            minDeviceRAMBytes: 500_000_000,
+            dependsOn: nil,
+            bundledResourceName: "en_US-lessac-medium-int8"
         )
     ]
 

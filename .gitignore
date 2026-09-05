@@ -35,6 +35,10 @@ android/local.properties
 *.mlmodelc
 *.ppn
 
+# Bundled TTS voices — fetched via tools/fetch-tts-voices.sh (sherpa
+# tarballs are ~45 MB; not committed, same convention as the .bin models)
+ios/ElderlyAssistant/Resources/Models/tts/
+
 # Local secrets
 .env
 .env.*
