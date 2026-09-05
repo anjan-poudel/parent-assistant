@@ -80,6 +80,10 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertTrue(bus.emittedEvents.contains {
             $0.eventType == "command_sensitive_blocked_auth_unavailable"
         })
+        // The refusal must ALSO land on the outcome card — the live-caption
+        // pill is gone by the time the block fires, so a spoken-only reply
+        // leaves the screen with no transcript and no answer (2026-09-05).
+        XCTAssertEqual(coordinator.genericReplies.count, 1)
     }
 
     // MARK: - Trial wiring: voice call / send message (LLM-interpreted path)
