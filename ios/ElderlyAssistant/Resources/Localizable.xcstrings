@@ -215,6 +215,57 @@
         }
       }
     },
+    "calendar.bsUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nepali date unavailable for this day"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजको नेपाली मिति उपलब्ध छैन"
+          }
+        }
+      }
+    },
+    "calendar.festivalToday": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Festival today"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजको चाडपर्व"
+          }
+        }
+      }
+    },
+    "calendar.inDays": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "in %@ days"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ दिनमा"
+          }
+        }
+      }
+    },
     "calendar.nepaliDate": {
       "extractionState": "manual",
       "localizations": {
@@ -266,6 +317,23 @@
         }
       }
     },
+    "calendar.today": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आज"
+          }
+        }
+      }
+    },
     "calendar.todayQuestion": {
       "extractionState": "manual",
       "localizations": {
@@ -279,6 +347,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "आज नेपाली पात्रोमा कति गते हो? एउटा छोटो लाइनमा जवाफ दिनुहोस्।"
+          }
+        }
+      }
+    },
+    "calendar.todaySchedule": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today's routine"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजको दिनचर्या"
+          }
+        }
+      }
+    },
+    "calendar.tomorrow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tomorrow"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भोलि"
+          }
+        }
+      }
+    },
+    "calendar.upcomingFestivals": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upcoming festivals"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आउँदै गरेका चाडपर्वहरू"
           }
         }
       }
@@ -687,6 +806,74 @@
           "stringUnit": {
             "state": "translated",
             "value": "सूचना: तपाईंको परिवारका सदस्यले औषधि दुई पटक खान खोज्नुभएको हुनसक्छ।"
+          }
+        }
+      }
+    },
+    "festival.advanceBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Coming up in %d days"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d दिनमा आउँदैछ"
+          }
+        }
+      }
+    },
+    "festival.reminderDays": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remind days before"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कति दिन अगाडि सम्झाउने"
+          }
+        }
+      }
+    },
+    "festival.reminderHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Important festivals also get a reminder this many days early, plus one on the day itself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "महत्वपूर्ण चाडपर्वहरूको सम्झना यति दिन अगाडि पनि आउँछ, साथै त्यही दिनमा पनि।"
+          }
+        }
+      }
+    },
+    "festival.reminderTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Festival reminders"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "चाडपर्वको सम्झना"
           }
         }
       }
