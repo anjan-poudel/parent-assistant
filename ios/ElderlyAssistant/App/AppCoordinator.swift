@@ -69,6 +69,8 @@ final class AppCoordinator: ObservableObject {
         alarmScheduler.locale = activeLocale
         medicationScheduler.locale = activeLocale
         familyNotifier.locale = activeLocale
+        routineAlarmScheduler.locale = activeLocale
+        routineScheduler.locale = activeLocale
     }
 
     /// First-run onboarding progress (spec §4.2). Persisted per step.
@@ -202,6 +204,17 @@ final class AppCoordinator: ObservableObject {
     private let alarmScheduler: UNNotificationScheduler
     private let familyNotifier: APNsFamilyNotifier
 
+    /// Generalised routine reminders (v2 pivot Phase 1 — walk, exercise,
+    /// meals, bedtime, …). NOT safety-critical: no ack window, no
+    /// escalation. Medication stays with `medicationScheduler` above,
+    /// untouched.
+    private let routineScheduler: RoutineScheduler
+    private let routineAlarmScheduler: UNRoutineNotificationScheduler
+    /// Kept so the medication-summary provider can be attached at the end
+    /// of init — plugin registration runs before `self` is fully
+    /// initialised, so the closure can't be captured at registration time.
+    private let routinePlugin: RoutinePlugin
+
     /// Family contacts (spec §4.4.2) — persisted encrypted, feeds the
     /// notifier whenever the list changes.
     let familyContactStore: FamilyContactStore
@@ -329,6 +342,24 @@ final class AppCoordinator: ObservableObject {
             familyNotifier: familyNotifier
         )
 
+        // Routine reminders (v2 pivot Phase 1): the medication path's
+        // proven shape — encrypted store, UN notifications, occurrences
+        // persisted before alarms arm, re-queue on launch — minus the
+        // safety-critical escalation machinery. Seeded once with the
+        // brief's category defaults (medication excluded: that system
+        // owns medication, and a parallel one would double-prompt doses).
+        let routineAlarmScheduler = UNRoutineNotificationScheduler()
+        self.routineAlarmScheduler = routineAlarmScheduler
+        let routineStore = RoutineStore(storage: storage)
+        routineStore.seedDefaultsIfNeeded()
+        let routineScheduler = RoutineScheduler(
+            store: routineStore,
+            alarmScheduler: routineAlarmScheduler,
+            observabilityBus: bus
+        )
+        self.routineScheduler = routineScheduler
+        self.routinePlugin = RoutinePlugin(scheduler: routineScheduler)
+
         // Language — restore the persisted choice, defaulting to the Nepali
         // pilot language (spec §3.2).
         self.appLanguage = AppLanguage.persisted()
@@ -403,6 +434,7 @@ final class AppCoordinator: ObservableObject {
         let pluginRegistry = PluginRegistry(observabilityBus: bus)
         pluginRegistry.register(NepaliCalendarPlugin(storage: storage))
         pluginRegistry.register(ApplianceHelperPlugin())
+        pluginRegistry.register(routinePlugin)
         self.pluginRegistry = pluginRegistry
 
         self.llamaCommandInterpreter = LlamaCommandInterpreter(
@@ -457,6 +489,14 @@ final class AppCoordinator: ObservableObject {
         // All stored properties are initialised — push the restored
         // language into services that build user-facing strings.
         syncServiceLocales()
+
+        // Fold today's medication reminders into the routine plugin's
+        // "what are my reminders today" answer — the user's mental model
+        // is ONE reminder list spanning both systems. Attached here (not
+        // at plugin registration) because the closure captures self.
+        routinePlugin.medicationSummaryProvider = { [weak self] in
+            self?.todayMedicationSummaryLines() ?? []
+        }
     }
 
     func start() {
@@ -483,6 +523,8 @@ final class AppCoordinator: ObservableObject {
 
         // Restore and re-arm any outstanding medication reminders
         medicationScheduler.scheduleAll()
+        // Same re-queue for routine reminders (FR-025)
+        routineScheduler.scheduleAll()
 
         // Voice pipeline is built lazily here so the CommandRouter can hold a
         // weak ref back to this fully-initialised coordinator.
@@ -1301,6 +1343,43 @@ final class AppCoordinator: ObservableObject {
         medicationScheduler.scheduleAll()
     }
 
+    // MARK: - Routine reminder surface (v2 pivot Phase 1)
+
+    /// All configured routine entries (seeded categories + voice-created)
+    /// — the Reminders leaf's manage list.
+    var routineEntries: [RoutineEntry] { routineScheduler.entries() }
+
+    /// Today's routine occurrences, sorted — listed in the Reminders
+    /// leaf alongside the medication doses.
+    var todaysRoutineOccurrences: [RoutineOccurrence] {
+        routineScheduler.todaysOccurrences()
+    }
+
+    func routineEntry(for id: UUID) -> RoutineEntry? {
+        routineScheduler.entry(for: id)
+    }
+
+    /// Enable/disable a routine entry from the Reminders leaf toggle;
+    /// persists and re-arms through the scheduler.
+    func setRoutineEntryEnabled(_ entryId: UUID, enabled: Bool) {
+        routineScheduler.setEnabled(entryId, enabled: enabled)
+    }
+
+    /// Today's medication reminders as localized "name — time" lines for
+    /// the routine plugin's `routine.query` answer — one spoken list
+    /// spanning both reminder systems.
+    private func todayMedicationSummaryLines() -> [String] {
+        medicationScheduler.pendingReminders
+            .filter { Calendar.current.isDateInToday($0.scheduledAt) }
+            .sorted { $0.scheduledAt < $1.scheduledAt }
+            .map { reminder in
+                let name = medicationName(for: reminder.medicationEntryId)
+                let time = reminder.scheduledAt.formatted(
+                    Date.FormatStyle(date: .omitted, time: .shortened).locale(activeLocale))
+                return "\(name) — \(time)"
+            }
+    }
+
     // MARK: - Public API for voice commands
 
     /// BASELINE ack, used for non-dementia flows and as an explicit fallback.
@@ -1447,6 +1526,7 @@ final class AppCoordinator: ObservableObject {
             using: nil
         ) { [weak self] task in
             self?.medicationScheduler.scheduleAll()
+            self?.routineScheduler.scheduleAll()
             task.setTaskCompleted(success: true)
         }
     }

@@ -129,46 +129,151 @@ struct MedsView: View {
     }
 }
 
-// MARK: - Reminders (सम्झना) — spec §4.3
+// MARK: - Reminders (सम्झना) — spec §4.3 + v2 pivot Phase 1
 
+/// Today's reminders from BOTH reminder systems — medication doses
+/// (`MedicationScheduler`) and routine occurrences (walk, exercise,
+/// meals, … from `RoutineScheduler`) — plus a manage list where the
+/// family enables/disables the seeded routine categories. Medication
+/// management stays on the Meds leaf / Settings editor; this screen
+/// never mutates medication data.
 struct RemindersView: View {
     @EnvironmentObject var coordinator: AppCoordinator
+    /// Bumped after a toggle so the computed lists re-read fresh data —
+    /// the coordinator exposes reminders as computed vars, not @Published.
+    @State private var entriesVersion = 0
 
-    private var todaysReminders: [ScheduledReminder] {
-        coordinator.pendingReminders
+    /// One row per today's reminder, both systems, sorted by time.
+    private var todayRows: [TodayRow] {
+        _ = entriesVersion
+        // One store read for the whole list, not two per row.
+        let entriesById = Dictionary(
+            uniqueKeysWithValues: coordinator.routineEntries.map { ($0.id, $0) }
+        )
+        let meds = coordinator.pendingReminders
             .filter { Calendar.current.isDateInToday($0.scheduledAt) }
-            .sorted { $0.scheduledAt < $1.scheduledAt }
+            .map { TodayRow(id: $0.id, scheduledAt: $0.scheduledAt,
+                            title: coordinator.medicationName(for: $0.medicationEntryId),
+                            systemImage: RoutineCategory.medication.systemImage,
+                            isDimmed: false) }
+        let routines = coordinator.todaysRoutineOccurrences.map { occurrence in
+            let entry = entriesById[occurrence.entryId]
+            return TodayRow(id: occurrence.id, scheduledAt: occurrence.scheduledAt,
+                            title: entry?.displayTitle(locale: coordinator.activeLocale)
+                                ?? L10n.str("routine.category.custom", locale: coordinator.activeLocale),
+                            systemImage: entry?.category.systemImage
+                                ?? RoutineCategory.custom.systemImage,
+                            isDimmed: occurrence.state != .pending)
+        }
+        return (meds + routines).sorted { $0.scheduledAt < $1.scheduledAt }
     }
 
     var body: some View {
         LeafScreen(titleKey: "reminders.title") {
-            if todaysReminders.isEmpty {
-                emptyState(key: "reminders.empty")
-            } else {
-                VStack(spacing: 12) {
-                    ForEach(todaysReminders) { reminder in
-                        HStack(spacing: 12) {
-                            Image(systemName: "clock.fill")
-                                .font(.system(size: 24))
-                                .foregroundColor(DesignTokens.accent)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(coordinator.medicationName(for: reminder.medicationEntryId))
-                                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                                    .foregroundColor(DesignTokens.textPrimary)
-                                Text(reminder.scheduledAt.formatted(date: .omitted, time: .shortened))
-                                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                                    .foregroundColor(DesignTokens.textSecondary)
-                            }
-                            Spacer()
-                        }
-                        .padding(16)
-                        .frame(maxWidth: .infinity)
-                        .background(DesignTokens.card)
-                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            VStack(spacing: 12) {
+                if todayRows.isEmpty {
+                    emptyState(key: "reminders.empty")
+                } else {
+                    sectionHeader(key: "reminders.todaySection")
+                    ForEach(todayRows) { row in
+                        todayRowView(row)
+                    }
+                }
+
+                if !coordinator.routineEntries.isEmpty {
+                    sectionHeader(key: "reminders.routinesSection")
+                    ForEach(coordinator.routineEntries) { entry in
+                        routineManageRow(entry)
                     }
                 }
             }
         }
+    }
+
+    private struct TodayRow: Identifiable {
+        let id: UUID
+        let scheduledAt: Date
+        let title: String
+        let systemImage: String
+        /// Past/expired occurrences stay visible but de-emphasised — the
+        /// elder still sees "walk was at 5:30" as context for the day.
+        let isDimmed: Bool
+    }
+
+    private func sectionHeader(key: String) -> some View {
+        Text(LocalizedStringKey(key))
+            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+            .foregroundColor(DesignTokens.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
+    }
+
+    private func todayRowView(_ row: TodayRow) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: row.systemImage)
+                .font(.system(size: 24))
+                .foregroundColor(row.isDimmed ? DesignTokens.textSecondary : DesignTokens.accent)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.title)
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(row.isDimmed ? DesignTokens.textSecondary : DesignTokens.textPrimary)
+                Text(row.scheduledAt.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
+            Spacer()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    private func routineManageRow(_ entry: RoutineEntry) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: entry.category.systemImage)
+                .font(.system(size: 24))
+                .foregroundColor(DesignTokens.accent)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(entry.displayTitle(locale: coordinator.activeLocale))
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Text(scheduleSummary(entry))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
+            Spacer()
+            Toggle("", isOn: Binding(
+                get: { entry.isEnabled },
+                set: { enabled in
+                    coordinator.setRoutineEntryEnabled(entry.id, enabled: enabled)
+                    entriesVersion += 1
+                }
+            ))
+            .labelsHidden()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// "7:00 AM, 4:00 PM" for daily entries; weekly entries prefix the
+    /// localized weekday names ("Sun, Tue · 9:00 AM").
+    private func scheduleSummary(_ entry: RoutineEntry) -> String {
+        let calendar = Calendar.current
+        let times = entry.scheduleTimes.compactMap { components -> String? in
+            calendar.date(from: components)?.formatted(date: .omitted, time: .shortened)
+        }
+        let timesText = times.joined(separator: ", ")
+        guard entry.frequency == .weekly, !entry.weekdays.isEmpty else { return timesText }
+        let formatter = DateFormatter()
+        formatter.locale = coordinator.activeLocale
+        guard let symbols = formatter.shortWeekdaySymbols else { return timesText }
+        let days = entry.weekdays.sorted().compactMap { weekday -> String? in
+            weekday >= 1 && weekday <= symbols.count ? symbols[weekday - 1] : nil
+        }
+        return days.joined(separator: ", ") + " · " + timesText
     }
 }
 
