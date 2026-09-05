@@ -112,6 +112,8 @@ final class GeminiCommandInterpreter: CommandInterpreter {
           "time": string or null,
           "medication": string or null,
           "message": string or null,
+          "callType": string or null,
+          "requestedApp": string or null,
           "confidence": number from 0 to 1,
           "reply": short string, a spoken reply in the user's language
         }
@@ -142,6 +144,12 @@ final class GeminiCommandInterpreter: CommandInterpreter {
         described (a name, or a relationship like "son"/"छोरा"), else null.
         For "send_message", set message to the message body they dictated,
         else null.
+        For "call", set callType to "video" if they asked for a video
+        call (e.g. "भिडियो कल", "video call"), or "voice" if they asked
+        for a plain phone call, else null if unclear. Set requestedApp to
+        the specific app they named (e.g. "facetime", "whatsapp",
+        "messenger", "viber"), else null if they didn't name one — don't
+        guess an app they didn't mention.
         Set entryId to null unless you can identify a specific target.
 
         User said: "\(transcript)"

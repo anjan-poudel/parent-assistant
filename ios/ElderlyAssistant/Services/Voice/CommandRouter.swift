@@ -3,6 +3,12 @@ import UserNotifications
 
 protocol VoiceCommandCoordinating: AnyObject {
     var isAwaitingConfirmation: Bool { get }
+    /// True only while a `call` intent is specifically awaiting its
+    /// yes/no — lets `CommandRouter` skip its generic confirmation speech
+    /// and let the coordinator speak its own call-specific response
+    /// instead, without touching the existing medication-confirmation
+    /// wiring at all.
+    var isAwaitingCallConfirmation: Bool { get }
     /// The locale all spoken replies resolve against (spec §3.2 — the
     /// coordinator's `AppLanguage` is the source of truth).
     var activeLocale: Locale { get }
@@ -27,12 +33,15 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// `set_reminder` intent: creates a reminder through scheduler storage.
     func addVoiceReminder(title: String, time: DateComponents)
 
-    /// `call` intent (trial wiring). Resolves `name` (a contact's name OR
-    /// relationship, e.g. "छोरा") against family contacts and places a
-    /// real phone call. Returns false when no contact can be resolved —
-    /// the router falls back to the existing blocked/unrecognised
-    /// message rather than claiming success.
-    func placeCall(toContactNamed name: String?) -> Bool
+    /// `call` intent (2026-09-05: "ai determines intent, then ask
+    /// permission and execute"). Resolves `name` (a contact's name OR
+    /// relationship, e.g. "छोरा") against family contacts, picks the best
+    /// REAL method for `requestedApp`/`callType` (see
+    /// `AppCoordinator.CallMethod`), and returns the confirmation prompt
+    /// to speak. Returns nil when no contact can be resolved — the router
+    /// falls back to the existing blocked/unrecognised message rather
+    /// than claiming success. Nothing is dialed until the user says yes.
+    func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?) -> String?
 
     /// `send_message` intent (trial wiring). iOS never lets a third-party
     /// app send SMS silently — `MFMessageComposeViewController` always
@@ -63,6 +72,7 @@ final class CommandRouter {
         case acknowledgedMedication
         case blockedSensitiveAction
         case emergencyTriggered
+        case callConfirmed
         case unrecognised(transcript: String)
     }
 
@@ -107,16 +117,25 @@ final class CommandRouter {
         // command. Runs the dementia-aware `acknowledgeWithConfirmation`
         // path with the double-dose check.
         if coordinator?.isAwaitingConfirmation == true {
+            // Call confirmations speak their own contextual response
+            // (AppCoordinator.handleConfirmationResponse) — the generic
+            // "confirmationYes"/"confirmationNo" catalog text below is
+            // medication-flavored and would be wrong here.
+            let isCallConfirmation = coordinator?.isAwaitingCallConfirmation == true
             if Self.isYesResponse(raw) {
                 coordinator?.handleConfirmationResponse(.yes)
                 emit(eventType: "confirmation_yes", outcome: "success")
-                speak(key: "router.confirmationYes")
-                return .acknowledgedMedication
+                if !isCallConfirmation {
+                    speak(key: "router.confirmationYes")
+                }
+                return isCallConfirmation ? .callConfirmed : .acknowledgedMedication
             }
             if Self.isNoResponse(raw) {
                 coordinator?.handleConfirmationResponse(.no)
                 emit(eventType: "confirmation_no", outcome: "success")
-                speak(key: "router.confirmationNo")
+                if !isCallConfirmation {
+                    speak(key: "router.confirmationNo")
+                }
                 return .unrecognised(transcript: raw)
             }
             // Ambiguous response — re-prompt.
@@ -317,13 +336,15 @@ final class CommandRouter {
     /// `routeKeyword`'s `sensitiveCallPhrases`, unchanged). Only a
     /// specifically-resolved contact gets dialed for real.
     private func handleCall(_ command: InterpretedCommand) {
-        guard coordinator?.placeCall(toContactNamed: command.contact) == true else {
+        guard let prompt = coordinator?.requestCallConfirmation(
+            contactQuery: command.contact, callType: command.callType, requestedApp: command.requestedApp
+        ) else {
             emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
             speak(key: "router.sensitiveBlocked")
             return
         }
-        emit(eventType: "command_call_placed", outcome: "success")
-        speak(text: command.reply)
+        emit(eventType: "command_call_confirmation_requested", outcome: "success")
+        speak(text: prompt)
     }
 
     /// `send_message` (trial wiring). Never claims the message was SENT —

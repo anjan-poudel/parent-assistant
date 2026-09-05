@@ -63,6 +63,16 @@ struct InterpretedCommand: Equatable {
     /// language, as dictated (trial wiring — spec: presents the native
     /// compose sheet pre-filled, since iOS never sends SMS silently).
     let message: String?
+    /// Entity for `call`: "voice" or "video", as best determined from
+    /// phrasing (2026-09-05 "intent is king" call routing). Nil defaults
+    /// to a voice call.
+    let callType: String?
+    /// Entity for `call`: an app the user explicitly named ("facetime",
+    /// "whatsapp", "messenger", "viber"), else null. Only FaceTime and
+    /// WhatsApp have any real integration on iOS — anything else falls
+    /// back to FaceTime with a disclosed notice
+    /// (`AppCoordinator.resolveCallMethod`).
+    let requestedApp: String?
     let confidence: Double
     let reply: String
 }
@@ -80,6 +90,8 @@ enum LlamaGrammar {
                     "\\"time\\"" ws ":" ws maybeString ws "," ws
                     "\\"medication\\"" ws ":" ws maybeString ws "," ws
                     "\\"message\\"" ws ":" ws maybeString ws "," ws
+                    "\\"callType\\"" ws ":" ws maybeString ws "," ws
+                    "\\"requestedApp\\"" ws ":" ws maybeString ws "," ws
                     "\\"confidence\\"" ws ":" ws number ws "," ws
                     "\\"reply\\"" ws ":" ws string ws "}"
     action ::= "\\"ack_med\\"" | "\\"call\\"" | "\\"emergency\\""
@@ -365,6 +377,8 @@ final class LlamaCommandInterpreter: CommandInterpreter {
                 time: decoded.time,
                 medication: decoded.medication,
                 message: decoded.message,
+                callType: decoded.callType,
+                requestedApp: decoded.requestedApp,
                 confidence: clamped,
                 reply: decoded.reply
             )
@@ -413,6 +427,8 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         let time: String?
         let medication: String?
         let message: String?
+        let callType: String?
+        let requestedApp: String?
         let confidence: Double
         let reply: String
     }

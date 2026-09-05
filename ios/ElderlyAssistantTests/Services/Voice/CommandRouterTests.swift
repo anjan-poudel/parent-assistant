@@ -83,42 +83,68 @@ final class CommandRouterTests: XCTestCase {
 
     // MARK: - Trial wiring: voice call / send message (LLM-interpreted path)
 
-    func testCallWithResolvedContactPlacesRealCall() {
+    /// 2026-09-05: calling now asks for confirmation FIRST — the router's
+    /// job is just to request it and speak the prompt. Nothing is dialed
+    /// at this layer; `AppCoordinator.handleConfirmationResponse` does
+    /// that only after the user says yes (covered by AppCoordinator-level
+    /// testing, not here — this test is about CommandRouter's contract).
+    func testCallWithResolvedContactRequestsConfirmationNotADial() {
         let coordinator = MockVoiceCommandCoordinator()
-        coordinator.callShouldSucceed = true
+        coordinator.callConfirmationPrompt = "छोरालाई फोन गर्ने हो?"
         let bus = MockObservabilityBus()
         let interpreter = FakeCommandInterpreter()
         interpreter.nextCommand = InterpretedCommand(
             action: .call, entryId: nil, contact: "छोरा", time: nil, medication: nil,
-            message: nil, confidence: 0.95, reply: "ठिक छ, फोन गर्दैछु"
+            message: nil, callType: "voice", requestedApp: nil, confidence: 0.95, reply: "ठिक छ, फोन गर्दैछु"
         )
         let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
                                    speaker: MockSpeaker(), interpreter: interpreter)
 
         _ = router.route(transcript: "छोरालाई फोन गर")
 
-        XCTAssertEqual(coordinator.placedCalls, ["छोरा"])
-        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_call_placed" })
+        XCTAssertEqual(coordinator.callConfirmationRequests.count, 1)
+        XCTAssertEqual(coordinator.callConfirmationRequests.first?.contact, "छोरा")
+        XCTAssertEqual(coordinator.callConfirmationRequests.first?.callType, "voice")
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_call_confirmation_requested" })
     }
 
     func testCallWithUnresolvedContactStaysBlocked() {
         let coordinator = MockVoiceCommandCoordinator()
-        coordinator.callShouldSucceed = false
+        coordinator.callConfirmationPrompt = nil
         let bus = MockObservabilityBus()
         let interpreter = FakeCommandInterpreter()
         interpreter.nextCommand = InterpretedCommand(
             action: .call, entryId: nil, contact: "अज्ञात व्यक्ति", time: nil, medication: nil,
-            message: nil, confidence: 0.95, reply: "ठिक छ"
+            message: nil, callType: nil, requestedApp: nil, confidence: 0.95, reply: "ठिक छ"
         )
         let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
                                    speaker: MockSpeaker(), interpreter: interpreter)
 
         _ = router.route(transcript: "फोन गर")
 
-        XCTAssertEqual(coordinator.placedCalls, ["अज्ञात व्यक्ति"])
+        XCTAssertEqual(coordinator.callConfirmationRequests.first?.contact, "अज्ञात व्यक्ति")
         XCTAssertTrue(bus.emittedEvents.contains {
             $0.eventType == "command_sensitive_blocked_auth_unavailable"
         })
+    }
+
+    /// The yes/no follow-up to a call confirmation must NOT speak the
+    /// generic medication-flavored "confirmationYes" text — AppCoordinator
+    /// owns that response for calls (see `isAwaitingCallConfirmation`).
+    func testCallConfirmationYesDoesNotSpeakGenericMedicationText() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isAwaitingConfirmation = true
+        coordinator.isAwaitingCallConfirmation = true
+        let speaker = MockSpeaker()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: MockObservabilityBus(),
+                                   speaker: speaker)
+
+        let result = router.route(transcript: "हजुर")
+
+        XCTAssertEqual(result, .callConfirmed)
+        XCTAssertEqual(coordinator.confirmationResponses, [.yes])
+        XCTAssertTrue(speaker.utterances.isEmpty,
+                      "CommandRouter must not also speak — AppCoordinator speaks its own call-specific response")
     }
 
     /// Regression: a plain Q&A reply (`.query`/`.none`) previously had NO
@@ -131,7 +157,7 @@ final class CommandRouterTests: XCTestCase {
         let interpreter = FakeCommandInterpreter()
         interpreter.nextCommand = InterpretedCommand(
             action: .query, entryId: nil, contact: nil, time: nil, medication: nil,
-            message: nil, confidence: 0.9, reply: "आज घमाइलो छ।"
+            message: nil, callType: nil, requestedApp: nil, confidence: 0.9, reply: "आज घमाइलो छ।"
         )
         let router = CommandRouter(coordinator: coordinator, observabilityBus: MockObservabilityBus(),
                                    speaker: MockSpeaker(), interpreter: interpreter)
@@ -148,7 +174,7 @@ final class CommandRouterTests: XCTestCase {
         let interpreter = FakeCommandInterpreter()
         interpreter.nextCommand = InterpretedCommand(
             action: .sendMessage, entryId: nil, contact: "छोरी", time: nil, medication: nil,
-            message: "म राम्रो छु", confidence: 0.95, reply: "सन्देश तयार छ"
+            message: "म राम्रो छु", callType: nil, requestedApp: nil, confidence: 0.95, reply: "सन्देश तयार छ"
         )
         let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
                                    speaker: MockSpeaker(), interpreter: interpreter)
@@ -219,11 +245,12 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
         addedReminders.append((title, time))
     }
 
-    var placedCalls: [String?] = []
-    var callShouldSucceed = false
-    func placeCall(toContactNamed name: String?) -> Bool {
-        placedCalls.append(name)
-        return callShouldSucceed
+    var isAwaitingCallConfirmation = false
+    var callConfirmationPrompt: String? = "फोन गर्ने हो?"
+    var callConfirmationRequests: [(contact: String?, callType: String?, requestedApp: String?)] = []
+    func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?) -> String? {
+        callConfirmationRequests.append((contactQuery, callType, requestedApp))
+        return callConfirmationPrompt
     }
 
     var composedMessages: [(contact: String?, body: String)] = []

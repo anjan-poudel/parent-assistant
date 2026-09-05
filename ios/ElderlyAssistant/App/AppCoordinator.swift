@@ -624,7 +624,13 @@ final class AppCoordinator: ObservableObject {
     func speak(key: String) {
         guard let speaker else { return }
         let text = L10n.str(key, locale: activeLocale)
-        guard !text.isEmpty else { return }
+        speak(text: text)
+    }
+
+    /// Speaks dynamic, already-resolved text (e.g. a call-confirmation
+    /// prompt built from a contact's name) — no catalog lookup.
+    func speak(text: String) {
+        guard let speaker, !text.isEmpty else { return }
         noteAssistantSpoke(text)
         noteSpeakingStarted()
         let locale = activeLocale
@@ -790,17 +796,111 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    /// Real `tel:` dialing for a voice-resolved contact. Returns false —
-    /// no side effects — when nothing matches, so the router's caller
-    /// falls back to its existing blocked/unrecognised message instead of
-    /// claiming success.
-    func placeCall(toContactNamed query: String?) -> Bool {
-        guard let query, let contact = matchContact(query),
-              let url = PhoneDialer.url(for: contact.phone) else { return false }
-        DispatchQueue.main.async { UIApplication.shared.open(url) }
-        setOutcome(icon: "phone.fill",
-                   text: L10n.fmt("home.outcome.callPlaced", locale: activeLocale, contact.name))
-        return true
+    /// Real, one-tap-completable outbound methods (2026-09-05 "intent is
+    /// king" routing). FaceTime deep links genuinely place the call;
+    /// WhatsApp has no public call-initiation API on iOS at all — `.chat`
+    /// only opens the conversation, the user still taps the call icon
+    /// themselves inside WhatsApp. Messenger and Viber have no
+    /// integration point whatsoever (confirmed in
+    /// docs/messaging-calling-platform-research.md, already agreed out of
+    /// scope) — requesting either falls back to FaceTime, disclosed out
+    /// loud, never silently.
+    enum CallMethod {
+        case facetimeVideo
+        case facetimeAudio
+        case whatsappChat
+    }
+
+    struct PendingCallAction {
+        let contact: FamilyContact
+        let method: CallMethod
+        /// Set when the user asked for an app we can't actually call
+        /// through (e.g. "messenger"), so we fell back to FaceTime —
+        /// named here so the confirmation prompt can disclose it.
+        let unsupportedRequestedApp: String?
+    }
+
+    @Published private(set) var pendingCallAction: PendingCallAction?
+    var isAwaitingCallConfirmation: Bool { pendingCallAction != nil }
+
+    /// `call` intent — resolves the contact and picks the best REAL
+    /// method (see `CallMethod`), then asks for voice confirmation before
+    /// doing anything (2026-09-05: "ai determines intent, then ask
+    /// permission and execute"). Returns the prompt to speak; nil if no
+    /// contact could be resolved, so the caller falls back to its
+    /// existing blocked/unrecognised message.
+    func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?) -> String? {
+        guard let contactQuery, let contact = matchContact(contactQuery) else { return nil }
+        let (method, unsupported) = Self.resolveCallMethod(requestedApp: requestedApp, callType: callType)
+        let action = PendingCallAction(contact: contact, method: method, unsupportedRequestedApp: unsupported)
+        pendingCallAction = action
+        DispatchQueue.main.async { [weak self] in
+            self?.voiceSession.transition(to: .awaitingConfirmation)
+        }
+        return confirmationPrompt(for: action)
+    }
+
+    /// Maps (requestedApp, callType) to a real, achievable method.
+    /// `requestedApp`/`callType` are free-form strings the LLM extracted
+    /// from speech (e.g. "whatsapp", "video") — matched loosely in both
+    /// English and Nepali since that's what actually shows up.
+    private static func resolveCallMethod(requestedApp: String?, callType: String?) -> (CallMethod, unsupportedRequestedApp: String?) {
+        let isVideo = callType.map { $0.lowercased().contains("video") || $0.contains("भिडियो") } ?? false
+        guard let app = requestedApp?.lowercased(), !app.isEmpty else {
+            return (isVideo ? .facetimeVideo : .facetimeAudio, nil)
+        }
+        if app.contains("facetime") || app.contains("फेसटाइम") {
+            return (isVideo ? .facetimeVideo : .facetimeAudio, nil)
+        }
+        if app.contains("whatsapp") || app.contains("ह्वाट्सएप") || app.contains("वाट्सएप") {
+            return (.whatsappChat, nil)
+        }
+        // Messenger, Viber, or anything else with no real integration —
+        // fall back to FaceTime, but say so.
+        return (isVideo ? .facetimeVideo : .facetimeAudio, requestedApp)
+    }
+
+    private func confirmationPrompt(for action: PendingCallAction) -> String {
+        let locale = activeLocale
+        var parts: [String] = []
+        if let unsupported = action.unsupportedRequestedApp {
+            parts.append(L10n.fmt("router.call.appUnsupportedNotice", locale: locale, unsupported))
+        }
+        let methodKey: String
+        switch action.method {
+        case .facetimeVideo: methodKey = "router.call.methodVideo"
+        case .facetimeAudio: methodKey = "router.call.methodVoice"
+        case .whatsappChat: methodKey = "router.call.methodWhatsAppChat"
+        }
+        let methodText = L10n.str(methodKey, locale: locale)
+        parts.append(L10n.fmt("router.call.confirmQuestion", locale: locale, action.contact.name, methodText))
+        return parts.joined(separator: " ")
+    }
+
+    /// Actually places the call/opens the chat — only ever reached after
+    /// the user said yes (`handleConfirmationResponse`). Never claims
+    /// WhatsApp "called" — it only opened a chat, and says so.
+    private func performCallAction(_ action: PendingCallAction) {
+        let locale = activeLocale
+        switch action.method {
+        case .facetimeVideo, .facetimeAudio:
+            let scheme = action.method == .facetimeVideo ? "facetime" : "facetime-audio"
+            let digits = action.contact.phone.filter { $0.isNumber || $0 == "+" }
+            if !digits.isEmpty, let url = URL(string: "\(scheme)://\(digits)") {
+                DispatchQueue.main.async { UIApplication.shared.open(url) }
+            }
+            setOutcome(icon: action.method == .facetimeVideo ? "video.fill" : "phone.fill",
+                       text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
+            speak(text: L10n.fmt("router.call.calling", locale: locale, action.contact.name))
+        case .whatsappChat:
+            let digits = action.contact.phone.filter { $0.isNumber }
+            if !digits.isEmpty, let url = URL(string: "https://wa.me/\(digits)") {
+                DispatchQueue.main.async { UIApplication.shared.open(url) }
+            }
+            setOutcome(icon: "message.fill",
+                       text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, action.contact.name))
+            speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, action.contact.name))
+        }
     }
 
     /// A pending SMS draft — presented as `MessageComposeView` from
@@ -928,6 +1028,23 @@ final class AppCoordinator: ObservableObject {
     /// reflecting reality. The session machine returns to idle (and its
     /// timeout timer is cancelled — C12).
     func handleConfirmationResponse(_ response: ConfirmationResponse) {
+        // Call confirmations are a separate, additive flow (2026-09-05) —
+        // checked first and returned early so the medication path below
+        // is completely untouched (safety-critical, 100%-covered code;
+        // not worth any risk to it for an unrelated feature).
+        if let action = pendingCallAction {
+            pendingCallAction = nil
+            switch response {
+            case .yes:
+                performCallAction(action)
+            case .no:
+                speak(text: L10n.fmt("router.call.cancelled", locale: activeLocale, action.contact.name))
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.voiceSession.transition(to: .idle)
+            }
+            return
+        }
         guard let entryId = pendingConfirmationEntryId else { return }
         _ = medicationScheduler.acknowledgeWithConfirmation(
             entryId: entryId,
@@ -950,7 +1067,7 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Whether a confirmation follow-up is currently expected.
-    var isAwaitingConfirmation: Bool { pendingConfirmationEntryId != nil }
+    var isAwaitingConfirmation: Bool { pendingConfirmationEntryId != nil || pendingCallAction != nil }
 
     /// Used by `CommandRouter` to identify what "I took my medication" refers
     /// to when the user hasn't specified which reminder.

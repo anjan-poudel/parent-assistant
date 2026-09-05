@@ -623,6 +623,23 @@
         }
       }
     },
+    "home.outcome.whatsappOpened": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WhatsApp opened for %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को लागि ह्वाट्सएप खोलियो"
+          }
+        }
+      }
+    },
     "home.setupCardHint": {
       "extractionState": "manual",
       "localizations": {
@@ -1758,6 +1775,142 @@
           "stringUnit": {
             "state": "translated",
             "value": "ठीक छ, म पछि फेरि सम्झाउँछु।"
+          }
+        }
+      }
+    },
+    "router.call.appUnsupportedNotice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't call directly through %@, so I'll use FaceTime instead."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ बाट सिधै कल गर्न सकिँदैन, त्यसैले फेसटाइम प्रयोग गर्दैछु।"
+          }
+        }
+      }
+    },
+    "router.call.calling": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Okay, calling %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठिक छ, %@ लाई कल गर्दैछु।"
+          }
+        }
+      }
+    },
+    "router.call.cancelled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Okay, cancelled calling %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठिक छ, %@ लाई कल गर्ने रद्द गरियो।"
+          }
+        }
+      }
+    },
+    "router.call.confirmQuestion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Make %2$@ to %1$@?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ लाई %@ गर्ने हो?"
+          }
+        }
+      }
+    },
+    "router.call.methodVideo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "a video call"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भिडियो कल"
+          }
+        }
+      }
+    },
+    "router.call.methodVoice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "a phone call"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोन कल"
+          }
+        }
+      }
+    },
+    "router.call.methodWhatsAppChat": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "their WhatsApp chat"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ह्वाट्सएपमा कुराकानी"
+          }
+        }
+      }
+    },
+    "router.call.whatsappOpened": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I've opened WhatsApp for %@ — please tap the call button yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को लागि ह्वाट्सएप खोलियो — कृपया आफैं कल बटन थिच्नुहोस्।"
           }
         }
       }
