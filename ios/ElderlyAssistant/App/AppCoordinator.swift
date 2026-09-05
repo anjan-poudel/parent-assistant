@@ -92,6 +92,22 @@ final class AppCoordinator: ObservableObject {
     }
     private static let sttPreferenceKey = "sttModelPreference"
 
+    /// Which voice engine stack is active: on-device Whisper+LLaMA, or the
+    /// cloud Gemini pivot (default). A UI preference, not a secret —
+    /// persisted in UserDefaults the same way as `sttModelPreference` — so
+    /// the household can A/B test both without rebuilding. Setting this
+    /// hot-swaps both the STT (`voicePipeline.setSpeechRecognizer`, the
+    /// same mechanism `trySwapToGemini()` already uses) and the LLM
+    /// interpreter (via `switchableInterpreter`, since `CommandRouter`
+    /// holds its interpreter as an immutable `private let`).
+    @Published var voiceEngineStack: VoiceEngineStack {
+        didSet {
+            UserDefaults.standard.set(voiceEngineStack.rawValue, forKey: Self.voiceEngineStackKey)
+            applyVoiceEngineStack()
+        }
+    }
+    private static let voiceEngineStackKey = "voiceEngineStack"
+
     /// Last user utterance and assistant reply — the Home conversation
     /// card (spec §4.1.4).
     @Published var lastTranscript: String?
@@ -234,6 +250,21 @@ final class AppCoordinator: ObservableObject {
     private let geminiClient: GeminiClient
     private let geminiSpeechRecognizer: GeminiSpeechRecognizer
 
+    /// On-device LLM interpreter (v1 stack, kept alive for the
+    /// on-device/Gemini A/B toggle — `voiceEngineStack`). Constructed
+    /// up-front like `whisperSpeechRecognizer`; `isAvailable` stays false
+    /// until both the LLM.swift runtime is linked and its model is cached
+    /// (see `LlamaCommandInterpreter.isAvailable`), in which case
+    /// `CommandRouter`'s existing keyword fallback takes over — unchanged.
+    private let llamaCommandInterpreter: LlamaCommandInterpreter
+    /// Set once in `start()`. `geminiCommandInterpreter` is the concrete
+    /// Gemini-backed interpreter; `switchableInterpreter` is the single
+    /// `CommandInterpreter` handed to `CommandRouter` — it forwards to
+    /// whichever of the two concrete interpreters `voiceEngineStack`
+    /// currently selects.
+    private var geminiCommandInterpreter: GeminiCommandInterpreter!
+    private var switchableInterpreter: SwitchableCommandInterpreter!
+
     /// Legacy v1 on-device model catalog — kept only so the buried
     /// "AI मोडेल" settings screen still functions as a manual fallback.
     /// No longer downloaded automatically at first run (v2 pivot).
@@ -322,6 +353,20 @@ final class AppCoordinator: ObservableObject {
             modelStore: modelStore,
             observabilityBus: bus
         )
+        self.llamaCommandInterpreter = LlamaCommandInterpreter(
+            modelStore: modelStore,
+            observabilityBus: bus
+        )
+
+        // Restore the persisted voice-engine stack choice (default: the
+        // live v2 Gemini pivot, matching today's always-Gemini behavior for
+        // anyone who's never touched the toggle). Applied for real once
+        // `start()` has built the pipeline + switchable interpreter — see
+        // `applyVoiceEngineStack()`. This is the property's ONLY initial
+        // assignment, so (like `appLanguage` above) its didSet does not
+        // fire here.
+        self.voiceEngineStack = UserDefaults.standard.string(forKey: Self.voiceEngineStackKey)
+            .flatMap(VoiceEngineStack.init(rawValue:)) ?? .gemini
 
         // Restore the persisted STT model choice. The didSet observer
         // pushes it to the recognizer and refreshes the label. Unknown
@@ -397,15 +442,25 @@ final class AppCoordinator: ObservableObject {
         // API key is configured (GeminiConfigStore) — CommandRouter treats
         // that exactly like the old "LLM not linked" case: fall through to
         // keyword matching.
-        let interpreter = GeminiCommandInterpreter(
+        let geminiInterpreter = GeminiCommandInterpreter(
             client: geminiClient,
             observabilityBus: observabilityBus
         )
+        self.geminiCommandInterpreter = geminiInterpreter
+        // CommandRouter holds its interpreter as an immutable `private let`
+        // — so it's handed ONE `SwitchableCommandInterpreter` that forwards
+        // to whichever concrete interpreter `voiceEngineStack` currently
+        // selects. `applyVoiceEngineStack()` (called below, and again on
+        // every stack change) is what actually flips `.current`.
+        let switchable = SwitchableCommandInterpreter(
+            current: voiceEngineStack == .onDevice ? llamaCommandInterpreter : geminiInterpreter
+        )
+        self.switchableInterpreter = switchable
         let router = CommandRouter(
             coordinator: self,
             observabilityBus: observabilityBus,
             speaker: speaker,
-            interpreter: interpreter
+            interpreter: switchable
         )
         // Start with the fallback STT. Gemini is swapped in below once an
         // API key is configured.
@@ -438,7 +493,11 @@ final class AppCoordinator: ObservableObject {
             switch result {
             case .success:
                 self.voiceState = .idle
-                self.trySwapToGemini()  // one-shot at startup, in case a key is already saved
+                // One-shot at startup: puts the STT + interpreter in the
+                // state `voiceEngineStack` says they should be in (e.g. a
+                // Gemini key already saved, or the on-device stack picked
+                // last session).
+                self.applyVoiceEngineStack()
             case .failure(let err):
                 self.voiceError = "\(err)"
                 self.voiceState = .error("\(err)")
@@ -641,13 +700,54 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Attempts to move the pipeline off the SFSpeechRecognizer fallback
-    /// onto the Gemini recognizer (v2 pivot). Idempotent.
+    /// onto the Gemini recognizer (v2 pivot). Idempotent. Guarded on
+    /// `voiceEngineStack` so that saving/rotating a Gemini API key while
+    /// the user has explicitly picked the on-device stack doesn't silently
+    /// yank them back onto Gemini — `applyVoiceEngineStack()` is what
+    /// actually decides which stack is live.
     private func trySwapToGemini() {
-        guard geminiSpeechRecognizer.isAvailable else { return }
+        guard voiceEngineStack == .gemini, geminiSpeechRecognizer.isAvailable else { return }
         voicePipeline?.setSpeechRecognizer(geminiSpeechRecognizer)
         DispatchQueue.main.async { [weak self] in
             self?.updateActiveSTTName()
         }
+    }
+
+    /// Applies `voiceEngineStack` to both halves of the pipeline: the STT
+    /// (hot-swapped via `VoicePipeline.setSpeechRecognizer`, same
+    /// mechanism `trySwapToGemini()` uses) and the LLM interpreter (via
+    /// `switchableInterpreter.current`, since `CommandRouter` can't have
+    /// its interpreter swapped directly). Called once at startup and again
+    /// on every `voiceEngineStack` change. No-ops harmlessly if called
+    /// before `start()` has built the pipeline/switchable interpreter.
+    private func applyVoiceEngineStack() {
+        switch voiceEngineStack {
+        case .gemini:
+            switchableInterpreter?.current = geminiCommandInterpreter
+            trySwapToGemini()
+        case .onDevice:
+            switchableInterpreter?.current = llamaCommandInterpreter
+            // Whisper if its model is actually cached and the runtime is
+            // linked; else the SFSpeechRecognizer fallback rather than
+            // silently doing nothing (spec §7: no dead-end states).
+            voicePipeline?.setSpeechRecognizer(
+                whisperSpeechRecognizer.isAvailable ? whisperSpeechRecognizer : fallbackSpeechRecognizer
+            )
+            DispatchQueue.main.async { [weak self] in
+                self?.updateActiveSTTName()
+            }
+        }
+    }
+
+    /// Whether the on-device stack (Whisper STT + LLaMA interpreter) is
+    /// actually ready to use — both its runtime package linked AND its
+    /// model downloaded (see `LlamaCommandInterpreter.isAvailable` /
+    /// `WhisperSpeechRecognizer.isAvailable`). Exposed for the Settings
+    /// voice-engine picker, which points the user at the buried "AI
+    /// मोडेल" screen when this is false rather than silently switching to
+    /// a non-functional stack.
+    var isOnDeviceStackReady: Bool {
+        llamaCommandInterpreter.isAvailable && whisperSpeechRecognizer.isAvailable
     }
 
     /// Model the legacy on-device recognizer would use if manually
@@ -657,11 +757,15 @@ final class AppCoordinator: ObservableObject {
         whisperSpeechRecognizer.currentModelID()
     }
 
-    /// Keeps `activeSTTNameKey` honest: Gemini first once configured
-    /// (v2 pivot), else whatever the legacy on-device picker resolves to,
-    /// else the SFSpeech fallback.
+    /// Keeps `activeSTTNameKey` honest: Gemini when that's the selected
+    /// stack AND it's configured (v2 pivot), else whatever the on-device
+    /// picker resolves to, else the SFSpeech fallback. Checking
+    /// `voiceEngineStack` (not just `isAvailable`) matters once the
+    /// on-device/Gemini toggle exists — a configured Gemini key shouldn't
+    /// make this claim "Gemini" while the user has explicitly picked
+    /// on-device.
     private func updateActiveSTTName() {
-        if geminiSpeechRecognizer.isAvailable {
+        if voiceEngineStack == .gemini, geminiSpeechRecognizer.isAvailable {
             activeSTTNameKey = "stt.name.gemini"
             return
         }

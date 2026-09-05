@@ -2935,6 +2935,176 @@
         }
       }
     },
+    "settings.voiceEngine.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Choose which assistant engine runs your voice commands. Gemini uses the internet; On-device works fully offline once its models are downloaded."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको आवाज आदेश कुन इन्जिनले चलाउने छनौट गर्नुहोस्। जेमिनीले इन्टरनेट प्रयोग गर्छ; यन्त्रमै भने मोडेलहरू डाउनलोड भइसकेपछि पूर्ण रूपमा इन्टरनेट बिना काम गर्छ।"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.gemini": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini (cloud)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जेमिनी (क्लाउड)"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.gemini.notReady": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs setup — add an API key in Gemini AI settings first"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सेटअप चाहिन्छ — पहिले जेमिनी AI सेटिङमा API कुञ्जी थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.gemini.ready": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready — API key is configured"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तयार — API कुञ्जी सेटअप गरिएको छ"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.onDevice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On-device (offline)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यन्त्रमै (अफलाइन)"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.onDevice.notReady": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not downloaded yet — long-press the Settings title to open AI मोडेल and download it first"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अझै डाउनलोड गरिएको छैन — पहिले AI मोडेल खोल्न सेटिङ शीर्षकमा लामो थिच्नुहोस् र डाउनलोड गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.onDevice.ready": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready — models are downloaded"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तयार — मोडेलहरू डाउनलोड भइसकेका छन्"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.statusGemini": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini (cloud)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जेमिनी (क्लाउड)"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.statusOnDevice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On-device"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यन्त्रमै"
+          }
+        }
+      }
+    },
+    "settings.voiceEngine.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice Engine"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज इन्जिन"
+          }
+        }
+      }
+    },
     "state.awaitingConfirmation.chipNo": {
       "extractionState": "manual",
       "localizations": {

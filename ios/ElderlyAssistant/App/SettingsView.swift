@@ -12,7 +12,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case language, family, meds, geminiAI, privacy
+        case language, family, meds, geminiAI, voiceEngine, privacy
 
         var id: String {
             switch self {
@@ -20,6 +20,7 @@ struct SettingsView: View {
             case .family: return "family"
             case .meds: return "meds"
             case .geminiAI: return "geminiAI"
+            case .voiceEngine: return "voiceEngine"
             case .privacy: return "privacy"
             }
         }
@@ -57,6 +58,7 @@ struct SettingsView: View {
                     VStack(spacing: 12) {
                         sectionRow(.language, icon: "globe", titleKey: "settings.language.title")
                         geminiSectionRow
+                        voiceEngineSectionRow
                         sectionRow(.family, icon: "person.2.fill", titleKey: "settings.family.title")
                         sectionRow(.meds, icon: "pills.fill", titleKey: "settings.meds.title")
                         sectionRow(.privacy, icon: "lock.shield.fill", titleKey: "settings.privacy.title")
@@ -80,6 +82,7 @@ struct SettingsView: View {
             case .family: FamilyContactsSettingsView()
             case .meds: MedicationScheduleSettingsView()
             case .geminiAI: GeminiAPISettingsView()
+            case .voiceEngine: VoiceEngineSettingsView()
             case .privacy: PrivacySettingsView()
             }
         }
@@ -110,6 +113,44 @@ struct SettingsView: View {
                     Text(coordinator.geminiConfigStore.isConfigured
                          ? "settings.gemini.statusConnected"
                          : "settings.gemini.statusMissing")
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// On-device vs Gemini A/B toggle. Visible (not buried) like the
+    /// Gemini row above it — this is the control that actually decides
+    /// which of the two live, since flipping it doesn't require a
+    /// restart (see `AppCoordinator.applyVoiceEngineStack`).
+    private var voiceEngineSectionRow: some View {
+        NavigationLink(value: SettingsSection.voiceEngine) {
+            HStack(spacing: 14) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 26))
+                    .foregroundColor(DesignTokens.accent)
+                    .frame(width: 40)
+                Text("settings.voiceEngine.title")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Spacer()
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(DesignTokens.accent)
+                        .frame(width: 8, height: 8)
+                    Text(coordinator.voiceEngineStack == .gemini
+                         ? "settings.voiceEngine.statusGemini"
+                         : "settings.voiceEngine.statusOnDevice")
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                         .foregroundColor(DesignTokens.textSecondary)
                 }
@@ -352,6 +393,75 @@ struct GeminiAPISettingsView: View {
                 Spacer()
             }
             .frame(minHeight: DesignTokens.minTapTargetSize)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - On-device vs Gemini voice-engine toggle
+//
+// Lets the household A/B test the two voice engine stacks without
+// rebuilding: the cloud v2 Gemini pivot (default) versus the legacy
+// on-device Whisper+LLaMA pipeline it superseded (still present in the
+// build, see `AppCoordinator.llamaCommandInterpreter` /
+// `whisperSpeechRecognizer`). Switching is instant — no restart — via
+// `AppCoordinator.applyVoiceEngineStack()`.
+struct VoiceEngineSettingsView: View {
+    @EnvironmentObject var coordinator: AppCoordinator
+
+    var body: some View {
+        LeafScreen(titleKey: "settings.voiceEngine.title") {
+            VStack(spacing: 16) {
+                Text("settings.voiceEngine.explanation")
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+
+                stackRow(
+                    .gemini,
+                    titleKey: "settings.voiceEngine.gemini",
+                    subtitleKey: coordinator.geminiConfigStore.isConfigured
+                        ? "settings.voiceEngine.gemini.ready"
+                        : "settings.voiceEngine.gemini.notReady"
+                )
+
+                stackRow(
+                    .onDevice,
+                    titleKey: "settings.voiceEngine.onDevice",
+                    subtitleKey: coordinator.isOnDeviceStackReady
+                        ? "settings.voiceEngine.onDevice.ready"
+                        : "settings.voiceEngine.onDevice.notReady"
+                )
+            }
+        }
+    }
+
+    private func stackRow(_ stack: VoiceEngineStack, titleKey: String, subtitleKey: String) -> some View {
+        let isSelected = coordinator.voiceEngineStack == stack
+        return Button {
+            coordinator.voiceEngineStack = stack
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 22))
+                    .foregroundColor(isSelected ? DesignTokens.accent : DesignTokens.textSecondary.opacity(0.5))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LocalizedStringKey(titleKey))
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                    Text(LocalizedStringKey(subtitleKey))
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+                Spacer()
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius)
+                    .stroke(isSelected ? DesignTokens.accent : Color.clear, lineWidth: 2)
+            )
         }
         .buttonStyle(.plain)
     }

@@ -47,6 +47,7 @@
 		8283088CCDAED6B8395D0F9C /* GeminiConfigStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA66D0A3F8E25813E13B1AA8 /* GeminiConfigStoreTests.swift */; };
 		85B42C13987E77A9592E8572 /* DoubleDoseDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B3C30966EA4E8B1E94A6917 /* DoubleDoseDetectorTests.swift */; };
 		877A9EAB9ADF74AF1E7DC12B /* VoiceSessionBindingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CD2468FE69CCF128862DE28 /* VoiceSessionBindingTests.swift */; };
+		88AB55B2E56480BD97A927CC /* SwitchableCommandInterpreterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBF8D15A8CBEB370AE0487CE /* SwitchableCommandInterpreterTests.swift */; };
 		8B5593B7AEDF4E0D815FA1BC /* MedicationSchedulerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B6FEFA69334CCBC0A933E9 /* MedicationSchedulerTests.swift */; };
 		8CD67C3B34F99F3EC51312F9 /* FamilyNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 875C3FEBDCA672D2C9E0E7F2 /* FamilyNotifier.swift */; };
 		92252E31AFFAA415D171810A /* OnboardingStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B80BB3C068100E30CFD3B9C /* OnboardingStateTests.swift */; };
@@ -60,6 +61,7 @@
 		AEBA656B0176A19E1F90EA93 /* MessageComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D14B6E81C221A233E013C46F /* MessageComposeView.swift */; };
 		AF08AFE8130798E981D2A92A /* GeminiCommandInterpreterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 841DCADD368A6ECCD04B61F9 /* GeminiCommandInterpreterTests.swift */; };
 		B21B3DF09B034133EFFFDF1B /* EnergyVADTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4099370DD1353BABBAF99588 /* EnergyVADTests.swift */; };
+		B2B08B4BF2C6CE1A5FFD90A0 /* SwitchableCommandInterpreter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7D7A7D5F8D07BCEECF0F970 /* SwitchableCommandInterpreter.swift */; };
 		B32BE0328D7BA52A2E4C4C5D /* TranscriptSanityGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5037C77CFB1853F53CE7B8B6 /* TranscriptSanityGuardTests.swift */; };
 		B54AE9405FEBDBD383BEFD87 /* VoicePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 680AAA1A7F05226F9618CE82 /* VoicePipeline.swift */; };
 		B6B573A73467D62075D67B2C /* ConfirmationChallengeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89ED4B2E4128B4CFA0B6365B /* ConfirmationChallengeTests.swift */; };
@@ -178,8 +180,10 @@
 		D42344465731A5DA5ABD125C /* DoubleDoseDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoubleDoseDetector.swift; sourceTree = "<group>"; };
 		D4F45398E4D634DDBCE65A38 /* SileroVAD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SileroVAD.swift; sourceTree = "<group>"; };
 		DA66D0A3F8E25813E13B1AA8 /* GeminiConfigStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiConfigStoreTests.swift; sourceTree = "<group>"; };
+		DBF8D15A8CBEB370AE0487CE /* SwitchableCommandInterpreterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwitchableCommandInterpreterTests.swift; sourceTree = "<group>"; };
 		E0D51BFE01BE4E11E7CA840E /* ElderlyAssistant.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ElderlyAssistant.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E3ABF1E7E6E221112999571F /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		E7D7A7D5F8D07BCEECF0F970 /* SwitchableCommandInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwitchableCommandInterpreter.swift; sourceTree = "<group>"; };
 		EC9012024C4815BFC474C722 /* TranscriptSanityGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSanityGuard.swift; sourceTree = "<group>"; };
 		EF51B12C0A76A131DDB383BA /* GeminiClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiClientTests.swift; sourceTree = "<group>"; };
 		F034BA7E282AAE5BE838BE8F /* InputSanitiser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSanitiser.swift; sourceTree = "<group>"; };
@@ -394,6 +398,7 @@
 				D4F45398E4D634DDBCE65A38 /* SileroVAD.swift */,
 				AA7962DC2383BB09B89340F5 /* Speaker.swift */,
 				C2AB3C99F28EE6B02B39ECEB /* SpeechRecognizer.swift */,
+				E7D7A7D5F8D07BCEECF0F970 /* SwitchableCommandInterpreter.swift */,
 				EC9012024C4815BFC474C722 /* TranscriptSanityGuard.swift */,
 				680AAA1A7F05226F9618CE82 /* VoicePipeline.swift */,
 				1AFE0B77607ED7DA0553D6F0 /* WakeWordEngine.swift */,
@@ -433,6 +438,7 @@
 				5F1E8CAFF81975F728099576 /* LlamaCommandInterpreterTests.swift */,
 				1464699EC23E298FC82EAF23 /* NepaliTimeParserTests.swift */,
 				A94328FF3C48D674B487DD12 /* SpeakerTests.swift */,
+				DBF8D15A8CBEB370AE0487CE /* SwitchableCommandInterpreterTests.swift */,
 				5037C77CFB1853F53CE7B8B6 /* TranscriptSanityGuardTests.swift */,
 				6EF74EEC9797CDE01B05BAA0 /* WhisperSpeechRecognizerTests.swift */,
 			);
@@ -647,6 +653,7 @@
 				7A821335546B5C53D68FD5C0 /* SileroVAD.swift in Sources */,
 				B970107BCCDA8472F0BCA767 /* Speaker.swift in Sources */,
 				5707C48E2D863D068ADDB5E0 /* SpeechRecognizer.swift in Sources */,
+				B2B08B4BF2C6CE1A5FFD90A0 /* SwitchableCommandInterpreter.swift in Sources */,
 				02543E15FCD856AFA17311CC /* TranscriptSanityGuard.swift in Sources */,
 				B54AE9405FEBDBD383BEFD87 /* VoicePipeline.swift in Sources */,
 				C0DFD8590612F9867C54D747 /* VoiceSessionStateMachine.swift in Sources */,
@@ -688,6 +695,7 @@
 				4E2531A97C5980C0611CB470 /* NepaliTimeParserTests.swift in Sources */,
 				92252E31AFFAA415D171810A /* OnboardingStateTests.swift in Sources */,
 				FD0C74053396420771C700C1 /* SpeakerTests.swift in Sources */,
+				88AB55B2E56480BD97A927CC /* SwitchableCommandInterpreterTests.swift in Sources */,
 				B32BE0328D7BA52A2E4C4C5D /* TranscriptSanityGuardTests.swift in Sources */,
 				877A9EAB9ADF74AF1E7DC12B /* VoiceSessionBindingTests.swift in Sources */,
 				36126C14FF50D0FDE355FC76 /* VoiceSessionStateMachineTests.swift in Sources */,
