@@ -62,9 +62,27 @@ final class IntentPromptTests: XCTestCase {
 
     func testFramesModelAsIntentEngineNotChatbot() {
         let prompt = build()
-        XCTAssertTrue(prompt.contains("INTENT-RECOGNITION"))
+        XCTAssertTrue(prompt.localizedCaseInsensitiveContains("INTENT DECIPHERING"))
         XCTAssertTrue(prompt.localizedCaseInsensitiveContains("not a"))
-        XCTAssertTrue(prompt.localizedCaseInsensitiveContains("conversational chatbot"))
+        XCTAssertTrue(prompt.localizedCaseInsensitiveContains("general chatbot"))
+    }
+
+    // MARK: - Elderly-assistance dual-mode framing (2026-09-05)
+
+    func testNamesBothOperatingModesExplicitly() {
+        let prompt = build()
+        XCTAssertTrue(prompt.contains("EXACTLY TWO MODES"))
+        XCTAssertTrue(prompt.localizedCaseInsensitiveContains("INTENT DECIPHERING"))
+        XCTAssertTrue(prompt.localizedCaseInsensitiveContains("OPEN-FORM ANSWERING"))
+    }
+
+    func testReplyStyleGuidanceIsElderlyAppropriate() {
+        let prompt = build()
+        XCTAssertTrue(prompt.localizedCaseInsensitiveContains("SPOKEN ALOUD"))
+        XCTAssertTrue(prompt.localizedCaseInsensitiveContains("plain and simple"))
+        XCTAssertTrue(prompt.localizedCaseInsensitiveContains("short sentences"))
+        XCTAssertTrue(prompt.localizedCaseInsensitiveContains("warm"))
+        XCTAssertTrue(prompt.localizedCaseInsensitiveContains("respectful"))
     }
 
     func testDistinguishesFunctionalReplyFromSubstantiveFallbackReply() {
