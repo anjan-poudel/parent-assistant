@@ -28,10 +28,16 @@ from config import load_config, abs_path
 
 
 def synthesize(text: str, wav_path: Path, cfg: dict) -> None:
-    """TTS one utterance to 16 kHz mono wav via piper."""
+    """TTS one utterance to 16 kHz mono wav via piper — resolved from the
+    venv next to the running interpreter so detached runs don't depend
+    on PATH."""
+    import sys
+    piper = Path(sys.executable).parent / "piper"
+    model = Path(str(cfg["stt_noise.tts_voice"]))
+    if not model.is_absolute():
+        model = Path(__file__).parent.parent / model
     subprocess.run(
-        ["piper", "--model", str(cfg["stt_noise.tts_voice"]),
-         "--output_file", str(wav_path)],
+        [str(piper), "--model", str(model), "--output_file", str(wav_path)],
         input=text.encode(), check=True,
     )
 
