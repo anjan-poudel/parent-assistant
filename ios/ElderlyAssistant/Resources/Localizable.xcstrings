@@ -2680,6 +2680,23 @@
         }
       }
     },
+    "settings.family.messengerHandle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger: %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्यासेन्जर: %@"
+          }
+        }
+      }
+    },
     "settings.family.title": {
       "extractionState": "manual",
       "localizations": {

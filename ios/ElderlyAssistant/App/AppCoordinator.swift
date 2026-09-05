@@ -1085,6 +1085,17 @@ final class AppCoordinator: ObservableObject {
     func handleCallConfirmationOverride(_ utterance: String) -> Bool {
         guard let action = pendingCallAction,
               let override = CallOverrideParser.parseMethodOverride(utterance) else { return false }
+        // The requestCallConfirmation no-handle gate applies to overrides
+        // too: amending to Messenger for a contact with no usable handle
+        // would re-confirm an action that can only fail — the exact
+        // yes/no trap that gate exists to prevent. The ORIGINAL action
+        // stays pending, so "हो" still places it and a further correction
+        // ("फेसटाइममा गर") still re-plans.
+        if override == .messengerAudio || override == .messengerVideo,
+           CallLinks.messengerHandle(action.contact.messengerHandle ?? "").isEmpty {
+            speak(text: L10n.fmt("router.call.messengerNoHandle", locale: activeLocale, action.contact.name))
+            return true
+        }
         let amended = PendingCallAction(contact: action.contact,
                                         method: override,
                                         unsupportedRequestedApp: nil,

@@ -516,7 +516,8 @@ struct FamilyContactsSettingsView: View {
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
                 if let handle = contact.messengerHandle, !handle.isEmpty {
-                    Text("Messenger: \(handle)")
+                    Text(L10n.fmt("settings.family.messengerHandle",
+                                  locale: coordinator.activeLocale, handle))
                         .font(.system(size: DesignTokens.minCaptionPointSize))
                         .foregroundColor(DesignTokens.textSecondary)
                 }
