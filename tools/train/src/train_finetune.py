@@ -50,6 +50,10 @@ def main() -> None:
                              "processor or the 80-mel stock-medium one")
     parser.add_argument("--out", type=str, default="finetune",
                         help="checkpoint subdir name (default: finetune)")
+    parser.add_argument("--bf16-weights", action="store_true",
+                        help="load base weights in bf16 — required for the "
+                             "1.5B teacher (fp32 weights + AdamW states OOM "
+                             "24 GB before the first step)")
     parser.add_argument("--no-resume", action="store_true")
     args, cfg = load_config(parser)
     cfg = apply_common(cfg, args)
@@ -61,7 +65,8 @@ def main() -> None:
 
     base = args.model or str(abs_path(cfg, "checkpoint_dir") / "distill-final")
     print(f"loading base model: {base}")
-    model = WhisperForConditionalGeneration.from_pretrained(base)
+    model = WhisperForConditionalGeneration.from_pretrained(
+        base, torch_dtype=torch.bfloat16 if args.bf16_weights else None)
     # Same as distillation: the teacher-width student's activations at
     # batch 16 don't fit 24 GB without checkpointing (stage-4 OOM,
     # 2026-09-01).
