@@ -3988,6 +3988,142 @@
           }
         }
       }
+    },
+    "router.call.methodMessengerAudio": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "a Messenger audio call"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्यासेन्जर अडियो कल"
+          }
+        }
+      }
+    },
+    "router.call.methodMessengerVideo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "a Messenger video call"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्यासेन्जर भिडियो कल"
+          }
+        }
+      }
+    },
+    "router.call.messengerOpened": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I've opened Messenger for %@ — please tap the call button yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को लागि म्यासेन्जर खोलियो — कृपया आफैं कल बटन थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "home.outcome.messengerOpened": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger opened for %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को लागि म्यासेन्जर खोलियो"
+          }
+        }
+      }
+    },
+    "router.call.messengerWebFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger isn't installed on this phone, so I've opened %@'s chat in the browser instead — please tap the call button yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनमा म्यासेन्जर छैन, त्यसैले %@ को कुराकानी ब्राउजरमा खोलिदिएको छु — कृपया आफैं कल बटन थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "home.outcome.messengerWebFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger chat opened in browser for %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को कुराकानी ब्राउजरमा खोलियो"
+          }
+        }
+      }
+    },
+    "router.call.messengerNoHandle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I don't have %@'s Messenger name yet. Please ask family to add it in Settings, or say another way to call."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को म्यासेन्जर नाम थाहा छैन। कृपया परिवारलाई सेटिङमा थप्न लगाउनुहोस्, वा कल गर्ने अर्को तरिका भन्नुहोस्।"
+          }
+        }
+      }
+    },
+    "onboarding.stepFamily.messenger": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger username (optional)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्यासेन्जर प्रयोगकर्ता नाम (ऐच्छिक)"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

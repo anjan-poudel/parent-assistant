@@ -6,17 +6,27 @@ import Foundation
 /// Complete — constitution §Security). The phone number is the payload the
 /// future broker relay will notify; `deviceToken` in the APNs notifier stays
 /// unprovisioned until that channel exists (review C6).
+///
+/// `messengerHandle` (2026-09-06): the contact's Messenger username or
+/// numeric user-id, needed because Messenger deep links address people by
+/// handle, not by phone number. Optional — Codable's synthesized decoding
+/// reads a missing key as nil, so payloads written before the field
+/// existed load unchanged (the store is unversioned; an optional field IS
+/// its migration pattern).
 struct FamilyContact: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String
     var phone: String
     var relationship: String
+    var messengerHandle: String?
 
-    init(id: UUID = UUID(), name: String, phone: String, relationship: String) {
+    init(id: UUID = UUID(), name: String, phone: String, relationship: String,
+         messengerHandle: String? = nil) {
         self.id = id
         self.name = name
         self.phone = phone
         self.relationship = relationship
+        self.messengerHandle = messengerHandle
     }
 }
 

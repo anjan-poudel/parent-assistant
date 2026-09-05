@@ -46,6 +46,47 @@ final class FamilyContactStoreTests: XCTestCase {
         let store = FamilyContactStore(storage: InMemoryEncryptedStorage())
         XCTAssertTrue(store.load().isEmpty)
     }
+
+    func testMessengerHandleRoundTrips() {
+        let store = FamilyContactStore(storage: InMemoryEncryptedStorage())
+        let contact = FamilyContact(name: "सीता", phone: "9812345678",
+                                    relationship: "छोरी",
+                                    messengerHandle: "sita.sharma77")
+        XCTAssertTrue(store.add(contact))
+
+        let loaded = store.load()
+        XCTAssertEqual(loaded.first?.messengerHandle, "sita.sharma77")
+    }
+
+    func testLegacyPayloadWithoutMessengerHandleDecodesAsNil() {
+        // Payloads written before the messengerHandle field existed (the
+        // unversioned store's only "migration" is the field being
+        // optional) must still load — written here through a legacy-shaped
+        // struct that provably lacks the key.
+        let storage = InMemoryEncryptedStorage()
+        let legacy = LegacyFamilyContact(id: UUID(), name: "राम",
+                                         phone: "9812345678", relationship: "छोरा")
+        guard case .success = storage.write(key: "family.contacts", value: [legacy]) else {
+            return XCTFail("legacy payload write failed")
+        }
+
+        let store = FamilyContactStore(storage: storage)
+        let loaded = store.load()
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded.first?.name, "राम")
+        XCTAssertNil(loaded.first?.messengerHandle,
+                     "a pre-field payload decodes with a nil handle, not a failure")
+    }
+}
+
+/// The pre-2026-09-06 contact shape — no `messengerHandle`. Exists to
+/// write old-shape payloads into storage for the backward-decode test;
+/// its JSON is byte-compatible with what the old app version stored.
+private struct LegacyFamilyContact: Codable {
+    let id: UUID
+    var name: String
+    var phone: String
+    var relationship: String
 }
 
 /// In-memory `EncryptedLocalStorage` for tests — the real implementation

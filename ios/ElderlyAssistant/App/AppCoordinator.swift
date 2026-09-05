@@ -933,8 +933,10 @@ final class AppCoordinator: ObservableObject {
     }
 
     @discardableResult
-    func addFamilyContact(name: String, phone: String, relationship: String) -> Bool {
-        let contact = FamilyContact(name: name, phone: phone, relationship: relationship)
+    func addFamilyContact(name: String, phone: String, relationship: String,
+                          messengerHandle: String? = nil) -> Bool {
+        let contact = FamilyContact(name: name, phone: phone, relationship: relationship,
+                                    messengerHandle: messengerHandle)
         guard familyContactStore.add(contact) else { return false }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -1008,7 +1010,7 @@ final class AppCoordinator: ObservableObject {
         let contact: FamilyContact
         let method: CallMethod
         /// Set when the user asked for an app we can't actually call
-        /// through (e.g. "messenger"), so we fell back to FaceTime —
+        /// through (e.g. "viber"), so we fell back to FaceTime —
         /// named here so the confirmation prompt can disclose it.
         let unsupportedRequestedApp: String?
         /// The original utterance + interpreted command this action came
@@ -1046,6 +1048,18 @@ final class AppCoordinator: ObservableObject {
         let resolved = methodResolver.resolve(contactId: contact.id,
                                               requestedApp: requestedApp,
                                               callType: callType)
+        // Messenger needs a per-contact handle (username/user-id), not a
+        // phone number — and most contacts won't have one yet. Caught
+        // HERE, before the confirmation question, so the elder is never
+        // asked to yes/no an action that can only fail (mirrors the
+        // .ambiguous path above: nothing pended, and the returned line
+        // tells them what actually unblocks it). The same normalization
+        // the opener uses decides "usable", so the two checks can't
+        // disagree.
+        if resolved.method == .messengerAudio || resolved.method == .messengerVideo,
+           CallLinks.messengerHandle(contact.messengerHandle ?? "").isEmpty {
+            return L10n.fmt("router.call.messengerNoHandle", locale: activeLocale, contact.name)
+        }
         let action = PendingCallAction(contact: contact,
                                        method: resolved.method,
                                        unsupportedRequestedApp: resolved.unsupportedRequestedApp,
@@ -1096,6 +1110,8 @@ final class AppCoordinator: ObservableObject {
         case .facetimeVideo: methodKey = "router.call.methodVideo"
         case .facetimeAudio: methodKey = "router.call.methodVoice"
         case .whatsappChat: methodKey = "router.call.methodWhatsAppChat"
+        case .messengerAudio: methodKey = "router.call.methodMessengerAudio"
+        case .messengerVideo: methodKey = "router.call.methodMessengerVideo"
         }
         let methodText = L10n.str(methodKey, locale: locale)
         parts.append(L10n.fmt("router.call.confirmQuestion", locale: locale, action.contact.name, methodText))
@@ -1106,8 +1122,11 @@ final class AppCoordinator: ObservableObject {
     /// the user said yes (`handleConfirmationResponse`). All URLs are
     /// built and opened by `CallLinks` (one tested home for handle
     /// normalization and app-absent decisions). Never claims WhatsApp
-    /// "called" — it only opened a chat, and says so; and a FaceTime
-    /// link that can't open says THAT, instead of claiming a call.
+    /// "called" — it only opened a chat, and says so; a FaceTime
+    /// link that can't open says THAT, instead of claiming a call; and
+    /// Messenger "calls" are announced as an OPENED THREAD with the call
+    /// button one tap away, never as a call in progress — no documented
+    /// scheme can start one (see `CallLinks.messengerThreadURL`).
     private func performCallAction(_ action: PendingCallAction) {
         let locale = activeLocale
         switch action.method {
@@ -1140,6 +1159,30 @@ final class AppCoordinator: ObservableObject {
                        text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, action.contact.name))
             speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, action.contact.name))
             noteConfirmedCallExecution(action)
+        case .messengerAudio, .messengerVideo:
+            switch callLinks.openMessengerThread(handle: action.contact.messengerHandle ?? "") {
+            case .openedThread:
+                setOutcome(icon: "message.fill",
+                           text: L10n.fmt("home.outcome.messengerOpened", locale: locale, action.contact.name))
+                speak(text: L10n.fmt("router.call.messengerOpened", locale: locale, action.contact.name))
+                noteConfirmedCallExecution(action)
+            case .fellBackToWeb:
+                // Messenger app absent — the m.me chat opened in Safari
+                // instead. A real surface appeared (the user CAN reach the
+                // thread there), so the confirmed execution still teaches
+                // the history — the disclosure is the speech, not silence.
+                setOutcome(icon: "safari.fill",
+                           text: L10n.fmt("home.outcome.messengerWebFallback", locale: locale, action.contact.name))
+                speak(text: L10n.fmt("router.call.messengerWebFallback", locale: locale, action.contact.name))
+                noteConfirmedCallExecution(action)
+            case .invalidHandle:
+                // The handle went missing/invalid between confirmation and
+                // execution — say what happened, record NOTHING (same rule
+                // as FaceTime .unavailable: never teach from a failure).
+                setOutcome(icon: "exclamationmark.triangle.fill",
+                           text: L10n.fmt("router.call.messengerNoHandle", locale: locale, action.contact.name))
+                speak(text: L10n.fmt("router.call.messengerNoHandle", locale: locale, action.contact.name))
+            }
         }
     }
 

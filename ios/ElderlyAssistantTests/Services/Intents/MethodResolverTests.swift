@@ -73,10 +73,47 @@ final class MethodResolverTests: XCTestCase {
 
     func testUnsupportedAppFallsBackToFaceTimeDisclosed() {
         let (resolver, _, _) = makeResolver()
-        let r = resolver.resolve(contactId: contactId, requestedApp: "messenger", callType: nil)
+        let r = resolver.resolve(contactId: contactId, requestedApp: "viber", callType: nil)
         XCTAssertEqual(r.method, .facetimeAudio)
-        XCTAssertEqual(r.unsupportedRequestedApp, "messenger")
+        XCTAssertEqual(r.unsupportedRequestedApp, "viber")
         XCTAssertEqual(r.source, .explicit)
+    }
+
+    // MARK: Messenger (2026-09-06: explicit user request — thread deep link)
+
+    func testMessengerAudioIsExplicit() {
+        let (resolver, _, _) = makeResolver()
+        let r = resolver.resolve(contactId: contactId, requestedApp: "messenger", callType: nil)
+        XCTAssertEqual(r.method, .messengerAudio)
+        XCTAssertNil(r.unsupportedRequestedApp)
+        XCTAssertEqual(r.source, .explicit)
+    }
+
+    func testMessengerVideoIsExplicit() {
+        let (resolver, _, _) = makeResolver()
+        let r = resolver.resolve(contactId: contactId, requestedApp: "messenger", callType: "video")
+        XCTAssertEqual(r.method, .messengerVideo)
+        XCTAssertNil(r.unsupportedRequestedApp)
+        XCTAssertEqual(r.source, .explicit)
+    }
+
+    func testMessengerNepaliNameIsExplicit() {
+        let (resolver, _, _) = makeResolver()
+        XCTAssertEqual(resolver.resolve(contactId: contactId, requestedApp: "म्यासेन्जर", callType: nil).method,
+                       .messengerAudio)
+        XCTAssertEqual(resolver.resolve(contactId: contactId, requestedApp: "म्यासेन्जरमा", callType: "भिडियो").method,
+                       .messengerVideo)
+    }
+
+    func testMessengerHistoryRoundTrips() {
+        // The new methods are Codable store payloads too (preference +
+        // history) — a messenger-confirmed contact defaults to messenger
+        // next time the user names nothing.
+        let (resolver, _, hist) = makeResolver()
+        hist.record(.messengerAudio, for: contactId)
+        let r = resolver.resolve(contactId: contactId, requestedApp: nil, callType: nil)
+        XCTAssertEqual(r.method, .messengerAudio)
+        XCTAssertEqual(r.source, .confirmedHistory)
     }
 
     // MARK: Stores round-trip + learning

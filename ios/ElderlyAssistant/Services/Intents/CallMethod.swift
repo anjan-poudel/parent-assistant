@@ -6,10 +6,18 @@ import Foundation
 /// FaceTime deep links genuinely place the call; WhatsApp has no public
 /// call-initiation API on iOS at all — `.whatsappChat` only opens the
 /// conversation, the user still taps the call icon themselves inside
-/// WhatsApp. Messenger and Viber have no integration point whatsoever
-/// (confirmed in docs/messaging-calling-platform-research.md, out of
-/// scope) — requesting either falls back to FaceTime, disclosed out loud,
-/// never silently.
+/// WhatsApp. Messenger is the same shape with one more caveat (added
+/// 2026-09-06 at the user's explicit request, superseding the v2 spec's
+/// "drop Messenger" note): `fb-messenger://user-thread/<handle>` opens
+/// the 1:1 thread where the audio/video call buttons sit, but NO
+/// documented scheme starts a 1:1 Messenger call directly (Rooms/call
+/// links are a different, shareable-link mechanism, not per-contact
+/// dialing) — so `.messengerAudio`/`.messengerVideo` open the thread and
+/// the user taps the call button. The audio/video distinction is carried
+/// in the method (not the URL, which is identical) so the confirmation
+/// prompt and the method history stay honest about what was asked. Viber
+/// and anything else with no integration point fall back to FaceTime,
+/// disclosed out loud, never silently.
 ///
 /// `.phone` (plain `tel:`) is NEW in v2: the universal default at the end
 /// of the MethodResolver chain — it works for every contact regardless of
@@ -26,6 +34,8 @@ enum CallMethod: String, Codable, Equatable {
     case facetimeVideo
     case facetimeAudio
     case whatsappChat
+    case messengerAudio
+    case messengerVideo
 }
 
 /// Per-contact, family-set preferred calling method (spec §6.2 chain

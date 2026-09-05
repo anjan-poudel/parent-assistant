@@ -318,6 +318,7 @@ private struct FamilyContactStep: View {
     @State private var name = ""
     @State private var phone = ""
     @State private var relationship = ""
+    @State private var messengerHandle = ""
 
     var body: some View {
         VStack(spacing: 24) {
@@ -336,14 +337,20 @@ private struct FamilyContactStep: View {
                 field(placeholderKey: "onboarding.stepFamily.phone", text: $phone)
                     .keyboardType(.phonePad)
                 field(placeholderKey: "onboarding.stepFamily.relationship", text: $relationship)
+                field(placeholderKey: "onboarding.stepFamily.messenger", text: $messengerHandle)
+                    .keyboardType(.asciiCapable)
+                    .autocapitalization(.none)
+                    .disableAutocorrection(true)
             }
             VStack(spacing: 14) {
                 primaryButton(key: "onboarding.stepFamily.save") {
                     if !name.trimmingCharacters(in: .whitespaces).isEmpty {
+                        let handle = messengerHandle.trimmingCharacters(in: .whitespacesAndNewlines)
                         coordinator.addFamilyContact(
                             name: name,
                             phone: phone,
-                            relationship: relationship
+                            relationship: relationship,
+                            messengerHandle: handle.isEmpty ? nil : handle
                         )
                     }
                     onNext(.familyContact)
