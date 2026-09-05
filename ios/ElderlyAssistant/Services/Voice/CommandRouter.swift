@@ -50,6 +50,15 @@ protocol VoiceCommandCoordinating: AnyObject {
     func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?,
                                  sourceTranscript: String?, sourceCommand: InterpretedCommand?) -> String?
 
+    /// Rephrase-as-question (spec §4 REPHRASE band, open decision #6):
+    /// a mid-confidence tier-`free` interpretation is stated as a yes/no
+    /// question instead of being dropped. The coordinator pends the
+    /// command, speaks the question; on yes the router takes it back via
+    /// `takePendingRephraseCommand` and dispatches it normally.
+    var pendingRephraseCommand: InterpretedCommand? { get }
+    func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?)
+    func takePendingRephraseCommand() -> (command: InterpretedCommand, sourceTranscript: String?)?
+
     /// Call-confirmation correction hook (spec §7.2 correction protocol).
     /// While a call confirmation is outstanding, the router hands each
     /// response utterance here FIRST: an utterance carrying a method
@@ -159,6 +168,27 @@ final class CommandRouter {
         // command. Runs the dementia-aware `acknowledgeWithConfirmation`
         // path with the double-dose check.
         if coordinator?.isAwaitingConfirmation == true {
+            // Rephrase-as-question follow-up: the outstanding challenge
+            // is a mid-band interpretation stated as a yes/no. Yes →
+            // dispatch the pended command as if freshly accepted; no →
+            // discard + re-prompt.
+            if coordinator?.pendingRephraseCommand != nil {
+                if Self.isYesResponse(raw) {
+                    if let taken = coordinator?.takePendingRephraseCommand() {
+                        emit(eventType: "rephrase_confirmed", outcome: "success")
+                        // Cache learning keys the ORIGINAL utterance, not
+                        // the "हो" that confirmed it.
+                        pendingTranscript = taken.sourceTranscript
+                        dispatchInterpreted(taken.command)
+                        pendingTranscript = nil
+                    }
+                    return .unrecognised(transcript: raw)
+                }
+                _ = coordinator?.takePendingRephraseCommand()
+                emit(eventType: "rephrase_discarded", outcome: "info")
+                speak(key: "router.rephrase.discard")
+                return .unrecognised(transcript: raw)
+            }
             // Call-confirmation correction protocol (spec §7.2): a
             // no-with-amendment ("होइन, फोन नै गर") is a slot override,
             // not a rejection — checked BEFORE the plain yes/no parse,
@@ -217,12 +247,26 @@ final class CommandRouter {
                 userLanguageHint: coordinator?.activeLocale.languageCode ?? "en"
             )
             interpreter.interpret(transcript: raw, context: context) { [weak self] command in
+                guard let self else { return }
                 if let command = command {
-                    self?.pendingTranscript = raw
-                    self?.dispatchInterpreted(command)
-                    self?.pendingTranscript = nil
+                    // REPHRASE band (spec §4, decision #6): a mid-band
+                    // tier-`free` command becomes a yes/no question rather
+                    // than an immediate dispatch. Tier-`confirm` actions
+                    // are unaffected — their executor confirmation
+                    // already verifies aloud. `neverGated` never reaches
+                    // here (safety net ran first).
+                    if command.confidence < 0.7,
+                       ConfirmationTier.tier(for: command.action) == .free,
+                       self.coordinator?.pendingRephraseCommand == nil {
+                        self.coordinator?.startRephraseConfirmation(command, sourceTranscript: raw)
+                        self.emit(eventType: "rephrase_question_started", outcome: "info")
+                        return
+                    }
+                    self.pendingTranscript = raw
+                    self.dispatchInterpreted(command)
+                    self.pendingTranscript = nil
                 } else {
-                    _ = self?.routeKeywordRemainder(raw)
+                    _ = self.routeKeywordRemainder(raw)
                 }
             }
             // We can't return a synchronous result once the LLM path fires;
@@ -385,19 +429,7 @@ final class CommandRouter {
         case .sendMessage:
             handleSendMessage(command)
         case .guide:
-            // Guide class (spec §5): steps are READ ALOUD to the human,
-            // never executed. Cloud-only today (appliance/TV questions
-            // need the vision helper anyway) — spoken steps when present,
-            // else the model's reply.
-            emit(eventType: "command_guide", outcome: "info")
-            if let steps = command.steps, !steps.isEmpty {
-                let spoken = steps.joined(separator: ". ")
-                coordinator?.noteGenericReply(spoken)
-                speak(text: spoken)
-            } else {
-                coordinator?.noteGenericReply(command.reply)
-                speak(text: command.reply)
-            }
+            handleGuide(command)
         case .createCalendarEvent, .suggestVideo:
             // Honest not-yet stubs (spec §7.3): the executors for these
             // land with the calendar/video phases — never pretend an
@@ -528,6 +560,61 @@ final class CommandRouter {
                 }
                 self.speak(text: result.spokenText)
             }
+        }
+    }
+
+    /// `guide` intent (spec §5 Guide class): steps are READ ALOUD to the
+    /// human, never executed on-device. Defers to the appliance plugin
+    /// when it can serve the topic (2026-09-05 integration #4 — the
+    /// plugin owns appliance UX: photo + grounding overlay, manuals);
+    /// the understand call's steps remain the fallback until the plugin
+    /// matures past its skeleton, so appliance questions work TODAY and
+    /// upgrade automatically when the plugin lands.
+    private func handleGuide(_ command: InterpretedCommand) {
+        emit(eventType: "command_guide", outcome: "info")
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let sourceTranscript = pendingTranscript ?? ""
+        guard let registry = pluginRegistry,
+              let geminiClient,
+              let topic = command.topic, !topic.isEmpty,
+              let plugin = registry.plugin(handling: "appliance.identify", locale: locale) else {
+            speakGuideSteps(command)
+            return
+        }
+        let pluginCommand = PluginCommand(actionName: "appliance.identify",
+                                          transcript: sourceTranscript,
+                                          entities: ["appliance": topic],
+                                          confidence: command.confidence)
+        let execContext = PluginExecutionContext(locale: locale,
+                                                 geminiClient: geminiClient,
+                                                 observabilityBus: observabilityBus)
+        Task { [weak self] in
+            guard let self else { return }
+            let result = await plugin.handle(pluginCommand, context: execContext)
+            await MainActor.run {
+                if case .failed = result {
+                    // Plugin not ready (skeleton) — steps are the honest
+                    // answer today.
+                    self.speakGuideSteps(command)
+                    return
+                }
+                self.coordinator?.noteGenericReply(result.spokenText)
+                if let view = plugin.presentationView(for: result) {
+                    self.coordinator?.presentPluginView(view)
+                }
+                self.speak(text: result.spokenText)
+            }
+        }
+    }
+
+    private func speakGuideSteps(_ command: InterpretedCommand) {
+        if let steps = command.steps, !steps.isEmpty {
+            let spoken = steps.joined(separator: ". ")
+            coordinator?.noteGenericReply(spoken)
+            speak(text: spoken)
+        } else {
+            coordinator?.noteGenericReply(command.reply)
+            speak(text: command.reply)
         }
     }
 

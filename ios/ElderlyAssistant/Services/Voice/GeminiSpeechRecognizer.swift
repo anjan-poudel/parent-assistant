@@ -39,6 +39,10 @@ final class GeminiSpeechRecognizer: SpeechRecognizerProtocol {
     /// collapse is opt-in per wiring, not a behavior change by default.
     var collapseContextProvider: (() -> InterpreterContext)?
     var onUnderstanding: ((String, InterpretedCommand?) -> Void)?
+    /// Set to receive progressively-revealed transcript partials while
+    /// the collapsed understand call streams (live captions, spec §3.3).
+    /// When nil the recognizer uses the non-streaming understand call.
+    var onPartialTranscript: ((String) -> Void)?
 
     init(client: GeminiClient, observabilityBus: ObservabilityBus, languageHint: String = "ne") {
         self.client = client
@@ -86,13 +90,21 @@ final class GeminiSpeechRecognizer: SpeechRecognizerProtocol {
             guard let self else { return }
             do {
                 if let collapseContext {
-                    // Collapsed path: one call does STT + intent. The
+                    // Collapsed path: one call does STT + intent — streamed
+                    // when a partial handler is wired (live captions). The
                     // command half fires its handler BEFORE the transcript
                     // settles, so the preparse is already waiting when the
                     // transcript reaches the router — ordering matters,
                     // the router's interpret call is synchronous-after.
-                    let understanding = try await self.client.understand(
-                        audioData: wav, mimeType: "audio/wav", context: collapseContext)
+                    let understanding: GeminiUnderstanding
+                    if let onPartial = self.onPartialTranscript {
+                        understanding = try await self.client.understandStreaming(
+                            audioData: wav, mimeType: "audio/wav", context: collapseContext,
+                            onPartialTranscript: onPartial)
+                    } else {
+                        understanding = try await self.client.understand(
+                            audioData: wav, mimeType: "audio/wav", context: collapseContext)
+                    }
                     self.emit("understood", outcome: understanding.command == nil ? "no_command" : "success")
                     #if DEBUG
                     print("[gemini_stt][DEBUG] understand transcript=\"\(understanding.transcript)\"")

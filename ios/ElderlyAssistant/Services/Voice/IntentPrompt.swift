@@ -92,7 +92,10 @@ enum IntentPrompt {
         "guide" set topic to the subject, e.g. "microwave" or "tv remote",
         and steps to a short ordered list of instruction steps in the
         user's language — steps are READ ALOUD to the user, never executed
-        by the device), "query" for any other question, otherwise "none".
+        by the device; if a PLUGIN CAPABILITY section for appliance help
+        appears below, prefer that plugin's action for appliance questions
+        and reserve "guide" for non-appliance how-to), "query" for any
+        other question, otherwise "none".
 
         Set action to "emergency" for ANY plea for help, urgent pain,
         injury, a fall, feeling unable to breathe, chest pain, or fear for
@@ -231,7 +234,10 @@ enum IntentPrompt {
         reminder (time = their original wording); "music" for a song or
         bhajan; "guide" for HOW to use a physical device/appliance (topic =
         the subject; steps = short ordered instruction steps in the user's
-        language — READ ALOUD to the user, never executed by the device);
+        language — READ ALOUD to the user, never executed by the device;
+        if a PLUGIN CAPABILITY section for appliance help is present in
+        this conversation, prefer that plugin's action for appliance
+        questions);
         "query" for any other question; otherwise "none".
 
         "emergency" is for ANY plea for help, urgent pain, injury, a fall,

@@ -129,6 +129,10 @@ enum ModelCatalog {
     static let whisperSmallNepali = ModelID("whisper-distill-ne-q5_1")
     static let whisperBaseEn      = ModelID("whisper-base-en-q5_1")
     static let llama3_2_1B        = ModelID("llama-3.2-1b-instruct-q4km")
+    /// The fine-tuned intent model (spec 2026-09-05 §8): ~1B QLoRA output
+    /// of the Gemma/Qwen bake-off in tools/train-intent/, exported to
+    /// GGUF. PLACEHOLDER until the bake-off produces a release artifact.
+    static let intentNepali1B     = ModelID("intent-ne-1b-q4km")
     static let llama3_2_3B        = ModelID("llama-3.2-3b-instruct-q4km")
     static let sileroVAD          = ModelID("silero-vad-v5")
     static let piperNepali        = ModelID("piper-ne-female-v1")
@@ -306,6 +310,21 @@ enum ModelCatalog {
             sizeBytes: 807_694_464,
             sha256: "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
             minDeviceRAMBytes: 3_000_000_000,
+            dependsOn: nil
+        ),
+        ModelCatalogEntry(
+            id: intentNepali1B,
+            kind: .llamaBase,
+            displayName: "Intent engine (Nepali, 1B)",
+            // PLACEHOLDER — no real artifact until the tools/train-intent
+            // bake-off exports and publishes one (same convention as the
+            // whisperKitNepali placeholder above). Nothing can fire a
+            // real request against an .invalid URL.
+            filename: "intent-ne-1b-q4km.gguf",
+            downloadURL: URL(string: "https://TODO-unset.example.invalid/intent-ne-1b-q4km.gguf")!,
+            sizeBytes: 900_000_000,         // ESTIMATE: ~1B Q4_K_M ballpark
+            sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+            minDeviceRAMBytes: 2_500_000_000,
             dependsOn: nil
         ),
         ModelCatalogEntry(
