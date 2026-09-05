@@ -59,7 +59,7 @@ final class GeminiCommandInterpreter: CommandInterpreter {
         }
         #endif
 
-        let prompt = Self.buildPrompt(transcript: clean, context: context)
+        let prompt = IntentPrompt.build(transcript: clean, context: context)
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -85,75 +85,6 @@ final class GeminiCommandInterpreter: CommandInterpreter {
                 await MainActor.run { completion(nil) }
             }
         }
-    }
-
-    // MARK: - Prompt
-
-    /// Same field set as `LlamaGrammar.commandJSON` (action, entryId,
-    /// contact, time, medication, message, confidence, reply) — described
-    /// in prose here since Gemini's JSON mode is driven by the prompt +
-    /// `responseMimeType`, not a GBNF grammar.
-    static func buildPrompt(transcript: String, context: InterpreterContext) -> String {
-        let meds = context.pendingMedications.isEmpty
-            ? "(none)"
-            : context.pendingMedications.joined(separator: ", ")
-        return """
-        You are Sahayak, a personal voice assistant for an elderly speaker.
-        The user's pending medications are: \(meds).
-        The user's language hint is: \(context.userLanguageHint).
-
-        Reply with ONLY a single JSON object (no markdown fences, no
-        commentary) with exactly these fields:
-        {
-          "action": one of "ack_med", "call", "emergency", "set_reminder",
-                    "health_query", "music", "send_message", "query", "none",
-          "entryId": string or null,
-          "contact": string or null,
-          "time": string or null,
-          "medication": string or null,
-          "message": string or null,
-          "callType": string or null,
-          "requestedApp": string or null,
-          "confidence": number from 0 to 1,
-          "reply": short string, a spoken reply in the user's language
-        }
-
-        Set action to "ack_med" if the user confirms they took medication,
-        "call" if they want to make a phone call, "send_message" if they
-        want to send a text message, "set_reminder" if they want a
-        reminder at a time, "music" if they ask for a song or bhajan,
-        "query" for any other question, otherwise "none".
-
-        Set action to "emergency" for ANY plea for help, urgent pain,
-        injury, a fall, feeling unable to breathe, chest pain, or fear for
-        their safety — even if it's phrased as a question or mentions a
-        symptom. Err toward "emergency" whenever there is real ambiguity
-        between "emergency" and "health_query": a false alarm just causes
-        one extra reassurance message, but missing a real emergency is
-        far worse. For example, "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ"
-        (help, my kidney hurts) is "emergency", NOT "health_query" — it is
-        a plea for help attached to pain, not a calm question about
-        health. Reserve "health_query" for calm, non-urgent questions
-        about health with no help-seeking or pain/injury/danger involved
-        (e.g. "मेरो रक्तचाप कस्तो हुनुपर्छ" — what should my blood pressure
-        be).
-        For "set_reminder", set time to the time expression they used
-        (keep the original wording, e.g. "बिहान ८ बजे") and medication to
-        the medication name if mentioned, else null.
-        For "call" and "send_message", set contact to who they named or
-        described (a name, or a relationship like "son"/"छोरा"), else null.
-        For "send_message", set message to the message body they dictated,
-        else null.
-        For "call", set callType to "video" if they asked for a video
-        call (e.g. "भिडियो कल", "video call"), or "voice" if they asked
-        for a plain phone call, else null if unclear. Set requestedApp to
-        the specific app they named (e.g. "facetime", "whatsapp",
-        "messenger", "viber"), else null if they didn't name one — don't
-        guess an app they didn't mention.
-        Set entryId to null unless you can identify a specific target.
-
-        User said: "\(transcript)"
-        """
     }
 
     // MARK: - Observability
