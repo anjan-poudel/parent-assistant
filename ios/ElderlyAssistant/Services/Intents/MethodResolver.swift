@@ -95,7 +95,7 @@ final class MethodResolver {
         if app.contains("facetime") || app.contains("फेसटाइम") {
             return (isVideo ? .facetimeVideo : .facetimeAudio, nil)
         }
-        if app.contains("whatsapp") || app.contains("ह्वाट्सएप") || app.contains("वाट्सएप") {
+        if CallLinks.isWhatsAppName(app) {
             return (.whatsappChat, nil)
         }
         if app.contains("phone") || app.contains("फोन") || app.contains("call") || app.contains("कल") {

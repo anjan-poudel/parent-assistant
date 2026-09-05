@@ -116,10 +116,11 @@ enum IntentPrompt {
         else null.
         For "call", set callType to "video" if they asked for a video
         call (e.g. "भिडियो कल", "video call"), or "voice" if they asked
-        for a plain phone call, else null if unclear. Set requestedApp to
-        the specific app they named (e.g. "facetime", "whatsapp",
-        "messenger", "viber"), else null if they didn't name one — don't
-        guess an app they didn't mention.
+        for a plain phone call, else null if unclear. For BOTH "call" and
+        "send_message", set requestedApp to the specific app they named
+        (e.g. "facetime", "whatsapp", "messenger", "viber" — including
+        phrasings like "वाट्सएपमा मेसेज पठा"), else null if they didn't
+        name one — don't guess an app they didn't mention.
         Set entryId to null unless you can identify a specific target.
 
         In MODE 1 (intent deciphering), the "reply" field is a short,
@@ -227,7 +228,8 @@ enum IntentPrompt {
         was taken; "call" to make a phone call (contact = who they named
         or described; callType "video"/"voice" only when asked; requestedApp
         only when THEY named an app — never guess one); "send_message" to
-        text someone (message = the dictated body); "set_reminder" for a
+        text someone (message = the dictated body; requestedApp likewise
+        only when they named an app, e.g. "वाट्सएपमा"); "set_reminder" for a
         reminder (time = their original wording); "music" for a song or
         bhajan; "guide" for HOW to use a physical device/appliance (topic =
         the subject; steps = short ordered instruction steps in the user's
