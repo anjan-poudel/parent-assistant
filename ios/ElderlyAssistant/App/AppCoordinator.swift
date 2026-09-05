@@ -1378,6 +1378,7 @@ final class AppCoordinator: ObservableObject {
         entries.append(entry)
         medicationScheduler.loadSchedule(entries: entries)
         medicationScheduler.scheduleAll()
+        calendarSync.syncNow(entries: routineScheduler.entries())
         return nil
     }
 
@@ -1387,6 +1388,27 @@ final class AppCoordinator: ObservableObject {
         entries.removeAll { $0.id == id }
         medicationScheduler.loadSchedule(entries: entries)
         medicationScheduler.scheduleAll()
+        calendarSync.syncNow(entries: routineScheduler.entries())
+    }
+
+    // MARK: - Native Calendar mirroring (v2 design §4.1, 2026-09-06)
+
+    /// EventKit mirror of the unified routine schedule — the app remains
+    /// the source of truth; the native Calendar is a read mirror so
+    /// family can see the routine in any calendar app. Permission
+    /// denial = honest local-only mode, never a crash. Mirrors the
+    /// peer reminders-v2 `RoutineEntry` model (which owns categories
+    /// natively — the parallel tag-store approach from the same merge
+    /// was dropped in favor of it).
+    private(set) lazy var calendarSync = CalendarSyncService(observabilityBus: observabilityBus)
+
+    /// Settings toggle handler: enable calendar mirroring (requests
+    /// EventKit access at point of use) or disable it.
+    func setCalendarSyncEnabled(_ enabled: Bool) async {
+        calendarSync.isEnabled = enabled
+        if enabled {
+            await calendarSync.enableAndSync(entries: routineScheduler.entries())
+        }
     }
 
     // MARK: - Routine reminder surface (v2 pivot Phase 1)
