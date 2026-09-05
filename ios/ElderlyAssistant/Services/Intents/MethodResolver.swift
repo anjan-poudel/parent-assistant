@@ -38,7 +38,7 @@ final class MethodResolver {
     struct ResolvedMethod {
         let method: CallMethod
         /// Set when the user asked for an app we can't actually call
-        /// through (e.g. "messenger"), so we fell back to FaceTime —
+        /// through (e.g. "viber"), so we fell back to FaceTime —
         /// named here so the confirmation prompt can disclose it.
         let unsupportedRequestedApp: String?
         let source: ResolutionSource
@@ -98,12 +98,18 @@ final class MethodResolver {
         if CallLinks.isWhatsAppName(app) {
             return (.whatsappChat, nil)
         }
+        if CallLinks.isMessengerName(app) {
+            // Messenger opens the 1:1 thread, never the call itself (see
+            // CallLinks.messengerThreadURL) — audio/video only changes
+            // what the confirmation prompt and history say.
+            return (isVideo ? .messengerVideo : .messengerAudio, nil)
+        }
         if app.contains("phone") || app.contains("फोन") || app.contains("call") || app.contains("कल") {
             // "फोन नै गर" — a plain phone call, said so in as many words.
             return (.phone, nil)
         }
-        // Messenger, Viber, or anything else with no real integration —
-        // fall back to FaceTime, but say so.
+        // Viber or anything else with no real integration — fall back to
+        // FaceTime, but say so.
         return (isVideo ? .facetimeVideo : .facetimeAudio, requestedApp)
     }
 }

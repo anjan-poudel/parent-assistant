@@ -113,6 +113,52 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_call_confirmation_requested" })
     }
 
+    /// "messenger ma call gara" — the LLM extracts requestedApp=messenger;
+    /// the router's job is to hand the slot through to the coordinator's
+    /// confirmation flow untouched (the messenger method resolution,
+    /// handle check, and deep link all live below this layer).
+    func testMessengerCallIntentRoutesAppSlotThroughToConfirmation() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.callConfirmationPrompt = "छोरालाई म्यासेन्जर अडियो कल गर्ने हो?"
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .call, entryId: nil, contact: "छोरा", time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: "messenger", pluginAction: nil, pluginEntities: nil, confidence: 0.95, reply: "ठिक छ"
+        )
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "छोरालाई messenger ma call gara")
+
+        XCTAssertEqual(coordinator.callConfirmationRequests.count, 1)
+        XCTAssertEqual(coordinator.callConfirmationRequests.first?.contact, "छोरा")
+        XCTAssertEqual(coordinator.callConfirmationRequests.first?.requestedApp, "messenger")
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_call_confirmation_requested" })
+    }
+
+    /// "messenger video" — callType=video + requestedApp=messenger both
+    /// survive routing, so MethodResolver can pick .messengerVideo.
+    func testMessengerVideoCallIntentRoutesBothSlotsThrough() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.callConfirmationPrompt = "छोरालाई म्यासेन्जर भिडियो कल गर्ने हो?"
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .call, entryId: nil, contact: "छोरा", time: nil, medication: nil,
+            message: nil, callType: "video", requestedApp: "म्यासेन्जर", pluginAction: nil, pluginEntities: nil, confidence: 0.95, reply: "ठिक छ"
+        )
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "छोरालाई म्यासेन्जरमा भिडियो कल गर")
+
+        XCTAssertEqual(coordinator.callConfirmationRequests.count, 1)
+        XCTAssertEqual(coordinator.callConfirmationRequests.first?.requestedApp, "म्यासेन्जर")
+        XCTAssertEqual(coordinator.callConfirmationRequests.first?.callType, "video")
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_call_confirmation_requested" })
+    }
+
     func testCallWithUnresolvedContactStaysBlocked() {
         let coordinator = MockVoiceCommandCoordinator()
         coordinator.callConfirmationPrompt = nil

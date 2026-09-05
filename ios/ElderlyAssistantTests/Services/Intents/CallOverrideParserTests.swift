@@ -29,6 +29,22 @@ final class CallOverrideParserTests: XCTestCase {
         XCTAssertEqual(CallOverrideParser.parseMethodOverride("whatsapp ma call gara"), .whatsappChat)
     }
 
+    func testMessengerOverrideBothScripts() {
+        XCTAssertEqual(CallOverrideParser.parseMethodOverride("होइन, म्यासेन्जरमा गर"), .messengerAudio)
+        XCTAssertEqual(CallOverrideParser.parseMethodOverride("no, use messenger"), .messengerAudio)
+        XCTAssertEqual(CallOverrideParser.parseMethodOverride("मेसेन्जर नै गर"), .messengerAudio)
+    }
+
+    func testMessengerWinsOverStrayVideoAndCallTokens() {
+        // "messenger video call gara" — the app mention owns its OWN
+        // audio/video distinction; without this ordering the bare
+        // "video"/"call" tokens would flip the override to FaceTime or
+        // tel: against the user's plain meaning.
+        XCTAssertEqual(CallOverrideParser.parseMethodOverride("messenger ma call gara"), .messengerAudio)
+        XCTAssertEqual(CallOverrideParser.parseMethodOverride("messenger video"), .messengerVideo)
+        XCTAssertEqual(CallOverrideParser.parseMethodOverride("म्यासेन्जरमा भिडियो गर"), .messengerVideo)
+    }
+
     func testPlainYesNoIsNotAnOverride() {
         XCTAssertNil(CallOverrideParser.parseMethodOverride("हो"))
         XCTAssertNil(CallOverrideParser.parseMethodOverride("होइन"))

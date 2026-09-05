@@ -35,6 +35,7 @@
 		<string>facetime</string>
 		<string>facetime-audio</string>
 		<string>whatsapp</string>
+		<string>fb-messenger</string>
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
@@ -43,7 +44,7 @@
 	<key>NSCalendarsUsageDescription</key>
 	<string>Your daily routine (medicines, exercise, meals) is mirrored to the Calendar app so your family can see it too. The app works fully even if you say no.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>The camera is used only to verify medication intake by capturing a photo of your empty hand. Photos are only shared with your caregiver.</string>
+	<string>The camera is used to verify medication intake, and to photograph appliances, remotes, or screens when you ask for help using them. Appliance photos are sent to the assistant's cloud service so it can guide you.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>The assistant needs microphone access to listen for your voice commands and wake word. Your voice data never leaves this device.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

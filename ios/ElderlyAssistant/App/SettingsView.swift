@@ -12,7 +12,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case language, family, meds, geminiAI, voiceEngine, privacy
+        case language, family, meds, geminiAI, voiceEngine, ttsVoices, privacy
 
         var id: String {
             switch self {
@@ -21,6 +21,7 @@ struct SettingsView: View {
             case .meds: return "meds"
             case .geminiAI: return "geminiAI"
             case .voiceEngine: return "voiceEngine"
+            case .ttsVoices: return "ttsVoices"
             case .privacy: return "privacy"
             }
         }
@@ -59,6 +60,7 @@ struct SettingsView: View {
                         sectionRow(.language, icon: "globe", titleKey: "settings.language.title")
                         geminiSectionRow
                         voiceEngineSectionRow
+                        ttsVoicesSectionRow
                         sectionRow(.family, icon: "person.2.fill", titleKey: "settings.family.title")
                         sectionRow(.meds, icon: "pills.fill", titleKey: "settings.meds.title")
                         sectionRow(.privacy, icon: "lock.shield.fill", titleKey: "settings.privacy.title")
@@ -83,6 +85,7 @@ struct SettingsView: View {
             case .meds: MedicationScheduleSettingsView()
             case .geminiAI: GeminiAPISettingsView()
             case .voiceEngine: VoiceEngineSettingsView()
+            case .ttsVoices: TTSVoicesSettingsView()
             case .privacy: PrivacySettingsView()
             }
         }
@@ -165,6 +168,59 @@ struct SettingsView: View {
             .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
         }
         .buttonStyle(.plain)
+    }
+
+
+    /// On-device TTS voices (Piper VITS via sherpa-onnx). Status surfaces
+    /// the 2026-09-06 failure mode — a build without the bundled voice
+    /// files silently fell back to no speech for Nepali.
+    private var ttsVoicesSectionRow: some View {
+        NavigationLink(value: SettingsSection.ttsVoices) {
+            HStack(spacing: 14) {
+                Image(systemName: "speaker.waveform.2.fill")
+                    .font(.system(size: 26))
+                    .foregroundColor(DesignTokens.accent)
+                    .frame(width: 40)
+                Text("settings.voices.title")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Spacer()
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(ttsVoiceSummary.ok ? DesignTokens.accent : DesignTokens.stateError)
+                        .frame(width: 8, height: 8)
+                    Text(ttsVoiceSummary.key)
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Green when every catalog voice can speak (installed, or bundled
+    /// and installable on first use); red the moment any voice is truly
+    /// missing from the build.
+    private var ttsVoiceSummary: (ok: Bool, key: LocalizedStringKey) {
+        let entries = ModelCatalog.entries(kind: .tts)
+        let allOK = entries.allSatisfy {
+            TTSVoicesSettingsView.status(for: $0, modelStore: coordinator.modelStore) != .missing
+        }
+        let anyInstalled = entries.contains {
+            TTSVoicesSettingsView.status(for: $0, modelStore: coordinator.modelStore) == .installed
+        }
+        if !allOK { return (false, "settings.voices.statusMissing") }
+        return (true, anyInstalled
+                ? "settings.voices.statusInstalled"
+                : "settings.voices.statusBundled")
     }
 
     private func sectionRow(_ section: SettingsSection, icon: String,
@@ -476,6 +532,7 @@ struct FamilyContactsSettingsView: View {
     @State private var name = ""
     @State private var phone = ""
     @State private var relationship = ""
+    @State private var messengerHandle = ""
 
     var body: some View {
         LeafScreen(titleKey: "settings.family.title") {
@@ -514,6 +571,12 @@ struct FamilyContactsSettingsView: View {
                 Text(contact.phone)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
+                if let handle = contact.messengerHandle, !handle.isEmpty {
+                    Text(L10n.fmt("settings.family.messengerHandle",
+                                  locale: coordinator.activeLocale, handle))
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
             }
             Spacer()
             Button(role: .destructive) {
@@ -554,12 +617,23 @@ struct FamilyContactsSettingsView: View {
                 .frame(height: 56)
                 .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            TextField(LocalizedStringKey("onboarding.stepFamily.messenger"), text: $messengerHandle)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .keyboardType(.asciiCapable)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+                .padding(14)
+                .frame(height: 56)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             Button {
                 let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { return }
+                let handle = messengerHandle.trimmingCharacters(in: .whitespacesAndNewlines)
                 coordinator.addFamilyContact(name: trimmed, phone: phone,
-                                             relationship: relationship)
-                name = ""; phone = ""; relationship = ""
+                                             relationship: relationship,
+                                             messengerHandle: handle.isEmpty ? nil : handle)
+                name = ""; phone = ""; relationship = ""; messengerHandle = ""
             } label: {
                 Text("settings.family.add")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
@@ -965,5 +1039,140 @@ struct PrivacySettingsView: View {
             .background(DesignTokens.card)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
         }
+    }
+}
+
+// MARK: - TTS voices (on-device Piper VITS)
+
+/// Per-voice install status for the on-device TTS voices
+/// (docs/tts-implementation-plan.md). Exists because the 2026-09-06 field
+/// failure was invisible: a build without the bundled voice files fell
+/// back to silence for Nepali and nobody could tell why.
+struct TTSVoicesSettingsView: View {
+    @EnvironmentObject var coordinator: AppCoordinator
+    @Environment(\.dismiss) private var dismiss
+
+    enum VoiceStatus {
+        case installed   // in the ModelStore, ready to speak
+        case bundled     // inside the app bundle; installs on first use
+        case missing     // neither — this voice cannot speak in this build
+    }
+
+    static func status(for entry: ModelCatalogEntry,
+                       modelStore: ModelStore,
+                       bundle: Bundle = .main) -> VoiceStatus {
+        if modelStore.isCached(entry.id) { return .installed }
+        if let name = entry.bundledResourceName,
+           bundle.url(forResource: name, withExtension: nil, subdirectory: "tts") != nil {
+            return .bundled
+        }
+        return .missing
+    }
+
+    var body: some View {
+        ZStack {
+            DesignTokens.background.ignoresSafeArea()
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 26, weight: .bold))
+                            .foregroundColor(DesignTokens.textPrimary)
+                            .frame(width: DesignTokens.minTapTargetSize,
+                                   height: DesignTokens.minTapTargetSize)
+                            .background(DesignTokens.card)
+                            .clipShape(Circle())
+                    }
+                    .accessibilityLabel(Text("common.back"))
+                    Text("settings.voices.title")
+                        .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                        .foregroundColor(DesignTokens.textPrimary)
+                    Spacer()
+                    EmergencyIconButton()
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 16)
+
+                ScrollView {
+                    VStack(spacing: 12) {
+                        ForEach(ModelCatalog.entries(kind: .tts)) { entry in
+                            voiceRow(entry)
+                        }
+                        Button {
+                            coordinator.speak(text: L10n.str("settings.voices.sampleGreeting",
+                                                             locale: coordinator.activeLocale))
+                        } label: {
+                            HStack(spacing: 14) {
+                                Image(systemName: "play.circle.fill")
+                                    .font(.system(size: 26))
+                                    .foregroundColor(DesignTokens.accent)
+                                    .frame(width: 40)
+                                Text("settings.voices.testButton")
+                                    .font(.system(size: DesignTokens.minBodyPointSize,
+                                                  weight: .semibold))
+                                    .foregroundColor(DesignTokens.textPrimary)
+                                Spacer()
+                            }
+                            .padding(18)
+                            .frame(maxWidth: .infinity)
+                            .background(DesignTokens.card)
+                            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+                        }
+                        .buttonStyle(.plain)
+
+                        if ModelCatalog.entries(kind: .tts).contains(where: {
+                            Self.status(for: $0, modelStore: coordinator.modelStore) == .missing
+                        }) {
+                            Text("settings.voices.missingHint")
+                                .font(.system(size: DesignTokens.minCaptionPointSize))
+                                .foregroundColor(DesignTokens.stateError)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 4)
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 32)
+                }
+            }
+        }
+        .navigationBarHidden(true)
+    }
+
+    private func voiceRow(_ entry: ModelCatalogEntry) -> some View {
+        let status = Self.status(for: entry, modelStore: coordinator.modelStore)
+        let nameKey = entry.id == ModelCatalog.piperNepali
+            ? "settings.voices.nepali" : "settings.voices.english"
+        let (statusKey, statusColor): (LocalizedStringKey, Color) = {
+            switch status {
+            case .installed: return ("settings.voices.statusInstalled", DesignTokens.accent)
+            case .bundled:   return ("settings.voices.statusBundled", DesignTokens.accent)
+            case .missing:   return ("settings.voices.statusMissing", DesignTokens.stateError)
+            }
+        }()
+        return HStack(spacing: 14) {
+            Image(systemName: "waveform")
+                .font(.system(size: 26))
+                .foregroundColor(DesignTokens.accent)
+                .frame(width: 40)
+            Text(LocalizedStringKey(nameKey))
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundColor(DesignTokens.textPrimary)
+            Spacer()
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 8, height: 8)
+                Text(statusKey)
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
     }
 }

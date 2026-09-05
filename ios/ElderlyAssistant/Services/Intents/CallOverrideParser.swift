@@ -18,9 +18,17 @@ enum CallOverrideParser {
         let text = NepaliTextNormalizer.normalize(raw)
         guard !text.isEmpty else { return nil }
 
-        // Order matters: check the most specific compounds first. "भिडियो"
-        // alone implies FaceTime video regardless of what else is said;
-        // "whatsapp" wins over a stray "call/फोन" token ("whatsapp ma call gara").
+        // Order matters: check the most specific compounds first. A named
+        // app with its own audio/video distinction (messenger) must win
+        // over the bare "video"/"कल" tokens inside the same utterance
+        // ("messenger video call gara" is a Messenger VIDEO call, not
+        // FaceTime); "whatsapp" wins over a stray "call/फोन" token
+        // ("whatsapp ma call gara"); "भिडियो" alone implies FaceTime
+        // video regardless of what else is said.
+        if CallLinks.isMessengerName(text) {
+            return (text.contains("video") || text.contains("भिडियो"))
+                ? .messengerVideo : .messengerAudio
+        }
         if text.contains("whatsapp") || text.contains("ह्वाट्सएप") || text.contains("वाट्सएप") {
             return .whatsappChat
         }

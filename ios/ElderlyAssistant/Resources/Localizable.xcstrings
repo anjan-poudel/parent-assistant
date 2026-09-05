@@ -11,6 +11,210 @@
         }
       }
     },
+    "appliance.closerPhotoHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't mark the exact spot on this photo. Follow the written steps, or take a closer photo of the buttons."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोटोमा ठीक ठाउँ देखाउन सकिनँ। लेखिएका चरणहरू पालना गर्नुहोस्, वा बटनहरूको नजिकबाट अर्को फोटो खिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "appliance.dismiss": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बन्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "appliance.error.generic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sorry, I couldn't help with that photo. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस्, त्यो फोटोबाट मदत गर्न सकिनँ। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "appliance.error.offline": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The internet isn't available right now. Please try again later."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले इन्टरनेट उपलब्ध छैन। पछि फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "appliance.error.photoUnusable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That photo didn't come out — please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यो फोटो राम्रो आएन — फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "appliance.error.timeout": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Understanding took too long — please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बुझ्न धेरै समय लाग्यो — फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "appliance.hedgeNotice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I'm not completely sure about this — please double-check yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यस बारेमा म पूर्ण पक्का छैन — कृपया आफैं पनि जाँच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "appliance.hedgePrefix": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I'm not completely sure, but"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पक्का छैन, तर"
+          }
+        }
+      }
+    },
+    "appliance.retake": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Take another photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अर्को फोटो खिच्नुहोस्"
+          }
+        }
+      }
+    },
+    "appliance.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try again"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फेरि प्रयास गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "appliance.takePhoto": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Take a photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो खिच्नुहोस्"
+          }
+        }
+      }
+    },
+    "appliance.working": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Looking at your photo…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको फोटो हेर्दैछु…"
+          }
+        }
+      }
+    },
     "calendar.nepaliDate": {
       "extractionState": "manual",
       "localizations": {
@@ -164,6 +368,108 @@
         }
       }
     },
+    "call.announce.faceTimeVideo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Starting a FaceTime video call with %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ सँग फेसटाइम भिडियो कल सुरु गर्दैछु।"
+          }
+        }
+      }
+    },
+    "call.announce.messenger": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening Messenger for %@ — please tap the call button there yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को लागि मेसेन्जर खोल्दैछु — कृपया त्यहाँ आफैं कल बटन थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "call.announce.messengerWebFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger isn't installed, so I've opened it in the browser for %@ — please tap the call button there."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनमा मेसेन्जर छैन, त्यसैले %@ को लागि ब्राउजरमा खोलिदिएको छु — कृपया त्यहाँ आफैं कल बटन थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "call.announce.noPhoneNumber": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I don't have a usable phone number for %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को फोन नम्बर उपलब्ध छैन।"
+          }
+        }
+      }
+    },
+    "call.announce.whatsAppCopiedFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neither WhatsApp nor Messages works on this device, so I've copied %@'s number — you can paste it yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो उपकरणमा ह्वाट्सएप वा म्यासेज चल्दैन, त्यसैले %@ को नम्बर कपी गरिदिएको छु — आफैं टाँस्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "call.announce.whatsAppSmsFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WhatsApp isn't installed on this phone, so I've opened Messages for %@ instead."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनमा ह्वाट्सएप छैन, त्यसैले %@ को लागि म्यासेज खोलिदिएको छु।"
+          }
+        }
+      }
+    },
     "call.callButtonLabel": {
       "extractionState": "manual",
       "localizations": {
@@ -211,6 +517,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "फोन गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "call.videoCallButtonLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video call %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ लाई भिडियो कल गर्नुहोस्"
           }
         }
       }
@@ -772,6 +1095,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ लाई पठाउन सन्देश तयार छ"
+          }
+        }
+      }
+    },
+    "home.outcome.messengerOpened": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger opened for %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को लागि मेसेन्जर खोलियो"
+          }
+        }
+      }
+    },
+    "home.outcome.messengerWebFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger chat opened in browser for %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को कुराकानी ब्राउजरमा खोलियो"
+          }
+        }
+      }
+    },
+    "home.outcome.numberCopied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Number copied for %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को नम्बर कपी भयो"
           }
         }
       }
@@ -1677,6 +2051,23 @@
         }
       }
     },
+    "onboarding.stepFamily.messenger": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger username (optional)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्यासेन्जर प्रयोगकर्ता नाम (ऐच्छिक)"
+          }
+        }
+      }
+    },
     "onboarding.stepFamily.name": {
       "extractionState": "manual",
       "localizations": {
@@ -1932,6 +2323,23 @@
         }
       }
     },
+    "plugin.applianceHelper.cameraPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Take a clear photo of the appliance or its buttons, and I will guide you."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उपकरण वा त्यसका बटनहरूको सफा फोटो खिच्नुहोस्, म तपाईंलाई सिकाउँछु।"
+          }
+        }
+      }
+    },
     "plugin.applianceHelper.name": {
       "extractionState": "manual",
       "localizations": {
@@ -1945,6 +2353,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "उपकरण सहायता"
+          }
+        }
+      }
+    },
+    "plugin.applianceHelper.notConfigured": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assistant isn't set up yet, so I can't look at photos right now."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायक अझै सेटअप भएको छैन, त्यसैले अहिले फोटो हेर्न सक्दिनँ।"
           }
         }
       }
@@ -2353,6 +2778,91 @@
           "stringUnit": {
             "state": "translated",
             "value": "यो उपकरणमा फेसटाइम उपलब्ध छैन, त्यसैले कल सुरु गर्न सकिनँ।"
+          }
+        }
+      }
+    },
+    "router.call.messengerNoHandle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I don't have %@'s Messenger name yet. Please ask family to add it in Settings, or say another way to call."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को म्यासेन्जर नाम थाहा छैन। कृपया परिवारलाई सेटिङमा थप्न लगाउनुहोस्, वा कल गर्ने अर्को तरिका भन्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.call.messengerOpened": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I've opened Messenger for %@ — please tap the call button yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को लागि म्यासेन्जर खोलियो — कृपया आफैं कल बटन थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.call.messengerWebFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger isn't installed on this phone, so I've opened %@'s chat in the browser instead — please tap the call button yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनमा म्यासेन्जर छैन, त्यसैले %@ को कुराकानी ब्राउजरमा खोलिदिएको छु — कृपया आफैं कल बटन थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.call.methodMessengerAudio": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "a Messenger audio call"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्यासेन्जर अडियो कल"
+          }
+        }
+      }
+    },
+    "router.call.methodMessengerVideo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "a Messenger video call"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्यासेन्जर भिडियो कल"
           }
         }
       }
@@ -3101,6 +3611,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "अहिलेसम्म कुनै सम्पर्क छैन"
+          }
+        }
+      }
+    },
+    "settings.family.messengerHandle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger: %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्यासेन्जर: %@"
           }
         }
       }
@@ -3900,6 +4427,159 @@
           "stringUnit": {
             "state": "translated",
             "value": "आवाज इन्जिन"
+          }
+        }
+      }
+    },
+    "settings.voices.english": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "English voice (US)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अंग्रेजी आवाज (अमेरिकी)"
+          }
+        }
+      }
+    },
+    "settings.voices.missingHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice files are not bundled in this build. Ask your family to rebuild the app with the voice files included."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो बिल्डमा आवाज फाइलहरू छैनन्। परिवारलाई आवाज फाइलसहित एप फेरि बनाउन भन्नुहोस्।"
+          }
+        }
+      }
+    },
+    "settings.voices.nepali": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nepali voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नेपाली आवाज"
+          }
+        }
+      }
+    },
+    "settings.voices.sampleGreeting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hello! Your assistant is speaking with its new voice."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नमस्ते! तपाईंको सहायक आफ्नो नयाँ आवाजमा बोल्दै छ।"
+          }
+        }
+      }
+    },
+    "settings.voices.statusBundled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready — installs on first use"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तयार — पहिलो प्रयोगमा स्थापना हुन्छ"
+          }
+        }
+      }
+    },
+    "settings.voices.statusInstalled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installed"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "स्थापित"
+          }
+        }
+      }
+    },
+    "settings.voices.statusMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Missing"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "छैन"
+          }
+        }
+      }
+    },
+    "settings.voices.testButton": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play sample greeting"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नमूना अभिवादन बजाउनुहोस्"
+          }
+        }
+      }
+    },
+    "settings.voices.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voices"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाजहरू"
           }
         }
       }

@@ -6,17 +6,77 @@ import Foundation
 /// Complete — constitution §Security). The phone number is the payload the
 /// future broker relay will notify; `deviceToken` in the APNs notifier stays
 /// unprovisioned until that channel exists (review C6).
+///
+/// `messengerHandle` (2026-09-06): the contact's Messenger username or
+/// numeric user-id, needed because Messenger deep links address people by
+/// handle, not by phone number. Optional — the custom decoder reads a
+/// missing key as nil (the store is unversioned; an optional field IS its
+/// migration pattern).
+///
+/// `preferredVideoApp`/`preferredCallApp` (contact-call-buttons task,
+/// 2026-09-06) are the per-contact default apps the Call leaf's video/
+/// audio buttons open. The model carries them NOW so personalization
+/// ships later as UI only — the edit-defaults screen (deferred by the
+/// user) plugs in by writing these two fields through
+/// `FamilyContactStore.save`; nothing else needs to change.
 struct FamilyContact: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String
     var phone: String
     var relationship: String
+    var messengerHandle: String?
 
-    init(id: UUID = UUID(), name: String, phone: String, relationship: String) {
+    /// App the video button opens for this contact. Default `.faceTime`
+    /// (the global default) — the only app that truly starts a video
+    /// call from a deep link.
+    var preferredVideoApp: CallApp
+    /// App the audio call button opens for this contact. Default
+    /// `.phone` (GSM `tel:`) — works for every contact, no app
+    /// assumptions.
+    var preferredCallApp: CallApp
+
+    init(id: UUID = UUID(), name: String, phone: String, relationship: String,
+         messengerHandle: String? = nil,
+         preferredVideoApp: CallApp = .faceTime, preferredCallApp: CallApp = .phone) {
         self.id = id
         self.name = name
         self.phone = phone
         self.relationship = relationship
+        self.messengerHandle = messengerHandle
+        self.preferredVideoApp = preferredVideoApp
+        self.preferredCallApp = preferredCallApp
+    }
+
+    /// Custom decode: contacts persisted BEFORE the preference fields
+    /// existed (and any hand-edited/corrupt value) must load with the
+    /// global defaults, not fail the whole store read. The store has no
+    /// schema-versioning pattern — plain Codable — so defaulting lives
+    /// here on the model.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        phone = try container.decode(String.self, forKey: .phone)
+        relationship = try container.decode(String.self, forKey: .relationship)
+        messengerHandle = (try? container.decodeIfPresent(String.self, forKey: .messengerHandle)) ?? nil
+        // `decode` throws on a missing key AND on an unknown raw value —
+        // `try?` turns both into the default.
+        preferredVideoApp = (try? container.decode(CallApp.self, forKey: .preferredVideoApp)) ?? .faceTime
+        preferredCallApp = (try? container.decode(CallApp.self, forKey: .preferredCallApp)) ?? .phone
+    }
+
+    /// The app a VIDEO button resolves to (task: contact preference →
+    /// global default). A stored preference that can't do video (`.phone`)
+    /// can't have come from the future picker — treat it as unset and
+    /// fall back to the global default rather than open the wrong surface.
+    var resolvedVideoApp: CallApp {
+        preferredVideoApp.supportsVideo ? preferredVideoApp : .faceTime
+    }
+
+    /// The app an AUDIO button resolves to. `.faceTime` is video-only in
+    /// the button vocabulary, so it falls back to the GSM default.
+    var resolvedAudioApp: CallApp {
+        preferredCallApp.supportsAudio ? preferredCallApp : .phone
     }
 }
 

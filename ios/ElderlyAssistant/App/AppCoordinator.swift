@@ -435,7 +435,7 @@ final class AppCoordinator: ObservableObject {
         // composition, and CommandRouter gets it for .plugin dispatch.
         let pluginRegistry = PluginRegistry(observabilityBus: bus)
         pluginRegistry.register(NepaliCalendarPlugin(storage: storage))
-        pluginRegistry.register(ApplianceHelperPlugin())
+        pluginRegistry.register(ApplianceHelperPlugin(storage: storage))
         pluginRegistry.register(routinePlugin)
         self.pluginRegistry = pluginRegistry
 
@@ -541,6 +541,12 @@ final class AppCoordinator: ObservableObject {
             modelStore: modelStore
         )
         self.speaker = speaker
+        // The registry is built in init but the speaker only exists now —
+        // hand it to the appliance plugin so guidance summaries are spoken
+        // by the same voice everything else uses.
+        pluginRegistry.plugins
+            .compactMap { $0 as? ApplianceHelperPlugin }
+            .forEach { $0.speaker = speaker }
         // v2 pivot: Gemini interpreter. `isAvailable` stays false until an
         // API key is configured (GeminiConfigStore) — CommandRouter treats
         // that exactly like the old "LLM not linked" case: fall through to
@@ -973,8 +979,10 @@ final class AppCoordinator: ObservableObject {
     }
 
     @discardableResult
-    func addFamilyContact(name: String, phone: String, relationship: String) -> Bool {
-        let contact = FamilyContact(name: name, phone: phone, relationship: relationship)
+    func addFamilyContact(name: String, phone: String, relationship: String,
+                          messengerHandle: String? = nil) -> Bool {
+        let contact = FamilyContact(name: name, phone: phone, relationship: relationship,
+                                    messengerHandle: messengerHandle)
         guard familyContactStore.add(contact) else { return false }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -1048,7 +1056,7 @@ final class AppCoordinator: ObservableObject {
         let contact: FamilyContact
         let method: CallMethod
         /// Set when the user asked for an app we can't actually call
-        /// through (e.g. "messenger"), so we fell back to FaceTime —
+        /// through (e.g. "viber"), so we fell back to FaceTime —
         /// named here so the confirmation prompt can disclose it.
         let unsupportedRequestedApp: String?
         /// The original utterance + interpreted command this action came
@@ -1086,6 +1094,18 @@ final class AppCoordinator: ObservableObject {
         let resolved = methodResolver.resolve(contactId: contact.id,
                                               requestedApp: requestedApp,
                                               callType: callType)
+        // Messenger needs a per-contact handle (username/user-id), not a
+        // phone number — and most contacts won't have one yet. Caught
+        // HERE, before the confirmation question, so the elder is never
+        // asked to yes/no an action that can only fail (mirrors the
+        // .ambiguous path above: nothing pended, and the returned line
+        // tells them what actually unblocks it). The same normalization
+        // the opener uses decides "usable", so the two checks can't
+        // disagree.
+        if resolved.method == .messengerAudio || resolved.method == .messengerVideo,
+           CallLinks.messengerHandle(contact.messengerHandle ?? "").isEmpty {
+            return L10n.fmt("router.call.messengerNoHandle", locale: activeLocale, contact.name)
+        }
         let action = PendingCallAction(contact: contact,
                                        method: resolved.method,
                                        unsupportedRequestedApp: resolved.unsupportedRequestedApp,
@@ -1111,6 +1131,17 @@ final class AppCoordinator: ObservableObject {
     func handleCallConfirmationOverride(_ utterance: String) -> Bool {
         guard let action = pendingCallAction,
               let override = CallOverrideParser.parseMethodOverride(utterance) else { return false }
+        // The requestCallConfirmation no-handle gate applies to overrides
+        // too: amending to Messenger for a contact with no usable handle
+        // would re-confirm an action that can only fail — the exact
+        // yes/no trap that gate exists to prevent. The ORIGINAL action
+        // stays pending, so "हो" still places it and a further correction
+        // ("फेसटाइममा गर") still re-plans.
+        if override == .messengerAudio || override == .messengerVideo,
+           CallLinks.messengerHandle(action.contact.messengerHandle ?? "").isEmpty {
+            speak(text: L10n.fmt("router.call.messengerNoHandle", locale: activeLocale, action.contact.name))
+            return true
+        }
         let amended = PendingCallAction(contact: action.contact,
                                         method: override,
                                         unsupportedRequestedApp: nil,
@@ -1136,6 +1167,8 @@ final class AppCoordinator: ObservableObject {
         case .facetimeVideo: methodKey = "router.call.methodVideo"
         case .facetimeAudio: methodKey = "router.call.methodVoice"
         case .whatsappChat: methodKey = "router.call.methodWhatsAppChat"
+        case .messengerAudio: methodKey = "router.call.methodMessengerAudio"
+        case .messengerVideo: methodKey = "router.call.methodMessengerVideo"
         }
         let methodText = L10n.str(methodKey, locale: locale)
         parts.append(L10n.fmt("router.call.confirmQuestion", locale: locale, action.contact.name, methodText))
@@ -1146,8 +1179,11 @@ final class AppCoordinator: ObservableObject {
     /// the user said yes (`handleConfirmationResponse`). All URLs are
     /// built and opened by `CallLinks` (one tested home for handle
     /// normalization and app-absent decisions). Never claims WhatsApp
-    /// "called" — it only opened a chat, and says so; and a FaceTime
-    /// link that can't open says THAT, instead of claiming a call.
+    /// "called" — it only opened a chat, and says so; a FaceTime
+    /// link that can't open says THAT, instead of claiming a call; and
+    /// Messenger "calls" are announced as an OPENED THREAD with the call
+    /// button one tap away, never as a call in progress — no documented
+    /// scheme can start one (see `CallLinks.messengerThreadURL`).
     private func performCallAction(_ action: PendingCallAction) {
         let locale = activeLocale
         switch action.method {
@@ -1180,6 +1216,30 @@ final class AppCoordinator: ObservableObject {
                        text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, action.contact.name))
             speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, action.contact.name))
             noteConfirmedCallExecution(action)
+        case .messengerAudio, .messengerVideo:
+            switch callLinks.openMessengerThread(handle: action.contact.messengerHandle ?? "") {
+            case .openedThread:
+                setOutcome(icon: "message.fill",
+                           text: L10n.fmt("home.outcome.messengerOpened", locale: locale, action.contact.name))
+                speak(text: L10n.fmt("router.call.messengerOpened", locale: locale, action.contact.name))
+                noteConfirmedCallExecution(action)
+            case .fellBackToWeb:
+                // Messenger app absent — the m.me chat opened in Safari
+                // instead. A real surface appeared (the user CAN reach the
+                // thread there), so the confirmed execution still teaches
+                // the history — the disclosure is the speech, not silence.
+                setOutcome(icon: "safari.fill",
+                           text: L10n.fmt("home.outcome.messengerWebFallback", locale: locale, action.contact.name))
+                speak(text: L10n.fmt("router.call.messengerWebFallback", locale: locale, action.contact.name))
+                noteConfirmedCallExecution(action)
+            case .invalidHandle:
+                // The handle went missing/invalid between confirmation and
+                // execution — say what happened, record NOTHING (same rule
+                // as FaceTime .unavailable: never teach from a failure).
+                setOutcome(icon: "exclamationmark.triangle.fill",
+                           text: L10n.fmt("router.call.messengerNoHandle", locale: locale, action.contact.name))
+                speak(text: L10n.fmt("router.call.messengerNoHandle", locale: locale, action.contact.name))
+            }
         }
     }
 
@@ -1195,6 +1255,93 @@ final class AppCoordinator: ObservableObject {
         if let transcript = action.sourceTranscript, let command = action.sourceCommand {
             intentRouter?.recordConfirmedExecution(transcript: transcript, command: command)
         }
+    }
+
+    /// Tap-originated call from a ContactTile video/audio button
+    /// (contact-call-buttons task, 2026-09-06). The tap IS the
+    /// confirmation (redesign precedent: the user's own hand on their own
+    /// unlocked phone — the same trust model as any contacts app), so
+    /// unlike the voice flow there is no PendingCallAction: resolve the
+    /// contact's preferred app (contact preference → global default,
+    /// baked into the model) and open it immediately, announcing aloud
+    /// which surface actually appeared — the same dual-channel honesty
+    /// `performCallAction` holds to. No method-history learning here:
+    /// the contact's stored preference IS this path's source of truth,
+    /// and `CallMethod` has no messenger case to record.
+    func performContactCall(_ contact: FamilyContact, kind: ContactCallKind) {
+        let locale = activeLocale
+        let app = kind == .video ? contact.resolvedVideoApp : contact.resolvedAudioApp
+        observabilityBus.emit(ObservabilityEvent(
+            component: "contact_call_buttons",
+            eventType: "tap",
+            durationMs: nil,
+            outcome: "\(kind == .video ? "video" : "audio"):\(app.rawValue)",
+            errorCode: nil,
+            metadata: [:]  // no contact identifiers — C9 policy
+        ))
+        switch app {
+        case .faceTime:
+            // Video-only in the button vocabulary; `resolvedVideoApp`
+            // already guarantees an audio tap never lands here.
+            switch callLinks.openFaceTime(handle: contact.phone, video: true) {
+            case .opened:
+                setOutcome(icon: "video.fill",
+                           text: L10n.fmt("home.outcome.callPlaced", locale: locale, contact.name))
+                speak(text: L10n.fmt("call.announce.faceTimeVideo", locale: locale, contact.name))
+            case .unavailable, .invalidHandle:
+                setOutcome(icon: "exclamationmark.triangle.fill",
+                           text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+                speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+            }
+        case .phone:
+            guard callLinks.openPhone(contact.phone) else {
+                announceNoUsableNumber(contact: contact, locale: locale)
+                return
+            }
+            setOutcome(icon: "phone.fill",
+                       text: L10n.fmt("home.outcome.callPlaced", locale: locale, contact.name))
+            speak(text: L10n.fmt("router.call.calling", locale: locale, contact.name))
+        case .messenger:
+            switch callLinks.openMessengerChat(phone: contact.phone) {
+            case .openedApp:
+                setOutcome(icon: "message.fill",
+                           text: L10n.fmt("home.outcome.messengerOpened", locale: locale, contact.name))
+                speak(text: L10n.fmt("call.announce.messenger", locale: locale, contact.name))
+            case .openedWebChat:
+                setOutcome(icon: "message.fill",
+                           text: L10n.fmt("home.outcome.messengerOpened", locale: locale, contact.name))
+                speak(text: L10n.fmt("call.announce.messengerWebFallback", locale: locale, contact.name))
+            case .invalidHandle:
+                announceNoUsableNumber(contact: contact, locale: locale)
+            }
+        case .whatsApp:
+            switch callLinks.openWhatsAppCallChat(contact.phone) {
+            case .openedChat:
+                setOutcome(icon: "message.fill",
+                           text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, contact.name))
+                speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, contact.name))
+            case .needsNativeCompose:
+                // WhatsApp absent → native Messages sheet to the same
+                // number (task's sms/copy chain), disclosed out loud.
+                presentMessageDraft(contact: contact, body: "")
+                speak(text: L10n.fmt("call.announce.whatsAppSmsFallback", locale: locale, contact.name))
+            case .copiedNumber:
+                setOutcome(icon: "doc.on.doc.fill",
+                           text: L10n.fmt("home.outcome.numberCopied", locale: locale, contact.name))
+                speak(text: L10n.fmt("call.announce.whatsAppCopiedFallback", locale: locale, contact.name))
+            case .invalidPhone:
+                announceNoUsableNumber(contact: contact, locale: locale)
+            }
+        }
+    }
+
+    /// Shared honest line for a contact whose stored phone normalizes to
+    /// nothing dialable — defensive (the editors require a number), but a
+    /// silent dead button is exactly what this feature must never ship.
+    private func announceNoUsableNumber(contact: FamilyContact, locale: Locale) {
+        setOutcome(icon: "exclamationmark.triangle.fill",
+                   text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, contact.name))
+        speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, contact.name))
     }
 
     /// A pending SMS draft — presented as `MessageComposeView` from
