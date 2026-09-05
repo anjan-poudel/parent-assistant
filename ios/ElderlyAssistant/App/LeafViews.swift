@@ -310,10 +310,16 @@ struct CallView: View {
     }
 }
 
-/// Face/initial avatar + name, with a real tap-to-dial action — no list
-/// picker in between (redesign spec §3.1 "one face, one tap").
+/// Face/initial avatar + name, with per-contact VIDEO and AUDIO call
+/// buttons — no list picker in between (redesign spec §3.1 "one face,
+/// one tap"; contact-call-buttons task 2026-09-06). Each button opens
+/// the contact's preferred app for that call kind (`FamilyContact`
+/// carries the per-contact defaults; the personalization editor is a
+/// deferred follow-up) through `AppCoordinator.performContactCall`,
+/// which also announces the opened surface aloud.
 struct ContactTile: View {
     let contact: FamilyContact
+    @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.locale) private var locale
 
     var body: some View {
@@ -328,7 +334,17 @@ struct ContactTile: View {
                     .foregroundColor(DesignTokens.textSecondary)
             }
             Spacer()
-            Button(action: call) {
+            Button(action: videoCall) {
+                Image(systemName: "video.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: DesignTokens.minTapTargetSize, height: DesignTokens.minTapTargetSize)
+                    .background(DesignTokens.BadgeTint.call.tint)
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(L10n.fmt("call.videoCallButtonLabel", locale: locale, contact.name)))
+            Button(action: audioCall) {
                 Image(systemName: "phone.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.white)
@@ -346,9 +362,12 @@ struct ContactTile: View {
         .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
     }
 
-    private func call() {
-        guard let url = PhoneDialer.url(for: contact.phone) else { return }
-        UIApplication.shared.open(url)
+    private func videoCall() {
+        coordinator.performContactCall(contact, kind: .video)
+    }
+
+    private func audioCall() {
+        coordinator.performContactCall(contact, kind: .audio)
     }
 }
 

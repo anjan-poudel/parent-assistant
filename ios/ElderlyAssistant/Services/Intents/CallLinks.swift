@@ -52,6 +52,45 @@ struct SystemCallLinkOpener: CallLinkOpening {
     }
 }
 
+/// The app a per-contact call button opens (contact-call-buttons task,
+/// 2026-09-06). Stored on `FamilyContact` as that contact's preference;
+/// `CallLinks` owns the URL/open behavior per app, so this vocabulary is
+/// shared between the storage model and the opener.
+///
+/// Only apps with a REAL outbound surface are listed (the same bar
+/// `CallMethod` holds): FaceTime genuinely initiates the call and `tel:`
+/// always works; Messenger and WhatsApp have NO public call-initiation
+/// API on iOS, so those buttons open the chat surface and the user taps
+/// the call icon inside the app — disclosed out loud, never claimed as
+/// "calling" (docs/messaging-calling-platform-research.md).
+enum CallApp: String, Codable, Equatable {
+    /// FaceTime — the only app that truly starts a call from a deep
+    /// link. Video-only in this vocabulary (audio FaceTime stays a
+    /// voice-flow `CallMethod`, not a per-contact button target).
+    case faceTime
+    /// Plain GSM call (`tel:`) — audio only, but works for every
+    /// contact with zero app assumptions.
+    case phone
+    /// Messenger chat surface (video/audio icon inside the app).
+    case messenger
+    /// WhatsApp chat surface (video/audio icon inside the app).
+    case whatsApp
+
+    /// Video buttons may resolve to any app except the GSM dialer.
+    var supportsVideo: Bool { self != .phone }
+    /// Audio buttons may resolve to any app except FaceTime (kept
+    /// video-only for the button path — see above).
+    var supportsAudio: Bool { self != .faceTime }
+}
+
+/// Which ContactTile button was tapped — the tap IS the confirmation
+/// (redesign precedent: a deliberate tap on one's own unlocked phone
+/// needs no voice confirmation), so this is the whole "intent".
+enum ContactCallKind: Equatable {
+    case video
+    case audio
+}
+
 /// Builds and opens the calling/messaging deep links (v2 pivot Phase 2,
 /// §4.3): FaceTime video (`facetime://`), FaceTime audio
 /// (`facetime-audio://`), WhatsApp outbound text (`whatsapp://send`), the
@@ -117,6 +156,38 @@ final class CallLinks {
         case invalidHandle
     }
 
+    /// Result of a Messenger chat open from a per-contact call button
+    /// (contact-call-buttons task). Messenger has no public API to
+    /// deep-link a call by phone number, so both outcomes land on a
+    /// chat surface and the user taps the call icon inside.
+    enum MessengerChatOutcome: Equatable {
+        /// Messenger is installed — the app opened (`fb-messenger://`).
+        case openedApp
+        /// Messenger is not installed — fell back to the
+        /// `https://m.me/<digits>` web chat (task's absent-app chain).
+        case openedWebChat
+        /// The contact's phone normalized to no digits.
+        case invalidHandle
+    }
+
+    /// Result of a WhatsApp chat open from a per-contact call button.
+    /// Distinct from `WhatsAppTextOutcome`: a CALL request carries no
+    /// message body, so the last-resort copy payload is the contact's
+    /// number, not a text.
+    enum WhatsAppCallOutcome: Equatable {
+        /// `whatsapp://send` opened the chat in-app — the user taps
+        /// the video/audio icon inside WhatsApp.
+        case openedChat
+        /// WhatsApp is not installed, but the native Messages sheet can
+        /// take a text to the same number — caller presents it and
+        /// discloses the swap.
+        case needsNativeCompose
+        /// No messaging surface at all — the contact's number was
+        /// copied to the pasteboard; caller discloses that.
+        case copiedNumber
+        /// The contact's phone normalized to no digits.
+        case invalidPhone
+    }
     private let opener: CallLinkOpening
     /// Whether the native Messages compose sheet can take text
     /// (`MFMessageComposeViewController.canSendText`) — injected because
@@ -339,5 +410,52 @@ final class CallLinks {
             opener.open(webURL)
         }
         return .fellBackToWeb
+    /// Opens Messenger for a per-contact call button (contact-call-
+    /// buttons task). No public API deep-links a Messenger call by phone
+    /// number, so this opens the app's chat surface and the user taps
+    /// the video/audio icon inside — the caller's spoken line says
+    /// exactly that. Absent-app chain per the task: `fb-messenger://`
+    /// when installed, else the `https://m.me/<digits>` web chat.
+    /// (`m.me` resolves a phone number only when the person's Facebook
+    /// is discoverable by it; otherwise it lands on Messenger web's
+    /// home — still a real surface, disclosed as the web fallback.)
+    func openMessengerChat(phone rawPhone: String) -> MessengerChatOutcome {
+        let digits = Self.whatsAppDigits(rawPhone)
+        guard !digits.isEmpty else { return .invalidHandle }
+        if let appURL = URL(string: "fb-messenger://"), opener.canOpenURL(appURL) {
+            opener.open(appURL)
+            return .openedApp
+        }
+        // https is always openable (Safari); non-empty digits make this
+        // URL well-formed, but stay unwrap-free per convention.
+        guard let webURL = URL(string: "https://m.me/\(digits)") else { return .invalidHandle }
+        opener.open(webURL)
+        return .openedWebChat
+    }
+
+    /// Opens a WhatsApp chat for a per-contact CALL button (no message
+    /// body — `whatsAppTextURL` omits the text parameter when empty, so
+    /// the user lands in the chat and taps the video/audio icon; v2 §4.3
+    /// "you still tap" framing applies to the call icons too).
+    ///
+    /// Unlike `openWhatsAppChat`'s unconditional `wa.me`, this IS
+    /// presence-gated on the `whatsapp://` scheme — the only honest
+    /// installed-check — so an absent app takes the task's fallback
+    /// chain: native Messages sheet when it can send text, else the
+    /// contact's number on the pasteboard. The caller performs the
+    /// fallback presentation/disclosure.
+    func openWhatsAppCallChat(_ rawPhone: String) -> WhatsAppCallOutcome {
+        guard let url = Self.whatsAppTextURL(phone: rawPhone, text: "") else {
+            return .invalidPhone
+        }
+        if opener.canOpenURL(url) {
+            opener.open(url)
+            return .openedChat
+        }
+        if canSendText() {
+            return .needsNativeCompose
+        }
+        copyText(Self.phoneHandle(rawPhone))
+        return .copiedNumber
     }
 }

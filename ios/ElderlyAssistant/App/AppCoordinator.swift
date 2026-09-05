@@ -1257,6 +1257,93 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// Tap-originated call from a ContactTile video/audio button
+    /// (contact-call-buttons task, 2026-09-06). The tap IS the
+    /// confirmation (redesign precedent: the user's own hand on their own
+    /// unlocked phone — the same trust model as any contacts app), so
+    /// unlike the voice flow there is no PendingCallAction: resolve the
+    /// contact's preferred app (contact preference → global default,
+    /// baked into the model) and open it immediately, announcing aloud
+    /// which surface actually appeared — the same dual-channel honesty
+    /// `performCallAction` holds to. No method-history learning here:
+    /// the contact's stored preference IS this path's source of truth,
+    /// and `CallMethod` has no messenger case to record.
+    func performContactCall(_ contact: FamilyContact, kind: ContactCallKind) {
+        let locale = activeLocale
+        let app = kind == .video ? contact.resolvedVideoApp : contact.resolvedAudioApp
+        observabilityBus.emit(ObservabilityEvent(
+            component: "contact_call_buttons",
+            eventType: "tap",
+            durationMs: nil,
+            outcome: "\(kind == .video ? "video" : "audio"):\(app.rawValue)",
+            errorCode: nil,
+            metadata: [:]  // no contact identifiers — C9 policy
+        ))
+        switch app {
+        case .faceTime:
+            // Video-only in the button vocabulary; `resolvedVideoApp`
+            // already guarantees an audio tap never lands here.
+            switch callLinks.openFaceTime(handle: contact.phone, video: true) {
+            case .opened:
+                setOutcome(icon: "video.fill",
+                           text: L10n.fmt("home.outcome.callPlaced", locale: locale, contact.name))
+                speak(text: L10n.fmt("call.announce.faceTimeVideo", locale: locale, contact.name))
+            case .unavailable, .invalidHandle:
+                setOutcome(icon: "exclamationmark.triangle.fill",
+                           text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+                speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+            }
+        case .phone:
+            guard callLinks.openPhone(contact.phone) else {
+                announceNoUsableNumber(contact: contact, locale: locale)
+                return
+            }
+            setOutcome(icon: "phone.fill",
+                       text: L10n.fmt("home.outcome.callPlaced", locale: locale, contact.name))
+            speak(text: L10n.fmt("router.call.calling", locale: locale, contact.name))
+        case .messenger:
+            switch callLinks.openMessengerChat(phone: contact.phone) {
+            case .openedApp:
+                setOutcome(icon: "message.fill",
+                           text: L10n.fmt("home.outcome.messengerOpened", locale: locale, contact.name))
+                speak(text: L10n.fmt("call.announce.messenger", locale: locale, contact.name))
+            case .openedWebChat:
+                setOutcome(icon: "message.fill",
+                           text: L10n.fmt("home.outcome.messengerOpened", locale: locale, contact.name))
+                speak(text: L10n.fmt("call.announce.messengerWebFallback", locale: locale, contact.name))
+            case .invalidHandle:
+                announceNoUsableNumber(contact: contact, locale: locale)
+            }
+        case .whatsApp:
+            switch callLinks.openWhatsAppCallChat(contact.phone) {
+            case .openedChat:
+                setOutcome(icon: "message.fill",
+                           text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, contact.name))
+                speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, contact.name))
+            case .needsNativeCompose:
+                // WhatsApp absent → native Messages sheet to the same
+                // number (task's sms/copy chain), disclosed out loud.
+                presentMessageDraft(contact: contact, body: "")
+                speak(text: L10n.fmt("call.announce.whatsAppSmsFallback", locale: locale, contact.name))
+            case .copiedNumber:
+                setOutcome(icon: "doc.on.doc.fill",
+                           text: L10n.fmt("home.outcome.numberCopied", locale: locale, contact.name))
+                speak(text: L10n.fmt("call.announce.whatsAppCopiedFallback", locale: locale, contact.name))
+            case .invalidPhone:
+                announceNoUsableNumber(contact: contact, locale: locale)
+            }
+        }
+    }
+
+    /// Shared honest line for a contact whose stored phone normalizes to
+    /// nothing dialable — defensive (the editors require a number), but a
+    /// silent dead button is exactly what this feature must never ship.
+    private func announceNoUsableNumber(contact: FamilyContact, locale: Locale) {
+        setOutcome(icon: "exclamationmark.triangle.fill",
+                   text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, contact.name))
+        speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, contact.name))
+    }
+
     /// A pending SMS draft — presented as `MessageComposeView` from
     /// `ContentView`. Never auto-sent: `MFMessageComposeViewController`
     /// requires the user's own tap on Send (Apple platform constraint,
