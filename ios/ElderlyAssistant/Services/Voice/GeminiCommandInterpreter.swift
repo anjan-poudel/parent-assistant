@@ -25,13 +25,19 @@ final class GeminiCommandInterpreter: CommandInterpreter {
     private let client: GeminiClient
     private let observabilityBus: ObservabilityBus
     private let config: Config
+    /// Optional — when set, prompt composition includes applicable
+    /// plugins' intent fragments (see `IntentPrompt.build`). Nil keeps
+    /// the pre-plugin behavior exactly.
+    private let pluginRegistry: PluginRegistry?
 
     var isAvailable: Bool { client.isAvailable }
 
-    init(client: GeminiClient, observabilityBus: ObservabilityBus, config: Config = .default) {
+    init(client: GeminiClient, observabilityBus: ObservabilityBus,
+         config: Config = .default, pluginRegistry: PluginRegistry? = nil) {
         self.client = client
         self.observabilityBus = observabilityBus
         self.config = config
+        self.pluginRegistry = pluginRegistry
     }
 
     func interpret(transcript: String,
@@ -59,7 +65,10 @@ final class GeminiCommandInterpreter: CommandInterpreter {
         }
         #endif
 
-        let prompt = IntentPrompt.build(transcript: clean, context: context)
+        let activePlugins = pluginRegistry?.activePlugins(
+            for: Locale(identifier: context.userLanguageHint)) ?? []
+        let prompt = IntentPrompt.build(transcript: clean, context: context,
+                                        activePlugins: activePlugins)
         Task { [weak self] in
             guard let self else { return }
             do {

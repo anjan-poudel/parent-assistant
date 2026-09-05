@@ -105,6 +105,26 @@ final class LlamaCommandInterpreterTests: XCTestCase {
         XCTAssertTrue(g.contains("\\\"none\\\""))
     }
 
+    func testParsePluginActionAndEntities() {
+        let json = """
+        {"action":"plugin","entryId":null,"contact":null,"time":null,"medication":null,"message":null,"callType":null,"requestedApp":null,"pluginAction":"nepali_calendar.query","pluginEntities":{"question":"आज के हो"},"confidence":0.9,"reply":"खोज्दैछु"}
+        """
+        let cmd = LlamaCommandInterpreter.parse(json: json)
+        XCTAssertEqual(cmd?.action, .plugin)
+        XCTAssertEqual(cmd?.pluginAction, "nepali_calendar.query")
+        XCTAssertEqual(cmd?.pluginEntities?["question"], "आज के हो")
+    }
+
+    func testParsePluginEntitiesDefaultsToNilWhenAbsent() {
+        let json = """
+        {"action":"ack_med","entryId":null,"contact":null,"confidence":0.9,"reply":"ठिक"}
+        """
+        let cmd = LlamaCommandInterpreter.parse(json: json)
+        XCTAssertEqual(cmd?.action, .ackMed)
+        XCTAssertNil(cmd?.pluginAction)
+        XCTAssertNil(cmd?.pluginEntities)
+    }
+
     func testParseExtractsTimeAndMedicationEntities() {
         let json = """
         {"action":"set_reminder","entryId":null,"contact":null,"time":"बिहान ८ बजे","medication":"प्रेसरको औषधि","confidence":0.92,"reply":"ठीक छ"}

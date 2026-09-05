@@ -1,4 +1,5 @@
 import XCTest
+import SwiftUI
 @testable import ElderlyAssistant
 
 /// Covers the shared prompt builder used by BOTH `GeminiCommandInterpreter`
@@ -56,6 +57,35 @@ final class IntentPromptTests: XCTestCase {
                        "health_query", "music", "send_message", "query", "none"] {
             XCTAssertTrue(prompt.contains("\"\(action)\""), "missing action: \(action)")
         }
+    }
+
+    // MARK: - Plugin composition (plugin architecture, 2026-09-05)
+
+    func testNoPluginsLeavesPromptFreeOfPluginSchema() {
+        let prompt = build()
+        XCTAssertFalse(prompt.contains("pluginAction"))
+        XCTAssertFalse(prompt.contains("pluginEntities"))
+    }
+
+    func testActivePluginContributesSchemaAndFragment() {
+        let plugin = FakePlugin(id: "test_plugin", actionNames: ["test.action"], applicableToNepali: false)
+        let prompt = IntentPrompt.build(transcript: "test",
+                                        context: InterpreterContext(pendingMedications: [], userLanguageHint: "ne"),
+                                        activePlugins: [plugin])
+        XCTAssertTrue(prompt.contains("\"pluginAction\""), "plugin schema must be described when a plugin is active")
+        XCTAssertTrue(prompt.contains("\"pluginEntities\""))
+        XCTAssertTrue(prompt.contains("fake fragment for test_plugin"))
+        XCTAssertTrue(prompt.contains("action"))
+    }
+
+    func testMultiplePluginsEachContributeFragment() {
+        let a = FakePlugin(id: "plugin_a", actionNames: ["a.action"], applicableToNepali: false)
+        let b = FakePlugin(id: "plugin_b", actionNames: ["b.action"], applicableToNepali: false)
+        let prompt = IntentPrompt.build(transcript: "test",
+                                        context: InterpreterContext(pendingMedications: [], userLanguageHint: "ne"),
+                                        activePlugins: [a, b])
+        XCTAssertTrue(prompt.contains("fake fragment for plugin_a"))
+        XCTAssertTrue(prompt.contains("fake fragment for plugin_b"))
     }
 
     // MARK: - Intent-first framing (product requirement, 2026-09-05)

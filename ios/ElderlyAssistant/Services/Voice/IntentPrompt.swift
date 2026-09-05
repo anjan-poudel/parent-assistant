@@ -21,7 +21,16 @@ import Foundation
 /// output; the LLM's only job is to produce that structure correctly.
 enum IntentPrompt {
 
-    static func build(transcript: String, context: InterpreterContext) -> String {
+    /// `activePlugins`: plugins applicable to the active locale (from
+    /// `PluginRegistry.activePlugins(for:)`). Each contributes a prompt
+    /// fragment teaching the model when to emit action "plugin" with its
+    /// own pluginAction/entities — composed in only for applicable
+    /// plugins, so a geography-gated plugin (e.g. the Nepali calendar)
+    /// costs zero prompt tokens and zero misclassification risk for
+    /// users it doesn't apply to (design doc §4). Defaults to empty so
+    /// plugin-less configurations behave exactly as before.
+    static func build(transcript: String, context: InterpreterContext,
+                      activePlugins: [AssistantPlugin] = []) -> String {
         let meds = context.pendingMedications.isEmpty
             ? "(none)"
             : context.pendingMedications.joined(separator: ", ")
@@ -125,5 +134,37 @@ enum IntentPrompt {
 
         User said: "\(transcript)"
         """
+        + pluginSections(activePlugins)
+    }
+
+    /// Schema addendum required when any plugin is active: the model
+    /// must know the "plugin" action exists and which extra fields to
+    /// emit for it, or plugin intents can never be expressed in the
+    /// output contract. Empty string when no plugins apply, so the
+    /// baseline prompt is byte-for-byte unchanged.
+    private static func pluginSections(_ plugins: [AssistantPlugin]) -> String {
+        guard !plugins.isEmpty else { return "" }
+        var sections = ["""
+
+
+        When "plugin" is the right action, "action" may also be "plugin".
+        In that case the JSON object may additionally contain:
+          "pluginAction": the namespaced action name declared by the
+                          relevant capability below (required when
+                          action is "plugin"),
+          "pluginEntities": an object of extra fields declared by that
+                            capability, or null.
+
+        The following capabilities are available for this user:
+        """]
+        for plugin in plugins {
+            // Indent each fragment's lines so the composed prompt keeps
+            // one consistent left margin, matching the core section.
+            let indented = plugin.intentContribution.promptFragment
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .joined(separator: "\n        ")
+            sections.append("\n\n        " + indented)
+        }
+        return sections.joined()
     }
 }

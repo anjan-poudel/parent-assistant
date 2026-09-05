@@ -98,10 +98,21 @@ final class GeminiClient {
     /// `GeminiCommandInterpreter`) owns the prompt content and decodes the
     /// result — this method only guarantees "valid JSON came back", not
     /// any particular shape.
-    func generateJSON(prompt: String) async throws -> String {
+    ///
+    /// `useSearchGrounding`: adds Google's `google_search` tool to the
+    /// request so Gemini can search the web and synthesize from results
+    /// instead of relying on training knowledge alone. Verified live
+    /// against this API key on 2026-09-05 (a real model-specific question
+    /// returned a cited, correct answer with `groundingMetadata`
+    /// present). Used by plugins whose questions are time-sensitive or
+    /// model-specific (e.g. `NepaliCalendarPlugin`) — costs more (a real
+    /// search per call) and adds latency, so it stays opt-in per call,
+    /// never a blanket default.
+    func generateJSON(prompt: String, useSearchGrounding: Bool = false) async throws -> String {
         let request = GeminiRequest(
             contents: [.init(parts: [.text(prompt)])],
-            generationConfig: .init(responseMimeType: "application/json")
+            generationConfig: .init(responseMimeType: "application/json"),
+            tools: useSearchGrounding ? [.init(googleSearch: .init())] : nil
         )
         return try await send(request)
     }
@@ -202,8 +213,18 @@ struct GeminiRequest: Encodable {
         var responseMimeType: String?
     }
 
+    struct Tool: Encodable {
+        struct GoogleSearch: Encodable {}
+        let googleSearch: GoogleSearch
+
+        private enum CodingKeys: String, CodingKey {
+            case googleSearch = "google_search"
+        }
+    }
+
     let contents: [Content]
     var generationConfig: GenerationConfig?
+    var tools: [Tool]?
 }
 
 struct GeminiResponse: Decodable {

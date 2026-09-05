@@ -5,6 +5,7 @@ import Combine
 import UserNotifications
 import UIKit
 import MessageUI
+import SwiftUI
 
 /// Central coordinator that wires all services together.
 /// Starts safety-critical services first (medication scheduler, health monitor),
@@ -264,6 +265,9 @@ final class AppCoordinator: ObservableObject {
     /// currently selects.
     private var geminiCommandInterpreter: GeminiCommandInterpreter!
     private var switchableInterpreter: SwitchableCommandInterpreter!
+    /// The plugin registry backing `.plugin` intent dispatch and plugin
+    /// prompt composition (design doc 2026-09-05).
+    private(set) var pluginRegistry: PluginRegistry!
 
     /// Legacy v1 on-device model catalog — kept only so the buried
     /// "AI मोडेल" settings screen still functions as a manual fallback.
@@ -353,9 +357,19 @@ final class AppCoordinator: ObservableObject {
             modelStore: modelStore,
             observabilityBus: bus
         )
+        // Plugin registry (design: docs/superpowers/specs/
+        // 2026-09-05-plugin-architecture-design.md). Built-ins are
+        // registered here; both interpreters get it for prompt
+        // composition, and CommandRouter gets it for .plugin dispatch.
+        let pluginRegistry = PluginRegistry(observabilityBus: bus)
+        pluginRegistry.register(NepaliCalendarPlugin(storage: storage))
+        pluginRegistry.register(ApplianceHelperPlugin())
+        self.pluginRegistry = pluginRegistry
+
         self.llamaCommandInterpreter = LlamaCommandInterpreter(
             modelStore: modelStore,
-            observabilityBus: bus
+            observabilityBus: bus,
+            pluginRegistry: pluginRegistry
         )
 
         // Restore the persisted voice-engine stack choice (default: the
@@ -444,7 +458,8 @@ final class AppCoordinator: ObservableObject {
         // keyword matching.
         let geminiInterpreter = GeminiCommandInterpreter(
             client: geminiClient,
-            observabilityBus: observabilityBus
+            observabilityBus: observabilityBus,
+            pluginRegistry: pluginRegistry
         )
         self.geminiCommandInterpreter = geminiInterpreter
         // CommandRouter holds its interpreter as an immutable `private let`
@@ -460,7 +475,9 @@ final class AppCoordinator: ObservableObject {
             coordinator: self,
             observabilityBus: observabilityBus,
             speaker: speaker,
-            interpreter: switchable
+            interpreter: switchable,
+            pluginRegistry: pluginRegistry,
+            geminiClient: geminiClient
         )
         // Start with the fallback STT. Gemini is swapped in below once an
         // API key is configured.
@@ -1017,6 +1034,23 @@ final class AppCoordinator: ObservableObject {
         let body: String
     }
     @Published var pendingMessageDraft: MessageDraft?
+
+    /// A plugin-provided view awaiting presentation (`.plugin` intent,
+    /// `PluginResult.spokenAndPresented`) — ContentView renders it as a
+    /// sheet, same pattern as `pendingMessageDraft`.
+    struct PluginPresentation: Identifiable {
+        let id = UUID()
+        let view: AnyView
+    }
+    @Published var pendingPluginPresentation: PluginPresentation?
+
+    /// `VoiceCommandCoordinating.presentPluginView` — a plugin's
+    /// `presentationView(for:)` result, published for ContentView.
+    func presentPluginView(_ view: AnyView) {
+        DispatchQueue.main.async { [weak self] in
+            self?.pendingPluginPresentation = PluginPresentation(view: view)
+        }
+    }
 
     func composeMessage(toContactNamed query: String?, body: String) -> Bool {
         guard MFMessageComposeViewController.canSendText(),
