@@ -247,6 +247,116 @@ struct ContactTile: View {
     }
 }
 
+// MARK: - Calendar (पात्रो) — 2026-09-06
+
+/// Today's date + the day's actual schedule (from the coordinator's
+/// real reminder/medication data), plus today's Nepali calendar date
+/// when the NepaliCalendarPlugin applies and can answer. No mock data
+/// anywhere: sections that have no real content are simply omitted.
+struct CalendarView: View {
+    @EnvironmentObject var coordinator: AppCoordinator
+    @State private var nepaliDateText: String?
+    @State private var nepaliDateLoaded = false
+
+    private var todaysReminders: [ScheduledReminder] {
+        coordinator.pendingReminders
+            .filter { Calendar.current.isDateInToday($0.scheduledAt) }
+            .sorted { $0.scheduledAt < $1.scheduledAt }
+    }
+
+    var body: some View {
+        LeafScreen(titleKey: "calendar.title") {
+            VStack(spacing: 12) {
+                dateCard
+                if let nepaliDateText {
+                    infoCard(titleKey: "calendar.nepaliDate", text: nepaliDateText)
+                }
+                scheduleSection
+            }
+        }
+        .task { await loadNepaliDate() }
+    }
+
+    private var dateCard: some View {
+        VStack(spacing: 6) {
+            Text(Date().formatted(.dateTime.weekday(.wide).locale(coordinator.activeLocale)))
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .foregroundColor(DesignTokens.textSecondary)
+            Text(Date().formatted(.dateTime.day().month(.wide).year().locale(coordinator.activeLocale)))
+                .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                .foregroundColor(DesignTokens.textPrimary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    private func infoCard(titleKey: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(LocalizedStringKey(titleKey))
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textSecondary)
+            Text(text)
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundColor(DesignTokens.textPrimary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    @ViewBuilder
+    private var scheduleSection: some View {
+        if todaysReminders.isEmpty {
+            Text("calendar.noScheduleToday")
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(24)
+                .frame(maxWidth: .infinity)
+                .background(DesignTokens.card)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        } else {
+            VStack(spacing: 12) {
+                ForEach(todaysReminders) { reminder in
+                    HStack(spacing: 12) {
+                        IconBadge(systemImage: "clock.fill", tint: .reminders)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(coordinator.medicationName(for: reminder.medicationEntryId))
+                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                                .foregroundColor(DesignTokens.textPrimary)
+                            Text(reminder.scheduledAt.formatted(date: .omitted, time: .shortened))
+                                .font(.system(size: DesignTokens.minCaptionPointSize))
+                                .foregroundColor(DesignTokens.textSecondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity)
+                    .background(DesignTokens.card)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                }
+            }
+        }
+    }
+
+    /// Asks the NepaliCalendarPlugin (via the coordinator) for today's
+    /// Nepali date. Only attempts when the plugin applies (Nepali
+    /// locale) and the assistant is configured — otherwise the section
+    /// stays hidden rather than showing an error or placeholder.
+    private func loadNepaliDate() async {
+        guard !nepaliDateLoaded else { return }
+        nepaliDateLoaded = true
+        if let answer = await coordinator.nepaliCalendarAnswer(
+            question: L10n.str("calendar.todayQuestion", locale: coordinator.activeLocale)) {
+            await MainActor.run { nepaliDateText = answer }
+        }
+    }
+}
+
 // MARK: - Shared
 
 private func emptyState(key: String) -> some View {

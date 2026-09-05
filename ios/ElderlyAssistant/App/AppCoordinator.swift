@@ -1158,6 +1158,65 @@ final class AppCoordinator: ObservableObject {
     }
     @Published var pendingMessageDraft: MessageDraft?
 
+    /// Asks the registered NepaliCalendarPlugin a question and returns
+    /// its spoken answer, or nil when the plugin doesn't apply (non-
+    /// Nepali locale), the assistant isn't configured, or the call
+    /// fails — callers must treat nil as "hide this", never show an
+    /// error string for a decorative display.
+    func nepaliCalendarAnswer(question: String) async -> String? {
+        guard let plugin = pluginRegistry?.plugin(handling: "nepali_calendar.query",
+                                                  locale: activeLocale),
+              geminiConfigStore.isConfigured else { return nil }
+        let command = PluginCommand(actionName: "nepali_calendar.query",
+                                    transcript: "",
+                                    entities: ["question": question],
+                                    confidence: 1.0)
+        let context = PluginExecutionContext(locale: activeLocale,
+                                             geminiClient: geminiClient,
+                                             observabilityBus: observabilityBus)
+        let result = await plugin.handle(command, context: context)
+        switch result {
+        case .spoken(let text), .spokenAndPresented(let text):
+            return text
+        case .failed:
+            return nil
+        }
+    }
+
+    /// One line with today's Nepali (Bikram Sambat) and Hindu calendar
+    /// dates, for the Home top strip (2026-09-06). Fetched at most once
+    /// per calendar day via a single search-grounded call, cached in
+    /// UserDefaults (not secret); nil when unavailable, and the strip
+    /// simply hides.
+    @Published private(set) var homeCalendarLine: String?
+    private static let homeCalendarLineDefaultsKey = "homeCalendarLine.v1"
+
+    /// Refreshes `homeCalendarLine` if today's line isn't cached yet.
+    /// Called from HomeView on appear — cheap no-op after the first
+    /// successful fetch of the day.
+    func refreshHomeCalendarLineIfNeeded() {
+        guard homeCalendarLine == nil else { return }
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        let todayKey = Self.homeCalendarLineDefaultsKey + "." + f.string(from: Date())
+        if let cached = UserDefaults.standard.string(forKey: todayKey), !cached.isEmpty {
+            homeCalendarLine = cached
+            return
+        }
+        guard geminiConfigStore.isConfigured,
+              pluginRegistry?.plugin(handling: "nepali_calendar.query",
+                                     locale: activeLocale) != nil else { return }
+        let question = L10n.str("home.calendarLine.question", locale: activeLocale)
+        Task { [weak self] in
+            guard let self,
+                  let answer = await self.nepaliCalendarAnswer(question: question) else { return }
+            await MainActor.run {
+                UserDefaults.standard.set(answer, forKey: todayKey)
+                self.homeCalendarLine = answer
+            }
+        }
+    }
+
     /// A plugin-provided view awaiting presentation (`.plugin` intent,
     /// `PluginResult.spokenAndPresented`) — ContentView renders it as a
     /// sheet, same pattern as `pendingMessageDraft`.

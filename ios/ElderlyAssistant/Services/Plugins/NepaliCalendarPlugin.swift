@@ -108,7 +108,17 @@ final class NepaliCalendarPlugin: AssistantPlugin {
     }
 
     private static func cacheKey(question: String) -> String {
-        "plugin.nepali_calendar.answer.\(question.lowercased().trimmingCharacters(in: .whitespacesAndNewlines))"
+        let base = "plugin.nepali_calendar.answer.\(question.lowercased().trimmingCharacters(in: .whitespacesAndNewlines))"
+        // Date-sensitive questions ("what is TODAY's date") change daily —
+        // the year-scoped cache designed for festival dates would serve
+        // yesterday's answer as "today". Scope those keys by day instead.
+        let q = question.lowercased()
+        if q.contains("आज") || q.contains("today") {
+            let f = DateFormatter()
+            f.dateFormat = "yyyy-MM-dd"
+            return base + "." + f.string(from: Date())
+        }
+        return base
     }
 
     private func loadCachedAnswer(key: String) -> String? {
