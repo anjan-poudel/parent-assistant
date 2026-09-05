@@ -585,6 +585,7 @@ struct MedicationScheduleSettingsView: View {
 
     @State private var name = ""
     @State private var time = Date()
+    @State private var category: RoutineCategory = .medication
     @State private var errorKey: String?
 
     var body: some View {
@@ -605,6 +606,7 @@ struct MedicationScheduleSettingsView: View {
                     }
                 }
                 addForm
+                calendarSyncCard
             }
         }
     }
@@ -615,6 +617,13 @@ struct MedicationScheduleSettingsView: View {
                 Text(entry.medicationName)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(DesignTokens.textPrimary)
+                HStack(spacing: 6) {
+                    Image(systemName: coordinator.routineCategory(for: entry.id).systemImage)
+                        .font(.system(size: 11))
+                    Text(LocalizedStringKey(coordinator.routineCategory(for: entry.id).labelKey))
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                }
+                .foregroundColor(DesignTokens.textSecondary)
                 Text(timesText(entry.scheduleTimes))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
@@ -646,6 +655,23 @@ struct MedicationScheduleSettingsView: View {
                 .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             HStack(spacing: 12) {
+                Text("routine.categoryLabel")
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Spacer()
+                Picker("", selection: $category) {
+                    ForEach(RoutineCategory.allCases) { cat in
+                        Label(LocalizedStringKey(cat.labelKey),
+                              systemImage: cat.systemImage).tag(cat)
+                    }
+                }
+                .labelsHidden()
+            }
+            .padding(14)
+            .frame(height: 56)
+            .background(DesignTokens.background)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            HStack(spacing: 12) {
                 Text("settings.meds.time")
                     .font(.system(size: DesignTokens.minBodyPointSize))
                     .foregroundColor(DesignTokens.textPrimary)
@@ -668,7 +694,7 @@ struct MedicationScheduleSettingsView: View {
 
             Button {
                 let components = Calendar.current.dateComponents([.hour, .minute], from: time)
-                errorKey = coordinator.addMedication(name: name, time: components)
+                errorKey = coordinator.addRoutine(title: name, time: components, category: category)
                 if errorKey == nil { name = "" }
             } label: {
                 Text("settings.meds.save")
@@ -685,6 +711,41 @@ struct MedicationScheduleSettingsView: View {
         .frame(maxWidth: .infinity)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// EventKit mirror toggle (v2 design §4.1) — requests calendar
+    /// access at point of use; denial leaves the app fully working in
+    /// local-only mode, honestly reported.
+    private var calendarSyncCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: Binding(
+                get: { coordinator.calendarSync.isEnabled },
+                set: { newValue in
+                    Task { await coordinator.setCalendarSyncEnabled(newValue) }
+                }
+            )) {
+                Label("calendarSync.toggle", systemImage: "calendar")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            Text(statusText)
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    private var statusText: String {
+        switch coordinator.calendarSync.status {
+        case .enabled: return L10n.str("calendarSync.statusOn", locale: coordinator.activeLocale)
+        case .denied: return L10n.str("calendarSync.statusDenied", locale: coordinator.activeLocale)
+        case .error: return L10n.str("calendarSync.statusError", locale: coordinator.activeLocale)
+        case .notRequested: return L10n.str("calendarSync.statusHint", locale: coordinator.activeLocale)
+        }
     }
 
     private func timesText(_ times: [DateComponents]) -> String {

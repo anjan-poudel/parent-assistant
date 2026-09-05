@@ -1290,6 +1290,7 @@ final class AppCoordinator: ObservableObject {
         entries.append(entry)
         medicationScheduler.loadSchedule(entries: entries)
         medicationScheduler.scheduleAll()
+        calendarSync.syncNow(entries: entries, tagStore: routineTagStore)
         return nil
     }
 
@@ -1299,6 +1300,63 @@ final class AppCoordinator: ObservableObject {
         entries.removeAll { $0.id == id }
         medicationScheduler.loadSchedule(entries: entries)
         medicationScheduler.scheduleAll()
+        routineTagStore.removeCategory(for: id)
+        routineTagStore.prune(keepingEntryIds: Set(entries.map(\.id)))
+        calendarSync.syncNow(entries: entries, tagStore: routineTagStore)
+    }
+
+    // MARK: - Unified routines (v2 design §4.1, 2026-09-06)
+
+    /// Category tag store (entryId → RoutineCategory) — additive layer
+    /// over the medication scheduler, which stays medication-only
+    /// internally. See Services/MedicationScheduler/RoutineEntry.swift.
+    private(set) lazy var routineTagStore = RoutineTagStore(storage: storage)
+
+    /// EventKit mirror (v2 design §4.1) — app remains source of truth;
+    /// the native Calendar is a read mirror so family can see the
+    /// routine anywhere. Permission denial = local-only, never a crash.
+    private(set) lazy var calendarSync = CalendarSyncService(observabilityBus: observabilityBus)
+
+    /// The category a schedule entry belongs to (untagged = medication,
+    /// the pre-generalization default).
+    func routineCategory(for entryId: UUID) -> RoutineCategory {
+        routineTagStore.category(for: entryId)
+    }
+
+    /// Adds a routine entry of any category. Same scheduling/escalation
+    /// machinery as medications (a routine IS a MedicationEntry under
+    /// the hood) plus its category tag and a calendar re-mirror.
+    /// Returns a catalog key on validation failure, nil on success.
+    @discardableResult
+    func addRoutine(title: String, time: DateComponents, category: RoutineCategory) -> String? {
+        let key = addMedication(name: title, time: time)
+        guard key == nil else { return key }
+        guard let entry = medicationScheduler.medicationEntries()
+            .first(where: { $0.medicationName == title.trimmingCharacters(in: .whitespacesAndNewlines)
+                              && $0.scheduleTimes.contains(time) }) else {
+            return "settings.meds.nameRequired"
+        }
+        routineTagStore.setCategory(category, for: entry.id)
+        calendarSync.syncNow(entries: medicationScheduler.medicationEntries(),
+                             tagStore: routineTagStore)
+        return nil
+    }
+
+    /// Re-tags an existing entry's category and re-mirrors.
+    func setRoutineCategory(_ category: RoutineCategory, for entryId: UUID) {
+        routineTagStore.setCategory(category, for: entryId)
+        calendarSync.syncNow(entries: medicationScheduler.medicationEntries(),
+                             tagStore: routineTagStore)
+    }
+
+    /// Settings toggle handler: enable calendar mirroring (requests
+    /// EventKit access at point of use) or disable it.
+    func setCalendarSyncEnabled(_ enabled: Bool) async {
+        calendarSync.isEnabled = enabled
+        if enabled {
+            await calendarSync.enableAndSync(entries: medicationScheduler.medicationEntries(),
+                                             tagStore: routineTagStore)
+        }
     }
 
     // MARK: - Public API for voice commands

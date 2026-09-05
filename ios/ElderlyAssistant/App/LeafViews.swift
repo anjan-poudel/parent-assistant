@@ -148,7 +148,7 @@ struct RemindersView: View {
                 VStack(spacing: 12) {
                     ForEach(todaysReminders) { reminder in
                         HStack(spacing: 12) {
-                            Image(systemName: "clock.fill")
+                            Image(systemName: coordinator.routineCategory(for: reminder.medicationEntryId).systemImage)
                                 .font(.system(size: 24))
                                 .foregroundColor(DesignTokens.accent)
                             VStack(alignment: .leading, spacing: 4) {
