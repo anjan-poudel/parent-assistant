@@ -171,6 +171,16 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         }
     }
 
+    /// Drops the loaded model so its RAM (~1.5 GB for medium-class
+    /// CoreML) is available to the LLM interpreter — same contract as
+    /// `WhisperSpeechRecognizer.releaseModel()`, called from
+    /// `AppCoordinator.recordTranscript`. The next utterance reloads on
+    /// demand (the load is seconds on ANE, not the CPU minutes).
+    func releaseModel() {
+        kitInstance = nil
+        loadedDescriptor = nil
+    }
+
     // MARK: - Inference (guarded)
 
     /// Preloads the model off the critical path: call at hot-swap time so

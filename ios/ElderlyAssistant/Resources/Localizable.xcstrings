@@ -3547,6 +3547,23 @@
         }
       }
     },
+    "stt.name.whisperKitNepali": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WhisperKit (Nepali medium, ANE)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WhisperKit (नेपाली मध्यम, ANE)"
+          }
+        }
+      }
+    },
     "stt.name.whisperMediumFinetunedNepali": {
       "extractionState": "manual",
       "localizations": {

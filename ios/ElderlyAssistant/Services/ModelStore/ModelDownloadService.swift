@@ -65,11 +65,14 @@ final class ModelDownloadService: NSObject, ObservableObject {
         if case .downloading = states[id] ?? .notStarted { return }
         if states[id] == .completed, store.isCached(id) { return }
 
-        // Disk-space guard.
+        // Disk-space guard. Directory artifacts (WhisperKit) size by their
+        // zip, not the placeholder `sizeBytes`.
+        let requiredBytes = entry.whisperKitZipURL != nil
+            ? entry.whisperKitZipBytes : entry.sizeBytes
         if let free = try? URL(fileURLWithPath: NSHomeDirectory())
             .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             .volumeAvailableCapacityForImportantUsage,
-           free < entry.sizeBytes + diskSafetyMarginBytes {
+           free < requiredBytes + diskSafetyMarginBytes {
             update(id, .failed(reason: "not enough disk space"))
             emit("download_disk_full", outcome: "failure", modelId: id, errorCode: "disk_full")
             return
@@ -81,15 +84,19 @@ final class ModelDownloadService: NSObject, ObservableObject {
             return
         }
 
-        // If a completed file is already on disk, short-circuit.
-        if store.isCached(id) {
+        // If a completed artifact is already on disk, short-circuit.
+        // WhisperKit models are directories, not single files.
+        let alreadyCached = entry.whisperKitZipURL != nil
+            ? store.directoryURL(for: id) != nil
+            : store.isCached(id)
+        if alreadyCached {
             update(id, .completed)
             return
         }
 
         update(id, .queued)
         let session = sessionFactory()
-        let task = session.downloadTask(with: entry.downloadURL)
+        let task = session.downloadTask(with: entry.whisperKitZipURL ?? entry.downloadURL)
         task.taskDescription = id.rawValue
         tasks[id] = task
         session.delegateQueue.maxConcurrentOperationCount = 1
@@ -102,7 +109,7 @@ final class ModelDownloadService: NSObject, ObservableObject {
             delegate: proxy,
             delegateQueue: nil
         )
-        let delegatedTask = delegated.downloadTask(with: entry.downloadURL)
+        let delegatedTask = delegated.downloadTask(with: entry.whisperKitZipURL ?? entry.downloadURL)
         delegatedTask.taskDescription = id.rawValue
         tasks[id] = delegatedTask
         proxy.retainer = delegated   // keep session alive until task done
@@ -132,6 +139,17 @@ final class ModelDownloadService: NSObject, ObservableObject {
 
     fileprivate func handleFinishedDownload(_ id: ModelID, tempURL: URL) {
         do {
+            // WhisperKit directory artifact: install the zip (checksum is
+            // verified inside) — no single-file staging/finalize, and no
+            // whisper.cpp encoder companion to chase.
+            if ModelCatalog.entry(for: id)?.whisperKitZipURL != nil {
+                update(id, .verifying)
+                _ = try store.installWhisperKitModel(fromZip: tempURL, for: id)
+                update(id, .completed)
+                emit("download_completed", outcome: "success", modelId: id, errorCode: nil)
+                tasks[id] = nil
+                return
+            }
             let staging = try store.stagingURL(for: id)
             let fm = FileManager.default
             if fm.fileExists(atPath: staging.path) {

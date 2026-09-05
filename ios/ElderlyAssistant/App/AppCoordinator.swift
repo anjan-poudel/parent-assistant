@@ -242,6 +242,11 @@ final class AppCoordinator: ObservableObject {
     let modelDownloadService: ModelDownloadService
     private let whisperSpeechRecognizer: WhisperSpeechRecognizer
     private let fallbackSpeechRecognizer: OnDeviceSpeechRecognizer
+    /// ANE WhisperKit runtime (memory: ios-stt-runtime-decision). Preferred
+    /// over the CPU whisper.cpp recognizer whenever its model artifact is
+    /// installed (`ModelStore.directoryURL(for: .whisperKitNepali)`) or a
+    /// bench override is set — same hot-swap mechanism, GPU/ANE compute.
+    private let whisperKitSpeechRecognizer: WhisperKitSpeechRecognizer
 
     /// v2: the Gemini API key + client (see `GeminiConfigStore`,
     /// `GeminiClient`). `geminiConfigStore` is exposed for the Settings
@@ -356,6 +361,21 @@ final class AppCoordinator: ObservableObject {
             modelStore: modelStore,
             observabilityBus: bus
         )
+        self.whisperKitSpeechRecognizer = WhisperKitSpeechRecognizer(
+            observabilityBus: bus,
+            modelStore: modelStore
+        )
+        // Bench hook (debug): point the ANE runtime at a sideloaded model
+        // folder or a WhisperKit-named model via scheme env vars —
+        // WHISPERKIT_MODEL_FOLDER / WHISPERKIT_MODEL_NAME. Production
+        // selection uses the installed catalog artifact instead.
+        let wkEnv = ProcessInfo.processInfo.environment
+        if let folder = wkEnv["WHISPERKIT_MODEL_FOLDER"] {
+            whisperKitSpeechRecognizer.modelFolderURL =
+                URL(fileURLWithPath: folder)
+        } else if let name = wkEnv["WHISPERKIT_MODEL_NAME"] {
+            whisperKitSpeechRecognizer.modelName = name
+        }
         self.llamaCommandInterpreter = LlamaCommandInterpreter(
             modelStore: modelStore,
             observabilityBus: bus
@@ -733,9 +753,22 @@ final class AppCoordinator: ObservableObject {
             // Whisper if its model is actually cached and the runtime is
             // linked; else the SFSpeechRecognizer fallback rather than
             // silently doing nothing (spec §7: no dead-end states).
-            voicePipeline?.setSpeechRecognizer(
-                whisperSpeechRecognizer.isAvailable ? whisperSpeechRecognizer : fallbackSpeechRecognizer
-            )
+            if whisperKitSpeechRecognizer.isAvailable {
+                // ANE WhisperKit first — the medium-class models are
+                // unusable on CPU (128 s for a 2.1 s clip, 2026-09-05)
+                // but conversational on ANE.
+                voicePipeline?.setSpeechRecognizer(whisperKitSpeechRecognizer)
+                // Absorb model load + CoreML specialization now so the
+                // first utterance doesn't pay it.
+                whisperKitSpeechRecognizer.prepare()
+            } else {
+                // CPU whisper.cpp when its model is cached; else the
+                // SFSpeechRecognizer fallback rather than silently doing
+                // nothing (spec §7: no dead-end states).
+                voicePipeline?.setSpeechRecognizer(
+                    whisperSpeechRecognizer.isAvailable ? whisperSpeechRecognizer : fallbackSpeechRecognizer
+                )
+            }
             DispatchQueue.main.async { [weak self] in
                 self?.updateActiveSTTName()
             }
@@ -750,7 +783,8 @@ final class AppCoordinator: ObservableObject {
     /// मोडेल" screen when this is false rather than silently switching to
     /// a non-functional stack.
     var isOnDeviceStackReady: Bool {
-        llamaCommandInterpreter.isAvailable && whisperSpeechRecognizer.isAvailable
+        llamaCommandInterpreter.isAvailable
+            && (whisperSpeechRecognizer.isAvailable || whisperKitSpeechRecognizer.isAvailable)
     }
 
     /// Model the legacy on-device recognizer would use if manually
@@ -772,6 +806,12 @@ final class AppCoordinator: ObservableObject {
             activeSTTNameKey = "stt.name.gemini"
             return
         }
+        // WhisperKit (ANE) wins the label whenever it's the recognizer the
+        // on-device stack will actually use.
+        if voiceEngineStack == .onDevice, whisperKitSpeechRecognizer.isAvailable {
+            activeSTTNameKey = sttNameKey(for: ModelCatalog.whisperKitNepali)
+            return
+        }
         let resolved = sttModelPreference
             .flatMap { modelStore.isCached($0) ? $0 : nil }
             ?? whisperSpeechRecognizer.currentModelID()
@@ -781,6 +821,8 @@ final class AppCoordinator: ObservableObject {
     /// Catalog key naming the active STT (resolved in the UI's locale).
     private func sttNameKey(for id: ModelID?) -> String {
         switch id {
+        case ModelCatalog.whisperKitNepali:
+            return "stt.name.whisperKitNepali"
         case ModelCatalog.whisperMediumFinetunedNepali:
             return "stt.name.whisperMediumFinetunedNepali"
         case ModelCatalog.whisperFinetunedNepali:
@@ -808,6 +850,7 @@ final class AppCoordinator: ObservableObject {
     /// on 6 GB devices.
     func recordTranscript(_ text: String) {
         whisperSpeechRecognizer.releaseModel()
+        whisperKitSpeechRecognizer.releaseModel()
         DispatchQueue.main.async { [weak self] in
             self?.lastTranscript = text
             self?.appendHistory(.user, text)
