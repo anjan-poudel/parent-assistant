@@ -222,6 +222,106 @@ final class CallLinksTests: XCTestCase {
         XCTAssertTrue(opener.canOpenChecks.isEmpty)
         XCTAssertTrue(copied.isEmpty)
     }
+
+    // MARK: - Messenger handle normalization
+
+    func testMessengerHandleKeepsUsernameDotsAndDigits() {
+        XCTAssertEqual(CallLinks.messengerHandle("sita.sharma77"), "sita.sharma77")
+        XCTAssertEqual(CallLinks.messengerHandle("100001234567890"), "100001234567890")
+    }
+
+    func testMessengerHandleTrimsWhitespaceAndLeadingAt() {
+        // Family members write handles the way they see them ("@sita.sharma").
+        XCTAssertEqual(CallLinks.messengerHandle("  @sita.sharma "), "sita.sharma")
+    }
+
+    func testMessengerHandleRejectsCharactersOutsideTheUsernameAlphabet() {
+        // Spaces inside, Devanagari, slashes — a handle we can't shape
+        // into a URL is invalid, never a guess.
+        XCTAssertEqual(CallLinks.messengerHandle("sita sharma"), "")
+        XCTAssertEqual(CallLinks.messengerHandle("सीता"), "")
+        XCTAssertEqual(CallLinks.messengerHandle("sita/sharma"), "")
+        XCTAssertEqual(CallLinks.messengerHandle(""), "")
+        XCTAssertEqual(CallLinks.messengerHandle("   "), "")
+    }
+
+    // MARK: - Messenger URL construction
+
+    func testMessengerThreadURLIsUserThreadForm() {
+        XCTAssertEqual(CallLinks.messengerThreadURL(handle: "sita.sharma77")?.absoluteString,
+                       "fb-messenger://user-thread/sita.sharma77")
+    }
+
+    func testMessengerThreadURLAcceptsNumericId() {
+        XCTAssertEqual(CallLinks.messengerThreadURL(handle: "100001234567890")?.absoluteString,
+                       "fb-messenger://user-thread/100001234567890")
+    }
+
+    func testMessengerThreadURLNilForInvalidHandle() {
+        XCTAssertNil(CallLinks.messengerThreadURL(handle: ""))
+        XCTAssertNil(CallLinks.messengerThreadURL(handle: "sita sharma"))
+    }
+
+    func testMessengerWebURLIsMMeForm() {
+        XCTAssertEqual(CallLinks.messengerWebURL(handle: "@sita.sharma77")?.absoluteString,
+                       "https://m.me/sita.sharma77")
+    }
+
+    func testMessengerWebURLNilForInvalidHandle() {
+        XCTAssertNil(CallLinks.messengerWebURL(handle: ""))
+    }
+
+    // MARK: - Messenger app-name vocabulary
+
+    func testIsMessengerNameMatchesBothScriptsAndFbPhrasing() {
+        XCTAssertTrue(CallLinks.isMessengerName("messenger"))
+        XCTAssertTrue(CallLinks.isMessengerName("Messenger"))
+        XCTAssertTrue(CallLinks.isMessengerName("fb messenger"))
+        XCTAssertTrue(CallLinks.isMessengerName("म्यासेन्जर"))
+        XCTAssertTrue(CallLinks.isMessengerName("मेसेन्जर"))
+        XCTAssertTrue(CallLinks.isMessengerName("म्यासेन्जरमा"))
+    }
+
+    func testIsMessengerNameRejectsOtherAppsAndEmpty() {
+        XCTAssertFalse(CallLinks.isMessengerName("whatsapp"))
+        XCTAssertFalse(CallLinks.isMessengerName("facetime"))
+        XCTAssertFalse(CallLinks.isMessengerName("message"))
+        XCTAssertFalse(CallLinks.isMessengerName(""))
+    }
+
+    // MARK: - Messenger open decisions (thread vs web fallback)
+
+    func testOpenMessengerThreadOpensExactThreadURLWhenInstalled() {
+        let opener = FakeCallLinkOpener(canOpen: true)
+        let links = CallLinks(opener: opener)
+        let outcome = links.openMessengerThread(handle: "sita.sharma77")
+        XCTAssertEqual(outcome, .openedThread)
+        XCTAssertEqual(opener.opened.map(\.absoluteString),
+                       ["fb-messenger://user-thread/sita.sharma77"])
+    }
+
+    func testOpenMessengerThreadFallsBackToMMeWhenAppAbsent() {
+        let opener = FakeCallLinkOpener(canOpen: false)
+        let links = CallLinks(opener: opener)
+        let outcome = links.openMessengerThread(handle: "sita.sharma77")
+        XCTAssertEqual(outcome, .fellBackToWeb)
+        XCTAssertEqual(opener.opened.map(\.absoluteString),
+                       ["https://m.me/sita.sharma77"],
+                       "the fallback is the m.me universal link via Safari, never the dead scheme")
+        XCTAssertEqual(opener.canOpenChecks.map(\.absoluteString),
+                       ["fb-messenger://user-thread/sita.sharma77"],
+                       "the scheme canOpenURL is the honest installed check")
+    }
+
+    func testOpenMessengerThreadInvalidHandleOpensAndChecksNothing() {
+        let opener = FakeCallLinkOpener(canOpen: true)
+        let links = CallLinks(opener: opener)
+        XCTAssertEqual(links.openMessengerThread(handle: ""), .invalidHandle)
+        XCTAssertEqual(links.openMessengerThread(handle: "  "), .invalidHandle)
+        XCTAssertEqual(links.openMessengerThread(handle: "सीता"), .invalidHandle)
+        XCTAssertTrue(opener.opened.isEmpty)
+        XCTAssertTrue(opener.canOpenChecks.isEmpty)
+    }
 }
 
 /// Scripted `CallLinkOpening` — records every check and open so tests

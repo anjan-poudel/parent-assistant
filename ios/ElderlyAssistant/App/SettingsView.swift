@@ -476,6 +476,7 @@ struct FamilyContactsSettingsView: View {
     @State private var name = ""
     @State private var phone = ""
     @State private var relationship = ""
+    @State private var messengerHandle = ""
 
     var body: some View {
         LeafScreen(titleKey: "settings.family.title") {
@@ -514,6 +515,12 @@ struct FamilyContactsSettingsView: View {
                 Text(contact.phone)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
+                if let handle = contact.messengerHandle, !handle.isEmpty {
+                    Text(L10n.fmt("settings.family.messengerHandle",
+                                  locale: coordinator.activeLocale, handle))
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
             }
             Spacer()
             Button(role: .destructive) {
@@ -554,12 +561,23 @@ struct FamilyContactsSettingsView: View {
                 .frame(height: 56)
                 .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            TextField(LocalizedStringKey("onboarding.stepFamily.messenger"), text: $messengerHandle)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .keyboardType(.asciiCapable)
+                .autocapitalization(.none)
+                .disableAutocorrection(true)
+                .padding(14)
+                .frame(height: 56)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             Button {
                 let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { return }
+                let handle = messengerHandle.trimmingCharacters(in: .whitespacesAndNewlines)
                 coordinator.addFamilyContact(name: trimmed, phone: phone,
-                                             relationship: relationship)
-                name = ""; phone = ""; relationship = ""
+                                             relationship: relationship,
+                                             messengerHandle: handle.isEmpty ? nil : handle)
+                name = ""; phone = ""; relationship = ""; messengerHandle = ""
             } label: {
                 Text("settings.family.add")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))

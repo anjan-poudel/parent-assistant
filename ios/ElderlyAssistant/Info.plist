@@ -35,6 +35,7 @@
 		<string>facetime</string>
 		<string>facetime-audio</string>
 		<string>whatsapp</string>
+		<string>fb-messenger</string>
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
