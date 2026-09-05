@@ -445,6 +445,27 @@ final class ModelStore {
         try? fileManager.removeItem(at: dest)
         try ensureDirectory(dest.deletingLastPathComponent())
         try fileManager.moveItem(at: extracted, to: dest)
+        // A locked device mid-install (Data-Protection-complete parent)
+        // can fail the move halfway, leaving a partial directory that then
+        // passes directoryURL's existence check — the recognizer engages
+        // and dies deep inside WhisperKit with modelsUnavailable (field
+        // report 2026-09-06, missing MelSpectrogram.mlmodelc). Treat a
+        // short payload as an install failure and remove the partial.
+        let expectedComponents = ["AudioEncoder.mlmodelc",
+                                  "TextDecoder.mlmodelc",
+                                  "MelSpectrogram.mlmodelc",
+                                  "tokenizer.json"]
+        let complete = expectedComponents.allSatisfy {
+            fileManager.fileExists(atPath: dest.appendingPathComponent($0).path)
+        }
+        guard complete else {
+            try? fileManager.removeItem(at: dest)
+            emit("whisperkit_install_incomplete", outcome: "failure",
+                 modelId: id, errorCode: "incomplete")
+            throw NSError(domain: "ModelStore", code: 8,
+                          userInfo: [NSLocalizedDescriptionKey:
+                                     "WhisperKit install incomplete — removed partial directory"])
+        }
         emit("whisperkit_model_installed", outcome: "success", modelId: id,
              errorCode: nil)
         return dest
