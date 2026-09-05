@@ -30,10 +30,18 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>facetime</string>
+		<string>facetime-audio</string>
+		<string>whatsapp</string>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>MinimumOSVersion</key>
 	<string>16.0</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Your daily routine (medicines, exercise, meals) is mirrored to the Calendar app so your family can see it too. The app works fully even if you say no.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>The camera is used only to verify medication intake by capturing a photo of your empty hand. Photos are only shared with your caregiver.</string>
 	<key>NSMicrophoneUsageDescription</key>

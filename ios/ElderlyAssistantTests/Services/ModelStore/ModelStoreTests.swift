@@ -174,6 +174,11 @@ final class ModelStoreTests: XCTestCase {
         try fm.createDirectory(at: modelDir, withIntermediateDirectories: true)
         let innerFile = "TextDecoder.mlmodelc"
         try Data("fake-coreml".utf8).write(to: modelDir.appendingPathComponent(innerFile))
+        // The install verifies the full expected payload (locked-device
+        // partial-install guard, 2026-09-06) — fixtures need all of it.
+        for component in ["AudioEncoder.mlmodelc", "MelSpectrogram.mlmodelc", "tokenizer.json"] {
+            try Data("fake".utf8).write(to: modelDir.appendingPathComponent(component))
+        }
         let zipURL = tmpRoot.appendingPathComponent("wk-\(UUID().uuidString).zip")
         // Zip the model dir ITSELF so the archive's single top-level entry
         // is the model folder — the layout installWhisperKitModel expects.
@@ -235,6 +240,32 @@ final class ModelStoreTests: XCTestCase {
         }
         XCTAssertNil(store.directoryURL(for: ModelCatalog.whisperKitNepali))
         XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "whisperkit_checksum_mismatch" })
+    }
+
+    func testInstallWhisperKitModelRejectsIncompletePayload() throws {
+        let store = try ModelStore(observabilityBus: bus,
+                                   rootDirectoryOverride: tmpRoot,
+                                   checksumPolicy: .skip)
+        // Zip with a top-level directory but missing the expected CoreML
+        // components — mirrors the locked-device partial install that
+        // produced modelsUnavailable on-device (2026-09-06).
+        let fm = FileManager.default
+        let modelDir = tmpRoot.appendingPathComponent("wkstage-\(UUID().uuidString)")
+            .appendingPathComponent("whisperkit-ne-medium", isDirectory: true)
+        try fm.createDirectory(at: modelDir, withIntermediateDirectories: true)
+        try Data("only-mel".utf8).write(to: modelDir.appendingPathComponent("MelSpectrogram.mlmodelc"))
+        let zipURL = tmpRoot.appendingPathComponent("wk-\(UUID().uuidString).zip")
+        try fm.zipItem(at: modelDir, to: zipURL)
+
+        XCTAssertThrowsError(
+            try store.installWhisperKitModel(fromZip: zipURL, for: ModelCatalog.whisperKitNepaliMedium)
+        ) { error in
+            XCTAssertEqual((error as NSError).code, 8)
+        }
+        // The partial directory must be gone so directoryURL (and thus
+        // recognizer availability) reports absence, not a trap.
+        XCTAssertNil(store.directoryURL(for: ModelCatalog.whisperKitNepaliMedium))
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "whisperkit_install_incomplete" })
     }
 }
 

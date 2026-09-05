@@ -608,6 +608,7 @@ struct MedicationScheduleSettingsView: View {
                     }
                 }
                 addForm
+                calendarSyncCard
             }
         }
     }
@@ -688,6 +689,41 @@ struct MedicationScheduleSettingsView: View {
         .frame(maxWidth: .infinity)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// EventKit mirror toggle (v2 design §4.1) — requests calendar
+    /// access at point of use; denial leaves the app fully working in
+    /// local-only mode, honestly reported.
+    private var calendarSyncCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: Binding(
+                get: { coordinator.calendarSync.isEnabled },
+                set: { newValue in
+                    Task { await coordinator.setCalendarSyncEnabled(newValue) }
+                }
+            )) {
+                Label("calendarSync.toggle", systemImage: "calendar")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            Text(statusText)
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    private var statusText: String {
+        switch coordinator.calendarSync.status {
+        case .enabled: return L10n.str("calendarSync.statusOn", locale: coordinator.activeLocale)
+        case .denied: return L10n.str("calendarSync.statusDenied", locale: coordinator.activeLocale)
+        case .error: return L10n.str("calendarSync.statusError", locale: coordinator.activeLocale)
+        case .notRequested: return L10n.str("calendarSync.statusHint", locale: coordinator.activeLocale)
+        }
     }
 
     private func timesText(_ times: [DateComponents]) -> String {

@@ -69,6 +69,8 @@ final class AppCoordinator: ObservableObject {
         alarmScheduler.locale = activeLocale
         medicationScheduler.locale = activeLocale
         familyNotifier.locale = activeLocale
+        routineAlarmScheduler.locale = activeLocale
+        routineScheduler.locale = activeLocale
     }
 
     /// First-run onboarding progress (spec §4.2). Persisted per step.
@@ -207,6 +209,17 @@ final class AppCoordinator: ObservableObject {
     private let alarmScheduler: UNNotificationScheduler
     private let familyNotifier: APNsFamilyNotifier
 
+    /// Generalised routine reminders (v2 pivot Phase 1 — walk, exercise,
+    /// meals, bedtime, …). NOT safety-critical: no ack window, no
+    /// escalation. Medication stays with `medicationScheduler` above,
+    /// untouched.
+    private let routineScheduler: RoutineScheduler
+    private let routineAlarmScheduler: UNRoutineNotificationScheduler
+    /// Kept so the medication-summary provider can be attached at the end
+    /// of init — plugin registration runs before `self` is fully
+    /// initialised, so the closure can't be captured at registration time.
+    private let routinePlugin: RoutinePlugin
+
     /// Family contacts (spec §4.4.2) — persisted encrypted, feeds the
     /// notifier whenever the list changes.
     let familyContactStore: FamilyContactStore
@@ -297,6 +310,10 @@ final class AppCoordinator: ObservableObject {
     /// Flywheel intent log (spec §11) — feeds the family review screen
     /// (Settings) and the export→retrain loop.
     private(set) lazy var intentLogStore = IntentLogStore()
+    /// Deep-link builder/opener for the call & message flows (v2 pivot
+    /// Phase 2, §4.3) — FaceTime video/audio, WhatsApp text, tel:.
+    /// Stateless, so no lazy needed; tests fake it via `CallLinkOpening`.
+    private let callLinks = CallLinks()
 
     /// The plugin registry backing `.plugin` intent dispatch and plugin
     /// prompt composition (design doc 2026-09-05).
@@ -339,6 +356,24 @@ final class AppCoordinator: ObservableObject {
             observabilityBus: bus,
             familyNotifier: familyNotifier
         )
+
+        // Routine reminders (v2 pivot Phase 1): the medication path's
+        // proven shape — encrypted store, UN notifications, occurrences
+        // persisted before alarms arm, re-queue on launch — minus the
+        // safety-critical escalation machinery. Seeded once with the
+        // brief's category defaults (medication excluded: that system
+        // owns medication, and a parallel one would double-prompt doses).
+        let routineAlarmScheduler = UNRoutineNotificationScheduler()
+        self.routineAlarmScheduler = routineAlarmScheduler
+        let routineStore = RoutineStore(storage: storage)
+        routineStore.seedDefaultsIfNeeded()
+        let routineScheduler = RoutineScheduler(
+            store: routineStore,
+            alarmScheduler: routineAlarmScheduler,
+            observabilityBus: bus
+        )
+        self.routineScheduler = routineScheduler
+        self.routinePlugin = RoutinePlugin(scheduler: routineScheduler)
 
         // Language — restore the persisted choice, defaulting to the Nepali
         // pilot language (spec §3.2).
@@ -414,6 +449,7 @@ final class AppCoordinator: ObservableObject {
         let pluginRegistry = PluginRegistry(observabilityBus: bus)
         pluginRegistry.register(NepaliCalendarPlugin(storage: storage))
         pluginRegistry.register(ApplianceHelperPlugin())
+        pluginRegistry.register(routinePlugin)
         self.pluginRegistry = pluginRegistry
 
         self.llamaCommandInterpreter = LlamaCommandInterpreter(
@@ -476,6 +512,14 @@ final class AppCoordinator: ObservableObject {
         // All stored properties are initialised — push the restored
         // language into services that build user-facing strings.
         syncServiceLocales()
+
+        // Fold today's medication reminders into the routine plugin's
+        // "what are my reminders today" answer — the user's mental model
+        // is ONE reminder list spanning both systems. Attached here (not
+        // at plugin registration) because the closure captures self.
+        routinePlugin.medicationSummaryProvider = { [weak self] in
+            self?.todayMedicationSummaryLines() ?? []
+        }
     }
 
     func start() {
@@ -502,6 +546,8 @@ final class AppCoordinator: ObservableObject {
 
         // Restore and re-arm any outstanding medication reminders
         medicationScheduler.scheduleAll()
+        // Same re-queue for routine reminders (FR-025)
+        routineScheduler.scheduleAll()
 
         // Voice pipeline is built lazily here so the CommandRouter can hold a
         // weak ref back to this fully-initialised coordinator.
@@ -1155,38 +1201,44 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Actually places the call/opens the chat — only ever reached after
-    /// the user said yes (`handleConfirmationResponse`). Never claims
-    /// WhatsApp "called" — it only opened a chat, and says so.
+    /// the user said yes (`handleConfirmationResponse`). All URLs are
+    /// built and opened by `CallLinks` (one tested home for handle
+    /// normalization and app-absent decisions). Never claims WhatsApp
+    /// "called" — it only opened a chat, and says so; and a FaceTime
+    /// link that can't open says THAT, instead of claiming a call.
     private func performCallAction(_ action: PendingCallAction) {
         let locale = activeLocale
         switch action.method {
         case .phone:
-            let digits = action.contact.phone.filter { $0.isNumber || $0 == "+" }
-            if !digits.isEmpty, let url = URL(string: "tel:\(digits)") {
-                DispatchQueue.main.async { UIApplication.shared.open(url) }
-            }
+            callLinks.openPhone(action.contact.phone)
             setOutcome(icon: "phone.fill",
                        text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
             speak(text: L10n.fmt("router.call.calling", locale: locale, action.contact.name))
+            noteConfirmedCallExecution(action)
         case .facetimeVideo, .facetimeAudio:
-            let scheme = action.method == .facetimeVideo ? "facetime" : "facetime-audio"
-            let digits = action.contact.phone.filter { $0.isNumber || $0 == "+" }
-            if !digits.isEmpty, let url = URL(string: "\(scheme)://\(digits)") {
-                DispatchQueue.main.async { UIApplication.shared.open(url) }
+            let isVideo = action.method == .facetimeVideo
+            switch callLinks.openFaceTime(handle: action.contact.phone, video: isVideo) {
+            case .opened:
+                setOutcome(icon: isVideo ? "video.fill" : "phone.fill",
+                           text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
+                speak(text: L10n.fmt("router.call.calling", locale: locale, action.contact.name))
+                noteConfirmedCallExecution(action)
+            case .unavailable, .invalidHandle:
+                // FaceTime absent is near-impossible on a real iPhone but
+                // real on simulator — say what actually happened, and
+                // record NOTHING: teaching the method history / intent
+                // cache from a failed open would repeat the failure.
+                setOutcome(icon: "exclamationmark.triangle.fill",
+                           text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+                speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
             }
-            setOutcome(icon: action.method == .facetimeVideo ? "video.fill" : "phone.fill",
-                       text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
-            speak(text: L10n.fmt("router.call.calling", locale: locale, action.contact.name))
         case .whatsappChat:
-            let digits = action.contact.phone.filter { $0.isNumber }
-            if !digits.isEmpty, let url = URL(string: "https://wa.me/\(digits)") {
-                DispatchQueue.main.async { UIApplication.shared.open(url) }
-            }
+            callLinks.openWhatsAppChat(action.contact.phone)
             setOutcome(icon: "message.fill",
                        text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, action.contact.name))
             speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, action.contact.name))
+            noteConfirmedCallExecution(action)
         }
-        noteConfirmedCallExecution(action)
     }
 
     /// Post-execution learning (spec §4.2 + §6.2): a CONFIRMED call is
@@ -1294,15 +1346,53 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    func composeMessage(toContactNamed query: String?, body: String) -> Bool {
+    /// `send_message` (v2 pivot Phase 2, §4.3). Every surface ends with
+    /// the user's own tap on Send — that tap IS the `.confirm`-tier
+    /// confirmation, exactly as the shipped SMS flow models it:
+    ///  - WhatsApp named ("वाट्सएपमा मेसेज पठा") → `whatsapp://send` deep
+    ///    link with the body pre-filled; app-absent falls back to the
+    ///    native Messages sheet, then to a pasteboard copy — each
+    ///    disclosed out loud, never silently swapped.
+    ///  - nothing named → the native compose sheet (shipped behavior).
+    func composeMessage(toContactNamed query: String?, body: String,
+                        requestedApp: String?) -> MessageComposeOutcome {
+        let locale = activeLocale
+        if let app = requestedApp, !app.isEmpty, CallLinks.isWhatsAppName(app) {
+            guard let query, let contact = resolveSingleContact(query) else { return .contactNotFound }
+            switch callLinks.openWhatsAppText(contact.phone, text: body) {
+            case .openedWhatsApp:
+                setOutcome(icon: "message.fill",
+                           text: L10n.fmt("home.outcome.whatsappMessageReady", locale: locale, contact.name))
+                speak(text: L10n.fmt("router.message.whatsappReady", locale: locale, contact.name))
+                return .whatsAppChatOpened
+            case .needsNativeCompose:
+                presentMessageDraft(contact: contact, body: body)
+                speak(text: L10n.fmt("router.message.whatsappMissingFallback", locale: locale, contact.name))
+                return .fellBackToNativeCompose
+            case .copiedText:
+                setOutcome(icon: "doc.on.doc.fill",
+                           text: L10n.fmt("home.outcome.messageCopied", locale: locale, contact.name))
+                speak(text: L10n.fmt("router.message.copiedFallback", locale: locale, contact.name))
+                return .copiedTextOnly
+            case .invalidPhone:
+                return .contactNotFound
+            }
+        }
         guard MFMessageComposeViewController.canSendText(),
-              let query, let contact = resolveSingleContact(query) else { return false }
+              let query, let contact = resolveSingleContact(query) else { return .contactNotFound }
+        presentMessageDraft(contact: contact, body: body)
+        return .nativeComposePresented
+    }
+
+    /// Presents the native compose sheet pre-filled (shipped SMS path,
+    /// extracted so the WhatsApp-absent fallback lands on the exact same
+    /// surface).
+    private func presentMessageDraft(contact: FamilyContact, body: String) {
         DispatchQueue.main.async { [weak self] in
             self?.pendingMessageDraft = MessageDraft(recipients: [contact.phone], body: body)
         }
         setOutcome(icon: "message.fill",
                    text: L10n.fmt("home.outcome.messageReady", locale: activeLocale, contact.name))
-        return true
     }
 
     // MARK: - Medication schedule surface (spec §4.3, §4.4.3)
@@ -1350,6 +1440,7 @@ final class AppCoordinator: ObservableObject {
         entries.append(entry)
         medicationScheduler.loadSchedule(entries: entries)
         medicationScheduler.scheduleAll()
+        calendarSync.syncNow(entries: routineScheduler.entries())
         return nil
     }
 
@@ -1359,6 +1450,64 @@ final class AppCoordinator: ObservableObject {
         entries.removeAll { $0.id == id }
         medicationScheduler.loadSchedule(entries: entries)
         medicationScheduler.scheduleAll()
+        calendarSync.syncNow(entries: routineScheduler.entries())
+    }
+
+    // MARK: - Native Calendar mirroring (v2 design §4.1, 2026-09-06)
+
+    /// EventKit mirror of the unified routine schedule — the app remains
+    /// the source of truth; the native Calendar is a read mirror so
+    /// family can see the routine in any calendar app. Permission
+    /// denial = honest local-only mode, never a crash. Mirrors the
+    /// peer reminders-v2 `RoutineEntry` model (which owns categories
+    /// natively — the parallel tag-store approach from the same merge
+    /// was dropped in favor of it).
+    private(set) lazy var calendarSync = CalendarSyncService(observabilityBus: observabilityBus)
+
+    /// Settings toggle handler: enable calendar mirroring (requests
+    /// EventKit access at point of use) or disable it.
+    func setCalendarSyncEnabled(_ enabled: Bool) async {
+        calendarSync.isEnabled = enabled
+        if enabled {
+            await calendarSync.enableAndSync(entries: routineScheduler.entries())
+        }
+    }
+
+    // MARK: - Routine reminder surface (v2 pivot Phase 1)
+
+    /// All configured routine entries (seeded categories + voice-created)
+    /// — the Reminders leaf's manage list.
+    var routineEntries: [RoutineEntry] { routineScheduler.entries() }
+
+    /// Today's routine occurrences, sorted — listed in the Reminders
+    /// leaf alongside the medication doses.
+    var todaysRoutineOccurrences: [RoutineOccurrence] {
+        routineScheduler.todaysOccurrences()
+    }
+
+    func routineEntry(for id: UUID) -> RoutineEntry? {
+        routineScheduler.entry(for: id)
+    }
+
+    /// Enable/disable a routine entry from the Reminders leaf toggle;
+    /// persists and re-arms through the scheduler.
+    func setRoutineEntryEnabled(_ entryId: UUID, enabled: Bool) {
+        routineScheduler.setEnabled(entryId, enabled: enabled)
+    }
+
+    /// Today's medication reminders as localized "name — time" lines for
+    /// the routine plugin's `routine.query` answer — one spoken list
+    /// spanning both reminder systems.
+    private func todayMedicationSummaryLines() -> [String] {
+        medicationScheduler.pendingReminders
+            .filter { Calendar.current.isDateInToday($0.scheduledAt) }
+            .sorted { $0.scheduledAt < $1.scheduledAt }
+            .map { reminder in
+                let name = medicationName(for: reminder.medicationEntryId)
+                let time = reminder.scheduledAt.formatted(
+                    Date.FormatStyle(date: .omitted, time: .shortened).locale(activeLocale))
+                return "\(name) — \(time)"
+            }
     }
 
     // MARK: - Public API for voice commands
@@ -1509,6 +1658,7 @@ final class AppCoordinator: ObservableObject {
             using: nil
         ) { [weak self] task in
             self?.medicationScheduler.scheduleAll()
+            self?.routineScheduler.scheduleAll()
             task.setTaskCompleted(success: true)
         }
     }
