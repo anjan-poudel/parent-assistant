@@ -55,6 +55,12 @@ final class IntentCommandCache {
         case .ackMed, .emergency, .setReminder, .createCalendarEvent,
              .sendMessage, .healthQuery, .guide, .query, .none:
             return false
+        case .plugin:
+            // Plugin commands carry plugin-specific entities; caching
+            // them by normalized transcript is a plugin-level concern
+            // (each plugin owns its own caching, e.g. NepaliCalendarPlugin),
+            // not something the shared intent cache should generalize.
+            return false
         }
     }
 

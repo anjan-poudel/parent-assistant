@@ -22,6 +22,14 @@ enum ConfirmationTier {
             return .confirm
         case .music, .suggestVideo, .guide, .healthQuery, .query, .none:
             return .free
+        case .plugin:
+            // Plugin actions own their own confirmation policy inside
+            // `handle(_:)` (e.g. a read-only Q&A plugin like the Nepali
+            // calendar must NOT be gated behind a yes/no before it can
+            // even answer; a future side-effecting plugin implements
+            // its own challenge internally). Blanket-gating here would
+            // break read-only plugins.
+            return .free
         }
     }
 }

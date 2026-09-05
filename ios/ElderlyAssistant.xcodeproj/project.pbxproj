@@ -31,6 +31,7 @@
 		3FE394412AC1FB089526F43C /* ModelStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F9D2C931DA6AAFA3A23B6C /* ModelStoreTests.swift */; };
 		408C22DF6353AF02C3CF6A5B /* LogSanitiser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8ACA4236E037E41C5E53D9 /* LogSanitiser.swift */; };
 		47965D07120D816E5424A120 /* WhisperSpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 426B00DB54390C484D152534 /* WhisperSpeechRecognizer.swift */; };
+		4853B105556AAF159E3A8CDC /* NepaliCalendarPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51C6DC153AE345DC345BF5A9 /* NepaliCalendarPlugin.swift */; };
 		49E6A368A078D9CF076BEA23 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9B3203338B37AF2615B9D88 /* ContentView.swift */; };
 		4BF2988FCED95DD8A8B71BC4 /* DoubleDoseDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = D42344465731A5DA5ABD125C /* DoubleDoseDetector.swift */; };
 		4E2531A97C5980C0611CB470 /* NepaliTimeParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1464699EC23E298FC82EAF23 /* NepaliTimeParserTests.swift */; };
@@ -43,17 +44,21 @@
 		5F3A3D7F5EE0797E87B0559A /* GeminiSpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D97B2DE62692EBEEE135ED3 /* GeminiSpeechRecognizer.swift */; };
 		5FC266A49696E92A57F6F704 /* SwiftWhisper in Frameworks */ = {isa = PBXBuildFile; productRef = 8A067B2B3D4535E50D1CCB35 /* SwiftWhisper */; };
 		5FF89DF6EC03BA9412F1D1AA /* CommandRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FF305EE75985E7F2B131DD2 /* CommandRouterTests.swift */; };
+		6064321E6F30E5CF231B2846 /* PluginRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D278DADF0D2C377E3DB8CBEA /* PluginRegistry.swift */; };
 		6327B3F4991396B26F8E1A3D /* WhisperKitSpeechRecognizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7126457D1955E4801E720A0C /* WhisperKitSpeechRecognizerTests.swift */; };
 		6892C759DC267D3FB01A108E /* GoldenCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AB9DEC12FB14373288BA403 /* GoldenCorpusTests.swift */; };
 		6D76A837CA7B0A4DD05892F0 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E6911EDC6A72A09AAE433AFA /* ZIPFoundation */; };
+		6EE28D10901081BC4ED82032 /* NepaliCalendarPluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4845ADE77C392C52E447EC3 /* NepaliCalendarPluginTests.swift */; };
 		72C5DCF0A0774E359FF6167C /* MemoryProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA1D94894BBEEB22126873C /* MemoryProbe.swift */; };
 		7721DD8366DF52E918926DA8 /* KeychainEncryptedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF694F3FBB8E78AF5BBCC74 /* KeychainEncryptedStorage.swift */; };
 		77513354E6D2333576B5A9FA /* OnboardingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3EB972E8CC8D69D5ABE0BF7 /* OnboardingState.swift */; };
 		785CD3897EA05819167B3393 /* MethodResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB0B756F43CF1C3479B1C8D6 /* MethodResolver.swift */; };
+		7898562B28339AF245041B58 /* AssistantPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10A24847193D89DECCB875F /* AssistantPlugin.swift */; };
 		7940BFB81963619DAC40F067 /* ContactResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1110AC89F51167AB8F5FFA08 /* ContactResolver.swift */; };
 		79D094F839936BD503BA7800 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3ABF1E7E6E221112999571F /* Models.swift */; };
 		7A0157A5AFF99A3206889004 /* GeminiCommandInterpreter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6049FE3C4BC8944626675C41 /* GeminiCommandInterpreter.swift */; };
 		7A821335546B5C53D68FD5C0 /* SileroVAD.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F45398E4D634DDBCE65A38 /* SileroVAD.swift */; };
+		7A865F3BF2B4545E31562305 /* ApplianceHelperPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC35964D9BCD5E6FEA63005D /* ApplianceHelperPlugin.swift */; };
 		7DEDF2D378FEA4B0ECAC05D0 /* AppCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030DDED1BA852B1A12ABABBE /* AppCoordinator.swift */; };
 		8283088CCDAED6B8395D0F9C /* GeminiConfigStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA66D0A3F8E25813E13B1AA8 /* GeminiConfigStoreTests.swift */; };
 		8329E9726B9F11D20DAB5EBA /* IntentPromptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53F8ADF917B01F1AF93CBE4D /* IntentPromptTests.swift */; };
@@ -89,6 +94,7 @@
 		C0DFD8590612F9867C54D747 /* VoiceSessionStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A92B889C53FB8260FFF9D74B /* VoiceSessionStateMachine.swift */; };
 		C2070A4B539BD460E7BF2E99 /* LlamaCommandInterpreterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F1E8CAFF81975F728099576 /* LlamaCommandInterpreterTests.swift */; };
 		C78BB7CD6A73D4C0D80F61E1 /* RepetitionGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CA5334AD9F1EA9244229250 /* RepetitionGuardTests.swift */; };
+		C7CF2A0A55409C601992C57A /* PluginRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62DABF729505AFBBE07545C1 /* PluginRegistryTests.swift */; };
 		C9EB06ED68AC62EB0872C5D1 /* LLM in Frameworks */ = {isa = PBXBuildFile; productRef = 785605133017A7EB4690010A /* LLM */; };
 		CAB99607C19DA4F02CDCEFA6 /* GeminiClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF51B12C0A76A131DDB383BA /* GeminiClientTests.swift */; };
 		CB62BACBB90B862ECB454BF1 /* ConfirmationTier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A338D802B71550540562ACC /* ConfirmationTier.swift */; };
@@ -166,6 +172,7 @@
 		5037C77CFB1853F53CE7B8B6 /* TranscriptSanityGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptSanityGuardTests.swift; sourceTree = "<group>"; };
 		50BF02BE296495632F0F495A /* NepaliTextNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliTextNormalizer.swift; sourceTree = "<group>"; };
 		50EFF6165E6175FF1A801198 /* DependencyProtocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyProtocols.swift; sourceTree = "<group>"; };
+		51C6DC153AE345DC345BF5A9 /* NepaliCalendarPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliCalendarPlugin.swift; sourceTree = "<group>"; };
 		51DDA7082A80F1D235E7A006 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
 		53B1F7C24D2C273993F61341 /* PlatformAlarmScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformAlarmScheduler.swift; sourceTree = "<group>"; };
 		53F8ADF917B01F1AF93CBE4D /* IntentPromptTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentPromptTests.swift; sourceTree = "<group>"; };
@@ -177,6 +184,7 @@
 		5F1E8CAFF81975F728099576 /* LlamaCommandInterpreterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaCommandInterpreterTests.swift; sourceTree = "<group>"; };
 		6049FE3C4BC8944626675C41 /* GeminiCommandInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiCommandInterpreter.swift; sourceTree = "<group>"; };
 		62505895EDDF79ED720171BE /* InputSanitiserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSanitiserTests.swift; sourceTree = "<group>"; };
+		62DABF729505AFBBE07545C1 /* PluginRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginRegistryTests.swift; sourceTree = "<group>"; };
 		680AAA1A7F05226F9618CE82 /* VoicePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePipeline.swift; sourceTree = "<group>"; };
 		6B3C30966EA4E8B1E94A6917 /* DoubleDoseDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoubleDoseDetectorTests.swift; sourceTree = "<group>"; };
 		6B4100D9B7589B71AD8962A0 /* ConfirmationChallenge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationChallenge.swift; sourceTree = "<group>"; };
@@ -207,7 +215,10 @@
 		A9F9D2C931DA6AAFA3A23B6C /* ModelStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStoreTests.swift; sourceTree = "<group>"; };
 		AA7962DC2383BB09B89340F5 /* Speaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Speaker.swift; sourceTree = "<group>"; };
 		AD5B0563FB83838D506EA5E4 /* EscalationEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EscalationEngineTests.swift; sourceTree = "<group>"; };
+		B10A24847193D89DECCB875F /* AssistantPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantPlugin.swift; sourceTree = "<group>"; };
+		B4845ADE77C392C52E447EC3 /* NepaliCalendarPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliCalendarPluginTests.swift; sourceTree = "<group>"; };
 		B871A07DB2851ECD2A47836D /* ElderlyAssistantUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElderlyAssistantUITests.swift; sourceTree = "<group>"; };
+		BC35964D9BCD5E6FEA63005D /* ApplianceHelperPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceHelperPlugin.swift; sourceTree = "<group>"; };
 		BC5A9F12844B0E88FDE85416 /* GeminiClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiClient.swift; sourceTree = "<group>"; };
 		C2AB3C99F28EE6B02B39ECEB /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
 		C3E07CFBA211DF9E699627A4 /* VoiceSessionStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionStateMachineTests.swift; sourceTree = "<group>"; };
@@ -216,6 +227,7 @@
 		C9B3203338B37AF2615B9D88 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		CF539F81F76209D893CF81A8 /* GeminiConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiConfigStore.swift; sourceTree = "<group>"; };
 		D14B6E81C221A233E013C46F /* MessageComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageComposeView.swift; sourceTree = "<group>"; };
+		D278DADF0D2C377E3DB8CBEA /* PluginRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginRegistry.swift; sourceTree = "<group>"; };
 		D33B090FB7E6192916B90838 /* RepetitionGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepetitionGuard.swift; sourceTree = "<group>"; };
 		D42344465731A5DA5ABD125C /* DoubleDoseDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoubleDoseDetector.swift; sourceTree = "<group>"; };
 		D4F45398E4D634DDBCE65A38 /* SileroVAD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SileroVAD.swift; sourceTree = "<group>"; };
@@ -275,6 +287,17 @@
 				8680FE2847368F1B8EAD81DD /* SwiftWhisper */,
 			);
 			name = Packages;
+			sourceTree = "<group>";
+		};
+		528CAE486C9D93AA442FC217 /* Plugins */ = {
+			isa = PBXGroup;
+			children = (
+				BC35964D9BCD5E6FEA63005D /* ApplianceHelperPlugin.swift */,
+				B10A24847193D89DECCB875F /* AssistantPlugin.swift */,
+				51C6DC153AE345DC345BF5A9 /* NepaliCalendarPlugin.swift */,
+				D278DADF0D2C377E3DB8CBEA /* PluginRegistry.swift */,
+			);
+			path = Plugins;
 			sourceTree = "<group>";
 		};
 		532DAB8D89B5BE790DC133D2 /* ModelStore */ = {
@@ -354,6 +377,7 @@
 				5BDC95CF7558F90FBF6F3CF9 /* Intents */,
 				CD858715B4AA04346AEF2620 /* MedicationScheduler */,
 				532DAB8D89B5BE790DC133D2 /* ModelStore */,
+				A5E6406B84F5622C587C6A01 /* Plugins */,
 				56AA6AE9E24D673E595EEBE2 /* Storage */,
 				E69B193AFBFA082B3A31836C /* Voice */,
 			);
@@ -399,6 +423,15 @@
 				A92B889C53FB8260FFF9D74B /* VoiceSessionStateMachine.swift */,
 			);
 			path = App;
+			sourceTree = "<group>";
+		};
+		A5E6406B84F5622C587C6A01 /* Plugins */ = {
+			isa = PBXGroup;
+			children = (
+				B4845ADE77C392C52E447EC3 /* NepaliCalendarPluginTests.swift */,
+				62DABF729505AFBBE07545C1 /* PluginRegistryTests.swift */,
+			);
+			path = Plugins;
 			sourceTree = "<group>";
 		};
 		B468AB39C10E698FAAB5E156 /* Gemini */ = {
@@ -458,6 +491,7 @@
 				F6A2FD0A446F342EF8783A8E /* MedicationScheduler */,
 				9E701634E7E75769DB3D33CE /* ModelStore */,
 				1B29DE634D16120E129D68A0 /* Observability */,
+				528CAE486C9D93AA442FC217 /* Plugins */,
 				F981889A905A1AC2E6CE6148 /* Storage */,
 				D8FFD7B97DF7F341380EDE63 /* Voice */,
 			);
@@ -694,6 +728,8 @@
 			files = (
 				7DEDF2D378FEA4B0ECAC05D0 /* AppCoordinator.swift in Sources */,
 				E623147E0CF99748C7B6A338 /* AppLanguage.swift in Sources */,
+				7A865F3BF2B4545E31562305 /* ApplianceHelperPlugin.swift in Sources */,
+				7898562B28339AF245041B58 /* AssistantPlugin.swift in Sources */,
 				F46656314EF3B024F5871089 /* AudioSessionManager.swift in Sources */,
 				07CD39D0B917CFF69322969C /* CallMethod.swift in Sources */,
 				07B323A60C170B4A023546EE /* CallOverrideParser.swift in Sources */,
@@ -733,12 +769,14 @@
 				D6835191986FBF797464B5BD /* ModelDownloadService.swift in Sources */,
 				CCCF817EA766F6043F60C9E5 /* ModelStore.swift in Sources */,
 				79D094F839936BD503BA7800 /* Models.swift in Sources */,
+				4853B105556AAF159E3A8CDC /* NepaliCalendarPlugin.swift in Sources */,
 				943F8EA95365206425FDF63D /* NepaliTextNormalizer.swift in Sources */,
 				1E4E2CACAEA900314E8D7026 /* NepaliTimeParser.swift in Sources */,
 				77513354E6D2333576B5A9FA /* OnboardingState.swift in Sources */,
 				2FBA03DFDCB85B2049B798F3 /* OnboardingWizardView.swift in Sources */,
 				B82C18E493D6249A16752637 /* PhotoVerifier.swift in Sources */,
 				030616993A706F818B3E2C87 /* PlatformAlarmScheduler.swift in Sources */,
+				6064321E6F30E5CF231B2846 /* PluginRegistry.swift in Sources */,
 				9FFA634C78CC8AF5A782F4AE /* RedesignComponents.swift in Sources */,
 				0C8D3F8DBB3E64DAE6B7F7AE /* RepetitionGuard.swift in Sources */,
 				DAB4D2CA398AD66F4496B04E /* SettingsView.swift in Sources */,
@@ -793,9 +831,11 @@
 				8B5593B7AEDF4E0D815FA1BC /* MedicationSchedulerTests.swift in Sources */,
 				159244CE2A555209136FBA19 /* MethodResolverTests.swift in Sources */,
 				3FE394412AC1FB089526F43C /* ModelStoreTests.swift in Sources */,
+				6EE28D10901081BC4ED82032 /* NepaliCalendarPluginTests.swift in Sources */,
 				B01A5BB8CDE8419BBC75112B /* NepaliTextNormalizerTests.swift in Sources */,
 				4E2531A97C5980C0611CB470 /* NepaliTimeParserTests.swift in Sources */,
 				92252E31AFFAA415D171810A /* OnboardingStateTests.swift in Sources */,
+				C7CF2A0A55409C601992C57A /* PluginRegistryTests.swift in Sources */,
 				C78BB7CD6A73D4C0D80F61E1 /* RepetitionGuardTests.swift in Sources */,
 				FD0C74053396420771C700C1 /* SpeakerTests.swift in Sources */,
 				88AB55B2E56480BD97A927CC /* SwitchableCommandInterpreterTests.swift in Sources */,

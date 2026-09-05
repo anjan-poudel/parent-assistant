@@ -27,5 +27,10 @@ struct ContentView: View {
                 coordinator.pendingMessageDraft = nil
             }
         }
+        // .plugin intent: a plugin-provided view (e.g. the appliance
+        // photo + overlay), presented app-wide.
+        .sheet(item: $coordinator.pendingPluginPresentation) { presentation in
+            presentation.view
+        }
     }
 }
