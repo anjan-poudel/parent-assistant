@@ -11,6 +11,210 @@
         }
       }
     },
+    "appliance.closerPhotoHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't mark the exact spot on this photo. Follow the written steps, or take a closer photo of the buttons."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोटोमा ठीक ठाउँ देखाउन सकिनँ। लेखिएका चरणहरू पालना गर्नुहोस्, वा बटनहरूको नजिकबाट अर्को फोटो खिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "appliance.dismiss": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बन्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "appliance.error.generic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sorry, I couldn't help with that photo. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस्, त्यो फोटोबाट मदत गर्न सकिनँ। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "appliance.error.offline": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The internet isn't available right now. Please try again later."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले इन्टरनेट उपलब्ध छैन। पछि फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "appliance.error.photoUnusable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That photo didn't come out — please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यो फोटो राम्रो आएन — फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "appliance.error.timeout": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Understanding took too long — please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बुझ्न धेरै समय लाग्यो — फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "appliance.hedgeNotice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I'm not completely sure about this — please double-check yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यस बारेमा म पूर्ण पक्का छैन — कृपया आफैं पनि जाँच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "appliance.hedgePrefix": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I'm not completely sure, but"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पक्का छैन, तर"
+          }
+        }
+      }
+    },
+    "appliance.retake": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Take another photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अर्को फोटो खिच्नुहोस्"
+          }
+        }
+      }
+    },
+    "appliance.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try again"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फेरि प्रयास गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "appliance.takePhoto": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Take a photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो खिच्नुहोस्"
+          }
+        }
+      }
+    },
+    "appliance.working": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Looking at your photo…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको फोटो हेर्दैछु…"
+          }
+        }
+      }
+    },
     "calendar.nepaliDate": {
       "extractionState": "manual",
       "localizations": {
@@ -1847,6 +2051,23 @@
         }
       }
     },
+    "plugin.applianceHelper.cameraPrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Take a clear photo of the appliance or its buttons, and I will guide you."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उपकरण वा त्यसका बटनहरूको सफा फोटो खिच्नुहोस्, म तपाईंलाई सिकाउँछु।"
+          }
+        }
+      }
+    },
     "plugin.applianceHelper.name": {
       "extractionState": "manual",
       "localizations": {
@@ -1860,6 +2081,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "उपकरण सहायता"
+          }
+        }
+      }
+    },
+    "plugin.applianceHelper.notConfigured": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assistant isn't set up yet, so I can't look at photos right now."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायक अझै सेटअप भएको छैन, त्यसैले अहिले फोटो हेर्न सक्दिनँ।"
           }
         }
       }
