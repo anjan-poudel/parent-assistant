@@ -8,7 +8,14 @@ final class ApplianceImagePreparerTests: XCTestCase {
 
     private func makeImage(width: CGFloat, height: CGFloat,
                            orientation: UIImage.Orientation = .up) -> UIImage {
-        let rendered = UIGraphicsImageRenderer(size: CGSize(width: width, height: height)).image { ctx in
+        // scale = 1 is load-bearing: the default format renders at the
+        // SIMULATOR'S display scale (3x on Plus-class devices), which would
+        // triple the cgImage's pixels and make every size assertion below
+        // device-dependent. 1 point == 1 pixel keeps fixtures exact.
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let rendered = UIGraphicsImageRenderer(size: CGSize(width: width, height: height),
+                                               format: format).image { ctx in
             UIColor.red.setFill()
             ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
             UIColor.blue.setFill()

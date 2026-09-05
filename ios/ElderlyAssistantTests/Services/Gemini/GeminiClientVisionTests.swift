@@ -196,7 +196,7 @@ final class GeminiClientVisionTests: XCTestCase {
         }
     }
 
-    func testProseWrappedJSONIsRecovered() async {
+    func testProseWrappedJSONIsRecovered() async throws {
         // The model wrapped the object in prose despite JSON mode — the
         // outermost {...} span is still decodable.
         transport.nextResult = .success(FakeGeminiTransport.jsonResponse(
