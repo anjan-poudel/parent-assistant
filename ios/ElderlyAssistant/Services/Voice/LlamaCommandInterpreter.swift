@@ -205,7 +205,7 @@ final class LlamaCommandInterpreter: CommandInterpreter {
             DispatchQueue.main.async { completion(nil) }
             return
         }
-        let prompt = Self.buildPrompt(transcript: clean, context: context)
+        let prompt = IntentPrompt.build(transcript: clean, context: context)
 
         inferenceQueue.async { [weak self] in
             self?.runInference(prompt: prompt) { json in
@@ -219,42 +219,6 @@ final class LlamaCommandInterpreter: CommandInterpreter {
                 }
             }
         }
-    }
-
-    // MARK: - Prompt
-
-    private static func buildPrompt(transcript: String,
-                                    context: InterpreterContext) -> String {
-        // From research-doc §6a.2. Kept short; the GBNF grammar handles
-        // shape, so the prompt only guides content.
-        let meds = context.pendingMedications.isEmpty
-            ? "(none)"
-            : context.pendingMedications.joined(separator: ", ")
-        return """
-        You are Sahayak, a personal assistant for an elderly speaker.
-        The user's pending medications are: \(meds).
-        The user's language hint is: \(context.userLanguageHint).
-        Reply with a single JSON object matching the tool schema.
-        Set action to "ack_med" if the user confirms they took medication,
-        "emergency" if they ask for help in an emergency, "call" if they
-        want to make a phone call, "send_message" if they want to send a
-        text message, "set_reminder" if they want a reminder at a
-        time, "health_query" if they ask about their health, "music" if
-        they ask for a song or bhajan, "query" for any other question,
-        otherwise "none".
-        For "set_reminder", set time to the time expression they used
-        (keep the original wording, e.g. "बिहान ८ बजे") and medication to
-        the medication name if mentioned, else null.
-        For "call" and "send_message", set contact to who they named or
-        described (a name, or a relationship like "son"/"छोरा"/"daughter"),
-        else null.
-        For "send_message", set message to the message body they dictated,
-        in their own words, else null.
-        Set entryId to null unless you can identify a specific target.
-        Set confidence to your certainty in [0, 1]. Set reply to a short
-        response in the user's language.
-        User said: "\(transcript)"
-        """
     }
 
     // MARK: - Inference (guarded, with timeout — spec §5.2)
