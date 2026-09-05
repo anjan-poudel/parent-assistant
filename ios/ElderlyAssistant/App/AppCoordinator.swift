@@ -284,6 +284,10 @@ final class AppCoordinator: ObservableObject {
                                                      historyStore: confirmedMethodHistory)
     private lazy var intentCache = IntentCommandCache(storage: storage)
     private lazy var repetitionGuard = RepetitionGuard(storage: storage)
+    /// Deep-link builder/opener for the call & message flows (v2 pivot
+    /// Phase 2, §4.3) — FaceTime video/audio, WhatsApp text, tel:.
+    /// Stateless, so no lazy needed; tests fake it via `CallLinkOpening`.
+    private let callLinks = CallLinks()
 
     /// The plugin registry backing `.plugin` intent dispatch and plugin
     /// prompt composition (design doc 2026-09-05).
@@ -1097,38 +1101,44 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Actually places the call/opens the chat — only ever reached after
-    /// the user said yes (`handleConfirmationResponse`). Never claims
-    /// WhatsApp "called" — it only opened a chat, and says so.
+    /// the user said yes (`handleConfirmationResponse`). All URLs are
+    /// built and opened by `CallLinks` (one tested home for handle
+    /// normalization and app-absent decisions). Never claims WhatsApp
+    /// "called" — it only opened a chat, and says so; and a FaceTime
+    /// link that can't open says THAT, instead of claiming a call.
     private func performCallAction(_ action: PendingCallAction) {
         let locale = activeLocale
         switch action.method {
         case .phone:
-            let digits = action.contact.phone.filter { $0.isNumber || $0 == "+" }
-            if !digits.isEmpty, let url = URL(string: "tel:\(digits)") {
-                DispatchQueue.main.async { UIApplication.shared.open(url) }
-            }
+            callLinks.openPhone(action.contact.phone)
             setOutcome(icon: "phone.fill",
                        text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
             speak(text: L10n.fmt("router.call.calling", locale: locale, action.contact.name))
+            noteConfirmedCallExecution(action)
         case .facetimeVideo, .facetimeAudio:
-            let scheme = action.method == .facetimeVideo ? "facetime" : "facetime-audio"
-            let digits = action.contact.phone.filter { $0.isNumber || $0 == "+" }
-            if !digits.isEmpty, let url = URL(string: "\(scheme)://\(digits)") {
-                DispatchQueue.main.async { UIApplication.shared.open(url) }
+            let isVideo = action.method == .facetimeVideo
+            switch callLinks.openFaceTime(handle: action.contact.phone, video: isVideo) {
+            case .opened:
+                setOutcome(icon: isVideo ? "video.fill" : "phone.fill",
+                           text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
+                speak(text: L10n.fmt("router.call.calling", locale: locale, action.contact.name))
+                noteConfirmedCallExecution(action)
+            case .unavailable, .invalidHandle:
+                // FaceTime absent is near-impossible on a real iPhone but
+                // real on simulator — say what actually happened, and
+                // record NOTHING: teaching the method history / intent
+                // cache from a failed open would repeat the failure.
+                setOutcome(icon: "exclamationmark.triangle.fill",
+                           text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+                speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
             }
-            setOutcome(icon: action.method == .facetimeVideo ? "video.fill" : "phone.fill",
-                       text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
-            speak(text: L10n.fmt("router.call.calling", locale: locale, action.contact.name))
         case .whatsappChat:
-            let digits = action.contact.phone.filter { $0.isNumber }
-            if !digits.isEmpty, let url = URL(string: "https://wa.me/\(digits)") {
-                DispatchQueue.main.async { UIApplication.shared.open(url) }
-            }
+            callLinks.openWhatsAppChat(action.contact.phone)
             setOutcome(icon: "message.fill",
                        text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, action.contact.name))
             speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, action.contact.name))
+            noteConfirmedCallExecution(action)
         }
-        noteConfirmedCallExecution(action)
     }
 
     /// Post-execution learning (spec §4.2 + §6.2): a CONFIRMED call is
@@ -1232,15 +1242,53 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    func composeMessage(toContactNamed query: String?, body: String) -> Bool {
+    /// `send_message` (v2 pivot Phase 2, §4.3). Every surface ends with
+    /// the user's own tap on Send — that tap IS the `.confirm`-tier
+    /// confirmation, exactly as the shipped SMS flow models it:
+    ///  - WhatsApp named ("वाट्सएपमा मेसेज पठा") → `whatsapp://send` deep
+    ///    link with the body pre-filled; app-absent falls back to the
+    ///    native Messages sheet, then to a pasteboard copy — each
+    ///    disclosed out loud, never silently swapped.
+    ///  - nothing named → the native compose sheet (shipped behavior).
+    func composeMessage(toContactNamed query: String?, body: String,
+                        requestedApp: String?) -> MessageComposeOutcome {
+        let locale = activeLocale
+        if let app = requestedApp, !app.isEmpty, CallLinks.isWhatsAppName(app) {
+            guard let query, let contact = resolveSingleContact(query) else { return .contactNotFound }
+            switch callLinks.openWhatsAppText(contact.phone, text: body) {
+            case .openedWhatsApp:
+                setOutcome(icon: "message.fill",
+                           text: L10n.fmt("home.outcome.whatsappMessageReady", locale: locale, contact.name))
+                speak(text: L10n.fmt("router.message.whatsappReady", locale: locale, contact.name))
+                return .whatsAppChatOpened
+            case .needsNativeCompose:
+                presentMessageDraft(contact: contact, body: body)
+                speak(text: L10n.fmt("router.message.whatsappMissingFallback", locale: locale, contact.name))
+                return .fellBackToNativeCompose
+            case .copiedText:
+                setOutcome(icon: "doc.on.doc.fill",
+                           text: L10n.fmt("home.outcome.messageCopied", locale: locale, contact.name))
+                speak(text: L10n.fmt("router.message.copiedFallback", locale: locale, contact.name))
+                return .copiedTextOnly
+            case .invalidPhone:
+                return .contactNotFound
+            }
+        }
         guard MFMessageComposeViewController.canSendText(),
-              let query, let contact = resolveSingleContact(query) else { return false }
+              let query, let contact = resolveSingleContact(query) else { return .contactNotFound }
+        presentMessageDraft(contact: contact, body: body)
+        return .nativeComposePresented
+    }
+
+    /// Presents the native compose sheet pre-filled (shipped SMS path,
+    /// extracted so the WhatsApp-absent fallback lands on the exact same
+    /// surface).
+    private func presentMessageDraft(contact: FamilyContact, body: String) {
         DispatchQueue.main.async { [weak self] in
             self?.pendingMessageDraft = MessageDraft(recipients: [contact.phone], body: body)
         }
         setOutcome(icon: "message.fill",
                    text: L10n.fmt("home.outcome.messageReady", locale: activeLocale, contact.name))
-        return true
     }
 
     // MARK: - Medication schedule surface (spec §4.3, §4.4.3)

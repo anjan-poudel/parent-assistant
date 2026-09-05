@@ -241,7 +241,7 @@ final class CommandRouterTests: XCTestCase {
 
     func testSendMessageWithResolvedContactPresentsComposeSheet() {
         let coordinator = MockVoiceCommandCoordinator()
-        coordinator.messageShouldSucceed = true
+        coordinator.messageOutcome = .nativeComposePresented
         let bus = MockObservabilityBus()
         let interpreter = FakeCommandInterpreter()
         interpreter.nextCommand = InterpretedCommand(
@@ -256,7 +256,50 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertEqual(coordinator.composedMessages.count, 1)
         XCTAssertEqual(coordinator.composedMessages.first?.contact, "छोरी")
         XCTAssertEqual(coordinator.composedMessages.first?.body, "म राम्रो छु")
+        XCTAssertNil(coordinator.composedMessages.first?.requestedApp)
         XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_message_composing" })
+    }
+
+    func testSendMessageNamingWhatsAppThreadsRequestedAppThrough() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.messageOutcome = .whatsAppChatOpened
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .sendMessage, entryId: nil, contact: "छोरी", time: nil, medication: nil,
+            message: "म राम्रो छु", callType: nil, requestedApp: "whatsapp", pluginAction: nil, pluginEntities: nil,
+            confidence: 0.95, reply: "सन्देश तयार छ"
+        )
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "छोरीलाई वाट्सएपमा सन्देश पठाऊ, म राम्रो छु")
+
+        // The router threads the slot verbatim — WHICH surface opens is
+        // the coordinator's decision (contact resolution + CallLinks).
+        XCTAssertEqual(coordinator.composedMessages.first?.requestedApp, "whatsapp")
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_message_whatsapp_opened" })
+    }
+
+    func testSendMessageWhatsAppFallbackEmitsInfoEvent() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.messageOutcome = .fellBackToNativeCompose
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .sendMessage, entryId: nil, contact: "छोरी", time: nil, medication: nil,
+            message: "म राम्रो छु", callType: nil, requestedApp: "whatsapp", pluginAction: nil, pluginEntities: nil,
+            confidence: 0.95, reply: "सन्देश तयार छ"
+        )
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "छोरीलाई वाट्सएपमा सन्देश पठाऊ")
+
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_message_whatsapp_fallback_sms" })
+        // The coordinator speaks the disclosed fallback line — the router
+        // must NOT also speak the model's ack as if WhatsApp opened.
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "command_message_whatsapp_opened" })
     }
 }
 
@@ -333,11 +376,12 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
         return overrideShouldHandle
     }
 
-    var composedMessages: [(contact: String?, body: String)] = []
-    var messageShouldSucceed = false
-    func composeMessage(toContactNamed name: String?, body: String) -> Bool {
-        composedMessages.append((name, body))
-        return messageShouldSucceed
+    var composedMessages: [(contact: String?, body: String, requestedApp: String?)] = []
+    var messageOutcome: MessageComposeOutcome = .contactNotFound
+    func composeMessage(toContactNamed name: String?, body: String,
+                        requestedApp: String?) -> MessageComposeOutcome {
+        composedMessages.append((name, body, requestedApp))
+        return messageOutcome
     }
 
     var presentedPluginViews: [AnyView] = []

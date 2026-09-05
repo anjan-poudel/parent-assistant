@@ -126,6 +126,12 @@ final class StubCoordinator: VoiceCommandCoordinating {
         nil
     }
     func handleCallConfirmationOverride(_ utterance: String) -> Bool { false }
-    func composeMessage(toContactNamed name: String?, body: String) -> Bool { false }
+    var composeMessageOutcome: MessageComposeOutcome = .contactNotFound
+    private(set) var composeMessageRequests: [(contact: String?, body: String, requestedApp: String?)] = []
+    func composeMessage(toContactNamed name: String?, body: String,
+                        requestedApp: String?) -> MessageComposeOutcome {
+        composeMessageRequests.append((name, body, requestedApp))
+        return composeMessageOutcome
+    }
     func presentPluginView(_ view: AnyView) {}
 }

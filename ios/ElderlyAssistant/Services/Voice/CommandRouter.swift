@@ -58,12 +58,17 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// means "not an override — run the normal yes/no flow".
     func handleCallConfirmationOverride(_ utterance: String) -> Bool
 
-    /// `send_message` intent (trial wiring). iOS never lets a third-party
-    /// app send SMS silently — `MFMessageComposeViewController` always
-    /// requires the user's own tap on Send — so this resolves the contact
-    /// and presents the native compose sheet pre-filled with `body`.
-    /// Returns false when no contact can be resolved.
-    func composeMessage(toContactNamed name: String?, body: String) -> Bool
+    /// `send_message` intent. iOS never lets a third-party app send a
+    /// message silently — every surface ends with the user's own tap on
+    /// Send, which IS the confirmation for the `.confirm` tier (same
+    /// model the SMS compose sheet shipped with). `requestedApp` routes
+    /// the surface: WhatsApp named → `whatsapp://send` deep link with the
+    /// body pre-filled (app-absent fallbacks disclosed inside, v2 §4.3);
+    /// otherwise the native compose sheet. The returned outcome says
+    /// which surface actually appeared, so the router can emit the right
+    /// event and leave the honest spoken line to the coordinator.
+    func composeMessage(toContactNamed name: String?, body: String,
+                        requestedApp: String?) -> MessageComposeOutcome
 
     /// `.plugin` intent: presents a plugin-provided view (e.g. the
     /// appliance photo + overlay). AppCoordinator publishes it;
@@ -476,18 +481,34 @@ final class CommandRouter {
         speak(text: prompt)
     }
 
-    /// `send_message` (trial wiring). Never claims the message was SENT —
-    /// only that it's ready, since the user still has to tap Send on the
-    /// native compose sheet.
+    /// `send_message`. Never claims the message was SENT — only that a
+    /// surface is ready, since the user still has to tap Send (native
+    /// sheet, or inside WhatsApp for the deep link — v2 §4.3). The
+    /// coordinator speaks for the deep-link/fallback outcomes (it alone
+    /// knows which surface appeared); the router keeps speaking the
+    /// model's ack for the shipped native-compose path.
     private func handleSendMessage(_ command: InterpretedCommand) {
-        guard let body = command.message, !body.isEmpty,
-              coordinator?.composeMessage(toContactNamed: command.contact, body: body) == true else {
+        guard let body = command.message, !body.isEmpty else {
             emit(eventType: "command_message_unresolved", outcome: "blocked")
             speak(key: "router.messageContactNotFound")
             return
         }
-        emit(eventType: "command_message_composing", outcome: "success")
-        speak(text: command.reply)
+        switch coordinator?.composeMessage(toContactNamed: command.contact,
+                                           body: body,
+                                           requestedApp: command.requestedApp) {
+        case .nativeComposePresented:
+            emit(eventType: "command_message_composing", outcome: "success")
+            speak(text: command.reply)
+        case .whatsAppChatOpened:
+            emit(eventType: "command_message_whatsapp_opened", outcome: "success")
+        case .fellBackToNativeCompose:
+            emit(eventType: "command_message_whatsapp_fallback_sms", outcome: "info")
+        case .copiedTextOnly:
+            emit(eventType: "command_message_whatsapp_copied", outcome: "info")
+        case .contactNotFound, .none:
+            emit(eventType: "command_message_unresolved", outcome: "blocked")
+            speak(key: "router.messageContactNotFound")
+        }
     }
 
     /// `.plugin` intent (plugin architecture, 2026-09-05). Resolves the

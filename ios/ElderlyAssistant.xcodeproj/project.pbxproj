@@ -22,6 +22,7 @@
 		159244CE2A555209136FBA19 /* MethodResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D3D1B1D2A416ED0E441A932 /* MethodResolverTests.swift */; };
 		16CDB50A84CA31870D3C4DDC /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = C51E1D3A1B144677E2F3A616 /* Localizable.xcstrings */; };
 		18BEB7D45D5046004C294903 /* IntentCommandCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26F476E23A6729932ACA0823 /* IntentCommandCacheTests.swift */; };
+		1AE062785099B2A92B49F9ED /* CallLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62FF5D6C4374911BDBFB167D /* CallLinks.swift */; };
 		1E4E2CACAEA900314E8D7026 /* NepaliTimeParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A15958C4A3DCF9FC454627A /* NepaliTimeParser.swift */; };
 		203223B8756FC96334BC2960 /* EscalationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AF7478D117F7C991FC99A68 /* EscalationEngine.swift */; };
 		299549B47B6CBC1FEED6E1EF /* ConfirmationChallenge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B4100D9B7589B71AD8962A0 /* ConfirmationChallenge.swift */; };
@@ -112,6 +113,7 @@
 		E268D3A135C024D0B298AC06 /* IntentSchemaV2Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90BDDB193F02D2D0F4CA995F /* IntentSchemaV2Tests.swift */; };
 		E4A41DDD8D18E332FADFAAED /* tts in Resources */ = {isa = PBXBuildFile; fileRef = 4EC24DBE5F87FAAC400D41EA /* tts */; };
 		E623147E0CF99748C7B6A338 /* AppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CD2AC05E4A8FC9B884539C1 /* AppLanguage.swift */; };
+		E89B1B0AC5382A89AF519187 /* CallLinksTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7722DDAEEEF6611E0F1162DD /* CallLinksTests.swift */; };
 		E8C639597E665201247E6605 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A8D077C9DB0C95CE97542AE /* HomeView.swift */; };
 		E902BCDC5BACE47F0529EC9A /* CommandRouterSafetyNetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E56CE505568F9DA78F71377 /* CommandRouterSafetyNetTests.swift */; };
 		EAA4C9A61CDA5778686FDA76 /* EscalationEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5B0563FB83838D506EA5E4 /* EscalationEngineTests.swift */; };
@@ -190,6 +192,7 @@
 		6049FE3C4BC8944626675C41 /* GeminiCommandInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiCommandInterpreter.swift; sourceTree = "<group>"; };
 		62505895EDDF79ED720171BE /* InputSanitiserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSanitiserTests.swift; sourceTree = "<group>"; };
 		62DABF729505AFBBE07545C1 /* PluginRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginRegistryTests.swift; sourceTree = "<group>"; };
+		62FF5D6C4374911BDBFB167D /* CallLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLinks.swift; sourceTree = "<group>"; };
 		680AAA1A7F05226F9618CE82 /* VoicePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePipeline.swift; sourceTree = "<group>"; };
 		6B3C30966EA4E8B1E94A6917 /* DoubleDoseDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoubleDoseDetectorTests.swift; sourceTree = "<group>"; };
 		6B4100D9B7589B71AD8962A0 /* ConfirmationChallenge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationChallenge.swift; sourceTree = "<group>"; };
@@ -198,6 +201,7 @@
 		7126457D1955E4801E720A0C /* WhisperKitSpeechRecognizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperKitSpeechRecognizerTests.swift; sourceTree = "<group>"; };
 		7286AFC3443EAABF628D89A5 /* CallMethod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallMethod.swift; sourceTree = "<group>"; };
 		7665911F65DF1CD61EC44277 /* ModelDownloadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadService.swift; sourceTree = "<group>"; };
+		7722DDAEEEF6611E0F1162DD /* CallLinksTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLinksTests.swift; sourceTree = "<group>"; };
 		7A8D077C9DB0C95CE97542AE /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		841DCADD368A6ECCD04B61F9 /* GeminiCommandInterpreterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiCommandInterpreterTests.swift; sourceTree = "<group>"; };
 		8680FE2847368F1B8EAD81DD /* SwiftWhisper */ = {isa = PBXFileReference; lastKnownFileType = folder; name = SwiftWhisper; path = vendor/SwiftWhisper; sourceTree = SOURCE_ROOT; };
@@ -329,6 +333,7 @@
 		5BDC95CF7558F90FBF6F3CF9 /* Intents */ = {
 			isa = PBXGroup;
 			children = (
+				7722DDAEEEF6611E0F1162DD /* CallLinksTests.swift */,
 				46BE34B77FAA335042575B06 /* CallOverrideParserTests.swift */,
 				3E56CE505568F9DA78F71377 /* CommandRouterSafetyNetTests.swift */,
 				54A73521E34C5BA11CF281B8 /* ContactResolverTests.swift */,
@@ -469,6 +474,7 @@
 		CB103D833B0E35C1D49D7552 /* Intents */ = {
 			isa = PBXGroup;
 			children = (
+				62FF5D6C4374911BDBFB167D /* CallLinks.swift */,
 				7286AFC3443EAABF628D89A5 /* CallMethod.swift */,
 				0DE7446D829BAF64E80F88E8 /* CallOverrideParser.swift */,
 				5A338D802B71550540562ACC /* ConfirmationTier.swift */,
@@ -747,6 +753,7 @@
 				7A865F3BF2B4545E31562305 /* ApplianceHelperPlugin.swift in Sources */,
 				7898562B28339AF245041B58 /* AssistantPlugin.swift in Sources */,
 				F46656314EF3B024F5871089 /* AudioSessionManager.swift in Sources */,
+				1AE062785099B2A92B49F9ED /* CallLinks.swift in Sources */,
 				07CD39D0B917CFF69322969C /* CallMethod.swift in Sources */,
 				07B323A60C170B4A023546EE /* CallOverrideParser.swift in Sources */,
 				549799318F9082CDE85AF5F7 /* CommandRouter.swift in Sources */,
@@ -821,6 +828,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E89B1B0AC5382A89AF519187 /* CallLinksTests.swift in Sources */,
 				9184CA7464ED5BE45A88982F /* CallOverrideParserTests.swift in Sources */,
 				E902BCDC5BACE47F0529EC9A /* CommandRouterSafetyNetTests.swift in Sources */,
 				5FF89DF6EC03BA9412F1D1AA /* CommandRouterTests.swift in Sources */,

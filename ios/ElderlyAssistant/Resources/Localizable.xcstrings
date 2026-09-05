@@ -657,6 +657,23 @@
         }
       }
     },
+    "home.outcome.messageCopied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Message copied for %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को लागि सन्देश कपी भयो"
+          }
+        }
+      }
+    },
     "home.outcome.messageReady": {
       "extractionState": "manual",
       "localizations": {
@@ -721,6 +738,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "पूर्ववत् भयो"
+          }
+        }
+      }
+    },
+    "home.outcome.whatsappMessageReady": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WhatsApp message ready for %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को लागि ह्वाट्सएप सन्देश तयार"
           }
         }
       }
@@ -2068,6 +2102,23 @@
         }
       }
     },
+    "router.call.facetimeUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FaceTime isn't available on this device, so I couldn't start the call."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो उपकरणमा फेसटाइम उपलब्ध छैन, त्यसैले कल सुरु गर्न सकिनँ।"
+          }
+        }
+      }
+    },
     "router.call.methodPhone": {
       "extractionState": "manual",
       "localizations": {
@@ -2285,6 +2336,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "स्वास्थ्य जानकारी अहिले उपलब्ध छैन। चाँडै आउनेछ।"
+          }
+        }
+      }
+    },
+    "router.message.copiedFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Neither WhatsApp nor Messages can take a text on this device, so I've copied your message for %@ — you can paste it yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो उपकरणमा ह्वाट्सएप वा म्यासेजबाट सन्देश पठाउन सकिँदैन, त्यसैले %@ को लागि तपाईंको सन्देश कपी गरिदिएको छु — आफैं टाँस्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "router.message.whatsappMissingFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WhatsApp isn't installed on this phone, so I've opened Messages for %@ with your text instead."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनमा ह्वाट्सएप छैन, त्यसैले %@ को लागि म्यासेजमा तपाईंको सन्देश राखिदिएको छु।"
+          }
+        }
+      }
+    },
+    "router.message.whatsappReady": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WhatsApp is opening for %@ with your message ready — please tap send there yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को लागि ह्वाट्सएपमा तपाईंको सन्देश तयार छ — कृपया त्यहाँ आफैं पठाउनुहोस् थिच्नुहोस्।"
           }
         }
       }
