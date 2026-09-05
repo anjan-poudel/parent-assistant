@@ -123,8 +123,10 @@ final class CommandRouterTests: XCTestCase {
         _ = router.route(transcript: "फोन गर")
 
         XCTAssertEqual(coordinator.callConfirmationRequests.first?.contact, "अज्ञात व्यक्ति")
+        // A name WAS extracted but didn't resolve — distinct "contact not
+        // found" message, not the generic "blocked" one (2026-09-05 fix).
         XCTAssertTrue(bus.emittedEvents.contains {
-            $0.eventType == "command_sensitive_blocked_auth_unavailable"
+            $0.eventType == "command_call_contact_not_found"
         })
     }
 

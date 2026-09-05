@@ -339,8 +339,19 @@ final class CommandRouter {
         guard let prompt = coordinator?.requestCallConfirmation(
             contactQuery: command.contact, callType: command.callType, requestedApp: command.requestedApp
         ) else {
-            emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
-            speak(key: "router.sensitiveBlocked")
+            // Distinguish WHY it failed instead of one generic "blocked"
+            // message: a name was extracted but didn't match anyone in
+            // family contacts (fixable by the user — add the contact) is
+            // a different situation from no name being understood at all
+            // (fixable by re-phrasing), and neither should sound like a
+            // permissions/auth problem, since neither is one.
+            if let contact = command.contact, !contact.isEmpty {
+                emit(eventType: "command_call_contact_not_found", outcome: "blocked")
+                speak(text: L10n.fmt("router.call.contactNotFound", locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"), contact))
+            } else {
+                emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
+                speak(key: "router.sensitiveBlocked")
+            }
             return
         }
         emit(eventType: "command_call_confirmation_requested", outcome: "success")

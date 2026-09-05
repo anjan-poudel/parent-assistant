@@ -468,9 +468,19 @@ struct ConfirmationChips: View {
 
     private func chip(key: String, isYes: Bool) -> some View {
         Button {
+            // Same bug class as CommandRouter's voice-path fix: a call
+            // confirmation speaks its OWN contextual response inside
+            // performCallAction (e.g. "Calling Maiya"). Speaking the
+            // generic medication-flavored text here afterward would
+            // cancel that correct utterance (SystemSpeechSpeaker.speak()
+            // cancels whatever's currently speaking) — checked BEFORE
+            // handleConfirmationResponse, which clears pendingCallAction.
+            let isCall = coordinator.isAwaitingCallConfirmation
             let response: ConfirmationResponse = isYes ? .yes : .no
             coordinator.handleConfirmationResponse(response)
-            coordinator.speak(key: isYes ? "router.confirmationYes" : "router.confirmationNo")
+            if !isCall {
+                coordinator.speak(key: isYes ? "router.confirmationYes" : "router.confirmationNo")
+            }
         } label: {
             Text(LocalizedStringKey(key))
                 .font(.system(size: 24, weight: .bold))

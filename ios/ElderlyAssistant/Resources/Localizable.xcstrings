@@ -1847,6 +1847,23 @@
         }
       }
     },
+    "router.call.contactNotFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I couldn't find %@ in your family contacts. Add them in Settings first."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मैले %@ लाई तपाईंको पारिवारिक सम्पर्कमा भेटिनँ। पहिले सेटिङमा थप्नुहोस्।"
+          }
+        }
+      }
+    },
     "router.call.methodVideo": {
       "extractionState": "manual",
       "localizations": {
