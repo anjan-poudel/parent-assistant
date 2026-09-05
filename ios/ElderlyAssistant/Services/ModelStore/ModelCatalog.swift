@@ -213,6 +213,32 @@ enum ModelCatalog {
             // but functional. The distilled small model is the fast path.
             coreMLEncoderBundledName: nil
         ),
+        // TODO: placeholder — no real hosted artifact exists yet. kiranpantha/whisper-large-v3-nepali ships raw PyTorch safetensors only; needs WhisperKit CoreML conversion + hosting once the finetune-teacher-v2 fine-tune (in progress) is exported and a hosting decision is made. Do not enable download until this is replaced with a real URL.
+        ModelCatalogEntry(
+            id: whisperKitNepali,
+            kind: .whisperBase,
+            displayName: "Whisper Large v3 Nepali (Teacher)",
+            // `filename`/`downloadURL` are required by the struct but unused
+            // for WhisperKit directory delivery (see whisperKitZipURL
+            // below) — pointed at the same invalid placeholder so nothing
+            // can accidentally fire a real request against them.
+            filename: "whisperkit-ne-teacher",
+            downloadURL: URL(string: "https://TODO-unset.example.invalid/whisperkit-ne-teacher.zip")!,
+            // ESTIMATE, not measured: 1.5B-param model, CoreML fp16
+            // ballpark. Update once the real conversion is exported.
+            sizeBytes: 3_100_000_000,
+            // PLACEHOLDER: no real artifact exists, so no real checksum
+            // exists yet. Must be replaced before download is enabled.
+            sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+            // ESTIMATE: scaled up from the medium fine-tune's 3.5 GB floor
+            // for a much larger 1.5B-param teacher model.
+            minDeviceRAMBytes: 8_000_000_000,
+            dependsOn: nil,
+            // TODO: placeholder — see comment above. Not a real download.
+            whisperKitZipURL: URL(string: "https://TODO-unset.example.invalid/whisperkit-ne-teacher.zip")!,
+            // ESTIMATE, not measured — see sizeBytes comment above.
+            whisperKitZipBytes: 3_100_000_000
+        ),
         ModelCatalogEntry(
             id: whisperSmallMultilingual,
             kind: .whisperBase,

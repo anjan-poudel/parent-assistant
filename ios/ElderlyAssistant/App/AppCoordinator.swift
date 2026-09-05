@@ -204,7 +204,10 @@ final class AppCoordinator: ObservableObject {
         ModelCatalog.llama3_2_1B,
         ModelCatalog.piperNepali,
         ModelCatalog.whisperFinetunedNepaliQ8,
-        ModelCatalog.whisperLargeV3Nepali
+        ModelCatalog.whisperLargeV3Nepali,
+        // Placeholder entry — not a real download yet. See the TODO comment
+        // on this entry in ModelCatalog.swift.
+        ModelCatalog.whisperKitNepali
     ]
 
     init() {
