@@ -5,6 +5,7 @@ import UIKit
 enum LeafDestination: Identifiable {
     case meds
     case reminders
+    case calendar
     case call
     case settings
 
@@ -12,6 +13,7 @@ enum LeafDestination: Identifiable {
         switch self {
         case .meds: return "meds"
         case .reminders: return "reminders"
+        case .calendar: return "calendar"
         case .call: return "call"
         case .settings: return "settings"
         }
@@ -37,6 +39,9 @@ struct HomeView: View {
                 DesignTokens.background.ignoresSafeArea()
                 VStack(spacing: 14) {
                     topBar
+                    if let line = coordinator.homeCalendarLine {
+                        calendarStrip(line)
+                    }
                     if !coordinator.onboardingState.pendingSteps.isEmpty {
                         setupStrip
                     }
@@ -73,10 +78,18 @@ struct HomeView: View {
 
     private var topBar: some View {
         HStack(alignment: .top, spacing: 8) {
-            Text(greetingText)
-                .font(DesignTokens.greetingFont(size: 22))
-                .foregroundColor(DesignTokens.textPrimary)
-                .multilineTextAlignment(.leading)
+            // The date/greeting area doubles as the calendar's entry
+            // point (2026-09-06: calendar lives ON the home screen via
+            // this tap target, NOT as a 5th dock item — the dock stays
+            // at four clean entries per the "keep dock items clean"
+            // direction).
+            NavigationLink(value: LeafDestination.calendar) {
+                Text(greetingText)
+                    .font(DesignTokens.greetingFont(size: 22))
+                    .foregroundColor(DesignTokens.textPrimary)
+                    .multilineTextAlignment(.leading)
+            }
+            .accessibilityLabel(Text("home.hub.calendar"))
             Spacer()
             // Settings has exactly one entry point (the dock below) —
             // deliberately not duplicated up here, so there's only ever
@@ -84,6 +97,34 @@ struct HomeView: View {
             EmergencyIconButton()
         }
         .padding(.top, 8)
+    }
+
+    /// Slim strip showing today's Nepali (Bikram Sambat) and Hindu
+    /// calendar dates (2026-09-06) — displayed directly on Home per
+    /// product direction, tappable into the full calendar leaf.
+    /// Deliberately a self-contained little view: when the main-screen
+    /// widget system lands, this becomes its first widget.
+    private func calendarStrip(_ line: String) -> some View {
+        NavigationLink(value: LeafDestination.calendar) {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(DesignTokens.accent)
+                Text(line)
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(DesignTokens.card)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .task { coordinator.refreshHomeCalendarLineIfNeeded() }
     }
 
     /// Slim, dismissible-by-navigation strip (redesign spec §3.1) —
@@ -293,6 +334,8 @@ struct HomeView: View {
             MedsView()
         case .reminders:
             RemindersView()
+        case .calendar:
+            CalendarView()
         case .call:
             CallView()
         case .settings:

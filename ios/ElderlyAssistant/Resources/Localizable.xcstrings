@@ -11,6 +11,74 @@
         }
       }
     },
+    "calendar.nepaliDate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today in the Nepali calendar"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नेपाली पात्रोमा आज"
+          }
+        }
+      }
+    },
+    "calendar.noScheduleToday": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing scheduled today"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आज कुनै कार्यक्रम छैन"
+          }
+        }
+      }
+    },
+    "calendar.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पात्रो"
+          }
+        }
+      }
+    },
+    "calendar.todayQuestion": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What is today's date in the Nepali calendar? Answer in one short line."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आज नेपाली पात्रोमा कति गते हो? एउटा छोटो लाइनमा जवाफ दिनुहोस्।"
+          }
+        }
+      }
+    },
     "call.callButtonLabel": {
       "extractionState": "manual",
       "localizations": {
@@ -215,6 +283,23 @@
         }
       }
     },
+    "home.calendarLine.question": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Give today's date in BOTH the Nepali (Bikram Sambat) and Hindu calendars in ONE short line, e.g. format 'असोज २०, २०८३ बि.सं. • भाद्र २८, १९४७ शक' — no extra words, just the line."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजको मिति नेपाली (बिक्रम संवत्) र हिन्दू पात्रो दुबैमा एउटै छोटो लाइनमा लेख्नुहोस्, जस्तै 'असोज २०, २०८३ बि.सं. • भाद्र २८, १९४७ शक' — अरू केही नलेख्नुहोस्, त्यही लाइन मात्र।"
+          }
+        }
+      }
+    },
     "home.conversation.assistant": {
       "extractionState": "manual",
       "localizations": {
@@ -415,6 +500,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "“बिहान ८ बजे सम्झना राख”"
+          }
+        }
+      }
+    },
+    "home.hub.calendar": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पात्रो"
           }
         }
       }
@@ -1949,6 +2051,40 @@
         }
       }
     },
+    "router.call.disambiguate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I found more than one matching person (%@). Please say the full name."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ भनेर धेरै जना भेटिए। कृपया पूरा नाम भन्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.call.methodPhone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "a phone call"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोन कल"
+          }
+        }
+      }
+    },
     "router.call.methodVideo": {
       "extractionState": "manual",
       "localizations": {
@@ -1996,6 +2132,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "ह्वाट्सएपमा कुराकानी"
+          }
+        }
+      }
+    },
+    "router.call.recentRepeatNotice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You called %@ a little while ago."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भर्खरै %@ लाई फोन गर्नुभएको थियो।"
           }
         }
       }
@@ -2098,6 +2251,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "सहायता सुरु भयो। परिवारलाई खबर पठाउँदैछु।"
+          }
+        }
+      }
+    },
+    "router.featureNotYet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That feature isn't ready yet, but it's coming."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यो सुविधा अहिले तयार छैन, तर चाँडै आउँदैछ।"
           }
         }
       }
@@ -3632,23 +3802,6 @@
         }
       }
     },
-    "stt.name.whisperLargeNepali": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Whisper (Nepali large v3)"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Whisper (नेपाली ठूलो v3)"
-          }
-        }
-      }
-    },
     "stt.name.whisperKitNepali": {
       "extractionState": "manual",
       "localizations": {
@@ -3662,6 +3815,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "WhisperKit (नेपाली मध्यम, ANE)"
+          }
+        }
+      }
+    },
+    "stt.name.whisperLargeNepali": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper (Nepali large v3)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Whisper (नेपाली ठूलो v3)"
           }
         }
       }
@@ -3713,74 +3883,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Whisper (नेपाली सानो, डिस्टिल्ड)"
-          }
-        }
-      }
-    },
-    "router.call.methodPhone": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "a phone call"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "फोन कल"
-          }
-        }
-      }
-    },
-    "router.call.recentRepeatNotice": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "You called %@ a little while ago."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "भर्खरै %@ लाई फोन गर्नुभएको थियो।"
-          }
-        }
-      }
-    },
-    "router.call.disambiguate": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "I found more than one matching person (%@). Please say the full name."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ भनेर धेरै जना भेटिए। कृपया पूरा नाम भन्नुहोस्।"
-          }
-        }
-      }
-    },
-    "router.featureNotYet": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "That feature isn't ready yet, but it's coming."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "त्यो सुविधा अहिले तयार छैन, तर चाँडै आउँदैछ।"
           }
         }
       }
