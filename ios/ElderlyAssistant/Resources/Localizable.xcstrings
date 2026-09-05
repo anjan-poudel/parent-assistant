@@ -4311,6 +4311,159 @@
           }
         }
       }
+    },
+    "settings.voices.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voices"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाजहरू"
+          }
+        }
+      }
+    },
+    "settings.voices.nepali": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nepali voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नेपाली आवाज"
+          }
+        }
+      }
+    },
+    "settings.voices.english": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "English voice (US)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अंग्रेजी आवाज (अमेरिकी)"
+          }
+        }
+      }
+    },
+    "settings.voices.statusInstalled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installed"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "स्थापित"
+          }
+        }
+      }
+    },
+    "settings.voices.statusBundled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready — installs on first use"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तयार — पहिलो प्रयोगमा स्थापना हुन्छ"
+          }
+        }
+      }
+    },
+    "settings.voices.statusMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Missing"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "छैन"
+          }
+        }
+      }
+    },
+    "settings.voices.testButton": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play sample greeting"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नमूना अभिवादन बजाउनुहोस्"
+          }
+        }
+      }
+    },
+    "settings.voices.sampleGreeting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hello! Your assistant is speaking with its new voice."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नमस्ते! तपाईंको सहायक आफ्नो नयाँ आवाजमा बोल्दै छ।"
+          }
+        }
+      }
+    },
+    "settings.voices.missingHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice files are not bundled in this build. Ask your family to rebuild the app with the voice files included."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो बिल्डमा आवाज फाइलहरू छैनन्। परिवारलाई आवाज फाइलसहित एप फेरि बनाउन भन्नुहोस्।"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
