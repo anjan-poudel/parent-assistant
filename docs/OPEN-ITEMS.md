@@ -15,7 +15,7 @@ the table; completed items are struck through with the landing commit noted.
 | # | Item | Status | Branch / Worktree | Notes |
 |---|------|--------|-------------------|-------|
 | 4 | Wake word ("Hey Sahayak") | not started | `task/wake-word` (`.claude/worktrees/wake-word`) | Brief at `TASK.md` in that worktree |
-| 5 | Gemini cost governance | not started | `task/cost-governance` (`.claude/worktrees/cost-governance`) | Brief at `TASK.md` in that worktree |
+| 5 | ~~Gemini cost governance~~ | landed `a50b61c` | ~~`task/cost-governance` (`.claude/worktrees/cost-governance`)~~ | ~~Brief at `TASK.md` in that worktree~~ |
 
 ---
 
