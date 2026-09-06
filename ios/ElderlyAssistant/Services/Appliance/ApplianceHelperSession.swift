@@ -6,16 +6,25 @@ import UIKit
 /// `ApplianceHelperView` stays a dumb renderer and the flow itself stays
 /// unit-testable against a fake `GeminiTransport`.
 ///
-/// Pipeline (design §2 + addendum §12.2):
+/// Pipeline (design §2 + addendum §12.2, duplicate detection extended
+/// 2026-09-06 — local-cache-manuals):
 ///   1. Uniform-scale the photo (never crop — §5.3) and hash the JPEG.
-///   2. Photo-hash cache lookup → instant hit, zero network.
+///   2. Question-aware cache lookup, FIRST (no LLM call on a hit):
+///      a. exact photo-hash key — same photo bytes AND same question;
+///      b. appliance identity (brand+model) + question key — checked
+///         once the identify call names the appliance (identity is only
+///         knowable after Gemini sees the photo), replacing the old
+///         bare brand+model check with one that never answers a
+///         different question from cache.
 ///   3. `identifyAppliance` (photo + Gemini's own knowledge).
-///   4. Confidence < 0.4 → check the brand+model cache for a better
-///      existing answer for the SAME appliance (this is the design §2's
-///      "checked AFTER the call too": brand+model only becomes knowable
-///      once the call returns) — else ONE search-grounded retry
-///      (addendum §12.2's verified manual-substitute).
-///   5. Cache the winner under both keys; present + speak the summary.
+///   4. Confidence < 0.4 → identity+question cache lookup for the SAME
+///      appliance+question answered better before — else ONE
+///      search-grounded retry (addendum §12.2's verified
+///      manual-substitute).
+///   5. Cache the winner under the photo-hash+question key, together
+///      with a downscaled photo copy — that entry is the saved "manual"
+///      the manuals library lists and re-renders with zero network.
+///   6. Present + speak the summary.
 @MainActor
 final class ApplianceHelperSession: ObservableObject {
 
@@ -41,12 +50,21 @@ final class ApplianceHelperSession: ObservableObject {
 
     @Published private(set) var state: State = .capturing
 
+    /// True while `.guidance` shows a SAVED MANUAL opened from the
+    /// library (camera-less, read-only) rather than a fresh answer — the
+    /// view hides the retake/closer-photo affordances that only make
+    /// sense mid-capture.
+    @Published private(set) var isViewingManual = false
+
     /// The elder's question from the voice turn (nil = general how-to-use).
     let question: String?
     let locale: Locale
 
+    /// Internal so the manuals library (same feature surface) can read
+    /// the entry list for its rows.
+    let cache: ApplianceCache
+
     private let geminiClient: GeminiClient
-    private let cache: ApplianceCache
     private let observabilityBus: ObservabilityBus
     private let speaker: Speaker?
 
@@ -75,6 +93,7 @@ final class ApplianceHelperSession: ObservableObject {
     func handleCapturedPhoto(_ image: UIImage) {
         guard !inFlight else { return }
         inFlight = true
+        isViewingManual = false
         state = .working
         Task { [weak self] in
             guard let self else { return }
@@ -86,7 +105,27 @@ final class ApplianceHelperSession: ObservableObject {
     /// "Try again" from an error or the closer-photo hint.
     func retake() {
         guard !inFlight else { return }
+        isViewingManual = false
         state = .capturing
+    }
+
+    // MARK: - Manuals library (cache-only re-render)
+
+    /// Opens a SAVED manual as guidance rendered entirely from the cache —
+    /// no camera, no Gemini. Same `present` path as a fresh answer, so the
+    /// existing per-step card UI (zoomable close-ups included) renders the
+    /// stored guidance + its stored photo.
+    ///
+    /// Returns false when the manual is no longer in the cache (deleted
+    /// elsewhere) or its photo is unreadable — the caller then stays in
+    /// the library rather than showing a fabricated result.
+    func presentManual(entryID: UUID) -> Bool {
+        guard let hit = cache.lookup(entryID: entryID),
+              let jpeg = cache.imageJPEG(entryID: entryID),
+              let image = UIImage(data: jpeg) else { return false }
+        isViewingManual = true
+        present(hit.entry.guidance, image: image)
+        return true
     }
 
     // MARK: - Pipeline
@@ -98,9 +137,11 @@ final class ApplianceHelperSession: ObservableObject {
             return
         }
 
-        // 2. Photo-hash cache hit — zero network.
-        if let hit = cache.lookup(photoHash: prepared.photoHash) {
-            emit("gemini_vision_cache_hit", outcome: "success",
+        // 2a. Question-aware photo-hash duplicate — zero network. The
+        // question dimension is load-bearing: the SAME photo asked a
+        // different question needs a fresh answer, not the old one.
+        if let hit = cache.lookup(photoHash: prepared.photoHash, question: question) {
+            emit("appliance_cache_hit", outcome: "success",
                  metadata: ["via": "photo_hash", "stale": hit.stale ? "true" : "false"])
             present(hit.entry.guidance, image: prepared.image)
             return
@@ -119,17 +160,24 @@ final class ApplianceHelperSession: ObservableObject {
             return
         }
 
-        // 4a. Low confidence → brand+model cache may already hold a better
-        // answer for this same appliance (design §2's post-call check).
+        // 4a. Identity + question duplicate detection (design §2's
+        // post-call cache check, question-aware since 2026-09-06): a weak
+        // fresh identification of an appliance whose brand+model already
+        // answered THIS question confidently — a re-photograph, or a
+        // second unit of the same model — skips the grounded retry and
+        // serves the cached guide. Only when the fresh answer is weak: a
+        // confident fresh answer is kept, because its boxes belong to the
+        // photo in front of the elder. Never matches across questions.
         if fresh.confidence < ApplianceGuidancePolicy.identificationConfidenceThreshold,
            let key = fresh.identity.brandModelKey,
-           let cached = cache.lookup(brandModelKey: key),
+           let cached = cache.lookup(brandModelKey: key, question: question),
            cached.entry.guidance.confidence >= ApplianceGuidancePolicy.identificationConfidenceThreshold {
-            emit("gemini_vision_cache_hit", outcome: "success",
-                 metadata: ["via": "brand_model", "stale": cached.stale ? "true" : "false"])
+            emit("appliance_cache_hit", outcome: "success",
+                 metadata: ["via": "identity_question", "stale": cached.stale ? "true" : "false"])
             // Keep the fresh photo-hash answer too — a retake of THIS
             // exact frame should hit its own question's answer.
-            cache.store(fresh, photoHash: prepared.photoHash)
+            cache.store(fresh, photoHash: prepared.photoHash, question: question,
+                        imageJPEG: Self.thumbnail(of: prepared.image))
             present(cached.entry.guidance, image: prepared.image)
             return
         }
@@ -147,18 +195,29 @@ final class ApplianceHelperSession: ObservableObject {
             winner = grounded
         }
 
-        // 5. Cache under both keys and present (even a still-low-confidence
-        // winner — §4.1: hedge, never refuse).
-        cache.store(winner, photoHash: prepared.photoHash)
+        // 5. Cache under the photo-hash+question key with the downscaled
+        // photo (the saved manual) and present (even a still-low-
+        // confidence winner — §4.1: hedge, never refuse).
+        cache.store(winner, photoHash: prepared.photoHash, question: question,
+                    imageJPEG: Self.thumbnail(of: prepared.image))
         present(winner, image: prepared.image)
+    }
+
+    /// The downscaled photo copy kept for cache-only re-render. Prepared
+    /// frames are at most 1024px; the copy is ~256px — see
+    /// `ApplianceImagePreparer.thumbnailLongEdge`.
+    private static func thumbnail(of preparedImage: UIImage) -> Data? {
+        ApplianceImagePreparer.thumbnailJPEG(of: preparedImage)
     }
 
     private func present(_ guidance: ApplianceGuidance, image: UIImage) {
         let presentation = ApplianceGuidancePolicy.presentation(for: guidance)
         state = .guidance(presentation, image: image)
-        // Spoken immediately; the full step list stays on screen for as
-        // long as the elder wants to re-read it (design §2 — never rely
-        // on hearing alone). Hedged answers SAY the hedge first (§4.1).
+        // Spoken immediately (also when a saved manual opens — the elder
+        // asked to see it, hearing the summary first matches how every
+        // other guidance arrives); the full step list stays on screen for
+        // as long as the elder wants to re-read it (design §2 — never
+        // rely on hearing alone). Hedged answers SAY the hedge first (§4.1).
         var spoken = guidance.spokenSummary
         if presentation.hedged {
             spoken = L10n.str("appliance.hedgePrefix", locale: locale) + " " + spoken
