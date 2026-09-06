@@ -288,8 +288,40 @@ struct OutcomeCardView: View {
 /// Replaces the old always-visible conversation card: opened only by
 /// tapping the collapsed outcome chip, so it never competes with the Talk
 /// hero for permanent screen space.
+///
+/// Pagination (local-cache-chat task, 2026-09-06): the sheet opens on the
+/// newest `AppCoordinator.conversationHistory` window (up to 20 rows,
+/// newest at the top) and offers a "Show more" button that loads the NEXT
+/// 20 OLDER exchanges from the persisted history and appends them below —
+/// repeating until the 200-entry store is exhausted, then the button
+/// disappears. The visible list is the coordinator's live window plus the
+/// older pages fetched so far (`@State`): a new exchange landing while
+/// the sheet is open appears on top without disturbing pages below. Rows
+/// read top-to-bottom as newest → oldest, exactly as the pre-pagination
+/// sheet rendered.
 struct ConversationHistorySheet: View {
-    let exchanges: [AppCoordinator.Exchange]
+    @ObservedObject var coordinator: AppCoordinator
+
+    /// Older-than-the-window pages already fetched via "Show more",
+    /// display order (each page newest-first). Drawn below the live
+    /// `coordinator.conversationHistory` window.
+    @State private var olderRows: [AppCoordinator.Exchange] = []
+
+    /// The oldest visible row — the boundary the next "Show more" page
+    /// must be strictly older than. Falls back to the window's oldest row
+    /// until an older page has been fetched.
+    private var boundaryID: UUID? {
+        olderRows.last?.id ?? coordinator.conversationHistory.last?.id
+    }
+
+    private var visibleRows: [AppCoordinator.Exchange] {
+        coordinator.conversationHistory.reversed() + olderRows
+    }
+
+    private var canShowMore: Bool {
+        guard let boundaryID else { return false }
+        return coordinator.hasOlderHistory(than: boundaryID)
+    }
 
     var body: some View {
         ScrollView {
@@ -302,15 +334,18 @@ struct ConversationHistorySheet: View {
                 Text("home.conversation.title")
                     .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
                     .foregroundColor(DesignTokens.textPrimary)
-                if exchanges.isEmpty {
+                if visibleRows.isEmpty {
                     Text("home.conversation.empty")
                         .font(.system(size: DesignTokens.minBodyPointSize))
                         .foregroundColor(DesignTokens.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 32)
                 } else {
-                    ForEach(exchanges.reversed()) { exchange in
+                    ForEach(visibleRows) { exchange in
                         row(exchange)
+                    }
+                    if canShowMore {
+                        showMoreButton
                     }
                 }
             }
@@ -319,6 +354,36 @@ struct ConversationHistorySheet: View {
         .background(DesignTokens.background.ignoresSafeArea())
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
+    }
+
+    /// Fetches the next 20 older exchanges (oldest → newest from the
+    /// coordinator) and flips them below the current rows, so the newest
+    /// of the page sits directly under the oldest row already shown.
+    /// Exhaustion is handled by `canShowMore` re-evaluating against the
+    /// new boundary — an empty page is never appended and the button
+    /// disappears the moment nothing older remains.
+    private func loadOlderPage() {
+        guard let boundaryID else { return }
+        let page = coordinator.olderHistory(than: boundaryID)
+        guard !page.isEmpty else { return }
+        olderRows += page.reversed()
+    }
+
+    private var showMoreButton: some View {
+        Button(action: loadOlderPage) {
+            Text("history.showMore")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.accent)
+                .frame(maxWidth: .infinity)
+                .frame(height: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.card)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule().stroke(DesignTokens.accent.opacity(0.35), lineWidth: 1.5)
+                )
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 4)
     }
 
     private func row(_ exchange: AppCoordinator.Exchange) -> some View {

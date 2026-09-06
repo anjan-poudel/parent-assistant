@@ -123,14 +123,13 @@ final class AppCoordinator: ObservableObject {
 
     // MARK: - Conversation history & outcome (redesign spec §3.1, §5)
 
-    enum ExchangeRole { case user, assistant }
-
-    struct Exchange: Identifiable {
-        let id = UUID()
-        let role: ExchangeRole
-        let text: String
-        let timestamp: Date
-    }
+    /// The persisted exchange model lives in `ChatHistoryStore`
+    /// (local-cache-chat task, 2026-09-06) — it must be Codable to
+    /// round-trip under the store's single storage key. These aliases
+    /// keep every existing call site (`AppCoordinator.Exchange`,
+    /// `AppCoordinator.ExchangeRole`) source-compatible.
+    typealias Exchange = ChatHistoryStore.Exchange
+    typealias ExchangeRole = ChatHistoryStore.ExchangeRole
 
     /// A concrete, real result of a voice action — shown as the Home
     /// outcome card (redesign spec §3.1). `undo` is non-nil ONLY when a
@@ -146,18 +145,50 @@ final class AppCoordinator: ObservableObject {
         let undo: (() -> Void)?
     }
 
-    /// Ring buffer backing the on-demand history sheet (redesign spec
-    /// §3.1) — replaces the old always-visible conversation card.
+    /// Window over `chatHistoryStore` for the Home UI and the history
+    /// sheet's first page (redesign spec §3.1) — always the LAST
+    /// `ChatHistoryStore.pageSize` (20) exchanges, oldest → newest. The
+    /// pre-persistence ring buffer behaved exactly like this; persistence
+    /// (local-cache-chat task, 2026-09-06) only added the 200-entry
+    /// on-disk layer that the window now slices from. Home's existing
+    /// behavior (outcome-card fallback, `historyChip` empty-check) is
+    /// unchanged.
     @Published private(set) var conversationHistory: [Exchange] = []
-    private static let maxHistory = 20
+
+    /// Encrypted, bounded (200-entry) history behind the window above —
+    /// loaded in `start()`, written through on every append. Lazy like
+    /// the intent-layer stores below: `storage` is assigned at the top of
+    /// `init`, long before anything can record a turn.
+    private lazy var chatHistoryStore = ChatHistoryStore(storage: storage)
 
     @Published var lastOutcome: OutcomeSummary?
 
+    /// Records one turn in the persisted history and refreshes the
+    /// published window. Always called on the main queue (the two callers
+    /// dispatch to main first), so the store is only ever touched from
+    /// main.
     private func appendHistory(_ role: ExchangeRole, _ text: String) {
-        conversationHistory.append(Exchange(role: role, text: text, timestamp: Date()))
-        if conversationHistory.count > Self.maxHistory {
-            conversationHistory.removeFirst(conversationHistory.count - Self.maxHistory)
-        }
+        chatHistoryStore.append(Exchange(role: role, text: text, timestamp: Date()))
+        conversationHistory = chatHistoryStore.recent()
+    }
+
+    /// Paged read for the history sheet's "Show more" button
+    /// (local-cache-chat task, 2026-09-06): up to `limit` exchanges
+    /// strictly OLDER than the one with id `boundaryID` — the oldest row
+    /// the sheet currently shows — oldest → newest (the sheet flips the
+    /// page below its list). Reads the FULL persisted history (≤200),
+    /// not just the 20-row window. Empty when nothing older exists, or
+    /// when the boundary exchange left the store (trimmed past the cap)
+    /// — the sheet hides the button on both.
+    func olderHistory(than boundaryID: UUID, limit: Int = ChatHistoryStore.pageSize) -> [Exchange] {
+        chatHistoryStore.older(than: boundaryID, limit: limit)
+    }
+
+    /// Whether exchanges older than `boundaryID` still exist — keeps the
+    /// sheet's "Show more" button visible exactly until the history is
+    /// exhausted, with no wasted page fetch.
+    func hasOlderHistory(than boundaryID: UUID) -> Bool {
+        chatHistoryStore.countOlder(than: boundaryID) > 0
     }
 
     /// Sets the Home outcome card. Always dispatched to main (H1) since
@@ -624,6 +655,15 @@ final class AppCoordinator: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
+
+        // Restore the persisted conversation history (local-cache-chat
+        // task, 2026-09-06). Nothing records a turn before this point —
+        // the router that calls recordTranscript/noteAssistantSpoke is
+        // only built below — so the window stays empty until the store
+        // has loaded. Corrupt or missing data loads as an empty history,
+        // never a crash.
+        chatHistoryStore.load()
+        conversationHistory = chatHistoryStore.recent()
 
         // Register background tasks (iOS)
         registerBackgroundTasks()

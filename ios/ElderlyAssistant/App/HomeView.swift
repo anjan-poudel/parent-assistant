@@ -69,7 +69,11 @@ struct HomeView: View {
                     .environment(\.locale, coordinator.appLanguage.locale)
             }
             .sheet(isPresented: $showHistory) {
-                ConversationHistorySheet(exchanges: coordinator.conversationHistory)
+                // The coordinator is passed (not looked up in the
+                // environment) so the sheet can page older history in
+                // and observe the live window (local-cache-chat task,
+                // 2026-09-06).
+                ConversationHistorySheet(coordinator: coordinator)
             }
         }
     }

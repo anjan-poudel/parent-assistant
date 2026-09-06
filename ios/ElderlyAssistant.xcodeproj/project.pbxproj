@@ -35,6 +35,7 @@
 		201D8D3A988E3A219871778B /* DevanagariNumerals.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CDCFC2BBD9A005B886D05DE /* DevanagariNumerals.swift */; };
 		203223B8756FC96334BC2960 /* EscalationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AF7478D117F7C991FC99A68 /* EscalationEngine.swift */; };
 		22F4201277692675311AC0C5 /* CallRecencyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94A0C8A422471F7D66CAC5CC /* CallRecencyStore.swift */; };
+		24415FD8BCD7DE2735015609 /* ChatHistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 211532801B960A1DEE46F53E /* ChatHistoryStore.swift */; };
 		299549B47B6CBC1FEED6E1EF /* ConfirmationChallenge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B4100D9B7589B71AD8962A0 /* ConfirmationChallenge.swift */; };
 		2AC2B667F13294A64020FAA7 /* HomeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 015F0565B242BD849F659D78 /* HomeWidget.swift */; };
 		2FA47D5B9C9DA6275043A088 /* ApplianceLabelLocalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0111F751B4131E4D8A9FB49 /* ApplianceLabelLocalizerTests.swift */; };
@@ -116,6 +117,7 @@
 		9C101D2FEE03E7E6870EACCD /* ApplianceLabelLocalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C016FA47072E7A79559DC4D8 /* ApplianceLabelLocalizer.swift */; };
 		9E5CF36889CDA8D902CDDF8D /* ApplianceHelperPluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3594E79FEA1BABFE0B7C332A /* ApplianceHelperPluginTests.swift */; };
 		9FFA634C78CC8AF5A782F4AE /* RedesignComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5E9F4FCD0C5DED28633EFCA /* RedesignComponents.swift */; };
+		A11CFADC2FFCD43BE468BE02 /* ChatHistoryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A5C80745F6171F18544F5C0 /* ChatHistoryStoreTests.swift */; };
 		A210B049A6DCC42049F7BD09 /* ElderlyAssistantUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B871A07DB2851ECD2A47836D /* ElderlyAssistantUITests.swift */; };
 		A27B946B5069859CBE902720 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 51DDA7082A80F1D235E7A006 /* DesignTokens.swift */; };
 		A83A346A8F1366347514E5AF /* MedicationScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0776B7C899783B35B84D499A /* MedicationScheduler.swift */; };
@@ -229,6 +231,7 @@
 		1BAE18E00C74B295000808E2 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		1EA39CCC1D20F069F694CF9D /* whisper-medium-ne-q5_1.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; path = "whisper-medium-ne-q5_1.bin"; sourceTree = "<group>"; };
 		204AC62FCB7AEC1810B3F158 /* IntentLogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentLogStore.swift; sourceTree = "<group>"; };
+		211532801B960A1DEE46F53E /* ChatHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistoryStore.swift; sourceTree = "<group>"; };
 		26F476E23A6729932ACA0823 /* IntentCommandCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentCommandCacheTests.swift; sourceTree = "<group>"; };
 		2A7DB532BF6505FE842CF0B1 /* RoutinePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinePlugin.swift; sourceTree = "<group>"; };
 		2A801C3C923FF4C4ECE4BE7C /* WhisperKitSpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperKitSpeechRecognizer.swift; sourceTree = "<group>"; };
@@ -314,6 +317,7 @@
 		91A586D1F8AEDB50FF83E530 /* IntentTestHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentTestHelpers.swift; sourceTree = "<group>"; };
 		91DDA75BE5CF8691D09075D6 /* IdHashing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdHashing.swift; sourceTree = "<group>"; };
 		94A0C8A422471F7D66CAC5CC /* CallRecencyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallRecencyStore.swift; sourceTree = "<group>"; };
+		9A5C80745F6171F18544F5C0 /* ChatHistoryStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistoryStoreTests.swift; sourceTree = "<group>"; };
 		9C2189211917E1D9BEE932FB /* LeafViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeafViews.swift; sourceTree = "<group>"; };
 		A1CEB57F5B87DFD2C57AF135 /* GeminiClientVisionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiClientVisionTests.swift; sourceTree = "<group>"; };
 		A3EB972E8CC8D69D5ABE0BF7 /* OnboardingState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingState.swift; sourceTree = "<group>"; };
@@ -628,6 +632,7 @@
 			children = (
 				030DDED1BA852B1A12ABABBE /* AppCoordinator.swift */,
 				5CD2AC05E4A8FC9B884539C1 /* AppLanguage.swift */,
+				211532801B960A1DEE46F53E /* ChatHistoryStore.swift */,
 				C9B3203338B37AF2615B9D88 /* ContentView.swift */,
 				51DDA7082A80F1D235E7A006 /* DesignTokens.swift */,
 				050315DE680CE94C0C4594A5 /* ElderlyAssistantApp.swift */,
@@ -804,6 +809,7 @@
 		E0942917D161FFBAE466E71F /* App */ = {
 			isa = PBXGroup;
 			children = (
+				9A5C80745F6171F18544F5C0 /* ChatHistoryStoreTests.swift */,
 				FD91B4512067275A5059F95A /* DesignTokensTests.swift */,
 				5B80BB3C068100E30CFD3B9C /* OnboardingStateTests.swift */,
 				3CD2468FE69CCF128862DE28 /* VoiceSessionBindingTests.swift */,
@@ -1057,6 +1063,7 @@
 				07CD39D0B917CFF69322969C /* CallMethod.swift in Sources */,
 				07B323A60C170B4A023546EE /* CallOverrideParser.swift in Sources */,
 				22F4201277692675311AC0C5 /* CallRecencyStore.swift in Sources */,
+				24415FD8BCD7DE2735015609 /* ChatHistoryStore.swift in Sources */,
 				549799318F9082CDE85AF5F7 /* CommandRouter.swift in Sources */,
 				299549B47B6CBC1FEED6E1EF /* ConfirmationChallenge.swift in Sources */,
 				CB62BACBB90B862ECB454BF1 /* ConfirmationTier.swift in Sources */,
@@ -1159,6 +1166,7 @@
 				AED0E12C9A13B2577432E076 /* CalendarSyncServiceTests.swift in Sources */,
 				E89B1B0AC5382A89AF519187 /* CallLinksTests.swift in Sources */,
 				9184CA7464ED5BE45A88982F /* CallOverrideParserTests.swift in Sources */,
+				A11CFADC2FFCD43BE468BE02 /* ChatHistoryStoreTests.swift in Sources */,
 				E902BCDC5BACE47F0529EC9A /* CommandRouterSafetyNetTests.swift in Sources */,
 				5FF89DF6EC03BA9412F1D1AA /* CommandRouterTests.swift in Sources */,
 				B6B573A73467D62075D67B2C /* ConfirmationChallengeTests.swift in Sources */,

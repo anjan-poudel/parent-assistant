@@ -6283,6 +6283,23 @@
           }
         }
       }
+    },
+    "history.showMore": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show more"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "थप देखाउनुहोस्"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
