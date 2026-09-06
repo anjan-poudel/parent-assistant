@@ -47,7 +47,7 @@ training:
   epochs: 3
   bf16: true
   target_modules: all-linear
-  max_seq_len: 1024
+  max_seq_len: 1536  # template alone is 1201 tok (max row 1410); 1024 truncated every label
 
 export:
   # llama.cpp checkout used by src/export_gguf.py (convert_hf_to_gguf.py +
