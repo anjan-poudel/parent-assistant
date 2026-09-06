@@ -53,22 +53,32 @@ enum IntentPrompt {
             : context.pendingMedications.joined(separator: ", ")
         // NOTE: keep this text within the on-device size budget — see the
         // enum doc and IntentPromptTests' character-ceiling regression test.
-        // Measured with the real llama3.2:1b tokenizer (2026-09-06): the
-        // formatted prompt (chat system + this turn + chat headers) is
-        // ~919 tokens at the canonical fixture — ~105 tokens of output
-        // headroom inside the 1,024-token context. The one-shot example
-        // below is load-bearing: without a completed JSON example and a
-        // closing imperative, the 1B base model answers the weather
-        // question by ECHOING the transcript instead of emitting JSON
-        // (verified empirically on llama3.2:1b, 2026-09-06).
+        // Measured with the real llama3.2:1b tokenizer (2026-09-06, real
+        // llama.cpp tokenization via raw /api/generate): this turn is
+        // 2,936 Swift chars ≈ 785 tokens at the canonical fixture; the
+        // formatted prompt (51-token chat system + headers) is ~849-865
+        // tokens (fixture-dependent), leaving ~160-175 tokens of context
+        // for the completion — the worst observed base-model output at
+        // device settings was 176 tokens, so truncation risk is minimal
+        // (the pre-trim prompt at ~919+ tokens left ~105 or less).
+        // Do NOT trim the rules, schema, or reply-style blocks below to
+        // save tokens: a 53-token deeper trim was measured to collapse
+        // emergency recognition on the real model (0/7 vs 5/7 draws) and a
+        // further 29-token trim broke JSON output entirely (5/7 non-JSON
+        // spirals) — this text is at the empirically verified tightest
+        // passing size. The one-shot example below is load-bearing: without
+        // a completed JSON example and a closing imperative, the 1B base
+        // model answers the weather question by ECHOING the transcript
+        // instead of emitting JSON (verified empirically on llama3.2:1b,
+        // 2026-09-06).
         return """
-        You are Sahayak, a voice assistant for an elderly speaker. The user's language hint is: \(context.userLanguageHint). Their pending medications are: \(meds).
+        You are Sahayak, a voice assistant for an elderly speaker — NOT a general chatbot. User's language hint is: \(context.userLanguageHint). Pending medications: \(meds).
 
         EXACTLY TWO MODES:
-          MODE 1 — INTENT DECIPHERING: wants something DONE — extract the intent + entities.
-          MODE 2 — OPEN-FORM ANSWERING: a question, or feelings/small talk — nothing to execute; the answer IS the response.
+          MODE 1 — INTENT DECIPHERING: wants something DONE — extract intent + entities.
+          MODE 2 — OPEN-FORM ANSWERING: a question or feelings — nothing executes; the answer IS the response.
 
-        You are NOT a general chatbot. The "response" field is SPOKEN ALOUD, so it must always be non-empty and in the user's own language, plain and simple, short sentences, warm, respectful.
+        "response" is SPOKEN ALOUD: always non-empty, in their language, plain and simple, short sentences, warm, respectful.
 
         Reply with ONLY one JSON object (no fences, no other text):
         {"intent": "ack_med"|"call"|"send_message"|"set_reminder"|"emergency"|"health_query"|"music"|"create_calendar_event"|"suggest_video"|"guide"|"query"|"none",
