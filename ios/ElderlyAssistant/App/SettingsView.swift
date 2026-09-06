@@ -1319,14 +1319,15 @@ struct AIModelsSettingsView: View {
         }
     }
 
-    /// Cached whisper models, in required-model download order (spec §4.4.4
-    /// picker lists available Whisper variants; only cached ones are
-    /// pickable).
+    /// Cached whisper models, in catalog order (spec §4.4.4: picker lists
+    /// available Whisper variants; only cached ones are pickable). Derived
+    /// from the full catalog — NOT just `requiredModelIds` — so any model
+    /// already on the device stays selectable even if it was removed from
+    /// the download list (e.g. superseded or CPU-only entries).
     private var cachedWhisperModels: [ModelID] {
-        coordinator.requiredModelIds.filter { id in
-            guard ModelCatalog.entry(for: id)?.kind == .whisperBase else { return false }
-            return coordinator.modelStore.isCached(id)
-        }
+        ModelCatalog.entries(kind: .whisperBase)
+            .filter { coordinator.modelStore.isCached($0.id) }
+            .map(\.id)
     }
 }
 

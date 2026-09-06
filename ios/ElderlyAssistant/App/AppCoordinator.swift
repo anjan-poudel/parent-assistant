@@ -418,9 +418,11 @@ final class AppCoordinator: ObservableObject {
         ModelCatalog.llama3_2_1B,
         ModelCatalog.piperNepali,
         ModelCatalog.whisperFinetunedNepaliQ8,
-        ModelCatalog.whisperLargeV3Nepali,
-        ModelCatalog.whisperLargeV3NepaliV2,
         ModelCatalog.whisperKitNepaliMedium
+        // Large-v3 ggml entries (whisperLargeV3Nepali,
+        // whisperLargeV3NepaliV2) intentionally NOT listed: CPU-only,
+        // too slow to be usable. The ANE (WhisperKit) large models
+        // replace them once their q6 artifacts are published.
     ]
 
     init() {
