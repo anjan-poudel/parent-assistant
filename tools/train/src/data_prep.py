@@ -95,7 +95,7 @@ def build_slr54(cfg: dict, data_dir: Path, known: set[str], out: Path) -> int:
         zip_path = data_dir / "downloads" / zip_name
         download(f"{base}/{zip_name}", zip_path)
         extract_zip(zip_path, audio_dir, "*.flac")
-        # Each zip carries the full corpus TSV (same content in all five).
+        # Each zip carries the full corpus TSV (same content in all 15).
         extract_zip(zip_path, data_dir / "downloads", "*/utt_spk_text.tsv")
         log_progress(f"slr54 zip {i} extracted")
 
