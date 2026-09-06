@@ -709,6 +709,9 @@ final class AppCoordinator: ObservableObject {
         // wedge the picker — same rule as `sttModelPreference` below.
         // Resolved into a LOCAL: `resolvedBrainModelID` reads `self`,
         // which init may not do before every stored property is set.
+        // Sampling is NOT configurable here — every on-device brain runs
+        // deterministic temp-0 + fixed-seed sampling through
+        // `OnDeviceSampling` ([NO-GIBBERISH] 2026-09-07).
         let restoredBrain: ModelID?
         if let raw = UserDefaults.standard.string(forKey: Self.brainPreferenceKey) {
             let stored = ModelID(rawValue: raw)
@@ -726,7 +729,6 @@ final class AppCoordinator: ObservableObject {
             preferredBaseId: restoredBrain ?? Self.defaultBrainModelID,
             config: LlamaCommandInterpreter.Config(confidenceThreshold: 0.4,
                                                    maxTokens: 128,
-                                                   temperature: 0.2,
                                                    timeoutSeconds: 10),
             pluginRegistry: pluginRegistry
         )

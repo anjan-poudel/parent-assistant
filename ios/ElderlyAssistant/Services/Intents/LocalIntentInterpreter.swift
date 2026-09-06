@@ -127,7 +127,19 @@ final class LocalIntentInterpreter: CommandInterpreter {
                     stopSequence: nil,
                     systemPrompt: ""
                 )
+                // [NO-GIBBERISH] (2026-09-07): deterministic sampling —
+                // temp 0 + the FIXED seed in `OnDeviceSampling` (shared
+                // with `LlamaCommandInterpreter`). Before this date the
+                // handle was created with LLM.swift's defaults (temp 0.8,
+                // RANDOM seed), so the same prompt could sample
+                // differently on every run.
                 guard let created = LLM(from: modelURL, template: rawTemplate,
+                                        seed: OnDeviceSampling.fixedSeed,
+                                        topK: OnDeviceSampling.topK,
+                                        topP: OnDeviceSampling.topP,
+                                        temp: OnDeviceSampling.temperature,
+                                        repeatPenalty: OnDeviceSampling.repeatPenalty,
+                                        repetitionLookback: OnDeviceSampling.repetitionLookback,
                                         maxTokenCount: 1024) else {
                     emit("model_load_failed", outcome: "failure")
                     completion(nil)

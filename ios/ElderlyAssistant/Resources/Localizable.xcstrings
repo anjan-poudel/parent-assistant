@@ -4244,6 +4244,176 @@
         }
       }
     },
+    "router.modelReplyUnclear": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "I'm sorry, I couldn't make sense of that. Please say it again."
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "माफ गर्नुहोस्, मैले त्यो बुझ्न सकिनँ। कृपया फेरि भन्नुहोस्।"
+        }
+      }
+    }
+    },
+    "topic.weather.unavailable": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "I'm sorry, I can't check the live weather yet. It will be available soon."
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "माफ गर्नुहोस्, म अहिले मौसम हेर्न सक्दिनँ। मौसमको जानकारी चाँडै उपलब्ध हुनेछ।"
+        }
+      }
+    }
+    },
+    "topic.greeting": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Hello! How can I help you today?"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "नमस्ते! आज म तपाईंलाई के मद्दत गर्न सक्छु?"
+        }
+      }
+    }
+    },
+    "topic.date.now": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Today is %1$@."
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "आज %1$@, %2$@ हो।"
+        }
+      }
+    }
+    },
+    "topic.time.nowOnHour": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "It's %1$@ %2$@."
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "अहिले %2$@ %1$@ बजेको छ।"
+        }
+      }
+    }
+    },
+    "topic.time.nowWithMinutes": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "It's %1$@:%2$@ %3$@."
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "अहिले %3$@ %1$@ बजेर %2$@ मिनेट भयो।"
+        }
+      }
+    }
+    },
+    "topic.time.period.morning": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "in the morning"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "बिहान"
+        }
+      }
+    }
+    },
+    "topic.time.period.afternoon": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "in the afternoon"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "दिउँसो"
+        }
+      }
+    }
+    },
+    "topic.time.period.evening": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "in the evening"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "बेलुका"
+        }
+      }
+    }
+    },
+    "topic.time.period.night": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "at night"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "राति"
+        }
+      }
+    }
+    },
     "router.reprompt": {
       "extractionState": "manual",
       "localizations": {

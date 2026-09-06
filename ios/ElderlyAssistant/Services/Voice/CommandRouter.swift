@@ -292,6 +292,34 @@ final class CommandRouter {
             return safetyResult
         }
 
+        // [NO-GIBBERISH] Deterministic TOPIC PRE-ANSWERS (2026-09-07): the
+        // most common Q&A topics — weather, time, date, greetings — are
+        // answered from a pre-written, honest table (`TopicPreAnswer`)
+        // BEFORE any model is consulted, so "भोलिको मौसम कस्तो छ?" ALWAYS
+        // gets a sensible non-gibberish reply and never depends on what a
+        // 1B model happened to sample that day. Runs regardless of
+        // interpreter availability (works while the brain downloads too).
+        // It sits AFTER the safety net + confirmation flow, so emergency /
+        // med-ack / yes-no utterances win as they always have, and it
+        // self-excludes call-ish utterances (below) so the sensitive-call
+        // block can never be shadowed by a topic answer.
+        if let topic = TopicPreAnswer.match(transcript: raw),
+           !Self.sensitiveCallPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
+            let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+            let text = TopicPreAnswer.reply(for: topic, locale: locale, now: clock())
+            observabilityBus.emit(ObservabilityEvent(
+                component: "command_router",
+                eventType: "topic_pre_answer",
+                durationMs: nil,
+                outcome: "success",
+                errorCode: nil,
+                metadata: ["topic": topic.rawValue]
+            ))
+            coordinator?.noteGenericReply(text)
+            speak(text: text, locale: locale)
+            return .unrecognised(transcript: raw)
+        }
+
         // Fast path — the LLM interpreter. Falls through to keyword when
         // the interpreter is unavailable or not confident.
         if interpreter.isAvailable {
@@ -372,6 +400,18 @@ final class CommandRouter {
         "लड्नुभयो", "सास फेर्न सकिन", "सास फेर्न गाह्रो", "छाती दुख्यो"
     ]
 
+    /// Call-ish vocabulary shared by the post-LLM block
+    /// (`routeKeywordRemainder`) and the [NO-GIBBERISH] pre-answer guard:
+    /// an utterance that both names a topic word AND reads call-ish
+    /// ("मौसम बताउने मान्छेलाई फोन गर") must stay on the interpreter/
+    /// block path — a deterministic topic answer would shadow the call
+    /// intent. Hoisted from `routeKeywordRemainder` (2026-09-07) so the
+    /// pre-answer stage checks the SAME list that blocks.
+    private static let sensitiveCallPhrases = [
+        "call", "phone", "facetime", "messenger", "whatsapp",
+        "फोन", "कल", "भिडियो कल", "म्यासेन्जर", "व्हाट्सएप", "वाट्सएप"
+    ]
+
     /// The safety-critical slice of the keyword layer, runnable on its
     /// own AHEAD of the LLM (spec §4 ladder: keyword net first, always).
     /// Returns nil when nothing safety-shaped matched, so the caller can
@@ -439,11 +479,7 @@ final class CommandRouter {
             .lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let sensitiveCallPhrases = [
-            "call", "phone", "facetime", "messenger", "whatsapp",
-            "फोन", "कल", "भिडियो कल", "म्यासेन्जर", "व्हाट्सएप", "वाट्सएप"
-        ]
-        if sensitiveCallPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
+        if Self.sensitiveCallPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
             emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
             // Visible outcome, not just spoken — the live-caption pill is
             // gone by now, so without a card the user's transcript and the
@@ -480,10 +516,22 @@ final class CommandRouter {
     /// interpretation at a time (VoicePipeline serialises utterances).
     private var pendingTranscript: String?
 
+    /// [NO-GIBBERISH] (2026-09-07) Clock seam for the deterministic
+    /// time/date pre-answers (`TopicPreAnswer` reads the current time from
+    /// this) — injectable so router tests can pin the exact spoken
+    /// sentence without depending on the wall clock.
+    var clock: () -> Date = { Date() }
+
     private func dispatchInterpreted(_ command: InterpretedCommand) {
         switch command.action {
         case .ackMed:
-            handleMedicationAcknowledgement(replyOverride: command.reply)
+            // [NO-GIBBERISH] (2026-09-07) The model's ack text is flavor
+            // over a deterministic outcome — gate it: a rejected override
+            // (nil) falls back to the baseline confirmation the
+            // no-override path already speaks (router.confirmationYes),
+            // and emits `llama_response_rejected_sanity`. The raw text
+            // never reaches the speaker.
+            handleMedicationAcknowledgement(replyOverride: sanitisedModelReply(command.reply))
         case .emergency:
             emit(eventType: "command_emergency", outcome: "success")
             handleEmergency()
@@ -511,15 +559,50 @@ final class CommandRouter {
             speakWithVisibleOutcome(key: "router.featureNotYet")
         case .query:
             emit(eventType: "command_llm_query", outcome: "info")
-            coordinator?.noteGenericReply(command.reply)
-            speak(text: command.reply)
+            deliverModelReply(command.reply)
         case .none:
             emit(eventType: "command_llm_no_action", outcome: "info")
-            coordinator?.noteGenericReply(command.reply)
-            speak(text: command.reply)
+            deliverModelReply(command.reply)
         case .plugin:
             handlePluginCommand(command)
         }
+    }
+
+    /// [NO-GIBBERISH] (2026-09-07) Gated delivery for model-text Q&A
+    /// replies (.query/.none): the text is carded + spoken ONLY when it
+    /// passes `ReplySanityGate`; a rejection speaks and cards the honest
+    /// localized fallback instead (`router.modelReplyUnclear`). The raw
+    /// text never reaches the speaker or the visible card either way, and
+    /// every rejection is observable
+    /// (`llama_response_rejected_sanity`, reason in errorCode).
+    private func deliverModelReply(_ text: String) {
+        if let safe = sanitisedModelReply(text) {
+            coordinator?.noteGenericReply(safe)
+            speak(text: safe)
+        } else {
+            speakWithVisibleOutcome(key: "router.modelReplyUnclear")
+        }
+    }
+
+    /// [NO-GIBBERISH] (2026-09-07) Sanity-gates model-generated text
+    /// about to be spoken/shown. Returns the text when it is safe to
+    /// deliver; nil when it must NOT be delivered (the caller speaks an
+    /// honest fallback). Every rejection emits
+    /// `llama_response_rejected_sanity` with the reason as errorCode —
+    /// rejected model text is observable and never reaches a human ear.
+    private func sanitisedModelReply(_ text: String) -> String? {
+        if let reason = ReplySanityGate.rejectionReason(text) {
+            observabilityBus.emit(ObservabilityEvent(
+                component: "command_router",
+                eventType: "llama_response_rejected_sanity",
+                durationMs: nil,
+                outcome: "rejected",
+                errorCode: reason.rawValue,
+                metadata: [:]
+            ))
+            return nil
+        }
+        return text
     }
 
     /// `set_reminder`: parse the spoken time expression, create the
@@ -598,7 +681,15 @@ final class CommandRouter {
                                            requestedApp: command.requestedApp) {
         case .nativeComposePresented:
             emit(eventType: "command_message_composing", outcome: "success")
-            speak(text: command.reply)
+            // [NO-GIBBERISH] (2026-09-07) The model's ack is spoken only
+            // when it passes the sanity gate; a rejected ack is NOT
+            // replaced by a spoken fallback here because the compose
+            // sheet itself is the real, visible outcome — but the
+            // rejection is still observable
+            // (`llama_response_rejected_sanity`).
+            if sanitisedModelReply(command.reply) != nil {
+                speak(text: command.reply)
+            }
         case .whatsAppChatOpened:
             emit(eventType: "command_message_whatsapp_opened", outcome: "success")
         case .fellBackToNativeCompose:
@@ -697,13 +788,22 @@ final class CommandRouter {
     }
 
     private func speakGuideSteps(_ command: InterpretedCommand) {
+        // [NO-GIBBERISH] (2026-09-07) Guide text is model-generated and
+        // read aloud — gate it exactly like every other model speech:
+        // rejected text is replaced by the honest fallback, never spoken.
         if let steps = command.steps, !steps.isEmpty {
             let spoken = steps.joined(separator: ". ")
-            coordinator?.noteGenericReply(spoken)
-            speak(text: spoken)
+            if let safe = sanitisedModelReply(spoken) {
+                coordinator?.noteGenericReply(safe)
+                speak(text: safe)
+            } else {
+                speakWithVisibleOutcome(key: "router.modelReplyUnclear")
+            }
+        } else if let safe = sanitisedModelReply(command.reply) {
+            coordinator?.noteGenericReply(safe)
+            speak(text: safe)
         } else {
-            coordinator?.noteGenericReply(command.reply)
-            speak(text: command.reply)
+            speakWithVisibleOutcome(key: "router.modelReplyUnclear")
         }
     }
 

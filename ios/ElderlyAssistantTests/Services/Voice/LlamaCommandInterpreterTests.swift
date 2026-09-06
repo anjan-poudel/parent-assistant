@@ -197,6 +197,38 @@ final class LlamaCommandInterpreterTests: XCTestCase {
         }
     }
 
+    func testCommandJSONSchemaMirrorsGrammarAndContract() {
+        // [NO-GIBBERISH] (2026-09-07) `commandJSONSchema` is what actually
+        // reaches llama.cpp's json-schema→grammar converter on the runtime
+        // path — it must mirror the hand-written `commandJSON` grammar
+        // field-for-field, teach the same 12-intent contract, and never
+        // teach the legacy keys.
+        let s = LlamaGrammar.commandJSONSchema
+        for key in ["intent", "response", "confidence", "actionType",
+                    "actionUrl", "entryId", "contact", "time", "medication",
+                    "message", "callType", "requestedApp", "topic", "steps",
+                    "pluginAction", "pluginEntities"] {
+            XCTAssertTrue(s.contains("\"\(key)\""), "schema missing key: \(key)")
+        }
+        let intents = ["ack_med", "call", "send_message", "set_reminder",
+                       "emergency", "health_query", "music",
+                       "create_calendar_event", "suggest_video", "guide",
+                       "query", "none"]
+        for intent in intents {
+            XCTAssertTrue(s.contains("\"\(intent)\""), "schema missing intent: \(intent)")
+        }
+        XCTAssertFalse(s.contains("\"action\""), "legacy key must not be taught")
+        XCTAssertFalse(s.contains("\"reply\""), "legacy key must not be taught")
+        // Nullable entities and typed array/object values — the converter
+        // supports exactly this subset (same shapes `intentSchema` uses).
+        XCTAssertTrue(s.contains("\"steps\": {\"type\": [\"array\", \"null\"]"),
+                      "steps must be a nullable string array")
+        XCTAssertTrue(s.contains("\"pluginEntities\": {\"type\": [\"object\", \"null\"]"),
+                      "pluginEntities must be a nullable string map")
+        XCTAssertTrue(s.contains("\"additionalProperties\": {\"type\": \"string\"}"))
+        XCTAssertTrue(s.contains("\"required\""))
+    }
+
     func testParsePluginActionAndEntities() {
         let json = """
         {"action":"plugin","entryId":null,"contact":null,"time":null,"medication":null,"message":null,"callType":null,"requestedApp":null,"pluginAction":"nepali_calendar.query","pluginEntities":{"question":"आज के हो"},"confidence":0.9,"reply":"खोज्दैछु"}
@@ -238,7 +270,7 @@ final class LlamaCommandInterpreterTests: XCTestCase {
 
     private func makeSeamedInterpreter(json: String) -> LlamaCommandInterpreter {
         let interp = LlamaCommandInterpreter(modelStore: store, observabilityBus: bus)
-        interp.generateOverride = { _ in json }
+        interp.generateOverride = { _, _ in json }
         return interp
     }
 
@@ -259,7 +291,7 @@ final class LlamaCommandInterpreterTests: XCTestCase {
     func testGenerateOverrideMakesInterpreterAvailableWithoutCachedModel() {
         let interp = LlamaCommandInterpreter(modelStore: store, observabilityBus: bus)
         XCTAssertFalse(interp.isAvailable, "no model cached")
-        interp.generateOverride = { _ in "{}" }
+        interp.generateOverride = { _, _ in "{}" }
         XCTAssertTrue(interp.isAvailable, "seam must stand in for the llama.cpp runtime")
     }
 
@@ -305,8 +337,33 @@ final class LlamaCommandInterpreterTests: XCTestCase {
     func testGenerateOverrideThrowingYieldsNil() {
         struct SeamFailure: Error {}
         let interp = LlamaCommandInterpreter(modelStore: store, observabilityBus: bus)
-        interp.generateOverride = { _ in throw SeamFailure() }
+        interp.generateOverride = { _, _ in throw SeamFailure() }
         XCTAssertNil(interpret(interp))
+    }
+
+    // MARK: - [NO-GIBBERISH] grammar wiring (2026-09-07)
+
+    func testGenerateOverrideReceivesTheCommandJSONSchema() {
+        // The seam mirrors the runtime call `(prompt, jsonSchema)` — this
+        // pins that the canonical schema actually reaches the point where
+        // llama.cpp is invoked (the pre-2026-09-07 defect was a defined
+        // grammar that never reached the runtime call).
+        let interp = LlamaCommandInterpreter(modelStore: store, observabilityBus: bus)
+        var receivedSchema: String?
+        interp.generateOverride = { _, jsonSchema in
+            receivedSchema = jsonSchema
+            return """
+            {"intent":"query","response":"जवाफ","confidence":0.9,"actionType":null,"actionUrl":null}
+            """
+        }
+        let ctx = InterpreterContext(pendingMedications: [], userLanguageHint: "ne")
+        let expectation = expectation(description: "completion fires")
+        interp.interpret(transcript: "के छ खबर?", context: ctx) { _ in
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 3.0)
+        XCTAssertEqual(receivedSchema, LlamaGrammar.commandJSONSchema,
+                       "the schema the seam receives must be the canonical command schema")
     }
 
     func testInterpretPassesSanitisedTranscriptAndContextIntoPrompt() {
@@ -315,7 +372,7 @@ final class LlamaCommandInterpreterTests: XCTestCase {
         // real runtime and the e2e tests exercise the same prompt.
         let interp = LlamaCommandInterpreter(modelStore: store, observabilityBus: bus)
         var receivedPrompt: String?
-        interp.generateOverride = { prompt in
+        interp.generateOverride = { prompt, _ in
             receivedPrompt = prompt
             return """
             {"intent":"query","response":"जवाफ","confidence":0.9,"actionType":null,"actionUrl":null}
