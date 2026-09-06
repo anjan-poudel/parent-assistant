@@ -156,17 +156,26 @@ def main() -> None:
             chunk = pending[bi:bi + BATCH]
             wavs: list[Path] = []
             metas: list[tuple[dict, str]] = []
-            for (row, n) in chunk:
+            from concurrent.futures import ThreadPoolExecutor
+
+            def synth_one(row_n: tuple[dict, int]) -> tuple[Path, dict, str] | None:
+                row, n = row_n
                 nid = f"{row['id']}:noise{n}"
                 wav = Path(tmp) / f"u{bi}_{n}.wav"
                 try:
                     synthesize(row["utterance"], wav, cfg)
+                    return wav, row, nid
                 except Exception as e:  # noqa: BLE001
-                    failed += 1
                     print(f"[stt_noise] {nid} synth failed: {e} — continuing")
-                    continue
-                wavs.append(wav)
-                metas.append((row, nid))
+                    return None
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                for result in pool.map(synth_one, chunk):
+                    if result is None:
+                        failed += 1
+                        continue
+                    wav, row, nid = result
+                    wavs.append(wav)
+                    metas.append((row, nid))
             if not wavs:
                 continue
             try:
