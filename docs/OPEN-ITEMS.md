@@ -3,6 +3,15 @@
 Tracked work not yet landed on `master`. New items get added at the top of
 the table; completed items are struck through with the landing commit noted.
 
+
+> **Ready-to-merge (2026-09-06):** the Home widget system merge is complete
+> and verified on branch `merge/home-widgets` (commit `e1b9999`, 555 unit
+> tests green) — one fast-forward step ahead of `master`. It is deliberately
+> NOT on master yet because the main tree has another session's in-flight
+> contacts work in 4 files; run `git merge merge/home-widgets` once that
+> tree is clean. (A cross-session message was sent too, but may be pending
+> approval — this note is the reliable channel.)
+
 | # | Item | Status | Branch / Worktree | Notes |
 |---|------|--------|-------------------|-------|
 | 4 | Wake word ("Hey Sahayak") | not started | `task/wake-word` (`.claude/worktrees/wake-word`) | Brief at `TASK.md` in that worktree |
