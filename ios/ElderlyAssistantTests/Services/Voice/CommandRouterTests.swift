@@ -358,9 +358,14 @@ final class CommandRouterTests: XCTestCase {
 private final class FakeCommandInterpreter: CommandInterpreter {
     var isAvailable = true
     var nextCommand: InterpretedCommand?
+    /// [INTENT-TOOLS] (2026-09-07) How often `interpret` was actually
+    /// invoked — lets the calculator/weather-yield tests prove the
+    /// deterministic stages answer WITHOUT ever consulting the LLM.
+    private(set) var interpretCallCount = 0
 
     func interpret(transcript: String, context: InterpreterContext,
                    completion: @escaping (InterpretedCommand?) -> Void) {
+        interpretCallCount += 1
         completion(nextCommand)
     }
 }
@@ -377,6 +382,13 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
     /// Defaults to `.available` so existing router tests keep the generic
     /// re-prompt behavior; the availability-matrix tests script it.
     var brainReadiness = BrainReadiness.available
+
+    /// [INTENT-TOOLS] (2026-09-07) Live-web capability — protocol
+    /// requirement with an extension default of false; this stored var
+    /// satisfies it so the weather-yield tests can script BOTH sides:
+    /// false (default, on-device stack) keeps the deterministic
+    /// pre-answer; true (cloud stack) yields weather to the interpreter.
+    var canAnswerLiveQuestionsFromWeb = false
 
     var activeLocale: Locale { Locale(identifier: "ne-NP") }
 
@@ -561,5 +573,203 @@ final class CommandRouterContactSearchTests: XCTestCase {
 
         XCTAssertEqual(result, .emergencyTriggered)
         XCTAssertTrue(coordinator.contactSearchRequests.isEmpty)
+    }
+}
+
+// MARK: - Intent tools (intent-tools, 2026-09-07): calculator + weather yield
+
+/// Router wiring of the deterministic tool stages:
+///  - `intent_tool_calculator` answers provable arithmetic in the
+///    pre-route layer (after the topic table, before the interpreter) on
+///    BOTH stacks by default — the interpreter is never consulted, the
+///    reply is carded + spoken with the coordinator's locale, and
+///    division by zero is an honest visible+spoken error event.
+///  - `canAnswerLiveQuestionsFromWeb` (default false) yields the WEATHER
+///    topic to the interpreter so a grounded cloud answer can replace
+///    the no-data pre-answer; time/date/greeting stay deterministic.
+final class CommandRouterIntentToolsTests: XCTestCase {
+
+    private let ne = Locale(identifier: "ne-NP")
+
+    private func makeRouter(_ coordinator: MockVoiceCommandCoordinator,
+                            interpreter: FakeCommandInterpreter? = nil)
+        -> (CommandRouter, MockObservabilityBus) {
+        let bus = MockObservabilityBus()
+        let router = CommandRouter(coordinator: coordinator,
+                                   observabilityBus: bus,
+                                   speaker: MockSpeaker(),
+                                   interpreter: interpreter ?? FakeCommandInterpreter())
+        return (router, bus)
+    }
+
+    // MARK: - Calculator: computed answers
+
+    func testCalculatorAnswerIsSpokenAndCardedWithoutConsultingTheLLM() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        let interpreter = FakeCommandInterpreter()
+        let (router, bus) = makeRouter(coordinator, interpreter: interpreter)
+
+        let result = router.route(transcript: "५ जोड ३ कति हुन्छ?")
+        await Task.yield()
+
+        XCTAssertEqual(result, .unrecognised(transcript: "५ जोड ३ कति हुन्छ?"))
+        XCTAssertEqual(coordinator.genericReplies, ["५ जोड ३ बराबर ८ हुन्छ।"],
+                       "the deterministic reply must land on the outcome card")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "intent_tool_calculator" && $0.outcome == "success"
+        })
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "command_dispatched_to_llm" })
+        XCTAssertEqual(interpreter.interpretCallCount, 0,
+                       "provable arithmetic must never reach the LLM interpreter")
+    }
+
+    func testCalculatorReplySpokenInCoordinatorsLocale() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        let speaker = MockSpeaker()
+        let bus = MockObservabilityBus()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: speaker, interpreter: FakeCommandInterpreter())
+
+        _ = router.route(transcript: "१० र ४ घटाउनुहोस्")
+        await Task.yield()
+
+        XCTAssertEqual(speaker.utterances.map(\.text), ["१० घटाउ ४ बराबर ६ हुन्छ।"])
+        XCTAssertEqual(speaker.utterances.first?.locale, Locale(identifier: "ne-NP"))
+    }
+
+    // MARK: - Calculator: division by zero — honest error, never a number
+
+    func testDivisionByZeroIsVisibleSpokenErrorNotANumber() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        let speaker = MockSpeaker()
+        let interpreter = FakeCommandInterpreter()
+        let bus = MockObservabilityBus()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: speaker, interpreter: interpreter)
+
+        _ = router.route(transcript: "१० लाई ० ले भाग गर")
+        await Task.yield()
+
+        let expected = L10n.str("calculator.error.divByZero", locale: ne)
+        XCTAssertEqual(coordinator.genericReplies, [expected],
+                       "the error must be VISIBLE — a spoken-only error vanishes with the caption pill")
+        XCTAssertEqual(speaker.utterances.map(\.text), [expected])
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "intent_tool_calculator" && $0.outcome == "error"
+                && $0.errorCode == "division_by_zero"
+        })
+        XCTAssertEqual(interpreter.interpretCallCount, 0)
+    }
+
+    // MARK: - Calculator: non-arithmetic falls through untouched
+
+    func testNonArithmeticUtteranceStillReachesTheInterpreter() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .query, entryId: nil, contact: nil, time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil, pluginAction: nil, pluginEntities: nil,
+            confidence: 0.9, reply: "त्यो कुरा मलाई थाहा छैन।"
+        )
+        let (router, bus) = makeRouter(coordinator, interpreter: interpreter)
+
+        _ = router.route(transcript: "मलाई एउटा कथा सुनाउनुहोस्")
+
+        XCTAssertEqual(interpreter.interpretCallCount, 1)
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_dispatched_to_llm" })
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "intent_tool_calculator" })
+        XCTAssertEqual(coordinator.genericReplies, ["त्यो कुरा मलाई थाहा छैन।"])
+    }
+
+    func testCalculatorNeverShadowsEmergencyOrCallVocabulary() async {
+        // Safety net outranks the tool stage — distress stays emergency.
+        let emergencyCoordinator = MockVoiceCommandCoordinator()
+        let (emergencyRouter, _) = makeRouter(emergencyCoordinator)
+        XCTAssertEqual(emergencyRouter.route(transcript: "मद्दत गर्नुहोस् ५ जोड ३"),
+                       .emergencyTriggered)
+        // Call-shaped utterances are vetoed inside CalculatorTool
+        // (mirrors the sensitive-call phrases) — they route onward, they
+        // are never answered as arithmetic. With an interpreter present
+        // the LLM path fires first (its asynchronous return shape is
+        // `.unrecognised`); the post-LLM sensitive-call block then wins
+        // inside the completion.
+        let callCoordinator = MockVoiceCommandCoordinator()
+        let interpreter = FakeCommandInterpreter()
+        let bus = MockObservabilityBus()
+        let router = CommandRouter(coordinator: callCoordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+        let result = router.route(transcript: "छोरालाई फोन गर ५ जोड ३")
+        XCTAssertEqual(result, .unrecognised(transcript: "छोरालाई फोन गर ५ जोड ३"))
+        XCTAssertEqual(interpreter.interpretCallCount, 1)
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_dispatched_to_llm" })
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "command_sensitive_blocked_auth_unavailable"
+        }, "the post-LLM sensitive-call block must still fire")
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "intent_tool_calculator" },
+                       "call talk must never be answered as arithmetic")
+    }
+
+    // MARK: - Weather yield: live-web capability decides the path
+
+    func testWeatherPreAnswerStandsWhenLiveWebCapabilityIsOff() {
+        // Default stack (extension default false — on-device brain, cloud
+        // disabled, or cloud brain unavailable): the honest deterministic
+        // no-data answer must win; the interpreter is never consulted.
+        let coordinator = MockVoiceCommandCoordinator()   // canAnswerLiveQuestionsFromWeb == false
+        let interpreter = FakeCommandInterpreter()
+        let (router, bus) = makeRouter(coordinator, interpreter: interpreter)
+
+        _ = router.route(transcript: "भोलि काठमाडौंमा पानी पर्छ?")
+
+        let expected = TopicPreAnswer.reply(for: .weather, locale: ne)
+        XCTAssertEqual(coordinator.genericReplies, [expected])
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "topic_pre_answer"
+                && $0.metadata["topic"] == TopicPreAnswer.Topic.weather.rawValue
+        })
+        XCTAssertEqual(interpreter.interpretCallCount, 0)
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "command_dispatched_to_llm" })
+    }
+
+    func testWeatherYieldsToInterpreterWhenLiveWebCapabilityIsOn() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.canAnswerLiveQuestionsFromWeb = true
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .query, entryId: nil, contact: nil, time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil, pluginAction: nil, pluginEntities: nil,
+            confidence: 0.9, reply: "भोलि काठमाडौंमा हल्का पानी पर्ने सम्भावना छ।"
+        )
+        let (router, bus) = makeRouter(coordinator, interpreter: interpreter)
+
+        _ = router.route(transcript: "भोलि काठमाडौंमा पानी पर्छ?")
+        await Task.yield()
+
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "topic_pre_answer" },
+                       "with live-web on, the weather no-data pre-answer must NOT fire")
+        XCTAssertEqual(interpreter.interpretCallCount, 1,
+                       "the grounded cloud interpreter answers the forecast")
+        XCTAssertEqual(coordinator.genericReplies, ["भोलि काठमाडौंमा हल्का पानी पर्ने सम्भावना छ।"])
+    }
+
+    func testTimeAndDateStayDeterministicEvenWithLiveWebOn() {
+        // Time/date are LOCAL FACTS, not web lookups — the live-web
+        // capability yields ONLY the weather topic.
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.canAnswerLiveQuestionsFromWeb = true
+        let interpreter = FakeCommandInterpreter()
+        let (router, bus) = makeRouter(coordinator, interpreter: interpreter)
+        let fixedNow = Date(timeIntervalSince1970: 1_727_000_000)   // pinned, not wall clock
+        router.clock = { fixedNow }
+
+        _ = router.route(transcript: "अहिले कति बजेको छ?")
+
+        let expected = TopicPreAnswer.reply(for: .time, locale: ne, now: fixedNow)
+        XCTAssertEqual(coordinator.genericReplies, [expected])
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "topic_pre_answer"
+                && $0.metadata["topic"] == TopicPreAnswer.Topic.time.rawValue
+        })
+        XCTAssertEqual(interpreter.interpretCallCount, 0)
     }
 }

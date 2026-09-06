@@ -73,6 +73,54 @@ final class GeminiSpeechRecognizerTests: XCTestCase {
         wait(for: [expectation], timeout: 2.0)
     }
 
+    // MARK: - Collapsed path carries the web-search tool (intent-tools, 2026-09-07)
+
+    func testCollapsedUnderstandCarriesGoogleSearchTool() {
+        let store = GeminiConfigStore(storage: GeminiInMemoryStorage())
+        store.save("fake-key")
+        let transport = FakeGeminiTransport()
+        let payload = #"{"transcript": "मेरो औषधि खाएँ"}"#
+        transport.nextResult = .success(FakeGeminiTransport.jsonResponse(text: payload))
+        let bus = MockObservabilityBus()
+        let client = GeminiClient(configStore: store, observabilityBus: bus, transport: transport)
+        let stt = GeminiSpeechRecognizer(client: client, observabilityBus: bus)
+
+        var understandingTranscript: String?
+        stt.collapseContextProvider = {
+            InterpreterContext(pendingMedications: [], userLanguageHint: "ne")
+        }
+        stt.onUnderstanding = { transcript, _ in understandingTranscript = transcript }
+
+        let expectation = expectation(description: "completion fires")
+        stt.startListening(timeout: 5) { result in
+            switch result {
+            case .success(let text): XCTAssertEqual(text, "मेरो औषधि खाएँ")
+            case .failure(let err): XCTFail("expected success, got \(err)")
+            }
+            expectation.fulfill()
+        }
+        stt.feed(makePCMBuffer(samples: 1600))
+        stt.finish()
+        wait(for: [expectation], timeout: 2.0)
+
+        XCTAssertEqual(understandingTranscript, "मेरो औषधि खाएँ",
+                       "the collapse hook receives the transcript half")
+        // The ONE collapsed call (STT + intent + reply) must carry the
+        // google_search tool — grounding rides on this call by default,
+        // because no transcript exists until after it returns (per-
+        // utterance gating is impossible; the audio arrives only under
+        // the cloud stack).
+        let body = transport.lastRequest?.httpBody
+        let json = try? JSONSerialization.jsonObject(with: body ?? Data()) as? [String: Any]
+        let tools = json?["tools"] as? [[String: Any]]
+        XCTAssertEqual(tools?.count, 1)
+        XCTAssertEqual(tools?.first?.keys.first, "google_search")
+        // The (ungrounded here) call still reports its tool outcome.
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "intent_tool_websearch" && $0.outcome == "not_used"
+        })
+    }
+
     // MARK: - WAV encoding
 
     func testWavDataHasCorrectHeaderFields() {

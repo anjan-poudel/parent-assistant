@@ -7728,6 +7728,125 @@
           }
         }
       }
+    },
+    "calculator.result": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ equals %2$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ बराबर %2$@ हुन्छ।"
+          }
+        }
+      }
+    },
+    "calculator.result.general": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The answer is %1$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जवाफ %1$@ हुन्छ।"
+          }
+        }
+      }
+    },
+    "calculator.error.divByZero": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can't divide by zero."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "शून्यले भाग गर्न सकिँदैन।"
+          }
+        }
+      }
+    },
+    "calculator.op.plus": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "plus"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जोड"
+          }
+        }
+      }
+    },
+    "calculator.op.minus": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "minus"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "घटाउ"
+          }
+        }
+      }
+    },
+    "calculator.op.times": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "times"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुणा"
+          }
+        }
+      }
+    },
+    "calculator.op.dividedBy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "divided by"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भाग"
+          }
+        }
+      }
     }
   },
   "version": "1.0",

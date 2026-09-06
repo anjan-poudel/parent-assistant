@@ -1467,6 +1467,21 @@ final class AppCoordinator: ObservableObject {
         )
     }
 
+    /// [INTENT-TOOLS] (2026-09-07) Live-web answering capability for
+    /// `CommandRouter`'s tool wiring. True ONLY when the cloud brain is
+    /// actually in the chain — the derivation mirrors the exact escalation
+    /// guard `IntentRouter` applies at route time (`cloudEnabled` AND the
+    /// cloud brain available), so the router's weather yield can never
+    /// disagree with what the chain would do next: on the on-device stack
+    /// a configured Gemini key stays out of the chain (`cloudEnabled` is
+    /// false) and this is false → the deterministic weather pre-answer
+    /// stands; on the Gemini stack with the key configured this is true →
+    /// weather questions fall through to the search-grounded interpreter.
+    var canAnswerLiveQuestionsFromWeb: Bool {
+        (intentRouter?.cloudEnabled ?? false)
+            && (intentRouter?.cloudBrain?.isAvailable ?? false)
+    }
+
     /// Whether the assistant-brain model is currently arriving (queued /
     /// downloading / verifying) — the one state that turns `.needsSetup`
     /// into `.downloadingBrain` for the router's fallback speech.

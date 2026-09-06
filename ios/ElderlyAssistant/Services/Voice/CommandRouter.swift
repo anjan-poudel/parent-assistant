@@ -140,6 +140,31 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// field empty). Zero-touch hands-free: nothing is spoken here —
     /// the leaf announces the result once the search has run.
     func requestContactSearch(query: String?)
+
+    /// [INTENT-TOOLS] (2026-09-07) Tool-capability surface. True only when
+    /// the coordinator's interpreter chain can answer open-domain
+    /// questions from LIVE web data (Gemini Google-Search grounding). The
+    /// router yields the deterministic weather pre-answer ("weather data
+    /// is unavailable on-device") to the interpreter when this is true —
+    /// with the cloud on, a forecast question deserves a real grounded
+    /// forecast, not the no-data answer; with it false (on-device stack,
+    /// cloud disabled, or brain unavailable), the honest deterministic
+    /// answer stands. Deliberately a REQUIREMENT with the default in the
+    /// extension below: an extension-only member (no requirement) binds
+    /// statically when looked up through a protocol-typed reference, and
+    /// `CommandRouter` holds its coordinator as `VoiceCommandCoordinating?`
+    /// — the extension default would then shadow `AppCoordinator`'s
+    /// opt-in and the weather yield could never fire in production.
+    var canAnswerLiveQuestionsFromWeb: Bool { get }
+}
+
+/// [INTENT-TOOLS] (2026-09-07) Tool-capability default. The default keeps
+/// every conformer that does not explicitly opt in (all mocks/doubles
+/// across the app and the test target) on the fully deterministic path —
+/// only a coordinator that explicitly returns true yields weather to the
+/// live-web interpreter.
+extension VoiceCommandCoordinating {
+    var canAnswerLiveQuestionsFromWeb: Bool { false }
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -336,18 +361,74 @@ final class CommandRouter {
         // block can never be shadowed by a topic answer.
         if let topic = TopicPreAnswer.match(transcript: raw),
            !Self.sensitiveCallPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
+            // [INTENT-TOOLS] (2026-09-07) Weather yields to a LIVE-WEB-
+            // capable interpreter: with Google-Search grounding on the
+            // cloud path, "भोलि काठमाडौंमा पानी पर्छ?" deserves a real
+            // grounded forecast, not the no-data pre-answer. The
+            // coordinator's `canAnswerLiveQuestionsFromWeb` (default
+            // false) is derived from the exact chain state the router's
+            // own escalation guard checks (cloud enabled AND cloud brain
+            // available), so a forecast question under the on-device
+            // stack — or with the cloud brain down — still gets the
+            // honest deterministic answer. Time/date/greeting topics are
+            // unchanged: they are local facts, not web lookups, and stay
+            // deterministic on every stack.
+            let liveWeb = coordinator?.canAnswerLiveQuestionsFromWeb ?? false
+            if topic == .weather && liveWeb {
+                // Fall through to the interpreter below.
+            } else {
+                let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+                let text = TopicPreAnswer.reply(for: topic, locale: locale, now: clock())
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "command_router",
+                    eventType: "topic_pre_answer",
+                    durationMs: nil,
+                    outcome: "success",
+                    errorCode: nil,
+                    metadata: ["topic": topic.rawValue]
+                ))
+                coordinator?.noteGenericReply(text)
+                speak(text: text, locale: locale)
+                return .unrecognised(transcript: raw)
+            }
+        }
+
+        // [INTENT-TOOLS] (2026-09-07) Deterministic CALCULATOR — see
+        // `CalculatorTool` for the full contract. This stage is the same
+        // pre-route pattern as TopicPreAnswer: after the safety net and
+        // topic answers, before any interpreter, on BOTH stacks, default
+        // on. The tool decides (nil → route on; computed/divisionByZero →
+        // answered here, the interpreter is never consulted for provable
+        // arithmetic).
+        if let decision = CalculatorTool.decide(raw) {
             let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
-            let text = TopicPreAnswer.reply(for: topic, locale: locale, now: clock())
-            observabilityBus.emit(ObservabilityEvent(
-                component: "command_router",
-                eventType: "topic_pre_answer",
-                durationMs: nil,
-                outcome: "success",
-                errorCode: nil,
-                metadata: ["topic": topic.rawValue]
-            ))
-            coordinator?.noteGenericReply(text)
-            speak(text: text, locale: locale)
+            switch decision {
+            case .computed(let calculation):
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "command_router",
+                    eventType: "intent_tool_calculator",
+                    durationMs: nil,
+                    outcome: "success",
+                    errorCode: nil,
+                    metadata: [:]
+                ))
+                let text = CalculatorTool.reply(for: calculation, locale: locale)
+                coordinator?.noteGenericReply(text)
+                speak(text: text, locale: locale)
+            case .divisionByZero:
+                // Honest error — the utterance WAS arithmetic but has no
+                // numeric answer; visible + spoken (elderly UX: an error
+                // spoken-only vanishes with the caption pill).
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "command_router",
+                    eventType: "intent_tool_calculator",
+                    durationMs: nil,
+                    outcome: "error",
+                    errorCode: "division_by_zero",
+                    metadata: [:]
+                ))
+                speakWithVisibleOutcome(key: "calculator.error.divByZero")
+            }
             return .unrecognised(transcript: raw)
         }
 
