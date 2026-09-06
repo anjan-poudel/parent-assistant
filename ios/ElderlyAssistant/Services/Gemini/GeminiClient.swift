@@ -163,15 +163,28 @@ final class GeminiClient {
     /// produces no parseable command still returns its transcript (the
     /// router then falls back exactly as if interpretation had failed —
     /// same failure shape, no new edge cases).
+    /// [INTENT-TOOLS] (2026-09-07) `useSearchGrounding`: adds Google's
+    /// `google_search` tool (same as `generateJSON`) so a collapsed
+    /// understand call can answer from LIVE web data — a forecast
+    /// question asked through the Gemini stack gets a real grounded
+    /// answer instead of training-knowledge-only text. Defaults to false
+    /// so every existing caller compiles unchanged; the intent-path
+    /// callers (`GeminiSpeechRecognizer` collapse, the cloud interpreter)
+    /// turn it on explicitly. Grounded calls pass through the SAME cost
+    /// governor — one attempt, counted at the transport boundary exactly
+    /// like every other call (no bypass), and each grounded request emits
+    /// `intent_tool_websearch` with the grounded/not_used outcome.
     func understand(audioData: Data, mimeType: String,
-                    context: InterpreterContext) async throws -> GeminiUnderstanding {
+                    context: InterpreterContext,
+                    useSearchGrounding: Bool = false) async throws -> GeminiUnderstanding {
         let prompt = IntentPrompt.buildUnderstanding(context: context)
         let request = GeminiRequest(
             contents: [.init(parts: [
                 .text(prompt),
                 .inlineData(mimeType: mimeType, data: audioData.base64EncodedString())
             ])],
-            generationConfig: .init(responseMimeType: "application/json")
+            generationConfig: .init(responseMimeType: "application/json"),
+            tools: useSearchGrounding ? [.init(googleSearch: .init())] : nil
         )
         let raw = try await send(request)
         let transcript = (try? JSONDecoder().decode(TranscriptProbe.self, from: Data(raw.utf8)))?.transcript ?? ""
@@ -191,8 +204,17 @@ final class GeminiClient {
     /// grows — the live-caption pill gets progressively-revealed text,
     /// which batch whisper.cpp could never offer. The final parse is
     /// identical to the non-streaming path (no new failure shapes).
+    /// [INTENT-TOOLS] (2026-09-07) `useSearchGrounding`: adds Google's
+    /// `google_search` tool to the streamed collapsed call, exactly like
+    /// the non-streaming `understand`. While the stream runs, each frame
+    /// is additionally probed for `groundingMetadata`; when grounding was
+    /// requested the call finishes with an `intent_tool_websearch` event
+    /// carrying `grounded` (at least one frame cited live search results)
+    /// or `not_used` (the model answered from knowledge alone — Gemini
+    /// decides per question; the tool is an offer, not a command).
     func understandStreaming(audioData: Data, mimeType: String,
                              context: InterpreterContext,
+                             useSearchGrounding: Bool = false,
                              onPartialTranscript: @escaping (String) -> Void
     ) async throws -> GeminiUnderstanding {
         guard let apiKey = configStore.apiKey, !apiKey.isEmpty else {
@@ -215,7 +237,8 @@ final class GeminiClient {
                 .text(prompt),
                 .inlineData(mimeType: mimeType, data: audioData.base64EncodedString())
             ])],
-            generationConfig: .init(responseMimeType: "application/json")
+            generationConfig: .init(responseMimeType: "application/json"),
+            tools: useSearchGrounding ? [.init(googleSearch: .init())] : nil
         )
         var request = URLRequest(url: url, timeoutInterval: config.timeoutSeconds)
         request.httpMethod = "POST"
@@ -225,6 +248,7 @@ final class GeminiClient {
         let start = Date()
         var accumulated = ""
         var lastReported = ""
+        var sawGrounding = false
         // Billable-attempt boundary — identical semantics to `send(_:)`
         // below: the attempt counts the moment the transport is asked to
         // make the call (success AND HTTP/network failure alike). Paths
@@ -244,6 +268,9 @@ final class GeminiClient {
             throw GeminiClientError.invalidResponse
         }
         for try await line in bytes.lines {
+            if useSearchGrounding, Self.sseFrameIsGrounded(line) {
+                sawGrounding = true
+            }
             guard let chunk = Self.parseSSELine(line) else { continue }
             accumulated += chunk
             if let partial = Self.extractPartialTranscript(from: accumulated),
@@ -252,8 +279,12 @@ final class GeminiClient {
                 onPartialTranscript(partial)
             }
         }
-        emit("gemini_call", outcome: "success",
-             durationMs: Int(Date().timeIntervalSince(start) * 1000))
+        let durationMs = Int(Date().timeIntervalSince(start) * 1000)
+        if useSearchGrounding {
+            emit("intent_tool_websearch", outcome: sawGrounding ? "grounded" : "not_used",
+                 durationMs: durationMs)
+        }
+        emit("gemini_call", outcome: "success", durationMs: durationMs)
         let transcript = (try? JSONDecoder().decode(TranscriptProbe.self, from: Data(accumulated.utf8)))?.transcript ?? lastReported
         let command = LlamaCommandInterpreter.parse(json: accumulated)
         return GeminiUnderstanding(transcript: transcript, command: command)
@@ -271,6 +302,24 @@ final class GeminiClient {
         }
         return response.candidates?.first?.content?.parts?
             .compactMap { $0.text }.joined()
+    }
+
+    /// [INTENT-TOOLS] (2026-09-07) Whether an SSE frame carries
+    /// `groundingMetadata` (the model actually used Google Search for
+    /// that frame). Signature independent of `parseSSELine` (whose
+    /// behavior StreamingCaptionTests pins): the grounded probe only
+    /// runs on frames while a search-grounded stream is live, and it
+    /// decodes the frame's JSON a second time rather than changing what
+    /// `parseSSELine` returns.
+    static func sseFrameIsGrounded(_ line: String) -> Bool {
+        guard line.hasPrefix("data:") else { return false }
+        let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+        guard !payload.isEmpty, payload != "[DONE]",
+              let data = payload.data(using: .utf8),
+              let response = try? JSONDecoder().decode(GeminiResponse.self, from: data) else {
+            return false
+        }
+        return response.candidates?.first?.groundingMetadata != nil
     }
 
     /// The transcript-so-far out of an accumulated PARTIAL JSON string —
@@ -390,6 +439,21 @@ final class GeminiClient {
             emit("gemini_empty_response", outcome: "failure", durationMs: durationMs)
             throw GeminiClientError.emptyResponse
         }
+        // [INTENT-TOOLS] (2026-09-07) Tool-usage observability for
+        // search-grounded requests (the only tool config in use today):
+        // `grounded` = the response cited live Google Search results;
+        // `not_used` = Gemini answered from knowledge alone (the tool is
+        // an offer — the model decides per question whether to search).
+        // Fires on every successful grounded-capable call through this
+        // single transport chokepoint (collapse, interpreter, plugins),
+        // so web-search usage is measurable per feature; the shared cost
+        // governor counts each attempt exactly once at the boundary
+        // above — grounding is never a billing bypass.
+        if let tools = body.tools, !tools.isEmpty {
+            let grounded = decoded.candidates?.first?.groundingMetadata != nil
+            emit("intent_tool_websearch", outcome: grounded ? "grounded" : "not_used",
+                 durationMs: durationMs)
+        }
         emit("gemini_call", outcome: "success", durationMs: durationMs)
         return text
     }
@@ -465,8 +529,14 @@ struct GeminiResponse: Decodable {
             struct Part: Decodable { let text: String? }
             let parts: [Part]?
         }
+        struct GroundingMetadata: Decodable {}
         let content: Content?
         let finishReason: String?
+        /// [INTENT-TOOLS] (2026-09-07) Present when the model actually
+        /// used the `google_search` tool for this candidate (cited live
+        /// results). Absence (nil) = answered from knowledge alone —
+        /// distinct from a search tool simply being available.
+        let groundingMetadata: GroundingMetadata?
     }
     struct PromptFeedback: Decodable { let blockReason: String? }
 
