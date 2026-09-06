@@ -80,11 +80,11 @@ enum DesignTokens {
     // up automatically — no per-view changes needed.
 
     /// Minimum body size — accessibility floor, not a suggestion.
-    static var minBodyPointSize: CGFloat { scaled(18) }
+    static var minBodyPointSize: CGFloat { scaled(21) }
     /// Minimum caption/label size — captions are "secondary" text, still ≥15pt.
-    static var minCaptionPointSize: CGFloat { scaled(15) }
-    static var titlePointSize: CGFloat { scaled(28) }
-    static var greetingPointSize: CGFloat { scaled(30) }
+    static var minCaptionPointSize: CGFloat { scaled(18) }
+    static var titlePointSize: CGFloat { scaled(32) }
+    static var greetingPointSize: CGFloat { scaled(33) }
 
     private static func scaled(_ base: CGFloat) -> CGFloat {
         UIFontMetrics.default.scaledValue(for: base)
@@ -107,6 +107,6 @@ enum DesignTokens {
     static let chipHeight: CGFloat = 60
     /// Bottom shortcut dock (redesign spec §3.1 — replaces the 2×2 hub grid;
     /// Home is the only screen that shows it).
-    static let dockHeight: CGFloat = 76
-    static let iconBadgeDiameter: CGFloat = 40
+    static let dockHeight: CGFloat = 88
+    static let iconBadgeDiameter: CGFloat = 44
 }

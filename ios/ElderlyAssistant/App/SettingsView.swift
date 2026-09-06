@@ -71,7 +71,7 @@ struct SettingsView: View {
                         sectionRow(.privacy, icon: "lock.shield.fill", titleKey: "settings.privacy.title")
                         sectionRow(.intentLog, icon: "checklist", titleKey: "settings.intentLog.title")
                         Text("settings.ai.hiddenHint")
-                            .font(.system(size: 11))
+                            .font(.system(size: 14))
                             .foregroundColor(DesignTokens.textSecondary.opacity(0.6))
                             .frame(maxWidth: .infinity)
                             .padding(.top, 8)

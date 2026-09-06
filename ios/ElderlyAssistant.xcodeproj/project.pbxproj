@@ -47,6 +47,7 @@
 		2FA47D5B9C9DA6275043A088 /* ApplianceLabelLocalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0111F751B4131E4D8A9FB49 /* ApplianceLabelLocalizerTests.swift */; };
 		2FBA03DFDCB85B2049B798F3 /* OnboardingWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C862F89CFC9B521BAD91DBCF /* OnboardingWizardView.swift */; };
 		309C84544D7A0882DBE0EB57 /* IntentPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBB0B062ABBF45149FD834EC /* IntentPrompt.swift */; };
+		334F939E8B4CCEFC727018A4 /* AppIcons.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 06E05F28CEB7B79070AFC14D /* AppIcons.xcassets */; };
 		36126C14FF50D0FDE355FC76 /* VoiceSessionStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E07CFBA211DF9E699627A4 /* VoiceSessionStateMachineTests.swift */; };
 		38EA930604B28AB2BF63DF05 /* WakeWordEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFE0B77607ED7DA0553D6F0 /* WakeWordEngine.swift */; };
 		39F0DBE85A418FEFC103B2E7 /* LocalBrainChainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C9FD745CF7B00B908EC011D /* LocalBrainChainTests.swift */; };
@@ -244,6 +245,7 @@
 		015F0565B242BD849F659D78 /* HomeWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeWidget.swift; sourceTree = "<group>"; };
 		030DDED1BA852B1A12ABABBE /* AppCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCoordinator.swift; sourceTree = "<group>"; };
 		050315DE680CE94C0C4594A5 /* ElderlyAssistantApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElderlyAssistantApp.swift; sourceTree = "<group>"; };
+		06E05F28CEB7B79070AFC14D /* AppIcons.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = AppIcons.xcassets; sourceTree = "<group>"; };
 		0776B7C899783B35B84D499A /* MedicationScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationScheduler.swift; sourceTree = "<group>"; };
 		084E8AA8568FED8E1D6B1E19 /* LocalIntentInterpreterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalIntentInterpreterTests.swift; sourceTree = "<group>"; };
 		0A15958C4A3DCF9FC454627A /* NepaliTimeParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliTimeParser.swift; sourceTree = "<group>"; };
@@ -708,6 +710,7 @@
 		A2FE20255533B18817DCEC03 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				06E05F28CEB7B79070AFC14D /* AppIcons.xcassets */,
 				C51E1D3A1B144677E2F3A616 /* Localizable.xcstrings */,
 				76398CBD05D4B8E57B2A58CB /* Models */,
 			);
@@ -1151,6 +1154,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				334F939E8B4CCEFC727018A4 /* AppIcons.xcassets in Resources */,
 				16CDB50A84CA31870D3C4DDC /* Localizable.xcstrings in Resources */,
 				E4A41DDD8D18E332FADFAAED /* tts in Resources */,
 				FF6D253A37F069880D322578 /* whisper-medium-ne-q5_1.bin in Resources */,
@@ -1580,7 +1584,7 @@
 		7542A3C41B25B5B324990BDC /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ElderlyAssistant/Info.plist;
@@ -1599,7 +1603,7 @@
 		7FB478A824707FA246ABC5C9 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ElderlyAssistant/Info.plist;

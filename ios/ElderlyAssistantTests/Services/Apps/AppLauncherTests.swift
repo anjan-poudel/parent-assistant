@@ -30,6 +30,27 @@ final class AppLauncherTests: XCTestCase {
         XCTAssertEqual(Set(AppLauncher.catalog.map(\.systemImage)).count, 18)
     }
 
+    func testOfficialBrandGlyphsCoverEveryThirdPartyAppExceptIMO() {
+        // Official glyphs (CC0 simple-icons, 2026-09-07) for every
+        // third-party app EXCEPT imo — simple-icons removed IMO's glyph
+        // over trademark concerns, and the catalog must not pretend a
+        // stand-in is official. Apple built-ins keep SF Symbols (their
+        // official glyphs) with nil imageName.
+        let builtInIDs = ["phone", "messages", "facetime", "mail", "calendar", "maps"]
+        let thirdParty = AppLauncher.catalog.filter { !builtInIDs.contains($0.id) }
+        let withGlyph = thirdParty.filter { $0.imageName != nil }
+        XCTAssertEqual(withGlyph.map(\.id),
+                       ["whatsapp", "messenger", "facebook", "instagram", "youtube",
+                        "gmail", "googlemaps", "chrome", "zoom", "telegram", "viber"])
+        XCTAssertNil(AppLauncher.app(for: "imo")?.imageName)
+        // Glyph asset names are unique and namespaced.
+        let names = thirdParty.compactMap(\.imageName)
+        XCTAssertEqual(Set(names).count, names.count)
+        XCTAssertTrue(names.allSatisfy { $0.hasPrefix("appIcon.") })
+        // Built-ins: SF Symbols ARE the official Apple glyphs.
+        XCTAssertTrue(AppLauncher.catalog.prefix(6).allSatisfy { $0.imageName == nil })
+    }
+
     func testCatalogStartsWithAppleBuiltInsInHomeScreenOrder() {
         // Display order: Apple built-ins first (phone → maps), then
         // third-party apps — so a fresh picker feels like the home screen.

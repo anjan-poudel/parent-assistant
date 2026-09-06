@@ -396,7 +396,7 @@ struct CallView: View {
         NavigationLink(value: LeafDestination.history) {
             HStack(spacing: 8) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(DesignTokens.accent)
                 Text(LocalizedStringKey("call.historyRow"))
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))

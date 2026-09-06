@@ -130,7 +130,7 @@ struct QuickAccessAppsView: View {
     /// coordinator, which re-probes and speaks honestly on tap).
     private func favouriteRow(_ app: AppLauncher.App) -> some View {
         HStack(spacing: 14) {
-            IconBadge(systemImage: app.systemImage, tint: .apps, diameter: 48)
+            AppGlyph(app: app, diameter: 48)
             // `== false` (not `!= true`) so a not-yet-probed row shows no
             // caption for the one frame before `.task` fills `installed`.
             rowLabel(app, captionKey: installed[app.id] == false ? "apps.notInstalled" : nil)
@@ -148,7 +148,7 @@ struct QuickAccessAppsView: View {
         let isFavourite = coordinator.favoriteAppIDs.contains(app.id)
         let isInstalledHere = installed[app.id] == true
         return HStack(spacing: 14) {
-            IconBadge(systemImage: app.systemImage, tint: .apps, diameter: 48)
+            AppGlyph(app: app, diameter: 48)
             rowLabel(app, captionKey: isInstalledHere ? "quickApps.installed" : nil)
             Spacer(minLength: 0)
             if isFavourite {

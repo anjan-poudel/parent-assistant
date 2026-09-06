@@ -18,7 +18,7 @@ final class CalendarStripWidget: HomeWidget {
             NavigationLink(value: LeafDestination.calendar) {
                 HStack(spacing: 8) {
                     Image(systemName: "calendar")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(DesignTokens.accent)
                     Text(coordinator.homeCalendarLine ?? "")
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))

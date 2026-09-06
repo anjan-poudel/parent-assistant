@@ -153,7 +153,7 @@ struct HomeView: View {
         NavigationLink(value: LeafDestination.calendar) {
             HStack(spacing: 8) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(DesignTokens.accent)
                 Text(line)
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
@@ -186,7 +186,7 @@ struct HomeView: View {
                     .foregroundColor(DesignTokens.textPrimary)
                 Spacer()
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundColor(DesignTokens.textSecondary)
             }
             .padding(.horizontal, 14)
@@ -235,18 +235,26 @@ struct HomeView: View {
             coordinator.performAppLaunch(app)
         } label: {
             VStack(spacing: 4) {
-                IconBadge(systemImage: app.systemImage, tint: .apps, diameter: 48)
+                appGlyph(app, diameter: 56)
                 Text(LocalizedStringKey(app.nameKey))
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
-            .frame(width: 76)
+            .frame(width: 92)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             .accessibilityElement(children: .combine)
         }
         .buttonStyle(.plain)
+    }
+
+    /// The app's OFFICIAL brand glyph on a white circle when the catalog
+    /// carries one (AppIcons.xcassets, CC0 simple-icons vectors), else
+    /// the SF Symbol stand-in badge — Apple built-ins and IMO (no
+    /// clean-licensed glyph) keep the stand-in.
+    private func appGlyph(_ app: AppLauncher.App, diameter: CGFloat) -> some View {
+        AppGlyph(app: app, diameter: diameter)
     }
 
     /// The trailing plus tile → Settings (LeafDestination.settings), where
@@ -254,9 +262,9 @@ struct HomeView: View {
     /// row's rhythm stays even.
     private var quickAccessAddTile: some View {
         VStack(spacing: 4) {
-            IconBadge(systemImage: "plus", tint: .apps, diameter: 48)
+            IconBadge(systemImage: "plus", tint: .apps, diameter: 56)
         }
-        .frame(width: 76)
+        .frame(width: 92)
         .frame(minHeight: DesignTokens.minTapTargetSize)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("home.quickAccess.add"))
@@ -409,7 +417,7 @@ struct HomeView: View {
             VStack(spacing: 4) {
                 IconBadge(systemImage: icon, tint: tint, diameter: 36)
                 Text(LocalizedStringKey(titleKey))
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
             }
             .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
@@ -428,7 +436,7 @@ struct HomeView: View {
                     IconBadge(systemImage: "phone.fill", tint: .call, diameter: 36)
                 }
                 Text(LocalizedStringKey("home.hub.call"))
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
             }
             .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
@@ -444,7 +452,7 @@ struct HomeView: View {
             VStack(spacing: 4) {
                 IconBadge(systemImage: "camera.viewfinder", tint: .appliance, diameter: 36)
                 Text(LocalizedStringKey("plugin.applianceHelper.name"))
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
             }
             .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)

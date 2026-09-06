@@ -27,6 +27,34 @@ struct IconBadge: View {
 
 // MARK: - Face avatar (initials — spec §3.1/§3.2, replaces generic phone icons)
 
+/// The OFFICIAL brand glyph of a quick-access catalog app on a white
+/// circle (AppIcons.xcassets, CC0 simple-icons vectors, 2026-09-07), or
+/// the SF Symbol stand-in badge when the catalog carries no clean-licensed
+/// glyph (Apple built-ins use SF Symbols as their official glyphs; IMO's
+/// was removed from simple-icons over trademark concerns). Hidden from
+/// VoiceOver — the surrounding tile/row reads the app name.
+struct AppGlyph: View {
+    let app: AppLauncher.App
+    let diameter: CGFloat
+
+    var body: some View {
+        Group {
+            if let imageName = app.imageName {
+                Image(imageName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: diameter * 0.6, height: diameter * 0.6)
+                    .frame(width: diameter, height: diameter)
+                    .background(Color.white)
+                    .clipShape(Circle())
+            } else {
+                IconBadge(systemImage: app.systemImage, tint: .apps, diameter: diameter)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 struct FaceAvatar: View {
     let name: String
     var diameter: CGFloat = DesignTokens.iconBadgeDiameter
@@ -74,7 +102,7 @@ struct EmergencyIconButton: View {
     var body: some View {
         Button(action: trigger) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 14, weight: .bold))
+                .font(.system(size: 17, weight: .bold))
                 .foregroundColor(DesignTokens.BadgeTint.emergency.tint)
                 .frame(width: 32, height: 32)
                 .background(DesignTokens.BadgeTint.emergency.background)
@@ -300,7 +328,7 @@ struct OutcomeCardView: View {
                     .foregroundColor(DesignTokens.textPrimary)
                     .lineLimit(1)
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundColor(DesignTokens.textSecondary)
             }
             .padding(.horizontal, 14)
