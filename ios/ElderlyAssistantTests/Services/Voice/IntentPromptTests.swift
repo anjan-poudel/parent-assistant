@@ -41,22 +41,87 @@ final class IntentPromptTests: XCTestCase {
         XCTAssertTrue(prompt.contains("language hint is: en"))
     }
 
-    // MARK: - Required JSON fields (must match InterpretedCommand exactly)
+    // MARK: - Required JSON fields (STRUCTURED-RESPONSE CONTRACT, 2026-09-06)
+    //
+    // The brain must answer with the canonical contract: `intent` +
+    // always-non-empty `response` + `confidence`, `actionType`/`actionUrl`
+    // when the intent needs them, and the entity/slot fields. The legacy
+    // wire shape (`action`/`reply`) is still ACCEPTED at parse time for
+    // cached/cloud/fine-tuned payloads, but the prompt must not TEACH the
+    // model the legacy keys — `response` is the spoken reply and the
+    // "query"/"none" answer that fixes the "माफ गर्नुहोस्" dead-end.
 
-    func testMentionsAllRequiredFields() {
+    func testMentionsAllCanonicalContractFields() {
         let prompt = build()
-        for field in ["action", "entryId", "contact", "time", "medication",
-                      "message", "callType", "requestedApp", "confidence", "reply"] {
-            XCTAssertTrue(prompt.contains("\"\(field)\""), "missing field: \(field)")
+        let canonical = ["intent", "response", "confidence", "actionType",
+                         "actionUrl"]
+        for field in canonical {
+            XCTAssertTrue(prompt.contains("\"\(field)\""), "missing canonical field: \(field)")
+        }
+        let entities = ["entryId", "contact", "time", "medication", "message",
+                        "callType", "requestedApp", "topic", "steps"]
+        for field in entities {
+            XCTAssertTrue(prompt.contains("\"\(field)\""), "missing entity field: \(field)")
         }
     }
 
-    func testMentionsAllActionValues() {
+    func testNoPluginBuildDoesNotTeachLegacyActionReplyKeys() {
+        // Dual-shape tolerance is parse-side only (LlamaCommandInterpreter
+        // .parse still accepts legacy payloads). The PROMPT must not teach
+        // "action"/"reply" as output keys, or models would emit the legacy
+        // shape and the always-populated "response" contract would drift.
         let prompt = build()
-        for action in ["ack_med", "call", "emergency", "set_reminder",
-                       "health_query", "music", "send_message", "query", "none"] {
-            XCTAssertTrue(prompt.contains("\"\(action)\""), "missing action: \(action)")
+        XCTAssertFalse(prompt.contains("\"action\""), "legacy key must not be taught")
+        XCTAssertFalse(prompt.contains("\"reply\""), "legacy key must not be taught")
+        XCTAssertTrue(prompt.contains("non-empty"),
+                      "the spoken response must be pinned non-empty")
+    }
+
+    func testMentionsAllCanonicalIntentValues() {
+        let prompt = build()
+        let intents = ["ack_med", "call", "send_message", "set_reminder",
+                       "emergency", "health_query", "music",
+                       "create_calendar_event", "suggest_video", "guide",
+                       "query", "none"]
+        for intent in intents {
+            XCTAssertTrue(prompt.contains("\"\(intent)\""), "missing intent value: \(intent)")
         }
+    }
+
+    func testIncludesOneShotExampleOfCanonicalAnswer() {
+        // The completed example + closing imperative is load-bearing: the
+        // 1B base model echoes the transcript instead of emitting JSON
+        // without it (verified on llama3.2:1b, 2026-09-06). Pinned so a
+        // future cleanup cannot silently delete it.
+        let prompt = build()
+        XCTAssertTrue(prompt.contains("Example: {"), "one-shot example must be present")
+        XCTAssertTrue(prompt.contains("\"intent\": \"query\""),
+                      "example must show the query intent answering a question")
+        XCTAssertTrue(prompt.contains("Now output ONLY the JSON object"),
+                      "closing imperative must be present")
+    }
+
+    // MARK: - On-device size budget (the actual [QUERY-FIX] root cause)
+
+    func testPromptStaysWithinOnDeviceCharacterBudget() {
+        // The on-device runtime runs LLaMA 3.2 1B in a 1,024-token context.
+        // The pre-fix prompt measured 2,361 tokens — the context overflowed,
+        // inference finished EMPTY, and every utterance fell through to the
+        // generic re-prompt. Measured with the real llama3.2:1b tokenizer
+        // (2026-09-06): this build() turn is ~3,050 chars ≈ 760 tokens; the
+        // formatted prompt (chat system ~330 chars + this turn + chat
+        // headers) is ~919 tokens, leaving ~105 tokens of output headroom.
+        // The ceiling below is the regression tripwire: ~3,300 chars of
+        // user turn is ~820 tokens even for transcripts a few hundred
+        // characters long — a silent prompt bloat that would re-open the
+        // overflow bug fails here instead.
+        let prompt = build(transcript: "भोलिको मौसम कस्तो छ?", meds: [],
+                           languageHint: "ne")
+        XCTAssertLessThanOrEqual(
+            prompt.count, 3_300,
+            "build() must stay inside the 1,024-token on-device budget "
+            + "(measured 3,050 chars for this fixture; 2,361 tokens pre-fix "
+            + "overflowed the context and produced the empty-completion bug)")
     }
 
     // MARK: - Plugin composition (plugin architecture, 2026-09-05)
