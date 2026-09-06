@@ -34,6 +34,7 @@
 		203223B8756FC96334BC2960 /* EscalationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AF7478D117F7C991FC99A68 /* EscalationEngine.swift */; };
 		22F4201277692675311AC0C5 /* CallRecencyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94A0C8A422471F7D66CAC5CC /* CallRecencyStore.swift */; };
 		299549B47B6CBC1FEED6E1EF /* ConfirmationChallenge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B4100D9B7589B71AD8962A0 /* ConfirmationChallenge.swift */; };
+		2AC2B667F13294A64020FAA7 /* HomeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 015F0565B242BD849F659D78 /* HomeWidget.swift */; };
 		2FBA03DFDCB85B2049B798F3 /* OnboardingWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C862F89CFC9B521BAD91DBCF /* OnboardingWizardView.swift */; };
 		309C84544D7A0882DBE0EB57 /* IntentPrompt.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBB0B062ABBF45149FD834EC /* IntentPrompt.swift */; };
 		36126C14FF50D0FDE355FC76 /* VoiceSessionStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E07CFBA211DF9E699627A4 /* VoiceSessionStateMachineTests.swift */; };
@@ -58,6 +59,7 @@
 		567E5B477BECD2916373A8E9 /* RoutineEntryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E89601B5B74A632363B210 /* RoutineEntryTests.swift */; };
 		5707C48E2D863D068ADDB5E0 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2AB3C99F28EE6B02B39ECEB /* SpeechRecognizer.swift */; };
 		587E27227EE644B9E9A0A16B /* IntentLogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 204AC62FCB7AEC1810B3F158 /* IntentLogStore.swift */; };
+		5AAEF9B2582961977F8DEDEA /* HomeWidgetRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B442DD3C17D8D2B675CA50 /* HomeWidgetRegistryTests.swift */; };
 		5D2DBB294952F1935B2643F5 /* WakeWordConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3C9242954AB514718F74083 /* WakeWordConfigTests.swift */; };
 		5DFA0A8C6A6658F4A17FCE73 /* ApplianceHelperView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5671947D2C91D0B244E2B8D7 /* ApplianceHelperView.swift */; };
 		5F3A3D7F5EE0797E87B0559A /* GeminiSpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D97B2DE62692EBEEE135ED3 /* GeminiSpeechRecognizer.swift */; };
@@ -124,6 +126,7 @@
 		B2B08B4BF2C6CE1A5FFD90A0 /* SwitchableCommandInterpreter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7D7A7D5F8D07BCEECF0F970 /* SwitchableCommandInterpreter.swift */; };
 		B32BE0328D7BA52A2E4C4C5D /* TranscriptSanityGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5037C77CFB1853F53CE7B8B6 /* TranscriptSanityGuardTests.swift */; };
 		B33768112BA767F621F55951 /* ApplianceHelperSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F4098459DFF8C5CD563A22B /* ApplianceHelperSession.swift */; };
+		B50A8C2CFD4493E8E1A148BB /* BuiltInWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0C190FFF74560789B8CFAE1 /* BuiltInWidgets.swift */; };
 		B54AE9405FEBDBD383BEFD87 /* VoicePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 680AAA1A7F05226F9618CE82 /* VoicePipeline.swift */; };
 		B5D1DB093727D791873E15A4 /* ApplianceImagePreparer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19BF32FC8BB4CA5F5135934E /* ApplianceImagePreparer.swift */; };
 		B69127557F2AF1A840965A34 /* ApplianceGuidance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78EBE994A8FC353B0884CD57 /* ApplianceGuidance.swift */; };
@@ -195,6 +198,7 @@
 /* Begin PBXFileReference section */
 		00611EDBE49E5F2148C3E6F6 /* FestivalCalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FestivalCalendarService.swift; sourceTree = "<group>"; };
 		0079B2DA884AD6CEC405B03C /* ElderlyAssistantTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ElderlyAssistantTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		015F0565B242BD849F659D78 /* HomeWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeWidget.swift; sourceTree = "<group>"; };
 		030DDED1BA852B1A12ABABBE /* AppCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCoordinator.swift; sourceTree = "<group>"; };
 		050315DE680CE94C0C4594A5 /* ElderlyAssistantApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElderlyAssistantApp.swift; sourceTree = "<group>"; };
 		0776B7C899783B35B84D499A /* MedicationScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationScheduler.swift; sourceTree = "<group>"; };
@@ -321,6 +325,7 @@
 		C3E07CFBA211DF9E699627A4 /* VoiceSessionStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionStateMachineTests.swift; sourceTree = "<group>"; };
 		C3E89601B5B74A632363B210 /* RoutineEntryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineEntryTests.swift; sourceTree = "<group>"; };
 		C51E1D3A1B144677E2F3A616 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		C5B442DD3C17D8D2B675CA50 /* HomeWidgetRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeWidgetRegistryTests.swift; sourceTree = "<group>"; };
 		C7AD4D9E3C904775640B4486 /* ContactCallButtonsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactCallButtonsTests.swift; sourceTree = "<group>"; };
 		C862F89CFC9B521BAD91DBCF /* OnboardingWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingWizardView.swift; sourceTree = "<group>"; };
 		C8CEB43F2A42FCFC9F2EE63F /* CalendarSyncServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSyncServiceTests.swift; sourceTree = "<group>"; };
@@ -341,6 +346,7 @@
 		DBB0B062ABBF45149FD834EC /* IntentPrompt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentPrompt.swift; sourceTree = "<group>"; };
 		DBF8D15A8CBEB370AE0487CE /* SwitchableCommandInterpreterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwitchableCommandInterpreterTests.swift; sourceTree = "<group>"; };
 		DE19D3B8DCDC23B845EB9323 /* SystemContactSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemContactSearchTests.swift; sourceTree = "<group>"; };
+		E0C190FFF74560789B8CFAE1 /* BuiltInWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuiltInWidgets.swift; sourceTree = "<group>"; };
 		E0D51BFE01BE4E11E7CA840E /* ElderlyAssistant.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = ElderlyAssistant.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E1A9A2E941B5F186071CD05C /* ApplianceOverlayMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceOverlayMapperTests.swift; sourceTree = "<group>"; };
 		E36896D3C8FF4ABB460E81C7 /* CalendarSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSyncService.swift; sourceTree = "<group>"; };
@@ -383,6 +389,15 @@
 				3B8ACA4236E037E41C5E53D9 /* LogSanitiser.swift */,
 			);
 			path = Observability;
+			sourceTree = "<group>";
+		};
+		1B7E77584CD8CC502C48EDED /* Widgets */ = {
+			isa = PBXGroup;
+			children = (
+				E0C190FFF74560789B8CFAE1 /* BuiltInWidgets.swift */,
+				015F0565B242BD849F659D78 /* HomeWidget.swift */,
+			);
+			path = Widgets;
 			sourceTree = "<group>";
 		};
 		1C72CEAE97AC2317DC63E872 /* Gemini */ = {
@@ -502,6 +517,14 @@
 			path = ElderlyAssistant;
 			sourceTree = "<group>";
 		};
+		8E79F65611E2FC9980BB24EB /* Widgets */ = {
+			isa = PBXGroup;
+			children = (
+				C5B442DD3C17D8D2B675CA50 /* HomeWidgetRegistryTests.swift */,
+			);
+			path = Widgets;
+			sourceTree = "<group>";
+		};
 		933D20AA23A788790BFBF3D0 = {
 			isa = PBXGroup;
 			children = (
@@ -593,6 +616,7 @@
 				F5E9F4FCD0C5DED28633EFCA /* RedesignComponents.swift */,
 				1BAE18E00C74B295000808E2 /* SettingsView.swift */,
 				A92B889C53FB8260FFF9D74B /* VoiceSessionStateMachine.swift */,
+				1B7E77584CD8CC502C48EDED /* Widgets */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -754,6 +778,7 @@
 				5B80BB3C068100E30CFD3B9C /* OnboardingStateTests.swift */,
 				3CD2468FE69CCF128862DE28 /* VoiceSessionBindingTests.swift */,
 				C3E07CFBA211DF9E699627A4 /* VoiceSessionStateMachineTests.swift */,
+				8E79F65611E2FC9980BB24EB /* Widgets */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -992,6 +1017,7 @@
 				7898562B28339AF245041B58 /* AssistantPlugin.swift in Sources */,
 				F46656314EF3B024F5871089 /* AudioSessionManager.swift in Sources */,
 				436C2714E2A7AA920F24367F /* BikramSambat.swift in Sources */,
+				B50A8C2CFD4493E8E1A148BB /* BuiltInWidgets.swift in Sources */,
 				955A5A640D1EE8160EDC178B /* CalendarSyncService.swift in Sources */,
 				1AE062785099B2A92B49F9ED /* CallLinks.swift in Sources */,
 				07CD39D0B917CFF69322969C /* CallMethod.swift in Sources */,
@@ -1017,6 +1043,7 @@
 				6EB7465B038D99E3A89F43F2 /* GeminiCostGovernor.swift in Sources */,
 				5F3A3D7F5EE0797E87B0559A /* GeminiSpeechRecognizer.swift in Sources */,
 				E8C639597E665201247E6605 /* HomeView.swift in Sources */,
+				2AC2B667F13294A64020FAA7 /* HomeWidget.swift in Sources */,
 				53AA5137EF546574CE276BA8 /* IdHashing.swift in Sources */,
 				D30A7382558EDC4BFCD5E331 /* InputSanitiser.swift in Sources */,
 				977C7BC4375350A80C065336 /* IntentCommandCache.swift in Sources */,
@@ -1113,6 +1140,7 @@
 				AC9D73FF2FCE028F85DCF9E0 /* GoldenCorpus.swift in Sources */,
 				6892C759DC267D3FB01A108E /* GoldenCorpusTests.swift in Sources */,
 				92C94484258C17CA63F0576B /* GuidePluginDispatchTests.swift in Sources */,
+				5AAEF9B2582961977F8DEDEA /* HomeWidgetRegistryTests.swift in Sources */,
 				51D666B0798FC7244E328326 /* InputSanitiserTests.swift in Sources */,
 				18BEB7D45D5046004C294903 /* IntentCommandCacheTests.swift in Sources */,
 				FF4B55EED6542AC50A9E36E5 /* IntentLogStoreTests.swift in Sources */,
