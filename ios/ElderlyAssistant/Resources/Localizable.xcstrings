@@ -623,6 +623,227 @@
         }
       }
     },
+    "call.search.allowBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your phone book holds everyone — people you saved AND people added by WhatsApp, Messenger and other apps. Allow access, and the assistant can call any of them from this screen."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको फोन बुकमा सबै हुन्छन् — आफूले राखेका र व्हाट्सएप, मेसेन्जर लगायतका एपले थपेका मान्छेहरू पनि। पहुँच दिनुभयो भने असिस्टेन्टले यही स्क्रिनबाट जोसुकैलाई फोन गर्न सक्छ।"
+          }
+        }
+      }
+    },
+    "call.search.allowButton": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow contacts access"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्पर्कहरूको पहुँच दिनुहोस्"
+          }
+        }
+      }
+    },
+    "call.search.allowTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search your whole phone book"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पूरै फोन बुक खोज्नुहोस्"
+          }
+        }
+      }
+    },
+    "call.search.bookEmpty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your phone book has no contacts yet."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको फोन बुकमा अहिलेसम्म कोही छैन।"
+          }
+        }
+      }
+    },
+    "call.search.deniedBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Contacts access is off, so searching can't see anyone. Turn it on in Settings — the rest of the app keeps working as usual."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्पर्कको पहुँच बन्द भएकाले खोज्दा कोही देखिँदैन। सेटिङ्समा गएर खोल्नुहोस् — बाँकी सबै पहिले जस्तै चल्छ।"
+          }
+        }
+      }
+    },
+    "call.search.deniedTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Contacts access is off"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्पर्कहरूको पहुँच बन्द छ"
+          }
+        }
+      }
+    },
+    "call.search.loadFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't read your contacts. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंका सम्पर्कहरू पढ्न सकिएन। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "call.search.loading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reading your contacts…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंका सम्पर्कहरू पढ्दैछु…"
+          }
+        }
+      }
+    },
+    "call.search.moreAvailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More people match. Keep typing to narrow the list."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अझ धेरै मान्छे मिल्छन्। सूची सानो बनाउन लेख्दै जानुहोस्।"
+          }
+        }
+      }
+    },
+    "call.search.noResults": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No one found. Try a different name or number."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कोही भेटिएन। अर्को नाम वा नम्बर लेख्नुहोस्।"
+          }
+        }
+      }
+    },
+    "call.search.openSettings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सेटिङ्स खोल्नुहोस्"
+          }
+        }
+      }
+    },
+    "call.search.placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search all contacts"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सबै सम्पर्कहरू खोज्नुहोस्"
+          }
+        }
+      }
+    },
+    "call.search.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try again"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फेरि प्रयास गर्नुहोस्"
+          }
+        }
+      }
+    },
     "call.title": {
       "extractionState": "manual",
       "localizations": {
@@ -1180,6 +1401,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "सेटिङ"
+          }
+        }
+      }
+    },
+    "home.hub.appliance": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Me"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "देखाउनुहोस्"
           }
         }
       }
@@ -5464,40 +5702,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Whisper (नेपाली सानो, डिस्टिल्ड)"
-          }
-        }
-      }
-    },
-    "widgets.medsStatus": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%1$@ of %2$@ doses taken today"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "आज %2$@ मध्ये %1$@ खुराक लिइयो"
-          }
-        }
-      }
-    },
-    "widgets.nextReminder": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Next: %1$@ at %2$@"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "अर्को: %1$@ — %2$@"
           }
         }
       }

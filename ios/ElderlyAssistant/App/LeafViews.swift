@@ -277,7 +277,7 @@ struct RemindersView: View {
     }
 }
 
-// MARK: - Call (फोन) — redesign spec §3.2
+// MARK: - Call (फोन) — redesign spec §3.2 + system-contacts search (2026-09-06)
 
 /// Replaces the old fail-closed placeholder. `CommandRouter`'s `.call`
 /// handling (voice-triggered "call X") stays blocked, unchanged, pending
@@ -285,28 +285,351 @@ struct RemindersView: View {
 /// redesign does not touch. TAPPING a contact here is a different trust
 /// model: it's the user's own hand on their own unlocked phone, the same
 /// as any contacts app, so it places a real call directly.
+///
+/// System-contacts search (2026-09-06, task: "sweep all sweepable
+/// contacts when searching, sort by most recently used"): the leaf now
+/// also searches the SYSTEM address book — which on iOS is the sweep.
+/// The system Contacts app already aggregates the user's own entries AND
+/// people synced in by third-party apps (WhatsApp, Messenger, …) as
+/// plain contacts, so one `CNContactStore` pass reaches every dialable
+/// person without any per-app SDK. Matches rank with numbers this app
+/// recently called first (`CallRecencyStore`), then alphabetically.
+/// Contacts permission is asked at the point of use behind a
+/// plain-language card — never silently on appear — and the family
+/// tiles below stay fully usable with or without it.
 struct CallView: View {
     @EnvironmentObject var coordinator: AppCoordinator
+    @Environment(\.scenePhase) private var scenePhase
+
+    private let directory = AddressBookDirectory()
+
+    @State private var searchText = ""
+    /// nil while the authorization state is still being read.
+    @State private var access: ContactsAccess?
+    /// nil = not loaded yet (or load in flight).
+    @State private var entries: [AddressBookEntry]?
+    @State private var loadFailed = false
+    /// Normalized number → last call date; refreshed on appear and after
+    /// each dial so the "recently used" ranking stays current.
+    @State private var recency: [String: Date] = [:]
 
     var body: some View {
         LeafScreen(titleKey: "call.title") {
-            if coordinator.familyContacts.isEmpty {
-                Text("call.contactsEmpty")
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+            VStack(spacing: 12) {
+                searchArea
+                if isSearching {
+                    resultsArea
+                } else {
+                    familyArea
+                }
+            }
+        }
+        .onAppear(perform: refreshDirectory)
+        .onChange(of: scenePhase) { phase in
+            // Returning from Settings after the access card's
+            // "Open Settings" is the denial → grant path; re-check then.
+            if phase == .active { refreshDirectory() }
+        }
+    }
+
+    private var trimmedQuery: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private var isSearching: Bool { !trimmedQuery.isEmpty }
+
+    /// Big search pill (≥44pt, body-size text, warm card). Search runs as
+    /// the user types — no submit step to fumble.
+    private var searchField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(DesignTokens.textSecondary)
+            TextField("call.search.placeholder", text: $searchText)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .foregroundColor(DesignTokens.textPrimary)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: DesignTokens.minTapTargetSize)
+        .background(DesignTokens.card)
+        .clipShape(Capsule())
+    }
+
+    private var loadingCard: some View {
+        AddressBookLoadingCard()
+    }
+
+    private var loadFailedCard: some View {
+        AddressBookLoadFailedCard(retry: loadEntries)
+    }
+
+    // MARK: Permission / loading states
+
+    @ViewBuilder
+    private var searchArea: some View {
+        if access == .allowed {
+            searchField
+            if entries == nil {
+                if loadFailed {
+                    loadFailedCard
+                } else {
+                    loadingCard
+                }
+            }
+        } else if access == .denied {
+            AddressBookAccessCard(mode: .blocked)
+        } else if access == .notDetermined {
+            // The one point-of-use ask — plain-language card first, the
+            // system prompt only after the user taps Allow.
+            AddressBookAccessCard(mode: .ask, onAllow: grantAccess)
+        }
+        // access == nil: authorization still being read; render nothing
+        // so the ask card can never flash before onAppear resolves it.
+    }
+
+    private func refreshDirectory() {
+        let status = AddressBookDirectory.access()
+        access = status
+        guard status == .allowed else { return }
+        recency = coordinator.contactCallRecency
+        if entries == nil || loadFailed {
+            loadEntries()
+        }
+    }
+
+    /// The user tapped Allow on the access card — the ONE place the
+    /// permission prompt may fire (point of use, constitution).
+    private func grantAccess() {
+        Task {
+            let granted = await directory.requestAccess()
+            access = AddressBookDirectory.access()
+            if granted {
+                recency = coordinator.contactCallRecency
+                loadEntries()
+            }
+        }
+    }
+
+    private func loadEntries() {
+        loadFailed = false
+        Task {
+            do {
+                // A full-book enumerate can take a moment on first
+                // access — never block the main thread for it.
+                let loaded = try await Task.detached(priority: .userInitiated) {
+                    try AddressBookDirectory().allEntries()
+                }.value
+                self.entries = loaded
+            } catch {
+                self.loadFailed = true
+            }
+        }
+    }
+
+    private func dial(_ entry: AddressBookEntry) {
+        coordinator.performSystemContactCall(name: entry.name, phone: entry.phone)
+        // Keep THIS list's ranking current without waiting for the next
+        // view appearance; the coordinator store stays the source of
+        // truth.
+        recency[entry.normalized] = Date()
+    }
+
+    // MARK: Result / family areas
+
+    @ViewBuilder
+    private var resultsArea: some View {
+        if let entries {
+            let outcome = SystemContactSearch.search(query: trimmedQuery,
+                                                     in: entries,
+                                                     recency: recency)
+            if outcome.moreAvailable {
+                Text("call.search.moreAvailable")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(32)
-                    .frame(maxWidth: .infinity)
-                    .background(DesignTokens.card)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
+            }
+            if outcome.entries.isEmpty {
+                // An empty BOOK and a query with no match are different
+                // truths — say which one it is.
+                if entries.isEmpty {
+                    emptyState(key: "call.search.bookEmpty")
+                } else {
+                    emptyState(key: "call.search.noResults")
+                }
             } else {
                 VStack(spacing: 12) {
-                    ForEach(coordinator.familyContacts) { contact in
-                        ContactTile(contact: contact)
+                    ForEach(outcome.entries) { entry in
+                        AddressBookResultRow(entry: entry) { dial(entry) }
                     }
                 }
             }
         }
+    }
+
+    /// The in-app family tiles (spec §4.4) — always reachable, with or
+    /// without contacts permission or a search query.
+    @ViewBuilder
+    private var familyArea: some View {
+        if coordinator.familyContacts.isEmpty {
+            emptyState(key: "call.contactsEmpty")
+        } else {
+            VStack(spacing: 12) {
+                ForEach(coordinator.familyContacts) { contact in
+                    ContactTile(contact: contact)
+                }
+            }
+        }
+    }
+}
+
+/// Permission state card for the contacts search. `.ask` appears while
+/// the app may still request access and explains WHY in plain language
+/// before the prompt fires (constitution: request at the point of use);
+/// `.blocked` appears after a denial or restriction, whose only forward
+/// path is the system Settings screen. Either way the family tiles stay
+/// visible beneath it — nothing is held hostage to the permission.
+private enum AddressBookAccessMode {
+    case ask
+    case blocked
+}
+
+private struct AddressBookAccessCard: View {
+    let mode: AddressBookAccessMode
+    /// Fires the one-time permission request; used only by `.ask`.
+    var onAllow: (() -> Void)?
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Text(titleKey)
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textPrimary)
+                .multilineTextAlignment(.center)
+            Text(bodyKey)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+                .multilineTextAlignment(.center)
+            Button(action: action) {
+                Text(buttonKey)
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .frame(height: DesignTokens.minTapTargetSize)
+                    .background(DesignTokens.accent)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    private var titleKey: LocalizedStringKey {
+        mode == .ask ? "call.search.allowTitle" : "call.search.deniedTitle"
+    }
+    private var bodyKey: LocalizedStringKey {
+        mode == .ask ? "call.search.allowBody" : "call.search.deniedBody"
+    }
+    private var buttonKey: LocalizedStringKey {
+        mode == .ask ? "call.search.allowButton" : "call.search.openSettings"
+    }
+
+    private func action() {
+        if mode == .ask {
+            onAllow?()
+        } else {
+            // Denied/restricted: only the system can lift it.
+            guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+            UIApplication.shared.open(url)
+        }
+    }
+}
+
+private struct AddressBookLoadingCard: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+            Text("call.search.loading")
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+}
+
+private struct AddressBookLoadFailedCard: View {
+    let retry: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text("call.search.loadFailed")
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+                .multilineTextAlignment(.center)
+            Button(action: retry) {
+                Text("call.search.retry")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .frame(height: DesignTokens.minTapTargetSize)
+                    .background(DesignTokens.accent)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+}
+
+/// One system-contacts search result. The WHOLE tile dials — a target
+/// comfortably larger than 44pt for elderly hands, with the phone circle
+/// mirroring the ContactTile audio affordance as a visual cue. VoiceOver
+/// reads it as one "Call <name>" button whose value is the number.
+private struct AddressBookResultRow: View {
+    let entry: AddressBookEntry
+    let dial: () -> Void
+    @Environment(\.locale) private var locale
+
+    var body: some View {
+        Button(action: dial) {
+            HStack(spacing: 14) {
+                FaceAvatar(name: entry.name, diameter: 52)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.name)
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                        .multilineTextAlignment(.leading)
+                    Text(entry.caption)
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "phone.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: DesignTokens.minTapTargetSize, height: DesignTokens.minTapTargetSize)
+                    .background(DesignTokens.accent)
+                    .clipShape(Circle())
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(L10n.fmt("call.callButtonLabel", locale: locale, entry.name)))
+        .accessibilityValue(Text(entry.caption))
     }
 }
 

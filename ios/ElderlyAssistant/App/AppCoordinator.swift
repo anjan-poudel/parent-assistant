@@ -1543,6 +1543,26 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// Design §4 "Show Me" button path: a dock tile presents the
+    /// appliance camera surface directly with no question attached —
+    /// skipping the LLM round trip entirely (the tap IS the intent, so
+    /// there is no ambiguity to resolve). The voice path goes through
+    /// `ApplianceHelperPlugin.handle` instead. 2026-09-06: until now only
+    /// the voice path existed; the dock tile was designed but unbuilt.
+    func presentApplianceHelper(question: String?) {
+        guard geminiClient.isAvailable else {
+            speak(text: L10n.str("plugin.applianceHelper.notConfigured", locale: activeLocale))
+            return
+        }
+        let session = ApplianceHelperSession(question: question,
+                                             locale: activeLocale,
+                                             geminiClient: geminiClient,
+                                             cache: ApplianceCache(storage: storage),
+                                             observabilityBus: observabilityBus,
+                                             speaker: speaker)
+        presentPluginView(AnyView(ApplianceHelperView(session: session)))
+    }
+
     /// `send_message` (v2 pivot Phase 2, §4.3). Every surface ends with
     /// the user's own tap on Send — that tap IS the `.confirm`-tier
     /// confirmation, exactly as the shipped SMS flow models it:
