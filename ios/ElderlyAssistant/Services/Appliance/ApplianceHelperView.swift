@@ -5,20 +5,33 @@ import UIKit
 /// All pipeline logic lives in `ApplianceHelperSession`; this view only
 /// renders `session.state` and forwards camera results.
 ///
-/// Layout contract (design §5.1): the photo renders `.aspectRatio(.fit)`
-/// inside a `GeometryReader`, and the `Canvas` overlay recomputes the
-/// letterboxed displayed rect via `ApplianceOverlayMapper` on every size
-/// change — a pure function of (containerSize, imageSize, box), so there
-/// is no stale mapping state to invalidate on rotation/Dynamic Type.
+/// Guidance layout: instead of one crammed overlay on the full photo, each
+/// step is its own card — the instruction text up top, then a CROPPED,
+/// zoomed close-up of the relevant section with the button circled (a
+/// `talkGlowEnd` ring, white under-stroke, step badge) and the button's
+/// label beneath it (augmented into the ACTIVE locale's language when the
+/// localizer knows the label). Close-ups are pinch-zoomed up to 4×
+/// (double-tap resets to 1×).
+///
+/// The crop rect is a pure function of (normalizedBox, CGImage pixel
+/// size) via `ApplianceCropGeometry`; the ring maps through
+/// `ApplianceOverlayMapper` on every size change, so there is no stale
+/// mapping state on rotation/Dynamic Type. Numerals and label augmentation
+/// follow the active locale (`@Environment(\.locale)`, set at the app root
+/// from `AppLanguage`) — Devanagari only under a Nepali-active locale.
 struct ApplianceHelperView: View {
 
     @ObservedObject var session: ApplianceHelperSession
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.locale) private var locale
     @State private var showCamera = false
     /// Auto-open the camera once when the sheet appears (the voice turn
     /// already said "show me the appliance"); retakes use the button.
     @State private var didAutoOpenCamera = false
-    @State private var pulse = false
+
+    /// Close-up panels are deliberately tall — the photo section is the
+    /// point of the step card.
+    private static let closeUpHeight: CGFloat = 260
 
     var body: some View {
         NavigationStack {
@@ -149,16 +162,13 @@ struct ApplianceHelperView: View {
                 if presentation.hedged {
                     hedgeBanner
                 }
-                photoWithOverlay(presentation, image: image)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 340)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                overviewCard(presentation)
 
                 if presentation.showCloserPhotoHint {
                     closerPhotoHint
                 }
 
-                stepsCard(presentation)
+                stepCards(presentation, image: image)
 
                 Button {
                     session.retake()
@@ -202,57 +212,9 @@ struct ApplianceHelperView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
     }
 
-    /// Photo + overlay (design §5.1): fixed-radius high-contrast circle +
-    /// step-number badge per visible control — fixed radius rather than
-    /// box-scaled, because real buttons are often tiny in a full-panel
-    /// photo and a box-accurate circle would be effectively invisible.
-    private func photoWithOverlay(_ presentation: ApplianceGuidancePolicy.Presentation,
-                                  image: UIImage) -> some View {
-        GeometryReader { geometry in
-            ZStack {
-                Image(uiImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                Canvas { context, _ in
-                    for (index, control) in presentation.visibleControls.enumerated() {
-                        let point = ApplianceOverlayMapper.screenPoint(
-                            for: control,
-                            containerSize: geometry.size,
-                            imageSize: image.size)
-                        let radius: CGFloat = 14 * (pulse ? 1.15 : 1.0)
-                        let rect = CGRect(x: point.x - radius, y: point.y - radius,
-                                          width: radius * 2, height: radius * 2)
-                        // White under-stroke keeps the orange ring legible
-                        // on both dark and busy control panels (don't rely
-                        // on color alone — pulse carries attention too).
-                        context.stroke(Circle().path(in: rect.insetBy(dx: -1.5, dy: -1.5)),
-                                       with: .color(.white), lineWidth: 5)
-                        context.stroke(Circle().path(in: rect),
-                                       with: .color(DesignTokens.talkGlowEnd), lineWidth: 3.5)
-                        let badgeNumber = control.stepNumber ?? (index + 1)
-                        let badgeCenter = CGPoint(x: point.x + radius, y: point.y - radius)
-                        let badgeRect = CGRect(x: badgeCenter.x - 10, y: badgeCenter.y - 10,
-                                               width: 20, height: 20)
-                        context.fill(Circle().path(in: badgeRect), with: .color(DesignTokens.talkGlowEnd))
-                        context.draw(Text("\(badgeNumber)")
-                                        .font(.system(size: 13, weight: .bold))
-                                        .foregroundColor(.white),
-                                     at: badgeCenter)
-                    }
-                }
-            }
-        }
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                pulse = true
-            }
-        }
-    }
-
-    /// The step list is ALWAYS shown as plain text — the overlay is
-    /// additive, never load-bearing for understanding (design §2/§7).
-    private func stepsCard(_ presentation: ApplianceGuidancePolicy.Presentation) -> some View {
+    /// Appliance name + spoken summary (the answer's plain-text anchor;
+    /// step detail now lives in the per-step cards below).
+    private func overviewCard(_ presentation: ApplianceGuidancePolicy.Presentation) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             let name = presentation.guidance.identity.displayName
             if !name.isEmpty {
@@ -265,19 +227,49 @@ struct ApplianceHelperView: View {
                     .font(.system(size: DesignTokens.minBodyPointSize))
                     .foregroundColor(DesignTokens.textPrimary)
             }
-            ForEach(Array(presentation.guidance.steps.enumerated()), id: \.offset) { index, step in
-                HStack(alignment: .top, spacing: 10) {
-                    Text("\(index + 1)")
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+    }
+
+    // MARK: - Step cards
+
+    /// One card per step, in order: badge + instruction text, then one
+    /// cropped close-up (circled button + label) per grounded control of
+    /// that step. Steps without a control stay text-only.
+    private func stepCards(_ presentation: ApplianceGuidancePolicy.Presentation,
+                           image: UIImage) -> some View {
+        let cards = ApplianceStepCardPlanner.build(
+            steps: presentation.guidance.steps,
+            controls: presentation.visibleControls)
+        return ForEach(cards, id: \.number) { card in
+            stepCard(card, image: image)
+        }
+    }
+
+    private func stepCard(_ card: ApplianceStepCard, image: UIImage) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                ZStack {
+                    Circle().fill(DesignTokens.accent)
+                    Text(stepNumberText(card.number))
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                         .foregroundColor(.white)
-                        .frame(width: 26, height: 26)
-                        .background(DesignTokens.accent)
-                        .clipShape(Circle())
-                    Text(step)
-                        .font(.system(size: DesignTokens.minBodyPointSize))
-                        .foregroundColor(DesignTokens.textPrimary)
-                    Spacer(minLength: 0)
+                        .accessibilityLabel(Text(stepAccessibilityLabel(card.number)))
                 }
+                .frame(width: 42, height: 42)
+                Text(card.text)
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 9)
+                Spacer(minLength: 0)
+            }
+            ForEach(Array(card.controls.enumerated()), id: \.offset) { _, control in
+                controlSection(control, stepNumber: card.number, image: image)
             }
         }
         .padding(16)
@@ -285,6 +277,224 @@ struct ApplianceHelperView: View {
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
         .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The cropped close-up (button circled, pinch-zoomable) plus the
+    /// button's label — augmented into the active locale when the
+    /// localizer knows the printed English text.
+    @ViewBuilder
+    private func controlSection(_ control: GroundedControl,
+                                stepNumber: Int,
+                                image: UIImage) -> some View {
+        let display = ApplianceLabelLocalizer.display(for: control.label,
+                                                      locale: locale)
+        VStack(alignment: .leading, spacing: 10) {
+            if let pixelSize = ApplianceCropGeometry.imagePixelSize(image),
+               let crop = ApplianceCropGeometry.crop(for: control.normalizedBox,
+                                                     imagePixelSize: pixelSize),
+               let croppedCG = image.cgImage?.cropping(to: crop.rect) {
+                let cropped = UIImage(cgImage: croppedCG,
+                                      scale: image.scale,
+                                      orientation: image.imageOrientation)
+                ZoomableStepImage(image: cropped,
+                                  crop: crop,
+                                  badgeText: stepNumberText(stepNumber))
+                    .frame(height: Self.closeUpHeight)
+                    .frame(maxWidth: .infinity)
+                    .background(DesignTokens.userBubble)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .accessibilityHidden(true)
+            }
+            buttonLabel(display)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The button's name under its close-up: the active locale's term when
+    /// the localizer knows it, with the printed English kept as a
+    /// reference line.
+    private func buttonLabel(_ display: ApplianceLabelLocalizer.Display) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(display.primary)
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundColor(DesignTokens.textPrimary)
+            if let secondary = display.secondary {
+                Text(secondary)
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // MARK: - Locale-driven presentation
+
+    /// Numerals and label augmentation follow the ACTIVE locale (the
+    /// `.locale` injected at the app root from `AppLanguage`) — Devanagari
+    /// only under a Nepali-active session, Western digits otherwise.
+    private var isNepaliUI: Bool {
+        ApplianceLabelLocalizer.isNepali(locale)
+    }
+
+    private func stepNumberText(_ number: Int) -> String {
+        isNepaliUI ? DevanagariNumerals.string(number) : "\(number)"
+    }
+
+    private func stepAccessibilityLabel(_ number: Int) -> String {
+        L10n.fmt("appliance.stepAccessibility", locale: locale, stepNumberText(number))
+    }
+}
+
+// MARK: - Zoomable step close-up
+
+/// The per-step cropped photo: the crop aspect-fits inside the panel, the
+/// ring/badge overlay tracks the control's box, and the whole content
+/// layer pinch-zooms 1×–4× with panning while zoomed (double-tap resets
+/// to 1×). Zoom transitions animate unless the user has Reduce Motion on
+/// (zooming itself still works — only the animation is skipped).
+private struct ZoomableStepImage: View {
+    /// The cropped region as a `UIImage`.
+    let image: UIImage
+    /// The crop geometry the ring is placed against.
+    let crop: ApplianceCropGeometry.Crop
+    /// The step's badge text, already localized (e.g. "१" or "1").
+    let badgeText: String
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Zoom settled between gestures (1 = fit).
+    @State private var settledZoom: CGFloat = 1
+    /// Pan offset settled between drags.
+    @State private var settledPan: CGSize = .zero
+    /// In-flight pinch factor (resets to 1 when the gesture ends).
+    @GestureState private var pinchFactor: CGFloat = 1
+    /// Pan origin for the CURRENT drag (so translations accumulate).
+    @State private var panBase: CGSize = .zero
+
+    /// Displayed zoom — clamped by pure `ApplianceZoomGeometry`.
+    private var zoom: CGFloat {
+        ApplianceZoomGeometry.clampedScale(settledZoom * pinchFactor)
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                let displayed = ApplianceOverlayMapper.displayedImageRect(
+                    containerSize: geometry.size,
+                    imageSize: image.size)
+                if displayed.width > 0, displayed.height > 0 {
+                    highlightOverlay(displayed: displayed)
+                }
+            }
+            .scaleEffect(zoom)
+            .offset(settledPan)
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .contentShape(Rectangle())
+            .simultaneousGesture(magnificationGesture(baseSize: geometry.size))
+            .simultaneousGesture(dragGesture(baseSize: geometry.size),
+                                 including: zoom > 1.001 ? .all : .none)
+            .simultaneousGesture(resetGesture,
+                                 including: zoom > 1.001 ? .all : .none)
+        }
+    }
+
+    /// The circled button + step badge, drawn in the crop's own displayed
+    /// space (the layer zooms as one, so the ring stays glued to the
+    /// button at any zoom). The ring encloses the control's VISIBLE box
+    /// (crop ∩ box, so a box that runs past the photo edge never gets an
+    /// off-photo center) with a readability floor.
+    private func highlightOverlay(displayed: CGRect) -> some View {
+        let ringCenter = CGPoint(x: displayed.minX + crop.boxInCrop.midX * displayed.width,
+                                 y: displayed.minY + crop.boxInCrop.midY * displayed.height)
+        let boxWidth = crop.boxInCrop.width * displayed.width
+        let boxHeight = crop.boxInCrop.height * displayed.height
+        // Enclosing circle of the visible box; can never exceed the photo.
+        let enclosing = 0.5 * CGFloat(hypot(Double(boxWidth), Double(boxHeight))) * 1.15
+        let radius = min(max(enclosing, 22), min(displayed.width, displayed.height) / 2)
+        return ZStack {
+            // White under-stroke keeps the orange ring legible on both
+            // dark and busy control panels (don't rely on color alone).
+            Circle()
+                .stroke(Color.white, lineWidth: 6)
+                .frame(width: (radius + 3) * 2, height: (radius + 3) * 2)
+                .position(ringCenter)
+            Circle()
+                .stroke(DesignTokens.talkGlowEnd, lineWidth: 4.5)
+                .frame(width: radius * 2, height: radius * 2)
+                .position(ringCenter)
+            ZStack {
+                Circle().fill(DesignTokens.talkGlowEnd)
+                Text(badgeText)
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                    .foregroundColor(.white)
+            }
+            .frame(width: 32, height: 32)
+            .overlay(Circle().stroke(Color.white, lineWidth: 2))
+            .position(x: ringCenter.x + radius * 0.78,
+                      y: ringCenter.y - radius * 0.78)
+        }
+    }
+
+    // MARK: Gestures
+
+    private func magnificationGesture(baseSize: CGSize) -> some Gesture {
+        MagnificationGesture()
+            .updating($pinchFactor) { value, state, _ in
+                state = value
+            }
+            .onEnded { value in
+                settledZoom = ApplianceZoomGeometry.clampedScale(settledZoom * value)
+                settlePan(to: ApplianceZoomGeometry.clampedOffset(
+                    settledPan, zoom: settledZoom, baseSize: baseSize))
+            }
+    }
+
+    private func dragGesture(baseSize: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 4)
+            .onChanged { value in
+                let proposed = CGSize(width: panBase.width + value.translation.width,
+                                      height: panBase.height + value.translation.height)
+                settlePan(to: ApplianceZoomGeometry.clampedOffset(
+                    proposed, zoom: zoom, baseSize: baseSize))
+            }
+            .onEnded { _ in
+                panBase = settledPan
+            }
+    }
+
+    /// Double-tap resets the close-up to its 1× fit (and centered).
+    private var resetGesture: some Gesture {
+        TapGesture(count: 2)
+            .onEnded {
+                animate {
+                    settledZoom = 1
+                    settlePan(to: .zero)
+                }
+            }
+    }
+
+    // MARK: Helpers
+
+    /// Reduce Motion (accessibility) skips zoom/pan animations but never
+    /// the zoom itself.
+    private func animate(_ change: () -> Void) {
+        if reduceMotion {
+            change()
+        } else {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                change()
+            }
+        }
+    }
+
+    private func settlePan(to value: CGSize) {
+        settledPan = value
+        panBase = value
     }
 }
 

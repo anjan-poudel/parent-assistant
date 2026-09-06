@@ -181,6 +181,23 @@
         }
       }
     },
+    "appliance.stepAccessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Step %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "चरण %@"
+          }
+        }
+      }
+    },
     "appliance.takePhoto": {
       "extractionState": "manual",
       "localizations": {
