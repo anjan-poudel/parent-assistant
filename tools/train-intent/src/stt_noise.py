@@ -30,7 +30,7 @@ from pathlib import Path
 
 from config import load_config, abs_path
 
-BATCH = 16  # clips per hf generate() call
+BATCH = 32  # clips per hf generate() call
 
 
 def synthesize(text: str, wav_path: Path, cfg: dict) -> None:
@@ -168,7 +168,7 @@ def main() -> None:
                 except Exception as e:  # noqa: BLE001
                     print(f"[stt_noise] {nid} synth failed: {e} — continuing")
                     return None
-            with ThreadPoolExecutor(max_workers=4) as pool:
+            with ThreadPoolExecutor(max_workers=8) as pool:
                 for result in pool.map(synth_one, chunk):
                     if result is None:
                         failed += 1
