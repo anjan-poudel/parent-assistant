@@ -60,6 +60,10 @@ struct ModelCatalogEntry: Codable, Identifiable {
     /// on first launch instead of downloading).
     let bundledResourceName: String?
 
+    /// True when the artifact needs CoreML spec v9 (grouped palettization)
+    /// — iOS 18+ at runtime. The download service refuses below that.
+    let requiresiOS18: Bool
+
     init(id: ModelID,
          kind: ModelKind,
          displayName: String,
@@ -74,7 +78,8 @@ struct ModelCatalogEntry: Codable, Identifiable {
          coreMLEncoderZipBytes: Int64 = 0,
          whisperKitZipURL: URL? = nil,
          whisperKitZipBytes: Int64 = 0,
-         bundledResourceName: String? = nil) {
+         bundledResourceName: String? = nil,
+         requiresiOS18: Bool = false) {
         self.id = id
         self.kind = kind
         self.displayName = displayName
@@ -90,6 +95,7 @@ struct ModelCatalogEntry: Codable, Identifiable {
         self.whisperKitZipURL = whisperKitZipURL
         self.whisperKitZipBytes = whisperKitZipBytes
         self.bundledResourceName = bundledResourceName
+        self.requiresiOS18 = requiresiOS18
     }
 
     var id_: ModelID { id }
@@ -111,6 +117,9 @@ enum ModelCatalog {
     /// — the ANE-accelerated path that replaces the ggml STT entries.
     /// Placeholder until the teacher conversion lands (see migration).
     static let whisperKitNepali = ModelID("whisperkit-ne-teacher")
+    /// kiranpantha base large-v3, 6-bit palettized CoreML (same recipe
+    /// as the teacher above).
+    static let whisperKitNepaliLargeBase = ModelID("whisperkit-ne-large-base")
     /// The SHIPPING WhisperKit model today: the medium fine-tune
     /// (checkpoint-5028) converted to fp16 CoreML — the quality bet from
     /// the distillation findings, now interactive via ANE (~1.3 s per
@@ -275,7 +284,27 @@ enum ModelCatalog {
             minDeviceRAMBytes: 5_000_000_000,
             dependsOn: nil,
             whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v6/whisperkit-ne-teacher-v2-q6.zip")!,
-            whisperKitZipBytes: 1_199_427_423
+            whisperKitZipBytes: 1_199_427_423,
+            requiresiOS18: true
+        ),
+        ModelCatalogEntry(
+            id: whisperKitNepaliLargeBase,
+            kind: .whisperBase,
+            displayName: "Nepali — Large · WhisperKit (original)",
+            // kiranpantha/whisper-large-v3-nepali base, same 6-bit
+            // palettization recipe as the fine-tuned sibling above.
+            // FLEURS WER 39.63 on the shared harness (teacher-v2: 34.51).
+            filename: "whisperkit-ne-large-base-q6",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v6/whisperkit-ne-large-base-q6.zip")!,
+            // Unpacked ~1.40 GB on disk (mlmodelc trio + tokenizer).
+            sizeBytes: 1_400_000_000,
+            // SHA-256 of the release ZIP — verified by installWhisperKitModel.
+            sha256: "cf4c8c206fd31e57821fcb2cf681c7db3c1052a831503a9ba72c9486f7d45f32",
+            minDeviceRAMBytes: 5_000_000_000,
+            dependsOn: nil,
+            whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v6/whisperkit-ne-large-base-q6.zip")!,
+            whisperKitZipBytes: 1_225_257_321,
+            requiresiOS18: true
         ),
         ModelCatalogEntry(
             id: whisperKitNepaliMedium,
