@@ -420,14 +420,14 @@ enum ModelCatalog {
     /// fallbacks last) — the picker and the downloads list both iterate
     /// this so the two surfaces always agree.
     static let availableSTTEntries: [ModelCatalogEntry] = {
-        entries(kind: .whisperBase).filter { id in
+        entries(kind: .whisperBase).filter { entry in
             // Exclude the teacher WhisperKit placeholder (no real artifact
             // yet) and the CPU-only large-v3 ggml models — too slow to be
             // usable on-device. The ANE (WhisperKit) large models replace
             // them once their q6 artifacts are published.
-            !(id == whisperKitNepali
-              || id == whisperLargeV3Nepali
-              || id == whisperLargeV3NepaliV2)
+            !(entry.id == whisperKitNepali
+              || entry.id == whisperLargeV3Nepali
+              || entry.id == whisperLargeV3NepaliV2)
         }
     }()
 }
