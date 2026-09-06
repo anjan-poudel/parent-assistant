@@ -658,12 +658,15 @@ final class AppCoordinator: ObservableObject {
         pluginRegistry.register(routinePlugin)
         self.pluginRegistry = pluginRegistry
 
+        // [NO-GIBBERISH] (2026-09-07): sampling is NOT configurable here —
+        // every on-device brain runs deterministic temp-0 + fixed-seed
+        // sampling through `OnDeviceSampling` (the old temperature: 0.2
+        // Config field was removed with that rationale).
         self.llamaCommandInterpreter = LlamaCommandInterpreter(
             modelStore: modelStore,
             observabilityBus: bus,
             config: LlamaCommandInterpreter.Config(confidenceThreshold: 0.4,
                                                    maxTokens: 128,
-                                                   temperature: 0.2,
                                                    timeoutSeconds: 10),
             pluginRegistry: pluginRegistry
         )

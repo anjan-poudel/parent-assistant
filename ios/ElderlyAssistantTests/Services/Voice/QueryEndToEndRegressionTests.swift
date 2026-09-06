@@ -1,7 +1,8 @@
 import XCTest
 @testable import ElderlyAssistant
 
-/// [QUERY-FIX] end-to-end regression suite (2026-09-06).
+/// [QUERY-FIX] end-to-end regression suite (2026-09-06), updated for
+/// [NO-GIBBERISH] (2026-09-07).
 ///
 /// Replays the exact device failure chain that motivated the fix. On the
 /// device, the Nepali weather question "भोलिको मौसम कस्तो छ?" transcribed
@@ -11,6 +12,12 @@ import XCTest
 /// (`LLM(from:maxTokenCount: 1024)`), the runtime finished with an EMPTY
 /// completion that was reported as success, `parse("")` returned nil, and
 /// every utterance fell through to `command_unrecognised`.
+///
+/// [NO-GIBBERISH] change (2026-09-07): the weather transcript is now a
+/// deterministic TOPIC PRE-ANSWER (`TopicPreAnswer`) — it never reaches
+/// the brain at all, so the model-path assertions below exercise a NEUTRAL
+/// open question (`openQuestionTranscript`) instead, and a dedicated test
+/// pins the weather pre-answer behavior end-to-end.
 ///
 /// These tests drive the REAL production chain — `CommandRouter` →
 /// `IntentRouter` (with a real cache) → `LocalBrainChain` → the real
@@ -78,7 +85,7 @@ final class QueryEndToEndRegressionTests: XCTestCase {
         // configuration the device was in when the bug was logged.
         let standIn = LlamaCommandInterpreter(modelStore: store,
                                               observabilityBus: bus)
-        standIn.generateOverride = { _ in overrideJSON }
+        standIn.generateOverride = { _, _ in overrideJSON }
         let preferred = LocalIntentInterpreter(modelStore: store,
                                                observabilityBus: bus)
         let chain = LocalBrainChain(preferred: preferred, standIn: standIn)
@@ -107,12 +114,18 @@ final class QueryEndToEndRegressionTests: XCTestCase {
         wait(for: [e], timeout: timeout)
     }
 
-    /// The exact device utterance.
+    /// The exact device utterance — now a deterministic TOPIC PRE-ANSWER
+    /// (weather), see the dedicated test below.
     private let weatherTranscript = "भोलिको मौसम कस्तो छ?"
 
-    /// The canonical contract answer a well-behaved brain returns for the
-    /// weather question (real, spoken, Nepali — the router must speak it).
-    private let weatherAnswer = "भोलि काठमाडौंमा हल्का बदली छ।"
+    /// A neutral open question with NO topic keywords — the transcript the
+    /// model-path tests exercise since the weather question no longer
+    /// reaches the brain.
+    private let openQuestionTranscript = "के छ खबर?"
+
+    /// The canonical contract answer a well-behaved brain returns for an
+    /// open question (real, spoken, Nepali — the router must speak it).
+    private let modelAnswer = "तपाईंका लागि केही राम्रा कुरा छन्।"
 
     private func canonicalQueryJSON(response: String, confidence: Double = 0.9) -> String {
         """
@@ -124,23 +137,23 @@ final class QueryEndToEndRegressionTests: XCTestCase {
         L10n.str("router.reprompt", locale: Locale(identifier: "ne-NP"))
     }
 
-    // MARK: - The device repro, fixed
+    // MARK: - The device repro, fixed (model path, neutral question)
 
-    func testWeatherQuestionYieldsSpokenAnswerNotApologyEndToEnd() {
-        // The exact device utterance + the canonical structured response:
-        // intent=query with a NON-EMPTY response. The router must speak
-        // the response (noteGenericReply + speak) — NOT the generic
-        // "माफ गर्नुहोस्" apology, and NOT command_unrecognised.
+    func testOpenQuestionYieldsSpokenAnswerNotApologyEndToEnd() {
+        // The canonical structured response: intent=query with a NON-EMPTY
+        // response. The router must speak the response
+        // (noteGenericReply + speak) — NOT the generic "माफ गर्नुहोस्"
+        // apology, and NOT command_unrecognised.
         let harness = makeLocalHarness(
-            overrideJSON: canonicalQueryJSON(response: weatherAnswer))
+            overrideJSON: canonicalQueryJSON(response: modelAnswer))
 
-        harness.router.route(transcript: weatherTranscript)
+        harness.router.route(transcript: openQuestionTranscript)
 
         waitUntil { harness.coordinator.genericReplies.count == 1 }
-        XCTAssertEqual(harness.coordinator.genericReplies, [weatherAnswer],
+        XCTAssertEqual(harness.coordinator.genericReplies, [modelAnswer],
                        "the query answer must reach the visible reply channel")
         waitUntil { !harness.speaker.spoken.isEmpty }
-        XCTAssertEqual(harness.speaker.spoken, [weatherAnswer],
+        XCTAssertEqual(harness.speaker.spoken, [modelAnswer],
                        "the query answer must be SPOKEN — never the apology")
 
         XCTAssertTrue(bus.contains("command_dispatched_to_llm"))
@@ -156,13 +169,13 @@ final class QueryEndToEndRegressionTests: XCTestCase {
         // shape (action/reply). The tolerant parse must keep that path
         // speakable too — this is the designed primary brain.
         let harness = makeLocalHarness(overrideJSON: """
-        {"action":"query","entryId":null,"contact":null,"time":null,"medication":null,"message":null,"callType":null,"requestedApp":null,"confidence":0.9,"reply":"\(weatherAnswer)"}
+        {"action":"query","entryId":null,"contact":null,"time":null,"medication":null,"message":null,"callType":null,"requestedApp":null,"confidence":0.9,"reply":"\(modelAnswer)"}
         """)
 
-        harness.router.route(transcript: weatherTranscript)
+        harness.router.route(transcript: openQuestionTranscript)
 
         waitUntil { harness.coordinator.genericReplies.count == 1 }
-        XCTAssertEqual(harness.coordinator.genericReplies, [weatherAnswer])
+        XCTAssertEqual(harness.coordinator.genericReplies, [modelAnswer])
         XCTAssertFalse(bus.contains("command_unrecognised"))
     }
 
@@ -174,7 +187,7 @@ final class QueryEndToEndRegressionTests: XCTestCase {
         let harness = makeLocalHarness(
             overrideJSON: canonicalQueryJSON(response: ""))
 
-        harness.router.route(transcript: weatherTranscript)
+        harness.router.route(transcript: openQuestionTranscript)
 
         waitUntil { self.bus.contains("command_unrecognised") }
         XCTAssertTrue(bus.contains("command_unrecognised"))
@@ -196,7 +209,7 @@ final class QueryEndToEndRegressionTests: XCTestCase {
         // never masquerade as a successful (empty) inference again.
         let harness = makeLocalHarness(overrideJSON: "")
 
-        harness.router.route(transcript: weatherTranscript)
+        harness.router.route(transcript: openQuestionTranscript)
 
         waitUntil { self.bus.contains("inference_empty_output") }
         XCTAssertTrue(bus.contains("inference_empty_output"),
@@ -206,6 +219,36 @@ final class QueryEndToEndRegressionTests: XCTestCase {
         XCTAssertTrue(bus.contains("command_unrecognised"))
         waitUntil { !harness.speaker.spoken.isEmpty }
         XCTAssertEqual(harness.speaker.spoken, [repromptText()])
+    }
+
+    // MARK: - [NO-GIBBERISH] weather pre-answer intercepts before the brain
+
+    func testWeatherQuestionYieldsDeterministicPreAnswerNotTheModel() {
+        // [NO-GIBBERISH] (2026-09-07) The exact device utterance is now a
+        // deterministic TOPIC PRE-ANSWER: "भोलिको मौसम कस्तो छ?" must get
+        // the honest pre-written weather reply — even with a brain whose
+        // seam would return EMPTY output (proving the brain is never
+        // consulted: no empty-output failure, no dispatch event, no
+        // inference event).
+        let harness = makeLocalHarness(overrideJSON: "")
+
+        harness.router.route(transcript: weatherTranscript)
+
+        waitUntil { !harness.coordinator.genericReplies.isEmpty }
+        let expected = L10n.str("topic.weather.unavailable",
+                                locale: Locale(identifier: "ne-NP"))
+        XCTAssertEqual(harness.coordinator.genericReplies, [expected],
+                       "the weather pre-answer must reach the visible reply channel")
+        waitUntil { !harness.speaker.spoken.isEmpty }
+        XCTAssertEqual(harness.speaker.spoken, [expected],
+                       "the weather pre-answer must be SPOKEN — honest, never gibberish")
+
+        XCTAssertTrue(bus.contains("topic_pre_answer"),
+                      "the deterministic answer must be observable as a pre-answer")
+        XCTAssertFalse(bus.contains("command_dispatched_to_llm"),
+                       "a topic pre-answer must never consult the brain")
+        XCTAssertFalse(bus.contains("inference_empty_output"))
+        XCTAssertFalse(bus.contains("command_unrecognised"))
     }
 
     // MARK: - Gemini (cloud) path — same contract, stubbed transport
@@ -229,12 +272,12 @@ final class QueryEndToEndRegressionTests: XCTestCase {
         // canonical query answer from the stubbed API must be spoken, not
         // reprompted.
         let harness = makeGeminiHarness(
-            json: canonicalQueryJSON(response: weatherAnswer, confidence: 0.95))
+            json: canonicalQueryJSON(response: modelAnswer, confidence: 0.95))
 
-        harness.router.route(transcript: weatherTranscript)
+        harness.router.route(transcript: openQuestionTranscript)
 
         waitUntil { harness.coordinator.genericReplies.count == 1 }
-        XCTAssertEqual(harness.coordinator.genericReplies, [weatherAnswer])
+        XCTAssertEqual(harness.coordinator.genericReplies, [modelAnswer])
         XCTAssertFalse(bus.contains("command_unrecognised"))
         XCTAssertTrue(bus.contains("command_llm_query"))
     }
@@ -245,7 +288,7 @@ final class QueryEndToEndRegressionTests: XCTestCase {
         let harness = makeGeminiHarness(
             json: canonicalQueryJSON(response: "", confidence: 0.95))
 
-        harness.router.route(transcript: weatherTranscript)
+        harness.router.route(transcript: openQuestionTranscript)
 
         waitUntil { self.bus.contains("command_unrecognised") }
         XCTAssertFalse(bus.contains("command_llm_query"))
