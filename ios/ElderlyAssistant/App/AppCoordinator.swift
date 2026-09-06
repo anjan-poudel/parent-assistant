@@ -1135,6 +1135,91 @@ final class AppCoordinator: ObservableObject {
         voiceStartWatchdog = nil
     }
 
+    // MARK: - One-shot search-phrase capture (Phone leaf mic button)
+
+    /// The leaf-owned capture runs while the always-on voice pipeline is
+    /// SUSPENDED — the pipeline's tap is the shared engine's single tap
+    /// slot (see `SearchPhraseCapture`'s design note, 2026-09-07). True
+    /// when we stopped a LIVE pipeline that must be restarted once the
+    /// capture completes; false when the pipeline was already stopped.
+    private var voiceWasSuspendedForSearchCapture = false
+    private var searchPhraseCaptureActive = false
+
+    private lazy var searchPhraseCapture = SearchPhraseCapture(
+        audioSession: audioSessionManager,
+        audioEngine: audioEngine,
+        recognizer: fallbackSpeechRecognizer
+    )
+
+    /// Begins a one-shot mic capture for the Phone leaf's search field
+    /// (`VoiceCommandCoordinating` peers — the leaf drives this directly,
+    /// not through the router). Refuses (`.busy`) while a talk cycle is
+    /// mid-flight or the assistant is mid-reply: deactivating the audio
+    /// session then would tear down the wake-word capture in progress or
+    /// cut the TTS mid-utterance and strand the speaking state. The
+    /// pipeline is stopped for the capture's duration and restarted
+    /// afterwards — the resume path mirrors `recoverVoiceCycle` minus
+    /// the spoken re-prompt and the start watchdog (mic permission was
+    /// just exercised by the capture, so the async start gap is a
+    /// dispatch, not a 10-second question mark).
+    func startSearchPhraseCapture(completion: @escaping (Result<String, SearchPhraseCapture.Failure>) -> Void) {
+        guard !searchPhraseCaptureActive else {
+            completion(.failure(.busy))
+            return
+        }
+        guard let voicePipeline else {
+            completion(.failure(.audioUnavailable))
+            return
+        }
+        switch voicePipeline.state {
+        case .idle:
+            guard speakingCount == 0 else {
+                completion(.failure(.busy))
+                return
+            }
+            voiceWasSuspendedForSearchCapture = true
+            voicePipeline.stop()
+        case .capturingCommand, .processing, .routing:
+            completion(.failure(.busy))
+            return
+        case .stopped, .error:
+            // Nothing to suspend, but stop anyway: a half-failed start
+            // (.error paths can leave the engine running with a tap
+            // installed) must never collide with the capture's own tap.
+            voiceWasSuspendedForSearchCapture = false
+            voicePipeline.stop()
+        }
+        searchPhraseCaptureActive = true
+        searchPhraseCapture.start { [weak self] result in
+            guard let self else { return }
+            self.searchPhraseCaptureActive = false
+            self.resumeVoiceAfterSearchCaptureIfNeeded()
+            completion(result)
+        }
+    }
+
+    /// Ends an in-flight capture early (user tapped stop, or the leaf
+    /// disappeared). The capture's own completion — which restarts a
+    /// suspended pipeline — still fires.
+    func cancelSearchPhraseCapture() {
+        searchPhraseCapture.cancel()
+    }
+
+    private func resumeVoiceAfterSearchCaptureIfNeeded() {
+        guard voiceWasSuspendedForSearchCapture else { return }
+        voiceWasSuspendedForSearchCapture = false
+        voicePipeline?.start { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.voiceState = .idle
+            case .failure(let err):
+                self.voiceError = "\(err)"
+                self.voiceState = .error("\(err)")
+            }
+        }
+    }
+
     /// Called by `CommandRouter` when a speak begins/ends — drives the
     /// derived `speaking` state. Callers may be on any queue; mutations
     /// are pinned to main (H1).
@@ -2033,6 +2118,39 @@ final class AppCoordinator: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             self?.pendingPluginPresentation = PluginPresentation(view: view)
         }
+    }
+
+    // MARK: - Contact-search requests (voice-contact-search, 2026-09-07)
+
+    /// A voice command routed to contact search ("मैयाको फोन नम्बर खोज" —
+    /// `VoiceContactSearchRoute`). HomeView observes the `id` and pushes
+    /// the Phone leaf; the leaf consumes the query via
+    /// `takePendingContactSearchRequest` and runs the search so results
+    /// (incl. WhatsApp/Messenger badges) are on screen, zero-touch.
+    /// Nothing is spoken here — the leaf announces the outcome.
+    struct ContactSearchRequest: Identifiable, Equatable {
+        let id = UUID()
+        let query: String?
+    }
+    @Published var pendingContactSearchRequest: ContactSearchRequest?
+
+    /// `VoiceCommandCoordinating.requestContactSearch`. Publishes a
+    /// fresh request — safe from any queue (observable mutation is
+    /// pinned to main, H1). A repeated utterance while one request is
+    /// still pending replaces it; the leaf consumes whatever is newest.
+    func requestContactSearch(query: String?) {
+        DispatchQueue.main.async { [weak self] in
+            self?.pendingContactSearchRequest = ContactSearchRequest(query: query)
+        }
+    }
+
+    /// Consumes and clears the pending request — called by the Phone
+    /// leaf once it has applied the query, so a stale request can never
+    /// push a second Phone screen. Main queue only (observable mutation).
+    func takePendingContactSearchRequest() -> ContactSearchRequest? {
+        let request = pendingContactSearchRequest
+        pendingContactSearchRequest = nil
+        return request
     }
 
     /// Design §4 "Show Me" button path: a dock tile presents the

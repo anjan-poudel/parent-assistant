@@ -6929,7 +6929,110 @@
           }
         }
       }
+    },
+    "call.search.spokenFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Found %@. Tap to call."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ फेला पर्‍यो। कल गर्न थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "call.search.spokenNotFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No one found for %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ भेटिएन।"
+          }
+        }
+      }
+    },
+    "call.search.micLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search by voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बोलेर खोज्नुहोस्"
+          }
+        }
+      }
+    },
+    "call.search.micStopLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop listening"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्न रोक्नुहोस्"
+          }
+        }
+      }
+    },
+    "call.search.micListening": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listening — say the name"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्दै छु — नाम भन्नुहोस्"
+          }
+        }
+      }
+    },
+    "call.search.micFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The mic couldn't hear. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माइकले सुन्न सकेन। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
     }
+
   },
   "version": "1.0"
 }

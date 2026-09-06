@@ -131,6 +131,15 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// appliance photo + overlay). AppCoordinator publishes it;
     /// ContentView renders the sheet.
     func presentPluginView(_ view: AnyView)
+
+    /// Voice-driven contact search (voice-contact-search, 2026-09-07):
+    /// the keyword pre-route ("मैयाको फोन नम्बर खोज" / "maiya ko phone
+    /// khoja") requests a Phone-screen search. The coordinator publishes
+    /// it so HomeView can push the Call leaf and the leaf can prefill
+    /// its search field with `query` (nil = navigate but leave the
+    /// field empty). Zero-touch hands-free: nothing is spoken here —
+    /// the leaf announces the result once the search has run.
+    func requestContactSearch(query: String?)
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -155,6 +164,7 @@ final class CommandRouter {
         case blockedSensitiveAction
         case emergencyTriggered
         case callConfirmed
+        case contactSearchRequested
         case unrecognised(transcript: String)
     }
 
@@ -290,6 +300,27 @@ final class CommandRouter {
         // its fallback — only the safety-critical vocabulary moved.
         if let safetyResult = routeSafetyNet(raw) {
             return safetyResult
+        }
+
+        // Voice-driven CONTACT SEARCH (voice-contact-search, 2026-09-07):
+        // "मैयाको फोन नम्बर खोज" / "maiya ko phone khoja" / "contact
+        // search <name>" opens the Phone screen with the extracted name
+        // already searching — zero-touch hands-free. Same deterministic
+        // pattern as `TopicPreAnswer`: no model, no IntentPrompt tokens
+        // (the prompt budget is pinned by IntentPromptTests).
+        //
+        // Placement: AFTER the safety net + confirmation flow (emergency /
+        // med-ack / yes-no utterances win exactly as before) and BEFORE
+        // the topic table + interpreter, so a greeting-prefixed search is
+        // a search, never small talk. The decision type carries its own
+        // direct-call veto ("फोन नम्बर लगाऊ" is a CALL intent — golden
+        // corpus), so the sensitive-call path below can never be shadowed.
+        // Nothing is spoken here: the Call leaf announces the outcome
+        // once results have actually rendered.
+        if case .openPhone(let query) = VoiceContactSearchRoute.decide(transcript: raw) {
+            coordinator?.requestContactSearch(query: query)
+            emit(eventType: "contact_search_command", outcome: "success")
+            return .contactSearchRequested
         }
 
         // [NO-GIBBERISH] Deterministic TOPIC PRE-ANSWERS (2026-09-07): the
