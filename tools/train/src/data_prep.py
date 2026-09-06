@@ -88,8 +88,8 @@ def build_slr54(cfg: dict, data_dir: Path, known: set[str], out: Path) -> int:
     base = cfg["slr54_base_url"]
     audio_dir = data_dir / "audio" / "slr54"
     added = 0
-    # Corpus ships 15 parts: asr_nepali_0..9, asr_nepali_a..e (~157 K utts).
-    suffixes = [str(i) for i in range(10)] + list("abcde")
+    # Corpus ships 16 parts: asr_nepali_0..9, asr_nepali_a..f (~157 K utts).
+    suffixes = [str(i) for i in range(10)] + list("abcdef")
     for i in suffixes:
         zip_name = f"asr_nepali_{i}.zip"
         zip_path = data_dir / "downloads" / zip_name
