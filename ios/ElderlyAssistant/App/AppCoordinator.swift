@@ -271,6 +271,11 @@ final class AppCoordinator: ObservableObject {
     /// `GeminiClient`). `geminiConfigStore` is exposed for the Settings
     /// screen that lets a family member paste in the key.
     let geminiConfigStore: GeminiConfigStore
+    /// Daily Gemini call budget (open item #5, 2026-09-06): the shared
+    /// per-day counter + family-editable soft cap wired into
+    /// `GeminiClient`. Exposed for the Settings → Gemini AI screen
+    /// (today's usage + cap editor).
+    let geminiCostGovernor: GeminiCostGovernor
     private let geminiClient: GeminiClient
     private let geminiSpeechRecognizer: GeminiSpeechRecognizer
 
@@ -398,7 +403,14 @@ final class AppCoordinator: ObservableObject {
         // family member — see GeminiConfigStore's doc comment.
         let geminiConfig = GeminiConfigStore(storage: storage)
         self.geminiConfigStore = geminiConfig
-        self.geminiClient = GeminiClient(configStore: geminiConfig, observabilityBus: bus)
+        // Cost governance (open item #5, 2026-09-06): ONE governor for
+        // every billable Gemini call in the app. Voice, plugins, and
+        // vision all share `geminiClient`, so they inherit the cap with
+        // no per-plugin special-casing.
+        let costGovernor = GeminiCostGovernor(storage: storage, observabilityBus: bus)
+        self.geminiCostGovernor = costGovernor
+        self.geminiClient = GeminiClient(configStore: geminiConfig, observabilityBus: bus,
+                                         costGovernor: costGovernor)
         self.geminiSpeechRecognizer = GeminiSpeechRecognizer(client: geminiClient, observabilityBus: bus)
 
         // Voice pipeline. Uses NullWakeWordEngine unless the Porcupine SPM

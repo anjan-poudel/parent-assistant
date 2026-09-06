@@ -327,6 +327,8 @@ struct GeminiAPISettingsView: View {
                     .font(.system(size: DesignTokens.minBodyPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
 
+                costGovernorCard
+
                 modelPicker
 
                 VStack(alignment: .leading, spacing: 10) {
@@ -394,6 +396,16 @@ struct GeminiAPISettingsView: View {
         }
     }
 
+    /// Daily-cost card (open item #5, 2026-09-06): today's Gemini usage
+    /// against the family-set soft cap + the cap editor. Family-facing
+    /// only — the elderly primary user never sees this screen, and when
+    /// the cap is hit the assistant's existing keyword fallback /
+    /// reprompt carries the turn invisibly.
+    private var costGovernorCard: some View {
+        GeminiCostCard(governor: coordinator.geminiCostGovernor,
+                       locale: coordinator.activeLocale)
+    }
+
     /// Model picker (2026-09-04 field request — "let me try different
     /// options"). Curated list (`GeminiModelCatalog`) plus a free-text
     /// override for anything else, since the full live model catalog
@@ -454,6 +466,88 @@ struct GeminiAPISettingsView: View {
             .frame(minHeight: DesignTokens.minTapTargetSize)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Cost-governance card inside the Gemini settings screen (open item #5,
+/// 2026-09-06). `@ObservedObject` on the governor so today's count and
+/// the cap value update live while the screen is open (the governor
+/// publishes from the main queue). Numbers render in Devanagari digits in
+/// the Nepali locale — the same convention as the festival reminder card.
+private struct GeminiCostCard: View {
+    @ObservedObject var governor: GeminiCostGovernor
+    let locale: Locale
+
+    private var count: Int { governor.callsToday }
+    private var cap: Int { governor.softDailyCap }
+    private var warningThreshold: Int { GeminiCostGovernor.warningThreshold(cap: cap) }
+
+    /// 0...1 for the progress bar; count may exceed cap (in-flight
+    /// attempts after the cap was crossed), so clamp for display.
+    private var progress: Double {
+        cap > 0 ? min(1, Double(count) / Double(cap)) : 0
+    }
+
+    private var progressTint: Color {
+        count >= cap ? DesignTokens.stateError : DesignTokens.accent
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("settings.gemini.cost.title", systemImage: "number.circle.fill")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundColor(DesignTokens.textPrimary)
+            HStack(spacing: 10) {
+                Text(L10n.fmt("settings.gemini.cost.usage", locale: locale,
+                              Self.number(count, locale: locale),
+                              Self.number(cap, locale: locale)))
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(count >= cap ? DesignTokens.stateError : DesignTokens.textPrimary)
+                Spacer()
+            }
+            ProgressView(value: progress)
+                .tint(progressTint)
+            HStack {
+                Text("settings.gemini.cost.capLabel")
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Spacer()
+                Stepper(value: Binding(
+                    get: { cap },
+                    set: { governor.setSoftDailyCap($0) }
+                ), in: GeminiCostGovernor.minimumSoftDailyCap...GeminiCostGovernor.maximumSoftDailyCap,
+                step: 10) {
+                    Text(Self.number(cap, locale: locale))
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundColor(DesignTokens.accent)
+                }
+            }
+            if count >= cap {
+                Text("settings.gemini.cost.reachedToday")
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.stateError)
+            } else if count >= warningThreshold {
+                Text("settings.gemini.cost.nearLimit")
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.stateListening)
+            }
+            Text("settings.gemini.cost.explanation")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// Devanagari digits in the Nepali locale (elder-facing numeral
+    /// convention), Arabic elsewhere.
+    private static func number(_ value: Int, locale: Locale) -> String {
+        if locale.language.languageCode?.identifier == "ne" {
+            return BikramSambat.devanagariDigits(value)
+        }
+        return String(value)
     }
 }
 

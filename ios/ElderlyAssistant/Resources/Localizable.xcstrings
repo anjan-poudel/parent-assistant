@@ -4006,6 +4006,108 @@
         }
       }
     },
+    "settings.gemini.cost.capLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daily call limit"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दैनिक कल सीमा"
+          }
+        }
+      }
+    },
+    "settings.gemini.cost.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This is a safety budget, so a technical problem (like the assistant waking up by itself) can never run up a large bill. When today's limit is reached, Sahayak stops using Gemini for the rest of the day — medicine and emergency help keep working, and full answers resume tomorrow."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो सुरक्षा बजेट हो — प्राविधिक समस्याले (जस्तै सहायक आफैं ब्युँझिएर) ठूलो बिल आउन सक्दैन। आजको सीमा पुगेपछि सहायकले आज बाँकी समय जेमिनी प्रयोग गर्दैन — औषधि र आपतकालीन सहायता भने चलिरहन्छ, र पूरा जवाफ भोलि फेरि सुरु हुन्छ।"
+          }
+        }
+      }
+    },
+    "settings.gemini.cost.nearLimit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nearly at today's limit — Gemini calls may stop for the rest of the day."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजको सीमा लगभग पुगिसक्यो — आज बाँकी समय जेमिनी कल रोकिन सक्छ।"
+          }
+        }
+      }
+    },
+    "settings.gemini.cost.reachedToday": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today's limit reached. Basic commands still work; full answers resume tomorrow."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजको सीमा पुगिसक्यो। आधारभूत आदेशहरू काम गर्छन्; पूरा जवाफ भोलि फेरि सुरु हुन्छ।"
+          }
+        }
+      }
+    },
+    "settings.gemini.cost.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daily usage limit"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दैनिक प्रयोग सीमा"
+          }
+        }
+      }
+    },
+    "settings.gemini.cost.usage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today's Gemini use: %1$@ of %2$@ calls"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजको जेमिनी प्रयोग: %2$@ मध्ये %1$@ कलहरू"
+          }
+        }
+      }
+    },
     "settings.gemini.explanation": {
       "extractionState": "manual",
       "localizations": {

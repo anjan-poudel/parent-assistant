@@ -53,6 +53,13 @@ final class GeminiClient {
         case httpError(status: Int, body: String?)
         case emptyResponse
         case blockedByProvider(reason: String)
+        /// Cost governance (open item #5, 2026-09-06): the day's Gemini
+        /// budget is exhausted (`GeminiCostGovernor`). Thrown BEFORE any
+        /// network work, so a capped attempt costs nothing. Callers treat
+        /// it through their existing generic error paths (keyword
+        /// fallback / localized reprompt) — it must never surface raw to
+        /// the elderly user.
+        case dailyCapReached
     }
 
     struct Config {
@@ -74,17 +81,26 @@ final class GeminiClient {
     private let transport: GeminiTransport
     private let streamingTransport: GeminiStreamingTransport
     private let config: Config
+    /// Optional per-day cost governor (open item #5, 2026-09-06). nil =
+    /// unlimited — the pre-governance behavior, preserved as the default
+    /// so existing construction sites and tests are untouched. When set,
+    /// every billable network path in this client (voice, plugins,
+    /// vision — all funnel through here) shares one budget with no
+    /// per-caller special-casing.
+    private let costGovernor: GeminiCostGovernor?
 
     init(configStore: GeminiConfigStore,
          observabilityBus: ObservabilityBus,
          transport: GeminiTransport = URLSession.shared,
          streamingTransport: GeminiStreamingTransport = URLSession.shared,
-         config: Config = .default) {
+         config: Config = .default,
+         costGovernor: GeminiCostGovernor? = nil) {
         self.configStore = configStore
         self.observabilityBus = observabilityBus
         self.transport = transport
         self.streamingTransport = streamingTransport
         self.config = config
+        self.costGovernor = costGovernor
     }
 
     var isAvailable: Bool { configStore.isConfigured }
@@ -179,6 +195,12 @@ final class GeminiClient {
         guard let apiKey = configStore.apiKey, !apiKey.isEmpty else {
             throw GeminiClientError.notConfigured
         }
+        // Cost gate BEFORE any network work (2026-09-06): an unconfigured
+        // client still reports notConfigured first — an unconfigured app
+        // cannot bill, so the cap is irrelevant to it.
+        if let costGovernor, !costGovernor.allowsCall() {
+            throw GeminiClientError.dailyCapReached
+        }
         guard let url = URL(string:
             "https://generativelanguage.googleapis.com/v1beta/models/\(configStore.model):streamGenerateContent?alt=sse&key=\(apiKey)"
         ) else {
@@ -200,7 +222,19 @@ final class GeminiClient {
         let start = Date()
         var accumulated = ""
         var lastReported = ""
-        let (bytes, response) = try await streamingTransport.bytes(for: request)
+        // Billable-attempt boundary — identical semantics to `send(_:)`
+        // below: the attempt counts the moment the transport is asked to
+        // make the call (success AND HTTP/network failure alike). Paths
+        // that never reach the transport (notConfigured, capped,
+        // invalidURL, encode failure) do not count.
+        let (bytes, response): (URLSession.AsyncBytes, URLResponse)
+        do {
+            (bytes, response) = try await streamingTransport.bytes(for: request)
+        } catch {
+            costGovernor?.recordCall()
+            throw error
+        }
+        costGovernor?.recordCall()
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             emit("gemini_http_error", outcome: "failure", durationMs: 0,
                  errorCode: String((response as? HTTPURLResponse)?.statusCode ?? -1))
@@ -297,6 +331,14 @@ final class GeminiClient {
         guard let apiKey = configStore.apiKey, !apiKey.isEmpty else {
             throw GeminiClientError.notConfigured
         }
+        // Cost gate BEFORE any network work (2026-09-06): a capped
+        // attempt throws `dailyCapReached` and costs nothing — no
+        // request is even built. Callers already handle thrown errors
+        // generically (deterministic keyword fallback / localized
+        // reprompt), so no new user-facing surface exists for the cap.
+        if let costGovernor, !costGovernor.allowsCall() {
+            throw GeminiClientError.dailyCapReached
+        }
         guard let url = URL(string:
             "https://generativelanguage.googleapis.com/v1beta/models/\(configStore.model):generateContent?key=\(apiKey)"
         ) else {
@@ -309,7 +351,20 @@ final class GeminiClient {
         request.httpBody = try JSONEncoder().encode(body)
 
         let start = Date()
-        let (data, response) = try await transport.send(request)
+        // Billable-attempt boundary ("the cost is the attempt", register
+        // item #5): the count moves the moment the transport is asked to
+        // make the call — success AND HTTP/network failure alike, because
+        // a request that went out (even one that came back 500, timed
+        // out, or was cancelled mid-flight) is what Google bills. Only
+        // attempts that never left the device skip counting.
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await transport.send(request)
+        } catch {
+            costGovernor?.recordCall()
+            throw error
+        }
+        costGovernor?.recordCall()
         let durationMs = Int(Date().timeIntervalSince(start) * 1000)
 
         guard let http = response as? HTTPURLResponse else {
