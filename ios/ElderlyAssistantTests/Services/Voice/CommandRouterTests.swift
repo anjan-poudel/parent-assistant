@@ -215,7 +215,11 @@ final class CommandRouterTests: XCTestCase {
         let router = CommandRouter(coordinator: coordinator, observabilityBus: MockObservabilityBus(),
                                    speaker: MockSpeaker(), interpreter: interpreter)
 
-        _ = router.route(transcript: "आजको मौसम कस्तो छ")
+        // A non-topic query: weather is now pre-answered by
+        // `TopicPreAnswer` (NO-GIBBERISH) before the interpreter chain
+        // runs, so the generic-reply regression needs a plain question
+        // outside the weather/time/date/greeting table.
+        _ = router.route(transcript: "मलाई एउटा कथा सुनाउनुहोस्")
 
         XCTAssertEqual(coordinator.genericReplies, ["आज घमाइलो छ।"])
     }

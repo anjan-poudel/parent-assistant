@@ -67,9 +67,10 @@ final class InterpreterAvailabilityTests: XCTestCase {
                                        coordinator: coordinator,
                                        bus: bus)
 
-        let result = router.route(transcript: "भोलि मौसम कस्तो हुन्छ?")
+        // Non-topic query: weather is pre-answered by `TopicPreAnswer`.
+        let result = router.route(transcript: "मलाई एउटा कथा सुनाउनुहोस्")
 
-        XCTAssertEqual(result, .unrecognised(transcript: "भोलि मौसम कस्तो हुन्छ?"))
+        XCTAssertEqual(result, .unrecognised(transcript: "मलाई एउटा कथा सुनाउनुहोस्"))
         waitForAsyncFallback()
         let downloadingText = ne("router.brainDownloading")
         XCTAssertFalse(downloadingText.isEmpty)
@@ -88,9 +89,10 @@ final class InterpreterAvailabilityTests: XCTestCase {
                                        coordinator: coordinator,
                                        bus: bus)
 
-        let result = router.route(transcript: "भोलि मौसम कस्तो हुन्छ?")
+        // Non-topic query: weather is pre-answered by `TopicPreAnswer`.
+        let result = router.route(transcript: "मलाई एउटा कथा सुनाउनुहोस्")
 
-        XCTAssertEqual(result, .unrecognised(transcript: "भोलि मौसम कस्तो हुन्छ?"))
+        XCTAssertEqual(result, .unrecognised(transcript: "मलाई एउटा कथा सुनाउनुहोस्"))
         waitForAsyncFallback()
         let setupText = ne("router.brainNeedsSetup")
         XCTAssertFalse(setupText.isEmpty)
@@ -110,7 +112,11 @@ final class InterpreterAvailabilityTests: XCTestCase {
                                        coordinator: coordinator,
                                        bus: bus)
 
-        _ = router.route(transcript: "भोलि मौसम कस्तो हुन्छ?")
+        // A non-topic query: weather is now pre-answered by
+        // `TopicPreAnswer` (NO-GIBBERISH) before the chain runs, so the
+        // abstention regression needs a plain question outside the
+        // weather/time/date/greeting table.
+        _ = router.route(transcript: "मलाई एउटा कथा सुनाउनुहोस्")
         waitForAsyncFallback()
 
         XCTAssertTrue(bus.contains("command_unrecognised"))
@@ -131,7 +137,7 @@ final class InterpreterAvailabilityTests: XCTestCase {
                                   observabilityBus: bus)
         router.cloudEnabled = false
         router.cloudBrain = StubCommandInterpreter(available: false, result: nil)
-        let answer = makeCommand(action: .query, confidence: 0.9, reply: "भोलि घाम लाग्नेछ।")
+        let answer = makeCommand(action: .query, confidence: 0.9, reply: "एउटा राम्रो कथा सुनाउँछु।")
         router.localBrain = LocalBrainChain(
             preferred: StubCommandInterpreter(available: false, result: nil),
             standIn: StubCommandInterpreter(result: answer))
@@ -143,11 +149,12 @@ final class InterpreterAvailabilityTests: XCTestCase {
         DispatchQueue.main.async {
             if !coordinator.genericReplies.isEmpty { exp.fulfill() }
         }
-        _ = commandRouter.route(transcript: "भोलि मौसम कस्तो हुन्छ?")
+        // Non-topic query: weather is pre-answered by `TopicPreAnswer`.
+        _ = commandRouter.route(transcript: "मलाई एउटा कथा सुनाउनुहोस्")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp.fulfill() }
         waitForExpectations(timeout: 2)
 
-        XCTAssertEqual(coordinator.genericReplies, ["भोलि घाम लाग्नेछ।"],
+        XCTAssertEqual(coordinator.genericReplies, ["एउटा राम्रो कथा सुनाउँछु।"],
                        "a cached stand-in must answer the plain query")
         XCTAssertFalse(bus.contains("command_unrecognised"),
                        "a real interpretation must not reach the unrecognised fallback at all")

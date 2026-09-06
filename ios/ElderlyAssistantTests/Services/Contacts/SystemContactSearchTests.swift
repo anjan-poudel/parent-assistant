@@ -89,6 +89,131 @@ final class AddressBookEntryTests: XCTestCase {
                                            organizationName: "",
                                            numbers: []))
     }
+
+    // MARK: - Messenger-handle derivation (messenger-badge task,
+    // 2026-09-06)
+
+    /// A dialable fixture row with the given linkage fields; every
+    /// derivation test needs a number first (a handle never makes a
+    /// row exist), so the helper carries one.
+    private func linkedEntry(instantMessages: [(service: String, username: String)] = [],
+                             socialProfiles: [(service: String, urlString: String)] = []) -> AddressBookEntry? {
+        AddressBookEntry.make(givenName: "Sita", familyName: "Sharma",
+                              organizationName: "",
+                              numbers: [("mobile", "9841000000")],
+                              instantMessageAddresses: instantMessages,
+                              socialProfiles: socialProfiles)
+    }
+
+    func testDerivesHandleFromFacebookInstantMessage() {
+        let entry = linkedEntry(instantMessages: [("Facebook", "sita.sharma")])
+        XCTAssertEqual(entry?.messengerHandle, "sita.sharma")
+    }
+
+    func testDerivesHandleFromMessengerNamedServicesCaseInsensitively() {
+        // Contacts.h predefines "Facebook"; sync tools write free-form
+        // "Messenger"-named services. Case is never significant.
+        for service in ["facebook", "Messenger", "Facebook Messenger", "fb messenger"] {
+            let entry = linkedEntry(instantMessages: [(service, "sita.sharma")])
+            XCTAssertEqual(entry?.messengerHandle, "sita.sharma",
+                           "service \"\(service)\" should yield the handle")
+        }
+    }
+
+    func testPrefersInstantMessageHandleOverSocialProfileURL() {
+        // IM linkage beats a social URL even when both are present and
+        // usable: the IM username is linkage written as a handle
+        // directly.
+        let entry = linkedEntry(instantMessages: [("Facebook", "sita.sharma")],
+                                socialProfiles: [("Facebook", "https://www.facebook.com/ram.thapa")])
+        XCTAssertEqual(entry?.messengerHandle, "sita.sharma")
+    }
+
+    func testSkipsUnusableInstantMessageThenReadsSocialProfile() {
+        // An empty IM username is a junk field, not a verdict — the
+        // social URL behind it still gets its chance.
+        let entry = linkedEntry(instantMessages: [("Facebook", "")],
+                                socialProfiles: [("Facebook", "https://www.facebook.com/sita.sharma")])
+        XCTAssertEqual(entry?.messengerHandle, "sita.sharma")
+    }
+
+    func testDerivesHandleFromFacebookSocialProfileURL() {
+        // The classic Facebook-sync record shape: service "Facebook"
+        // with the profile URL. Subdomains, trailing slashes and query
+        // strings on the URL do not disturb the last path segment.
+        for url in ["https://www.facebook.com/sita.sharma",
+                    "https://m.facebook.com/sita.sharma",
+                    "https://facebook.com/sita.sharma/",
+                    "https://www.facebook.com/sita.sharma?ref=bookmarks"] {
+            let entry = linkedEntry(socialProfiles: [("Facebook", url)])
+            XCTAssertEqual(entry?.messengerHandle, "sita.sharma",
+                           "URL \(url) should yield the handle")
+        }
+        // A direct numeric user-id path is a legitimate handle form too.
+        let numeric = linkedEntry(socialProfiles: [("Facebook", "https://www.facebook.com/1000123456789")])
+        XCTAssertEqual(numeric?.messengerHandle, "1000123456789")
+    }
+
+    func testReadsNumericIDFromReservedPHPProfilePages() {
+        // "profile.php" / "friends.php" are page handlers, not people —
+        // the person's numeric user-id rides in the id= query there,
+        // and numeric user-ids are a legitimate fb-messenger form.
+        let profile = linkedEntry(socialProfiles: [("Facebook",
+            "https://www.facebook.com/profile.php?id=1000123456789")])
+        XCTAssertEqual(profile?.messengerHandle, "1000123456789")
+        let friends = linkedEntry(socialProfiles: [("Facebook",
+            "https://www.facebook.com/friends.php?id=1000123456789")])
+        XCTAssertEqual(friends?.messengerHandle, "1000123456789")
+    }
+
+    func testIgnoresNonFacebookLinkageServices() {
+        // A Skype IM or a Twitter social profile is not Facebook
+        // linkage, whatever the username or URL says.
+        let skypeIM = linkedEntry(instantMessages: [("Skype", "sita.sharma")])
+        XCTAssertNil(skypeIM?.messengerHandle)
+        let twitterSocial = linkedEntry(socialProfiles: [("Twitter",
+                                                          "https://www.facebook.com/sita.sharma")])
+        XCTAssertNil(twitterSocial?.messengerHandle)
+        // And a Facebook SERVICE with a non-facebook host is not a
+        // facebook.com profile (including look-alike suffixes — the
+        // ".facebook.com" check needs the separating dot).
+        let wrongHost = linkedEntry(socialProfiles: [("Facebook",
+                                                      "https://notfacebook.com/sita.sharma"),
+                                                     ("Facebook",
+                                                      "https://facebook.com.evil.example/sita.sharma")])
+        XCTAssertNil(wrongHost?.messengerHandle)
+    }
+
+    func testRejectsURLsAndHandlesThatNameNoPerson() {
+        // Empty path, reserved page without an id, non-digit id — no
+        // person is named, so no handle.
+        for url in ["https://www.facebook.com",
+                    "https://www.facebook.com/",
+                    "https://www.facebook.com/profile.php",
+                    "https://www.facebook.com/profile.php?id=abc",
+                    "https://www.facebook.com/friends.php"] {
+            let entry = linkedEntry(socialProfiles: [("Facebook", url)])
+            XCTAssertNil(entry?.messengerHandle, "URL \(url) should yield nil")
+        }
+        // A Devanagari "username" is outside Messenger's username
+        // alphabet (the normalizer's whole point — "सीता" must never
+        // become a link), in an IM username or a URL path alike.
+        let devanagariIM = linkedEntry(instantMessages: [("Facebook", "सीता")])
+        XCTAssertNil(devanagariIM?.messengerHandle)
+        let devanagariURL = linkedEntry(socialProfiles: [("Facebook",
+                                                          "https://www.facebook.com/सीता")])
+        XCTAssertNil(devanagariURL?.messengerHandle)
+        // A display name with spaces is not a username either.
+        let spaced = linkedEntry(instantMessages: [("Facebook", "sita sharma")])
+        XCTAssertNil(spaced?.messengerHandle)
+    }
+
+    func testNeverInventsHandleFromPhoneAlone() {
+        // The regression this task fixes backwards: linkage absent,
+        // the row must stay handle-free — a bare number is not a
+        // Messenger identity, so no pill is ever derived from one.
+        XCTAssertNil(linkedEntry()?.messengerHandle)
+    }
 }
 
 final class SystemContactSearchTests: XCTestCase {

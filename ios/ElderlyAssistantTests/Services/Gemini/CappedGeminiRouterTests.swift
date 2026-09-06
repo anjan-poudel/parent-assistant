@@ -40,7 +40,11 @@ final class CappedGeminiRouterTests: XCTestCase {
 
         let exp = expectation(description: "async dispatch")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { exp.fulfill() }
-        _ = router.route(transcript: "भोलि मौसम कस्तो हुन्छ?")
+        // A non-topic query: weather is now pre-answered by
+        // `TopicPreAnswer` (NO-GIBBERISH) before the cap path runs, so
+        // the cap regression needs a plain question outside the
+        // weather/time/date/greeting table.
+        _ = router.route(transcript: "मलाई एउटा कथा सुनाउनुहोस्")
         waitForExpectations(timeout: 2)
 
         let capText = L10n.str("router.capReached", locale: Locale(identifier: "ne"))
