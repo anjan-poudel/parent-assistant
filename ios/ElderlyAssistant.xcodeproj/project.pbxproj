@@ -64,11 +64,13 @@
 		6064321E6F30E5CF231B2846 /* PluginRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = D278DADF0D2C377E3DB8CBEA /* PluginRegistry.swift */; };
 		606944C641EBE05F9A06993D /* RoutineStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7FC00B54F67A877DAC411D7 /* RoutineStoreTests.swift */; };
 		60C4D792AAC8EB983EC74C85 /* sherpa-onnx in Frameworks */ = {isa = PBXBuildFile; productRef = 0FF0D45C4E6548287910C557 /* sherpa-onnx */; };
+		622DD2B5661408E69ECFF6AB /* GeminiCostGovernorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C902E1B6C3BFCBAC3E00266B /* GeminiCostGovernorTests.swift */; };
 		6327B3F4991396B26F8E1A3D /* WhisperKitSpeechRecognizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7126457D1955E4801E720A0C /* WhisperKitSpeechRecognizerTests.swift */; };
 		642A0B735A9C84D2E9E0AB59 /* FestivalCalendarServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F383092EDDE12BB83A67E16 /* FestivalCalendarServiceTests.swift */; };
 		6892C759DC267D3FB01A108E /* GoldenCorpusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AB9DEC12FB14373288BA403 /* GoldenCorpusTests.swift */; };
 		6CB6763C02F02BEEF5B9A8C2 /* AddressBookDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9059F5AEB1D33F6E5844364A /* AddressBookDirectory.swift */; };
 		6D76A837CA7B0A4DD05892F0 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = E6911EDC6A72A09AAE433AFA /* ZIPFoundation */; };
+		6EB7465B038D99E3A89F43F2 /* GeminiCostGovernor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 154C9880FE9FE362EDFF4A83 /* GeminiCostGovernor.swift */; };
 		6EE28D10901081BC4ED82032 /* NepaliCalendarPluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4845ADE77C392C52E447EC3 /* NepaliCalendarPluginTests.swift */; };
 		72C5DCF0A0774E359FF6167C /* MemoryProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA1D94894BBEEB22126873C /* MemoryProbe.swift */; };
 		763161FE0570CCACDD200538 /* SherpaTTSEngineSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DFB692BA73C236DF16E7B0 /* SherpaTTSEngineSmokeTests.swift */; };
@@ -201,6 +203,7 @@
 		0DE7446D829BAF64E80F88E8 /* CallOverrideParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallOverrideParser.swift; sourceTree = "<group>"; };
 		1110AC89F51167AB8F5FFA08 /* ContactResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactResolver.swift; sourceTree = "<group>"; };
 		1464699EC23E298FC82EAF23 /* NepaliTimeParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliTimeParserTests.swift; sourceTree = "<group>"; };
+		154C9880FE9FE362EDFF4A83 /* GeminiCostGovernor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiCostGovernor.swift; sourceTree = "<group>"; };
 		1681B7F77E2119291C04249C /* FamilyContactStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyContactStore.swift; sourceTree = "<group>"; };
 		17D5405DCF5CA4C99038974A /* ApplianceGuidancePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceGuidancePolicyTests.swift; sourceTree = "<group>"; };
 		19856D82D3015342C16759AF /* RoutinePluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinePluginTests.swift; sourceTree = "<group>"; };
@@ -318,6 +321,7 @@
 		C7AD4D9E3C904775640B4486 /* ContactCallButtonsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactCallButtonsTests.swift; sourceTree = "<group>"; };
 		C862F89CFC9B521BAD91DBCF /* OnboardingWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingWizardView.swift; sourceTree = "<group>"; };
 		C8CEB43F2A42FCFC9F2EE63F /* CalendarSyncServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSyncServiceTests.swift; sourceTree = "<group>"; };
+		C902E1B6C3BFCBAC3E00266B /* GeminiCostGovernorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiCostGovernorTests.swift; sourceTree = "<group>"; };
 		C9B3203338B37AF2615B9D88 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		CB448CA95E79375B692A12F8 /* NepaliFestival.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliFestival.swift; sourceTree = "<group>"; };
 		CF539F81F76209D893CF81A8 /* GeminiConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiConfigStore.swift; sourceTree = "<group>"; };
@@ -383,6 +387,7 @@
 				BC5A9F12844B0E88FDE85416 /* GeminiClient.swift */,
 				F8D11805F08657DA0E36E4CA /* GeminiClient+Vision.swift */,
 				CF539F81F76209D893CF81A8 /* GeminiConfigStore.swift */,
+				154C9880FE9FE362EDFF4A83 /* GeminiCostGovernor.swift */,
 			);
 			path = Gemini;
 			sourceTree = "<group>";
@@ -616,6 +621,7 @@
 				A1CEB57F5B87DFD2C57AF135 /* GeminiClientVisionTests.swift */,
 				841DCADD368A6ECCD04B61F9 /* GeminiCommandInterpreterTests.swift */,
 				DA66D0A3F8E25813E13B1AA8 /* GeminiConfigStoreTests.swift */,
+				C902E1B6C3BFCBAC3E00266B /* GeminiCostGovernorTests.swift */,
 				70BC41C933F4723716E9A3A9 /* GeminiSpeechRecognizerTests.swift */,
 			);
 			path = Gemini;
@@ -1002,6 +1008,7 @@
 				14863E9A4965CD4A4D24D5F2 /* GeminiClient.swift in Sources */,
 				7A0157A5AFF99A3206889004 /* GeminiCommandInterpreter.swift in Sources */,
 				0848BC9BF00BD20B7DE1653B /* GeminiConfigStore.swift in Sources */,
+				6EB7465B038D99E3A89F43F2 /* GeminiCostGovernor.swift in Sources */,
 				5F3A3D7F5EE0797E87B0559A /* GeminiSpeechRecognizer.swift in Sources */,
 				E8C639597E665201247E6605 /* HomeView.swift in Sources */,
 				53AA5137EF546574CE276BA8 /* IdHashing.swift in Sources */,
@@ -1094,6 +1101,7 @@
 				AA2A94D7E82259E1FC8DD83E /* GeminiClientVisionTests.swift in Sources */,
 				AF08AFE8130798E981D2A92A /* GeminiCommandInterpreterTests.swift in Sources */,
 				8283088CCDAED6B8395D0F9C /* GeminiConfigStoreTests.swift in Sources */,
+				622DD2B5661408E69ECFF6AB /* GeminiCostGovernorTests.swift in Sources */,
 				EF70C76E2EEF74B490FCEDC6 /* GeminiSpeechRecognizerTests.swift in Sources */,
 				AC9D73FF2FCE028F85DCF9E0 /* GoldenCorpus.swift in Sources */,
 				6892C759DC267D3FB01A108E /* GoldenCorpusTests.swift in Sources */,
