@@ -533,6 +533,12 @@ final class AppCoordinator: ObservableObject {
     /// Stateless, so no lazy needed; tests fake it via `CallLinkOpening`.
     private let callLinks = CallLinks()
 
+    /// Per-contact Messenger handles for ADDRESS-BOOK people, keyed by
+    /// normalized phone (Messenger deep-link fix, 2026-09-07) — Messenger
+    /// has NO phone-number thread link, so the row's pill captures the
+    /// username once and opens the real thread from then on.
+    private(set) lazy var messengerHandleStore = MessengerHandleStore(storage: storage)
+
     /// The plugin registry backing `.plugin` intent dispatch and plugin
     /// prompt composition (design doc 2026-09-05).
     private(set) var pluginRegistry: PluginRegistry!
@@ -2199,6 +2205,21 @@ final class AppCoordinator: ObservableObject {
     /// messenger case: the thread opens in-app when Messenger is
     /// installed, as the m.me web chat in Safari when it is not, and a
     /// missing handle opens nothing and says so. No recency entry.
+    /// Stored Messenger handle for a book-row contact, if the family has
+    /// captured one (see `performSystemContactMessenger`'s callers). Nil
+    /// when none was ever saved.
+    func storedMessengerHandle(forNormalizedPhone normalized: String) -> String? {
+        messengerHandleStore.handle(forNormalizedPhone: normalized)
+    }
+
+    /// Saves the captured Messenger handle for a book-row contact. The
+    /// caller has already shown the capture prompt; this just persists
+    /// and returns whether the write landed.
+    @discardableResult
+    func storeMessengerHandle(_ handle: String, forNormalizedPhone normalized: String) -> Bool {
+        messengerHandleStore.set(handle: handle, forNormalizedPhone: normalized)
+    }
+
     func performSystemContactMessenger(name: String, handle: String) {
         let locale = activeLocale
         switch callLinks.openMessengerThread(handle: handle) {

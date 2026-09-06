@@ -1728,6 +1728,91 @@
         }
       }
     },
+    "messenger.handlePrompt.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter %@'s Messenger username"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को मेसेन्जर नाम लेख्नुहोस्"
+          }
+        }
+      }
+    },
+    "messenger.handlePrompt.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger opens a person's chat by username, not phone number. Ask them for their Messenger username."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेसेन्जरले फोन नम्बरबाट नभई नामबाट च्याट खोल्छ। उहाँको मेसेन्जर नाम सोध्नुहोस्।"
+          }
+        }
+      }
+    },
+    "messenger.handlePrompt.placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Username"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेसेन्जर नाम"
+          }
+        }
+      }
+    },
+    "messenger.handlePrompt.save": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुरक्षित गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "messenger.handlePrompt.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "रद्द गर्नुहोस्"
+          }
+        }
+      }
+    },
     "call.title": {
       "extractionState": "manual",
       "localizations": {

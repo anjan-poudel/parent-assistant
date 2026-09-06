@@ -330,6 +330,13 @@ struct CallView: View {
     /// result was announced (or the ask became moot — user edited away).
     @State private var announcedVoiceSearchID: UUID?
 
+    // Messenger username capture (deep-link fix, 2026-09-07): Messenger
+    // has no phone-number thread link, so a row without a handle asks
+    // once for the person's username, stores it, and opens the thread.
+    @State private var showHandlePrompt = false
+    @State private var handleText = ""
+    @State private var pendingHandleResult: UnifiedContactSearch.Result?
+
     var body: some View {
         LeafScreen(titleKey: "call.title") {
             VStack(spacing: 12) {
@@ -385,6 +392,28 @@ struct CallView: View {
                 coordinator.cancelSearchPhraseCapture()
             }
             micPhase = .idle
+        }
+        .alert(L10n.fmt("messenger.handlePrompt.title",
+                        locale: coordinator.appLanguage.locale,
+                        pendingHandleResult?.name ?? ""),
+               isPresented: $showHandlePrompt) {
+            TextField(L10n.str("messenger.handlePrompt.placeholder",
+                               locale: coordinator.appLanguage.locale),
+                      text: $handleText)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button(L10n.str("messenger.handlePrompt.save",
+                            locale: coordinator.appLanguage.locale)) {
+                saveCapturedHandle()
+            }
+            Button(L10n.str("messenger.handlePrompt.cancel",
+                            locale: coordinator.appLanguage.locale),
+                   role: .cancel) {
+                pendingHandleResult = nil
+            }
+        } message: {
+            Text(L10n.str("messenger.handlePrompt.body",
+                          locale: coordinator.appLanguage.locale))
         }
     }
 
@@ -694,17 +723,45 @@ struct CallView: View {
         coordinator.performSystemContactWhatsApp(name: result.name, phone: result.phone)
     }
 
-    /// The row's Messenger pill. A handle on file opens the person's
-    /// thread directly; otherwise (the common case — Messenger matches
-    /// by phone and writes no linkage back) the phone-based chat
-    /// attempt runs, with the coordinator disclosing every fallback.
+    /// The row's Messenger pill. Resolution order (2026-09-07):
+    /// address-book-derived handle → family-captured stored handle
+    /// (`MessengerHandleStore`, keyed by normalized phone) → capture
+    /// prompt. Messenger has NO phone-number thread link, so a row
+    /// without a handle prompts once for the username; from then on
+    /// the pill opens the person's real thread, where the audio/video
+    /// buttons sit.
     private func messenger(_ result: UnifiedContactSearch.Result) {
-        if let handle = result.messengerHandle, !handle.isEmpty {
+        let normalized = ContactNumberKey.normalized(result.phone)
+        let stored = normalized.isEmpty
+            ? nil
+            : coordinator.storedMessengerHandle(forNormalizedPhone: normalized)
+        if let handle = result.messengerHandle ?? stored, !handle.isEmpty {
+            coordinator.performSystemContactMessenger(name: result.name, handle: handle)
+        } else if normalized.isEmpty {
+            // Defensive: no phone and no handle means nothing can ever
+            // be linked — the honest no-handle line, never a dead tap.
+            coordinator.performSystemContactMessenger(name: result.name, handle: "")
+        } else {
+            pendingHandleResult = result
+            handleText = ""
+            showHandlePrompt = true
+        }
+    }
+
+    /// Save action of the username-capture prompt: normalize, persist,
+    /// and open the thread — or, for an unusable entry, speak the
+    /// honest no-handle line (the user can re-tap and try again).
+    private func saveCapturedHandle() {
+        guard let result = pendingHandleResult else { return }
+        let normalized = ContactNumberKey.normalized(result.phone)
+        let handle = CallLinks.messengerHandle(handleText)
+        if !handle.isEmpty, !normalized.isEmpty {
+            coordinator.storeMessengerHandle(handle, forNormalizedPhone: normalized)
             coordinator.performSystemContactMessenger(name: result.name, handle: handle)
         } else {
-            coordinator.performSystemContactMessengerChat(name: result.name,
-                                                          phone: result.phone)
+            coordinator.performSystemContactMessenger(name: result.name, handle: "")
         }
+        pendingHandleResult = nil
     }
 
     // MARK: Result / family areas
