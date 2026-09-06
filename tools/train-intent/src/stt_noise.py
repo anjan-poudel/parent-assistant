@@ -15,6 +15,10 @@ Resumable: reads data/teacher.jsonl, appends to data/noised.jsonl; ids
 already noised are skipped. Id format: "{source_id}:noise{n}".
 
 Requires: piper TTS + whisper.cpp (paths in config.yaml:stt_noise).
+
+Throughput note (2026-09-06): the hf backend transcribes in batches of
+BATCH clips per generate() call — per-clip generate calls were ~10×
+slower (one forward pass per utterance, fixed per-call overhead).
 """
 from __future__ import annotations
 
@@ -25,6 +29,8 @@ import tempfile
 from pathlib import Path
 
 from config import load_config, abs_path
+
+BATCH = 16  # clips per hf generate() call
 
 
 def synthesize(text: str, wav_path: Path, cfg: dict) -> None:
@@ -92,7 +98,26 @@ def make_hf_transcriber(cfg: dict):
                 forced_decoder_ids=forced, max_new_tokens=96)
         return processor.batch_decode(ids, skip_special_tokens=True)[0].strip()
 
-    return transcribe
+    def transcribe_batch(wav_paths: list[Path]) -> list[str]:
+        """One padded forward pass per batch — the feature extractor pads
+        a list of arrays internally, so no manual collation needed."""
+        import soundfile as sf
+        audios = []
+        for p in wav_paths:
+            audio, sr = sf.read(str(p), dtype="float32")
+            if sr != 16000:
+                import scipy.signal as sps
+                audio = sps.resample(audio, int(len(audio) * 16000 / sr))
+            audios.append(audio)
+        inputs = processor(audios, sampling_rate=16000, return_tensors="pt")
+        with torch.no_grad():
+            ids = model.generate(
+                inputs.input_features.cuda().half(),
+                forced_decoder_ids=forced, max_new_tokens=96)
+        return [t.strip() for t in
+                processor.batch_decode(ids, skip_special_tokens=True)]
+
+    return transcribe, transcribe_batch
 
 
 def main() -> None:
@@ -111,30 +136,47 @@ def main() -> None:
         with open(out_path, encoding="utf-8") as f:
             done = {json.loads(line)["id"] for line in f if line.strip()}
 
-    transcribe = make_hf_transcriber(cfg) if args.backend == "hf" else (
-        lambda wav: transcribe_cli(wav, cfg))
+    if args.backend == "hf":
+        transcribe, transcribe_batch = make_hf_transcriber(cfg)
+    else:
+        transcribe = lambda wav: transcribe_cli(wav, cfg)  # noqa: E731
+        transcribe_batch = None
 
     rows = [json.loads(line) for line in open(src_path, encoding="utf-8") if line.strip()]
     if args.limit:
         rows = rows[: args.limit]
 
     variants = int(cfg["stt_noise.variants_per_utterance"])
-    written = skipped = failed = 0
+    pending = [(row, n) for row in rows for n in range(variants)
+               if f"{row['id']}:noise{n}" not in done]
+    skipped = len(rows) * variants - len(pending)
+    written = failed = 0
     with open(out_path, "a", encoding="utf-8") as out, tempfile.TemporaryDirectory() as tmp:
-        for i, row in enumerate(rows):
-            for n in range(variants):
+        for bi in range(0, len(pending), BATCH):
+            chunk = pending[bi:bi + BATCH]
+            wavs: list[Path] = []
+            metas: list[tuple[dict, str]] = []
+            for (row, n) in chunk:
                 nid = f"{row['id']}:noise{n}"
-                if nid in done:
-                    skipped += 1
-                    continue
-                wav = Path(tmp) / f"u{n}.wav"
+                wav = Path(tmp) / f"u{bi}_{n}.wav"
                 try:
                     synthesize(row["utterance"], wav, cfg)
-                    noisy = transcribe(wav)
                 except Exception as e:  # noqa: BLE001
                     failed += 1
-                    print(f"[stt_noise] {nid} failed: {e} — continuing")
+                    print(f"[stt_noise] {nid} synth failed: {e} — continuing")
                     continue
+                wavs.append(wav)
+                metas.append((row, nid))
+            if not wavs:
+                continue
+            try:
+                noisies = (transcribe_batch(wavs) if transcribe_batch is not None
+                           else [transcribe(w) for w in wavs])
+            except Exception as e:  # noqa: BLE001
+                failed += len(wavs)
+                print(f"[stt_noise] batch failed: {e} — continuing")
+                continue
+            for (row, nid), noisy in zip(metas, noisies):
                 if not noisy or noisy == row["utterance"]:
                     continue  # identical round-trip teaches nothing
                 new_row = dict(row)
@@ -145,9 +187,9 @@ def main() -> None:
                 out.write(json.dumps(new_row, ensure_ascii=False) + "\n")
                 done.add(nid)
                 written += 1
-            if (i + 1) % 50 == 0:
-                out.flush()
-                print(f"[stt_noise] {i + 1}/{len(rows)} rows, {written} noised")
+            out.flush()
+            print(f"[stt_noise] {min(bi + BATCH, len(pending))}/{len(pending)} "
+                  f"pending, {written} noised")
     print(f"[stt_noise] done: {written} written, {skipped} skipped, {failed} failed → {out_path}")
 
 
