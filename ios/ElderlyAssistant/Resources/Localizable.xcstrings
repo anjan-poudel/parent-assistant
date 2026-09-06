@@ -3751,6 +3751,23 @@
         }
       }
     },
+    "router.capReached": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I've reached today's limit for Gemini answers. A family member can raise the limit in Settings, or full answers resume tomorrow."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजको जेमिनी जवाफको सीमा पुगिसक्यो। परिवारको कसैले सेटिङमा सीमा बढाउन सक्नुहुन्छ, नत्र पूरा जवाफ भोलि फेरि सुरु हुन्छ।"
+          }
+        }
+      }
+    },
     "router.confirmationAmbiguous": {
       "extractionState": "manual",
       "localizations": {

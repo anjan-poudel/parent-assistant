@@ -58,7 +58,10 @@ final class GeminiClient {
         /// network work, so a capped attempt costs nothing. Callers treat
         /// it through their existing generic error paths (keyword
         /// fallback / localized reprompt) — it must never surface raw to
-        /// the elderly user.
+        /// the elderly user. The text-interpretation layer
+        /// (`GeminiCommandInterpreter`) special-cases it into an honest
+        /// localized cap reply rather than the "didn't understand"
+        /// re-prompt (fix 2026-09-06).
         case dailyCapReached
     }
 

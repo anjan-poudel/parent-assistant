@@ -14,7 +14,11 @@ import Foundation
 /// failure (network, timeout, low confidence, malformed JSON) this
 /// reports `nil`, and the router falls back to keyword matching — the
 /// same "new failure path" pattern `LlamaCommandInterpreter` already used
-/// for its inference timeout.
+/// for its inference timeout. The ONE exception is the daily cost cap
+/// (`GeminiClientError.dailyCapReached`): that is not a comprehension
+/// failure, and reporting nil would make the router claim "I didn't
+/// understand" — so the cap completes with a deterministic `.none`
+/// command carrying the localized cap message instead (see `interpret`).
 final class GeminiCommandInterpreter: CommandInterpreter {
 
     struct Config {
@@ -91,7 +95,28 @@ final class GeminiCommandInterpreter: CommandInterpreter {
                 }
             } catch {
                 self.emit("interpret_failed", outcome: "failure", errorCode: String(describing: error))
-                await MainActor.run { completion(nil) }
+                await MainActor.run {
+                    guard let geminiError = error as? GeminiClient.GeminiClientError,
+                          case .dailyCapReached = geminiError else {
+                        completion(nil)
+                        return
+                    }
+                    // Honesty at the cap (fix 2026-09-06): the day's
+                    // Gemini budget is exhausted — a COMPREHENSION failure
+                    // this is not, so completing nil would send the router
+                    // to its generic "I didn't understand" re-prompt and
+                    // lie about why nothing happened. Complete with a
+                    // deterministic `.none` command (confidence 1.0 → the
+                    // accept band, so `IntentRouter`'s band policy passes
+                    // it through final) whose reply is the localized cap
+                    // message; `CommandRouter` speaks it verbatim.
+                    let locale = Locale(identifier: context.userLanguageHint)
+                    let reply = L10n.str("router.capReached", locale: locale)
+                    completion(InterpretedCommand(
+                        action: .none, entryId: nil, contact: nil, time: nil,
+                        medication: nil, message: nil, callType: nil,
+                        requestedApp: nil, confidence: 1.0, reply: reply))
+                }
             }
         }
     }

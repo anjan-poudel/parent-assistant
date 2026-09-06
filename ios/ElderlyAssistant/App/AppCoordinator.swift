@@ -359,17 +359,20 @@ final class AppCoordinator: ObservableObject {
     /// can truthfully distinguish active / needs-setup / off-at-launch.
     private let wakeWordEngineRealAtLaunch: Bool
 
-    /// On-device LLM interpreter (v1 stack, kept alive for the
-    /// on-device/Gemini A/B toggle — `voiceEngineStack`). Constructed
-    /// up-front like `whisperSpeechRecognizer`; `isAvailable` stays false
-    /// until both the LLM.swift runtime is linked and its model is cached
-    /// (see `LlamaCommandInterpreter.isAvailable`), in which case
-    /// `CommandRouter`'s existing keyword fallback takes over — unchanged.
+    /// On-device LLaMA interpreter — the "LLaMA today" half of the local
+    /// brain (spec 2026-09-05 §4.0): `LocalBrainChain`'s stand-in while
+    /// the fine-tuned intent GGUF isn't cached. Constructed up-front like
+    /// `whisperSpeechRecognizer`; `isAvailable` stays false until both the
+    /// LLM.swift runtime is linked and its model is cached (see
+    /// `LlamaCommandInterpreter.isAvailable`). When unavailable the
+    /// chain's slot is simply empty and the router's cloud layer / keyword
+    /// fallback carry the turn.
     private let llamaCommandInterpreter: LlamaCommandInterpreter
     /// The fine-tuned intent model (spec 2026-09-05 §8) — the local brain
-    /// `IntentRouter` prefers once its GGUF is cached. Until the bake-off
-    /// artifact ships, `isAvailable` is false and the router simply never
-    /// sees it (cloud/cache carry everything).
+    /// `IntentRouter` prefers once its GGUF is cached (the preferred half
+    /// of `LocalBrainChain`). Until the bake-off artifact ships,
+    /// `isAvailable` is false and the chain delegates to the LLaMA
+    /// stand-in, keeping an on-device interpretation path alive.
     private let localIntentInterpreter: LocalIntentInterpreter
     /// Set once in `start()`. `geminiCommandInterpreter` is the concrete
     /// Gemini-backed interpreter — one of the two optional BRAINS behind
@@ -729,10 +732,19 @@ final class AppCoordinator: ObservableObject {
         )
         self.geminiCommandInterpreter = geminiInterpreter
         let router3 = IntentRouter(cache: intentCache, observabilityBus: observabilityBus)
-        // The fine-tuned intent model is the preferred local brain (spec
-        // §8); it reports isAvailable=false until its GGUF is cached, so
-        // the router's lower layers carry everything until then.
-        router3.localBrain = localIntentInterpreter
+        // Local brain = the fine-tuned intent model while its GGUF is
+        // cached (spec §8), else the LLaMA interpreter as the spec's
+        // "LLaMA today" stand-in. Installing the fine-tuned model bare
+        // (as the merge that introduced it did) left no brain at all in
+        // configurations that can't reach the cloud — the on-device
+        // Whisper stack, or Gemini without a key — because the GGUF is
+        // still a placeholder: every utterance fell to the generic
+        // "didn't understand" re-prompt despite correct transcription.
+        // `LocalBrainChain` consults the stand-in only while the
+        // preferred model is unavailable, so nothing changes once the
+        // fine-tuned GGUF ships.
+        router3.localBrain = LocalBrainChain(preferred: localIntentInterpreter,
+                                             standIn: llamaCommandInterpreter)
         router3.cloudBrain = geminiInterpreter
         router3.cloudEnabled = (voiceEngineStack == .gemini)
         self.intentRouter = router3
