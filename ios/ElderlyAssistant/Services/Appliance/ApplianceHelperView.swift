@@ -3,7 +3,10 @@ import UIKit
 
 /// Camera-capture + guidance sheet for the appliance helper (design §5).
 /// All pipeline logic lives in `ApplianceHelperSession`; this view only
-/// renders `session.state` and forwards camera results.
+/// renders `session.state` and forwards camera results. Since 2026-09-06
+/// the opening (capturing) state also offers the saved-manuals library
+/// (`ApplianceManualLibraryView`) — saved guides re-rendered from cache,
+/// camera-less and network-free.
 ///
 /// Guidance layout: instead of one crammed overlay on the full photo, each
 /// step is its own card — the instruction text up top, then a CROPPED,
@@ -28,6 +31,10 @@ struct ApplianceHelperView: View {
     /// Auto-open the camera once when the sheet appears (the voice turn
     /// already said "show me the appliance"); retakes use the button.
     @State private var didAutoOpenCamera = false
+    /// The saved-manuals library (2026-09-06): opened from the capturing
+    /// state; rows open manuals as cache-rendered guidance.
+    @State private var showManualsLibrary = false
+    @State private var manualsModel: ApplianceManualLibraryModel?
 
     /// Close-up panels are deliberately tall — the photo section is the
     /// point of the step card.
@@ -69,6 +76,18 @@ struct ApplianceHelperView: View {
             })
             .ignoresSafeArea()
         }
+        .sheet(isPresented: $showManualsLibrary) {
+            if let model = manualsModel {
+                ApplianceManualLibraryView(session: session, model: model)
+            }
+        }
+    }
+
+    // MARK: - Manuals library entry
+
+    private func openManualsLibrary() {
+        manualsModel = ApplianceManualLibraryModel(cache: session.cache)
+        showManualsLibrary = true
     }
 
     @ViewBuilder
@@ -110,6 +129,41 @@ struct ApplianceHelperView: View {
                     .clipShape(Capsule())
             }
             .frame(minHeight: DesignTokens.minTapTargetSize)
+
+            // Saved-manuals entry (2026-09-06): the second way the cache
+            // pays off — browse previously saved guides without touching
+            // the camera or the network.
+            Button {
+                openManualsLibrary()
+            } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "books.vertical.fill")
+                        .font(.system(size: 24))
+                        .foregroundColor(DesignTokens.accent)
+                        .frame(width: 40)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("appliance.manual.title")
+                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                            .foregroundColor(DesignTokens.textPrimary)
+                        Text("appliance.manual.openHint")
+                            .font(.system(size: DesignTokens.minCaptionPointSize))
+                            .foregroundColor(DesignTokens.textSecondary)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+                .padding(.horizontal, 18)
+                .padding(.vertical, 12)
+                .background(DesignTokens.setupReminder)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+            }
+            .buttonStyle(.plain)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .padding(.horizontal, 24)
+            .padding(.top, 6)
             Spacer()
         }
     }
@@ -164,19 +218,24 @@ struct ApplianceHelperView: View {
                 }
                 overviewCard(presentation)
 
-                if presentation.showCloserPhotoHint {
+                // Camera-era affordances only: a SAVED MANUAL (2026-09-06)
+                // is a cache re-render — "take a closer photo" and
+                // "retake" make no sense without the camera session.
+                if presentation.showCloserPhotoHint && !session.isViewingManual {
                     closerPhotoHint
                 }
 
                 stepCards(presentation, image: image)
 
-                Button {
-                    session.retake()
-                } label: {
-                    Label("appliance.retake", systemImage: "camera.rotate.fill")
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundColor(DesignTokens.accent)
-                        .frame(minHeight: DesignTokens.minTapTargetSize)
+                if !session.isViewingManual {
+                    Button {
+                        session.retake()
+                    } label: {
+                        Label("appliance.retake", systemImage: "camera.rotate.fill")
+                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                            .foregroundColor(DesignTokens.accent)
+                            .frame(minHeight: DesignTokens.minTapTargetSize)
+                    }
                 }
             }
             .padding(.horizontal, 16)

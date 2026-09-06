@@ -147,6 +147,210 @@
         }
       }
     },
+    "appliance.manual.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manuals"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्यानुअलहरू"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.openHint": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved guides for your appliances"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंका उपकरणका बचत गरिएका गाइडहरू"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.searchPlaceholder": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search manuals"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्यानुअल खोज्नुहोस्"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.empty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No saved manuals yet. Take a photo of an appliance and its guide will be saved here."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिलेसम्म कुनै म्यानुअल बचत भएको छैन। कुनै उपकरणको फोटो खिच्नुहोस् — यसको गाइड यहाँ बचत हुनेछ।"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.noResults": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No manual matches your search"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको खोजीसँग मेल खाने कुनै म्यानुअल छैन"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.deleteAction": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेटाउनुहोस्"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.deleteA11y": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete manual"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्यानुअल मेट्नुहोस्"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.deleteConfirmTitle": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete this manual?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो म्यानुअल मेट्ने हो?"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.deleteConfirmMessage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Its saved photo and steps will be removed."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यसको बचत गरिएको फोटो र चरणहरू हटाइनेछन्।"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.cancel": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "रद्द गर्नुहोस्"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.openFailedTitle": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Can't open this manual"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो म्यानुअल खोल्न सकिएन"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.openFailedMessage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It may have been deleted. The list has been refreshed."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो मेटिएको हुन सक्छ। सूची नयाँ गरिएको छ।"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
     "appliance.retake": {
       "extractionState": "manual",
       "localizations": {

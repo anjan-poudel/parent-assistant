@@ -19,6 +19,22 @@ enum ApplianceImagePreparer {
 
     static let maxLongEdge: CGFloat = 1024
     static let jpegQuality: CGFloat = 0.7
+    /// Longest edge of the DOWNSCALED copy kept in the local cache
+    /// (2026-09-06, local-cache-manuals): small enough that 40 entries of
+    /// thumbnails stay trivial for on-device storage, uniform-scale of
+    /// the same frame so normalized boxes still map. Enough resolution to
+    /// re-render the step-card result UI from cache with zero network.
+    static let thumbnailLongEdge: CGFloat = 256
+
+    /// The cache/manuals-library copy of a capture: a ~256px uniform
+    /// downscale of the ALREADY-prepared image (never a crop — boxes are
+    /// normalized to the full frame, so any uniform scale of the same
+    /// frame stays box-accurate), JPEG ~0.7.
+    static func thumbnailJPEG(of preparedImage: UIImage,
+                              maxLongEdge: CGFloat = ApplianceImagePreparer.thumbnailLongEdge,
+                              jpegQuality: CGFloat = ApplianceImagePreparer.jpegQuality) -> Data? {
+        prepare(preparedImage, maxLongEdge: maxLongEdge, jpegQuality: jpegQuality)?.jpegData
+    }
 
     struct Prepared: Equatable {
         /// The orientation-normalized, uniformly downscaled image —
