@@ -303,6 +303,71 @@ Feature: Quick access apps
 
 ---
 
+### 1.12 Assistant Activity History & Live Call Detection (Recent activity leaf)
+
+**FR-051**
+The app must record every call or message IT initiates — the channel opened (phone, FaceTime video/audio, WhatsApp, Messenger, SMS), the contact name and number/handle, the timestamp, and any pre-filled message body — under one encrypted-at-rest key, capped at 100 entries with the oldest pruned, and show them newest-first in a Recent activity leaf with per-row re-initiation (call back / open the channel again); rows must be logged ONLY on a genuine open (a failed or impossible open records nothing), the recorded surface must be the surface that actually appeared (a WhatsApp "call" opens a chat and is recorded as a message open, never claimed as a call), and the app may never log or claim anything beyond its own actions — it cannot read the system call log or other apps' messages (iOS platform wall).
+
+**FR-052**
+The app must detect when a call is in progress (CXCallObserver) and show an honest, identity-free indicator on the Recent activity screen; detection is masked/anonymous by platform design — the app never learns (and never claims to know) whose call it is, records no call detail from the observer, and the detector is edge-triggered (state-change only). Spoken output around active calls must pause/resume where the voice stack exposes a clean pause API; where it exposes none, the skip must be documented with evidence (an active call interrupts the app's audio session at the OS level, which already stops in-flight TTS).
+
+#### Feature: Assistant activity history and live call detection (FR-051, FR-052)
+
+```gherkin
+Feature: Assistant activity history and live call detection
+  As an elderly user
+  I want the assistant to remember which calls and messages it made for me
+  So that I can re-check or repeat an action without fumbling
+
+  Scenario: A call made through the assistant appears in Recent activity
+    Given the user asked the assistant to call a contact
+    When the phone dialer genuinely opens for that contact's number
+    Then the activity log must record a call row with the contact name, number, channel, and timestamp
+    And the Recent activity leaf must show the row newest first
+
+  Scenario: A failed open records nothing
+    Given a call or chat cannot open (invalid handle, unusable number, FaceTime unavailable)
+    When the assistant announces what happened instead
+    Then no activity row must be recorded
+
+  Scenario: The log keeps the newest 100 rows
+    Given the activity log holds 100 rows
+    When a new row is recorded
+    Then the oldest row must be pruned
+    And all rows must survive an app relaunch (encrypted at rest)
+
+  Scenario: A WhatsApp chat open is recorded as the surface it is
+    Given the user asked the assistant to message or "call" a contact on WhatsApp
+    When the WhatsApp chat opens for that number
+    Then the log must record a message-channel row (WhatsApp exposes no call deep link)
+    And no row may claim a WhatsApp call was placed
+
+  Scenario: A Recent activity row re-initiates its channel
+    Given a phone-call row exists in Recent activity
+    When the user taps the row
+    Then the assistant must dial that number again
+    And the re-initiation must itself appear as a new row
+
+  Scenario: A Messenger row without a handle says so instead of a dead tap
+    Given a Messenger row has no stored handle
+    When the user taps the row
+    Then the assistant must announce that the handle is missing rather than silently do nothing
+
+  Scenario: The live call indicator is honest and identity-free
+    Given a call is connected on the device
+    When the user opens the Recent activity leaf
+    Then the leaf must show that a call is in progress
+    And the app must never show or store who is calling (iOS masks the identity)
+
+  Scenario: The Recent activity leaf has an honest empty state
+    Given no calls or messages have been initiated through the assistant
+    When the user opens the Recent activity leaf
+    Then the leaf must say nothing is here yet
+    And the app must never suggest rows from the system call log or other apps' messages
+```
+
+---
+
 ## 2. Non-Functional Requirements
 
 ### 2.1 Performance

@@ -7,6 +7,7 @@ enum LeafDestination: Identifiable {
     case reminders
     case calendar
     case call
+    case history
     case settings
 
     var id: String {
@@ -15,6 +16,7 @@ enum LeafDestination: Identifiable {
         case .reminders: return "reminders"
         case .calendar: return "calendar"
         case .call: return "call"
+        case .history: return "history"
         case .settings: return "settings"
         }
     }
@@ -432,6 +434,8 @@ struct HomeView: View {
             CalendarView()
         case .call:
             CallView()
+        case .history:
+            HistoryView()
         case .settings:
             SettingsView()
         }
