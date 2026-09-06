@@ -33,7 +33,12 @@ final class ContactResolver {
     /// Both scripts map onto the same English anchor words so a contact
     /// stored as relationship "छोरा" matches a query of "son" and vice
     /// versa — matching runs on the ANCHORS, not the raw strings.
-    private static let relationshipAnchors: [String: String] = [
+    ///
+    /// Shared with `UnifiedContactSearch` (2026-09-06): the phone
+    /// search's relationship tier anchors family matches on this same
+    /// table, so one relationship vocabulary drives both surfaces
+    /// instead of two copies that could drift apart.
+    static let relationshipAnchors: [String: String] = [
         // Nepali
         "छोरा": "son", "छोरी": "daughter",
         "आमा": "mother", "बुबा": "father", "बाबु": "son",
@@ -95,8 +100,8 @@ final class ContactResolver {
         // relationship anchors must share a word. Raw containment is not
         // enough — "बहिनी" and "दिदी" are both "sister" but share no
         // substring.
-        if let queryAnchor = anchor(in: normalizedQuery),
-           let contactAnchor = anchor(in: relationship),
+        if let queryAnchor = Self.relationshipAnchor(in: normalizedQuery),
+           let contactAnchor = Self.relationshipAnchor(in: relationship),
            queryAnchor == contactAnchor {
             return 0.9
         }
@@ -120,7 +125,9 @@ final class ContactResolver {
     /// The first relationship anchor word found in `normalizedText` —
     /// checked token-wise AND as containment for compounds like
     /// "मेरो छोरालाई" (my son, with the dative suffix attached).
-    private func anchor(in normalizedText: String) -> String? {
+    /// Internal so `UnifiedContactSearch` can tier family matches on
+    /// the same anchors.
+    static func relationshipAnchor(in normalizedText: String) -> String? {
         let tokens = normalizedText.split(separator: " ").map(String.init)
         for token in tokens {
             if let anchor = Self.relationshipAnchors[token] { return anchor }

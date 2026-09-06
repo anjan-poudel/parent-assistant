@@ -208,10 +208,26 @@ struct LiveCaptionPill: View {
 /// channel for users who may not have heard it clearly. `undo` is only
 /// present on the summary when a real reversible action backs it
 /// (`AppCoordinator` never fabricates one).
+///
+/// Text area composition is uniform for every outcome
+/// (conversation-panel fix, 2026-09-06): the user's transcript is always
+/// rendered as a "you said" row — small caption above the transcript,
+/// mirroring the history sheet's user row — ABOVE the assistant's
+/// response, so the card reads user-then-assistant like the sheet and a
+/// response is never shown without its command. Rows come from
+/// `AppCoordinator.OutcomeSummary.rows`, the same pure composition every
+/// outcome path funnels through.
 struct OutcomeCardView: View {
     let outcome: AppCoordinator.OutcomeSummary
     let expanded: Bool
     let onTapChip: () -> Void
+
+    /// The card's text rows in display order (user transcript — when one
+    /// was recorded — above the response).
+    private var bodyRows: [AppCoordinator.OutcomeSummary.Row] {
+        AppCoordinator.OutcomeSummary.rows(transcript: outcome.transcript,
+                                           response: outcome.text)
+    }
 
     var body: some View {
         Group {
@@ -234,10 +250,24 @@ struct OutcomeCardView: View {
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundColor(DesignTokens.accent)
                 )
-            VStack(alignment: .leading, spacing: 2) {
-                Text(outcome.text)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(DesignTokens.textPrimary)
+            VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(bodyRows, id: \.self) { row in
+                        switch row {
+                        case .user(let heard):
+                            Text("home.outcome.youSaid")
+                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                                .foregroundColor(DesignTokens.textSecondary)
+                            Text(heard)
+                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                                .foregroundColor(DesignTokens.textPrimary)
+                        case .assistant(let response):
+                            Text(response)
+                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                                .foregroundColor(DesignTokens.textPrimary)
+                        }
+                    }
+                }
                 HStack(spacing: 10) {
                     Text(outcome.timestamp.formatted(date: .omitted, time: .shortened))
                         .font(.system(size: DesignTokens.minCaptionPointSize))
@@ -285,6 +315,49 @@ struct OutcomeCardView: View {
 
 // MARK: - Conversation history sheet (Home, on-demand — spec §3.1)
 
+/// Pure display-ordering for the conversation history sheet
+/// (conversation-panel fix, 2026-09-06). The sheet reads newest-first,
+/// but each exchange pair must read user-then-assistant — a plain
+/// reversal of the chronological list would show every assistant reply
+/// ABOVE the user transcript it answers. So user turns are paired with
+/// the assistant turn that directly follows them on the CHRONOLOGICAL
+/// list, and the pairs (plus any singletons: an unanswered user turn, an
+/// assistant row whose user was trimmed past the cap or never spoke) are
+/// emitted newest group first, each pair internally user-then-assistant.
+///
+/// Callers pass the concatenated chronological history (the coordinator's
+/// live window + every older page fetched so far, oldest → newest), so
+/// pairing is correct across the window/page seam too — a pair split by
+/// pagination is still re-joined. Unit-tested without SwiftUI.
+enum HistoryRowOrderer {
+    static func newestFirstPaired(from chronological: [AppCoordinator.Exchange])
+        -> [AppCoordinator.Exchange] {
+        var result: [AppCoordinator.Exchange] = []
+        result.reserveCapacity(chronological.count)
+        var index = chronological.count
+        while index > 0 {
+            index -= 1
+            let newest = chronological[index]
+            // Walk newest → oldest. When the newest row is an assistant
+            // reply and the row directly below it in time is its user
+            // transcript, emit the PAIR user-first so the reply never
+            // renders above its own transcript. Anything else (an
+            // unanswered user turn, an orphan assistant row) emits as a
+            // singleton in place.
+            if index > 0,
+               newest.role == .assistant,
+               chronological[index - 1].role == .user {
+                result.append(chronological[index - 1])
+                result.append(newest)
+                index -= 1
+            } else {
+                result.append(newest)
+            }
+        }
+        return result
+    }
+}
+
 /// Replaces the old always-visible conversation card: opened only by
 /// tapping the collapsed outcome chip, so it never competes with the Talk
 /// hero for permanent screen space.
@@ -299,6 +372,13 @@ struct OutcomeCardView: View {
 /// the sheet is open appears on top without disturbing pages below. Rows
 /// read top-to-bottom as newest → oldest, exactly as the pre-pagination
 /// sheet rendered.
+///
+/// Row pairing (conversation-panel fix, 2026-09-06): within each
+/// exchange pair the user's transcript is drawn ABOVE its own assistant
+/// reply — `HistoryRowOrderer` pairs the full chronological history
+/// (window + older pages so far, re-joined across the pagination seam)
+/// before the newest-first flip, so no pair ever reads response-above-
+/// transcript the way a bare `.reversed()` did.
 struct ConversationHistorySheet: View {
     @ObservedObject var coordinator: AppCoordinator
 
@@ -314,8 +394,17 @@ struct ConversationHistorySheet: View {
         olderRows.last?.id ?? coordinator.conversationHistory.last?.id
     }
 
+    /// Display rows, newest group first with each pair user-then-
+    /// assistant: the FULL chronological history — every fetched older
+    /// page first (oldest → newest), then the live window — fed through
+    /// `HistoryRowOrderer`. Concatenation order matters: the orderer
+    /// walks its input newest → oldest, so the input must be pure
+    /// chronological (older rows before newer) for pairs to be re-joined
+    /// across the window/page seam.
     private var visibleRows: [AppCoordinator.Exchange] {
-        coordinator.conversationHistory.reversed() + olderRows
+        let window = coordinator.conversationHistory
+        let olderChronological = Array(olderRows.reversed())
+        return HistoryRowOrderer.newestFirstPaired(from: olderChronological + window)
     }
 
     private var canShowMore: Bool {

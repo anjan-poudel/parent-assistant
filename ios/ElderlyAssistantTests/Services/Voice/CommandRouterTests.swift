@@ -370,6 +370,9 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
     var confirmationPrompt: String? = "के तपाईंले औषधि अहिले लिनुभएको हो?"
     var isAwaitingConfirmation = false
     var addedReminders: [(title: String, time: DateComponents)] = []
+    /// Defaults to `.available` so existing router tests keep the generic
+    /// re-prompt behavior; the availability-matrix tests script it.
+    var brainReadiness = BrainReadiness.available
 
     var activeLocale: Locale { Locale(identifier: "ne-NP") }
 

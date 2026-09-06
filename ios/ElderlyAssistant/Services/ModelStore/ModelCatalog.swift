@@ -250,31 +250,25 @@ enum ModelCatalog {
             dependsOn: nil,
             coreMLEncoderBundledName: nil
         ),
-        // TODO: placeholder — no real hosted artifact exists yet. kiranpantha/whisper-large-v3-nepali ships raw PyTorch safetensors only; needs WhisperKit CoreML conversion + hosting once the finetune-teacher-v2 fine-tune (in progress) is exported and a hosting decision is made. Do not enable download until this is replaced with a real URL.
         ModelCatalogEntry(
             id: whisperKitNepali,
             kind: .whisperBase,
-            displayName: "Nepali — Large · WhisperKit (coming soon)",
-            // `filename`/`downloadURL` are required by the struct but unused
-            // for WhisperKit directory delivery (see whisperKitZipURL
-            // below) — pointed at the same invalid placeholder so nothing
-            // can accidentally fire a real request against them.
-            filename: "whisperkit-ne-teacher",
-            downloadURL: URL(string: "https://TODO-unset.example.invalid/whisperkit-ne-teacher.zip")!,
-            // ESTIMATE, not measured: 1.5B-param model, CoreML fp16
-            // ballpark. Update once the real conversion is exported.
-            sizeBytes: 3_100_000_000,
-            // PLACEHOLDER: no real artifact exists, so no real checksum
-            // exists yet. Must be replaced before download is enabled.
-            sha256: "0000000000000000000000000000000000000000000000000000000000000000",
-            // ESTIMATE: scaled up from the medium fine-tune's 3.5 GB floor
-            // for a much larger 1.5B-param teacher model.
-            minDeviceRAMBytes: 8_000_000_000,
+            displayName: "Nepali — Large · WhisperKit (fine-tuned)",
+            // finetune-teacher-v2-final, 6-bit palettized CoreML (+2-bit
+            // sparse outliers, group 64) — q6 zip is 1.12 GB vs 2.9 GB
+            // fp16. FLEURS WER 34.51 (base scores 39.63 on the same set).
+            // NOTE: CoreML spec v9 → requires iOS 18+ at runtime.
+            filename: "whisperkit-ne-teacher-v2-q6",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v6/whisperkit-ne-teacher-v2-q6.zip")!,
+            // Unpacked ~1.40 GB on disk (mlmodelc trio + tokenizer).
+            sizeBytes: 1_400_000_000,
+            // SHA-256 of the release ZIP — verified by installWhisperKitModel.
+            sha256: "d14082ebef5e34ade16826bdb5d49e85c55687d781b11608d0282be3070798ae",
+            // q6 live footprint ~2.5-3 GB — 6 GB-class devices pass.
+            minDeviceRAMBytes: 5_000_000_000,
             dependsOn: nil,
-            // TODO: placeholder — see comment above. Not a real download.
-            whisperKitZipURL: URL(string: "https://TODO-unset.example.invalid/whisperkit-ne-teacher.zip")!,
-            // ESTIMATE, not measured — see sizeBytes comment above.
-            whisperKitZipBytes: 3_100_000_000
+            whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v6/whisperkit-ne-teacher-v2-q6.zip")!,
+            whisperKitZipBytes: 1_199_427_423
         ),
         ModelCatalogEntry(
             id: whisperKitNepaliMedium,
@@ -420,14 +414,11 @@ enum ModelCatalog {
     /// fallbacks last) — the picker and the downloads list both iterate
     /// this so the two surfaces always agree.
     static let availableSTTEntries: [ModelCatalogEntry] = {
-        entries(kind: .whisperBase).filter { entry in
-            // Exclude the teacher WhisperKit placeholder (no real artifact
-            // yet) and the CPU-only large-v3 ggml models — too slow to be
-            // usable on-device. The ANE (WhisperKit) large models replace
-            // them once their q6 artifacts are published.
-            !(entry.id == whisperKitNepali
-              || entry.id == whisperLargeV3Nepali
-              || entry.id == whisperLargeV3NepaliV2)
-        }
+        // No exclusions: the teacher WhisperKit placeholder is now a real
+        // q6 artifact (2026-09-06), and every other catalog STT engine —
+        // including the CPU-only large-v3 ggml models — stays selectable
+        // per the user's "pick ANY engine" field report; the honest size
+        // labels carry the speed trade-off.
+        entries(kind: .whisperBase)
     }()
 }

@@ -137,12 +137,53 @@ final class AppCoordinator: ObservableObject {
     /// reminder); it stays nil for actions with no real undo path (e.g.
     /// medication acknowledgement) rather than faking one (redesign spec
     /// §6).
+    ///
+    /// The card always reads user-then-assistant (conversation-panel fix,
+    /// 2026-09-06): `transcript` — the user utterance this outcome
+    /// answers, captured by `setOutcome` from `lastTranscript` at
+    /// creation time — is rendered ABOVE `text`. It is nil only when
+    /// nothing was heard for this outcome (a touch/chip-initiated action
+    /// after a silent session, or a blank utterance), in which case the
+    /// card shows the response alone.
     struct OutcomeSummary: Identifiable {
         let id = UUID()
         let icon: String
         let text: String
+        let transcript: String?
         let timestamp: Date
         let undo: (() -> Void)?
+
+        /// One text row of the outcome card, top to bottom — a user
+        /// transcript row always precedes the assistant response row.
+        /// Hashable so `OutcomeCardView` can `ForEach` it by identity.
+        enum Row: Hashable {
+            case user(String)
+            case assistant(String)
+        }
+
+        /// Composes the card's text rows from the raw transcript and the
+        /// assistant's response: the "you said" row first (omitted when
+        /// the transcript is nil/blank — sanitized by
+        /// `sanitizedTranscript`), the response row last. Every
+        /// outcome-producing path funnels through this via `setOutcome`,
+        /// so a response is never shown without its command above it.
+        /// Pure — unit-tested without SwiftUI (repo pattern).
+        static func rows(transcript raw: String?, response: String) -> [Row] {
+            var rows: [Row] = []
+            if let heard = sanitizedTranscript(raw) {
+                rows.append(.user(heard))
+            }
+            rows.append(.assistant(response))
+            return rows
+        }
+
+        /// The transcript trimmed for display — nil when absent or blank
+        /// so the card never draws an empty "you said" row.
+        static func sanitizedTranscript(_ raw: String?) -> String? {
+            guard let raw else { return nil }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
     }
 
     /// Window over `chatHistoryStore` for the Home UI and the history
@@ -193,9 +234,23 @@ final class AppCoordinator: ObservableObject {
 
     /// Sets the Home outcome card. Always dispatched to main (H1) since
     /// callers may run on the router's queue, not just main.
+    ///
+    /// Composition is UNIFORM for every outcome (conversation-panel fix,
+    /// 2026-09-06): the card shows the user's transcript — `lastTranscript`,
+    /// recorded by `recordTranscript` at the top of every `route()` call —
+    /// above `text`, so no single path (medication ack, reminder set,
+    /// call/message, generic reply) renders the response without the
+    /// command that produced it. The transcript is snapshotted
+    /// synchronously — at outcome-creation time, on whatever queue the
+    /// caller runs — before the main-queue hop, and sanitized: nil/blank
+    /// (a touch-initiated outcome with nothing heard this session) simply
+    /// yields a card without the "you said" row.
     private func setOutcome(icon: String, text: String, undo: (() -> Void)? = nil) {
+        let transcript = OutcomeSummary.sanitizedTranscript(lastTranscript)
         DispatchQueue.main.async { [weak self] in
-            self?.lastOutcome = OutcomeSummary(icon: icon, text: text, timestamp: Date(), undo: undo)
+            self?.lastOutcome = OutcomeSummary(icon: icon, text: text,
+                                               transcript: transcript,
+                                               timestamp: Date(), undo: undo)
         }
     }
 
@@ -210,23 +265,19 @@ final class AppCoordinator: ObservableObject {
     /// from `noteAssistantSpoke` generally) so it can never clobber a
     /// more specific outcome set moments earlier in the same turn.
     ///
-    /// Includes `lastTranscript` (already set by `recordTranscript` at the
-    /// top of every `route()` call, so it's available here) alongside the
-    /// reply — repeated field reports (2026-09-04) made clear that only
-    /// ever showing the ASSISTANT's reply, with the user's own transcript
-    /// visible for barely a second during capture and never again, reads
-    /// as "no transcript showing" even though routing worked correctly.
-    /// Showing both together, persistently, is the actual fix — not a UI
-    /// timing tweak.
+    /// Only the REPLY text is passed here — the card composition is now
+    /// uniform, so the transcript handling this method used to do inline
+    /// (repeated field reports, 2026-09-04, made clear that showing only
+    /// the ASSISTANT's reply, with the user's transcript visible for
+    /// barely a second during capture and never again, reads as "no
+    /// transcript showing" even though routing worked correctly) moved
+    /// into `setOutcome`: it attaches `lastTranscript` — already set by
+    /// `recordTranscript` at the top of every `route()` call — to EVERY
+    /// outcome, and `OutcomeCardView` renders it as a "you said" row
+    /// above the response (2026-09-06 conversation-panel fix).
     func noteGenericReply(_ text: String) {
         guard !text.isEmpty else { return }
-        let display: String
-        if let heard = lastTranscript, !heard.isEmpty {
-            display = "\u{201C}\(heard)\u{201D}\n\(text)"
-        } else {
-            display = text
-        }
-        setOutcome(icon: "bubble.left.and.bubble.right.fill", text: display)
+        setOutcome(icon: "bubble.left.and.bubble.right.fill", text: text)
     }
 
     /// While non-nil, a confirmation challenge is awaiting the user's
@@ -359,17 +410,20 @@ final class AppCoordinator: ObservableObject {
     /// can truthfully distinguish active / needs-setup / off-at-launch.
     private let wakeWordEngineRealAtLaunch: Bool
 
-    /// On-device LLM interpreter (v1 stack, kept alive for the
-    /// on-device/Gemini A/B toggle — `voiceEngineStack`). Constructed
-    /// up-front like `whisperSpeechRecognizer`; `isAvailable` stays false
-    /// until both the LLM.swift runtime is linked and its model is cached
-    /// (see `LlamaCommandInterpreter.isAvailable`), in which case
-    /// `CommandRouter`'s existing keyword fallback takes over — unchanged.
+    /// On-device LLaMA interpreter — the "LLaMA today" half of the local
+    /// brain (spec 2026-09-05 §4.0): `LocalBrainChain`'s stand-in while
+    /// the fine-tuned intent GGUF isn't cached. Constructed up-front like
+    /// `whisperSpeechRecognizer`; `isAvailable` stays false until both the
+    /// LLM.swift runtime is linked and its model is cached (see
+    /// `LlamaCommandInterpreter.isAvailable`). When unavailable the
+    /// chain's slot is simply empty and the router's cloud layer / keyword
+    /// fallback carry the turn.
     private let llamaCommandInterpreter: LlamaCommandInterpreter
     /// The fine-tuned intent model (spec 2026-09-05 §8) — the local brain
-    /// `IntentRouter` prefers once its GGUF is cached. Until the bake-off
-    /// artifact ships, `isAvailable` is false and the router simply never
-    /// sees it (cloud/cache carry everything).
+    /// `IntentRouter` prefers once its GGUF is cached (the preferred half
+    /// of `LocalBrainChain`). Until the bake-off artifact ships,
+    /// `isAvailable` is false and the chain delegates to the LLaMA
+    /// stand-in, keeping an on-device interpretation path alive.
     private let localIntentInterpreter: LocalIntentInterpreter
     /// Set once in `start()`. `geminiCommandInterpreter` is the concrete
     /// Gemini-backed interpreter — one of the two optional BRAINS behind
@@ -409,9 +463,54 @@ final class AppCoordinator: ObservableObject {
     /// prompt composition (design doc 2026-09-05).
     private(set) var pluginRegistry: PluginRegistry!
 
+    /// The assistant-brain model `start()` auto-downloads when an
+    /// interpreter is needed (interpreter-availability fix 2026-09-06):
+    /// LLaMA 3.2 1B Instruct Q4_K_M GGUF from HuggingFace (bartowski),
+    /// ~807 MB, sha256-verified, catalog kind `.llamaBase`. This is the
+    /// "default LLM that was the default before" the v2 pivot — the
+    /// brain `LlamaCommandInterpreter` (LocalBrainChain's stand-in)
+    /// runs, and the model the buried "AI मोडेल" screen lists as
+    /// "Assistant brain — 1B".
+    static let assistantBrainModelID = ModelCatalog.llama3_2_1B
+
+    /// Whether `start()` should kick the assistant-brain model's one-time
+    /// download: the model isn't cached AND no live cloud brain exists.
+    /// The on-device stack always needs the local model (a configured
+    /// Gemini key stays out of its chain — `cloudEnabled` is false), and
+    /// the Gemini stack needs it too while no key is configured, which is
+    /// exactly the shape of the reported bug (correct transcript, apology
+    /// reply, nothing listening). Pure static so the decision is
+    /// unit-testable without an AppCoordinator instance (same seam as
+    /// `isWakeWordRuntimeLinked`). Downloads are NOT Gemini calls — the
+    /// cost governor caps billable cloud calls and is deliberately
+    /// untouched by this restore.
+    static func shouldAutoDownloadAssistantBrain(modelCached: Bool,
+                                                 cloudEnabled: Bool,
+                                                 cloudBrainAvailable: Bool) -> Bool {
+        guard !modelCached else { return false }
+        return !(cloudEnabled && cloudBrainAvailable)
+    }
+
+    /// Compile-time: is the vendored LLM.swift runtime linked into THIS
+    /// build? Mirrors the `#if canImport(LLM)` inside
+    /// `LlamaCommandInterpreter.isAvailable` (and the shape of
+    /// `isWakeWordRuntimeLinked`), so the auto-download policy never
+    /// fetches an ~807 MB GGUF for a build whose interpreter could not
+    /// run it.
+    static var isLLMRuntimeLinked: Bool {
+        #if canImport(LLM)
+        return true
+        #else
+        return false
+        #endif
+    }
+
     /// Legacy v1 on-device model catalog — kept only so the buried
     /// "AI मोडेल" settings screen still functions as a manual fallback.
-    /// No longer downloaded automatically at first run (v2 pivot).
+    /// STT models are no longer downloaded automatically at first run
+    /// (v2 pivot); the assistant-brain model above IS, via
+    /// `ensureAssistantBrainDownloadIfNeeded()` (interpreter-availability
+    /// fix 2026-09-06).
     ///
     /// The downloads-management rows must cover EVERY STT engine the
     /// picker can select (anything selectable has to be fetchable), so
@@ -728,13 +827,34 @@ final class AppCoordinator: ObservableObject {
         )
         self.geminiCommandInterpreter = geminiInterpreter
         let router3 = IntentRouter(cache: intentCache, observabilityBus: observabilityBus)
-        // The fine-tuned intent model is the preferred local brain (spec
-        // §8); it reports isAvailable=false until its GGUF is cached, so
-        // the router's lower layers carry everything until then.
-        router3.localBrain = localIntentInterpreter
+        // Local brain = the fine-tuned intent model while its GGUF is
+        // cached (spec §8), else the LLaMA interpreter as the spec's
+        // "LLaMA today" stand-in. Installing the fine-tuned model bare
+        // (as the merge that introduced it did) left no brain at all in
+        // configurations that can't reach the cloud — the on-device
+        // Whisper stack, or Gemini without a key — because the GGUF is
+        // still a placeholder: every utterance fell to the generic
+        // "didn't understand" re-prompt despite correct transcription.
+        // `LocalBrainChain` consults the stand-in only while the
+        // preferred model is unavailable, so nothing changes once the
+        // fine-tuned GGUF ships.
+        router3.localBrain = LocalBrainChain(preferred: localIntentInterpreter,
+                                             standIn: llamaCommandInterpreter)
         router3.cloudBrain = geminiInterpreter
         router3.cloudEnabled = (voiceEngineStack == .gemini)
         self.intentRouter = router3
+        // Interpreter-availability fix (2026-09-06): restore the
+        // assistant-brain model's one-time auto-download. The v2 pivot
+        // removed ALL first-run downloads, so the LLaMA stand-in that
+        // LocalBrainChain restores below (commit 13ded79) could never
+        // come online on a real device — the chain sat empty and every
+        // plain utterance fell through to the generic "didn't understand"
+        // re-prompt despite a correct transcript. `start()` is idempotent
+        // (onboarding wizard and Home both call it) and
+        // `ModelDownloadService.start` no-ops while a download is already
+        // in flight or completed, so this is safe to run on every launch;
+        // when the Gemini stack is live no download starts at all.
+        ensureAssistantBrainDownloadIfNeeded()
         // Collapse #1 (spec §4): when the Gemini recognizer is the active
         // STT, ONE understand call does STT + intent; the command half is
         // waiting in `intentRouter` when the transcript half routes.
@@ -1030,6 +1150,9 @@ final class AppCoordinator: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             self?.updateActiveSTTName()
         }
+        // The cloud brain is now live — the local brain model's one-time
+        // download (if any) is redundant on this stack (2026-09-06).
+        cancelAssistantBrainDownloadIfRedundant()
     }
 
     /// Applies `voiceEngineStack` to both halves of the pipeline: the STT
@@ -1084,6 +1207,66 @@ final class AppCoordinator: ObservableObject {
     var isOnDeviceStackReady: Bool {
         llamaCommandInterpreter.isAvailable
             && (whisperSpeechRecognizer.isAvailable || whisperKitSpeechRecognizer.isAvailable)
+    }
+
+    /// Interpreter-chain status for `CommandRouter`'s no-brain fallback
+    /// speech (spec §7 "no dead ends"; interpreter-availability fix
+    /// 2026-09-06). Derivation mirrors the EXACT layer ladder the router
+    /// consults so the spoken message and the routing outcome can never
+    /// disagree: the local chain (preferred intent GGUF / LLaMA stand-in)
+    /// counts when `isAvailable`; the cloud brain counts only when
+    /// `cloudEnabled` (the on-device stack keeps a configured Gemini key
+    /// out of the chain — same guard as `IntentRouter`'s escalation).
+    /// The model-download state supplies the distinction between the two
+    /// honest no-brain messages (downloading vs setup needed).
+    var brainReadiness: BrainReadiness {
+        BrainReadiness.resolve(
+            localBrainAvailable: intentRouter?.localBrain?.isAvailable ?? false,
+            cloudEnabled: intentRouter?.cloudEnabled ?? false,
+            cloudBrainAvailable: intentRouter?.cloudBrain?.isAvailable ?? false,
+            brainDownloadInFlight: isAssistantBrainDownloadInFlight
+        )
+    }
+
+    /// Whether the assistant-brain model is currently arriving (queued /
+    /// downloading / verifying) — the one state that turns `.needsSetup`
+    /// into `.downloadingBrain` for the router's fallback speech.
+    private var isAssistantBrainDownloadInFlight: Bool {
+        switch modelDownloadService.states[Self.assistantBrainModelID] ?? .notStarted {
+        case .queued, .downloading, .verifying: return true
+        case .notStarted, .completed, .failed, .cancelled: return false
+        }
+    }
+
+    /// Kicks the assistant-brain model's one-time download when the
+    /// interpreter chain needs it and the model isn't cached (policy in
+    /// `shouldAutoDownloadAssistantBrain`). `start()` is idempotent and
+    /// `ModelDownloadService.start` no-ops while a download is in flight
+    /// or completed, so this re-runs safely on every launch — and a
+    /// `.failed` attempt is retried by the next launch. Silent when the
+    /// LLM runtime isn't linked (nothing could run the model) or a cloud
+    /// brain is live (nothing needs it).
+    private func ensureAssistantBrainDownloadIfNeeded() {
+        guard Self.isLLMRuntimeLinked else { return }
+        guard Self.shouldAutoDownloadAssistantBrain(
+            modelCached: modelStore.isCached(Self.assistantBrainModelID),
+            cloudEnabled: intentRouter?.cloudEnabled ?? false,
+            cloudBrainAvailable: geminiCommandInterpreter?.isAvailable ?? false
+        ) else { return }
+        modelDownloadService.start(Self.assistantBrainModelID)
+    }
+
+    /// A newly-configured Gemini key makes the local brain model redundant
+    /// on the Gemini stack — stop an in-flight one-time download instead
+    /// of letting ~807 MB finish arriving over the elder's data plan (the
+    /// model row re-downloads on demand if the stack ever switches to
+    /// on-device). No-op when nothing is in flight; the on-device stack is
+    /// never touched because it needs the local model regardless of keys.
+    private func cancelAssistantBrainDownloadIfRedundant() {
+        guard voiceEngineStack == .gemini,
+              !modelStore.isCached(Self.assistantBrainModelID),
+              isAssistantBrainDownloadInFlight else { return }
+        modelDownloadService.cancel(Self.assistantBrainModelID)
     }
 
     /// Model the legacy on-device recognizer would use if manually
@@ -1601,6 +1784,91 @@ final class AppCoordinator: ObservableObject {
         speak(text: L10n.fmt("router.call.calling", locale: activeLocale, name))
     }
 
+    /// WhatsApp surface for a SYSTEM-address-book search row (unified
+    /// contact search, 2026-09-06). No `FamilyContact` preference stands
+    /// behind a phone-book row, so the tap opens WhatsApp's chat to the
+    /// number when the app is installed, and otherwise walks the same
+    /// absent-app chain as `performContactCall`'s whatsApp case —
+    /// native Messages sheet, else the number on the pasteboard — each
+    /// swap disclosed out loud. No recency entry: opening a chat is not
+    /// a call (consistent with the family whatsApp button).
+    func performSystemContactWhatsApp(name: String, phone: String) {
+        let locale = activeLocale
+        switch callLinks.openWhatsAppCallChat(phone) {
+        case .openedChat:
+            setOutcome(icon: "message.fill",
+                       text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, name))
+            speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, name))
+            noteSearchChannelTap(outcome: "whatsapp:openedChat")
+        case .needsNativeCompose:
+            // WhatsApp absent → the same native Messages sheet to the
+            // same number the family whatsApp button falls back to.
+            presentMessageDraft(phone: phone, name: name, body: "")
+            speak(text: L10n.fmt("call.announce.whatsAppSmsFallback", locale: locale, name))
+            noteSearchChannelTap(outcome: "whatsapp:needsNativeCompose")
+        case .copiedNumber:
+            setOutcome(icon: "doc.on.doc.fill",
+                       text: L10n.fmt("home.outcome.numberCopied", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.whatsAppCopiedFallback", locale: locale, name))
+            noteSearchChannelTap(outcome: "whatsapp:copiedNumber")
+        case .invalidPhone:
+            // The number normalized to nothing dialable — defensive (the
+            // search layer filters such rows), never a silent dead tap.
+            setOutcome(icon: "exclamationmark.triangle.fill",
+                       text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
+            noteSearchChannelTap(outcome: "whatsapp:invalidPhone")
+        }
+    }
+
+    /// Messenger thread for a SYSTEM-address-book search row — the
+    /// messenger analogue of `performSystemContactWhatsApp`, keyed on
+    /// the person's Messenger handle (a row shows the pill only when one
+    /// is on file). Same tap model and disclosures as `performContactCall`'s
+    /// messenger case: the thread opens in-app when Messenger is
+    /// installed, as the m.me web chat in Safari when it is not, and a
+    /// missing handle opens nothing and says so. No recency entry.
+    func performSystemContactMessenger(name: String, handle: String) {
+        let locale = activeLocale
+        switch callLinks.openMessengerThread(handle: handle) {
+        case .openedThread:
+            setOutcome(icon: "message.fill",
+                       text: L10n.fmt("home.outcome.messengerOpened", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.messenger", locale: locale, name))
+            noteSearchChannelTap(outcome: "messenger:openedThread")
+        case .fellBackToWeb:
+            // Messenger absent — the m.me chat opened in Safari instead;
+            // the same web-fallback disclosure the family messenger
+            // path speaks, so the user knows which surface appeared.
+            setOutcome(icon: "message.fill",
+                       text: L10n.fmt("home.outcome.messengerOpened", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.messengerWebFallback", locale: locale, name))
+            noteSearchChannelTap(outcome: "messenger:fellBackToWeb")
+        case .invalidHandle:
+            // Handle missing or unusable — nothing opened; say what
+            // happened (same line `performContactCall` speaks for an
+            // unusable messenger handle), never teach from a failure.
+            setOutcome(icon: "exclamationmark.triangle.fill",
+                       text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
+            noteSearchChannelTap(outcome: "messenger:invalidHandle")
+        }
+    }
+
+    /// One observability event per channel tap from the unified search
+    /// rows, the outcome naming which surface actually appeared (or
+    /// which fallback ran).
+    private func noteSearchChannelTap(outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "contact_search_channels",
+            eventType: "tap",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]  // no contact identifiers — C9 policy
+        ))
+    }
+
     /// Recency hook for the Phone leaf's search ranking: every number a
     /// call was genuinely placed to from this app — voice flow, family
     /// tiles, system-contact search rows — lands in `callRecencyStore`.
@@ -1762,13 +2030,20 @@ final class AppCoordinator: ObservableObject {
 
     /// Presents the native compose sheet pre-filled (shipped SMS path,
     /// extracted so the WhatsApp-absent fallback lands on the exact same
-    /// surface).
+    /// surface). The phone/name variant below serves rows that carry no
+    /// `FamilyContact` (system address-book search) — this one delegates.
     private func presentMessageDraft(contact: FamilyContact, body: String) {
+        presentMessageDraft(phone: contact.phone, name: contact.name, body: body)
+    }
+
+    /// Phone/name variant of `presentMessageDraft(contact:body:)` — same
+    /// sheet, same outcome line, no `FamilyContact` required.
+    private func presentMessageDraft(phone: String, name: String, body: String) {
         DispatchQueue.main.async { [weak self] in
-            self?.pendingMessageDraft = MessageDraft(recipients: [contact.phone], body: body)
+            self?.pendingMessageDraft = MessageDraft(recipients: [phone], body: body)
         }
         setOutcome(icon: "message.fill",
-                   text: L10n.fmt("home.outcome.messageReady", locale: activeLocale, contact.name))
+                   text: L10n.fmt("home.outcome.messageReady", locale: activeLocale, name))
     }
 
     // MARK: - Medication schedule surface (spec §4.3, §4.4.3)

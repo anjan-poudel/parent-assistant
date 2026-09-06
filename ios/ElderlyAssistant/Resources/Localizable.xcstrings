@@ -1065,6 +1065,91 @@
         }
       }
     },
+    "call.search.familyChip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Family"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "परिवार"
+          }
+        }
+      }
+    },
+    "call.channel.whatsapp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WhatsApp"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ह्वाट्सएप"
+          }
+        }
+      }
+    },
+    "call.channel.messenger": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेसेन्जर"
+          }
+        }
+      }
+    },
+    "call.channel.whatsappLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open WhatsApp chat with %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ सँग ह्वाट्सएप च्याट खोल्नुहोस्"
+          }
+        }
+      }
+    },
+    "call.channel.messengerLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Messenger chat with %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ सँग मेसेन्जर च्याट खोल्नुहोस्"
+          }
+        }
+      }
+    },
     "call.title": {
       "extractionState": "manual",
       "localizations": {
@@ -1877,6 +1962,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ को लागि ह्वाट्सएप खोलियो"
+          }
+        }
+      }
+    },
+    "home.outcome.youSaid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You said"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंले भन्नुभयो"
           }
         }
       }
@@ -3445,6 +3547,40 @@
         }
       }
     },
+    "router.brainDownloading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I'm not ready to answer yet. My brain model is still downloading — this only happens once. Please ask me again in a few minutes."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म अहिले जवाफ दिन तयार छैन। मेरो दिमागको मोडेल अझै डाउनलोड भइरहेको छ — यो एक पटक मात्र हुन्छ। कृपया केही मिनेटपछि फेरि सोध्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.brainNeedsSetup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't answer that yet — my brain isn't set up. Please ask a family member to open Settings and download the brain model or add the Gemini key."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म त्यसको जवाफ अहिले दिन सक्दिनँ — मेरो दिमाग सेटअप भएको छैन। कृपया परिवारको कसैलाई भन्नुहोस्, सेटिङ खोलेर दिमागको मोडेल डाउनलोड गर्नुहोस् वा जेमिनी कुञ्जी राख्नुहोस्।"
+          }
+        }
+      }
+    },
     "router.call.appUnsupportedNotice": {
       "extractionState": "manual",
       "localizations": {
@@ -3747,6 +3883,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ को लागि ह्वाट्सएप खोलियो — कृपया आफैं कल बटन थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.capReached": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I've reached today's limit for Gemini answers. A family member can raise the limit in Settings, or full answers resume tomorrow."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजको जेमिनी जवाफको सीमा पुगिसक्यो। परिवारको कसैले सेटिङमा सीमा बढाउन सक्नुहुन्छ, नत्र पूरा जवाफ भोलि फेरि सुरु हुन्छ।"
           }
         }
       }

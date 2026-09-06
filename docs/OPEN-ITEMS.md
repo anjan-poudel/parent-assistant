@@ -14,6 +14,8 @@ the table; completed items are struck through with the landing commit noted.
 
 | # | Item | Status | Branch / Worktree | Notes |
 |---|------|--------|-------------------|-------|
+| 7 | Query path structured-response contract ([QUERY-FIX]): kill the invariant "माफ गर्नुहोस्" apology for correctly-transcribed questions | landed `7ac8b33` | ~~`fix-query-end-to-end` (`.claude/worktrees/fix-query-end-to-end`)~~ | e2e suite `QueryEndToEndRegressionTests`; train-intent must mirror the canonical contract — see section below |
+| 6 | Intent-model base bake-off (Gemma 3 1B vs Qwen 3 1.7B) | not started | none (runs on GPU server 192.168.1.117 via `tools/train-intent/`) | Spec: design 2026-09-05 §7/§9.5, ship gates §10; unblocks `ModelCatalog.intentNepali1B` placeholder |
 | 4 | ~~Wake word ("Hey Sahayak")~~ | landed `95b7ff7` | ~~`task/wake-word` (`.claude/worktrees/wake-word`)~~ | ~~Brief at `TASK.md` in that worktree~~ |
 | 5 | ~~Gemini cost governance~~ | landed `a50b61c` | ~~`task/cost-governance` (`.claude/worktrees/cost-governance`)~~ | ~~Brief at `TASK.md` in that worktree~~ |
 
@@ -78,6 +80,56 @@ the vision features to a real user (v2 design §3.2/§7; appliance design §8).
 **Hard constraints:** no time-zone cleverness beyond local-calendar day
 rollover; do not touch IntentPrompt, CommandRouter, HomeView, or the plugin
 registry/plugins.
+
+---
+
+## #7 — Query path structured-response contract ([QUERY-FIX])
+
+**Problem (real-device, invariant):** Nepali open-domain questions ("भोलिको
+मौसम कस्तो छ?") transcribed correctly, then `llama_interpreter` reported
+`inference_done` outcome=success, `command_router` emitted
+`command_unrecognised`, and the speaker ALWAYS said the generic apology
+(`router.reprompt`). Root cause: the pre-fix `IntentPrompt` text measured
+2,361 tokens against the on-device 1,024-token context
+(`LLM(from:maxTokenCount: 1024)`); the runtime finished with an EMPTY
+completion that was logged as success, `parse("")` returned nil, and every
+utterance fell through to the apology.
+
+**Fix:** canonical structured-response contract shared by both brains —
+the interpreter answers with ONE JSON object: `intent` (12-value enum),
+`response` (ALWAYS non-empty; for a question it IS the actual answer the
+router speaks), `confidence`, `actionType`/`actionUrl`, plus the entity/slot
+fields. `IntentPrompt.build` rewritten inside the measured on-device budget
+(~919 formatted tokens at the canonical fixture vs 1,024, verified on the
+real llama3.2:1b tokenizer; the completed one-shot example + closing
+imperative is load-bearing for the 1B base model). `LlamaCommandInterpreter`
+parse maps canonical (`intent`/`response`) onto `InterpretedCommand`, still
+accepts the legacy wire shape (`action`/`reply` — intent cache, cloud
+collapsed path, grammar-bound fine-tuned local brain), and REJECTS
+empty/missing/whitespace `response` (a reply-less command would make the
+router speak nothing — a silent dead-end worse than the re-prompt); missing
+`confidence` defaults to 0.5 (rephrase band). Empty inference output is now
+an observable `inference_empty_output` failure, never `inference_done`
+success. Gemini shares the prompt + parse via `IntentPrompt.build` and
+`LlamaCommandInterpreter.parse`, so the cloud path got the same contract.
+
+**Verification:** `QueryEndToEndRegressionTests` drives the REAL chain
+(`CommandRouter` → `IntentRouter` with real cache → `LocalBrainChain` → real
+`LlamaCommandInterpreter` via the `generateOverride` seam; Gemini via stubbed
+transport): Q&A transcript → structured JSON → spoken answer via
+`noteGenericReply` + `speak`, no `command_unrecognised`, no apology; empty
+output and empty `response` fall back to the honest re-prompt. Size-budget
+regression tripwire pinned in `IntentPromptTests`.
+
+**Train-intent mirror obligation:** the fine-tuned local brain
+(`LocalIntentInterpreter.intentSchema` grammar) still emits the LEGACY keys
+(`action`/`reply`) — the tolerant parse keeps it dispatchable, but when the
+train-intent workstream adopts the canonical contract it must mirror it
+exactly on every output surface: `LABEL_FIELDS`,
+`seeds/prompt_template.txt`, `LocalIntentInterpreter.intentSchema`, and
+`LlamaGrammar.commandJSON` (already canonical) must all teach
+`intent`/`response`/`actionType`/`actionUrl` with an always-non-empty
+`response`, so both brains speak one contract.
 
 ---
 

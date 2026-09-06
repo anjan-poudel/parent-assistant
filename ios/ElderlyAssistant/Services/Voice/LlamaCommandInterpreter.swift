@@ -135,9 +135,22 @@ struct InterpretedCommand: Equatable, Codable {
 /// The llama.cpp grammar handed to the sampler where the runtime supports
 /// it. Kept as source so it can be unit-tested and version-bumped
 /// alongside the schema.
+///
+/// Mirrors the STRUCTURED-RESPONSE CONTRACT (2026-09-06, [QUERY-FIX]) the
+/// shared prompt teaches: `intent` + always-non-empty `response` +
+/// `confidence`, plus `actionType`/`actionUrl` and the entity/slot fields.
+/// `parse(json:)` additionally accepts the pre-contract legacy wire shape
+/// (`action`/`reply`) so old cached payloads, the cloud collapsed path's
+/// canned output, and the grammar-constrained fine-tuned local brain
+/// (whose `intentSchema` still emits the legacy keys) keep working —
+/// lenient in that one direction only.
 enum LlamaGrammar {
     static let commandJSON: String = """
-    root   ::= "{" ws "\\"action\\"" ws ":" ws action ws "," ws
+    root   ::= "{" ws "\\"intent\\"" ws ":" ws intent ws "," ws
+                    "\\"response\\"" ws ":" ws string ws "," ws
+                    "\\"confidence\\"" ws ":" ws number ws "," ws
+                    "\\"actionType\\"" ws ":" ws maybeString ws "," ws
+                    "\\"actionUrl\\"" ws ":" ws maybeString ws "," ws
                     "\\"entryId\\"" ws ":" ws maybeString ws "," ws
                     "\\"contact\\"" ws ":" ws maybeString ws "," ws
                     "\\"time\\"" ws ":" ws maybeString ws "," ws
@@ -148,14 +161,12 @@ enum LlamaGrammar {
                     "\\"topic\\"" ws ":" ws maybeString ws "," ws
                     "\\"steps\\"" ws ":" ws maybeStringArray ws "," ws
                     "\\"pluginAction\\"" ws ":" ws maybeString ws "," ws
-                    "\\"pluginEntities\\"" ws ":" ws entityMap ws "," ws
-                    "\\"confidence\\"" ws ":" ws number ws "," ws
-                    "\\"reply\\"" ws ":" ws string ws "}"
-    action ::= "\\"ack_med\\"" | "\\"call\\"" | "\\"emergency\\""
+                    "\\"pluginEntities\\"" ws ":" ws entityMap ws "}"
+    intent ::= "\\"ack_med\\"" | "\\"call\\"" | "\\"emergency\\""
              | "\\"set_reminder\\"" | "\\"health_query\\"" | "\\"music\\""
              | "\\"send_message\\"" | "\\"guide\\""
              | "\\"create_calendar_event\\"" | "\\"suggest_video\\""
-             | "\\"query\\"" | "\\"plugin\\"" | "\\"none\\""
+             | "\\"query\\"" | "\\"none\\""
     maybeString ::= "null" | string
     maybeStringArray ::= "null" | "[" ws (string ("," ws string)*)? "]"
     entityMap ::= "null" | "{" ws ("\\"" ([^"\\\\] | "\\\\" .)* "\\"" ws ":" ws string (ws "," ws "\\"" ([^"\\\\] | "\\\\" .)* "\\"" ws ":" ws string)*)? ws "}"
@@ -204,8 +215,14 @@ final class LlamaCommandInterpreter: CommandInterpreter {
     private let modelStore: ModelStore
     private let observabilityBus: ObservabilityBus
     private let config: Config
-    /// Optional — when set, prompt composition includes applicable
-    /// plugins' intent fragments (see `IntentPrompt.build`).
+    /// Optional — retained for wiring compatibility (`AppCoordinator`
+    /// passes the shared registry). Plugin capability fragments are NOT
+    /// composed into the on-device prompt: this runtime's context is
+    /// 1,024 tokens and the full fragment text overflowed it — the
+    /// silent empty completion behind the 2026-09-06 [QUERY-FIX] bug (the
+    /// `inference_empty_output` guard in `runInference` makes any future
+    /// overflow observable instead of silent). Plugin-bearing prompts are
+    /// the cloud path's job (`GeminiCommandInterpreter`).
     private let pluginRegistry: PluginRegistry?
     private let inferenceQueue = DispatchQueue(label: "llama.command",
                                                qos: .userInitiated)
@@ -220,27 +237,35 @@ final class LlamaCommandInterpreter: CommandInterpreter {
     /// `Template(systemPrompt:)` handed to `LLM(from:)` and the manually
     /// formatted chat header in `runInference` — previously duplicated as
     /// two inline copies that could drift apart. Kept deliberately SHORT:
-    /// the on-device model is 1B and long system prompts hurt it. The
-    /// detailed schema/entity instructions live in the user turn via
-    /// `IntentPrompt.build` — this string only carries identity, the two
-    /// operating modes, output discipline, and the reply style, matching
-    /// the elderly-assistance customization in `IntentPrompt`.
+    /// the on-device model is 1B in a 1,024-token context, and the
+    /// pre-[QUERY-FIX] prompt measured 2,361 tokens — an overflow that
+    /// produced empty completions (the 2026-09-06 bug). The detailed
+    /// schema/entity instructions live in the user turn via
+    /// `IntentPrompt.build`; this string only carries identity, the two
+    /// operating modes, output discipline, and the reply style.
     private static let chatSystemPrompt = """
-    You are Sahayak, a voice assistant for an elderly speaker who is not \
-    a native English speaker and finds technology difficult. You operate \
-    in exactly two modes: (1) deciphering the user's intent into a \
-    structured command, or (2) answering an open-form question or \
-    statement. Reply ONLY with a single JSON object matching the schema \
-    in the user's message — no other text. Write the reply field in \
-    plain, simple language with short sentences, warm and respectful, in \
-    the user's own language — it will be spoken aloud to them.
+    You are Sahayak, a voice assistant for an elderly speaker. Reply ONLY \
+    with one JSON object matching the schema in the user's message — no \
+    other text, no markdown fences. The "response" field must be a \
+    non-empty string in the user's own language, plain and simple, short \
+    sentences, warm and respectful — it will be spoken aloud.
     """
+
+    /// Test seam: replaces the llama.cpp call entirely (same pattern as
+    /// `LocalIntentInterpreter.generateOverride`). While set, the
+    /// interpreter is "available" without any cached model, so the REAL
+    /// router chain can be driven end-to-end in unit tests — the
+    /// end-to-end regression suite replays the exact device utterance
+    /// through CommandRouter → IntentRouter → LocalBrainChain → this
+    /// interpreter on the seam.
+    var generateOverride: ((String) async throws -> String)?
 
     /// Cached LLM handle. Held as `Any?` so this file compiles without
     /// the LLM package present. Casts to `LLM.LLM` inside `#if canImport`.
     private var llmInstance: Any?
 
     var isAvailable: Bool {
+        if generateOverride != nil { return true }
         guard modelStore.isCached(preferredBaseId) else { return false }
         #if canImport(LLM)
         return true
@@ -291,10 +316,11 @@ final class LlamaCommandInterpreter: CommandInterpreter {
             DispatchQueue.main.async { completion(nil) }
             return
         }
-        let activePlugins = pluginRegistry?.activePlugins(
-            for: Locale(identifier: context.userLanguageHint)) ?? []
-        let prompt = IntentPrompt.build(transcript: clean, context: context,
-                                        activePlugins: activePlugins)
+        // Plugin fragments are deliberately NOT composed here — the
+        // on-device context (1,024 tokens) cannot fit them (see the
+        // pluginRegistry property docs); `IntentPrompt.build` defaults to
+        // no plugins.
+        let prompt = IntentPrompt.build(transcript: clean, context: context)
 
         inferenceQueue.async { [weak self] in
             self?.runInference(prompt: prompt) { json in
@@ -314,6 +340,27 @@ final class LlamaCommandInterpreter: CommandInterpreter {
 
     private func runInference(prompt: String,
                               completion: @escaping (String?) -> Void) {
+        // Test seam — mirrors `LocalIntentInterpreter.generateOverride`.
+        // The returned string still runs through the SAME empty-output
+        // guard as the real runtime below, so the seam cannot mask the
+        // overflow failure mode it exists to test around.
+        if let generateOverride {
+            Task {
+                do {
+                    let out = try await generateOverride(prompt)
+                    if out.isEmpty {
+                        emit("inference_empty_output", outcome: "failure")
+                        completion(nil)
+                    } else {
+                        emit("inference_done", outcome: "success")
+                        completion(out)
+                    }
+                } catch {
+                    completion(nil)
+                }
+            }
+            return
+        }
         #if canImport(LLM)
         guard let modelURL = modelStore.path(for: preferredBaseId) else {
             emit("model_path_missing", outcome: "failure")
@@ -394,8 +441,23 @@ final class LlamaCommandInterpreter: CommandInterpreter {
                 let result = await group.next() ?? nil
                 group.cancelAll()
                 if let output = (result ?? nil) as? String?, let output {
-                    emit("inference_done", outcome: "success")
-                    completion(output)
+                    if output.isEmpty {
+                        // The [QUERY-FIX] bug's exact failure shape
+                        // (2026-09-06): when the formatted prompt exceeds
+                        // the 1,024-token context, prepareContext fails and
+                        // the runtime finishes with an EMPTY output that
+                        // used to be reported as inference_done success —
+                        // parse("") then returned nil and every utterance
+                        // fell to the generic re-prompt despite correct
+                        // transcription. Report it honestly as a failure
+                        // so an overflow can never masquerade as a
+                        // successful (empty) inference again.
+                        emit("inference_empty_output", outcome: "failure")
+                        completion(nil)
+                    } else {
+                        emit("inference_done", outcome: "success")
+                        completion(output)
+                    }
                 } else {
                     emit("inference_timeout", outcome: "failure")
                     completion(nil)
@@ -411,6 +473,27 @@ final class LlamaCommandInterpreter: CommandInterpreter {
 
     // MARK: - Parse
 
+    /// Decodes the STRUCTURED-RESPONSE CONTRACT (2026-09-06): a single
+    /// JSON object with `intent` (classified intent), `response` (the
+    /// spoken reply — ALWAYS non-empty; for an open-domain question it IS
+    /// the answer the router speaks), `confidence`, `actionType`/
+    /// `actionUrl` (when the intent needs them), and the entity/slot
+    /// fields the intent uses. `intent`→`action` and `response`→`reply`
+    /// map onto the existing `InterpretedCommand` model; `actionType`/
+    /// `actionUrl` are validated but not carried (no current consumer —
+    /// they exist for deep-link actions that land later).
+    ///
+    /// The pre-contract LEGACY wire shape (`action`/`reply` + the same
+    /// entity fields) is still accepted so the intent→command cache's
+    /// stored payloads, the cloud collapsed path's canned JSON, and the
+    /// grammar-constrained fine-tuned local brain (`LocalIntentInterpreter
+    /// .intentSchema`) keep working unchanged.
+    ///
+    /// Contract enforcement: a missing/empty `response` (or `reply`)
+    /// returns nil — dispatching a command whose reply is empty would
+    /// make the router speak NOTHING, a silent dead-end worse than the
+    /// generic re-prompt. A missing `confidence` defaults to 0.5 (the
+    /// REPHRASE band — the router re-asks instead of silently acting).
     static func parse(json raw: String?) -> InterpretedCommand? {
         guard let raw = raw else { return nil }
         // Small models often wrap output in ```json fences or add
@@ -418,11 +501,16 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         let extracted = Self.extractJSONObject(from: raw) ?? raw
         guard let data = extracted.data(using: .utf8) else { return nil }
         do {
-            let decoded = try JSONDecoder().decode(RawCommand.self, from: data)
-            guard let action = InterpretedCommand.Action(rawValue: decoded.action) else {
+            let decoded = try JSONDecoder().decode(CommandWireObject.self, from: data)
+            let actionName = decoded.intent ?? decoded.action
+            guard let actionName, let action = InterpretedCommand.Action(rawValue: actionName) else {
                 return nil
             }
-            let clamped = max(0.0, min(1.0, decoded.confidence))
+            let reply = decoded.response ?? decoded.reply ?? ""
+            guard !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return nil
+            }
+            let clamped = max(0.0, min(1.0, decoded.confidence ?? 0.5))
             return InterpretedCommand(
                 action: action,
                 entryId: decoded.entryId,
@@ -437,7 +525,7 @@ final class LlamaCommandInterpreter: CommandInterpreter {
                 pluginAction: decoded.pluginAction,
                 pluginEntities: decoded.pluginEntities,
                 confidence: clamped,
-                reply: decoded.reply
+                reply: reply
             )
         } catch {
             return nil
@@ -476,9 +564,23 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         return nil
     }
 
-    // Codable shape matched to the GBNF grammar output.
-    private struct RawCommand: Codable {
-        let action: String
+    /// One tolerant wire shape for BOTH schema generations: canonical
+    /// (`intent`/`response`/`actionType`/`actionUrl`) and legacy
+    /// (`action`/`reply`). All-optional decoding lets a payload from
+    /// either generation decode; `parse` then requires intent-or-action
+    /// and a non-empty response-or-reply. Optional `String?` properties
+    /// decode missing keys as nil (synthesized `decodeIfPresent`), so v1
+    /// payloads that never carried the intent/v2 keys still decode.
+    private struct CommandWireObject: Codable {
+        // Canonical contract keys.
+        let intent: String?
+        let response: String?
+        let actionType: String?
+        let actionUrl: String?
+        // Legacy keys (pre-2026-09 contract).
+        let action: String?
+        let reply: String?
+        // Entity/slot fields — shared by both shapes.
         let entryId: String?
         let contact: String?
         let time: String?
@@ -486,14 +588,11 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         let message: String?
         let callType: String?
         let requestedApp: String?
-        // intent/v2 — optional at the wire level so v1 payloads (which
-        // never carried these keys) still decode.
         let topic: String?
         let steps: [String]?
         let pluginAction: String?
         let pluginEntities: [String: String]?
-        let confidence: Double
-        let reply: String
+        let confidence: Double?
     }
 
     // MARK: - Observability

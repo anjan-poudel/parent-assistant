@@ -197,6 +197,67 @@ The user profile must be stored entirely on-device. No profile data (voice model
 
 ---
 
+### 1.10 Unified Contact Search & Channel Actions (Call leaf)
+
+**FR-047**
+The Call leaf search must match across the user's configured family contacts AND the device address book, presented as one ranked list — family matches first (exact name, then relationship anchor, then containment, recency-tiebroken), address-book matches recency-ranked as before; duplicates between the two sources collapse to the family entry when the family contact matched the query; the existing 15-result cap and "more available" hint apply to the union.
+
+**FR-048**
+Every search result must surface channel actions whose availability is action-based, never presence-claimed: a WhatsApp chat action whenever the row has a dialable phone number, a Messenger thread action only when a Messenger handle is stored; app-absent fallbacks (native Messages sheet / pasteboard for WhatsApp, m.me web for Messenger) must be disclosed aloud; initiating these actions must not record call recency.
+
+#### Feature: Unified Contact Search & Channel Actions (FR-047, FR-048)
+
+```gherkin
+Feature: Unified contact search and channel actions
+  As an elderly user
+  I want to find anyone — family or phone book — and start a chat in one place
+  So that I can reach people without juggling apps
+
+  Scenario: Search finds family and address-book contacts together, family first
+    Given the user has configured a family contact whose name is "Aarav Sharma"
+    And the device address book also contains "Aarav Sharma" and "Aarav Karki"
+    When the user searches the Call leaf for "Aarav"
+    Then the results must be presented as one ranked list
+    And the family entry must appear before the address-book entries
+
+  Scenario: Relationship word matches across scripts
+    Given a family contact is stored with the relationship "छोरी"
+    When the user searches the Call leaf for "daughter"
+    Then the relationship anchor must match across scripts
+    And the family contact must appear in the results
+
+  Scenario: Duplicate collapses when the family contact matched
+    Given the address book contains the same person as a configured family contact
+    When the user's query matches the family contact
+    Then the results must show the family entry only
+    And the matching address-book row must not appear separately
+
+  Scenario: Address-book twin still found when the family contact did not match
+    Given the address book contains "Ramesh" who is not a configured family contact
+    When the user searches the Call leaf for "Ramesh"
+    Then the address-book row must appear in the results as before
+    And no duplicate collapse must apply
+
+  Scenario: WhatsApp chat action on an address-book row
+    Given an address-book row has a dialable phone number
+    When the user selects the WhatsApp action for that row
+    Then the system must open a WhatsApp chat for that number
+    And the action must not record call recency
+
+  Scenario: Messenger action appears only when a Messenger handle is stored
+    Given a search result row has no stored Messenger handle
+    When the row is presented with its channel actions
+    Then no Messenger action must be offered for that row
+
+  Scenario: WhatsApp app-absent fallback is disclosed aloud
+    Given WhatsApp is not installed on the device
+    And a search result row has a dialable phone number
+    When the user selects the WhatsApp action for that row
+    Then the system must disclose the fallback aloud (native Messages sheet or pasted number)
+```
+
+---
+
 ## 2. Non-Functional Requirements
 
 ### 2.1 Performance

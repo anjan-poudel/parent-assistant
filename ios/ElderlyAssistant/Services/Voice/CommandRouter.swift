@@ -2,8 +2,56 @@ import Foundation
 import UserNotifications
 import SwiftUI
 
+/// Honest interpreter-chain status for the router's no-brain fallback
+/// (spec §7 "no dead ends"; interpreter-availability fix 2026-09-06).
+///
+/// Before this type existed, `routeKeywordRemainder` spoke the generic
+/// "didn't understand" re-prompt whenever interpretation came back nil —
+/// a lie when the transcript was correct and NO interpreter existed to
+/// hear the utterance at all (the on-device stack before the LLaMA GGUF
+/// is cached; the Gemini stack before an API key is configured). The
+/// coordinator owns the chain wiring AND the model-download state, so it
+/// derives the readiness the router speaks against:
+///
+///  - `.available` — a real brain can answer. A nil interpretation here
+///    means the brain genuinely didn't understand, so the generic
+///    re-prompt stays honest and is what the router speaks.
+///  - `.downloadingBrain` — no brain yet, but the assistant-brain model
+///    is downloading (one-time, ~1 GB). Say THAT instead of pretending
+///    the user misspoke.
+///  - `.needsSetup` — no brain and nothing in flight (download failed or
+///    gated, runtime missing). The unblock is Settings (model download
+///    or Gemini key), and the message says so.
+enum BrainReadiness: Equatable {
+    case available
+    case downloadingBrain
+    case needsSetup
+
+    /// Mirrors the exact layer ladder `IntentRouter` consults at route
+    /// time: the local brain, else the cloud brain ONLY when the stack
+    /// allows cloud (`cloudEnabled` — the on-device stack ignores a
+    /// configured Gemini key, exactly like the router's escalation
+    /// guard does). `brainDownloadInFlight` is what distinguishes the
+    /// two honest no-brain messages.
+    static func resolve(localBrainAvailable: Bool,
+                        cloudEnabled: Bool,
+                        cloudBrainAvailable: Bool,
+                        brainDownloadInFlight: Bool) -> BrainReadiness {
+        if localBrainAvailable || (cloudEnabled && cloudBrainAvailable) {
+            return .available
+        }
+        return brainDownloadInFlight ? .downloadingBrain : .needsSetup
+    }
+}
+
 protocol VoiceCommandCoordinating: AnyObject {
     var isAwaitingConfirmation: Bool { get }
+    /// Interpreter-chain status for the router's fallback speech (spec
+    /// §7 no dead ends; 2026-09-06) — the coordinator derives it because
+    /// it owns the chain wiring and the model-download state; the router
+    /// only decides which (localized) message to speak. See
+    /// `BrainReadiness` for the three states and their speech.
+    var brainReadiness: BrainReadiness { get }
     /// True only while a `call` intent is specifically awaiting its
     /// yes/no — lets `CommandRouter` skip its generic confirmation speech
     /// and let the coordinator speak its own call-specific response
@@ -378,7 +426,13 @@ final class CommandRouter {
     /// Post-LLM keyword fallback — everything in the keyword layer that
     /// is NOT safety-critical: the blunt sensitive-call block (no entity
     /// extraction available, so any call-ish phrase is blocked rather
-    /// than acted on) and the generic unrecognised re-prompt.
+    /// than acted on) and the unrecognised handling. The unrecognised
+    /// branch speaks honestly against `coordinator.brainReadiness`
+    /// (2026-09-06): the generic "I didn't understand" re-prompt is only
+    /// truthful while an interpreter actually listened — when the chain
+    /// is empty because the brain model is downloading or needs setup,
+    /// the user hears THAT (spec §7 no dead ends), not a lie that blames
+    /// their pronunciation.
     @discardableResult
     private func routeKeywordRemainder(_ raw: String) -> RoutingResult {
         let text = raw
@@ -399,7 +453,21 @@ final class CommandRouter {
         }
 
         emit(eventType: "command_unrecognised", outcome: "info")
-        speak(key: "router.reprompt")
+        // No interpreter heard this utterance — or one did and
+        // abstained. Only `.available` makes the generic re-prompt
+        // honest; the two no-brain states say what is actually
+        // happening (first-run model download / setup needed). Both
+        // no-brain messages are also VISIBLE (live-caption card via the
+        // coordinator), since the captions are a mobility aid, not just
+        // hearing assistance.
+        switch coordinator?.brainReadiness ?? .available {
+        case .available:
+            speak(key: "router.reprompt")
+        case .downloadingBrain:
+            speakWithVisibleOutcome(key: "router.brainDownloading")
+        case .needsSetup:
+            speakWithVisibleOutcome(key: "router.brainNeedsSetup")
+        }
         return .unrecognised(transcript: raw)
     }
 
