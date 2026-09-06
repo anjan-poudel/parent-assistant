@@ -4823,174 +4823,174 @@
       }
     },
     "router.modelReplyUnclear": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "I'm sorry, I couldn't make sense of that. Please say it again."
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "माफ गर्नुहोस्, मैले त्यो बुझ्न सकिनँ। कृपया फेरि भन्नुहोस्।"
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I'm sorry, I couldn't make sense of that. Please say it again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस्, मैले त्यो बुझ्न सकिनँ। कृपया फेरि भन्नुहोस्।"
+          }
         }
       }
-    }
     },
     "topic.weather.unavailable": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "I'm sorry, I can't check the live weather yet. It will be available soon."
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "माफ गर्नुहोस्, म अहिले मौसम हेर्न सक्दिनँ। मौसमको जानकारी चाँडै उपलब्ध हुनेछ।"
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I'm sorry, I can't check the live weather yet. It will be available soon."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस्, म अहिले मौसम हेर्न सक्दिनँ। मौसमको जानकारी चाँडै उपलब्ध हुनेछ।"
+          }
         }
       }
-    }
     },
     "topic.greeting": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "Hello! How can I help you today?"
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "नमस्ते! आज म तपाईंलाई के मद्दत गर्न सक्छु?"
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hello! How can I help you today?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नमस्ते! आज म तपाईंलाई के मद्दत गर्न सक्छु?"
+          }
         }
       }
-    }
     },
     "topic.date.now": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "Today is %1$@."
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "आज %1$@, %2$@ हो।"
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today is %1$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आज %1$@, %2$@ हो।"
+          }
         }
       }
-    }
     },
     "topic.time.nowOnHour": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "It's %1$@ %2$@."
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "अहिले %2$@ %1$@ बजेको छ।"
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It's %1$@ %2$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले %2$@ %1$@ बजेको छ।"
+          }
         }
       }
-    }
     },
     "topic.time.nowWithMinutes": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "It's %1$@:%2$@ %3$@."
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "अहिले %3$@ %1$@ बजेर %2$@ मिनेट भयो।"
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It's %1$@:%2$@ %3$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले %3$@ %1$@ बजेर %2$@ मिनेट भयो।"
+          }
         }
       }
-    }
     },
     "topic.time.period.morning": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "in the morning"
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "बिहान"
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "in the morning"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बिहान"
+          }
         }
       }
-    }
     },
     "topic.time.period.afternoon": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "in the afternoon"
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "दिउँसो"
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "in the afternoon"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दिउँसो"
+          }
         }
       }
-    }
     },
     "topic.time.period.evening": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "in the evening"
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "बेलुका"
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "in the evening"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बेलुका"
+          }
         }
       }
-    }
     },
     "topic.time.period.night": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "at night"
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "राति"
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "at night"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "राति"
+          }
         }
       }
-    }
     },
     "router.reprompt": {
       "extractionState": "manual",
@@ -7696,5 +7696,345 @@
       }
     }
   },
-  "version": "1.0"
+  "version": "1.0",
+  "call.search.spokenFound": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Found %@. Tap to call."
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "%@ फेला पर्‍यो। कल गर्न थिच्नुहोस्।"
+        }
+      }
+    }
+  },
+  "call.search.spokenNotFound": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "No one found for %@."
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "%@ भेटिएन।"
+        }
+      }
+    }
+  },
+  "call.search.micLabel": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Search by voice"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "बोलेर खोज्नुहोस्"
+        }
+      }
+    }
+  },
+  "call.search.micStopLabel": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Stop listening"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "सुन्न रोक्नुहोस्"
+        }
+      }
+    }
+  },
+  "call.search.micListening": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Listening — say the name"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "सुन्दै छु — नाम भन्नुहोस्"
+        }
+      }
+    }
+  },
+  "call.search.allowBody": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Your phone book holds everyone — people you saved AND people added by WhatsApp, Messenger and other apps. Allow access, and the assistant can call any of them from this screen."
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "तपाईंको फोन बुकमा सबै हुन्छन् — आफूले राखेका र व्हाट्सएप, मेसेन्जर लगायतका एपले थपेका मान्छेहरू पनि। पहुँच दिनुभयो भने असिस्टेन्टले यही स्क्रिनबाट जोसुकैलाई फोन गर्न सक्छ।"
+        }
+      }
+    }
+  },
+  "call.search.allowButton": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Allow contacts access"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "सम्पर्कहरूको पहुँच दिनुहोस्"
+        }
+      }
+    }
+  },
+  "call.search.allowTitle": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Search your whole phone book"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "पूरै फोन बुक खोज्नुहोस्"
+        }
+      }
+    }
+  },
+  "call.search.bookEmpty": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Your phone book has no contacts yet."
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "तपाईंको फोन बुकमा अहिलेसम्म कोही छैन।"
+        }
+      }
+    }
+  },
+  "call.search.deniedBody": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Contacts access is off, so searching can't see anyone. Turn it on in Settings — the rest of the app keeps working as usual."
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "सम्पर्कको पहुँच बन्द भएकाले खोज्दा कोही देखिँदैन। सेटिङ्समा गएर खोल्नुहोस् — बाँकी सबै पहिले जस्तै चल्छ।"
+        }
+      }
+    }
+  },
+  "call.search.deniedTitle": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Contacts access is off"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "सम्पर्कहरूको पहुँच बन्द छ"
+        }
+      }
+    }
+  },
+  "call.search.loadFailed": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Couldn't read your contacts. Please try again."
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "तपाईंका सम्पर्कहरू पढ्न सकिएन। फेरि प्रयास गर्नुहोस्।"
+        }
+      }
+    }
+  },
+  "call.search.loading": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Reading your contacts…"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "तपाईंका सम्पर्कहरू पढ्दैछु…"
+        }
+      }
+    }
+  },
+  "call.search.moreAvailable": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "More people match. Keep typing to narrow the list."
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "अझ धेरै मान्छे मिल्छन्। सूची सानो बनाउन लेख्दै जानुहोस्।"
+        }
+      }
+    }
+  },
+  "call.search.noResults": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "No one found. Try a different name or number."
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "कोही भेटिएन। अर्को नाम वा नम्बर लेख्नुहोस्।"
+        }
+      }
+    }
+  },
+  "call.search.openSettings": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Open Settings"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "सेटिङ्स खोल्नुहोस्"
+        }
+      }
+    }
+  },
+  "call.search.placeholder": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Search all contacts"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "सबै सम्पर्कहरू खोज्नुहोस्"
+        }
+      }
+    }
+  },
+  "call.search.retry": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Try again"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "फेरि प्रयास गर्नुहोस्"
+        }
+      }
+    }
+  },
+  "call.search.familyChip": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Family"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "परिवार"
+        }
+      }
+    }
+  },
+  "call.search.micFailed": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "The mic couldn't hear. Please try again."
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "माइकले सुन्न सकेन। फेरि प्रयास गर्नुहोस्।"
+        }
+      }
+    }
+  }
 }

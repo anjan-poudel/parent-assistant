@@ -440,6 +440,13 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
     var presentedPluginViews: [AnyView] = []
     func presentPluginView(_ view: AnyView) { presentedPluginViews.append(view) }
 
+    /// voice-contact-search (2026-09-07): recorder for the keyword
+    /// pre-route's coordinator call.
+    var contactSearchRequests: [String?] = []
+    func requestContactSearch(query: String?) {
+        contactSearchRequests.append(query)
+    }
+
     var pendingRephraseCommand: InterpretedCommand? { rephrasePended?.command }
     private(set) var rephrasePended: (command: InterpretedCommand, sourceTranscript: String?)?
     func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?) {
@@ -460,4 +467,99 @@ private final class MockSpeaker: Speaker {
     }
 
     func cancel() {}
+}
+
+// MARK: - Contact-search keyword pre-route (voice-contact-search, 2026-09-07)
+
+/// Wiring of the deterministic contact-search stage: `VoiceContactSearchRoute`
+/// decides before the topic table and interpreter, the coordinator receives
+/// the extracted query, and call-shaped utterances never reach it.
+final class CommandRouterContactSearchTests: XCTestCase {
+
+    private func makeRouter(_ coordinator: MockVoiceCommandCoordinator)
+        -> (CommandRouter, MockObservabilityBus) {
+        let bus = MockObservabilityBus()
+        let router = CommandRouter(coordinator: coordinator,
+                                   observabilityBus: bus,
+                                   speaker: MockSpeaker())
+        return (router, bus)
+    }
+
+    func testDevanagariContactSearchRoutesToCoordinatorWithExtractedQuery() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "मैयाको फोन नम्बर खोज")
+
+        XCTAssertEqual(result, .contactSearchRequested)
+        XCTAssertEqual(coordinator.contactSearchRequests, ["मैया"])
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "contact_search_command" })
+    }
+
+    func testRomanizedContactSearchRoutesToCoordinator() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "maiya ko phone khoja")
+
+        XCTAssertEqual(result, .contactSearchRequested)
+        XCTAssertEqual(coordinator.contactSearchRequests, ["maiya"])
+    }
+
+    func testGreetingPrefixedSearchIsASearchNotSmallTalk() {
+        // The pre-route sits BEFORE the TopicPreAnswer table: a greeting
+        // prefix must not turn "नमस्ते, मैयाको फोन नम्बर खोज" into a
+        // greeting reply.
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "नमस्ते, मैयाको फोन नम्बर खोज")
+
+        XCTAssertEqual(result, .contactSearchRequested)
+        XCTAssertEqual(coordinator.contactSearchRequests, ["मैया"])
+        XCTAssertTrue(coordinator.genericReplies.isEmpty)
+    }
+
+    func testSearchShapedUtteranceWithoutNameStillRoutes() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "फोन नम्बर खोज")
+
+        XCTAssertEqual(result, .contactSearchRequested)
+        XCTAssertEqual(coordinator.contactSearchRequests, [nil])
+    }
+
+    func testDirectCallUtteranceIsNotSwallowedBySearchMarkers() {
+        // "फोन नम्बर लगाऊ" is a CALL intent (golden corpus) — the phone-
+        // word markers must never shadow it.
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "फोन नम्बर लगाऊ")
+
+        XCTAssertNotEqual(result, .contactSearchRequested)
+        XCTAssertTrue(coordinator.contactSearchRequests.isEmpty)
+    }
+
+    func testCallVerbUtteranceIsNotSwallowedBySearchMarkers() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "छोरालाई फोन गर")
+
+        XCTAssertTrue(coordinator.contactSearchRequests.isEmpty)
+    }
+
+    func testEmergencyStillWinsBeforeContactSearch() {
+        // The safety net is above the pre-route in the ladder — distress
+        // phrasing that contains no search marker must never be delayed.
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ")
+
+        XCTAssertEqual(result, .emergencyTriggered)
+        XCTAssertTrue(coordinator.contactSearchRequests.isEmpty)
+    }
 }

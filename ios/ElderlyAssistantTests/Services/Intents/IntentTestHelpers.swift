@@ -142,6 +142,13 @@ final class StubCoordinator: VoiceCommandCoordinating {
     }
     func presentPluginView(_ view: AnyView) {}
 
+    /// voice-contact-search (2026-09-07): recorder for the keyword
+    /// pre-route's coordinator call.
+    private(set) var contactSearchRequests: [String?] = []
+    func requestContactSearch(query: String?) {
+        contactSearchRequests.append(query)
+    }
+
     var pendingRephraseCommand: InterpretedCommand? { rephrasePended?.command }
     private(set) var rephrasePended: (command: InterpretedCommand, sourceTranscript: String?)?
     func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?) {

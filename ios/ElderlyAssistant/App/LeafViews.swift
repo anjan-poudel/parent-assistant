@@ -1,5 +1,7 @@
 import SwiftUI
 import UIKit
+import AVFoundation
+import Speech
 
 /// Shared leaf-screen chrome: huge back button, single-purpose layout
 /// (spec §4.3). Every hub leaf uses this.
@@ -313,6 +315,21 @@ struct CallView: View {
     /// each dial so the "recently used" ranking stays current.
     @State private var recency: [String: Date] = [:]
 
+    // Voice search (voice-contact-search, 2026-09-07).
+    /// One-shot mic-capture phase for the search field's mic button.
+    private enum MicPhase { case idle, listening, failed }
+    @State private var micPhase: MicPhase = .idle
+    /// True once speech/mic permission is denied — the button is honest
+    /// dead for this visit (the denial might be reversible in Settings;
+    /// next visit re-checks).
+    @State private var micHidden = false
+    /// The voice-command search this leaf is currently answering
+    /// (nil when none): the request id plus the query to announce.
+    @State private var voiceRequest: AppCoordinator.ContactSearchRequest?
+    /// Guards the spoken announcement to ONCE per request: set when the
+    /// result was announced (or the ask became moot — user edited away).
+    @State private var announcedVoiceSearchID: UUID?
+
     var body: some View {
         LeafScreen(titleKey: "call.title") {
             VStack(spacing: 12) {
@@ -325,11 +342,49 @@ struct CallView: View {
                 }
             }
         }
-        .onAppear(perform: refreshDirectory)
+        .onAppear {
+            refreshDirectory()
+            // A voice command may have pushed this leaf — consume the
+            // request and prefill; a fresh publish while the leaf was
+            // already open is picked up by the onChange below.
+            consumePendingVoiceRequestIfPresent()
+        }
+        .onChange(of: coordinator.pendingContactSearchRequest?.id) { _ in
+            consumePendingVoiceRequestIfPresent()
+        }
+        .onChange(of: entries) { _ in
+            announceVoiceResultIfReady()
+        }
+        .onChange(of: loadFailed) { _ in
+            announceVoiceResultIfReady()
+        }
+        .onChange(of: searchText) { _ in
+            // A change the USER made (typing, clearing) retires the voice
+            // ask: the elder is refining by hand, so the results were
+            // theirs to see — never speak over them late. Our own prefill
+            // sets searchText == voiceRequest.query, which is not a
+            // retirement (trimmedQuery matches, so nothing happens here).
+            if let voice = voiceRequest, trimmedQuery != voice.query {
+                announcedVoiceSearchID = voice.id
+            }
+        }
         .onChange(of: scenePhase) { phase in
             // Returning from Settings after the access card's
             // "Open Settings" is the denial → grant path; re-check then.
-            if phase == .active { refreshDirectory() }
+            if phase == .active {
+                refreshDirectory()
+                // Permission state may have changed in Settings too.
+                updateMicVisibility()
+            }
+        }
+        .onDisappear {
+            // Never leave the voice suspended and the mic open: a leaf
+            // the user walked away from must not keep listening. The
+            // capture completion (fires on cancel) restarts the pipeline.
+            if micPhase == .listening {
+                coordinator.cancelSearchPhraseCapture()
+            }
+            micPhase = .idle
         }
     }
 
@@ -373,11 +428,58 @@ struct CallView: View {
                 .foregroundColor(DesignTokens.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+            if micButtonVisible {
+                micButton
+            }
         }
         .padding(.horizontal, 16)
         .frame(minHeight: DesignTokens.minTapTargetSize)
         .background(DesignTokens.card)
         .clipShape(Capsule())
+    }
+
+    /// In-pill voice-search button (voice-contact-search, 2026-09-07):
+    /// one shot captures a name into the search field — refinement when
+    /// the elder is already here. ≥44pt tap target (DesignTokens floor).
+    /// While listening it becomes the stop control; the caption below
+    /// the pill says what the mic is doing.
+    private var micButton: some View {
+        let listening = micPhase == .listening
+        return Button(action: micTapped) {
+            Image(systemName: listening ? "stop.fill" : "mic.fill")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundColor(listening ? .white : DesignTokens.accent)
+                .frame(width: 30, height: 30)
+                .background(listening ? DesignTokens.accent : DesignTokens.background)
+                .clipShape(Circle())
+        }
+        .frame(minWidth: DesignTokens.minTapTargetSize,
+               minHeight: DesignTokens.minTapTargetSize)
+        .accessibilityLabel(Text(LocalizedStringKey(
+            listening ? "call.search.micStopLabel" : "call.search.micLabel")))
+    }
+
+    /// What the mic is doing right now — a caption under the pill while
+    /// listening ("say the name") or after a failed attempt ("the mic
+    /// couldn't hear — try again"). Silent otherwise.
+    @ViewBuilder
+    private var micCaption: some View {
+        switch micPhase {
+        case .listening:
+            Text(L10n.str("call.search.micListening", locale: coordinator.activeLocale))
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.accent)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 6)
+        case .failed:
+            Text(L10n.str("call.search.micFailed", locale: coordinator.activeLocale))
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 6)
+        case .idle:
+            EmptyView()
+        }
     }
 
     private var loadingCard: some View {
@@ -394,6 +496,7 @@ struct CallView: View {
     private var searchArea: some View {
         if access == .allowed {
             searchField
+            micCaption
             if entries == nil {
                 if loadFailed {
                     loadFailedCard
@@ -448,6 +551,132 @@ struct CallView: View {
             } catch {
                 self.loadFailed = true
             }
+        }
+    }
+
+    // MARK: - Voice search (voice-contact-search, 2026-09-07)
+
+    /// True when the mic button may be shown: contacts are searchable and
+    /// neither speech nor mic permission is dead. `.notDetermined` counts
+    /// as visible — the ask happens at the tap (point of use); a denial
+    /// flips `micHidden` for the rest of this visit.
+    private var micButtonVisible: Bool {
+        guard !micHidden, access == .allowed else { return false }
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized, .notDetermined: break
+        case .denied, .restricted: return false
+        @unknown default: return false
+        }
+        if micRecordPermissionDenied() { return false }
+        return true
+    }
+
+    private func updateMicVisibility() {
+        // Denied in Settings while this view was alive → hide. Computed
+        // fresh each appearance and on scenePhase → .active.
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .denied, .restricted: micHidden = true
+        default: break
+        }
+        if micRecordPermissionDenied() { micHidden = true }
+    }
+
+    private func micRecordPermissionDenied() -> Bool {
+        if #available(iOS 17.0, *) {
+            return AVAudioApplication.shared.recordPermission == .denied
+        }
+        return AVAudioSession.sharedInstance().recordPermission == .denied
+    }
+
+    /// Tap on the mic / stop button. Idle → start listening. Listening →
+    /// stop (the capture completion restores the voice pipeline and
+    /// returns the phase to idle). Failed → clear the caption and start
+    /// again — one tap retries, no intermediate step.
+    private func micTapped() {
+        switch micPhase {
+        case .idle, .failed:
+            micPhase = .listening
+            startMicCapture()
+        case .listening:
+            coordinator.cancelSearchPhraseCapture()
+        }
+    }
+
+    private func startMicCapture() {
+        // CallView is a struct — the @State mutations below are captured
+        // by value through the binding, so no weak dance is needed (or
+        // allowed); the closure only outlives the view briefly while the
+        // one-shot capture runs.
+        coordinator.startSearchPhraseCapture { result in
+            switch result {
+            case .success(let text):
+                self.micPhase = .idle
+                // As-you-type search picks the transcript up from here.
+                self.searchText = text
+            case .failure(let failure):
+                switch failure {
+                case .notAuthorized:
+                    // Denied at the point of use — the button is honest
+                    // dead for this visit (Settings can reverse it).
+                    self.micHidden = true
+                    self.micPhase = .idle
+                case .cancelled, .busy:
+                    // User tapped stop, or the assistant is mid-turn —
+                    // both transient, both silent.
+                    self.micPhase = .idle
+                case .noSpeech, .audioUnavailable, .noAudioInput,
+                     .recognitionFailed:
+                    self.micPhase = .failed
+                }
+            }
+        }
+    }
+
+    /// Consumes the coordinator's pending contact-search request (set by
+    /// the router keyword pre-route) and applies it: navigate is already
+    /// done — HomeView pushed this leaf — so here the query pre-fills the
+    /// search field and the results (incl. WhatsApp/Messenger badges)
+    /// land on screen, zero-touch. A nil query means "open the screen
+    /// unprefilled" — nothing to announce.
+    private func consumePendingVoiceRequestIfPresent() {
+        guard let request = coordinator.takePendingContactSearchRequest() else { return }
+        micPhase = .idle
+        guard let query = request.query else {
+            voiceRequest = nil
+            return
+        }
+        voiceRequest = AppCoordinator.ContactSearchRequest(query: query)
+        searchText = query
+        // Entries may still be loading (onChange(of: entries) will call
+        // back), but when they are here the results are on screen NOW.
+        announceVoiceResultIfReady()
+    }
+
+    /// Speaks the outcome of a voice-commanded search — once per request
+    /// — so the elder hears "मैया फेला पर्‍यो — कल गर्न थिच्नुहोस्"
+    /// without looking. Silence unless every condition holds: a real
+    /// voice query is pending, results are actually rendered (contacts
+    /// allowed, book loaded, no load failure), and the field still holds
+    /// the voice query (an edit retires the ask — handled in the
+    /// searchText onChange). Runs as the coordinator's TTS — the same
+    /// channel the assistant always speaks on.
+    private func announceVoiceResultIfReady() {
+        guard let voice = voiceRequest,
+              announcedVoiceSearchID != voice.id,
+              access == .allowed,
+              let entries,
+              !loadFailed,
+              trimmedQuery == voice.query else { return }
+        announcedVoiceSearchID = voice.id
+        let outcome = UnifiedContactSearch.search(query: trimmedQuery,
+                                                  family: coordinator.familyContacts,
+                                                  in: entries,
+                                                  recency: recency)
+        let locale = coordinator.activeLocale
+        if let name = outcome.entries.first?.name {
+            coordinator.speak(text: L10n.fmt("call.search.spokenFound", locale: locale, name))
+        } else {
+            coordinator.speak(text: L10n.fmt("call.search.spokenNotFound", locale: locale, trimmedQuery))
         }
     }
 

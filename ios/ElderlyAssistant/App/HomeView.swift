@@ -34,9 +34,15 @@ struct HomeView: View {
     @State private var showWizard = false
     @State private var showHistory = false
     @State private var outcomeExpanded = true
+    /// Programmatic push target for voice-driven contact search
+    /// (voice-contact-search, 2026-09-07): the router's keyword pre-route
+    /// publishes `pendingContactSearchRequest`; this onChange appends the
+    /// Call leaf so results land on screen with zero touch. Ordinary dock
+    /// taps keep using NavigationLink(value:) — both append to this path.
+    @State private var navPath: [LeafDestination] = []
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navPath) {
             ZStack {
                 DesignTokens.background.ignoresSafeArea()
                 VStack(spacing: 14) {
@@ -66,6 +72,18 @@ struct HomeView: View {
             // is fragile — it silently fails to present on some iOS 16
             // builds, which presented as "hub buttons do nothing".
             .navigationDestination(for: LeafDestination.self) { leafView(for: $0) }
+            // Voice-driven contact search (2026-09-07): a request means
+            // "Phone screen + this search" — push the Call leaf when we
+            // aren't already on it. The leaf consumes the request on
+            // appear (and observes it while open, so a second utterance
+            // re-searches live); consuming clears it, so a stale request
+            // can never double-push. iOS 16 onChange (single-parameter).
+            .onChange(of: coordinator.pendingContactSearchRequest?.id) { _ in
+                guard coordinator.pendingContactSearchRequest != nil else { return }
+                if navPath.last != .call {
+                    navPath.append(.call)
+                }
+            }
             .fullScreenCover(isPresented: $showWizard) {
                 OnboardingWizardView(startingAt: coordinator.onboardingState.firstPendingStep)
                     .environmentObject(coordinator)
