@@ -62,6 +62,11 @@ final class CommandRouterSafetyNetTests: XCTestCase {
     }
 
     func testNonSafetyUtteranceStillReachesInterpreter() {
+        // [NO-GIBBERISH] (2026-09-07) Transcript switched from a weather
+        // question to a neutral open request: weather ("भोलि मौसम कस्तो
+        // हुन्छ") is now a deterministic TopicPreAnswer that intercepts
+        // BEFORE the interpreter, so it would no longer exercise the
+        // model path this test pins.
         let interpreter = StubCommandInterpreter(
             result: makeCommand(action: .query, confidence: 0.9, reply: "भोलि घाम लाग्नेछ।"))
         let (router, coordinator, _) = makeRouter(interpreter: interpreter)
@@ -70,7 +75,7 @@ final class CommandRouterSafetyNetTests: XCTestCase {
         DispatchQueue.main.async {
             if !coordinator.genericReplies.isEmpty { exp.fulfill() }
         }
-        _ = router.route(transcript: "भोलि मौसम कस्तो हुन्छ")
+        _ = router.route(transcript: "केही राम्रो कथा सुनाउनुस्")
 
         XCTAssertEqual(interpreter.callCount, 1)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp.fulfill() }
@@ -114,13 +119,17 @@ extension CommandRouterSafetyNetTests {
     }
 
     func testRephraseYesDispatchesThePendedCommand() {
+        // [NO-GIBBERISH] (2026-09-07) Transcript switched from "मौसम कस्तो
+        // होला" to a neutral request — weather is now a deterministic
+        // TopicPreAnswer and would be intercepted before the mid-band
+        // rephrase flow this test pins.
         let interpreter = StubCommandInterpreter(
             result: makeCommand(action: .query, confidence: 0.5, reply: "भोलि घाम लाग्नेछ।"))
         let (router, coordinator, _) = makeRouter(interpreter: interpreter)
 
         var exp = expectation(description: "question")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp.fulfill() }
-        _ = router.route(transcript: "मौसम कस्तो होला")
+        _ = router.route(transcript: "केही राम्रो कुरा बताउनुस्")
         waitForExpectations(timeout: 2)
         XCTAssertNotNil(coordinator.rephrasePended)
 

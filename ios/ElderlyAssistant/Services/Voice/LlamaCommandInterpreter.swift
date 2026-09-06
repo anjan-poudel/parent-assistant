@@ -5,14 +5,25 @@ import LLM
 
 /// LLM-driven interpretation of a transcript into a structured command.
 ///
-/// Runs LLaMA 3.2 (1B or 3B) on-device via llama.cpp. The GBNF grammar
-/// below is the single source of truth for the JSON schema; LLM.swift does
-/// not expose sampler-level grammar constraints, so well-formedness is
-/// enforced here by strict decoding against the same schema plus a
-/// defensive JSON-object extraction — and any parse failure falls back to
-/// the router's keyword layer (review H2's "enforce or drop the claim":
-/// the claim is enforced as output validation, and the grammar stays
-/// unit-tested as the schema definition).
+/// Runs LLaMA 3.2 (1B or 3B) on-device via llama.cpp. [NO-GIBBERISH]
+/// (2026-09-07): the canonical output schema is NOW enforced AT THE
+/// SAMPLER — `runInference` calls `LLMCore.generateWithConstraints
+/// (from:jsonSchema:)` with `LlamaGrammar.commandJSONSchema`, which
+/// converts the schema to a llama.cpp GBNF grammar and samples through it
+/// (malformed JSON is structurally impossible). Prior to that date the
+/// GBNF grammar below was defined but NEVER reached the runtime: the
+/// interpreter sampled UNCONSTRAINED via `getCompletion(from:)`, which
+/// explained the field's unconstrained-model output. Decoding against the
+/// same schema (tolerant of BOTH the canonical contract and the legacy
+/// wire shape) plus a defensive JSON-object extraction remains as
+/// defense-in-depth; any parse failure still falls back to the router's
+/// keyword layer. Sampling is deterministic (temperature 0, fixed seed —
+/// see `OnDeviceSampling`): same prompt ⇒ same output, so a bad reply is
+/// reproducible and can be pinned down instead of showing once.
+///
+/// The interpreter's spoken text is additionally sanity-gated at the
+/// router (`ReplySanityGate`) — untrustworthy output is NEVER spoken raw;
+/// it falls back to an honest re-prompt.
 ///
 /// The interpreter sits BEHIND `CommandRouter`. Router calls it first;
 /// falls back to keyword matching on:
@@ -174,6 +185,75 @@ enum LlamaGrammar {
     number ::= ("0" | [1-9][0-9]*) ("." [0-9]+)?
     ws     ::= [ \\t\\n]*
     """
+
+    /// [NO-GIBBERISH] (2026-09-07) The JSON Schema handed to llama.cpp's
+    /// json-schema→GBNF converter (`LLMCore.generateWithConstraints(from:
+    /// jsonSchema:)`) — the canonical STRUCTURED-RESPONSE CONTRACT made
+    /// structurally enforceable at the sampler, mirroring `commandJSON`
+    /// above field-for-field (same keys, same 12-intent enum, same
+    /// entity nullability). Keep the two in sync when the wire shape
+    /// versions; the grammar test pins this mirror.
+    ///
+    /// Required list mirrors `properties` insertion order so the converter
+    /// emits keys in the same fixed order the hand-written grammar does.
+    /// `pluginEntities` is a nullable string map (values typed, so the
+    /// converter builds a proper object rule — see the plugin entity
+    /// grammar above).
+    static let commandJSONSchema: String = """
+    {
+      "type": "object",
+      "properties": {
+        "intent": {"type": "string", "enum": ["ack_med", "call", "emergency",
+          "set_reminder", "health_query", "music", "send_message", "guide",
+          "create_calendar_event", "suggest_video", "query", "none"]},
+        "response": {"type": "string"},
+        "confidence": {"type": "number"},
+        "actionType": {"type": ["string", "null"]},
+        "actionUrl": {"type": ["string", "null"]},
+        "entryId": {"type": ["string", "null"]},
+        "contact": {"type": ["string", "null"]},
+        "time": {"type": ["string", "null"]},
+        "medication": {"type": ["string", "null"]},
+        "message": {"type": ["string", "null"]},
+        "callType": {"type": ["string", "null"]},
+        "requestedApp": {"type": ["string", "null"]},
+        "topic": {"type": ["string", "null"]},
+        "steps": {"type": ["array", "null"], "items": {"type": "string"}},
+        "pluginAction": {"type": ["string", "null"]},
+        "pluginEntities": {"type": ["object", "null"],
+          "additionalProperties": {"type": "string"}}
+      },
+      "required": ["intent", "response", "confidence", "actionType",
+        "actionUrl", "entryId", "contact", "time", "medication", "message",
+        "callType", "requestedApp", "topic", "steps", "pluginAction",
+        "pluginEntities"]
+    }
+    """
+}
+
+/// [NO-GIBBERISH] Deterministic on-device sampling (2026-09-07), shared by
+/// BOTH on-device brains (`LlamaCommandInterpreter` and
+/// `LocalIntentInterpreter`). Before this date both brains created their
+/// `LLM` handle with the vendored runtime's DEFAULTS — temperature 0.8 and
+/// a RANDOM seed (LLM.swift's `LLM(from:)` defaults) — so the same prompt
+/// could sample differently on every run: a reply that was gibberish once
+/// could be fine the next time, which made the field's "sometimes
+/// gibberish" reports unreproducible. Temperature 0 (greedy) plus a fixed
+/// seed makes sampling deterministic: the same transcript produces the
+/// same output, a bad output reproduces, and the determinism removes the
+/// random-seed class of one-off garbage entirely. topK/topP/repeatPenalty/
+/// repetitionLookback are passed explicitly (they equal the runtime
+/// defaults) so a future LLM.swift default bump cannot silently change
+/// on-device behavior.
+enum OnDeviceSampling {
+    /// Fixed seed — dated so the constant is self-explaining in logs
+    /// ("GNERATING WITH SEEED" debug print in LLM.swift).
+    static let fixedSeed: UInt32 = 20_260_907
+    static let temperature: Float = 0
+    static let topK: Int32 = 40
+    static let topP: Float = 0.95
+    static let repeatPenalty: Float = 1.2
+    static let repetitionLookback: Int32 = 64
 }
 
 // MARK: - Null impl (compile-safe fallback)
@@ -201,14 +281,16 @@ final class LlamaCommandInterpreter: CommandInterpreter {
     struct Config {
         let confidenceThreshold: Double
         let maxTokens: Int
-        let temperature: Float
         /// Inference timeout (spec §5.2, review H2). On expiry the
         /// interpreter reports nil so the router falls back to keyword
         /// matching — this is a NEW failure path, not preserved behavior.
         let timeoutSeconds: Double
+        // [NO-GIBBERISH] (2026-09-07): sampling temperature/seed are NOT
+        // configurable — determinism is a correctness invariant here, so
+        // every interpreter samples through `OnDeviceSampling` (temp 0,
+        // fixed seed) regardless of configuration.
         static let `default` = Config(confidenceThreshold: 0.7,
                                       maxTokens: 128,
-                                      temperature: 0.2,
                                       timeoutSeconds: 10)
     }
 
@@ -229,7 +311,7 @@ final class LlamaCommandInterpreter: CommandInterpreter {
 
     /// Which base model is selected (1B or 3B). Read at each request from
     /// `ModelStore` so hot-swap works.
-    private let preferredBaseId: ModelID
+    private(set) var preferredBaseId: ModelID
     /// Last requested LoRA — Phase-1 skeleton only.
     private var activeLoRA: ModelID?
 
@@ -258,7 +340,15 @@ final class LlamaCommandInterpreter: CommandInterpreter {
     /// end-to-end regression suite replays the exact device utterance
     /// through CommandRouter → IntentRouter → LocalBrainChain → this
     /// interpreter on the seam.
-    var generateOverride: ((String) async throws -> String)?
+    ///
+    /// [NO-GIBBERISH] (2026-09-07) Signature is `(prompt, jsonSchema)` so
+    /// the seam mirrors the grammar-constrained runtime call exactly: the
+    /// override observes the SAME schema that reaches llama.cpp, and the
+    /// grammar-wiring test pins that the schema flows to the seam. The
+    /// returned string still runs through the same empty-output guard as
+    /// the real runtime, so the seam cannot mask the overflow failure mode
+    /// it exists to test around.
+    var generateOverride: ((String, String) async throws -> String)?
 
     /// Cached LLM handle. Held as `Any?` so this file compiles without
     /// the LLM package present. Casts to `LLM.LLM` inside `#if canImport`.
@@ -284,6 +374,26 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         self.preferredBaseId = preferredBaseId
         self.config = config
         self.pluginRegistry = pluginRegistry
+    }
+
+    /// The base model this interpreter currently loads (read-only outside;
+    /// swap via `switchBaseModel`). Exposed so the coordinator can align
+    /// download policy with the live choice.
+    var baseModelID: ModelID { preferredBaseId }
+
+    /// The applied LoRA id, if any (read-only; test-observable so a base
+    /// swap provably drops the old base's adapter).
+    var activeLoRAID: ModelID? { activeLoRA }
+
+    /// Hot-swaps the brain model (Settings "Assistant brain" picker,
+    /// 2026-09-06): points inference at the new GGUF and drops the loaded
+    /// llama.cpp handle + any LoRA so the NEXT inference re-loads from the
+    /// new model. A swap never touches the running pipeline — the router
+    /// just sees `isAvailable` flip to the new model's cache state.
+    func switchBaseModel(to id: ModelID) {
+        preferredBaseId = id
+        llmInstance = nil
+        activeLoRA = nil
     }
 
     // MARK: - LoRA skeleton
@@ -336,6 +446,76 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         }
     }
 
+    // MARK: - Chat format (per-model family)
+
+    /// The special-token scheme a brain model speaks. Pure data — no LLM
+    /// package types — so the format choice and prompt bytes are
+    /// unit-testable without the runtime linked.
+    struct ChatFormat: Equatable {
+        enum Kind: Equatable { case llama3, qwen3 }
+        let kind: Kind
+        let systemPrefix: String
+        let systemSuffix: String
+        let userPrefix: String
+        let userSuffix: String
+        let botPrefix: String
+        let botSuffix: String
+        let stopSequence: String
+    }
+
+    /// Which chat format the model id needs. Only Qwen3-family brains
+    /// diverge today (their `<|im_start|>` scheme — LLaMA 3.2's
+    /// `<|begin_of_text|>` headers would be gibberish to them and vice
+    /// versa); everything else keeps the shipped LLaMA 3.2 scheme.
+    static func chatFormat(for id: ModelID) -> ChatFormat {
+        switch id {
+        case ModelCatalog.qwen3_1_7BInstruct, ModelCatalog.qwen3_4BInstruct:
+            return ChatFormat(
+                kind: .qwen3,
+                systemPrefix: "<|im_start|>system\n",
+                systemSuffix: "<|im_end|>\n",
+                userPrefix: "<|im_start|>user\n",
+                userSuffix: "<|im_end|>\n",
+                botPrefix: "<|im_start|>assistant\n",
+                botSuffix: "<|im_end|>",
+                stopSequence: "<|im_end|>"
+            )
+        default:
+            return ChatFormat(
+                kind: .llama3,
+                systemPrefix: "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n",
+                systemSuffix: "<|eot_id|>",
+                userPrefix: "<|start_header_id|>user<|end_header_id|>\n\n",
+                userSuffix: "<|eot_id|>",
+                botPrefix: "<|start_header_id|>assistant<|end_header_id|>\n\n",
+                botSuffix: "<|eot_id|>",
+                stopSequence: "<|eot_id|>"
+            )
+        }
+    }
+
+    /// The raw completion prompt for a family. The LLaMA 3.2 branch is
+    /// BYTE-IDENTICAL to the shipped literal (the model is tuned to this
+    /// exact framing; a formatting change would silently shift its
+    /// instruction-following). The Qwen3 branch mirrors Qwen3-Instruct's
+    /// official chat template.
+    static func formattedPrompt(prompt: String, system: String, format: ChatFormat) -> String {
+        switch format.kind {
+        case .llama3:
+            // Exact bytes of the shipped multiline literal (verified
+            // against git HEAD — one leading newline, double newlines
+            // between segments, triple at the end).
+            return "\n<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+                + "\(system)<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n"
+                + "\(prompt)<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n\n"
+        case .qwen3:
+            // Qwen3-Instruct's official chat template shape.
+            return "<|im_start|>system\n\(system)<|im_end|>\n"
+                + "<|im_start|>user\n\(prompt)<|im_end|>\n"
+                + "<|im_start|>assistant\n"
+        }
+    }
+
     // MARK: - Inference (guarded, with timeout — spec §5.2)
 
     private func runInference(prompt: String,
@@ -347,7 +527,12 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         if let generateOverride {
             Task {
                 do {
-                    let out = try await generateOverride(prompt)
+                    // [NO-GIBBERISH] (2026-09-07) The seam receives the
+                    // same schema the real runtime call receives below, so
+                    // the grammar-wiring tests can assert the schema
+                    // reaches the point of the llama.cpp call.
+                    let out = try await generateOverride(prompt,
+                                                         LlamaGrammar.commandJSONSchema)
                     if out.isEmpty {
                         emit("inference_empty_output", outcome: "failure")
                         completion(nil)
@@ -368,28 +553,22 @@ final class LlamaCommandInterpreter: CommandInterpreter {
             return
         }
 
+        // Per-model chat format (2026-09-06): the brain is now
+        // selectable, and Qwen3 speaks a different special-token
+        // scheme than LLaMA 3.2. `chatFormat(for:)` carries both —
+        // the LLaMA branch is byte-identical to the shipped
+        // hard-coded template. Declared OUTSIDE the load branch so the
+        // cached-handle path formats with the same scheme.
+        let format = Self.chatFormat(for: preferredBaseId)
         let llm: LLM
         if let existing = llmInstance as? LLM {
             llm = existing
         } else {
-            // LLM.swift doesn't ship a Llama-3 template preset (`.llama` is
-            // the Llama-2 `[INST]` format). Build one that matches
-            // LLaMA 3.2's official chat header/EOT scheme so instruction
-            // following actually works.
-            let llama3Template = Template(
-                system: (
-                    "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n",
-                    "<|eot_id|>"
-                ),
-                user: (
-                    "<|start_header_id|>user<|end_header_id|>\n\n",
-                    "<|eot_id|>"
-                ),
-                bot: (
-                    "<|start_header_id|>assistant<|end_header_id|>\n\n",
-                    "<|eot_id|>"
-                ),
-                stopSequence: "<|eot_id|>",
+            let template = Template(
+                system: (format.systemPrefix, format.systemSuffix),
+                user: (format.userPrefix, format.userSuffix),
+                bot: (format.botPrefix, format.botSuffix),
+                stopSequence: format.stopSequence,
                 systemPrompt: Self.chatSystemPrompt
             )
             // 1024-token context (default 2048): our prompts are ~150
@@ -397,7 +576,23 @@ final class LlamaCommandInterpreter: CommandInterpreter {
             // llama.cpp's compute buffers — with Whisper resident,
             // 2048 overflowed the app's memory ceiling and crashed
             // `llama_context::output_reserve` on 6 GB devices.
-            guard let created = LLM(from: modelURL, template: llama3Template,
+            // [NO-GIBBERISH] (2026-09-07): deterministic sampling — temp 0
+            // + the FIXED seed in `OnDeviceSampling` — passed at LLM
+            // creation. Before this date the handle was created with
+            // LLM.swift's defaults (temp 0.8, RANDOM seed), so the same
+            // prompt sampled differently on every run (the unreproducible
+            // one-off gibberish class). Every other parameter is explicit
+            // so a future runtime default bump cannot silently change
+            // behavior here. The template remains per-model (`template`
+            // from the brain picker — LLaMA 3.2 and Qwen3 share this
+            // call site).
+            guard let created = LLM(from: modelURL, template: template,
+                                    seed: OnDeviceSampling.fixedSeed,
+                                    topK: OnDeviceSampling.topK,
+                                    topP: OnDeviceSampling.topP,
+                                    temp: OnDeviceSampling.temperature,
+                                    repeatPenalty: OnDeviceSampling.repeatPenalty,
+                                    repetitionLookback: OnDeviceSampling.repetitionLookback,
                                     maxTokenCount: 1024) else {
                 emit("model_load_failed", outcome: "failure")
                 completion(nil)
@@ -410,55 +605,74 @@ final class LlamaCommandInterpreter: CommandInterpreter {
 
         // LLM.swift's `getCompletion(from:)` sends the raw string with
         // no template preprocessing — the Template we passed to `LLM(from:)`
-        // only gets applied by `respond(to:)`. If we call getCompletion
-        // with a bare prompt, LLaMA 3.2 gets no chat headers and no system
-        // prompt, and instruction-following falls apart.
-        //
-        // Manually format with LLaMA 3.2's official chat scheme instead.
-        let systemPrompt = Self.chatSystemPrompt
-        let formattedPrompt = """
-        <|begin_of_text|><|start_header_id|>system<|end_header_id|>
-
-        \(systemPrompt)<|eot_id|><|start_header_id|>user<|end_header_id|>
-
-        \(prompt)<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-
-
-        """
+        // only gets applied by `respond(to:)`. Format manually with the
+        // SELECTED BRAIN's own chat scheme (`format` comes from the
+        // per-model template — LLaMA 3.2 and Qwen3 schemes both live
+        // here). The runtime's `generateWithConstraints` consumes the raw
+        // string, exactly like `getCompletion(from:)` did.
+        let formattedPrompt = Self.formattedPrompt(
+            prompt: prompt,
+            system: Self.chatSystemPrompt,
+            format: format
+        )
 
         Task {
-            await withTaskGroup(of: String??.self) { group in
+            // [NO-GIBBERISH] (2026-09-07) Grammar-constrained generation:
+            // `LlamaGrammar.commandJSONSchema` is converted by llama.cpp to
+            // a GBNF grammar and the sampler is chained through it (see
+            // `LLMCore.generateWithConstraints`) — the canonical JSON
+            // contract is STRUCTURALLY enforced at decode time, and the
+            // reply text is constrained to a JSON string (no quotes,
+            // backslashes or control characters can leak into it). This is
+            // what replaced the pre-2026-09-07 `getCompletion(from:)`
+            // unconstrained sampling call — the field's gibberish output
+            // class. `.failed` covers both an EMPTY completion (the
+            // [QUERY-FIX] overflow failure shape — when the prompt exceeds
+            // the 1,024-token context `prepareContext` throws and the
+            // runtime reports it honestly instead of an empty "success")
+            // and any other runtime error; `.timedOut` is the sleep task
+            // winning the race.
+            enum InferenceOutcome { case success(String); case failed; case timedOut }
+            await withTaskGroup(of: InferenceOutcome.self) { group in
                 group.addTask {
-                    await llm.getCompletion(from: formattedPrompt) as String??
+                    do {
+                        let output = try await llm.core.generateWithConstraints(
+                            from: formattedPrompt,
+                            jsonSchema: LlamaGrammar.commandJSONSchema)
+                        return output.isEmpty ? .failed : .success(output)
+                    } catch {
+                        return .failed
+                    }
                 }
                 group.addTask {
                     try? await Task.sleep(nanoseconds: UInt64(self.config.timeoutSeconds * 1_000_000_000))
-                    return nil
+                    // Interrupt the in-flight generation so the next
+                    // utterance does not race a still-decoding context.
+                    llm.stop()
+                    return .timedOut
                 }
-                // First result wins; on timeout the sleep task returns nil
-                // first and the interpreter reports "not confident" so the
-                // router falls back to keyword matching.
-                let result = await group.next() ?? nil
+                // First result wins; on timeout the sleep task returns
+                // .timedOut first and the interpreter reports "not
+                // confident" so the router falls back to keyword matching.
+                let result = await group.next() ?? .timedOut
                 group.cancelAll()
-                if let output = (result ?? nil) as? String?, let output {
-                    if output.isEmpty {
-                        // The [QUERY-FIX] bug's exact failure shape
-                        // (2026-09-06): when the formatted prompt exceeds
-                        // the 1,024-token context, prepareContext fails and
-                        // the runtime finishes with an EMPTY output that
-                        // used to be reported as inference_done success —
-                        // parse("") then returned nil and every utterance
-                        // fell to the generic re-prompt despite correct
-                        // transcription. Report it honestly as a failure
-                        // so an overflow can never masquerade as a
-                        // successful (empty) inference again.
-                        emit("inference_empty_output", outcome: "failure")
-                        completion(nil)
-                    } else {
-                        emit("inference_done", outcome: "success")
-                        completion(output)
-                    }
-                } else {
+                switch result {
+                case .success(let output):
+                    emit("inference_done", outcome: "success")
+                    completion(output)
+                case .failed:
+                    // The [QUERY-FIX] bug's exact failure shape
+                    // (2026-09-06): when the formatted prompt exceeds
+                    // the 1,024-token context, prepareContext fails and
+                    // the runtime used to finish with an EMPTY output that
+                    // was reported as inference_done success — parse("")
+                    // then returned nil and every utterance fell to the
+                    // generic re-prompt despite correct transcription.
+                    // Report it honestly as a failure so an overflow can
+                    // never masquerade as a successful inference again.
+                    emit("inference_empty_output", outcome: "failure")
+                    completion(nil)
+                case .timedOut:
                     emit("inference_timeout", outcome: "failure")
                     completion(nil)
                 }

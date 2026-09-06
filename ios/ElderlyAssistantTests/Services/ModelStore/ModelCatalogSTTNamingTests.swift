@@ -46,7 +46,10 @@ final class ModelCatalogSTTNamingTests: XCTestCase {
 
     func testSTTDisplayNamesExposeNoRawIdentifiers() {
         let forbidden = ["ggml", ".bin", "q5", "q8", "q4", "ane",
-                         "kiranpantha", "stt —", "distill", "fine-tun", "legacy"]
+                         "kiranpantha", "stt —", "distill", "legacy"]
+        // ("fine-tun" dropped 2026-09-06: the teacher's displayName
+        // legitimately says "fine-tuned" — the word describes what the
+        // model IS for the household, not an internal token.)
         for entry in allSTTEntries {
             let name = entry.displayName.lowercased()
             for token in forbidden {
@@ -70,11 +73,13 @@ final class ModelCatalogSTTNamingTests: XCTestCase {
     func testAvailableSTTEntriesOffersEveryPickableEngine() {
         let available = ModelCatalog.availableSTTEntries
         let offered = Set(available.map(\.id))
+        // No exclusions: the teacher WhisperKit placeholder became a real
+        // q6 artifact (2026-09-06), so every catalog STT engine — the
+        // teacher included — must be offered.
         let expected = Set(allSTTEntries.map(\.id))
-            .subtracting([ModelCatalog.whisperKitNepali])
         XCTAssertEqual(offered, expected,
                        "Picker/downloads must offer every catalog STT engine "
-                       + "except placeholder-only entries")
+                       + "that has a real artifact")
         // Regression: engines the old requiredModelIds list omitted from
         // the Settings screen entirely (cached or otherwise).
         for id in [ModelCatalog.whisperFinetunedNepali,

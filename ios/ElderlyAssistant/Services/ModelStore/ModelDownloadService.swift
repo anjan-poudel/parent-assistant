@@ -84,6 +84,16 @@ final class ModelDownloadService: NSObject, ObservableObject {
             return
         }
 
+        // q6 palettized CoreML is spec v9 (grouped palettization) — needs
+        // iOS 18+ at runtime; refuse before wasting a ~1.2 GB download.
+        if entry.requiresiOS18,
+           !ProcessInfo.processInfo.isOperatingSystemAtLeast(
+               OperatingSystemVersion(majorVersion: 18, minorVersion: 0, patchVersion: 0)) {
+            update(id, .failed(reason: "this model requires iOS 18"))
+            emit("download_os_tier_rejected", outcome: "failure", modelId: id, errorCode: "os_tier")
+            return
+        }
+
         // If a completed artifact is already on disk, short-circuit.
         // WhisperKit models are directories, not single files.
         let alreadyCached = entry.whisperKitZipURL != nil

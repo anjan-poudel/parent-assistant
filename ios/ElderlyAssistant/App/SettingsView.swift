@@ -1283,6 +1283,35 @@ struct AIModelsSettingsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
 
                 VStack(alignment: .leading, spacing: 12) {
+                    Text("settings.brain.selection")
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                    // Every real brain artifact is offered — cached AND
+                    // not-yet-downloaded alike (the STT picker's lesson:
+                    // a cached-only list hides everything but 1–2 rows).
+                    // Picking one that isn't installed starts its
+                    // download (`brainModelPreference`'s didSet does
+                    // that, same contract as the STT picker); the
+                    // downloads card below shows per-row progress.
+                    Picker("settings.brain.selection",
+                           selection: brainSelection) {
+                        Text("settings.ai.automatic").tag(Optional<ModelID>.none)
+                        ForEach(ModelCatalog.availableBrainEntries, id: \.id) { entry in
+                            Text(Self.sttOptionLabel(entry: entry,
+                                                     downloaded: isInstalled(entry.id),
+                                                     locale: coordinator.appLanguage.locale))
+                                .tag(Optional(entry.id))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(DesignTokens.accent)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(DesignTokens.card)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+
+                VStack(alignment: .leading, spacing: 12) {
                     Text("settings.ai.downloads")
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                         .foregroundColor(DesignTokens.textPrimary)
@@ -1298,6 +1327,13 @@ struct AIModelsSettingsView: View {
                                     downloads.reset(id)
                                     if coordinator.sttModelPreference == id {
                                         coordinator.sttModelPreference = nil
+                                    }
+                                    // Deleting the brain the picker is
+                                    // currently set to falls back to the
+                                    // default (same truthfulness rule as
+                                    // the STT handling above).
+                                    if coordinator.brainModelPreference == id {
+                                        coordinator.brainModelPreference = nil
                                     }
                                 }
                             )
@@ -1351,6 +1387,18 @@ struct AIModelsSettingsView: View {
                     startDownloadIfNeeded(newValue)
                 }
             }
+        )
+    }
+
+    /// Brain picker selection: writes `brainModelPreference`. The
+    /// coordinator's didSet already starts the chosen model's download
+    /// when it isn't cached (the same fresh-pick contract as the STT
+    /// picker), so this binding stays a thin passthrough — no second
+    /// download kick here.
+    private var brainSelection: Binding<ModelID?> {
+        Binding(
+            get: { coordinator.brainModelPreference },
+            set: { coordinator.brainModelPreference = $0 }
         )
     }
 
