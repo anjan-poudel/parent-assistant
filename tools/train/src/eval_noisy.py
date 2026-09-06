@@ -137,14 +137,29 @@ def build(force: bool) -> None:
 
 
 # ----------------------------------------------------------------- scoring
+_STAGE_RE = re.compile(
+    r"python\S*\s+(?:[^\s/]*/)?(?:eval_checkpoint|train_finetune)\.py")
+
+
 def gpu_stage_pids() -> list[str]:
+    """Pids of real eval/train stage processes.
+
+    pgrep -f matches shell command lines too (e.g. an ssh wrapper quoting the
+    pattern), so only lines that look like an actual python launch of one of
+    the stage scripts count as a running GPU stage.
+    """
     try:
         out = subprocess.run(
-            ["pgrep", "-af", "eval_checkpoint.py|train_finetune.py"],
+            ["pgrep", "-af", "eval_checkpoint[.]py|train_finetune[.]py"],
             capture_output=True, text=True, timeout=30).stdout
     except subprocess.TimeoutExpired:
         return []
-    return [ln.split(None, 1)[0] for ln in out.splitlines() if ln.strip()]
+    pids = []
+    for ln in out.splitlines():
+        parts = ln.split(None, 1)
+        if len(parts) == 2 and _STAGE_RE.search(parts[1]):
+            pids.append(parts[0])
+    return pids
 
 
 def gate() -> None:
@@ -155,27 +170,33 @@ def gate() -> None:
         sys.exit(2)
 
 
-def watch(proc: subprocess.Popen, log: Path) -> bool:
-    """True if the run produced its WER= line (harness writes the CSV row
-    just before printing it; a lingering process is then killed)."""
+def watch(proc: subprocess.Popen, log: Path, marker: str) -> bool:
+    """True once the run's own WER= line (naming the manifest) appears.
+
+    Note: eval_checkpoint.py declares --test-set with action='append' and
+    default=['fleurs'], so a run also iterates over clean 'fleurs' first.
+    With --force absent that iteration prints 'skip (already scored)'; the
+    line we wait for is the one containing the manifest basename, printed
+    only after the noisy iteration's CSV row was appended. Exit code 0
+    without the marker means the set was already scored (skip) -> fine.
+    """
     start = time.monotonic()
-    pat = re.compile(r"WER=")
     while time.monotonic() - start < RUN_TIMEOUT_S:
         if proc.poll() is not None:
             tail = log.read_text(encoding="utf-8", errors="replace")
-            if pat.search(tail):
+            if marker in tail or proc.returncode == 0:
                 return True
-            return False  # exited without a score -> retry
+            return False  # crashed without a score -> retry
         tail = log.read_text(encoding="utf-8", errors="replace")
-        if pat.search(tail):
+        if marker in tail:
             try:
-                proc.wait(120)  # row already appended; grace for clean exit
+                proc.wait(60)  # row already appended; brief grace to exit
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait(30)
             return True
         time.sleep(20)
-    print(f"[eval] run exceeded {RUN_TIMEOUT_S}s without WER= "
+    print(f"[eval] run exceeded {RUN_TIMEOUT_S}s without its WER= line "
           f"(jiwer hang?)", flush=True)
     return False
 
@@ -183,20 +204,25 @@ def watch(proc: subprocess.Popen, log: Path) -> bool:
 def run_eval(model: str, manifest: Path) -> bool:
     short = Path(model).name
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    log = ROOT / "logs" / f"noisy_{short}_{manifest.stem}_{stamp}.log"
+    log = ROOT / "logs" / \
+        f"noisy_{short}_{manifest.stem}_{stamp}_{os.getpid()}.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ)
     env.update(ENV_EXTRA)
+    # No --force: fresh (model, set) keys are never skipped, and leaving
+    # --force off makes the harness's implicit clean-'fleurs' iteration hit
+    # the seen-check ('skip') instead of re-scoring clean data every run.
     cmd = [sys.executable, "src/eval_checkpoint.py",
-           "--model", model, "--test-set", str(manifest), "--force",
+           "--model", model, "--test-set", str(manifest),
            "--batch-size", str(BATCH_SIZE), "--processor", "medium"]
+    marker = f"{manifest.name}: WER="
     for attempt in (1, 2):
-        print(f"[eval] {cmd[2]} model={model} set={manifest.name} "
+        print(f"[eval] model={model} set={manifest.name} "
               f"attempt={attempt} log={log.name}", flush=True)
         with open(log, "w", encoding="utf-8") as lf:
             proc = subprocess.Popen(cmd, cwd=ROOT, env=env,
                                     stdout=lf, stderr=subprocess.STDOUT)
-        if watch(proc, log):
+        if watch(proc, log, marker):
             return True
         if proc.poll() is None:
             proc.kill()
