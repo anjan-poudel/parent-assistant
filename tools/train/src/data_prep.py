@@ -88,14 +88,16 @@ def build_slr54(cfg: dict, data_dir: Path, known: set[str], out: Path) -> int:
     base = cfg["slr54_base_url"]
     audio_dir = data_dir / "audio" / "slr54"
     added = 0
-    for i in range(5):
+    # Corpus ships 15 parts: asr_nepali_0..9, asr_nepali_a..e (~157 K utts).
+    suffixes = [str(i) for i in range(10)] + list("abcde")
+    for i in suffixes:
         zip_name = f"asr_nepali_{i}.zip"
         zip_path = data_dir / "downloads" / zip_name
         download(f"{base}/{zip_name}", zip_path)
         extract_zip(zip_path, audio_dir, "*.flac")
         # Each zip carries the full corpus TSV (same content in all five).
         extract_zip(zip_path, data_dir / "downloads", "*/utt_spk_text.tsv")
-        log_progress(f"slr54 zip {i}/5 extracted")
+        log_progress(f"slr54 zip {i} extracted")
 
     # unzip preserves the archive's sharded layout:
     # audio/slr54/asr_nepali/data/xx/yy/<uid>.flac — index it once.
