@@ -32,7 +32,13 @@ def synthesize(text: str, wav_path: Path, cfg: dict) -> None:
     venv next to the running interpreter so detached runs don't depend
     on PATH."""
     import sys
-    piper = Path(sys.executable).parent / "piper"
+    # Resolution order: explicit config `stt_noise.piper_bin` (needed when
+    # the launcher venv differs from the piper venv — the hf backend runs
+    # under the TRAIN venv for CUDA, but piper lives in the train-intent
+    # venv), then interpreter-relative, then PATH.
+    configured = cfg.get("stt_noise.piper_bin")
+    piper = (Path(str(configured)).expanduser() if configured
+             else Path(sys.executable).parent / "piper")
     model = Path(str(cfg["stt_noise.tts_voice"]))
     if not model.is_absolute():
         model = Path(__file__).parent.parent / model
