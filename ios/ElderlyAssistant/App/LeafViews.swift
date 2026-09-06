@@ -316,6 +316,7 @@ struct CallView: View {
     var body: some View {
         LeafScreen(titleKey: "call.title") {
             VStack(spacing: 12) {
+                historyRow
                 searchArea
                 if isSearching {
                     resultsArea
@@ -330,6 +331,29 @@ struct CallView: View {
             // "Open Settings" is the denial → grant path; re-check then.
             if phase == .active { refreshDirectory() }
         }
+    }
+
+    /// Entry point to the Recent activity leaf (call-history task,
+    /// 2026-09-06) — the assistant's OWN calls and messages, so it is
+    /// reachable with or without contacts permission (history needs
+    /// none) and lives one row above the search that does.
+    private var historyRow: some View {
+        NavigationLink(value: LeafDestination.history) {
+            HStack(spacing: 8) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(DesignTokens.accent)
+                Text(LocalizedStringKey("call.historyRow"))
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .background(DesignTokens.card)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private var trimmedQuery: String {

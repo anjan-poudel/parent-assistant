@@ -218,6 +218,37 @@ final class AppCoordinator: ObservableObject {
     /// `init`, long before anything can record a turn.
     private lazy var chatHistoryStore = ChatHistoryStore(storage: storage)
 
+    // MARK: - Assistant activity history + live-call detection
+    // (call-history task, 2026-09-06)
+
+    /// Encrypted, bounded (100-entry) log of what THIS app itself
+    /// called/messaged — the Recent activity leaf's source of truth.
+    /// Never the system call log, never other apps' messages (iOS
+    /// platform wall). Lazy like `chatHistoryStore`: `storage` is
+    /// assigned at the top of `init`, long before any call/message path
+    /// can record. Main-queue confined by contract.
+    private(set) lazy var activityLog = AppActivityLog(storage: storage)
+
+    /// Published window over `activityLog`, newest first — the leaf's
+    /// read side. Mirrors the `conversationHistory` window pattern:
+    /// the store stays the source of truth and `recordActivity` refreshes
+    /// this window after every write, so a row recorded while the leaf is
+    /// open (a re-initiated call/message) appears without a re-push.
+    @Published private(set) var recentActivity: [AppActivityEntry] = []
+
+    /// True while a call is connected (CXCallObserver via
+    /// `liveCallDetector`). Identity-free BY PLATFORM DESIGN: iOS masks
+    /// calls that involve other apps — no handle, number, or identity is
+    /// ever delivered, so this flag says "a call is in progress" and the
+    /// app never learns (or claims) whose. Nothing from the observer is
+    /// read for storage or logged.
+    @Published private(set) var liveCallActive = false
+
+    /// Edge-triggered detector; armed (constructed) in `start()`. Lazy
+    /// so it is created only after init has finished and on the main
+    /// queue, where it stays confined.
+    private(set) lazy var liveCallDetector = makeLiveCallDetector()
+
     @Published var lastOutcome: OutcomeSummary?
 
     /// Records one turn in the persisted history and refreshes the
@@ -827,6 +858,26 @@ final class AppCoordinator: ObservableObject {
         // never a crash.
         chatHistoryStore.load()
         conversationHistory = chatHistoryStore.recent()
+
+        // Activity history (call-history task, 2026-09-06): prime the
+        // leaf's window from disk — rows from previous launches must show
+        // even before anything new is recorded this session.
+        refreshRecentActivity()
+
+        // Live-call detection (call-history task, 2026-09-06): force the
+        // lazy detector to construct + subscribe so `liveCallActive`
+        // tracks reality from launch. Pause/resume of spoken output
+        // around calls: SKIPPED — the voice stack exposes no clean pause
+        // API to hang this on (Speaker = speak/cancel only; VoicePipeline
+        // = start/stop with no pause state; VoiceSessionStateMachine has
+        // no pause transition; the AVSpeechSynthesizer is private inside
+        // SystemSpeechSpeaker). It is also unnecessary: a real call
+        // interrupts the app's audio session at the OS level
+        // (AudioSessionManager already observes AVAudioSession
+        // interruptions), which stops in-flight TTS — nothing in the app
+        // talks over an active call, so a half-broken teardown would buy
+        // nothing.
+        _ = liveCallDetector
 
         // Register background tasks (iOS)
         registerBackgroundTasks()
@@ -1675,6 +1726,9 @@ final class AppCoordinator: ObservableObject {
                        text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
             speak(text: L10n.fmt("router.call.calling", locale: locale, action.contact.name))
             noteConfirmedCallExecution(action)
+            recordActivity(kind: .call, channel: .phone,
+                           contactName: action.contact.name,
+                           phone: action.contact.phone)
         case .facetimeVideo, .facetimeAudio:
             let isVideo = action.method == .facetimeVideo
             switch callLinks.openFaceTime(handle: action.contact.phone, video: isVideo) {
@@ -1684,6 +1738,10 @@ final class AppCoordinator: ObservableObject {
                 speak(text: L10n.fmt("router.call.calling", locale: locale, action.contact.name))
                 noteConfirmedCallExecution(action)
                 contactNumberUsed(action.contact.phone)
+                recordActivity(kind: .call,
+                               channel: isVideo ? .faceTimeVideo : .faceTimeAudio,
+                               contactName: action.contact.name,
+                               phone: action.contact.phone)
             case .unavailable, .invalidHandle:
                 // FaceTime absent is near-impossible on a real iPhone but
                 // real on simulator — say what actually happened, and
@@ -1699,6 +1757,11 @@ final class AppCoordinator: ObservableObject {
                        text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, action.contact.name))
             speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, action.contact.name))
             noteConfirmedCallExecution(action)
+            // The wa.me chat opened — a genuine MESSAGE surface (the only
+            // one WhatsApp exposes to a deep link; see Channel.whatsapp).
+            recordActivity(kind: .message, channel: .whatsapp,
+                           contactName: action.contact.name,
+                           phone: action.contact.phone)
         case .messengerAudio, .messengerVideo:
             switch callLinks.openMessengerThread(handle: action.contact.messengerHandle ?? "") {
             case .openedThread:
@@ -1706,6 +1769,13 @@ final class AppCoordinator: ObservableObject {
                            text: L10n.fmt("home.outcome.messengerOpened", locale: locale, action.contact.name))
                 speak(text: L10n.fmt("router.call.messengerOpened", locale: locale, action.contact.name))
                 noteConfirmedCallExecution(action)
+                // A call request resolves to the opened thread — recorded
+                // honestly as the attempt it was (the app never claims a
+                // Messenger "call"; no documented scheme can start one).
+                recordActivity(kind: .call, channel: .messenger,
+                               contactName: action.contact.name,
+                               phone: action.contact.phone,
+                               messengerHandle: action.contact.messengerHandle)
             case .fellBackToWeb:
                 // Messenger app absent — the m.me chat opened in Safari
                 // instead. A real surface appeared (the user CAN reach the
@@ -1715,6 +1785,11 @@ final class AppCoordinator: ObservableObject {
                            text: L10n.fmt("home.outcome.messengerWebFallback", locale: locale, action.contact.name))
                 speak(text: L10n.fmt("router.call.messengerWebFallback", locale: locale, action.contact.name))
                 noteConfirmedCallExecution(action)
+                // Same attempt recorded for the web surface that opened.
+                recordActivity(kind: .call, channel: .messenger,
+                               contactName: action.contact.name,
+                               phone: action.contact.phone,
+                               messengerHandle: action.contact.messengerHandle)
             case .invalidHandle:
                 // The handle went missing/invalid between confirmation and
                 // execution — say what happened, record NOTHING (same rule
@@ -1776,6 +1851,8 @@ final class AppCoordinator: ObservableObject {
                            text: L10n.fmt("home.outcome.callPlaced", locale: locale, contact.name))
                 speak(text: L10n.fmt("call.announce.faceTimeVideo", locale: locale, contact.name))
                 contactNumberUsed(contact.phone)
+                recordActivity(kind: .call, channel: .faceTimeVideo,
+                               contactName: contact.name, phone: contact.phone)
             case .unavailable, .invalidHandle:
                 setOutcome(icon: "exclamationmark.triangle.fill",
                            text: L10n.str("router.call.facetimeUnavailable", locale: locale))
@@ -1790,16 +1867,24 @@ final class AppCoordinator: ObservableObject {
             setOutcome(icon: "phone.fill",
                        text: L10n.fmt("home.outcome.callPlaced", locale: locale, contact.name))
             speak(text: L10n.fmt("router.call.calling", locale: locale, contact.name))
+            recordActivity(kind: .call, channel: .phone,
+                           contactName: contact.name, phone: contact.phone)
         case .messenger:
             switch callLinks.openMessengerChat(phone: contact.phone) {
             case .openedApp:
                 setOutcome(icon: "message.fill",
                            text: L10n.fmt("home.outcome.messengerOpened", locale: locale, contact.name))
                 speak(text: L10n.fmt("call.announce.messenger", locale: locale, contact.name))
+                recordActivity(kind: .call, channel: .messenger,
+                               contactName: contact.name, phone: contact.phone,
+                               messengerHandle: contact.messengerHandle)
             case .openedWebChat:
                 setOutcome(icon: "message.fill",
                            text: L10n.fmt("home.outcome.messengerOpened", locale: locale, contact.name))
                 speak(text: L10n.fmt("call.announce.messengerWebFallback", locale: locale, contact.name))
+                recordActivity(kind: .call, channel: .messenger,
+                               contactName: contact.name, phone: contact.phone,
+                               messengerHandle: contact.messengerHandle)
             case .invalidHandle:
                 announceNoUsableNumber(contact: contact, locale: locale)
             }
@@ -1809,6 +1894,8 @@ final class AppCoordinator: ObservableObject {
                 setOutcome(icon: "message.fill",
                            text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, contact.name))
                 speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, contact.name))
+                recordActivity(kind: .message, channel: .whatsapp,
+                               contactName: contact.name, phone: contact.phone)
             case .needsNativeCompose:
                 // WhatsApp absent → native Messages sheet to the same
                 // number (task's sms/copy chain), disclosed out loud.
@@ -1847,6 +1934,32 @@ final class AppCoordinator: ObservableObject {
         setOutcome(icon: "phone.fill",
                    text: L10n.fmt("home.outcome.callPlaced", locale: activeLocale, name))
         speak(text: L10n.fmt("router.call.calling", locale: activeLocale, name))
+        recordActivity(kind: .call, channel: .phone,
+                       contactName: name, phone: phone)
+    }
+
+    /// FaceTime re-initiation for a Recent activity row (call-history
+    /// task, 2026-09-06): the row stored the number a FaceTime link
+    /// opened before, and tapping it opens FaceTime again — the same
+    /// genuine-open path performContactCall's faceTime case uses, with
+    /// the same "record only a real open" rule.
+    func performFaceTimeCall(name: String, phone: String, video: Bool) {
+        let locale = activeLocale
+        switch callLinks.openFaceTime(handle: phone, video: video) {
+        case .opened:
+            setOutcome(icon: video ? "video.fill" : "phone.fill",
+                       text: L10n.fmt("home.outcome.callPlaced", locale: locale, name))
+            speak(text: L10n.fmt("router.call.calling", locale: locale, name))
+            contactNumberUsed(phone)
+            recordActivity(kind: .call,
+                           channel: video ? .faceTimeVideo : .faceTimeAudio,
+                           contactName: name, phone: phone)
+        case .unavailable, .invalidHandle:
+            // Same honest line the tiles speak when FaceTime can't open.
+            setOutcome(icon: "exclamationmark.triangle.fill",
+                       text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+            speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+        }
     }
 
     /// WhatsApp surface for a SYSTEM-address-book search row (unified
@@ -1865,6 +1978,8 @@ final class AppCoordinator: ObservableObject {
                        text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, name))
             speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, name))
             noteSearchChannelTap(outcome: "whatsapp:openedChat")
+            recordActivity(kind: .message, channel: .whatsapp,
+                           contactName: name, phone: phone)
         case .needsNativeCompose:
             // WhatsApp absent → the same native Messages sheet to the
             // same number the family whatsApp button falls back to.
@@ -1901,6 +2016,11 @@ final class AppCoordinator: ObservableObject {
                        text: L10n.fmt("home.outcome.messengerOpened", locale: locale, name))
             speak(text: L10n.fmt("call.announce.messenger", locale: locale, name))
             noteSearchChannelTap(outcome: "messenger:openedThread")
+            // A thread (chat) surface opened — recorded as the message
+            // channel it is; no phone number rides on this API, the
+            // handle is what re-opening needs.
+            recordActivity(kind: .message, channel: .messenger,
+                           contactName: name, messengerHandle: handle)
         case .fellBackToWeb:
             // Messenger absent — the m.me chat opened in Safari instead;
             // the same web-fallback disclosure the family messenger
@@ -1941,6 +2061,55 @@ final class AppCoordinator: ObservableObject {
     /// didn't happen must not make its number look recently used.
     private func contactNumberUsed(_ phone: String) {
         callRecencyStore.record(phone: phone)
+    }
+
+    // MARK: - Activity recording + live-call wiring (call-history task,
+    // 2026-09-06)
+
+    /// One line in the Recent activity log, per GENUINE channel open.
+    /// Every call site pairs a `recordActivity` with the outcome branch
+    /// that actually opened a surface — never with a failure branch:
+    /// recording an open that didn't happen would lie about what the
+    /// assistant did (the same honesty rule `contactNumberUsed` holds
+    /// to). Called on the main queue only.
+    private func recordActivity(kind: AppActivityEntry.Kind,
+                                channel: AppActivityEntry.Channel,
+                                contactName: String,
+                                phone: String = "",
+                                messengerHandle: String? = nil,
+                                body: String? = nil) {
+        // Message text is stored only when it is non-blank (a pre-filled
+        // draft is content; an empty compose sheet is not).
+        let trimmed = body?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let storedBody = trimmed.flatMap { $0.isEmpty ? nil : $0 }
+        activityLog.append(AppActivityEntry(kind: kind, channel: channel,
+                                            contactName: contactName,
+                                            phone: phone,
+                                            messengerHandle: messengerHandle,
+                                            body: storedBody))
+        refreshRecentActivity()
+    }
+
+    /// Refreshes the published window from the store (see
+    /// `recentActivity`). Main queue.
+    private func refreshRecentActivity() {
+        recentActivity = activityLog.entries()
+    }
+
+    /// Builds the live-call detector. Instance method (not a closure over
+    /// `self` in the lazy declaration) so the onChange closure can hold
+    /// `self` weakly without capture-list gymnastics in a lazy
+    /// initializer. Main queue by contract — CXCallStateProvider's
+    /// delegate is `.main`, and `liveCallActive` is main-queue confined.
+    private func makeLiveCallDetector() -> LiveCallDetector {
+        let detector = LiveCallDetector(provider: CXCallStateProvider()) { [weak self] active in
+            DispatchQueue.main.async { self?.liveCallActive = active }
+        }
+        // Initial state: a call already connected at launch must show on
+        // the leaf immediately (the detector does not fire onChange for
+        // its initial snapshot — that is exactly what this read is for).
+        liveCallActive = detector.hasActiveCall
+        return detector
     }
 
     /// Normalized-number → last-call-date index for ranking search
@@ -2073,6 +2242,12 @@ final class AppCoordinator: ObservableObject {
                 setOutcome(icon: "message.fill",
                            text: L10n.fmt("home.outcome.whatsappMessageReady", locale: locale, contact.name))
                 speak(text: L10n.fmt("router.message.whatsappReady", locale: locale, contact.name))
+                // The WhatsApp chat with the pre-filled body opened — a
+                // genuine message surface (FR-049 completeness: the
+                // send_message path is an assistant action like any other).
+                recordActivity(kind: .message, channel: .whatsapp,
+                               contactName: contact.name, phone: contact.phone,
+                               body: body)
                 return .whatsAppChatOpened
             case .needsNativeCompose:
                 presentMessageDraft(contact: contact, body: body)
@@ -2102,10 +2277,19 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Phone/name variant of `presentMessageDraft(contact:body:)` — same
-    /// sheet, same outcome line, no `FamilyContact` required.
-    private func presentMessageDraft(phone: String, name: String, body: String) {
+    /// sheet, same outcome line, no `FamilyContact` required. Internal
+    /// since call-history task, 2026-09-06: the Recent activity leaf's
+    /// SMS rows re-open drafts through this entry point.
+    func presentMessageDraft(phone: String, name: String, body: String) {
         DispatchQueue.main.async { [weak self] in
             self?.pendingMessageDraft = MessageDraft(recipients: [phone], body: body)
+            // The compose sheet IS a genuine open of the SMS channel
+            // (call-history task, 2026-09-06) — recorded inside this
+            // block so the row lands after the sheet is actually up.
+            // `recordActivity` prunes blank bodies itself.
+            self?.recordActivity(kind: .message, channel: .sms,
+                                 contactName: name, phone: phone,
+                                 body: body)
         }
         setOutcome(icon: "message.fill",
                    text: L10n.fmt("home.outcome.messageReady", locale: activeLocale, name))

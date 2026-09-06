@@ -944,3 +944,40 @@ App-absent fallbacks are disclosed aloud reusing existing announcement keys (`ca
 | `UnifiedContactResultRow` | FR-047, FR-048 |
 | `AppCoordinator` channel actions | FR-048 |
 | New `call.channel.*` / `call.search.familyChip` keys | NFR-023 |
+
+## 18. Assistant Activity History & Live Call Detection (FR-051/FR-052)
+
+Recent-activity feature (iOS): an encrypted, newest-first log of every call/message the app ITSELF initiates, shown in a "Recent activity" leaf with per-row re-initiation, plus an honest identity-free "call in progress" indicator driven by CXCallObserver.
+
+**`AppActivityEntry` (new model):** Codable/Equatable/Identifiable row — id, timestamp, `Kind` (.call/.message), `Channel` (.phone/.faceTimeVideo/.faceTimeAudio/.whatsapp/.messenger/.sms), contactName, phone, optional messengerHandle, optional body. The channel vocabulary IS the platform wall: only the app's own opens are representable, never the system call log or other apps' messages. Kind is the surface that ACTUALLY appeared: a WhatsApp "call" deep-links to a chat and records `.message/.whatsapp` (WhatsApp exposes no call scheme — the app never claims a call it cannot make); a Messenger call request resolves to the opened thread and records `.call/.messenger` as the attempt it is, with the handle stored for re-opening. Rows are logged only inside the outcome branch that genuinely opened a surface — a failed/invalid open records nothing (same honesty rule as `CallRecencyStore`).
+
+**`AppActivityLog` (new store):** one JSON array under `storageKey = "app.activity.log"` via `EncryptedLocalStorage` (Keychain, Data Protection Complete — constitution §Security), `maxEntries = 100` (drop oldest, keep newest), `append(_:)` write-through, `entries()` newest-first. House pattern from `ChatHistoryStore`: lazy load guarded by `didLoadFromDisk`; missing/corrupt payloads read as empty, never crash, and recover on the next write. Main-queue confined by contract.
+
+**`LiveCallDetector` / `CallStateProviding` / `CXCallStateProvider` (new):** the coordinator talks only to the `CallStateProviding` seam (`hasActiveCall` + `addChangeListener`), so CallKit stays behind one thin wall and the detector is fully fakeable in tests. `CXCallStateProvider` mirrors CXCallObserver onto the seam (delegate on `.main`); detection is masked/anonymous BY PLATFORM DESIGN — iOS delivers no identity for calls involving other apps, so the only fact ever known or shown is "a call is connected", and nothing from the observer is read for storage or logged. `LiveCallDetector` is edge-triggered: snapshots the initial state at init (no phantom initial callback — the coordinator reads `hasActiveCall` for launch state), then fires `onChange` only on real transitions.
+
+**`AppCoordinator` (recording + wiring):** `activityLog`, a `@Published recentActivity` window over it (the `conversationHistory` window pattern — refreshed from the store after every write, so a row recorded while the leaf is open appears without a re-push), `@Published liveCallActive`, and a lazily armed `liveCallDetector` in `start()`. Recording hooks sit on the six existing genuine-open paths (voice `performCallAction`, tile `performContactCall`, system-contact call/WhatsApp/Messenger, `composeMessage`'s `.openedWhatsApp`, and inside `presentMessageDraft`'s main-async block for the SMS sheet — the one call that records off the synchronous path); `presentMessageDraft(phone:name:body:)` becomes internal so history rows can re-open drafts. Message bodies are stored only when non-blank. Spoken-output pause/resume around active calls: SKIPPED and documented in `start()` — the voice stack exposes no clean pause API (Speaker = speak/cancel only; VoicePipeline = start/stop, no pause state; VoiceSessionStateMachine has no pause transition; the AVSpeechSynthesizer is private inside SystemSpeechSpeaker), and a real call already interrupts the app's audio session at the OS level (AudioSessionManager observes AVAudioSession interruptions), stopping in-flight TTS — nothing talks over a call, so a half-broken teardown would buy nothing.
+
+**`HistoryView` (new leaf, no contacts permission needed):** `LeafScreen(titleKey: "history.title")`; card rows (≥44pt) with channel SF Symbols, bold contact name, caption = kind (`history.channel.call/.message`) + `HistoryTimeFormat` bucket; accessibility label via `history.callbackLabel`/`history.messageLabel`; honest empty state `history.empty`; small `history.liveCall` capsule while `liveCallActive`. Tap re-initiates the recorded channel: phone → `performSystemContactCall`, FaceTime → new `performFaceTimeCall(name:phone:video:)` (recorded rows need a video/audio choice the tile API doesn't make), WhatsApp → `performSystemContactWhatsApp`, Messenger → `performSystemContactMessenger` when a handle is stored (else the honest `router.call.messengerNoHandle` announce), SMS → `presentMessageDraft`. `HistoryTimeFormat.displayString(for:now:calendar:locale:)` is pure (injected clock/calendar/locale) — "Just now" < 60 s, then Today/Yesterday day-buckets, else a locale short date. The Call leaf gets a capsule row (`call.historyRow`) above the search — reachable with or without contacts permission.
+
+**New localization keys (en / ne):**
+- `call.historyRow` — "Recent calls & messages" / "हालसालैका कल र सन्देशहरू"
+- `history.title` — "Recent activity" / "हालसालैको गतिविधि"
+- `history.channel.call` — "Call" / "कल"
+- `history.channel.message` — "Message" / "सन्देश"
+- `history.callbackLabel` — "Call %@ back" / "%@ लाई फेरि फोन गर्नुहोस्"
+- `history.messageLabel` — "Message %@" / "%@ लाई सन्देश पठाउनुहोस्"
+- `history.timeNow` — "Just now" / "भर्खरै"
+- `history.timeToday` — "Today" / "आज"
+- `history.timeYesterday` — "Yesterday" / "हिजो"
+- `history.empty` — "Nothing here yet. Calls and messages you make through the assistant will appear here." / "यहाँ अहिले केही छैन। सहायकबाट गरिएका कल र सन्देशहरू यहाँ देखिनेछन्।"
+- `history.liveCall` — "A call is in progress" / "अहिले कल भइरहेको छ"
+
+**Traceability:**
+
+| Component | Requirements |
+|-----------|-------------|
+| `AppActivityEntry` / `AppActivityLog` | FR-051 |
+| `AppCoordinator` recording hooks + `recentActivity` | FR-051 |
+| `HistoryView` / `HistoryTimeFormat` | FR-051 |
+| `LiveCallDetector` / `CXCallStateProvider` | FR-052 |
+| New `history.*` / `call.historyRow` keys | NFR-023 |
