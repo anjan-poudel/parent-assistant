@@ -412,9 +412,54 @@ final class AppCoordinator: ObservableObject {
     /// prompt composition (design doc 2026-09-05).
     private(set) var pluginRegistry: PluginRegistry!
 
+    /// The assistant-brain model `start()` auto-downloads when an
+    /// interpreter is needed (interpreter-availability fix 2026-09-06):
+    /// LLaMA 3.2 1B Instruct Q4_K_M GGUF from HuggingFace (bartowski),
+    /// ~807 MB, sha256-verified, catalog kind `.llamaBase`. This is the
+    /// "default LLM that was the default before" the v2 pivot — the
+    /// brain `LlamaCommandInterpreter` (LocalBrainChain's stand-in)
+    /// runs, and the model the buried "AI मोडेल" screen lists as
+    /// "Assistant brain — 1B".
+    static let assistantBrainModelID = ModelCatalog.llama3_2_1B
+
+    /// Whether `start()` should kick the assistant-brain model's one-time
+    /// download: the model isn't cached AND no live cloud brain exists.
+    /// The on-device stack always needs the local model (a configured
+    /// Gemini key stays out of its chain — `cloudEnabled` is false), and
+    /// the Gemini stack needs it too while no key is configured, which is
+    /// exactly the shape of the reported bug (correct transcript, apology
+    /// reply, nothing listening). Pure static so the decision is
+    /// unit-testable without an AppCoordinator instance (same seam as
+    /// `isWakeWordRuntimeLinked`). Downloads are NOT Gemini calls — the
+    /// cost governor caps billable cloud calls and is deliberately
+    /// untouched by this restore.
+    static func shouldAutoDownloadAssistantBrain(modelCached: Bool,
+                                                 cloudEnabled: Bool,
+                                                 cloudBrainAvailable: Bool) -> Bool {
+        guard !modelCached else { return false }
+        return !(cloudEnabled && cloudBrainAvailable)
+    }
+
+    /// Compile-time: is the vendored LLM.swift runtime linked into THIS
+    /// build? Mirrors the `#if canImport(LLM)` inside
+    /// `LlamaCommandInterpreter.isAvailable` (and the shape of
+    /// `isWakeWordRuntimeLinked`), so the auto-download policy never
+    /// fetches an ~807 MB GGUF for a build whose interpreter could not
+    /// run it.
+    static var isLLMRuntimeLinked: Bool {
+        #if canImport(LLM)
+        return true
+        #else
+        return false
+        #endif
+    }
+
     /// Legacy v1 on-device model catalog — kept only so the buried
     /// "AI मोडेल" settings screen still functions as a manual fallback.
-    /// No longer downloaded automatically at first run (v2 pivot).
+    /// STT models are no longer downloaded automatically at first run
+    /// (v2 pivot); the assistant-brain model above IS, via
+    /// `ensureAssistantBrainDownloadIfNeeded()` (interpreter-availability
+    /// fix 2026-09-06).
     ///
     /// The downloads-management rows must cover EVERY STT engine the
     /// picker can select (anything selectable has to be fetchable), so
@@ -747,6 +792,18 @@ final class AppCoordinator: ObservableObject {
         router3.cloudBrain = geminiInterpreter
         router3.cloudEnabled = (voiceEngineStack == .gemini)
         self.intentRouter = router3
+        // Interpreter-availability fix (2026-09-06): restore the
+        // assistant-brain model's one-time auto-download. The v2 pivot
+        // removed ALL first-run downloads, so the LLaMA stand-in that
+        // LocalBrainChain restores below (commit 13ded79) could never
+        // come online on a real device — the chain sat empty and every
+        // plain utterance fell through to the generic "didn't understand"
+        // re-prompt despite a correct transcript. `start()` is idempotent
+        // (onboarding wizard and Home both call it) and
+        // `ModelDownloadService.start` no-ops while a download is already
+        // in flight or completed, so this is safe to run on every launch;
+        // when the Gemini stack is live no download starts at all.
+        ensureAssistantBrainDownloadIfNeeded()
         // Collapse #1 (spec §4): when the Gemini recognizer is the active
         // STT, ONE understand call does STT + intent; the command half is
         // waiting in `intentRouter` when the transcript half routes.
@@ -1042,6 +1099,9 @@ final class AppCoordinator: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             self?.updateActiveSTTName()
         }
+        // The cloud brain is now live — the local brain model's one-time
+        // download (if any) is redundant on this stack (2026-09-06).
+        cancelAssistantBrainDownloadIfRedundant()
     }
 
     /// Applies `voiceEngineStack` to both halves of the pipeline: the STT
@@ -1096,6 +1156,66 @@ final class AppCoordinator: ObservableObject {
     var isOnDeviceStackReady: Bool {
         llamaCommandInterpreter.isAvailable
             && (whisperSpeechRecognizer.isAvailable || whisperKitSpeechRecognizer.isAvailable)
+    }
+
+    /// Interpreter-chain status for `CommandRouter`'s no-brain fallback
+    /// speech (spec §7 "no dead ends"; interpreter-availability fix
+    /// 2026-09-06). Derivation mirrors the EXACT layer ladder the router
+    /// consults so the spoken message and the routing outcome can never
+    /// disagree: the local chain (preferred intent GGUF / LLaMA stand-in)
+    /// counts when `isAvailable`; the cloud brain counts only when
+    /// `cloudEnabled` (the on-device stack keeps a configured Gemini key
+    /// out of the chain — same guard as `IntentRouter`'s escalation).
+    /// The model-download state supplies the distinction between the two
+    /// honest no-brain messages (downloading vs setup needed).
+    var brainReadiness: BrainReadiness {
+        BrainReadiness.resolve(
+            localBrainAvailable: intentRouter?.localBrain?.isAvailable ?? false,
+            cloudEnabled: intentRouter?.cloudEnabled ?? false,
+            cloudBrainAvailable: intentRouter?.cloudBrain?.isAvailable ?? false,
+            brainDownloadInFlight: isAssistantBrainDownloadInFlight
+        )
+    }
+
+    /// Whether the assistant-brain model is currently arriving (queued /
+    /// downloading / verifying) — the one state that turns `.needsSetup`
+    /// into `.downloadingBrain` for the router's fallback speech.
+    private var isAssistantBrainDownloadInFlight: Bool {
+        switch modelDownloadService.states[Self.assistantBrainModelID] ?? .notStarted {
+        case .queued, .downloading, .verifying: return true
+        case .notStarted, .completed, .failed, .cancelled: return false
+        }
+    }
+
+    /// Kicks the assistant-brain model's one-time download when the
+    /// interpreter chain needs it and the model isn't cached (policy in
+    /// `shouldAutoDownloadAssistantBrain`). `start()` is idempotent and
+    /// `ModelDownloadService.start` no-ops while a download is in flight
+    /// or completed, so this re-runs safely on every launch — and a
+    /// `.failed` attempt is retried by the next launch. Silent when the
+    /// LLM runtime isn't linked (nothing could run the model) or a cloud
+    /// brain is live (nothing needs it).
+    private func ensureAssistantBrainDownloadIfNeeded() {
+        guard Self.isLLMRuntimeLinked else { return }
+        guard Self.shouldAutoDownloadAssistantBrain(
+            modelCached: modelStore.isCached(Self.assistantBrainModelID),
+            cloudEnabled: intentRouter?.cloudEnabled ?? false,
+            cloudBrainAvailable: geminiCommandInterpreter?.isAvailable ?? false
+        ) else { return }
+        modelDownloadService.start(Self.assistantBrainModelID)
+    }
+
+    /// A newly-configured Gemini key makes the local brain model redundant
+    /// on the Gemini stack — stop an in-flight one-time download instead
+    /// of letting ~807 MB finish arriving over the elder's data plan (the
+    /// model row re-downloads on demand if the stack ever switches to
+    /// on-device). No-op when nothing is in flight; the on-device stack is
+    /// never touched because it needs the local model regardless of keys.
+    private func cancelAssistantBrainDownloadIfRedundant() {
+        guard voiceEngineStack == .gemini,
+              !modelStore.isCached(Self.assistantBrainModelID),
+              isAssistantBrainDownloadInFlight else { return }
+        modelDownloadService.cancel(Self.assistantBrainModelID)
     }
 
     /// Model the legacy on-device recognizer would use if manually

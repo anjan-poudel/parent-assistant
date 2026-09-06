@@ -3530,6 +3530,40 @@
         }
       }
     },
+    "router.brainDownloading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I'm not ready to answer yet. My brain model is still downloading — this only happens once. Please ask me again in a few minutes."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म अहिले जवाफ दिन तयार छैन। मेरो दिमागको मोडेल अझै डाउनलोड भइरहेको छ — यो एक पटक मात्र हुन्छ। कृपया केही मिनेटपछि फेरि सोध्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.brainNeedsSetup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't answer that yet — my brain isn't set up. Please ask a family member to open Settings and download the brain model or add the Gemini key."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म त्यसको जवाफ अहिले दिन सक्दिनँ — मेरो दिमाग सेटअप भएको छैन। कृपया परिवारको कसैलाई भन्नुहोस्, सेटिङ खोलेर दिमागको मोडेल डाउनलोड गर्नुहोस् वा जेमिनी कुञ्जी राख्नुहोस्।"
+          }
+        }
+      }
+    },
     "router.call.appUnsupportedNotice": {
       "extractionState": "manual",
       "localizations": {

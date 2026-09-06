@@ -110,6 +110,7 @@
 		88AB55B2E56480BD97A927CC /* SwitchableCommandInterpreterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBF8D15A8CBEB370AE0487CE /* SwitchableCommandInterpreterTests.swift */; };
 		8B5593B7AEDF4E0D815FA1BC /* MedicationSchedulerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7B6FEFA69334CCBC0A933E9 /* MedicationSchedulerTests.swift */; };
 		8CD67C3B34F99F3EC51312F9 /* FamilyNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 875C3FEBDCA672D2C9E0E7F2 /* FamilyNotifier.swift */; };
+		8D391071434C506F5EC32FD3 /* InterpreterAvailabilityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A0EA61C3EB71FA3AE684ECA /* InterpreterAvailabilityTests.swift */; };
 		9184CA7464ED5BE45A88982F /* CallOverrideParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46BE34B77FAA335042575B06 /* CallOverrideParserTests.swift */; };
 		92252E31AFFAA415D171810A /* OnboardingStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B80BB3C068100E30CFD3B9C /* OnboardingStateTests.swift */; };
 		92C94484258C17CA63F0576B /* GuidePluginDispatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D9C297BE95E6402139E1D01 /* GuidePluginDispatchTests.swift */; };
@@ -243,6 +244,7 @@
 		204AC62FCB7AEC1810B3F158 /* IntentLogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentLogStore.swift; sourceTree = "<group>"; };
 		211532801B960A1DEE46F53E /* ChatHistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistoryStore.swift; sourceTree = "<group>"; };
 		26F476E23A6729932ACA0823 /* IntentCommandCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentCommandCacheTests.swift; sourceTree = "<group>"; };
+		2A0EA61C3EB71FA3AE684ECA /* InterpreterAvailabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterpreterAvailabilityTests.swift; sourceTree = "<group>"; };
 		2A7DB532BF6505FE842CF0B1 /* RoutinePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinePlugin.swift; sourceTree = "<group>"; };
 		2A801C3C923FF4C4ECE4BE7C /* WhisperKitSpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperKitSpeechRecognizer.swift; sourceTree = "<group>"; };
 		2C4095871136C41B6AE730BA /* RoutineStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineStore.swift; sourceTree = "<group>"; };
@@ -525,6 +527,7 @@
 				89349A86DFC524C47C19FE4C /* IntentRouterTests.swift */,
 				90BDDB193F02D2D0F4CA995F /* IntentSchemaV2Tests.swift */,
 				91A586D1F8AEDB50FF83E530 /* IntentTestHelpers.swift */,
+				2A0EA61C3EB71FA3AE684ECA /* InterpreterAvailabilityTests.swift */,
 				4C9FD745CF7B00B908EC011D /* LocalBrainChainTests.swift */,
 				084E8AA8568FED8E1D6B1E19 /* LocalIntentInterpreterTests.swift */,
 				4D3D1B1D2A416ED0E441A932 /* MethodResolverTests.swift */,
@@ -1229,6 +1232,7 @@
 				0E2E4493E2F497E872E7BF51 /* IntentRouterTests.swift in Sources */,
 				E268D3A135C024D0B298AC06 /* IntentSchemaV2Tests.swift in Sources */,
 				969BC1130152BCF1F6C8268D /* IntentTestHelpers.swift in Sources */,
+				8D391071434C506F5EC32FD3 /* InterpreterAvailabilityTests.swift in Sources */,
 				C2070A4B539BD460E7BF2E99 /* LlamaCommandInterpreterTests.swift in Sources */,
 				39F0DBE85A418FEFC103B2E7 /* LocalBrainChainTests.swift in Sources */,
 				848F73DA22BBE374915B3CE7 /* LocalIntentInterpreterTests.swift in Sources */,

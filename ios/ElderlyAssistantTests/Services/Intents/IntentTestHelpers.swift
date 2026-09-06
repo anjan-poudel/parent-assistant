@@ -103,6 +103,10 @@ final class StubCoordinator: VoiceCommandCoordinating {
     var isAwaitingConfirmation: Bool {
         manualAwaitingConfirmation || rephrasePended != nil
     }
+    /// Defaults to `.available` so tests that don't script the brain
+    /// state keep the router's historical behavior (generic re-prompt);
+    /// the availability-matrix tests set it explicitly.
+    var brainReadiness = BrainReadiness.available
     var isAwaitingCallConfirmation = false
     var activeLocale = Locale(identifier: "ne-NP")
 
