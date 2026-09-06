@@ -45,6 +45,9 @@ struct HomeView: View {
                     if !coordinator.onboardingState.pendingSteps.isEmpty {
                         setupStrip
                     }
+                    if !coordinator.favoriteApps.isEmpty {
+                        quickAccessRow
+                    }
                     Spacer(minLength: 0)
                     talkStage
                     Spacer(minLength: 0)
@@ -159,6 +162,71 @@ struct HomeView: View {
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Quick access row (quick-access-apps task, 2026-09-06)
+
+    /// The user's favourite apps as one-tap launch tiles, right under the
+    /// setup strip. Deliberately an inline row, NOT a HomeWidget — the
+    /// row has no widget lifecycle needs and the home-screen widget
+    /// system is a separate concern (documented in the task design). The
+    /// trailing plus tile opens Settings → Quick apps, where the
+    /// favourites are managed; the whole row renders only while at least
+    /// one favourite exists.
+    private var quickAccessRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("home.quickAccess.caption")
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textSecondary)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(coordinator.favoriteApps) { app in
+                        quickAccessTile(app)
+                    }
+                    NavigationLink(value: LeafDestination.settings) {
+                        quickAccessAddTile
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.vertical, 2)
+            }
+        }
+    }
+
+    /// 48pt badge + 12pt name on a 76pt-wide tile, ≥44pt tall — one
+    /// combined accessibility element ("WhatsApp, button"); tapping
+    /// launches through the coordinator, which probes the scheme again at
+    /// tap time and speaks honestly when the app has gone away.
+    private func quickAccessTile(_ app: AppLauncher.App) -> some View {
+        Button {
+            coordinator.performAppLaunch(app)
+        } label: {
+            VStack(spacing: 4) {
+                IconBadge(systemImage: app.systemImage, tint: .apps, diameter: 48)
+                Text(LocalizedStringKey(app.nameKey))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .frame(width: 76)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .accessibilityElement(children: .combine)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// The trailing plus tile → Settings (LeafDestination.settings), where
+    /// the Quick apps picker lives. 76pt-wide like the app tiles so the
+    /// row's rhythm stays even.
+    private var quickAccessAddTile: some View {
+        VStack(spacing: 4) {
+            IconBadge(systemImage: "plus", tint: .apps, diameter: 48)
+        }
+        .frame(width: 76)
+        .frame(minHeight: DesignTokens.minTapTargetSize)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("home.quickAccess.add"))
     }
 
     // MARK: - Talk stage (redesign spec §3.1)

@@ -32,10 +32,25 @@
 	<string>1</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
+		<string>calshow</string>
+		<string>comgooglemaps</string>
 		<string>facetime</string>
 		<string>facetime-audio</string>
-		<string>whatsapp</string>
+		<string>fb</string>
 		<string>fb-messenger</string>
+		<string>googlechrome</string>
+		<string>googlegmail</string>
+		<string>imo</string>
+		<string>instagram</string>
+		<string>maps</string>
+		<string>message</string>
+		<string>sms</string>
+		<string>tel</string>
+		<string>tg</string>
+		<string>viber</string>
+		<string>whatsapp</string>
+		<string>youtube</string>
+		<string>zoomus</string>
 	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
