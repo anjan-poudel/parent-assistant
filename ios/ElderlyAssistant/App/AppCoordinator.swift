@@ -137,12 +137,53 @@ final class AppCoordinator: ObservableObject {
     /// reminder); it stays nil for actions with no real undo path (e.g.
     /// medication acknowledgement) rather than faking one (redesign spec
     /// §6).
+    ///
+    /// The card always reads user-then-assistant (conversation-panel fix,
+    /// 2026-09-06): `transcript` — the user utterance this outcome
+    /// answers, captured by `setOutcome` from `lastTranscript` at
+    /// creation time — is rendered ABOVE `text`. It is nil only when
+    /// nothing was heard for this outcome (a touch/chip-initiated action
+    /// after a silent session, or a blank utterance), in which case the
+    /// card shows the response alone.
     struct OutcomeSummary: Identifiable {
         let id = UUID()
         let icon: String
         let text: String
+        let transcript: String?
         let timestamp: Date
         let undo: (() -> Void)?
+
+        /// One text row of the outcome card, top to bottom — a user
+        /// transcript row always precedes the assistant response row.
+        /// Hashable so `OutcomeCardView` can `ForEach` it by identity.
+        enum Row: Hashable {
+            case user(String)
+            case assistant(String)
+        }
+
+        /// Composes the card's text rows from the raw transcript and the
+        /// assistant's response: the "you said" row first (omitted when
+        /// the transcript is nil/blank — sanitized by
+        /// `sanitizedTranscript`), the response row last. Every
+        /// outcome-producing path funnels through this via `setOutcome`,
+        /// so a response is never shown without its command above it.
+        /// Pure — unit-tested without SwiftUI (repo pattern).
+        static func rows(transcript raw: String?, response: String) -> [Row] {
+            var rows: [Row] = []
+            if let heard = sanitizedTranscript(raw) {
+                rows.append(.user(heard))
+            }
+            rows.append(.assistant(response))
+            return rows
+        }
+
+        /// The transcript trimmed for display — nil when absent or blank
+        /// so the card never draws an empty "you said" row.
+        static func sanitizedTranscript(_ raw: String?) -> String? {
+            guard let raw else { return nil }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
     }
 
     /// Window over `chatHistoryStore` for the Home UI and the history
@@ -193,9 +234,23 @@ final class AppCoordinator: ObservableObject {
 
     /// Sets the Home outcome card. Always dispatched to main (H1) since
     /// callers may run on the router's queue, not just main.
+    ///
+    /// Composition is UNIFORM for every outcome (conversation-panel fix,
+    /// 2026-09-06): the card shows the user's transcript — `lastTranscript`,
+    /// recorded by `recordTranscript` at the top of every `route()` call —
+    /// above `text`, so no single path (medication ack, reminder set,
+    /// call/message, generic reply) renders the response without the
+    /// command that produced it. The transcript is snapshotted
+    /// synchronously — at outcome-creation time, on whatever queue the
+    /// caller runs — before the main-queue hop, and sanitized: nil/blank
+    /// (a touch-initiated outcome with nothing heard this session) simply
+    /// yields a card without the "you said" row.
     private func setOutcome(icon: String, text: String, undo: (() -> Void)? = nil) {
+        let transcript = OutcomeSummary.sanitizedTranscript(lastTranscript)
         DispatchQueue.main.async { [weak self] in
-            self?.lastOutcome = OutcomeSummary(icon: icon, text: text, timestamp: Date(), undo: undo)
+            self?.lastOutcome = OutcomeSummary(icon: icon, text: text,
+                                               transcript: transcript,
+                                               timestamp: Date(), undo: undo)
         }
     }
 
@@ -210,23 +265,19 @@ final class AppCoordinator: ObservableObject {
     /// from `noteAssistantSpoke` generally) so it can never clobber a
     /// more specific outcome set moments earlier in the same turn.
     ///
-    /// Includes `lastTranscript` (already set by `recordTranscript` at the
-    /// top of every `route()` call, so it's available here) alongside the
-    /// reply — repeated field reports (2026-09-04) made clear that only
-    /// ever showing the ASSISTANT's reply, with the user's own transcript
-    /// visible for barely a second during capture and never again, reads
-    /// as "no transcript showing" even though routing worked correctly.
-    /// Showing both together, persistently, is the actual fix — not a UI
-    /// timing tweak.
+    /// Only the REPLY text is passed here — the card composition is now
+    /// uniform, so the transcript handling this method used to do inline
+    /// (repeated field reports, 2026-09-04, made clear that showing only
+    /// the ASSISTANT's reply, with the user's transcript visible for
+    /// barely a second during capture and never again, reads as "no
+    /// transcript showing" even though routing worked correctly) moved
+    /// into `setOutcome`: it attaches `lastTranscript` — already set by
+    /// `recordTranscript` at the top of every `route()` call — to EVERY
+    /// outcome, and `OutcomeCardView` renders it as a "you said" row
+    /// above the response (2026-09-06 conversation-panel fix).
     func noteGenericReply(_ text: String) {
         guard !text.isEmpty else { return }
-        let display: String
-        if let heard = lastTranscript, !heard.isEmpty {
-            display = "\u{201C}\(heard)\u{201D}\n\(text)"
-        } else {
-            display = text
-        }
-        setOutcome(icon: "bubble.left.and.bubble.right.fill", text: display)
+        setOutcome(icon: "bubble.left.and.bubble.right.fill", text: text)
     }
 
     /// While non-nil, a confirmation challenge is awaiting the user's

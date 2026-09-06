@@ -1966,6 +1966,23 @@
         }
       }
     },
+    "home.outcome.youSaid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You said"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंले भन्नुभयो"
+          }
+        }
+      }
+    },
     "home.setupCardHint": {
       "extractionState": "manual",
       "localizations": {
