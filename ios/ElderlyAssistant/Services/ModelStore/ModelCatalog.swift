@@ -148,7 +148,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperMediumFinetunedNepali,
             kind: .whisperBase,
-            displayName: "Nepali STT — Medium (default)",
+            displayName: "Nepali — Medium (default)",
             filename: "whisper-medium-ne-q5_1.bin",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v3/whisper-medium-ne-q5_1.bin")!,
             // Stock-medium fine-tune (checkpoint-5028, 2026-09-03).
@@ -162,7 +162,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperFinetunedNepali,
             kind: .whisperBase,
-            displayName: "Nepali STT — Small",
+            displayName: "Nepali — Small",
             filename: "whisper-finetuned-ne-q5_1.bin",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v2/whisper-finetuned-ne-q5_1.bin")!,
             // Stage-4 fine-tune (checkpoint-4773, 2026-09-02) on labeled
@@ -182,7 +182,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperFinetunedNepaliQ8,
             kind: .whisperBase,
-            displayName: "Nepali STT — Small · higher quality",
+            displayName: "Nepali — Small (more accurate)",
             filename: "whisper-finetuned-ne-q8_0.bin",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v2/whisper-finetuned-ne-q8_0.bin")!,
             // Same checkpoint, q8_0 — best accuracy, +110 MB download.
@@ -195,7 +195,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperSmallNepali,
             kind: .whisperBase,
-            displayName: "Nepali STT — Small · legacy (distilled)",
+            displayName: "Nepali — Small (old version)",
             filename: "whisper-distill-ne-q5_1.bin",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v1/whisper-distill-ne-q5_1.bin")!,
             // Superseded by whisperFinetunedNepali (stage-4 fine-tune).
@@ -208,7 +208,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperLargeV3Nepali,
             kind: .whisperBase,
-            displayName: "Nepali STT — Large v3 · kiranpantha base",
+            displayName: "Nepali — Large (original)",
             // Self-converted from kiranpantha/whisper-large-v3-nepali —
             // the only popular Nepali fine-tune that keeps the standard
             // multilingual tokenizer (see docs/whisper-small-nepali-
@@ -236,7 +236,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperLargeV3NepaliV2,
             kind: .whisperBase,
-            displayName: "Nepali STT — Large v3 · fine-tuned v2",
+            displayName: "Nepali — Large (new version)",
             // finetune-teacher-v2-final (2026-09-06): 3 epochs on the
             // canonicalized+noise-aug mix, started from the kiranpantha
             // base above. FLEURS eval did not beat the base on this
@@ -254,7 +254,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperKitNepali,
             kind: .whisperBase,
-            displayName: "Nepali STT — Large · ANE (not ready yet)",
+            displayName: "Nepali — Large · WhisperKit (coming soon)",
             // `filename`/`downloadURL` are required by the struct but unused
             // for WhisperKit directory delivery (see whisperKitZipURL
             // below) — pointed at the same invalid placeholder so nothing
@@ -279,7 +279,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperKitNepaliMedium,
             kind: .whisperBase,
-            displayName: "Nepali STT — Medium · ANE (fastest)",
+            displayName: "Nepali — Medium · WhisperKit (fast)",
             // WhisperKit directory delivery — `filename`/`downloadURL` are
             // struct-required but unused; the zip URL below is the real one.
             filename: "whisperkit-ne-medium",
@@ -298,7 +298,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperSmallMultilingual,
             kind: .whisperBase,
-            displayName: "Multilingual STT — Small (fallback)",
+            displayName: "Multilingual — Small",
             filename: "ggml-small-q5_1.bin",
             downloadURL: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin")!,
             sizeBytes: 190_085_487,
@@ -313,7 +313,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperBaseEn,
             kind: .whisperBase,
-            displayName: "English STT — Base",
+            displayName: "English — Base (smallest)",
             filename: "ggml-whisper-base-en-q5_1.bin",
             downloadURL: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin")!,
             sizeBytes: 59_721_011,
@@ -408,4 +408,18 @@ enum ModelCatalog {
     static func entries(kind: ModelKind) -> [ModelCatalogEntry] {
         all.filter { $0.kind == kind }
     }
+
+    /// The STT engines a user can actually select or download from the
+    /// Settings "AI मोडेल" screen: every `.whisperBase` catalog entry
+    /// that has a real, hosted artifact. Excludes `whisperKitNepali`,
+    /// the teacher-conversion PLACEHOLDER — its download/zip URLs are
+    /// `.invalid` stubs and its sha256 is all-zero, and its entry's
+    /// comment forbids enabling download until a real artifact exists.
+    ///
+    /// Order matches `all` (default first, Nepali sizes then WhisperKit,
+    /// fallbacks last) — the picker and the downloads list both iterate
+    /// this so the two surfaces always agree.
+    static let availableSTTEntries: [ModelCatalogEntry] = {
+        entries(kind: .whisperBase).filter { $0.id != whisperKitNepali }
+    }()
 }

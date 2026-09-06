@@ -81,6 +81,18 @@ final class ModelStore {
         return path(for: id) != nil
     }
 
+    /// Install check covering BOTH artifact shapes: WhisperKit models are
+    /// DIRECTORY artifacts (`directoryURL(for:)` — `isCached` only knows
+    /// single files, so it would report an installed WhisperKit model as
+    /// missing), every other kind is a single file. The Settings model
+    /// screen uses this so its picker/downloads rows tell the truth about
+    /// ANE models too.
+    func isInstalled(_ entry: ModelCatalogEntry) -> Bool {
+        entry.whisperKitZipURL != nil
+            ? directoryURL(for: entry.id) != nil
+            : isCached(entry.id)
+    }
+
     // MARK: - TTS voices (sherpa-layout directories)
 
     /// URL of an installed TTS voice directory (contains model.onnx,
@@ -351,6 +363,14 @@ final class ModelStore {
            fileManager.fileExists(atPath: coreml.path) {
             try? fileManager.removeItem(at: coreml)
             emit("delete_coreml_encoder", outcome: "success",
+                 modelId: id, errorCode: nil)
+        }
+        // WhisperKit models are directory artifacts under
+        // whisperKit/<id> — the Settings trash button must clear them
+        // too, or a "deleted" row silently comes back as Ready.
+        if let dir = directoryURL(for: id) {
+            try fileManager.removeItem(at: dir)
+            emit("delete_whisperkit_directory", outcome: "success",
                  modelId: id, errorCode: nil)
         }
     }

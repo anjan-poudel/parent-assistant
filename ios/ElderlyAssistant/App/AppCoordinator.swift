@@ -412,16 +412,15 @@ final class AppCoordinator: ObservableObject {
     /// Legacy v1 on-device model catalog — kept only so the buried
     /// "AI मोडेल" settings screen still functions as a manual fallback.
     /// No longer downloaded automatically at first run (v2 pivot).
-    let requiredModelIds: [ModelID] = [
-        ModelCatalog.whisperMediumFinetunedNepali,
-        ModelCatalog.whisperSmallMultilingual,
-        ModelCatalog.llama3_2_1B,
-        ModelCatalog.piperNepali,
-        ModelCatalog.whisperFinetunedNepaliQ8,
-        ModelCatalog.whisperLargeV3Nepali,
-        ModelCatalog.whisperLargeV3NepaliV2,
-        ModelCatalog.whisperKitNepaliMedium
-    ]
+    ///
+    /// The downloads-management rows must cover EVERY STT engine the
+    /// picker can select (anything selectable has to be fetchable), so
+    /// this mirrors `ModelCatalog.availableSTTEntries` (all catalog
+    /// whisper-base entries minus placeholder-only models), then the
+    /// assistant-brain and voice rows the screen has always managed.
+    let requiredModelIds: [ModelID] =
+        ModelCatalog.availableSTTEntries.map(\.id)
+        + [ModelCatalog.llama3_2_1B, ModelCatalog.piperNepali]
 
     init() {
         // Core infrastructure. Storage uses the Keychain (Data Protection class
@@ -1101,7 +1100,12 @@ final class AppCoordinator: ObservableObject {
     /// on-device/Gemini toggle exists — a configured Gemini key shouldn't
     /// make this claim "Gemini" while the user has explicitly picked
     /// on-device.
-    private func updateActiveSTTName() {
+    ///
+    /// Internal (not private) because the Settings model screen calls it
+    /// when a download completes — installing a model can change which
+    /// recognizer/model the label should claim (e.g. a finished
+    /// WhisperKit install makes the ANE recognizer available).
+    func updateActiveSTTName() {
         if voiceEngineStack == .gemini, geminiSpeechRecognizer.isAvailable {
             activeSTTNameKey = "stt.name.gemini"
             return
@@ -1133,6 +1137,8 @@ final class AppCoordinator: ObservableObject {
             return "stt.name.whisperNepaliSmall"
         case ModelCatalog.whisperLargeV3Nepali:
             return "stt.name.whisperLargeNepali"
+        case ModelCatalog.whisperLargeV3NepaliV2:
+            return "stt.name.whisperLargeNepaliV2"
         case ModelCatalog.whisperSmallMultilingual:
             return "stt.name.whisperMultilingual"
         case ModelCatalog.whisperBaseEn:

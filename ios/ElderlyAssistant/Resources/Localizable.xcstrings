@@ -2414,13 +2414,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "English speech recognition (base)"
+            "value": "English — Base (smallest)"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "अंग्रेजी आवाज पहिचान (आधार)"
+            "value": "अंग्रेजी — आधार (सबैभन्दा सानो)"
           }
         }
       }
@@ -2431,13 +2431,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nepali speech recognition (small, distilled)"
+            "value": "Nepali — Small (old version)"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "नेपाली आवाज पहिचान (सानो, डिस्टिल्ड)"
+            "value": "नेपाली — सानो (पुरानो संस्करण)"
           }
         }
       }
@@ -2448,13 +2448,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nepali speech recognition (small, fine-tuned)"
+            "value": "Nepali — Small"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "नेपाली आवाज पहिचान (सानो, फाइनट्युन्ड)"
+            "value": "नेपाली — सानो"
           }
         }
       }
@@ -2465,13 +2465,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nepali speech recognition (small, fine-tuned, high quality)"
+            "value": "Nepali — Small (more accurate)"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "नेपाली आवाज पहिचान (सानो, फाइनट्युन्ड, उच्च गुणस्तर)"
+            "value": "नेपाली — सानो (थप सटीक)"
           }
         }
       }
@@ -2482,13 +2482,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nepali speech recognition (large v3)"
+            "value": "Nepali — Large (original)"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "नेपाली आवाज पहिचान (ठूलो v3)"
+            "value": "नेपाली — ठूलो (मूल)"
           }
         }
       }
@@ -2499,13 +2499,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nepali speech recognition (medium, fine-tuned)"
+            "value": "Nepali — Medium (default)"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "नेपाली आवाज पहिचान (मध्यम, फाइनट्युन्ड)"
+            "value": "नेपाली — मध्यम (पूर्वनिर्धारित)"
           }
         }
       }
@@ -2516,13 +2516,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Multilingual speech recognition (small)"
+            "value": "Multilingual — Small"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "बहुभाषी आवाज पहिचान (सानो)"
+            "value": "बहुभाषी — सानो"
           }
         }
       }
@@ -5899,13 +5899,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Whisper (English)"
+            "value": "English — Base (smallest)"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "Whisper (अंग्रेजी)"
+            "value": "अंग्रेजी — आधार (सबैभन्दा सानो)"
           }
         }
       }
@@ -5916,13 +5916,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Whisper (Nepali small, fine-tuned)"
+            "value": "Nepali — Small"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "Whisper (नेपाली सानो, फाइनट्युन्ड)"
+            "value": "नेपाली — सानो"
           }
         }
       }
@@ -5933,13 +5933,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Whisper (Nepali small, fine-tuned q8)"
+            "value": "Nepali — Small (more accurate)"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "Whisper (नेपाली सानो, फाइनट्युन्ड q8)"
+            "value": "नेपाली — सानो (थप सटीक)"
           }
         }
       }
@@ -5950,13 +5950,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "WhisperKit (Nepali medium, ANE)"
+            "value": "Nepali — Medium · WhisperKit (fast)"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "WhisperKit (नेपाली मध्यम, ANE)"
+            "value": "नेपाली — मध्यम · WhisperKit (छिटो)"
           }
         }
       }
@@ -5967,13 +5967,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Whisper (Nepali large v3)"
+            "value": "Nepali — Large (original)"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "Whisper (नेपाली ठूलो v3)"
+            "value": "नेपाली — ठूलो (मूल)"
           }
         }
       }
@@ -5984,13 +5984,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Whisper (Nepali medium, fine-tuned)"
+            "value": "Nepali — Medium (default)"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "Whisper (नेपाली मध्यम, फाइनट्युन्ड)"
+            "value": "नेपाली — मध्यम (पूर्वनिर्धारित)"
           }
         }
       }
@@ -6001,13 +6001,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Whisper (multilingual fallback)"
+            "value": "Multilingual — Small"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "Whisper (बहुभाषी फलब्याक)"
+            "value": "बहुभाषी — सानो"
           }
         }
       }
@@ -6018,13 +6018,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Whisper (Nepali small, distilled)"
+            "value": "Nepali — Small (old version)"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "Whisper (नेपाली सानो, डिस्टिल्ड)"
+            "value": "नेपाली — सानो (पुरानो संस्करण)"
           }
         }
       }
@@ -6501,6 +6501,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "थप देखाउनुहोस्"
+          }
+        }
+      }
+    },
+    "model.name.whisper-large-v3-ne-v2-q5_1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nepali — Large (new version)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नेपाली — ठूलो (नयाँ संस्करण)"
+          }
+        }
+      }
+    },
+    "model.name.whisperkit-ne-medium": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nepali — Medium · WhisperKit (fast)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नेपाली — मध्यम · WhisperKit (छिटो)"
+          }
+        }
+      }
+    },
+    "stt.name.whisperLargeNepaliV2": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nepali — Large (new version)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नेपाली — ठूलो (नयाँ संस्करण)"
           }
         }
       }

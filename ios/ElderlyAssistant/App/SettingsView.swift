@@ -1253,23 +1253,28 @@ struct AIModelsSettingsView: View {
                     Text("settings.ai.selection")
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                         .foregroundColor(DesignTokens.textPrimary)
-                    if cachedWhisperModels.isEmpty {
+                    // Every catalog STT engine is offered — cached AND
+                    // not-yet-downloaded alike (a cached-only list hid
+                    // everything but the user's 1–2 installed models).
+                    // Picking an engine that isn't installed starts its
+                    // download (see `sttSelection`); the downloads card
+                    // below shows per-row progress.
+                    Picker("settings.ai.selection",
+                           selection: sttSelection) {
+                        Text("settings.ai.automatic").tag(Optional<ModelID>.none)
+                        ForEach(ModelCatalog.availableSTTEntries, id: \.id) { entry in
+                            Text(Self.sttOptionLabel(entry: entry,
+                                                     downloaded: isInstalled(entry.id),
+                                                     locale: coordinator.appLanguage.locale))
+                                .tag(Optional(entry.id))
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(DesignTokens.accent)
+                    if !hasAnySTTInstalled {
                         Text("model.notDownloaded")
                             .font(.system(size: DesignTokens.minCaptionPointSize))
                             .foregroundColor(DesignTokens.textSecondary)
-                    } else {
-                        Picker("settings.ai.selection",
-                               selection: $coordinator.sttModelPreference) {
-                            Text("settings.ai.automatic").tag(Optional<ModelID>.none)
-                            ForEach(cachedWhisperModels, id: \.rawValue) { id in
-                                if let entry = ModelCatalog.entry(for: id) {
-                                    Text(entry.displayName(locale: coordinator.appLanguage.locale))
-                                        .tag(Optional(id))
-                                }
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .tint(DesignTokens.accent)
                     }
                 }
                 .padding(16)
@@ -1285,9 +1290,7 @@ struct AIModelsSettingsView: View {
                         if let entry = ModelCatalog.entry(for: id) {
                             ModelManagementRow(
                                 entry: entry,
-                                state: downloads.states[id]
-                                    ?? (coordinator.modelStore.isCached(id)
-                                        ? .completed : .notStarted),
+                                state: downloadState(for: id),
                                 onStart: { downloads.start(id) },
                                 onCancel: { downloads.cancel(id) },
                                 onDelete: {
@@ -1316,17 +1319,83 @@ struct AIModelsSettingsView: View {
                 .background(DesignTokens.card)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
             }
+            // A finished install can flip which recognizer/model the
+            // "STT in use" caption should claim (e.g. WhisperKit lands →
+            // the ANE recognizer becomes available) — the coordinator
+            // only recomputes that label on preference/stack changes.
+            .onReceive(downloads.$states) { states in
+                let someCompleted = states.values.contains { state in
+                    if case .completed = state { return true }
+                    return false
+                }
+                if someCompleted {
+                    coordinator.updateActiveSTTName()
+                }
+            }
         }
     }
 
-    /// Cached whisper models, in required-model download order (spec §4.4.4
-    /// picker lists available Whisper variants; only cached ones are
-    /// pickable).
-    private var cachedWhisperModels: [ModelID] {
-        coordinator.requiredModelIds.filter { id in
-            guard ModelCatalog.entry(for: id)?.kind == .whisperBase else { return false }
-            return coordinator.modelStore.isCached(id)
+    /// Picker selection: sets the persisted preference (existing
+    /// `sttModelPreference` flow) AND — when the chosen engine is not
+    /// installed yet — starts its download through the existing
+    /// `ModelDownloadService` so a fresh pick works immediately. Rows
+    /// below surface progress; once the install completes the picker
+    /// label sheds its "not downloaded" suffix and the recognizer
+    /// resolves the preference (it loads whatever model is cached).
+    private var sttSelection: Binding<ModelID?> {
+        Binding(
+            get: { coordinator.sttModelPreference },
+            set: { newValue in
+                coordinator.sttModelPreference = newValue
+                if let newValue {
+                    startDownloadIfNeeded(newValue)
+                }
+            }
+        )
+    }
+
+    private func startDownloadIfNeeded(_ id: ModelID) {
+        guard !isInstalled(id) else { return }
+        switch downloads.states[id] ?? .notStarted {
+        case .notStarted, .failed, .cancelled:
+            downloads.start(id)
+        case .queued, .downloading, .verifying, .completed:
+            break   // already in flight (or just finished)
         }
+    }
+
+    /// Directory-aware installed check: WhisperKit artifacts are model
+    /// directories (`ModelStore.isCached` only sees single files), and a
+    /// service `.completed` state counts even before the store query.
+    private func isInstalled(_ id: ModelID) -> Bool {
+        if downloads.states[id] == .completed { return true }
+        guard let entry = ModelCatalog.entry(for: id) else { return false }
+        return coordinator.modelStore.isInstalled(entry)
+    }
+
+    private var hasAnySTTInstalled: Bool {
+        ModelCatalog.availableSTTEntries.contains { isInstalled($0.id) }
+    }
+
+    /// Row state for the downloads list: the service's live state wins;
+    /// otherwise derive from what is on disk (directory-aware so an
+    /// installed WhisperKit model reads as Ready, not Download).
+    private func downloadState(for id: ModelID) -> ModelDownloadState {
+        if let state = downloads.states[id] { return state }
+        guard let entry = ModelCatalog.entry(for: id) else { return .notStarted }
+        return coordinator.modelStore.isInstalled(entry) ? .completed : .notStarted
+    }
+
+    /// Picker row text: the localized model name, plus an honest
+    /// "not downloaded yet" note whenever the artifact isn't installed.
+    /// Pure (the view computes `downloaded` from store + service state)
+    /// so tests can pin both label states.
+    static func sttOptionLabel(entry: ModelCatalogEntry,
+                               downloaded: Bool,
+                               locale: Locale) -> String {
+        let name = entry.displayName(locale: locale)
+        guard !downloaded else { return name }
+        return "\(name) — \(L10n.str("model.notDownloaded", locale: locale))"
     }
 }
 

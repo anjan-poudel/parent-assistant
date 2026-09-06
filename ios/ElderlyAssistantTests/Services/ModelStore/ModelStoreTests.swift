@@ -267,5 +267,50 @@ final class ModelStoreTests: XCTestCase {
         XCTAssertNil(store.directoryURL(for: ModelCatalog.whisperKitNepaliMedium))
         XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "whisperkit_install_incomplete" })
     }
+
+    // MARK: - Install checks the Settings model screen depends on
+
+    func testIsInstalledCoversWhisperKitDirectoryArtifacts() throws {
+        let store = try ModelStore(observabilityBus: bus,
+                                   rootDirectoryOverride: tmpRoot,
+                                   checksumPolicy: .skip)
+
+        // File artifact: isInstalled tracks isCached.
+        let fileID = ModelCatalog.whisperBaseEn
+        let fileEntry = ModelCatalog.entry(for: fileID)!
+        XCTAssertFalse(store.isInstalled(fileEntry))
+        let staged = try store.stagingURL(for: fileID)
+        try Data("fake-model".utf8).write(to: staged)
+        _ = try store.finalize(fileID)
+        XCTAssertTrue(store.isInstalled(fileEntry))
+
+        // WhisperKit directory artifact: installed even though isCached
+        // (a single-file check) still says no — the Settings picker must
+        // not tell the user an installed ANE model is "not downloaded".
+        let wkID = ModelCatalog.whisperKitNepaliMedium
+        let wkEntry = ModelCatalog.entry(for: wkID)!
+        XCTAssertFalse(store.isInstalled(wkEntry))
+        let (zipURL, _) = try makeWhisperKitZip()
+        _ = try store.installWhisperKitModel(fromZip: zipURL, for: wkID)
+        XCTAssertTrue(store.isInstalled(wkEntry))
+        XCTAssertFalse(store.isCached(wkID), "directory artifact, not a file")
+    }
+
+    func testDeleteRemovesWhisperKitDirectoryArtifact() throws {
+        let store = try ModelStore(observabilityBus: bus,
+                                   rootDirectoryOverride: tmpRoot,
+                                   checksumPolicy: .skip)
+        let wkID = ModelCatalog.whisperKitNepaliMedium
+        let wkEntry = ModelCatalog.entry(for: wkID)!
+        let (zipURL, _) = try makeWhisperKitZip()
+        _ = try store.installWhisperKitModel(fromZip: zipURL, for: wkID)
+        XCTAssertTrue(store.isInstalled(wkEntry))
+
+        try store.delete(wkID)
+        XCTAssertFalse(store.isInstalled(wkEntry), "delete must clear the directory")
+        XCTAssertNil(store.directoryURL(for: wkID))
+        // Idempotent, like the file path.
+        XCTAssertNoThrow(try store.delete(wkID))
+    }
 }
 
