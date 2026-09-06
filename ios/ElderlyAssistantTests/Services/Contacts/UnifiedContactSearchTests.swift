@@ -397,11 +397,13 @@ final class UnifiedContactSearchTests: XCTestCase {
 
     func testAvailabilityBadgesReflectLinkBuildabilityNotPlatformPresence() {
         // Book row WITHOUT Facebook linkage (the twin fixture carries
-        // none — a linked row badges instead, see
-        // testMessengerBadgeForLinkedBookRows): the number can shape a
-        // WhatsApp link, but Messenger links are handle-addressed — no
-        // handle stored, so no badge — even though an app-synced copy
-        // of this person may exist on the device.
+        // none): the number shapes both the WhatsApp link AND the
+        // phone-based Messenger chat attempt (field fix 2026-09-06 —
+        // Messenger matches by phone and writes no linkage back, so
+        // handle-derived-only badging hid real Messenger contacts).
+        // No handle stored, so `messengerHandle` stays nil even though
+        // the badge is on — the row's action falls back to the chat
+        // attempt, exactly like WhatsApp's always does.
         let bookOutcome = UnifiedContactSearch.search(query: "शर्मा", family: [],
                                                       in: [sitaTwin, sitaSharma])
         guard let bookRow = bookOutcome.entries.first,
@@ -411,7 +413,7 @@ final class UnifiedContactSearchTests: XCTestCase {
         }
         XCTAssertEqual(twin.name, "सीता शर्मा")
         XCTAssertTrue(bookRow.whatsAppAvailable)
-        XCTAssertFalse(bookRow.messengerAvailable)
+        XCTAssertTrue(bookRow.messengerAvailable)
         XCTAssertNil(bookRow.messengerHandle)
 
         // Family rows: WhatsApp needs dialable digits; Messenger needs
@@ -491,11 +493,12 @@ final class UnifiedContactSearchTests: XCTestCase {
         XCTAssertTrue(row.messengerAvailable)
         XCTAssertEqual(row.messengerHandle, "maya.gurung")
 
-        // The linkage-free neighbor in the same book stays badge-off:
-        // a bare number cannot form a Messenger handle, even when an
-        // app-synced copy of the person exists on the device.
+        // The linkage-free neighbor in the same book still gets the
+        // phone-based chat badge (field fix 2026-09-06) — the action
+        // falls back to the m.me-by-number attempt, which is exactly
+        // how Messenger matches contacts anyway. Its handle stays nil.
         let plain = UnifiedContactSearch.Result.addressBook(sitaSharma)
-        XCTAssertFalse(plain.messengerAvailable)
+        XCTAssertTrue(plain.messengerAvailable)
         XCTAssertNil(plain.messengerHandle)
     }
 

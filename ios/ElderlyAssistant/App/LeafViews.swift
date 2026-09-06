@@ -441,12 +441,17 @@ struct CallView: View {
         coordinator.performSystemContactWhatsApp(name: result.name, phone: result.phone)
     }
 
-    /// The row's Messenger pill. A row shows one only when the person
-    /// has a handle on file; the coordinator discloses the fallback
-    /// when the app is missing.
+    /// The row's Messenger pill. A handle on file opens the person's
+    /// thread directly; otherwise (the common case — Messenger matches
+    /// by phone and writes no linkage back) the phone-based chat
+    /// attempt runs, with the coordinator disclosing every fallback.
     private func messenger(_ result: UnifiedContactSearch.Result) {
-        coordinator.performSystemContactMessenger(name: result.name,
-                                                  handle: result.messengerHandle ?? "")
+        if let handle = result.messengerHandle, !handle.isEmpty {
+            coordinator.performSystemContactMessenger(name: result.name, handle: handle)
+        } else {
+            coordinator.performSystemContactMessengerChat(name: result.name,
+                                                          phone: result.phone)
+        }
     }
 
     // MARK: Result / family areas

@@ -1920,6 +1920,41 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// Messenger CHAT attempt for a search row by PHONE — the common
+    /// case: Messenger matches contacts by number server-side and
+    /// writes no linkage back into most address-book cards, so no
+    /// handle can be derived; the phone-based chat is the only honest
+    /// surface iOS lets the app open for them. Same chain as the family
+    /// messenger tile (`performContactCall`'s .messenger case):
+    /// `fb-messenger://` when installed, else the `m.me/<digits>` web
+    /// chat — which resolves exactly when the number is
+    /// Messenger-registered, and is disclosed as the web fallback when
+    /// it isn't. No recency entry (a chat open is not a call).
+    func performSystemContactMessengerChat(name: String, phone: String) {
+        let locale = activeLocale
+        switch callLinks.openMessengerChat(phone: phone) {
+        case .openedApp:
+            setOutcome(icon: "message.fill",
+                       text: L10n.fmt("home.outcome.messengerOpened", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.messenger", locale: locale, name))
+            noteSearchChannelTap(outcome: "messenger:openedApp")
+        case .openedWebChat:
+            // Messenger absent — the m.me chat opened in Safari instead;
+            // the same web-fallback disclosure the family path speaks.
+            setOutcome(icon: "message.fill",
+                       text: L10n.fmt("home.outcome.messengerOpened", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.messengerWebFallback", locale: locale, name))
+            noteSearchChannelTap(outcome: "messenger:openedWebChat")
+        case .invalidHandle:
+            // The number normalized to nothing dialable — defensive (the
+            // search layer filters such rows), never a silent dead tap.
+            setOutcome(icon: "exclamationmark.triangle.fill",
+                       text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
+            noteSearchChannelTap(outcome: "messenger:invalidHandle")
+        }
+    }
+
     /// One observability event per channel tap from the unified search
     /// rows, the outcome naming which surface actually appeared (or
     /// which fallback ran).

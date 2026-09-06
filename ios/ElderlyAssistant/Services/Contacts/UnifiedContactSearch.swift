@@ -101,23 +101,32 @@ enum UnifiedContactSearch {
             !ContactNumberKey.normalized(phone).isEmpty
         }
 
-        /// Whether a Messenger thread link can be built for this row.
+        /// Whether a Messenger chat surface can be opened for this row.
         /// Family rows: the stored handle must normalize to Messenger's
         /// username alphabet (see `CallLinks.messengerHandle` — "सीता"
-        /// is NOT a usable handle, and no handle means no link). Book
-        /// rows: true exactly when the record's Facebook linkage
-        /// yielded a handle — `AddressBookEntry.derivedMessengerHandle`
-        /// already ran every candidate through the same normalizer, so a
-        /// non-nil derived handle IS a buildable link, and a plain row
-        /// (number only, no linkage) stays badge-off: a bare number
-        /// cannot form a Messenger handle, even when an app-synced copy
-        /// of the person exists on the device.
+        /// is NOT a usable handle, and no handle means no link).
+        ///
+        /// Book rows (2026-09-06, field fix): true whenever the row has
+        /// a dialable phone — the SAME availability semantics as the
+        /// WhatsApp pill. Reality check: Messenger matches contacts by
+        /// phone number server-side and writes NO linkage back into
+        /// most address-book cards (only the user's own card usually
+        /// carries one), so handle-derived-only badging left real
+        /// Messenger contacts pill-less. The phone-based chat is the
+        /// only honest surface iOS lets the app open for them
+        /// (`fb-messenger://` when installed, else the `m.me/<digits>`
+        /// web chat — which resolves exactly when the number is
+        /// Messenger-registered, and is disclosed as a web fallback
+        /// when it isn't). Availability is still never presence: the
+        /// pill says "a Messenger chat attempt can be made", never
+        /// "this person is on Messenger".
         var messengerAvailable: Bool {
             switch self {
             case .family(let contact):
                 return !CallLinks.messengerHandle(contact.messengerHandle ?? "").isEmpty
             case .addressBook(let entry):
-                return entry.messengerHandle != nil
+                return !ContactNumberKey.normalized(entry.phone).isEmpty
+                    || entry.messengerHandle != nil
             }
         }
     }
