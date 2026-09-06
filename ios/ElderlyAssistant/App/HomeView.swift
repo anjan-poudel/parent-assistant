@@ -39,7 +39,14 @@ struct HomeView: View {
     /// publishes `pendingContactSearchRequest`; this onChange appends the
     /// Call leaf so results land on screen with zero touch. Ordinary dock
     /// taps keep using NavigationLink(value:) — both append to this path.
-    @State private var navPath: [LeafDestination] = []
+    /// Type-erased navigation path (fix 2026-09-07): the previous
+    /// `[LeafDestination]`-typed path silently DROPPED every
+    /// `SettingsSection` push from the Settings screen ("nothing in
+    /// Settings works") — a value that isn't a LeafDestination cannot
+    /// append to a LeafDestination-typed path. `NavigationPath` accepts
+    /// any Hashable value, so dock leaves AND Settings sections push
+    /// through the same stack.
+    @State private var navPath = NavigationPath()
 
     var body: some View {
         NavigationStack(path: $navPath) {
@@ -80,8 +87,14 @@ struct HomeView: View {
             // can never double-push. iOS 16 onChange (single-parameter).
             .onChange(of: coordinator.pendingContactSearchRequest?.id) { _ in
                 guard coordinator.pendingContactSearchRequest != nil else { return }
-                if navPath.last != .call {
-                    navPath.append(.call)
+                // Push the Call leaf from Home (empty path). From other
+                // leaves the request stays pending; a type-erased
+                // `NavigationPath` cannot read its last element, so the
+                // old "already on .call" peek is unavailable — the empty-
+                // path guard is the honest equivalent for the primary
+                // voice-from-Home flow (fix 2026-09-07).
+                if navPath.isEmpty {
+                    navPath.append(LeafDestination.call)
                 }
             }
             .fullScreenCover(isPresented: $showWizard) {

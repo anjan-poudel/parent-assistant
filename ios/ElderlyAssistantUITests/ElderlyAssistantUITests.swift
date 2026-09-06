@@ -123,4 +123,64 @@ final class ElderlyAssistantUITests: XCTestCase {
                       downloaded.waitForExistence(timeout: 10),
                       "Long-pressing the Settings title should reveal the model screen")
     }
+
+    /// Walks EVERY Settings section row: each tap must push its screen
+    /// (title visible), and back must return. Catches a broken row or a
+    /// navigation regression in one pass.
+    func testEverySettingsSectionNavigates() throws {
+        let app = launchToHome()
+        let settings = app.buttons["सेटिङ"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 15))
+        settings.tap()
+        XCTAssertTrue(app.staticTexts["सेटिङ"].firstMatch.waitForExistence(timeout: 10))
+
+        let sections: [(row: String, title: String)] = [
+            ("भाषा र क्षेत्र", "भाषा र क्षेत्र"),
+            ("जेमिनी AI", "जेमिनी AI"),
+            ("आवाज इन्जिन", "आवाज इन्जिन"),
+            ("आवाज सक्रियता", "आवाज सक्रियता"),
+            ("आवाजहरू", "आवाजहरू"),
+            ("द्रुत एपहरू", "द्रुत एपहरू"),
+            ("परिवारको सम्पर्क", "परिवारको सम्पर्क"),
+            ("औषधि तालिका", "औषधि तालिका"),
+            ("गोपनीयता", "गोपनीयता"),
+            ("सहायकको गतिविधि", "सहायकको गतिविधि"),
+        ]
+        for (row, title) in sections {
+            // Custom status rows compose their label ("जेमिनी AI, सक्रिय"),
+            // so match by containment, not exact equality.
+            let rowButton = app.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@", row)).firstMatch
+            XCTAssertTrue(rowButton.waitForExistence(timeout: 10),
+                          "Settings row \"(\(row))\" should exist")
+            rowButton.tap()
+            let pushed = app.staticTexts[title].firstMatch
+            XCTAssertTrue(pushed.waitForExistence(timeout: 10),
+                          "Tapping \"(\(row))\" should push its screen (title \"(\(title))\")")
+            let back = app.buttons["पछाडि"].firstMatch
+            XCTAssertTrue(back.waitForExistence(timeout: 5))
+            back.tap()
+            XCTAssertTrue(app.staticTexts["सेटिङ"].firstMatch.waitForExistence(timeout: 5),
+                          "Back should return to Settings")
+        }
+    }
+
+    /// Quick-access picker interaction: search field filters the catalog.
+    func testQuickAccessPickerSearchWorks() throws {
+        let app = launchToHome()
+        let settings = app.buttons["सेटिङ"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 15))
+        settings.tap()
+        let row = app.buttons["द्रुत एपहरू"].firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        row.tap()
+        let search = app.textFields["एपहरू खोज्नुहोस्"].firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 10),
+                      "Quick access picker should show its search field")
+        search.tap()
+        search.typeText("whatsapp")
+        XCTAssertTrue(app.staticTexts["WhatsApp"].firstMatch.waitForExistence(timeout: 5)
+                      || app.staticTexts["ह्वाट्सएप"].firstMatch.waitForExistence(timeout: 5),
+                      "Searching should surface the WhatsApp row")
+    }
 }

@@ -2646,6 +2646,40 @@
         }
       }
     },
+    "intentLog.export": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "निर्यात गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "intentLog.clear": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हटाउनुहोस्"
+          }
+        }
+      }
+    },
     "intentLog.confirmed": {
       "extractionState": "manual",
       "localizations": {
