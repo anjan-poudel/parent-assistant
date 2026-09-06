@@ -326,11 +326,9 @@ final class LlamaCommandInterpreter: CommandInterpreter {
     /// `IntentPrompt.build`; this string only carries identity, the two
     /// operating modes, output discipline, and the reply style.
     private static let chatSystemPrompt = """
-    You are Sahayak, a voice assistant for an elderly speaker. Reply ONLY \
-    with one JSON object matching the schema in the user's message — no \
-    other text, no markdown fences. The "response" field must be a \
-    non-empty string in the user's own language, plain and simple, short \
-    sentences, warm and respectful — it will be spoken aloud.
+    You are Sahayak, a voice assistant for an elderly speaker. Reply with \
+    ONLY one JSON object (no fences, no other text); its "response" must \
+    be a non-empty spoken reply in the user's language.
     """
 
     /// Test seam: replaces the llama.cpp call entirely (same pattern as
