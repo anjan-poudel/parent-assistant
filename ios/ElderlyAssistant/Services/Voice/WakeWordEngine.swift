@@ -5,12 +5,16 @@ import AVFoundation
 /// `onDetection` handler whenever the trained keyword ("Hey Sahayak") fires.
 ///
 /// The concrete implementation is Porcupine (`PorcupineWakeWordEngine`), used
-/// only when the Porcupine Swift package is added to the project AND a
-/// Picovoice access key is configured. When neither is present, a
+/// only when the Porcupine Swift package is added to the project, the
+/// Settings → "Voice activation" toggle is ON, an access key is configured,
+/// and the trained `.ppn` is bundled — see `WakeWordEngineSelection` and
+/// docs/wake-word-setup.md. When any of that is missing, a
 /// `NullWakeWordEngine` is used so the rest of the pipeline still compiles
-/// and runs — you just have to trigger detection manually via
-/// `VoicePipeline.simulateWakeWordDetection()` (wired to a debug button in
-/// `ContentView`).
+/// and runs exactly as before the wake-word feature — Talk button and
+/// `VoicePipeline.simulateWakeWordDetection()` untouched. While the engine
+/// is live, `VoicePipeline` consults `WakeWordActivityGate` before feeding
+/// it mic audio and before acting on detections (self-hearing mitigation,
+/// 2026-09-06).
 protocol WakeWordEngine: AnyObject {
     /// Sample rate the engine expects for input audio. The audio tap must
     /// convert to this rate before calling `process(_:)`.
@@ -49,18 +53,23 @@ final class NullWakeWordEngine: WakeWordEngine {
 
 /// Real wake-word detector using Picovoice's on-device Porcupine engine.
 ///
-/// To enable:
-///  1. Add the Porcupine iOS Swift package to `project.yml` (see comment
-///     block in that file), run `./build.sh generate` to refresh the
-///     Xcode project.
-///  2. Sign up at https://console.picovoice.ai/ (free tier) and copy your
-///     access key. Set it via the `PICOVOICE_ACCESS_KEY` env var at build
-///     time OR paste it into `voice-config.plist` (git-ignored).
+/// To enable (2026-09-06, full family-facing steps in docs/wake-word-setup.md):
+///  1. Uncomment the Porcupine SPM package in `ios/project.yml`, run
+///     `./build.sh generate` to refresh the Xcode project.
+///  2. A family member pastes the Picovoice access key into Settings →
+///     "Voice activation" (stored in the Keychain via
+///     `WakeWordAccessKeyStore`) — or a team build can embed it as the
+///     `PicovoiceAccessKey` Info.plist value. The app never ships a key.
 ///  3. Train the "Hey Sahayak" wake word in the Picovoice Console, download
 ///     the iOS `.ppn` file, and drop it into
 ///     `ios/ElderlyAssistant/Resources/hey-sahayak_ios.ppn`.
-///  4. Rebuild. `PorcupineWakeWordEngine` will now compile and be picked up
-///     by `VoicePipeline.makeWakeWordEngine()`.
+///  4. Rebuild. `PorcupineWakeWordEngine` will now compile, and
+///     `AppCoordinator.makeWakeWordEngine()` builds it when the Settings
+///     toggle (default ON) is enabled — status shown on the Settings screen.
+///
+/// This file's `#if canImport(Porcupine)` guard (and its mirror,
+/// `AppCoordinator.isWakeWordRuntimeLinked`) is what keeps a build honest:
+/// no Porcupine package, no real engine, no "Active" claim.
 #if canImport(Porcupine)
 import Porcupine
 
