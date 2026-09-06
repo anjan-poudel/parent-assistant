@@ -12,7 +12,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case language, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, privacy, intentLog
+        case language, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, quickApps, privacy, intentLog
 
         var id: String {
             switch self {
@@ -23,6 +23,7 @@ struct SettingsView: View {
             case .voiceEngine: return "voiceEngine"
             case .wakeWord: return "wakeWord"
             case .ttsVoices: return "ttsVoices"
+            case .quickApps: return "quickApps"
             case .privacy: return "privacy"
             case .intentLog: return "intentLog"
             }
@@ -64,6 +65,7 @@ struct SettingsView: View {
                         voiceEngineSectionRow
                         wakeWordSectionRow
                         ttsVoicesSectionRow
+                        sectionRow(.quickApps, icon: "square.grid.2x2.fill", titleKey: "settings.quickApps.title")
                         sectionRow(.family, icon: "person.2.fill", titleKey: "settings.family.title")
                         sectionRow(.meds, icon: "pills.fill", titleKey: "settings.meds.title")
                         sectionRow(.privacy, icon: "lock.shield.fill", titleKey: "settings.privacy.title")
@@ -91,6 +93,7 @@ struct SettingsView: View {
             case .voiceEngine: VoiceEngineSettingsView()
             case .wakeWord: WakeWordSettingsView()
             case .ttsVoices: TTSVoicesSettingsView()
+            case .quickApps: QuickAccessAppsView()
             case .privacy: PrivacySettingsView()
             case .intentLog: IntentLogReviewView()
             }

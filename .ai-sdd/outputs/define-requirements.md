@@ -256,6 +256,51 @@ Feature: Unified contact search and channel actions
     Then the system must disclose the fallback aloud (native Messages sheet or pasted number)
 ```
 
+### 1.11 Quick Access Apps (Home row + Settings picker)
+
+**FR-049**
+The Home screen must show a quick-access row of the user's favourite apps — up to 8, each a 48pt icon tile with the app's localized name — directly below the setup strip, hidden entirely until at least one app has been added. Tapping a tile must open the app; when the app is no longer installed the system must say so aloud and open nothing rather than fail silently.
+
+**FR-050**
+Settings must offer a "Quick apps" screen that searches a curated catalog of apps and lists the user's favourites (add, remove, order preserved). An app may be added as a favourite only when it is actually installed on the device — presence must be probed per app, never assumed from the catalog — additions must stop at the 8-app cap with the cap disclosed, and favourite state must survive relaunch.
+
+#### Feature: Quick Access Apps (FR-049, FR-050)
+
+```gherkin
+Feature: Quick access apps
+  As an elderly user
+  I want my most-used apps one tap away on the Home screen
+  So that I can open them without hunting through screens or remembering names
+
+  Scenario: Home row appears only after an app is added
+    Given the user has not added any quick access apps
+    Then the Home screen must show no quick access row
+    When the user adds a favourite app in Settings
+    Then the Home screen must show the quick access row with that app
+
+  Scenario: Tapping a favourite tile opens the app
+    Given the user has added WhatsApp as a quick access app
+    When the user taps the WhatsApp tile on the Home row
+    Then the system must open WhatsApp
+
+  Scenario: Row is capped at eight apps
+    Given the user has added 8 quick access apps
+    When the user tries to add a 9th app in the Settings picker
+    Then the picker must refuse the add
+    And the cap must be disclosed on screen
+
+  Scenario: Only installed apps can be added
+    Given an app in the catalog is not installed on this phone
+    When the user opens the Settings picker
+    Then the picker must not offer an add control for that app
+
+  Scenario: Honest launch when an app has been uninstalled
+    Given a favourite app has been uninstalled since it was added
+    When the user taps its tile on the Home row
+    Then the system must open nothing
+    And the system must say aloud that the app is not installed on this phone
+```
+
 ---
 
 ## 2. Non-Functional Requirements
@@ -717,6 +762,39 @@ Feature: Health metric monitoring via HealthKit and Health Connect
     When the remote configuration is applied
     Then subsequent blood pressure readings must be evaluated against the new threshold of 170 mmHg
     And readings at or above 170 mmHg must trigger the emergency response sequence (FR-033)
+```
+
+### Feature: Quick Access Apps (FR-049, FR-050)
+
+```gherkin
+Feature: Quick access apps (FR-049, FR-050)
+  As an elderly user
+  I want my most-used apps one tap away on the Home screen
+  So that I can open them without hunting through screens
+
+  Scenario: Adding only what is installed
+    Given the user opens the Quick apps screen in Settings
+    When an app in the catalog is not installed on this phone
+    Then that app must not be offered for adding
+    And apps that are installed must be offered with an add control
+
+  Scenario: Adding up to the cap
+    Given the user already has 8 quick access apps
+    When the user tries to add another installed app
+    Then the add must be refused
+    And the on-screen note must disclose the 8-app cap
+
+  Scenario: Removing a favourite from the Home row
+    Given the user has WhatsApp as a quick access app
+    When the user removes WhatsApp in the Quick apps screen
+    Then the Home row must no longer show WhatsApp
+    And the row must stay hidden if no favourites remain
+
+  Scenario: Launching announces an absent app
+    Given a favourite app is not installed on the device
+    When the user taps its Home-row tile
+    Then nothing must be opened
+    And the system must announce that the app is not installed
 ```
 
 ---

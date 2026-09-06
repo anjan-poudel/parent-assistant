@@ -944,3 +944,47 @@ App-absent fallbacks are disclosed aloud reusing existing announcement keys (`ca
 | `UnifiedContactResultRow` | FR-047, FR-048 |
 | `AppCoordinator` channel actions | FR-048 |
 | New `call.channel.*` / `call.search.familyChip` keys | NFR-023 |
+
+
+---
+
+## 17. Quick Access Apps (FR-049/FR-050)
+
+Home quick-access row + Settings picker feature (iOS): a curated 18-app catalog whose favourites (≤ 8) render as a Home-screen tile row and are managed in a Settings screen that adds an app only when it is actually installed.
+
+**`AppLauncher` (pure catalog + launch seam, new):** iOS cannot enumerate installed apps, so the design probes each catalog app's custom URL scheme and never assumes presence.
+- `catalog` — 18 apps in display order: Apple built-ins first (`phone`/`tel`, `messages`/`sms`, `facetime`, `mail`/`message`, `calendar`/`calshow`, `maps`/`maps`), then the commonly installed third-party apps (`whatsapp`, `messenger`/`fb-messenger`, `facebook`/`fb`, `instagram`, `youtube`, `gmail`/`googlegmail`, `googlemaps`/`comgooglemaps`, `chrome`/`googlechrome`, `zoom`/`zoomus`, `telegram`/`tg`, `viber`, `imo`). Each `App { id, nameKey, systemImage, scheme }` — `id` is the stable storage key, `nameKey` resolves through the UI locale, `rootURL` is the scheme-only `scheme://`.
+- `maxFavourites = 8` — the Home-row cap.
+- Pure statics, fully unit-tested: `app(for:)`, `apps(for:)` (stored-order mapping that drops ids naming no catalog app — a stale preference can never wedge the UI), `validatedFavouriteIDs(_:cap:)` (dedupe first-wins → drop unknowns → cap; the coordinator restores through it), `search(query:in:)` (trimmed empty query → []; case- and diacritic-insensitive `contains` over the active-locale name AND the English name AND the raw id — both "ह्वाट्सएप" and "whatsapp" find WhatsApp in a Nepali session; results in catalog order).
+- Instance `isInstalled` / `open` go through the same `CallLinkOpening` seam the call/message flows fake in tests (`SystemCallLinkOpener` in production): probe and open both use exactly the scheme root URL. Honest answers require every catalog scheme declared in Info.plist `LSApplicationQueriesSchemes` (19 entries incl. the pre-existing `tel`/`sms`/`facetime`/`facetime-audio`/`whatsapp`…; iOS cap 50 — `AppLauncherTests` pins the invariant against the real Info.plist).
+
+**`AppCoordinator` favourite state + launch (three thin additions):**
+- `favoriteAppIDs` — `@Published private(set)`, persisted to UserDefaults key `quickAccessApps`; restored in `init` through `validatedFavouriteIDs` (pure prune, no probes at launch, `didSet` bypassed by direct assignment). Computed `favoriteApps` maps ids → catalog apps for the Home row.
+- `addFavoriteApp` — catalog membership, not already added, under the 8-cap, and actually installed (refuses otherwise, honest add-only-when-installed); `removeFavoriteApp`; `isAppInstalled`.
+- `performAppLaunch` — probes first, then opens and speaks the truth: installed → "Opening %@." (`apps.announce.opened`); absent → "… is not installed on this phone." (`apps.announce.notInstalled`) and nothing opens — never a silent dead tap. Every launch emits `ObservabilityEvent(component: "app_launcher", eventType: "launch", outcome: "<app-id>:opened" | "<app-id>:notInstalled")`.
+
+**`HomeView` quick-access row (FR-049):** an inline row (a plain SwiftUI row, NOT a HomeWidget) directly below the setup strip: caption "Quick access" + horizontal scroll of `IconBadge(tint: .apps)` 48pt tiles with the app's localized name underneath, plus a "+" tile navigating to the Settings leaf. The whole row is hidden while `favoriteApps` is empty.
+
+**`QuickAccessAppsView` Settings picker (FR-050):** capsule search over the catalog (same chrome as the Call leaf's contact search) + the favourites section (remove per row) + the full catalog with per-app "Installed" badges and add controls offered only when the app is installed and the cap is not reached; `quickApps.capNote` discloses the 8-app cap and the probe note discloses that only installed apps can be added. Installation is probed once per appearance (`.task`), never cached long-term, and a refused add re-probes that app before announcing.
+
+**`DesignTokens.BadgeTint.apps`:** soft cyan background `#E0F0F2` / deep cyan-teal tint `#1F7A8C` — a fourth tile family, distinct from meds (green), call (blue) and settings (purple).
+
+**Info.plist `LSApplicationQueriesSchemes`:** 15 schemes added (2026-09 catalog: `tel`, `sms`, `message`, `calshow`, `maps`, `fb`, `fb-messenger`, `instagram`, `youtube`, `googlegmail`, `comgooglemaps`, `googlechrome`, `zoomus`, `tg`, `viber`, `imo`) on top of the existing four → 19 total, alphabetized.
+
+**New localization keys (en / ne):**
+- 18 `app.name.*` catalog names — e.g. `app.name.whatsapp` "WhatsApp" / "ह्वाट्सएप", `app.name.messenger` "Messenger" / "मेसेन्जर", `app.name.calendar` "Calendar" / "पात्रो", `app.name.maps` "Maps" / "नक्सा"
+- `settings.quickApps.title` — "Quick apps" / "द्रुत एपहरू"
+- `quickApps.search.placeholder`, `quickApps.yourApps`, `quickApps.allApps`, `quickApps.installed`, `quickApps.add`, `quickApps.addFor` ("Add %@" — formatted a11y label; %@-word-order-safe in Nepali), `quickApps.added`, `quickApps.remove` ("Remove %@"), `quickApps.capNote`
+- `home.quickAccess.caption` ("Quick access"), `home.quickAccess.add` ("Add a quick app")
+- `apps.notInstalled`, `apps.probeNote`, `apps.announce.opened` ("Opening %@."), `apps.announce.notInstalled` ("%@ is not installed on this phone.")
+
+**Traceability:**
+
+| Component | Requirements |
+|-----------|-------------|
+| `AppLauncher` | FR-049, FR-050 |
+| `HomeView` quick-access row | FR-049 |
+| `QuickAccessAppsView` | FR-050 |
+| `AppCoordinator` favourite state + `performAppLaunch` | FR-049, FR-050 |
+| `AppLauncherTests` | FR-049, FR-050 |
+| New `app.name.*` / `quickApps.*` / `home.quickAccess.*` / `apps.*` keys | NFR-023 |

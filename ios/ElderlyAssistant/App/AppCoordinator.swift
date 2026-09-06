@@ -127,6 +127,33 @@ final class AppCoordinator: ObservableObject {
     }
     private static let voiceEngineStackKey = "voiceEngineStack"
 
+    /// The user's favourite apps for the Home quick-access row
+    /// (quick-access-apps task, 2026-09-06), in stored order.
+    /// `private(set)`: mutation is confined to `addFavoriteApp` /
+    /// `removeFavoriteApp`, which validate. Persisted in UserDefaults the
+    /// same way as the other UI preferences — the ids are catalog keys,
+    /// not secrets. Mutating the array REPLACES it (never in-place), so
+    /// the didSet always sees the new value.
+    @Published private(set) var favoriteAppIDs: [String] {
+        didSet {
+            UserDefaults.standard.set(favoriteAppIDs, forKey: Self.quickAccessAppsKey)
+        }
+    }
+    private static let quickAccessAppsKey = "quickAccessApps"
+
+    /// The favourited catalog apps in stored order — what the Home row
+    /// and the picker's "Your apps" section render. Stale ids (an app
+    /// removed from the catalog) never surface (`AppLauncher.apps(for:)`
+    /// is stale-proof).
+    var favoriteApps: [AppLauncher.App] {
+        AppLauncher.apps(for: favoriteAppIDs)
+    }
+
+    /// Catalog + scheme launcher for the quick-access feature. Shares the
+    /// `CallLinkOpening` seam the call/message flows use, so the same
+    /// fake covers both in tests. Stateless, so no lazy needed.
+    private let appLauncher = AppLauncher()
+
     /// Last user utterance and assistant reply — the Home conversation
     /// card (spec §4.1.4).
     @Published var lastTranscript: String?
@@ -749,6 +776,17 @@ final class AppCoordinator: ObservableObject {
         // fire here.
         self.voiceEngineStack = UserDefaults.standard.string(forKey: Self.voiceEngineStackKey)
             .flatMap(VoiceEngineStack.init(rawValue:)) ?? .gemini
+
+        // Restore the persisted quick-access favourites (quick-access-apps
+        // task, 2026-09-06). Pure prune — dedupe, drop ids naming no
+        // catalog app, cap at 8 — with NO scheme probes at launch, so no
+        // main-thread requirement. This is the property's ONLY initial
+        // assignment, so its didSet does not fire here (same rule as
+        // `voiceEngineStack` above) — nothing else needs to react to the
+        // restored list.
+        self.favoriteAppIDs = AppLauncher.validatedFavouriteIDs(
+            UserDefaults.standard.stringArray(forKey: Self.quickAccessAppsKey) ?? []
+        )
 
         // Restore the persisted wake-word listening preference (default
         // ON — inert until the access key + .ppn exist, see
@@ -1485,6 +1523,74 @@ final class AppCoordinator: ObservableObject {
         speak(key: "router.emergencyAck")
     }
 
+    // MARK: - Quick access apps (Home row + Settings picker, 2026-09-06)
+
+    /// Honest installed probe for a catalog app — `canOpenURL` on its
+    /// declared scheme (iOS cannot enumerate installed apps; the schemes
+    /// live in Info.plist LSApplicationQueriesSchemes and every catalog
+    /// scheme is pinned by AppLauncherTests). Main-thread safe
+    /// (`SystemCallLinkOpener` hops to main for the system probe).
+    func isAppInstalled(_ app: AppLauncher.App) -> Bool {
+        appLauncher.isInstalled(app)
+    }
+
+    /// Adds `app` to the quick-access favourites. Every precondition is
+    /// re-validated here — the picker gates its buttons on the same
+    /// checks, but the coordinator is the backstop (a scheme probe can
+    /// go stale between the row's appearance and the tap): catalog
+    /// membership, genuinely installed on this phone, room under the
+    /// cap, not already favourited. Returns false (and changes nothing)
+    /// when any check fails.
+    @discardableResult
+    func addFavoriteApp(_ app: AppLauncher.App) -> Bool {
+        guard AppLauncher.app(for: app.id) != nil,
+              !favoriteAppIDs.contains(app.id),
+              favoriteAppIDs.count < AppLauncher.maxFavourites,
+              isAppInstalled(app) else { return false }
+        favoriteAppIDs.append(app.id)
+        return true
+    }
+
+    /// Removes `app` from the quick-access favourites. No-op when it
+    /// isn't there (the picker and a stale row can both call it).
+    func removeFavoriteApp(_ app: AppLauncher.App) {
+        favoriteAppIDs.removeAll { $0 == app.id }
+    }
+
+    /// Launches a quick-access app from the Home row / picker, with the
+    /// dual-channel honesty every open path holds: probe FIRST, and when
+    /// the app is gone (deleted after the row appeared) say so out loud
+    /// and show it on the outcome card — never a silent dead tap. One
+    /// `app_launcher` event per attempt; the outcome names which surface
+    /// appeared (`<id>:opened`) or why nothing did (`<id>:notInstalled`).
+    func performAppLaunch(_ app: AppLauncher.App) {
+        let locale = activeLocale
+        let name = L10n.str(app.nameKey, locale: locale)
+        guard isAppInstalled(app) else {
+            let text = L10n.fmt("apps.announce.notInstalled", locale: locale, name)
+            setOutcome(icon: "exclamationmark.triangle.fill", text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):notInstalled")
+            return
+        }
+        appLauncher.open(app)
+        let text = L10n.fmt("apps.announce.opened", locale: locale, name)
+        setOutcome(icon: app.systemImage, text: text)
+        speak(text: text)
+        emitAppLaunch(outcome: "\(app.id):opened")
+    }
+
+    private func emitAppLaunch(outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "app_launcher",
+            eventType: "launch",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]  // catalog app id only — no contact identifiers (C9)
+        ))
+    }
+
     // MARK: - Voice-triggered call & message (trial wiring)
     //
     // Deliberately scoped to the LLM-interpreted path only —
@@ -1913,6 +2019,41 @@ final class AppCoordinator: ObservableObject {
             // Handle missing or unusable — nothing opened; say what
             // happened (same line `performContactCall` speaks for an
             // unusable messenger handle), never teach from a failure.
+            setOutcome(icon: "exclamationmark.triangle.fill",
+                       text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
+            noteSearchChannelTap(outcome: "messenger:invalidHandle")
+        }
+    }
+
+    /// Messenger CHAT attempt for a search row by PHONE — the common
+    /// case: Messenger matches contacts by number server-side and
+    /// writes no linkage back into most address-book cards, so no
+    /// handle can be derived; the phone-based chat is the only honest
+    /// surface iOS lets the app open for them. Same chain as the family
+    /// messenger tile (`performContactCall`'s .messenger case):
+    /// `fb-messenger://` when installed, else the `m.me/<digits>` web
+    /// chat — which resolves exactly when the number is
+    /// Messenger-registered, and is disclosed as the web fallback when
+    /// it isn't. No recency entry (a chat open is not a call).
+    func performSystemContactMessengerChat(name: String, phone: String) {
+        let locale = activeLocale
+        switch callLinks.openMessengerChat(phone: phone) {
+        case .openedApp:
+            setOutcome(icon: "message.fill",
+                       text: L10n.fmt("home.outcome.messengerOpened", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.messenger", locale: locale, name))
+            noteSearchChannelTap(outcome: "messenger:openedApp")
+        case .openedWebChat:
+            // Messenger absent — the m.me chat opened in Safari instead;
+            // the same web-fallback disclosure the family path speaks.
+            setOutcome(icon: "message.fill",
+                       text: L10n.fmt("home.outcome.messengerOpened", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.messengerWebFallback", locale: locale, name))
+            noteSearchChannelTap(outcome: "messenger:openedWebChat")
+        case .invalidHandle:
+            // The number normalized to nothing dialable — defensive (the
+            // search layer filters such rows), never a silent dead tap.
             setOutcome(icon: "exclamationmark.triangle.fill",
                        text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
             speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))

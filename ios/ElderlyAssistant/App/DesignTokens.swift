@@ -44,7 +44,7 @@ enum DesignTokens {
     /// color family used elsewhere (meds/reminders = accent family, call =
     /// blue, settings = purple, emergency = red).
     enum BadgeTint {
-        case meds, reminders, call, appliance, settings, emergency
+        case meds, reminders, call, appliance, settings, apps, emergency
 
         var background: Color {
             switch self {
@@ -53,6 +53,7 @@ enum DesignTokens {
             case .call: return Color(red: 0.906, green: 0.933, blue: 0.973)      // #E6EEF8
             case .appliance: return Color(red: 0.992, green: 0.945, blue: 0.890)  // #FDF1E3
             case .settings: return Color(red: 0.937, green: 0.918, blue: 0.965)  // #EFEAF6
+            case .apps: return Color(red: 0.878, green: 0.941, blue: 0.949)      // #E0F0F2
             case .emergency: return Color.white
             }
         }
@@ -63,6 +64,7 @@ enum DesignTokens {
             case .call: return Color(red: 0.165, green: 0.373, blue: 0.561)      // #2A5F8F
             case .appliance: return Color(red: 0.541, green: 0.427, blue: 0.231)  // #8A6D3B
             case .settings: return DesignTokens.stateUnderstanding
+            case .apps: return Color(red: 0.122, green: 0.478, blue: 0.549)      // #1F7A8C
             case .emergency: return Color(red: 0.706, green: 0.251, blue: 0.118) // #B4401E
             }
         }
