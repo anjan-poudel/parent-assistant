@@ -39,7 +39,9 @@ struct HomeView: View {
                 DesignTokens.background.ignoresSafeArea()
                 VStack(spacing: 14) {
                     topBar
-                    widgetStack
+                    if let line = coordinator.homeCalendarLine {
+                        calendarStrip(line)
+                    }
                     if !coordinator.onboardingState.pendingSteps.isEmpty {
                         setupStrip
                     }
@@ -102,19 +104,32 @@ struct HomeView: View {
         .padding(.top, 8)
     }
 
-    /// The Home-screen widget stack (2026-09-06 widget system):
-    /// ordered, self-hiding glanceable cards between the top bar and the
-    /// Talk hero. Adding a widget = conform to `HomeWidget` and register
-    /// in `HomeWidgetRegistry.builtIns` — this view never changes.
-    private let widgetRegistry = HomeWidgetRegistry()
-
-    private var widgetStack: some View {
-        let visible = widgetRegistry.orderedVisibleWidgets(coordinator: coordinator)
-        return VStack(spacing: 10) {
-            ForEach(visible, id: \.widgetID) { widget in
-                widget.makeView(coordinator: coordinator)
+    /// Slim strip showing today's Nepali (Bikram Sambat) and Hindu
+    /// calendar dates (2026-09-06) — displayed directly on Home per
+    /// product direction, tappable into the full calendar leaf.
+    /// Deliberately a self-contained little view: when the main-screen
+    /// widget system lands, this becomes its first widget.
+    private func calendarStrip(_ line: String) -> some View {
+        NavigationLink(value: LeafDestination.calendar) {
+            HStack(spacing: 8) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(DesignTokens.accent)
+                Text(line)
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(DesignTokens.card)
+            .clipShape(Capsule())
         }
+        .buttonStyle(.plain)
+        .task { coordinator.refreshHomeCalendarLineIfNeeded() }
     }
 
     /// Slim, dismissible-by-navigation strip (redesign spec §3.1) —
@@ -275,6 +290,7 @@ struct HomeView: View {
             dockItem(.meds, icon: "pills.fill", tint: .meds, titleKey: "home.hub.meds")
             dockItem(.reminders, icon: "clock.fill", tint: .reminders, titleKey: "home.hub.reminders")
             dockCallItem
+            dockApplianceItem
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 10)
@@ -307,6 +323,22 @@ struct HomeView: View {
                     IconBadge(systemImage: "phone.fill", tint: .call, diameter: 36)
                 }
                 Text(LocalizedStringKey("home.hub.call"))
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+            }
+            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Appliance vision helper — the design §4 "Show Me" dock tile. A
+    /// Button, not a NavigationLink: it presents the camera surface
+    /// app-wide (via `pendingPluginPresentation`), same as the voice path.
+    private var dockApplianceItem: some View {
+        Button { coordinator.presentApplianceHelper(question: nil) } label: {
+            VStack(spacing: 4) {
+                IconBadge(systemImage: "camera.viewfinder", tint: .appliance, diameter: 36)
+                Text(LocalizedStringKey("plugin.applianceHelper.name"))
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
             }
