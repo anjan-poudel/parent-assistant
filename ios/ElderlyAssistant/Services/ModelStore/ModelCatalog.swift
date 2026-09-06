@@ -101,6 +101,9 @@ enum ModelCatalog {
 
     // MARK: - Well-known IDs
     static let whisperLargeV3Nepali = ModelID("whisper-large-v3-nepali-ggml")
+    /// The teacher fine-tune (finetune-teacher-v2-final) exported to GGML
+    /// q5_1 — same geometry/format as the base large-v3 above.
+    static let whisperLargeV3NepaliV2 = ModelID("whisper-large-v3-ne-v2-q5_1")
     /// The MEDIUM-class fine-tune (stock medium geometry, 24 enc layers,
     /// 80-mel — training-model-size-findings bet). The new default.
     static let whisperMediumFinetunedNepali = ModelID("whisper-medium-ne-q5_1")
@@ -145,7 +148,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperMediumFinetunedNepali,
             kind: .whisperBase,
-            displayName: "Nepali speech recognition (medium, fine-tuned)",
+            displayName: "Nepali STT — Medium (default)",
             filename: "whisper-medium-ne-q5_1.bin",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v3/whisper-medium-ne-q5_1.bin")!,
             // Stock-medium fine-tune (checkpoint-5028, 2026-09-03).
@@ -159,7 +162,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperFinetunedNepali,
             kind: .whisperBase,
-            displayName: "Nepali speech recognition (small, fine-tuned)",
+            displayName: "Nepali STT — Small",
             filename: "whisper-finetuned-ne-q5_1.bin",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v2/whisper-finetuned-ne-q5_1.bin")!,
             // Stage-4 fine-tune (checkpoint-4773, 2026-09-02) on labeled
@@ -179,7 +182,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperFinetunedNepaliQ8,
             kind: .whisperBase,
-            displayName: "Nepali speech recognition (small, fine-tuned, high quality)",
+            displayName: "Nepali STT — Small · higher quality",
             filename: "whisper-finetuned-ne-q8_0.bin",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v2/whisper-finetuned-ne-q8_0.bin")!,
             // Same checkpoint, q8_0 — best accuracy, +110 MB download.
@@ -192,7 +195,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperSmallNepali,
             kind: .whisperBase,
-            displayName: "Nepali speech recognition (small, distilled)",
+            displayName: "Nepali STT — Small · legacy (distilled)",
             filename: "whisper-distill-ne-q5_1.bin",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v1/whisper-distill-ne-q5_1.bin")!,
             // Superseded by whisperFinetunedNepali (stage-4 fine-tune).
@@ -205,7 +208,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperLargeV3Nepali,
             kind: .whisperBase,
-            displayName: "Nepali speech recognition (large v3, Devanagari)",
+            displayName: "Nepali STT — Large v3 · kiranpantha base",
             // Self-converted from kiranpantha/whisper-large-v3-nepali —
             // the only popular Nepali fine-tune that keeps the standard
             // multilingual tokenizer (see docs/whisper-small-nepali-
@@ -230,11 +233,28 @@ enum ModelCatalog {
             // but functional. The distilled small model is the fast path.
             coreMLEncoderBundledName: nil
         ),
+        ModelCatalogEntry(
+            id: whisperLargeV3NepaliV2,
+            kind: .whisperBase,
+            displayName: "Nepali STT — Large v3 · fine-tuned v2",
+            // finetune-teacher-v2-final (2026-09-06): 3 epochs on the
+            // canonicalized+noise-aug mix, started from the kiranpantha
+            // base above. FLEURS eval did not beat the base on this
+            // harness (34.51 vs base TBD) — offered for real-device
+            // comparison, not as the recommended default.
+            filename: "whisper-large-v3-ne-v2-q5_1.bin",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v5/whisper-large-v3-ne-v2-q5_1.bin")!,
+            sizeBytes: 1_177_039_883,
+            sha256: "fee6d4ca08689761ffa4d9702c32f0886fef244241c39bfca8b3473c64fcce0b",
+            minDeviceRAMBytes: 4_500_000_000,
+            dependsOn: nil,
+            coreMLEncoderBundledName: nil
+        ),
         // TODO: placeholder — no real hosted artifact exists yet. kiranpantha/whisper-large-v3-nepali ships raw PyTorch safetensors only; needs WhisperKit CoreML conversion + hosting once the finetune-teacher-v2 fine-tune (in progress) is exported and a hosting decision is made. Do not enable download until this is replaced with a real URL.
         ModelCatalogEntry(
             id: whisperKitNepali,
             kind: .whisperBase,
-            displayName: "Whisper Large v3 Nepali (Teacher)",
+            displayName: "Nepali STT — Large · ANE (not ready yet)",
             // `filename`/`downloadURL` are required by the struct but unused
             // for WhisperKit directory delivery (see whisperKitZipURL
             // below) — pointed at the same invalid placeholder so nothing
@@ -259,7 +279,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperKitNepaliMedium,
             kind: .whisperBase,
-            displayName: "Nepali speech recognition (medium, fine-tuned, ANE)",
+            displayName: "Nepali STT — Medium · ANE (fastest)",
             // WhisperKit directory delivery — `filename`/`downloadURL` are
             // struct-required but unused; the zip URL below is the real one.
             filename: "whisperkit-ne-medium",
@@ -278,7 +298,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperSmallMultilingual,
             kind: .whisperBase,
-            displayName: "Multilingual speech recognition fallback (small)",
+            displayName: "Multilingual STT — Small (fallback)",
             filename: "ggml-small-q5_1.bin",
             downloadURL: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin")!,
             sizeBytes: 190_085_487,
@@ -293,7 +313,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperBaseEn,
             kind: .whisperBase,
-            displayName: "English speech recognition (base)",
+            displayName: "English STT — Base",
             filename: "ggml-whisper-base-en-q5_1.bin",
             downloadURL: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin")!,
             sizeBytes: 59_721_011,
@@ -304,7 +324,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: llama3_2_1B,
             kind: .llamaBase,
-            displayName: "Assistant reasoning (1B)",
+            displayName: "Assistant brain — 1B",
             filename: "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
             downloadURL: URL(string: "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf")!,
             sizeBytes: 807_694_464,
@@ -330,7 +350,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: llama3_2_3B,
             kind: .llamaBase,
-            displayName: "Assistant reasoning (3B)",
+            displayName: "Assistant brain — 3B",
             filename: "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
             downloadURL: URL(string: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf")!,
             sizeBytes: 2_019_377_696,

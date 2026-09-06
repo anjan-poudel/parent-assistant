@@ -388,6 +388,7 @@ final class AppCoordinator: ObservableObject {
         ModelCatalog.piperNepali,
         ModelCatalog.whisperFinetunedNepaliQ8,
         ModelCatalog.whisperLargeV3Nepali,
+        ModelCatalog.whisperLargeV3NepaliV2,
         ModelCatalog.whisperKitNepaliMedium
     ]
 
