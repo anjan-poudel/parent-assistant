@@ -132,6 +132,13 @@ enum ModelCatalog {
     static let whisperSmallNepali = ModelID("whisper-distill-ne-q5_1")
     static let whisperBaseEn      = ModelID("whisper-base-en-q5_1")
     static let llama3_2_1B        = ModelID("llama-3.2-1b-instruct-q4km")
+    /// Qwen3 1.7B Instruct — the mid-size brain option (standard qwen3
+    /// arch, loads on the vendored llama.cpp b10068 runtime).
+    static let qwen3_1_7BInstruct = ModelID("qwen3-1.7b-instruct-q4km")
+    /// Qwen3 4B Instruct (2507) — the 3B-class successor to LLaMA 3.2 3B
+    /// (Qwen3's dense line has no 3B; 4B is the nearest size). Standard
+    /// qwen3 arch — loads on the vendored llama.cpp b10068 runtime.
+    static let qwen3_4BInstruct   = ModelID("qwen3-4b-instruct-2507-q4km")
     /// The fine-tuned intent model (spec 2026-09-05 §8): ~1B QLoRA output
     /// of the Gemma/Qwen bake-off in tools/train-intent/, exported to
     /// GGUF. PLACEHOLDER until the bake-off produces a release artifact.
@@ -353,6 +360,41 @@ enum ModelCatalog {
             dependsOn: nil
         ),
         ModelCatalogEntry(
+            id: qwen3_1_7BInstruct,
+            kind: .llamaBase,
+            displayName: "Assistant brain — Qwen3 1.7B",
+            // lm-kit mirror of the official Qwen3-1.7B-Instruct (2507)
+            // GGUF — Apache-2.0, standard Q4_K_M, converted with a
+            // mid-2025 llama.cpp (standard qwen3 arch, loads on b10068).
+            // sha256 + size pinned from the HuggingFace LFS metadata
+            // (2026-09-06).
+            filename: "Qwen3-1.7B-Q4_K_M.gguf",
+            downloadURL: URL(string: "https://huggingface.co/lm-kit/qwen-3-1.7b-instruct-gguf/resolve/main/Qwen3-1.7B-Q4_K_M.gguf")!,
+            sizeBytes: 1_282_439_360,
+            sha256: "b047d6617eba56dcfa3357566b06807f54b15816faf6182aabd12d7e2378e537",
+            // ~2.2B params at Q4: 1.3 GB file, live footprint ~2 GB —
+            // one gate step above the LLaMA 1B entry.
+            minDeviceRAMBytes: 3_500_000_000,
+            dependsOn: nil
+        ),
+        ModelCatalogEntry(
+            id: qwen3_4BInstruct,
+            kind: .llamaBase,
+            displayName: "Assistant brain — Qwen3 4B",
+            // mradermacher mirror of the official instruct GGUF (standard
+            // Q4_K_M, not unsloth dynamic quants — loads on the vendored
+            // llama.cpp b10068). sha256 + size pinned from the HuggingFace
+            // LFS metadata (2026-09-06).
+            filename: "Qwen3-4B-Instruct-2507.Q4_K_M.gguf",
+            downloadURL: URL(string: "https://huggingface.co/mradermacher/Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen3-4B-Instruct-2507.Q4_K_M.gguf")!,
+            sizeBytes: 2_497_280_896,
+            sha256: "edabe01d973c31dce0d71eaf7e44628021b23b9bd2cbb93059846dad1cc4e153",
+            // 4.4B-param Q4_K_M: ~2.5 GB file, live footprint ~3.5–4.5 GB —
+            // one gate step above the LLaMA 3B entry.
+            minDeviceRAMBytes: 6_000_000_000,
+            dependsOn: nil
+        ),
+        ModelCatalogEntry(
             id: sileroVAD,
             kind: .vad,
             displayName: "Voice activity detection",
@@ -420,5 +462,14 @@ enum ModelCatalog {
         // per the user's "pick ANY engine" field report; the honest size
         // labels carry the speed trade-off.
         entries(kind: .whisperBase)
+    }()
+
+    /// The brain models the Settings picker can select: every `.llamaBase`
+    /// entry with a real, hosted artifact. Excludes `intentNepali1B`, the
+    /// fine-tune PLACEHOLDER — its URLs are `.invalid` stubs and its
+    /// sha256 is all-zero, nothing can fire a real request against it
+    /// (same rule `availableSTTEntries` used to hold).
+    static let availableBrainEntries: [ModelCatalogEntry] = {
+        entries(kind: .llamaBase).filter { $0.id != intentNepali1B }
     }()
 }

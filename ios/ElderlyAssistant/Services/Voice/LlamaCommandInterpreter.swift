@@ -229,7 +229,7 @@ final class LlamaCommandInterpreter: CommandInterpreter {
 
     /// Which base model is selected (1B or 3B). Read at each request from
     /// `ModelStore` so hot-swap works.
-    private let preferredBaseId: ModelID
+    private(set) var preferredBaseId: ModelID
     /// Last requested LoRA — Phase-1 skeleton only.
     private var activeLoRA: ModelID?
 
@@ -286,6 +286,26 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         self.pluginRegistry = pluginRegistry
     }
 
+    /// The base model this interpreter currently loads (read-only outside;
+    /// swap via `switchBaseModel`). Exposed so the coordinator can align
+    /// download policy with the live choice.
+    var baseModelID: ModelID { preferredBaseId }
+
+    /// The applied LoRA id, if any (read-only; test-observable so a base
+    /// swap provably drops the old base's adapter).
+    var activeLoRAID: ModelID? { activeLoRA }
+
+    /// Hot-swaps the brain model (Settings "Assistant brain" picker,
+    /// 2026-09-06): points inference at the new GGUF and drops the loaded
+    /// llama.cpp handle + any LoRA so the NEXT inference re-loads from the
+    /// new model. A swap never touches the running pipeline — the router
+    /// just sees `isAvailable` flip to the new model's cache state.
+    func switchBaseModel(to id: ModelID) {
+        preferredBaseId = id
+        llmInstance = nil
+        activeLoRA = nil
+    }
+
     // MARK: - LoRA skeleton
 
     func applyLoRA(_ id: ModelID?) {
@@ -336,6 +356,76 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         }
     }
 
+    // MARK: - Chat format (per-model family)
+
+    /// The special-token scheme a brain model speaks. Pure data — no LLM
+    /// package types — so the format choice and prompt bytes are
+    /// unit-testable without the runtime linked.
+    struct ChatFormat: Equatable {
+        enum Kind: Equatable { case llama3, qwen3 }
+        let kind: Kind
+        let systemPrefix: String
+        let systemSuffix: String
+        let userPrefix: String
+        let userSuffix: String
+        let botPrefix: String
+        let botSuffix: String
+        let stopSequence: String
+    }
+
+    /// Which chat format the model id needs. Only Qwen3-family brains
+    /// diverge today (their `<|im_start|>` scheme — LLaMA 3.2's
+    /// `<|begin_of_text|>` headers would be gibberish to them and vice
+    /// versa); everything else keeps the shipped LLaMA 3.2 scheme.
+    static func chatFormat(for id: ModelID) -> ChatFormat {
+        switch id {
+        case ModelCatalog.qwen3_1_7BInstruct, ModelCatalog.qwen3_4BInstruct:
+            return ChatFormat(
+                kind: .qwen3,
+                systemPrefix: "<|im_start|>system\n",
+                systemSuffix: "<|im_end|>\n",
+                userPrefix: "<|im_start|>user\n",
+                userSuffix: "<|im_end|>\n",
+                botPrefix: "<|im_start|>assistant\n",
+                botSuffix: "<|im_end|>",
+                stopSequence: "<|im_end|>"
+            )
+        default:
+            return ChatFormat(
+                kind: .llama3,
+                systemPrefix: "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n",
+                systemSuffix: "<|eot_id|>",
+                userPrefix: "<|start_header_id|>user<|end_header_id|>\n\n",
+                userSuffix: "<|eot_id|>",
+                botPrefix: "<|start_header_id|>assistant<|end_header_id|>\n\n",
+                botSuffix: "<|eot_id|>",
+                stopSequence: "<|eot_id|>"
+            )
+        }
+    }
+
+    /// The raw completion prompt for a family. The LLaMA 3.2 branch is
+    /// BYTE-IDENTICAL to the shipped literal (the model is tuned to this
+    /// exact framing; a formatting change would silently shift its
+    /// instruction-following). The Qwen3 branch mirrors Qwen3-Instruct's
+    /// official chat template.
+    static func formattedPrompt(prompt: String, system: String, format: ChatFormat) -> String {
+        switch format.kind {
+        case .llama3:
+            // Exact bytes of the shipped multiline literal (verified
+            // against git HEAD — one leading newline, double newlines
+            // between segments, triple at the end).
+            return "\n<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n"
+                + "\(system)<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n"
+                + "\(prompt)<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n\n"
+        case .qwen3:
+            // Qwen3-Instruct's official chat template shape.
+            return "<|im_start|>system\n\(system)<|im_end|>\n"
+                + "<|im_start|>user\n\(prompt)<|im_end|>\n"
+                + "<|im_start|>assistant\n"
+        }
+    }
+
     // MARK: - Inference (guarded, with timeout — spec §5.2)
 
     private func runInference(prompt: String,
@@ -368,28 +458,22 @@ final class LlamaCommandInterpreter: CommandInterpreter {
             return
         }
 
+        // Per-model chat format (2026-09-06): the brain is now
+        // selectable, and Qwen3 speaks a different special-token
+        // scheme than LLaMA 3.2. `chatFormat(for:)` carries both —
+        // the LLaMA branch is byte-identical to the shipped
+        // hard-coded template. Declared OUTSIDE the load branch so the
+        // cached-handle path formats with the same scheme.
+        let format = Self.chatFormat(for: preferredBaseId)
         let llm: LLM
         if let existing = llmInstance as? LLM {
             llm = existing
         } else {
-            // LLM.swift doesn't ship a Llama-3 template preset (`.llama` is
-            // the Llama-2 `[INST]` format). Build one that matches
-            // LLaMA 3.2's official chat header/EOT scheme so instruction
-            // following actually works.
-            let llama3Template = Template(
-                system: (
-                    "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n",
-                    "<|eot_id|>"
-                ),
-                user: (
-                    "<|start_header_id|>user<|end_header_id|>\n\n",
-                    "<|eot_id|>"
-                ),
-                bot: (
-                    "<|start_header_id|>assistant<|end_header_id|>\n\n",
-                    "<|eot_id|>"
-                ),
-                stopSequence: "<|eot_id|>",
+            let template = Template(
+                system: (format.systemPrefix, format.systemSuffix),
+                user: (format.userPrefix, format.userSuffix),
+                bot: (format.botPrefix, format.botSuffix),
+                stopSequence: format.stopSequence,
                 systemPrompt: Self.chatSystemPrompt
             )
             // 1024-token context (default 2048): our prompts are ~150
@@ -397,7 +481,7 @@ final class LlamaCommandInterpreter: CommandInterpreter {
             // llama.cpp's compute buffers — with Whisper resident,
             // 2048 overflowed the app's memory ceiling and crashed
             // `llama_context::output_reserve` on 6 GB devices.
-            guard let created = LLM(from: modelURL, template: llama3Template,
+            guard let created = LLM(from: modelURL, template: template,
                                     maxTokenCount: 1024) else {
                 emit("model_load_failed", outcome: "failure")
                 completion(nil)
@@ -411,20 +495,14 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         // LLM.swift's `getCompletion(from:)` sends the raw string with
         // no template preprocessing — the Template we passed to `LLM(from:)`
         // only gets applied by `respond(to:)`. If we call getCompletion
-        // with a bare prompt, LLaMA 3.2 gets no chat headers and no system
-        // prompt, and instruction-following falls apart.
-        //
-        // Manually format with LLaMA 3.2's official chat scheme instead.
-        let systemPrompt = Self.chatSystemPrompt
-        let formattedPrompt = """
-        <|begin_of_text|><|start_header_id|>system<|end_header_id|>
-
-        \(systemPrompt)<|eot_id|><|start_header_id|>user<|end_header_id|>
-
-        \(prompt)<|eot_id|><|start_header_id|>assistant<|end_header_id|>
-
-
-        """
+        // with a bare prompt, the model gets no chat headers and no system
+        // prompt, and instruction-following falls apart. Format manually
+        // with the selected model's own chat scheme instead.
+        let formattedPrompt = Self.formattedPrompt(
+            prompt: prompt,
+            system: Self.chatSystemPrompt,
+            format: format
+        )
 
         Task {
             await withTaskGroup(of: String??.self) { group in

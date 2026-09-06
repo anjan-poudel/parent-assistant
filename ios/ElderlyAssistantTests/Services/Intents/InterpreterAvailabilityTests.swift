@@ -155,13 +155,13 @@ final class InterpreterAvailabilityTests: XCTestCase {
 
     // MARK: - (c) Auto-download wiring + readiness derivation
 
-    func testAssistantBrainModelIsTheRealHostedLlamaArtifact() {
+    func testDefaultBrainModelIsTheRealHostedLlamaArtifact() {
         // The auto-download target is the default LLM that shipped before
         // the v2 pivot — a REAL hosted artifact (bartowski Q4_K_M GGUF),
         // not the .invalid placeholder convention the fine-tuned intent
         // model still uses. Nothing to publish; this is pure wiring.
-        XCTAssertEqual(AppCoordinator.assistantBrainModelID, ModelCatalog.llama3_2_1B)
-        let entry = ModelCatalog.entry(for: AppCoordinator.assistantBrainModelID)
+        XCTAssertEqual(AppCoordinator.defaultBrainModelID, ModelCatalog.llama3_2_1B)
+        let entry = ModelCatalog.entry(for: AppCoordinator.defaultBrainModelID)
         XCTAssertNotNil(entry)
         let url = entry?.downloadURL.absoluteString ?? ""
         XCTAssertFalse(url.contains(".invalid"),

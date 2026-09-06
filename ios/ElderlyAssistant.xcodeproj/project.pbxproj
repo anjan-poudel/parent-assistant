@@ -69,6 +69,7 @@
 		567E5B477BECD2916373A8E9 /* RoutineEntryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E89601B5B74A632363B210 /* RoutineEntryTests.swift */; };
 		5707C48E2D863D068ADDB5E0 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2AB3C99F28EE6B02B39ECEB /* SpeechRecognizer.swift */; };
 		587E27227EE644B9E9A0A16B /* IntentLogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 204AC62FCB7AEC1810B3F158 /* IntentLogStore.swift */; };
+		5A998118C2447F3A2286E11D /* BrainModelSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43045410ABEEDEFE1834C9F9 /* BrainModelSelectionTests.swift */; };
 		5AAEF9B2582961977F8DEDEA /* HomeWidgetRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5B442DD3C17D8D2B675CA50 /* HomeWidgetRegistryTests.swift */; };
 		5D2DBB294952F1935B2643F5 /* WakeWordConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3C9242954AB514718F74083 /* WakeWordConfigTests.swift */; };
 		5DFA0A8C6A6658F4A17FCE73 /* ApplianceHelperView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5671947D2C91D0B244E2B8D7 /* ApplianceHelperView.swift */; };
@@ -264,6 +265,7 @@
 		4099370DD1353BABBAF99588 /* EnergyVADTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnergyVADTests.swift; sourceTree = "<group>"; };
 		422C3EB82A765DEAFD6FA512 /* ApplianceCropGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceCropGeometryTests.swift; sourceTree = "<group>"; };
 		426B00DB54390C484D152534 /* WhisperSpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperSpeechRecognizer.swift; sourceTree = "<group>"; };
+		43045410ABEEDEFE1834C9F9 /* BrainModelSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrainModelSelectionTests.swift; sourceTree = "<group>"; };
 		459B50A39CF4B7C83A674894 /* LlamaCommandInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaCommandInterpreter.swift; sourceTree = "<group>"; };
 		46BE34B77FAA335042575B06 /* CallOverrideParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallOverrideParserTests.swift; sourceTree = "<group>"; };
 		476E2E6BBD5358CE33C61EC6 /* GoldenCorpus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoldenCorpus.swift; sourceTree = "<group>"; };
@@ -856,6 +858,7 @@
 		E69B193AFBFA082B3A31836C /* Voice */ = {
 			isa = PBXGroup;
 			children = (
+				43045410ABEEDEFE1834C9F9 /* BrainModelSelectionTests.swift */,
 				4FF305EE75985E7F2B131DD2 /* CommandRouterTests.swift */,
 				4099370DD1353BABBAF99588 /* EnergyVADTests.swift */,
 				476E2E6BBD5358CE33C61EC6 /* GoldenCorpus.swift */,
@@ -1204,6 +1207,7 @@
 				D7DDBE14D7AE57D9FE7B3787 /* ApplianceStepCardPlannerTests.swift in Sources */,
 				9C089A5A01D2BCE16354BB45 /* ApplianceZoomGeometryTests.swift in Sources */,
 				8600027791E33214CD3F1630 /* BikramSambatTests.swift in Sources */,
+				5A998118C2447F3A2286E11D /* BrainModelSelectionTests.swift in Sources */,
 				AED0E12C9A13B2577432E076 /* CalendarSyncServiceTests.swift in Sources */,
 				E89B1B0AC5382A89AF519187 /* CallLinksTests.swift in Sources */,
 				9184CA7464ED5BE45A88982F /* CallOverrideParserTests.swift in Sources */,

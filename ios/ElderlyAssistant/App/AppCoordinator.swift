@@ -95,6 +95,22 @@ final class AppCoordinator: ObservableObject {
     }
     private static let sttPreferenceKey = "sttModelPreference"
 
+    /// Which brain model the local LLaMA interpreter runs (Settings →
+    /// "AI मोडेल" → Assistant brain, 2026-09-06). nil = the default
+    /// (`defaultBrainModelID`). Persisted in UserDefaults the same way
+    /// as `sttModelPreference` — a UI preference, not a secret. Setting
+    /// this hot-swaps the interpreter's base model and starts the chosen
+    /// model's download when it isn't cached (the STT picker's contract:
+    /// a fresh pick works immediately).
+    @Published var brainModelPreference: ModelID? {
+        didSet {
+            UserDefaults.standard.set(brainModelPreference?.rawValue,
+                                      forKey: Self.brainPreferenceKey)
+            applyBrainModel()
+        }
+    }
+    private static let brainPreferenceKey = "brainModelPreference"
+
     /// Which voice engine stack is active: on-device Whisper+LLaMA, or the
     /// cloud Gemini pivot (default). A UI preference, not a secret —
     /// persisted in UserDefaults the same way as `sttModelPreference` — so
@@ -463,15 +479,41 @@ final class AppCoordinator: ObservableObject {
     /// prompt composition (design doc 2026-09-05).
     private(set) var pluginRegistry: PluginRegistry!
 
-    /// The assistant-brain model `start()` auto-downloads when an
-    /// interpreter is needed (interpreter-availability fix 2026-09-06):
+    /// The DEFAULT assistant-brain model `start()` auto-downloads when
+    /// an interpreter is needed (interpreter-availability fix 2026-09-06):
     /// LLaMA 3.2 1B Instruct Q4_K_M GGUF from HuggingFace (bartowski),
     /// ~807 MB, sha256-verified, catalog kind `.llamaBase`. This is the
     /// "default LLM that was the default before" the v2 pivot — the
     /// brain `LlamaCommandInterpreter` (LocalBrainChain's stand-in)
-    /// runs, and the model the buried "AI मोडेल" screen lists as
-    /// "Assistant brain — 1B".
-    static let assistantBrainModelID = ModelCatalog.llama3_2_1B
+    /// runs when no explicit choice is stored. Since brain
+    /// selectability (2026-09-06) the Settings "AI मोडेल" screen offers
+    /// every `ModelCatalog.availableBrainEntries` model; the LIVE
+    /// choice is `resolvedBrainModelID`.
+    static let defaultBrainModelID = ModelCatalog.llama3_2_1B
+
+    /// The brain model the interpreter actually uses: the stored
+    /// preference when it names a real catalog entry, else the default.
+    /// (A stale stored value — model removed from the catalog — falls
+    /// back rather than wedge the picker.)
+    var resolvedBrainModelID: ModelID {
+        brainModelPreference.flatMap { ModelCatalog.entry(for: $0) != nil ? $0 : nil }
+            ?? Self.defaultBrainModelID
+    }
+
+    /// Hot-swaps the interpreter's base model and starts the chosen
+    /// model's download when it isn't cached — the brain picker's
+    /// contract. The interpreter drops its loaded llama.cpp handle on
+    /// the swap, so the next inference loads the new model. Only ever
+    /// runs from `brainModelPreference`'s didSet (real user changes,
+    /// post-`start()`); the init-time restore assigns directly and
+    /// `ensureAssistantBrainDownloadIfNeeded()` covers the first launch.
+    private func applyBrainModel() {
+        let resolved = resolvedBrainModelID
+        llamaCommandInterpreter.switchBaseModel(to: resolved)
+        if !modelStore.isCached(resolved) {
+            modelDownloadService.start(resolved)
+        }
+    }
 
     /// Whether `start()` should kick the assistant-brain model's one-time
     /// download: the model isn't cached AND no live cloud brain exists.
@@ -514,12 +556,14 @@ final class AppCoordinator: ObservableObject {
     ///
     /// The downloads-management rows must cover EVERY STT engine the
     /// picker can select (anything selectable has to be fetchable), so
-    /// this mirrors `ModelCatalog.availableSTTEntries` (all catalog
-    /// whisper-base entries minus placeholder-only models), then the
-    /// assistant-brain and voice rows the screen has always managed.
+    /// this mirrors `ModelCatalog.availableSTTEntries`, then every
+    /// selectable brain model (`availableBrainEntries` — same rule:
+    /// anything the picker offers must be fetchable) and the voice rows
+    /// the screen has always managed.
     let requiredModelIds: [ModelID] =
         ModelCatalog.availableSTTEntries.map(\.id)
-        + [ModelCatalog.llama3_2_1B, ModelCatalog.piperNepali]
+        + ModelCatalog.availableBrainEntries.map(\.id)
+        + [ModelCatalog.piperNepali]
 
     init() {
         // Core infrastructure. Storage uses the Keychain (Data Protection class
@@ -658,9 +702,28 @@ final class AppCoordinator: ObservableObject {
         pluginRegistry.register(routinePlugin)
         self.pluginRegistry = pluginRegistry
 
+        // Restore the persisted brain-model choice BEFORE the interpreter
+        // is constructed so its base model is the live one from the very
+        // first inference. Unknown IDs (a model removed from the catalog,
+        // or a bad stored value) are ignored so a stale preference can't
+        // wedge the picker — same rule as `sttModelPreference` below.
+        // Resolved into a LOCAL: `resolvedBrainModelID` reads `self`,
+        // which init may not do before every stored property is set.
+        let restoredBrain: ModelID?
+        if let raw = UserDefaults.standard.string(forKey: Self.brainPreferenceKey) {
+            let stored = ModelID(rawValue: raw)
+            restoredBrain = ModelCatalog.entry(for: stored) != nil ? stored : nil
+        } else {
+            restoredBrain = nil
+        }
+        if let restoredBrain {
+            self.brainModelPreference = restoredBrain
+        }
+
         self.llamaCommandInterpreter = LlamaCommandInterpreter(
             modelStore: modelStore,
             observabilityBus: bus,
+            preferredBaseId: restoredBrain ?? Self.defaultBrainModelID,
             config: LlamaCommandInterpreter.Config(confidenceThreshold: 0.4,
                                                    maxTokens: 128,
                                                    temperature: 0.2,
@@ -1232,7 +1295,7 @@ final class AppCoordinator: ObservableObject {
     /// downloading / verifying) — the one state that turns `.needsSetup`
     /// into `.downloadingBrain` for the router's fallback speech.
     private var isAssistantBrainDownloadInFlight: Bool {
-        switch modelDownloadService.states[Self.assistantBrainModelID] ?? .notStarted {
+        switch modelDownloadService.states[resolvedBrainModelID] ?? .notStarted {
         case .queued, .downloading, .verifying: return true
         case .notStarted, .completed, .failed, .cancelled: return false
         }
@@ -1249,11 +1312,11 @@ final class AppCoordinator: ObservableObject {
     private func ensureAssistantBrainDownloadIfNeeded() {
         guard Self.isLLMRuntimeLinked else { return }
         guard Self.shouldAutoDownloadAssistantBrain(
-            modelCached: modelStore.isCached(Self.assistantBrainModelID),
+            modelCached: modelStore.isCached(resolvedBrainModelID),
             cloudEnabled: intentRouter?.cloudEnabled ?? false,
             cloudBrainAvailable: geminiCommandInterpreter?.isAvailable ?? false
         ) else { return }
-        modelDownloadService.start(Self.assistantBrainModelID)
+        modelDownloadService.start(resolvedBrainModelID)
     }
 
     /// A newly-configured Gemini key makes the local brain model redundant
@@ -1264,9 +1327,9 @@ final class AppCoordinator: ObservableObject {
     /// never touched because it needs the local model regardless of keys.
     private func cancelAssistantBrainDownloadIfRedundant() {
         guard voiceEngineStack == .gemini,
-              !modelStore.isCached(Self.assistantBrainModelID),
+              !modelStore.isCached(resolvedBrainModelID),
               isAssistantBrainDownloadInFlight else { return }
-        modelDownloadService.cancel(Self.assistantBrainModelID)
+        modelDownloadService.cancel(resolvedBrainModelID)
     }
 
     /// Model the legacy on-device recognizer would use if manually

@@ -2476,6 +2476,40 @@
         }
       }
     },
+    "model.name.qwen3-1.7b-instruct-q4km": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistant reasoning (Qwen3 1.7B)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायक तर्क मोडल (Qwen3 १.७B)"
+          }
+        }
+      }
+    },
+    "model.name.qwen3-4b-instruct-2507-q4km": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistant reasoning (Qwen3 4B)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायक तर्क मोडल (Qwen3 ४B)"
+          }
+        }
+      }
+    },
     "model.name.piper-ne-female-v1": {
       "extractionState": "manual",
       "localizations": {
@@ -4512,6 +4546,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "आवाज पहिचान मोडेल"
+          }
+        }
+      }
+    },
+    "settings.brain.selection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistant brain model"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायक दिमाग मोडेल"
           }
         }
       }
