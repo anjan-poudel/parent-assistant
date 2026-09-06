@@ -95,10 +95,12 @@
 		7898562B28339AF245041B58 /* AssistantPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10A24847193D89DECCB875F /* AssistantPlugin.swift */; };
 		7940BFB81963619DAC40F067 /* ContactResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1110AC89F51167AB8F5FFA08 /* ContactResolver.swift */; };
 		79D094F839936BD503BA7800 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3ABF1E7E6E221112999571F /* Models.swift */; };
+		79D4B1953306ACC3F360A315 /* UnifiedContactSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D63F2DFCD9600AEF6746584B /* UnifiedContactSearchTests.swift */; };
 		7A0157A5AFF99A3206889004 /* GeminiCommandInterpreter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6049FE3C4BC8944626675C41 /* GeminiCommandInterpreter.swift */; };
 		7A821335546B5C53D68FD5C0 /* SileroVAD.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4F45398E4D634DDBCE65A38 /* SileroVAD.swift */; };
 		7A865F3BF2B4545E31562305 /* ApplianceHelperPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC35964D9BCD5E6FEA63005D /* ApplianceHelperPlugin.swift */; };
 		7DEDF2D378FEA4B0ECAC05D0 /* AppCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 030DDED1BA852B1A12ABABBE /* AppCoordinator.swift */; };
+		810E91EE6B8C5D938BDF45A2 /* UnifiedContactSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5D597BE53A1783851BFAEED /* UnifiedContactSearch.swift */; };
 		8283088CCDAED6B8395D0F9C /* GeminiConfigStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA66D0A3F8E25813E13B1AA8 /* GeminiConfigStoreTests.swift */; };
 		8329E9726B9F11D20DAB5EBA /* IntentPromptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53F8ADF917B01F1AF93CBE4D /* IntentPromptTests.swift */; };
 		848F73DA22BBE374915B3CE7 /* LocalIntentInterpreterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 084E8AA8568FED8E1D6B1E19 /* LocalIntentInterpreterTests.swift */; };
@@ -373,6 +375,8 @@
 		D4CE59D7A2E3DA0D6741C594 /* RoutineAlarmScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineAlarmScheduler.swift; sourceTree = "<group>"; };
 		D4F45398E4D634DDBCE65A38 /* SileroVAD.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SileroVAD.swift; sourceTree = "<group>"; };
 		D5BAF4F68264CEB596D17165 /* ApplianceCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceCache.swift; sourceTree = "<group>"; };
+		D5D597BE53A1783851BFAEED /* UnifiedContactSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedContactSearch.swift; sourceTree = "<group>"; };
+		D63F2DFCD9600AEF6746584B /* UnifiedContactSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedContactSearchTests.swift; sourceTree = "<group>"; };
 		D80A1E3F1D3D05689F2B2BEF /* ApplianceStepCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceStepCards.swift; sourceTree = "<group>"; };
 		D81DC4E1BE69187C2BFCB3D0 /* ApplianceGuidancePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceGuidancePolicy.swift; sourceTree = "<group>"; };
 		DA66D0A3F8E25813E13B1AA8 /* GeminiConfigStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiConfigStoreTests.swift; sourceTree = "<group>"; };
@@ -494,6 +498,7 @@
 			isa = PBXGroup;
 			children = (
 				DE19D3B8DCDC23B845EB9323 /* SystemContactSearchTests.swift */,
+				D63F2DFCD9600AEF6746584B /* UnifiedContactSearchTests.swift */,
 			);
 			path = Contacts;
 			sourceTree = "<group>";
@@ -903,6 +908,7 @@
 			children = (
 				9059F5AEB1D33F6E5844364A /* AddressBookDirectory.swift */,
 				94A0C8A422471F7D66CAC5CC /* CallRecencyStore.swift */,
+				D5D597BE53A1783851BFAEED /* UnifiedContactSearch.swift */,
 			);
 			path = Contacts;
 			sourceTree = "<group>";
@@ -1155,6 +1161,7 @@
 				B2B08B4BF2C6CE1A5FFD90A0 /* SwitchableCommandInterpreter.swift in Sources */,
 				AA0C98432913C4C0A766B461 /* TithiCalculator.swift in Sources */,
 				02543E15FCD856AFA17311CC /* TranscriptSanityGuard.swift in Sources */,
+				810E91EE6B8C5D938BDF45A2 /* UnifiedContactSearch.swift in Sources */,
 				B54AE9405FEBDBD383BEFD87 /* VoicePipeline.swift in Sources */,
 				C0DFD8590612F9867C54D747 /* VoiceSessionStateMachine.swift in Sources */,
 				02C7492EF339715D5966169E /* WakeWordConfig.swift in Sources */,
@@ -1249,6 +1256,7 @@
 				B7C570291146098E83BFFD43 /* TTSVoiceInstallTests.swift in Sources */,
 				E7B12E9B962D7CEF115B22CA /* TithiCalculatorTests.swift in Sources */,
 				B32BE0328D7BA52A2E4C4C5D /* TranscriptSanityGuardTests.swift in Sources */,
+				79D4B1953306ACC3F360A315 /* UnifiedContactSearchTests.swift in Sources */,
 				877A9EAB9ADF74AF1E7DC12B /* VoiceSessionBindingTests.swift in Sources */,
 				36126C14FF50D0FDE355FC76 /* VoiceSessionStateMachineTests.swift in Sources */,
 				5D2DBB294952F1935B2643F5 /* WakeWordConfigTests.swift in Sources */,

@@ -427,12 +427,26 @@ struct CallView: View {
         }
     }
 
-    private func dial(_ entry: AddressBookEntry) {
-        coordinator.performSystemContactCall(name: entry.name, phone: entry.phone)
+    private func dial(_ result: UnifiedContactSearch.Result) {
+        coordinator.performSystemContactCall(name: result.name, phone: result.phone)
         // Keep THIS list's ranking current without waiting for the next
         // view appearance; the coordinator store stays the source of
         // truth.
-        recency[entry.normalized] = Date()
+        recency[ContactNumberKey.normalized(result.phone)] = Date()
+    }
+
+    /// The row's WhatsApp pill — a chat surface, not a call, so no
+    /// recency entry (channel opens are not dials).
+    private func whatsApp(_ result: UnifiedContactSearch.Result) {
+        coordinator.performSystemContactWhatsApp(name: result.name, phone: result.phone)
+    }
+
+    /// The row's Messenger pill. A row shows one only when the person
+    /// has a handle on file; the coordinator discloses the fallback
+    /// when the app is missing.
+    private func messenger(_ result: UnifiedContactSearch.Result) {
+        coordinator.performSystemContactMessenger(name: result.name,
+                                                  handle: result.messengerHandle ?? "")
     }
 
     // MARK: Result / family areas
@@ -440,9 +454,10 @@ struct CallView: View {
     @ViewBuilder
     private var resultsArea: some View {
         if let entries {
-            let outcome = SystemContactSearch.search(query: trimmedQuery,
-                                                     in: entries,
-                                                     recency: recency)
+            let outcome = UnifiedContactSearch.search(query: trimmedQuery,
+                                                      family: coordinator.familyContacts,
+                                                      in: entries,
+                                                      recency: recency)
             if outcome.moreAvailable {
                 Text("call.search.moreAvailable")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
@@ -451,17 +466,21 @@ struct CallView: View {
                     .padding(.horizontal, 4)
             }
             if outcome.entries.isEmpty {
-                // An empty BOOK and a query with no match are different
-                // truths — say which one it is.
-                if entries.isEmpty {
+                // An empty book AND no family at all, vs. a query that
+                // simply matched nobody, are different truths — say
+                // which one it is.
+                if entries.isEmpty && coordinator.familyContacts.isEmpty {
                     emptyState(key: "call.search.bookEmpty")
                 } else {
                     emptyState(key: "call.search.noResults")
                 }
             } else {
                 VStack(spacing: 12) {
-                    ForEach(outcome.entries) { entry in
-                        AddressBookResultRow(entry: entry) { dial(entry) }
+                    ForEach(outcome.entries) { result in
+                        UnifiedContactResultRow(result: result,
+                                                dial: { dial(result) },
+                                                whatsApp: { whatsApp(result) },
+                                                messenger: { messenger(result) })
                     }
                 }
             }
@@ -590,28 +609,69 @@ private struct AddressBookLoadFailedCard: View {
     }
 }
 
-/// One system-contacts search result. The WHOLE tile dials — a target
-/// comfortably larger than 44pt for elderly hands, with the phone circle
-/// mirroring the ContactTile audio affordance as a visual cue. VoiceOver
-/// reads it as one "Call <name>" button whose value is the number.
-private struct AddressBookResultRow: View {
-    let entry: AddressBookEntry
+/// One unified search result — a family member or a system address-book
+/// row (family rows wear a small accent "Family" chip so the two read
+/// differently). The WHOLE dial zone — avatar, name/caption, phone
+/// circle — is a single button: a target comfortably larger than 44pt
+/// for elderly hands, the phone circle mirroring the ContactTile audio
+/// affordance as a visual cue. VoiceOver reads it as one "Call <name>"
+/// button whose value is the caption. Below the dial zone, one pill per
+/// chat app the person is actually reachable on opens that app's thread
+/// instead of the dialer (channel availability decided by the search,
+/// not guessed here).
+private struct UnifiedContactResultRow: View {
+    let result: UnifiedContactSearch.Result
     let dial: () -> Void
+    let whatsApp: () -> Void
+    let messenger: () -> Void
     @Environment(\.locale) private var locale
 
+    /// Channel brand colors — kept here, not in DesignTokens: they are
+    /// the apps' own identities, not Warm & Soft palette tokens.
+    private static let whatsAppGreen = Color(red: 0.145, green: 0.827, blue: 0.4)
+    private static let messengerBlue = Color(red: 0.0, green: 0.518, blue: 1.0)
+
+    /// Whether this result is one of the app's own family contacts
+    /// (vs. a system address-book row).
+    private var isFamily: Bool {
+        if case .family = result { return true }
+        return false
+    }
+
     var body: some View {
+        VStack(spacing: 10) {
+            dialZone
+            if result.whatsAppAvailable || result.messengerAvailable {
+                channelPills
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
+    }
+
+    /// The wide dial button — tapping anywhere on the face/number zone
+    /// places the GSM call.
+    private var dialZone: some View {
         Button(action: dial) {
             HStack(spacing: 14) {
-                FaceAvatar(name: entry.name, diameter: 52)
+                FaceAvatar(name: result.name, diameter: 52)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(entry.name)
+                    Text(result.name)
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                         .foregroundColor(DesignTokens.textPrimary)
                         .multilineTextAlignment(.leading)
-                    Text(entry.caption)
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        if isFamily {
+                            familyChip
+                        }
+                        Text(result.caption)
+                            .font(.system(size: DesignTokens.minCaptionPointSize))
+                            .foregroundColor(DesignTokens.textSecondary)
+                            .lineLimit(1)
+                    }
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "phone.fill")
@@ -621,15 +681,58 @@ private struct AddressBookResultRow: View {
                     .background(DesignTokens.accent)
                     .clipShape(Circle())
             }
-            .padding(16)
-            .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(Text(L10n.fmt("call.callButtonLabel", locale: locale, entry.name)))
-        .accessibilityValue(Text(entry.caption))
+        .accessibilityLabel(Text(L10n.fmt("call.callButtonLabel", locale: locale, result.name)))
+        .accessibilityValue(Text(result.caption))
+    }
+
+    /// Small accent-tinted "Family" capsule prepended to the caption.
+    /// Hidden from VoiceOver so the dial button stays a single read —
+    /// the caption already says who this person is.
+    private var familyChip: some View {
+        Text(L10n.str("call.search.familyChip", locale: locale))
+            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+            .foregroundColor(DesignTokens.accent)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(DesignTokens.accent.opacity(0.12))
+            .clipShape(Capsule())
+            .accessibilityHidden(true)
+    }
+
+    /// One ≥44pt capsule per reachable chat app — every surface a row
+    /// offers is thumb-size, white text on the app's own brand color.
+    private var channelPills: some View {
+        HStack(spacing: 10) {
+            if result.whatsAppAvailable {
+                Button(action: whatsApp) {
+                    Text(L10n.str("call.channel.whatsapp", locale: locale))
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
+                        .background(Self.whatsAppGreen)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(L10n.fmt("call.channel.whatsappLabel", locale: locale, result.name)))
+            }
+            if result.messengerAvailable {
+                Button(action: messenger) {
+                    Text(L10n.str("call.channel.messenger", locale: locale))
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
+                        .background(Self.messengerBlue)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(L10n.fmt("call.channel.messengerLabel", locale: locale, result.name)))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

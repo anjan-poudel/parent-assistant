@@ -1613,6 +1613,91 @@ final class AppCoordinator: ObservableObject {
         speak(text: L10n.fmt("router.call.calling", locale: activeLocale, name))
     }
 
+    /// WhatsApp surface for a SYSTEM-address-book search row (unified
+    /// contact search, 2026-09-06). No `FamilyContact` preference stands
+    /// behind a phone-book row, so the tap opens WhatsApp's chat to the
+    /// number when the app is installed, and otherwise walks the same
+    /// absent-app chain as `performContactCall`'s whatsApp case —
+    /// native Messages sheet, else the number on the pasteboard — each
+    /// swap disclosed out loud. No recency entry: opening a chat is not
+    /// a call (consistent with the family whatsApp button).
+    func performSystemContactWhatsApp(name: String, phone: String) {
+        let locale = activeLocale
+        switch callLinks.openWhatsAppCallChat(phone) {
+        case .openedChat:
+            setOutcome(icon: "message.fill",
+                       text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, name))
+            speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, name))
+            noteSearchChannelTap(outcome: "whatsapp:openedChat")
+        case .needsNativeCompose:
+            // WhatsApp absent → the same native Messages sheet to the
+            // same number the family whatsApp button falls back to.
+            presentMessageDraft(phone: phone, name: name, body: "")
+            speak(text: L10n.fmt("call.announce.whatsAppSmsFallback", locale: locale, name))
+            noteSearchChannelTap(outcome: "whatsapp:needsNativeCompose")
+        case .copiedNumber:
+            setOutcome(icon: "doc.on.doc.fill",
+                       text: L10n.fmt("home.outcome.numberCopied", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.whatsAppCopiedFallback", locale: locale, name))
+            noteSearchChannelTap(outcome: "whatsapp:copiedNumber")
+        case .invalidPhone:
+            // The number normalized to nothing dialable — defensive (the
+            // search layer filters such rows), never a silent dead tap.
+            setOutcome(icon: "exclamationmark.triangle.fill",
+                       text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
+            noteSearchChannelTap(outcome: "whatsapp:invalidPhone")
+        }
+    }
+
+    /// Messenger thread for a SYSTEM-address-book search row — the
+    /// messenger analogue of `performSystemContactWhatsApp`, keyed on
+    /// the person's Messenger handle (a row shows the pill only when one
+    /// is on file). Same tap model and disclosures as `performContactCall`'s
+    /// messenger case: the thread opens in-app when Messenger is
+    /// installed, as the m.me web chat in Safari when it is not, and a
+    /// missing handle opens nothing and says so. No recency entry.
+    func performSystemContactMessenger(name: String, handle: String) {
+        let locale = activeLocale
+        switch callLinks.openMessengerThread(handle: handle) {
+        case .openedThread:
+            setOutcome(icon: "message.fill",
+                       text: L10n.fmt("home.outcome.messengerOpened", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.messenger", locale: locale, name))
+            noteSearchChannelTap(outcome: "messenger:openedThread")
+        case .fellBackToWeb:
+            // Messenger absent — the m.me chat opened in Safari instead;
+            // the same web-fallback disclosure the family messenger
+            // path speaks, so the user knows which surface appeared.
+            setOutcome(icon: "message.fill",
+                       text: L10n.fmt("home.outcome.messengerOpened", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.messengerWebFallback", locale: locale, name))
+            noteSearchChannelTap(outcome: "messenger:fellBackToWeb")
+        case .invalidHandle:
+            // Handle missing or unusable — nothing opened; say what
+            // happened (same line `performContactCall` speaks for an
+            // unusable messenger handle), never teach from a failure.
+            setOutcome(icon: "exclamationmark.triangle.fill",
+                       text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
+            speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
+            noteSearchChannelTap(outcome: "messenger:invalidHandle")
+        }
+    }
+
+    /// One observability event per channel tap from the unified search
+    /// rows, the outcome naming which surface actually appeared (or
+    /// which fallback ran).
+    private func noteSearchChannelTap(outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "contact_search_channels",
+            eventType: "tap",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]  // no contact identifiers — C9 policy
+        ))
+    }
+
     /// Recency hook for the Phone leaf's search ranking: every number a
     /// call was genuinely placed to from this app — voice flow, family
     /// tiles, system-contact search rows — lands in `callRecencyStore`.
@@ -1774,13 +1859,20 @@ final class AppCoordinator: ObservableObject {
 
     /// Presents the native compose sheet pre-filled (shipped SMS path,
     /// extracted so the WhatsApp-absent fallback lands on the exact same
-    /// surface).
+    /// surface). The phone/name variant below serves rows that carry no
+    /// `FamilyContact` (system address-book search) — this one delegates.
     private func presentMessageDraft(contact: FamilyContact, body: String) {
+        presentMessageDraft(phone: contact.phone, name: contact.name, body: body)
+    }
+
+    /// Phone/name variant of `presentMessageDraft(contact:body:)` — same
+    /// sheet, same outcome line, no `FamilyContact` required.
+    private func presentMessageDraft(phone: String, name: String, body: String) {
         DispatchQueue.main.async { [weak self] in
-            self?.pendingMessageDraft = MessageDraft(recipients: [contact.phone], body: body)
+            self?.pendingMessageDraft = MessageDraft(recipients: [phone], body: body)
         }
         setOutcome(icon: "message.fill",
-                   text: L10n.fmt("home.outcome.messageReady", locale: activeLocale, contact.name))
+                   text: L10n.fmt("home.outcome.messageReady", locale: activeLocale, name))
     }
 
     // MARK: - Medication schedule surface (spec §4.3, §4.4.3)

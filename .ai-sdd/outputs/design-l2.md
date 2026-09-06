@@ -909,3 +909,38 @@ All components emit events to `ObservabilityBus`. `LogSanitiser` is applied at e
 | `EncryptedLocalStorage` | NFR-015, NFR-016, NFR-011 |
 | `LogSanitiser` + `ObservabilityBus` | NFR-015, NFR-016 |
 | `CompanionApp` modules | FR-038–FR-042, FR-043–FR-046 |
+
+---
+
+## 16. Unified Contact Search & Channel Actions (FR-047/FR-048)
+
+Call leaf feature (iOS): one search surface over configured family contacts and the device address book, plus per-row channel actions opening WhatsApp / Messenger chats.
+
+**`UnifiedContactSearch` (pure, new seam):** composes the two existing search seams into one ranked list; owns no platform glue and is fully unit-testable.
+- Family match tiers (via the shared `ContactResolver` relationship-anchor table): exact name, then relationship anchor, then containment — each tier recency-tiebroken. The anchor table maps both scripts ("daughter" ↔ "छोरी") so cross-script relationship queries resolve.
+- Dedupe is matched-family-only: an address-book row collapses into the family entry only when the query matched that family contact; a book "twin" stands alone when the family contact did not match.
+- Ranking: matched family entries first (tier order), then address-book matches via unchanged `SystemContactSearch` delegation (name/digit substring match, `CallRecencyStore` recency ranking).
+- The union keeps `SystemContactSearch.defaultLimit` (15); its `moreAvailable` flag drives the existing "keep typing" hint.
+
+**`UnifiedContactResultRow` (UI):** dial-first tile (existing call action) plus channel pills. Availability semantics are action-based, never presence-claimed:
+- WhatsApp pill iff the row has a dialable phone number;
+- Messenger pill iff a stored Messenger handle exists.
+App-absent fallbacks are disclosed aloud reusing existing announcement keys (`call.announce.whatsAppSmsFallback`, `call.announce.whatsAppCopiedFallback`, `call.announce.messengerWebFallback`).
+
+**`AppCoordinator` channel methods (two thin additions):** open WhatsApp chat / Messenger thread by reusing the `CallLinks` openers (wa:// / sms:, fb-messenger:// / m.me). Channel actions never write `CallRecencyStore` — only real calls do (FR-048).
+
+**New localization keys (en / ne):**
+- `call.search.familyChip` — "Family" / "परिवार"
+- `call.channel.whatsapp` — "WhatsApp" / "ह्वाट्सएप"
+- `call.channel.messenger` — "Messenger" / "मेसेन्जर"
+- `call.channel.whatsappLabel` — "Open WhatsApp chat with %@" / "%@ सँग ह्वाट्सएप च्याट खोल्नुहोस्"
+- `call.channel.messengerLabel` — "Open Messenger chat with %@" / "%@ सँग मेसेन्जर च्याट खोल्नुहोस्"
+
+**Traceability:**
+
+| Component | Requirements |
+|-----------|-------------|
+| `UnifiedContactSearch` | FR-047 |
+| `UnifiedContactResultRow` | FR-047, FR-048 |
+| `AppCoordinator` channel actions | FR-048 |
+| New `call.channel.*` / `call.search.familyChip` keys | NFR-023 |
