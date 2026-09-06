@@ -12,7 +12,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case language, family, meds, geminiAI, voiceEngine, ttsVoices, privacy, intentLog
+        case language, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, privacy, intentLog
 
         var id: String {
             switch self {
@@ -21,6 +21,7 @@ struct SettingsView: View {
             case .meds: return "meds"
             case .geminiAI: return "geminiAI"
             case .voiceEngine: return "voiceEngine"
+            case .wakeWord: return "wakeWord"
             case .ttsVoices: return "ttsVoices"
             case .privacy: return "privacy"
             case .intentLog: return "intentLog"
@@ -61,6 +62,7 @@ struct SettingsView: View {
                         sectionRow(.language, icon: "globe", titleKey: "settings.language.title")
                         geminiSectionRow
                         voiceEngineSectionRow
+                        wakeWordSectionRow
                         ttsVoicesSectionRow
                         sectionRow(.family, icon: "person.2.fill", titleKey: "settings.family.title")
                         sectionRow(.meds, icon: "pills.fill", titleKey: "settings.meds.title")
@@ -87,6 +89,7 @@ struct SettingsView: View {
             case .meds: MedicationScheduleSettingsView()
             case .geminiAI: GeminiAPISettingsView()
             case .voiceEngine: VoiceEngineSettingsView()
+            case .wakeWord: WakeWordSettingsView()
             case .ttsVoices: TTSVoicesSettingsView()
             case .privacy: PrivacySettingsView()
             case .intentLog: IntentLogReviewView()
@@ -173,6 +176,43 @@ struct SettingsView: View {
         .buttonStyle(.plain)
     }
 
+
+    /// Voice activation — "Hey Sahayak" wake word (open item #4). The dot
+    /// color + label come from the same `wakeWordStatus` derivation the
+    /// destination screen shows, so the row can never disagree with the
+    /// screen (unit-tested logic in `WakeWordStatusResolver`).
+    private var wakeWordSectionRow: some View {
+        let status = coordinator.wakeWordStatus
+        return NavigationLink(value: SettingsSection.wakeWord) {
+            HStack(spacing: 14) {
+                Image(systemName: "dot.radiowaves.left.and.right")
+                    .font(.system(size: 26))
+                    .foregroundColor(DesignTokens.accent)
+                    .frame(width: 40)
+                Text("wakeWord.title")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Spacer()
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(status.presentationColor)
+                        .frame(width: 8, height: 8)
+                    Text(status.shortTitleKey)
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+    }
 
     /// On-device TTS voices (Piper VITS via sherpa-onnx). Status surfaces
     /// the 2026-09-06 failure mode — a build without the bundled voice
@@ -617,6 +657,257 @@ struct VoiceEngineSettingsView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Wake word "Hey Sahayak" (open item #4) — Voice activation
+//
+// Family-facing "Voice activation" screen. Its one job is honest status:
+// everything that must be true for the wake word to actually listen (the
+// Settings toggle ON, the Porcupine runtime linked into the build, a
+// Picovoice access key, the trained keyword file bundled) is shown
+// explicitly, and every non-active state names the concrete next step —
+// no dead ends (spec §7). Until ALL pieces exist the app keeps
+// `NullWakeWordEngine` (today's exact behavior), which this screen says
+// plainly instead of pretending otherwise.
+//
+// Presentation mapping shared between the Settings row dot and this
+// screen's banner (2026-09-06). `WakeWordStatus` itself is pure logic in
+// Services/Voice/WakeWordConfig.swift (unit-tested); only the color/text
+// choices live here.
+extension WakeWordStatus {
+    var presentationColor: Color {
+        switch self {
+        case .active: return DesignTokens.accent
+        case .off: return DesignTokens.stateStopped
+        case .needsSetup: return DesignTokens.stateError
+        case .restartToActivate: return DesignTokens.stateListening
+        }
+    }
+
+    /// Short label for the Settings row's status dot.
+    var shortTitleKey: LocalizedStringKey {
+        switch self {
+        case .active: return "wakeWord.status.active"
+        case .off: return "wakeWord.status.off"
+        case .needsSetup: return "wakeWord.status.needsSetup"
+        case .restartToActivate: return "wakeWord.status.restartToActivate"
+        }
+    }
+}
+
+struct WakeWordSettingsView: View {
+    @EnvironmentObject var coordinator: AppCoordinator
+    @State private var draftKey: String = ""
+    @State private var showRemoveConfirm = false
+
+    var body: some View {
+        LeafScreen(titleKey: "wakeWord.title") {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("wakeWord.explanation")
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+
+                statusBlock(coordinator.wakeWordStatus)
+
+                toggleCard
+
+                accessKeyCard
+
+                if coordinator.wakeWordStatus != .active {
+                    Text("wakeWord.talkStillWorks")
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                        .padding(.horizontal, 4)
+                }
+            }
+        }
+        .confirmationDialog("wakeWord.removeConfirm", isPresented: $showRemoveConfirm) {
+            Button("wakeWord.remove", role: .destructive) {
+                coordinator.wakeWordAccessKeyStore.clear()
+            }
+            Button("common.back", role: .cancel) {}
+        }
+    }
+
+    /// One colored card per status — title line plus a plain-language
+    /// explanation. `.needsSetup` additionally lists the missing pieces
+    /// (see `setupChecklist`).
+    @ViewBuilder
+    private func statusBlock(_ status: WakeWordStatus) -> some View {
+        switch status {
+        case .active:
+            statusCard(color: DesignTokens.accent,
+                       titleKey: "wakeWord.active.title",
+                       detailKey: "wakeWord.active.detail")
+        case .off:
+            statusCard(color: DesignTokens.stateStopped,
+                       titleKey: "wakeWord.off.title",
+                       detailKey: "wakeWord.off.detail")
+        case .needsSetup:
+            statusCard(color: DesignTokens.stateError,
+                       titleKey: "wakeWord.needsSetup.title",
+                       detailKey: "wakeWord.needsSetup.detail")
+            setupChecklist
+        case .restartToActivate:
+            statusCard(color: DesignTokens.stateListening,
+                       titleKey: "wakeWord.restart.title",
+                       detailKey: "wakeWord.restart.detail")
+        }
+    }
+
+    private func statusCard(color: Color,
+                            titleKey: LocalizedStringKey,
+                            detailKey: LocalizedStringKey) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(color)
+                    .frame(width: 12, height: 12)
+                Text(titleKey)
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(DesignTokens.textPrimary)
+            }
+            Text(detailKey)
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// Renders ONLY the absent pieces, each keyed to the coordinator's own
+    /// provisioning truth (`isWakeWordRuntimeLinked` /
+    /// `isWakeWordAccessKeyConfigured` / `WakeWordModelFile.bundledPath()`
+    /// — the same inputs the launch engine decision used), so the checklist
+    /// can never contradict the status banner above it.
+    private var setupChecklist: some View {
+        VStack(spacing: 10) {
+            if !AppCoordinator.isWakeWordRuntimeLinked {
+                missingRow("wakeWord.setupNeedsRuntime")
+            }
+            if !coordinator.isWakeWordAccessKeyConfigured {
+                missingRow("wakeWord.setupNeedsKey")
+            }
+            if WakeWordModelFile.bundledPath() == nil {
+                missingRow("wakeWord.setupNeedsModel")
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    private func missingRow(_ key: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 22))
+                .foregroundColor(DesignTokens.stateError)
+            Text(LocalizedStringKey(key))
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textPrimary)
+            Spacer(minLength: 0)
+        }
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The on/off master switch. ON is the default (inert until the other
+    /// pieces exist — see `WakeWordPreferences`); the coordinator's didSet
+    /// persists it AND closes/opens the live audio gate, so switching OFF
+    /// here stops the mic feed to the wake-word engine immediately. The
+    /// battery trade-off is disclosed underneath (honesty requirement).
+    private var toggleCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: Binding(
+                get: { coordinator.wakeWordEnabled },
+                set: { coordinator.wakeWordEnabled = $0 }
+            )) {
+                Text("wakeWord.toggleLabel")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            if coordinator.wakeWordEnabled {
+                Text("wakeWord.batteryNote")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// Picovoice access-key paste-in — an exact mirror of the Gemini key
+    /// card. This is the family mechanism: get a free key at
+    /// console.picovoice.ai, paste it here. Stored in the iPhone's secure
+    /// Keychain via `EncryptedLocalStorage` (never UserDefaults, never
+    /// hardcoded). The key card is always editable — even when Porcupine
+    /// isn't linked yet — so setup survives a later app rebuild.
+    private var accessKeyCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("wakeWord.keyLabel")
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textSecondary)
+            Text("wakeWord.keyDescription")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+            SecureField("wakeWord.keyPlaceholder", text: $draftKey)
+                .font(.system(size: DesignTokens.minBodyPointSize, design: .monospaced))
+                .padding(14)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
+                        .stroke(DesignTokens.textSecondary.opacity(0.25), lineWidth: 1)
+                )
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+
+            Button {
+                coordinator.wakeWordAccessKeyStore.save(draftKey)
+                draftKey = ""
+            } label: {
+                Text("wakeWord.save")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: DesignTokens.minTapTargetSize)
+                    .background(draftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? DesignTokens.textSecondary.opacity(0.4) : DesignTokens.accent)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            }
+            .buttonStyle(.plain)
+            .disabled(draftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+            if coordinator.wakeWordAccessKeyStore.isConfigured {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(DesignTokens.accent)
+                    Text("wakeWord.keySaved")
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textSecondary)
+                    Spacer()
+                    Button(role: .destructive) {
+                        showRemoveConfirm = true
+                    } label: {
+                        Text("wakeWord.remove")
+                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                    }
+                }
+                .padding(.horizontal, 4)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 }
 

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		018596E1F52E3ADCC43D9444 /* FestivalCalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00611EDBE49E5F2148C3E6F6 /* FestivalCalendarService.swift */; };
 		02543E15FCD856AFA17311CC /* TranscriptSanityGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC9012024C4815BFC474C722 /* TranscriptSanityGuard.swift */; };
+		02C7492EF339715D5966169E /* WakeWordConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCD6AEC6B90A955BDDECBB02 /* WakeWordConfig.swift */; };
 		030616993A706F818B3E2C87 /* PlatformAlarmScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53B1F7C24D2C273993F61341 /* PlatformAlarmScheduler.swift */; };
 		052113CFB87090EC64FBC483 /* WhisperKitSpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A801C3C923FF4C4ECE4BE7C /* WhisperKitSpeechRecognizer.swift */; };
 		07B323A60C170B4A023546EE /* CallOverrideParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DE7446D829BAF64E80F88E8 /* CallOverrideParser.swift */; };
@@ -57,6 +58,7 @@
 		567E5B477BECD2916373A8E9 /* RoutineEntryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E89601B5B74A632363B210 /* RoutineEntryTests.swift */; };
 		5707C48E2D863D068ADDB5E0 /* SpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2AB3C99F28EE6B02B39ECEB /* SpeechRecognizer.swift */; };
 		587E27227EE644B9E9A0A16B /* IntentLogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 204AC62FCB7AEC1810B3F158 /* IntentLogStore.swift */; };
+		5D2DBB294952F1935B2643F5 /* WakeWordConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3C9242954AB514718F74083 /* WakeWordConfigTests.swift */; };
 		5DFA0A8C6A6658F4A17FCE73 /* ApplianceHelperView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5671947D2C91D0B244E2B8D7 /* ApplianceHelperView.swift */; };
 		5F3A3D7F5EE0797E87B0559A /* GeminiSpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D97B2DE62692EBEEE135ED3 /* GeminiSpeechRecognizer.swift */; };
 		5FC266A49696E92A57F6F704 /* SwiftWhisper in Frameworks */ = {isa = PBXBuildFile; productRef = 8A067B2B3D4535E50D1CCB35 /* SwiftWhisper */; };
@@ -314,6 +316,7 @@
 		BC35964D9BCD5E6FEA63005D /* ApplianceHelperPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceHelperPlugin.swift; sourceTree = "<group>"; };
 		BC5A9F12844B0E88FDE85416 /* GeminiClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiClient.swift; sourceTree = "<group>"; };
 		C2AB3C99F28EE6B02B39ECEB /* SpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechRecognizer.swift; sourceTree = "<group>"; };
+		C3C9242954AB514718F74083 /* WakeWordConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeWordConfigTests.swift; sourceTree = "<group>"; };
 		C3DB8C0B125F630049F12E20 /* BikramSambatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BikramSambatTests.swift; sourceTree = "<group>"; };
 		C3E07CFBA211DF9E699627A4 /* VoiceSessionStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionStateMachineTests.swift; sourceTree = "<group>"; };
 		C3E89601B5B74A632363B210 /* RoutineEntryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineEntryTests.swift; sourceTree = "<group>"; };
@@ -324,6 +327,7 @@
 		C902E1B6C3BFCBAC3E00266B /* GeminiCostGovernorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiCostGovernorTests.swift; sourceTree = "<group>"; };
 		C9B3203338B37AF2615B9D88 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		CB448CA95E79375B692A12F8 /* NepaliFestival.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliFestival.swift; sourceTree = "<group>"; };
+		CCD6AEC6B90A955BDDECBB02 /* WakeWordConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeWordConfig.swift; sourceTree = "<group>"; };
 		CF539F81F76209D893CF81A8 /* GeminiConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiConfigStore.swift; sourceTree = "<group>"; };
 		D14B6E81C221A233E013C46F /* MessageComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageComposeView.swift; sourceTree = "<group>"; };
 		D278DADF0D2C377E3DB8CBEA /* PluginRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginRegistry.swift; sourceTree = "<group>"; };
@@ -727,6 +731,7 @@
 				E7D7A7D5F8D07BCEECF0F970 /* SwitchableCommandInterpreter.swift */,
 				EC9012024C4815BFC474C722 /* TranscriptSanityGuard.swift */,
 				680AAA1A7F05226F9618CE82 /* VoicePipeline.swift */,
+				CCD6AEC6B90A955BDDECBB02 /* WakeWordConfig.swift */,
 				1AFE0B77607ED7DA0553D6F0 /* WakeWordEngine.swift */,
 				2A801C3C923FF4C4ECE4BE7C /* WhisperKitSpeechRecognizer.swift */,
 				426B00DB54390C484D152534 /* WhisperSpeechRecognizer.swift */,
@@ -770,6 +775,7 @@
 				A94328FF3C48D674B487DD12 /* SpeakerTests.swift */,
 				DBF8D15A8CBEB370AE0487CE /* SwitchableCommandInterpreterTests.swift */,
 				5037C77CFB1853F53CE7B8B6 /* TranscriptSanityGuardTests.swift */,
+				C3C9242954AB514718F74083 /* WakeWordConfigTests.swift */,
 				7126457D1955E4801E720A0C /* WhisperKitSpeechRecognizerTests.swift */,
 				6EF74EEC9797CDE01B05BAA0 /* WhisperSpeechRecognizerTests.swift */,
 			);
@@ -1058,6 +1064,7 @@
 				02543E15FCD856AFA17311CC /* TranscriptSanityGuard.swift in Sources */,
 				B54AE9405FEBDBD383BEFD87 /* VoicePipeline.swift in Sources */,
 				C0DFD8590612F9867C54D747 /* VoiceSessionStateMachine.swift in Sources */,
+				02C7492EF339715D5966169E /* WakeWordConfig.swift in Sources */,
 				38EA930604B28AB2BF63DF05 /* WakeWordEngine.swift in Sources */,
 				052113CFB87090EC64FBC483 /* WhisperKitSpeechRecognizer.swift in Sources */,
 				47965D07120D816E5424A120 /* WhisperSpeechRecognizer.swift in Sources */,
@@ -1140,6 +1147,7 @@
 				B32BE0328D7BA52A2E4C4C5D /* TranscriptSanityGuardTests.swift in Sources */,
 				877A9EAB9ADF74AF1E7DC12B /* VoiceSessionBindingTests.swift in Sources */,
 				36126C14FF50D0FDE355FC76 /* VoiceSessionStateMachineTests.swift in Sources */,
+				5D2DBB294952F1935B2643F5 /* WakeWordConfigTests.swift in Sources */,
 				6327B3F4991396B26F8E1A3D /* WhisperKitSpeechRecognizerTests.swift in Sources */,
 				F2545B47080302C2D47C85BB /* WhisperSpeechRecognizerTests.swift in Sources */,
 			);

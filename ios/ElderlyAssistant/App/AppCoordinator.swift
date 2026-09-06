@@ -233,6 +233,13 @@ final class AppCoordinator: ObservableObject {
     private var voicePipeline: VoicePipeline!
     private var voiceStateCancellable: AnyCancellable?
     private var geminiSwapCancellable: AnyCancellable?
+    /// Forwards the wake-word access-key store's publishes (2026-09-06):
+    /// `wakeWordAccessKeyStore` is a nested ObservableObject, so a
+    /// save/clear alone would not invalidate views observing the
+    /// coordinator — the Settings "Voice activation" status derives from
+    /// the store's `accessKey` and must refresh the moment the family
+    /// member saves (or removes) the key.
+    private var wakeWordKeyStoreCancellable: AnyCancellable?
     private var speaker: Speaker?
 
     /// Voice-session derivation state (spec §3.3): the last pipeline state
@@ -278,6 +285,48 @@ final class AppCoordinator: ObservableObject {
     let geminiCostGovernor: GeminiCostGovernor
     private let geminiClient: GeminiClient
     private let geminiSpeechRecognizer: GeminiSpeechRecognizer
+
+    // MARK: - Wake word ("Hey Sahayak", open item #4)
+    //
+    // Three moving parts: `wakeWordAccessKeyStore` (the Settings paste-in
+    // field's home — Keychain-backed, same pattern as geminiConfigStore),
+    // `wakeWordEnabled` (the persisted Settings toggle), and the launch
+    // engine built in init. The pure logic behind these lives in
+    // Services/Voice/WakeWordConfig.swift so it is unit-testable without
+    // the Porcupine SPM package linked.
+
+    /// Picovoice access key the family pastes into Settings → "Voice
+    /// activation". `makeWakeWordEngine()` reads it as the FALLBACK when
+    /// the build-time Info.plist key (`PicovoiceAccessKey`) is absent.
+    let wakeWordAccessKeyStore: WakeWordAccessKeyStore
+
+    /// Persisted "listen for Hey Sahayak" UI preference — UserDefaults
+    /// (not a secret), same shape as `sttModelPreference` /
+    /// `voiceEngineStack`. Defaults ON: inert until the key + .ppn exist
+    /// (the Null engine is in place regardless), then listening starts at
+    /// the next launch — see `WakeWordPreferences` for the rationale.
+    /// didSet persists AND closes/opens the live audio gate so the
+    /// Settings toggle acts immediately (no relaunch needed to STOP).
+    @Published var wakeWordEnabled: Bool {
+        didSet {
+            wakeWordPreferences.setEnabled(wakeWordEnabled)
+            wakeWordActivityGate.setEnabled(wakeWordEnabled)
+        }
+    }
+    private let wakeWordPreferences = WakeWordPreferences()
+
+    /// Consulted by the voice pipeline for every idle-state audio chunk
+    /// and inbound wake detection: closed while the assistant's own TTS is
+    /// playing (self-hearing mitigation — see `WakeWordActivityGate`) or
+    /// listening is switched off in Settings. Written on the main queue
+    /// (noteSpeakingStarted/Ended, the Settings binding), read on the mic
+    /// tap's processing queue — the lock lives inside the gate.
+    private let wakeWordActivityGate = WakeWordActivityGate()
+
+    /// Whether the engine built in `init` is a REAL Porcupine engine (vs
+    /// the Null fallback). Recorded once so Settings → "Voice activation"
+    /// can truthfully distinguish active / needs-setup / off-at-launch.
+    private let wakeWordEngineRealAtLaunch: Bool
 
     /// On-device LLM interpreter (v1 stack, kept alive for the
     /// on-device/Gemini A/B toggle — `voiceEngineStack`). Constructed
@@ -418,12 +467,22 @@ final class AppCoordinator: ObservableObject {
                                          costGovernor: costGovernor)
         self.geminiSpeechRecognizer = GeminiSpeechRecognizer(client: geminiClient, observabilityBus: bus)
 
+        // Wake word (#4): the access-key store the Settings paste-in field
+        // writes to. makeWakeWordEngine() reads it as the fallback when
+        // the build-time Info.plist `PicovoiceAccessKey` is absent.
+        self.wakeWordAccessKeyStore = WakeWordAccessKeyStore(storage: storage)
+
         // Voice pipeline. Uses NullWakeWordEngine unless the Porcupine SPM
-        // package is present AND a valid access key / .ppn file are found —
-        // see Services/Voice/WakeWordEngine.swift for the enablement steps.
+        // package is present AND the Settings toggle is ON AND a valid
+        // access key / .ppn file are found — see Services/Voice/
+        // WakeWordEngine.swift and docs/wake-word-setup.md for the
+        // enablement steps. The launch outcome is recorded so Settings →
+        // "Voice activation" can report an honest status.
         self.audioEngine = AVAudioEngine()
         self.audioSessionManager = AudioSessionManager(observabilityBus: bus)
-        self.wakeWordEngine = Self.makeWakeWordEngine()
+        let wakeWordLaunch = Self.makeWakeWordEngine(accessKeyStore: wakeWordAccessKeyStore)
+        self.wakeWordEngine = wakeWordLaunch.engine
+        self.wakeWordEngineRealAtLaunch = wakeWordLaunch.isReal
         self.voiceActivityDetector = EnergyVAD()
         // Two STTs are constructed up-front:
         // - fallback (SFSpeechRecognizer, en-US) — used while Whisper is
@@ -496,6 +555,16 @@ final class AppCoordinator: ObservableObject {
         self.voiceEngineStack = UserDefaults.standard.string(forKey: Self.voiceEngineStackKey)
             .flatMap(VoiceEngineStack.init(rawValue:)) ?? .gemini
 
+        // Restore the persisted wake-word listening preference (default
+        // ON — inert until the access key + .ppn exist, see
+        // `WakeWordPreferences`). This is the property's ONLY initial
+        // assignment, so its didSet does not fire here (same rule as
+        // `voiceEngineStack` above) — the live audio gate is synced
+        // explicitly instead, or a stored OFF would sit on the gate's
+        // default ON until the first Settings toggle.
+        self.wakeWordEnabled = wakeWordPreferences.isEnabled
+        wakeWordActivityGate.setEnabled(wakeWordEnabled)
+
         // Restore the persisted STT model choice. The didSet observer
         // pushes it to the recognizer and refreshes the label. Unknown
         // IDs (a model removed from the catalog, or a bad stored value)
@@ -529,6 +598,18 @@ final class AppCoordinator: ObservableObject {
         // All stored properties are initialised — push the restored
         // language into services that build user-facing strings.
         syncServiceLocales()
+
+        // Forward the wake-word access-key store's publishes (2026-09-06):
+        // `wakeWordAccessKeyStore` is a nested ObservableObject, so a
+        // save/clear alone would not invalidate views observing the
+        // coordinator — the Settings "Voice activation" status derives
+        // from the store's `accessKey` and must refresh the moment the
+        // family member saves (or removes) the key. Placed here (not next
+        // to the store's init) because the closure captures self.
+        wakeWordKeyStoreCancellable = wakeWordAccessKeyStore.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
 
         // Fold today's medication reminders into the routine plugin's
         // "what are my reminders today" answer — the user's mental model
@@ -641,6 +722,7 @@ final class AppCoordinator: ObservableObject {
             audioSession: audioSessionManager,
             audioEngine: audioEngine,
             wakeWordEngine: wakeWordEngine,
+            wakeWordGate: wakeWordActivityGate,
             speechRecognizer: fallbackSpeechRecognizer,
             voiceActivityDetector: voiceActivityDetector,
             router: router,
@@ -831,10 +913,27 @@ final class AppCoordinator: ObservableObject {
     /// Called by `CommandRouter` when a speak begins/ends — drives the
     /// derived `speaking` state. Callers may be on any queue; mutations
     /// are pinned to main (H1).
+    ///
+    /// 2026-09-06 (wake word #4): both functions also close/open the
+    /// `WakeWordActivityGate`, which the voice pipeline consults before
+    /// feeding mic audio to the wake-word engine. Self-hearing
+    /// mitigation: the audio session is `.measurement` mode without AEC
+    /// (AudioSessionManager), so while the assistant's own reply plays
+    /// the mic hears it — including the phrase "Hey Sahayak" if the reply
+    /// contained it. We suppress HERE (per-reply, reversible) rather than
+    /// switching the global audio-session mode, which is a regression
+    /// risk for the always-on tap and the recognizers that share it. The
+    /// gate is opened on the LAST speaker finishing (speech can nest —
+    /// multiple speak()s overlap during a busy turn). One benign race:
+    /// `speak()` launches the TTS Task before the main-async block below
+    /// runs, so the first milliseconds of a reply may not be suppressed —
+    /// Porcupine needs ~a second of audio to fire the keyword, so no
+    /// practical window.
     func noteSpeakingStarted() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.speakingCount += 1
+            self.wakeWordActivityGate.setSpeaking(true)
             self.handlePipelineState(self.lastPipelineState)
         }
     }
@@ -843,6 +942,7 @@ final class AppCoordinator: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.speakingCount = max(0, self.speakingCount - 1)
+            self.wakeWordActivityGate.setSpeaking(self.speakingCount > 0)
             self.handlePipelineState(self.lastPipelineState)
         }
     }
@@ -1896,21 +1996,107 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    // MARK: - Wake-word engine selection
+    // MARK: - Wake-word engine selection & status (open item #4)
 
-    private static func makeWakeWordEngine() -> WakeWordEngine {
-        #if canImport(Porcupine)
-        // Look for the Picovoice access key + trained .ppn. If either is
-        // missing, fall back to the null engine so the app still boots.
-        if let accessKey = Bundle.main.object(forInfoDictionaryKey: "PicovoiceAccessKey") as? String,
-           !accessKey.isEmpty,
-           let keywordPath = Bundle.main.path(forResource: "hey-sahayak_ios", ofType: "ppn"),
-           let engine = try? PorcupineWakeWordEngine(accessKey: accessKey, keywordPath: keywordPath) {
-            return engine
+    /// Builds the launch wake-word engine and reports whether it is REAL
+    /// (Porcupine) or the Null fallback — Settings → "Voice activation"
+    /// needs that truth for its status row.
+    ///
+    /// Decision order (2026-09-06):
+    ///  1. The persisted Settings toggle is the master switch: OFF means
+    ///     NullWakeWordEngine even when an access key + .ppn are both
+    ///     present (the open-item requirement — disabled must behave
+    ///     exactly like today).
+    ///  2. Access key: build-time Info.plist `PicovoiceAccessKey`, else
+    ///     the Settings paste-in value in `EncryptedLocalStorage`
+    ///     (`wakeWordAccessKeyStore` — Keychain, Data Protection
+    ///     Complete).
+    ///  3. The trained keyword file must be in the bundle
+    ///     (hey-sahayak_ios.ppn).
+    ///  4. Porcupine init must succeed (a malformed key throws).
+    ///
+    /// The pure decision table lives in `WakeWordEngineSelection`
+    /// (unit-tested without the Porcupine package linked); only the real
+    /// engine's construction is Porcupine-guarded, below.
+    private static func makeWakeWordEngine(accessKeyStore: WakeWordAccessKeyStore)
+        -> (engine: WakeWordEngine, isReal: Bool) {
+        guard let real = WakeWordEngineSelection.make(
+            toggleEnabled: WakeWordPreferences().isEnabled,
+            accessKey: configuredAccessKey(accessKeyStore: accessKeyStore),
+            keywordPath: WakeWordModelFile.bundledPath(),
+            build: buildRealWakeWordEngine
+        ) else {
+            print("[AppCoordinator] Wake-word engine: NullWakeWordEngine "
+                  + "(toggle off, artifact missing, or Porcupine init failed) — "
+                  + "Talk button + simulate path unchanged")
+            return (NullWakeWordEngine(), false)
         }
-        print("[AppCoordinator] Porcupine present but access key or .ppn missing — using NullWakeWordEngine")
+        return (real, true)
+    }
+
+    /// The Picovoice access key for this build: the Info.plist value
+    /// (`PicovoiceAccessKey`, embedded at build time for team builds)
+    /// wins; otherwise the Settings paste-in value. The precedence rule
+    /// itself is `WakeWordAccessKeyStore.resolvedAccessKey` (unit-tested).
+    private static func configuredAccessKey(accessKeyStore: WakeWordAccessKeyStore) -> String? {
+        WakeWordAccessKeyStore.resolvedAccessKey(
+            plistKey: Bundle.main.object(forInfoDictionaryKey: "PicovoiceAccessKey") as? String,
+            storedKey: accessKeyStore.accessKey
+        )
+    }
+
+    #if canImport(Porcupine)
+    /// Attempts the real engine — compiles only when the Porcupine SPM
+    /// package is linked into the build (project.yml keeps it commented
+    /// until a key + trained .ppn exist — docs/wake-word-setup.md).
+    private static func buildRealWakeWordEngine(accessKey: String, keywordPath: String) -> WakeWordEngine? {
+        try? PorcupineWakeWordEngine(accessKey: accessKey, keywordPath: keywordPath)
+    }
+    #else
+    /// Porcupine is not linked into this build — the selection logic above
+    /// still runs so Settings can report the honest "runtime missing"
+    /// status, but no real engine can be built.
+    private static func buildRealWakeWordEngine(accessKey: String, keywordPath: String) -> WakeWordEngine? {
+        nil
+    }
+    #endif
+
+    /// Compile-time: is the Porcupine runtime linked into THIS build?
+    /// Mirrors the `#if canImport(Porcupine)` around the real engine so
+    /// the Settings status can never claim "Active" for a build whose
+    /// engine is Null by construction.
+    static var isWakeWordRuntimeLinked: Bool {
+        #if canImport(Porcupine)
+        return true
+        #else
+        return false
         #endif
-        return NullWakeWordEngine()
+    }
+
+    /// True when an access key is available to this build — the build-time
+    /// Info.plist value, or the Settings paste-in (EncryptedLocalStorage).
+    var isWakeWordAccessKeyConfigured: Bool {
+        Self.configuredAccessKey(accessKeyStore: wakeWordAccessKeyStore) != nil
+    }
+
+    /// True when THIS build has everything the real engine needs: runtime
+    /// linked, an access key, and the bundled keyword file — the same
+    /// inputs `makeWakeWordEngine()` decides on, so the status row and the
+    /// actually-built engine cannot disagree.
+    var isWakeWordProvisioned: Bool {
+        Self.isWakeWordRuntimeLinked
+            && Self.configuredAccessKey(accessKeyStore: wakeWordAccessKeyStore) != nil
+            && WakeWordModelFile.bundledPath() != nil
+    }
+
+    /// Honest state for the Settings "Voice activation" row/screen
+    /// (derivation unit-tested in `WakeWordStatusResolver`).
+    var wakeWordStatus: WakeWordStatus {
+        WakeWordStatusResolver.status(
+            enabled: wakeWordEnabled,
+            isProvisioned: isWakeWordProvisioned,
+            realEngineAtLaunch: wakeWordEngineRealAtLaunch
+        )
     }
 }
 

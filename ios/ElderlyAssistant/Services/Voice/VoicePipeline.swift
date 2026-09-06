@@ -32,6 +32,28 @@ final class VoicePipeline {
 
     private let audioSession: AudioSessionManager
     private let wakeWordEngine: WakeWordEngine
+    /// Consulted (on the processing queue) before every idle-state audio
+    /// chunk reaches the wake-word engine, and before inbound wake
+    /// detections start a capture (wake word #4, 2026-09-06) — see
+    /// `WakeWordActivityGate` for what closes it and why. In short:
+    ///
+    ///  - Self-hearing mitigation: while the assistant's own TTS reply is
+    ///    playing, the mic hears it — the audio session is `.playAndRecord`
+    ///    with `.measurement` mode and NO acoustic echo cancellation
+    ///    (AudioSessionManager) — so a reply containing the phrase "Hey
+    ///    Sahayak" could otherwise wake the assistant mid-speech. We
+    ///    suppress here rather than switching the global audio-session
+    ///    mode: a mode/AEC change is a regression risk for the always-on
+    ///    tap and the recognizers that share it.
+    ///  - The Settings "listen for Hey Sahayak" toggle: turning listening
+    ///    OFF must stop keyword detection immediately, not at the next
+    ///    launch (audio feeding stops, so the engine can never fire).
+    ///
+    /// The Talk button (`simulateWakeWordDetection`) is HUMAN intent and
+    /// must keep working with listening switched off — it consults only
+    /// the gate's `allowsWakeDetection` half (speaking), never the
+    /// enable half. Nil = always open, exactly the pre-wake-word behavior.
+    private let wakeWordGate: WakeWordActivityGate?
     private var speechRecognizer: SpeechRecognizerProtocol
     private var vad: VoiceActivityDetector?
     private let router: CommandRouter
@@ -59,6 +81,7 @@ final class VoicePipeline {
     init(audioSession: AudioSessionManager,
          audioEngine: AVAudioEngine,
          wakeWordEngine: WakeWordEngine,
+         wakeWordGate: WakeWordActivityGate? = nil,
          speechRecognizer: SpeechRecognizerProtocol,
          voiceActivityDetector: VoiceActivityDetector? = nil,
          router: CommandRouter,
@@ -66,6 +89,7 @@ final class VoicePipeline {
         self.audioSession = audioSession
         self.audioEngine = audioEngine
         self.wakeWordEngine = wakeWordEngine
+        self.wakeWordGate = wakeWordGate
         self.speechRecognizer = speechRecognizer
         self.vad = voiceActivityDetector
         self.router = router
@@ -216,6 +240,12 @@ final class VoicePipeline {
     }
 
     private func feedWakeWord(_ samples: [Int16]) {
+        // Gate check FIRST, before buffering: while the gate is closed
+        // (assistant speaking / listening switched off) the audio is
+        // dropped wholesale, never queued — queuing would flush stale TTS
+        // audio into the engine right after the reply ends, which is
+        // exactly the false wake this gate exists to prevent.
+        guard wakeWordGate?.allowsWakeWordAudio ?? true else { return }
         pcmBuffer.append(contentsOf: samples)
         let frameLength = wakeWordEngine.frameLength
         while pcmBuffer.count >= frameLength {
@@ -244,7 +274,15 @@ final class VoicePipeline {
     // MARK: - Wake handling
 
     private func handleWakeDetected() {
-        guard state == .idle else { return }
+        // Second gate at the DETECTION end, not just the audio-feed end: a
+        // keyword event already in flight when the reply started (the
+        // engine fires on its own queue; the handler hops to main) must
+        // not start a capture while the assistant is still talking. Only
+        // the speaking half of the gate applies here — the enable half is
+        // deliberately NOT consulted, because the Talk button runs
+        // `simulateWakeWordDetection()` through this same path and must
+        // keep working with listening switched off.
+        guard state == .idle, wakeWordGate?.allowsWakeDetection ?? true else { return }
         state = .capturingCommand
         pcmBuffer.removeAll()
         silenceCounter = 0

@@ -5807,6 +5807,465 @@
           }
         }
       }
+    },
+    "wakeWord.active.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Say “Hey Sahayak”, pause briefly, then speak your command — for example: “Hey Sahayak, remind me to take medicine at 8.”"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“हे सहायक” भन्नुहोस्, छोटो रोकिनुहोस्, अनि आफ्नो आदेश बोल्नुहोस् — उदाहरण: “हे सहायक, मलाई ८ बजे औषधि खान सम्झाउनुहोस्।”"
+          }
+        }
+      }
+    },
+    "wakeWord.active.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listening is on"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्ने सुविधा सक्रिय छ"
+          }
+        }
+      }
+    },
+    "wakeWord.batteryNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "While this is on, the microphone listens all the time, which uses a little more battery. Switch it off here any time."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो अन हुँदा माइक्रोफोनले सधैं सुनिरहन्छ, जसले अलि बढी ब्याट्री खपत गर्छ। जतिबेला पनि यहाँबाट बन्द गर्न सकिन्छ।"
+          }
+        }
+      }
+    },
+    "wakeWord.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "With the wake word on, Sahayak listens for “Hey Sahayak” and then takes your command by itself — no button press. It needs a one-time setup by a family member. Until it's set up, the app works exactly as before."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "वेक वर्ड अन हुँदा, सहायकले “हे सहायक” सुन्छ र त्यसपछि आफैं तपाईंको आदेश लिन्छ — बटन थिच्नु पर्दैन। यसका लागि परिवारको कसैले एकपटक सेटअप गर्नुपर्छ। सेटअप नभएसम्म, एप पहिले जस्तै चल्छ।"
+          }
+        }
+      }
+    },
+    "wakeWord.keyDescription": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Get a free key at console.picovoice.ai. It is stored only on this device, in the iPhone's secure keychain."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "console.picovoice.ai बाट निःशुल्क कुञ्जी लिनुहोस्। यो यही यन्त्रमा मात्र, iPhone को सुरक्षित किचेनमा भण्डारण हुन्छ।"
+          }
+        }
+      }
+    },
+    "wakeWord.keyLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Picovoice access key"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Picovoice पहुँच कुञ्जी"
+          }
+        }
+      }
+    },
+    "wakeWord.keyPlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste the access key here"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यहाँ पहुँच कुञ्जी टाँस्नुहोस्"
+          }
+        }
+      }
+    },
+    "wakeWord.keySaved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Access key saved"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पहुँच कुञ्जी सुरक्षित भयो"
+          }
+        }
+      }
+    },
+    "wakeWord.needsSetup.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listening is switched on, but this build is missing something the wake word needs — the missing pieces are listed below. Once a family member fixes them, it starts working after the app is restarted."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्ने स्विच अन गरिएको छ, तर यो संस्करणमा वेक वर्डका लागि चाहिने केही कुरा छैन — के छैन भन्ने तल दिइएको छ। परिवारको कसैले मिलाएपछि, एप पुनः सुरु गरेपछि मात्र यसले काम गर्न थाल्छ।"
+          }
+        }
+      }
+    },
+    "wakeWord.needsSetup.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The wake word isn't ready yet"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "वेक वर्ड अझै तयार भएको छैन"
+          }
+        }
+      }
+    },
+    "wakeWord.off.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The app is not listening for “Hey Sahayak” right now. Turn the switch on above to listen again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "एपले अहिले “हे सहायक” सुनिरहेको छैन। फेरि सुन्नका लागि माथिको स्विच अन गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "wakeWord.off.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listening is off"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्ने सुविधा बन्द छ"
+          }
+        }
+      }
+    },
+    "wakeWord.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove key"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कुञ्जी हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "wakeWord.removeConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove the access key? Listening for “Hey Sahayak” will stop until a key is added again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पहुँच कुञ्जी हटाउने हो? फेरि कुञ्जी थपिएसम्म “हे सहायक” सुन्ने सुविधा बन्द हुनेछ।"
+          }
+        }
+      }
+    },
+    "wakeWord.restart.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Everything is set up. The listener starts when the app opens, so close the app fully and open it again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सबै तयार छ। सुन्ने सुविधा एप खुल्दा सुरु हुन्छ, त्यसैले एप पूरै बन्द गरेर फेरि खोल्नुहोस्।"
+          }
+        }
+      }
+    },
+    "wakeWord.restart.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restart to start listening"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्न सुरु गर्न एप पुनः सुरु गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "wakeWord.save": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुरक्षित गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "wakeWord.setupNeedsKey": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Picovoice access key is missing — paste it in the box below."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Picovoice पहुँच कुञ्जी छैन — तलको बाकसमा टाँस्नुहोस्।"
+          }
+        }
+      }
+    },
+    "wakeWord.setupNeedsModel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The trained “Hey Sahayak” keyword file is not part of this build. A family member needs to add it and build the app again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तालिम प्राप्त “हे सहायक” वेक वर्ड फाइल यो संस्करणको हिस्सा होइन। परिवारको कसैले थपेर एप फेरि बनाउनुपर्छ।"
+          }
+        }
+      }
+    },
+    "wakeWord.setupNeedsRuntime": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The listening engine (Porcupine) is not part of this build. A family member needs to enable it and build the app again — step-by-step instructions are in the project."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्ने इन्जिन (Porcupine) यो संस्करणको हिस्सा होइन। परिवारको कसैले यसलाई जोडेर एप फेरि बनाउनुपर्छ — चरणबद्ध निर्देशन परियोजनामा छन्।"
+          }
+        }
+      }
+    },
+    "wakeWord.status.active": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सक्रिय"
+          }
+        }
+      }
+    },
+    "wakeWord.status.needsSetup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Setup needed"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सेटअप चाहिन्छ"
+          }
+        }
+      }
+    },
+    "wakeWord.status.off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बन्द"
+          }
+        }
+      }
+    },
+    "wakeWord.status.restartToActivate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restart to activate"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पुनः सुरु गर्दा सक्रिय हुन्छ"
+          }
+        }
+      }
+    },
+    "wakeWord.talkStillWorks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Talk button on the home screen still works exactly as before — it doesn't depend on the wake word."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "होम स्क्रिनको टक बटन पहिले जस्तै काम गर्छ — यो वेक वर्डमा भर पर्दैन।"
+          }
+        }
+      }
+    },
+    "wakeWord.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice activation"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज सक्रियता"
+          }
+        }
+      }
+    },
+    "wakeWord.toggleLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listen for “Hey Sahayak”"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“हे सहायक” सुन्नुहोस्"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
