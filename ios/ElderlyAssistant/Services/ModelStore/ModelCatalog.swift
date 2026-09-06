@@ -421,13 +421,14 @@ enum ModelCatalog {
     /// this so the two surfaces always agree.
     static let availableSTTEntries: [ModelCatalogEntry] = {
         entries(kind: .whisperBase).filter { entry in
-            // Exclude the teacher WhisperKit placeholder (no real artifact
-            // yet) and the CPU-only large-v3 ggml models — too slow to be
-            // usable on-device. The ANE (WhisperKit) large models replace
-            // them once their q6 artifacts are published.
-            !(entry.id == whisperKitNepali
-              || entry.id == whisperLargeV3Nepali
-              || entry.id == whisperLargeV3NepaliV2)
+            // Exclude ONLY the teacher WhisperKit placeholder (no real
+            // artifact yet). Every other catalog STT engine — including
+            // the CPU-only large-v3 ggml models — stays selectable: the
+            // user asked to be able to pick ANY engine (2026-09-06 field
+            // report), and the honest size labels in their names ("Large
+            // (original)") carry the speed trade-off without hiding the
+            // choice.
+            entry.id != whisperKitNepali
         }
     }()
 }
