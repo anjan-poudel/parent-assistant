@@ -120,6 +120,19 @@ struct HomeView: View {
 
     private var topBar: some View {
         HStack(alignment: .top, spacing: 8) {
+            // Settings stays in the top bar, LEFT-anchored at the leading
+            // edge with the greeting centered between it and the emergency
+            // button, so the gear can never be confused with emergency
+            // (2026-09-07). Still exactly one entry point, by voice or by
+            // touch. Equal-width 44pt containers on both sides keep the
+            // greeting visually centered.
+            NavigationLink(value: LeafDestination.settings) {
+                IconBadge(systemImage: "gearshape.fill", tint: .settings, diameter: 32)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(LocalizedStringKey("home.hub.settings")))
+            .frame(width: 44, alignment: .leading)
+            Spacer()
             // The date/greeting area doubles as the calendar's entry
             // point (2026-09-06: calendar lives ON the home screen via
             // this tap target, NOT as a 5th dock item — the dock stays
@@ -141,15 +154,8 @@ struct HomeView: View {
             }
             .accessibilityLabel(Text("home.hub.calendar"))
             Spacer()
-            // Settings moved to the top bar (2026-09-06): a bottom-dock
-            // slot is too valuable for something used occasionally.
-            // Still exactly one entry point, by voice or by touch.
-            NavigationLink(value: LeafDestination.settings) {
-                IconBadge(systemImage: "gearshape.fill", tint: .settings, diameter: 32)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(LocalizedStringKey("home.hub.settings")))
             EmergencyIconButton()
+                .frame(width: 44, alignment: .trailing)
         }
         .padding(.top, 8)
     }
