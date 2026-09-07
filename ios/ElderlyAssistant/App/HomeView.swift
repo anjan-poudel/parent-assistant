@@ -124,10 +124,18 @@ struct HomeView: View {
             // at three clean entries per the "keep dock items clean"
             // direction; settings moved to the top bar 2026-09-06).
             NavigationLink(value: LeafDestination.calendar) {
-                Text(greetingText)
-                    .font(DesignTokens.greetingFont(size: 22))
-                    .foregroundColor(DesignTokens.textPrimary)
-                    .multilineTextAlignment(.leading)
+                // Live clock (greeting-clock fix, 2026-09-07): the shown
+                // time used to freeze at launch because `greetingText`
+                // read `Date()` once per body evaluation and nothing ever
+                // re-evaluated it. TimelineView re-evaluates its content
+                // every minute with `context.date` as the tick's instant —
+                // no manual Timer object, no re-render churn on Home.
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    Text(greetingText(at: context.date))
+                        .font(DesignTokens.greetingFont(size: 22))
+                        .foregroundColor(DesignTokens.textPrimary)
+                        .multilineTextAlignment(.leading)
+                }
             }
             .accessibilityLabel(Text("home.hub.calendar"))
             Spacer()
@@ -482,9 +490,14 @@ struct HomeView: View {
 
     // MARK: - Greeting text (spec §4.1.1)
 
-    private var greetingText: String {
-        let time = Date().formatted(date: .omitted, time: .shortened)
-        let hour = Calendar.current.component(.hour, from: Date())
+    /// Greeting salutation + clock time, both resolved from ONE instant
+    /// (2026-09-07): topBar calls this with the TimelineView context date,
+    /// so the salutation and the shown time can never disagree and the
+    /// clock ticks every minute with no manual Timer. Single render site
+    /// (topBar), so there is no Date()-based convenience overload.
+    private func greetingText(at date: Date) -> String {
+        let time = date.formatted(date: .omitted, time: .shortened)
+        let hour = Calendar.current.component(.hour, from: date)
         let locale = coordinator.appLanguage.locale
         switch hour {
         case 5..<12:
