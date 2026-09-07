@@ -25,6 +25,7 @@ final class ExternalReminderMappingTests: XCTestCase {
                            declined: Bool = false,
                            hasAlarms: Bool = false,
                            notes: String? = nil,
+                           calendarIdentifier: String? = nil,
                            title: String = "Doctor visit") -> ScannedEvent {
         ScannedEvent(
             nativeIdentifier: id,
@@ -34,6 +35,7 @@ final class ExternalReminderMappingTests: XCTestCase {
             isAllDay: isAllDay,
             isDeclined: declined,
             hasAlarms: hasAlarms,
+            calendarIdentifier: calendarIdentifier,
             calendarName: "Family"
         )
     }

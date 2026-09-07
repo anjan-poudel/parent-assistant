@@ -2610,6 +2610,7 @@ struct MedicationScheduleSettingsView: View {
                 addForm
                 festivalReminderCard
                 calendarSyncCard
+                twoWayCard
                 externalCalendarCard
             }
         }
@@ -2717,6 +2718,55 @@ struct MedicationScheduleSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// Two-way mirroring (calendar-driven task, 2026-09-07) — the
+    /// default-OFF extension of the mirror card above: mirrored
+    /// routine events live in a dedicated "Sahayak" calendar, and
+    /// edits the family makes THERE — time changes, daily↔weekly
+    /// changes, deletions, even the whole calendar — apply back to the
+    /// app's schedule. FULL access is requested only at the point of
+    /// use (this toggle turning ON — reconciliation must READ events,
+    /// which write-only access cannot); the caption below follows
+    /// `twoWaySyncDecision` (toggle intent vs the OS's permission
+    /// truth). Disabled while the mirror itself is off — two-way is a
+    /// mode of the mirror.
+    private var twoWayCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: Binding(
+                get: { coordinator.calendarSync.twoWayEnabled },
+                set: { newValue in
+                    Task { await coordinator.setCalendarTwoWayEnabled(newValue) }
+                }
+            )) {
+                Label("calendar.twoWay.title", systemImage: "arrow.triangle.2.circlepath")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .disabled(!coordinator.calendarSync.isEnabled)
+            Text(twoWayStatusText)
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    private var twoWayStatusText: String {
+        let sync = coordinator.calendarSync
+        switch CalendarSyncService.twoWaySyncDecision(
+            eventsAccess: sync.currentEventsAccess,
+            twoWayEnabled: sync.twoWayEnabled) {
+        case .idle:
+            return L10n.str("calendar.twoWay.hint", locale: coordinator.activeLocale)
+        case .sync:
+            return L10n.str("calendar.twoWay.caption", locale: coordinator.activeLocale)
+        case .needsFullAccessPrompt, .unavailable:
+            return L10n.str("calendar.twoWay.denied", locale: coordinator.activeLocale)
+        }
     }
 
     /// Native Calendar/Reminders import (calendar-driven task,

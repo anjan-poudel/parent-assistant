@@ -1116,6 +1116,74 @@
         }
       }
     },
+    "calendar.twoWay.caption": {
+        "extractionState": "manual",
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "On — routine events live in the Sahayak calendar, and edits you make to them in the Calendar app update your routine here."
+                }
+            },
+            "ne": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "खोलिएको छ — दिनचर्याका घटनाहरू Sahayak क्यालेन्डरमा रहन्छन्, र क्यालेन्डर एपमा ती घटनाहरूमा गरेका सम्पादनहरूले यहाँको दिनचर्या अपडेट गर्छन्।"
+                }
+            }
+        }
+    },
+    "calendar.twoWay.denied": {
+        "extractionState": "manual",
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Two-way mirroring needs full calendar access, which was not granted — edits made in the Calendar app cannot come back here. You can try again from iOS Settings."
+                }
+            },
+            "ne": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "दुवैतिर मिरर गर्न क्यालेन्डरको पूर्ण पहुँच चाहिन्छ, जुन दिइएन — क्यालेन्डर एपमा गरेका सम्पादनहरू यहाँ फर्कन सक्दैनन्। iOS सेटिङबाट फेरि प्रयास गर्न सक्नुहुन्छ।"
+                }
+            }
+        }
+    },
+    "calendar.twoWay.hint": {
+        "extractionState": "manual",
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "When on, routine events are mirrored to a dedicated Sahayak calendar, and changes you make to those events there (time, deletion) update your routine here. Off by default — full access is asked only when you turn this on."
+                }
+            },
+            "ne": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "खोल्दा दिनचर्याका घटनाहरू छुट्टै Sahayak क्यालेन्डरमा मिरर हुन्छन्, र त्यहाँ ती घटनाहरूमा गरेका परिवर्तनहरू (समय, मेटाइ) ले यहाँको दिनचर्या अपडेट गर्छन्। सुरुमा बन्द हुन्छ — पूर्ण पहुँच यो खोल्दा मात्र सोधिन्छ।"
+                }
+            }
+        }
+    },
+    "calendar.twoWay.title": {
+        "extractionState": "manual",
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Mirror routine changes both ways"
+                }
+            },
+            "ne": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "दिनचर्याका परिवर्तनहरू दुवैतिर मिरर गर्नुहोस्"
+                }
+            }
+        }
+    },
     "calendarSync.statusDenied": {
       "extractionState": "manual",
       "localizations": {
