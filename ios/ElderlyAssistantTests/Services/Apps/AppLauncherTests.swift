@@ -49,6 +49,23 @@ final class AppLauncherTests: XCTestCase {
         XCTAssertTrue(names.allSatisfy { $0.hasPrefix("appIcon.") })
         // Built-ins: SF Symbols ARE the official Apple glyphs.
         XCTAssertTrue(AppLauncher.catalog.prefix(6).allSatisfy { $0.imageName == nil })
+
+        // Every glyph carries its official brand tint as a 6-digit
+        // "RRGGBB" hex — the CC0 vectors are single-color paths that
+        // render BLACK without a tint, which is the "all icons the same
+        // color" complaint this closes. Glyph and tint travel together:
+        // among third-party apps only imo (no glyph) has none, and
+        // built-ins (SF Symbols, no glyph) have none either. (2026-09-07)
+        for app in withGlyph {
+            let tint = app.glyphTintHex
+            XCTAssertNotNil(tint, "\(app.id) must carry an official brand tint")
+            XCTAssertEqual(tint?.count, 6, "\(app.id) tint must be 6 digits")
+            XCTAssertTrue(tint?.allSatisfy(\.isHexDigit) ?? false,
+                          "\(app.id) tint \(tint ?? "nil") must be pure hex")
+        }
+        XCTAssertEqual(thirdParty.filter { $0.glyphTintHex == nil }.map(\.id), ["imo"])
+        XCTAssertTrue(AppLauncher.catalog.prefix(6).allSatisfy { $0.glyphTintHex == nil })
+        XCTAssertNil(AppLauncher.app(for: "imo")?.glyphTintHex)
     }
 
     func testCatalogStartsWithAppleBuiltInsInHomeScreenOrder() {
