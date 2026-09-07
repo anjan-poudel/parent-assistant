@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import CoreML
 #if canImport(WhisperKit)
 import WhisperKit
 #endif
@@ -271,7 +272,13 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
                     + "simulator=\(WhisperKit.isRunningOnSimulator)")
                 // Force Nepali transcription — auto language detection on
                 // short utterances produced English (translate-ish) output.
-                let options = DecodingOptions(task: .transcribe, language: "ne")
+                var options = DecodingOptions(task: .transcribe, language: "ne")
+                // Slice D: per-user dialect prompt-token biasing. nil (the
+                // .default label, or an honest no-tokens state) leaves the
+                // options exactly as before — zero behaviour change.
+                if let biasTokens = activeDialectPromptTokens() {
+                    options.promptTokens = biasTokens
+                }
                 let results = try await kit.transcribe(audioArrays: [audio],
                                                        decodeOptions: options)
                 let ms = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
@@ -301,14 +308,206 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
 
     // MARK: - Observability
 
-    private func emit(_ eventType: String, errorCode: String?) {
+    private func emit(_ eventType: String,
+                      errorCode: String?,
+                      component: String = "whisperkit_stt",
+                      metadata: [String: String] = [:]) {
         observabilityBus.emit(ObservabilityEvent(
-            component: "whisperkit_stt",
+            component: component,
             eventType: eventType,
             durationMs: nil,
             outcome: errorCode == nil ? "info" : "failure",
             errorCode: errorCode,
-            metadata: [:]
+            metadata: metadata
         ))
+    }
+
+    // MARK: - Dialect ID seam + decode biasing (voice-personalisation P0, slice D)
+    //
+    // Seam contract (DialectIdentifier.swift / docs/voice-personalisation-p0-plan.md
+    // slice D): the *label + seam* are the deliverable; accent packs are server
+    // work. Everything here is inert while the persisted label is `.default` —
+    // existing STT behaviour is byte-identical in that state.
+
+    /// Once-per-session honesty flags: an unavailable dialect path is
+    /// reported a single time, never spammed per utterance.
+    private var dialectEmbeddingUnavailableReported = false
+    private var dialectBiasingUnavailableReported = false
+
+    /// Prompt-token bias for the user's persisted dialect label, resolved
+    /// from the bundled table's precomputed whisper BPE ids (≤100 tokens).
+    /// - nil when the label is `.default` (no biasing, unchanged behaviour)
+    ///   or when no trustworthy token set exists — the latter is reported
+    ///   honestly once per session, never silently ignored.
+    private func activeDialectPromptTokens() -> [Int]? {
+        let label = DialectPreference.persisted()
+        guard label.selectsPack else { return nil }
+        guard let table = DialectCentroidTable.bundledCached else {
+            reportDialectUnavailableOnce(&dialectBiasingUnavailableReported,
+                                         event: "dialect_biasing_empty",
+                                         reason: "centroid_table_missing")
+            return nil
+        }
+        let tokens = table.promptTokenIds(for: label)
+        if tokens.isEmpty {
+            // Label set but the table carries no tokens for it (seed table,
+            // or table/label from different calibration runs). Honest no-op.
+            reportDialectUnavailableOnce(&dialectBiasingUnavailableReported,
+                                         event: "dialect_biasing_empty",
+                                         reason: "no_tokens_for_\(label.rawValue)")
+        }
+        return tokens.isEmpty ? nil : tokens
+    }
+
+    /// Enrolment seam (called by the future enrolment flow, one short sample
+    /// per attempt): mean-pooled encoder embedding for
+    /// `DialectIdentifier.classify`. Uses only the pinned WhisperKit
+    /// revision's public chain — `audioProcessor.padOrTrim` →
+    /// `featureExtractor.logMelSpectrogram` → `audioEncoder.encodeFeatures`
+    /// (`encoder_output_embeds`), all exposed as public properties/methods on
+    /// the loaded `WhisperKit` instance (verified at rev ea872ffd).
+    ///
+    /// Runs the encoder a second time over the same audio as transcription —
+    /// acceptable at enrolment (one-time, 5–30 s samples per research §4.4),
+    /// never on the utterance path.
+    ///
+    /// Returns nil whenever the embedding cannot be produced (never throws —
+    /// unavailability is the nil path) and emits
+    /// `dialect_embedding_unavailable` with the reason once per session.
+    func extractDialectEmbedding(from audio: [Float]) async -> [Float]? {
+        #if canImport(WhisperKit)
+        guard let kit = kitInstance as? WhisperKit else {
+            reportDialectUnavailableOnce(&dialectEmbeddingUnavailableReported,
+                                         event: "dialect_embedding_unavailable",
+                                         reason: "model_not_loaded")
+            return nil
+        }
+        do {
+            // 480 000 frames = 30 s at 16 kHz — fine for enrolment samples
+            // (research §4.4: 5–30 s). Explicit toLength: the parameter is on
+            // the AudioProcessing protocol requirement itself.
+            guard let padded = kit.audioProcessor.padOrTrim(fromArray: audio,
+                                                            startAt: 0,
+                                                            toLength: 480_000) else {
+                reportDialectUnavailableOnce(&dialectEmbeddingUnavailableReported,
+                                             event: "dialect_embedding_unavailable",
+                                             reason: "audio_padding_failed")
+                return nil
+            }
+            guard let mel = try await kit.featureExtractor
+                .logMelSpectrogram(fromAudio: padded) else {
+                reportDialectUnavailableOnce(&dialectEmbeddingUnavailableReported,
+                                             event: "dialect_embedding_unavailable",
+                                             reason: "mel_extraction_failed")
+                return nil
+            }
+            guard let encoded = try await kit.audioEncoder.encodeFeatures(mel),
+                  let multiArray = encoded as? MLMultiArray else {
+                reportDialectUnavailableOnce(&dialectEmbeddingUnavailableReported,
+                                             event: "dialect_embedding_unavailable",
+                                             reason: "encoder_output_missing")
+                return nil
+            }
+            let shape = multiArray.shape.map(\.intValue)
+            guard let flat = Self.flatten(multiArray) else {
+                reportDialectUnavailableOnce(&dialectEmbeddingUnavailableReported,
+                                             event: "dialect_embedding_unavailable",
+                                             reason: "unsupported_scalar_type")
+                return nil
+            }
+            // Pool against the bundled table's dimension when present (the
+            // classifier dimension check is the final honesty gate); fall
+            // back to the tensor's last axis for bench/unknown models.
+            let dimension = DialectCentroidTable.bundledCached?.embeddingDimension
+                ?? (shape.last ?? 0)
+            guard let vector = DialectEmbeddingVector.meanPooled(shape: shape,
+                                                                 values: flat,
+                                                                 embeddingDimension: dimension),
+                  !vector.isEmpty else {
+                reportDialectUnavailableOnce(&dialectEmbeddingUnavailableReported,
+                                             event: "dialect_embedding_unavailable",
+                                             reason: "invalid_embedding_shape")
+                return nil
+            }
+            return vector
+        } catch {
+            // e.g. WhisperError.modelsUnavailable when the encoder CoreML
+            // model is not loaded — same unavailable semantics as above.
+            reportDialectUnavailableOnce(&dialectEmbeddingUnavailableReported,
+                                         event: "dialect_embedding_unavailable",
+                                         reason: "encoder_error")
+            print("[dialect_id] extractDialectEmbedding failed: \(error)")
+            return nil
+        }
+        #else
+        reportDialectUnavailableOnce(&dialectEmbeddingUnavailableReported,
+                                     event: "dialect_embedding_unavailable",
+                                     reason: "runtime_missing")
+        return nil
+        #endif
+    }
+
+    /// Applies the user's dialect label: persists it (decode biasing takes
+    /// effect from the next utterance) and emits the PII-free
+    /// `dialect_label_set` event — label raw value only, never audio or
+    /// transcripts.
+    func applyDialectLabel(_ label: DialectLabel) {
+        DialectPreference.persist(label)
+        emit("dialect_label_set", errorCode: nil,
+             component: "dialect_id",
+             metadata: ["label": label.rawValue])
+        print("[dialect_id] dialect_label_set label=\(label.rawValue)")
+    }
+
+    /// MLMultiArray → flat row-major [Float], supporting float32 fast-path
+    /// and float16 (ANE/GPU encoder output can be fp16). Returns nil for any
+    /// other scalar type — the caller reports that honestly rather than
+    /// guessing at byte layouts.
+    private static func flatten(_ multiArray: MLMultiArray) -> [Float]? {
+        if multiArray.dataType == .float32 {
+            return multiArray.withUnsafeBytes { buffer in
+                Array(buffer.bindMemory(to: Float.self))
+            }
+        }
+        if multiArray.dataType == .float16 {
+            return multiArray.withUnsafeBytes { buffer in
+                // No Float16→Float conversion initializer is guaranteed
+                // across toolchains, so convert via IEEE-754 half bits
+                // (Apple platforms are little-endian; MLMultiArray storage
+                // is native-endian).
+                buffer.bindMemory(to: UInt16.self).map(Self.float16BitsToFloat)
+            }
+        }
+        return nil
+    }
+
+    /// IEEE-754 binary16 → binary32 (canonical conversion, deterministic
+    /// across toolchains; used when the encoder emits fp16 activations).
+    private static func float16BitsToFloat(_ bits: UInt16) -> Float {
+        let sign: Float = (bits & 0x8000) == 0 ? 1 : -1
+        let exponent = Int((bits >> 10) & 0x1F)
+        let fraction = Int(bits & 0x03FF)
+        switch exponent {
+        case 0:
+            // Zero or subnormal: value = fraction × 2⁻²⁴.
+            return sign * Float(fraction) * 0x1p-24
+        case 31:
+            // Infinity or NaN (NaN payload discarded — encoder output
+            // should never contain either; NaN would poison the mean pool).
+            return fraction == 0 ? sign * Float.infinity : .nan
+        default:
+            // Normal: (1 + fraction/1024) × 2^(exponent − 15).
+            let scale = Float(pow(2.0, Double(exponent - 15)))
+            return sign * (1024 + Float(fraction)) / 1024 * scale
+        }
+    }
+
+    private func reportDialectUnavailableOnce(_ reported: inout Bool,
+                                              event: String,
+                                              reason: String) {
+        guard !reported else { return }
+        reported = true
+        emit(event, errorCode: reason, component: "dialect_id")
+        print("[dialect_id] \(event) reason=\(reason)")
     }
 }

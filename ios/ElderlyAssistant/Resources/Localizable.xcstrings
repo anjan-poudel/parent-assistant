@@ -11808,6 +11808,278 @@
           }
         }
       }
+    },
+    "settings.voices.chooseTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pick the voice the assistant uses for its spoken replies."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायकले जवाफ बोल्दा प्रयोग गर्ने आवाज छान्नुहोस्।"
+          }
+        }
+      }
+    },
+    "settings.voices.sampleNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every Listen button speaks this sentence:"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "प्रत्येक 'सुन्नुहोस्' बटनले यो वाक्य बोल्छ:"
+          }
+        }
+      }
+    },
+    "settings.voices.google": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google voice (Nepali)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल आवाज (नेपाली)"
+          }
+        }
+      }
+    },
+    "settings.voices.chitwan": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chitwan voice (Nepali)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "चितवन आवाज (नेपाली)"
+          }
+        }
+      }
+    },
+    "settings.voices.moreGoogleSpeakers": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Other speakers of the Google voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल आवाजका अरू वक्ताहरू"
+          }
+        }
+      }
+    },
+    "settings.voices.speakerNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These use the Google voice already on your device (no extra download). Preview one before using it — every speaker sounds different."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यिनले तपाईंको यन्त्रमा भएकै गुगल आवाज प्रयोग गर्छन् (थप डाउनलोड छैन)। प्रयोग गर्नुअघि सुनेर हेर्नुहोस् — हरेक वक्ताको आवाज फरक हुन्छ।"
+          }
+        }
+      }
+    },
+    "settings.voices.googleSpeaker": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google voice — speaker %d"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल आवाज — वक्ता %d"
+          }
+        }
+      }
+    },
+    "settings.voices.listenButton": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listen"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.voices.useButton": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use this voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो आवाज प्रयोग गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.voices.currentVoice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हालको आवाज"
+          }
+        }
+      }
+    },
+    "settings.voices.listenHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Plays the sample sentence in this voice. Your current voice stays unchanged."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो आवाजमा नमूना वाक्य बजाउँछ। हालको आवाज बदलिँदैन।"
+          }
+        }
+      }
+    },
+    "settings.voices.useHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Asks you to confirm before switching to this voice."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो आवाजमा बदल्नुअघि पुष्टि माग्छ।"
+          }
+        }
+      }
+    },
+    "settings.voices.confirmTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change the voice?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज बदल्ने हो?"
+          }
+        }
+      }
+    },
+    "settings.voices.confirmMessage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assistant will speak using %@. You can change it again at any time."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायकले %@ प्रयोग गरेर बोल्नेछ। तपाईं जुनसुकै समय फेरि बदल्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "settings.voices.confirmApply": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apply"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "लागू गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.voices.installFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Couldn't install %@ in this build. Ask your family to rebuild the app with the voice files included."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो बिल्डमा %@ स्थापना गर्न सकिएन। परिवारलाई आवाज फाइलसहित एप फेरि बनाउन भन्नुहोस्।"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
