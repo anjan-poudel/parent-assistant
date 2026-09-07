@@ -88,6 +88,27 @@ final class VoicePipeline {
     /// Held only during the VAD-gated capture phase — how far past silence
     /// onset we've counted before firing `finish()`.
     private var silenceCounter: Int = 0
+    /// Capture-generation guard (TALK-CRASH-FIX, 2026-09-07).
+    ///
+    /// Every capture start — and every `stop()` — advances this counter.
+    /// Each capture's async tails (the STT completion, the "stuck in
+    /// listening" wedge guard, and the VAD end-of-utterance hop) capture
+    /// the generation they were started under and bail out when it no
+    /// longer matches. Without the guard, a completion settling a capture
+    /// that `stop()` already cancelled still ran the full post-capture
+    /// tail — `state = .routing`, `resumeWakeListening()` — against a
+    /// stopped pipeline. AppCoordinator maps that .routing onto the UI
+    /// session while it is `.stopped`: an illegal `.stopped → .understanding`
+    /// transition that assertion-crashed in DEBUG ("stale-tail" crash,
+    /// Talk-button tap while listening). The wedge guard had the reverse
+    /// bug — it checked only `state == .capturingCommand`, so a stale
+    /// guard could force-cancel a *newer* capture.
+    ///
+    /// Writes and checks are confined to the main queue (capture start,
+    /// `stop()`, and every tail), so the counter itself never races; only
+    /// `handleAudioBuffer`'s pre-existing `state` reads run on the
+    /// processing queue.
+    private var captureGeneration = 0
 
     init(audioSession: AudioSessionManager,
          audioEngine: AVAudioEngine,
@@ -113,10 +134,28 @@ final class VoicePipeline {
     }
 
     private func wireVADCallbacks() {
-        vad?.onEndOfUtterance = { [weak self] in
-            guard let self, self.state == .capturingCommand else { return }
-            self.emit("vad_end_of_utterance", outcome: "success")
-            self.speechRecognizer.finish()
+        // Re-wired at every capture start (handleWakeDetected) and after a
+        // VAD hot-swap — always on the main queue. The closure captures the
+        // capture generation at wire time so a fire that belongs to a
+        // superseded capture can never act on a newer one.
+        guard let vad else { return }
+        let generation = captureGeneration
+        vad.onEndOfUtterance = { [weak self] in
+            guard let self else { return }
+            // The VAD calls this from the pipeline's processing queue
+            // (vad.process runs there, via handleAudioBuffer), but the
+            // recognizer lifecycle is main-confined: a finish() issued
+            // from the processing queue raced a main-queue stop()/cancel()
+            // on the recognizers' internal buffers. Hop to main first,
+            // then re-check generation + state — by the time the hop runs
+            // the capture may already be over (stop(), or a newer capture
+            // started), and finish() must not cross generations.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.captureGeneration == generation,
+                      self.state == .capturingCommand else { return }
+                self.emit("vad_end_of_utterance", outcome: "success")
+                self.speechRecognizer.finish()
+            }
         }
     }
 
@@ -167,6 +206,11 @@ final class VoicePipeline {
     }
 
     func stop() {
+        // Invalidate any in-flight capture BEFORE tearing the recognizer
+        // down: its completion (settled by the cancel below, possibly
+        // synchronously) must not run the post-capture tail against a
+        // stopped pipeline — see `captureGeneration` (TALK-CRASH-FIX).
+        captureGeneration += 1
         wakeWordEngine.stop()
         vad?.stop()
         speechRecognizer.cancel()
@@ -294,6 +338,12 @@ final class VoicePipeline {
         // `simulateWakeWordDetection()` through this same path and must
         // keep working with listening switched off.
         guard state == .idle, wakeWordGate?.allowsWakeDetection ?? true else { return }
+        // A fresh capture epoch: the tails scheduled below (STT
+        // completion, wedge guard, VAD end-of-utterance) all capture
+        // `generation` and are inert once a stop() or a newer capture
+        // bumps the counter — see `captureGeneration` (TALK-CRASH-FIX).
+        captureGeneration += 1
+        let generation = captureGeneration
         state = .capturingCommand
         pcmBuffer.removeAll()
         silenceCounter = 0
@@ -311,9 +361,11 @@ final class VoicePipeline {
             }
             if audioEngine.isRunning { audioEngine.stop() }
         } else {
-            // Push mode: our tap stays live. Prime the VAD.
+            // Push mode: our tap stays live. Prime the VAD and wire its
+            // end-of-utterance callback to THIS capture's generation.
             vad?.reset()
             vad?.start(endOfUtteranceMs: Self.endOfUtteranceMs)
+            wireVADCallbacks()
         }
 
         // `Self.captureTimeoutSeconds` after startListening, if we haven't
@@ -340,13 +392,30 @@ final class VoicePipeline {
         // unaffected; this only widens the worst-case "truly wedged"
         // ceiling, it doesn't change the common-case latency.
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.captureTimeoutSeconds + Self.wedgeGuardMarginSeconds) { [weak self] in
-            guard let self, self.state == .capturingCommand else { return }
+            // Generation guard: this wedge belongs to the capture started
+            // above. It previously checked only `state == .capturingCommand`,
+            // so a wedge left over from a recycled capture could force-cancel
+            // a brand-new capture ~18 s in. With the guard, a stale wedge
+            // (stop(), or a newer capture) is a no-op.
+            guard let self, self.captureGeneration == generation,
+                  self.state == .capturingCommand else { return }
             self.state = .processing
             self.speechRecognizer.cancel()
         }
 
         speechRecognizer.startListening(timeout: Self.captureTimeoutSeconds) { [weak self] result in
             guard let self else { return }
+            // Generation guard: this completion may be settling a capture
+            // that stop() already invalidated (cancel settles the
+            // recognizer, which completes this closure). Running the tail
+            // then would flip `state = .routing` against the stopped
+            // pipeline; AppCoordinator maps that .routing onto the UI
+            // session's `.stopped → .understanding` — an illegal
+            // transition that assertion-crashed in DEBUG (the "stale-tail"
+            // Talk-button crash, TALK-CRASH-FIX). Stale completions are
+            // dropped whole: stop() already reset the VAD/state, or a
+            // newer capture owns the tail.
+            guard self.captureGeneration == generation else { return }
             self.vad?.stop()
             self.state = .routing
             switch result {

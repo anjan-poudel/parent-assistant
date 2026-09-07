@@ -500,6 +500,22 @@ final class AppCoordinator: ObservableObject {
     /// surfaces that as an error with a truthful caption.
     private var voiceStartWatchdog: DispatchWorkItem?
 
+    /// Transient localized notice shown on the Talk button's status line
+    /// after a long-press reset (TALK-CRASH-FIX, 2026-09-07) — e.g.
+    /// "Voice reset. I'm ready." Cleared after `voiceResetNoticeSeconds`
+    /// and whenever a NEW capture begins (handlePipelineState
+    /// .capturingCommand), so a live cycle never shares its line with
+    /// stale feedback.
+    @Published private(set) var voiceResetNotice: String?
+    /// Token-guards the auto-clear: only the timer issued by the LATEST
+    /// show may clear — a repeat reset inside the window must not have
+    /// its fresh notice wiped by the previous notice's timer.
+    private var voiceResetNoticeToken = 0
+    /// Seconds the post-reset notice stays on the status line — long
+    /// enough for a slow read, short enough not to linger into the next
+    /// turn.
+    private static let voiceResetNoticeSeconds: TimeInterval = 4
+
     /// `start()` is idempotent — the onboarding wizard and Home both call
     /// it (spec §4.2: wizard runs before voice engages).
     private var started = false
@@ -1360,6 +1376,10 @@ final class AppCoordinator: ObservableObject {
             cancelVoiceWatchdog()
             cancelVoiceStartWatchdog()
         case .capturingCommand:
+            // A fresh capture supersedes any post-reset notice: the
+            // status line must speak for the LIVE cycle, not the last
+            // reset (TALK-CRASH-FIX, 2026-09-07).
+            clearVoiceResetNotice()
             // Redesign spec §3.1/§6: the live-caption pill must not show
             // the PREVIOUS utterance's transcript while a new one is being
             // captured — clear BOTH transcript buffers at the start of
@@ -1435,13 +1455,26 @@ final class AppCoordinator: ObservableObject {
         voiceWatchdog = nil
     }
 
-    /// Stops and restarts the voice pipeline — the recovery path for a
-    /// wedged talk cycle. Also the manual escape hatch: the Talk button
-    /// calls this when tapped mid-cycle. Spoken re-prompt included so the
-    /// user knows the assistant is listening again.
-    func recoverVoiceCycle() {
+    /// Stops and restarts the voice pipeline — the ONE recovery core for
+    /// a wedged or cancelled talk cycle. Every recycle path runs through
+    /// here: the "stuck in listening" watchdog, the Talk-button tap
+    /// escape hatch (`recoverVoiceCycle`) and the Talk-button long-press
+    /// reset (`resetVoiceActivation`). One teardown sequence means one
+    /// set of cancel-safe semantics to reason about (a `stop()` during an
+    /// in-flight capture bumps the pipeline's capture generation, so the
+    /// cancelled capture's stale completion tails are dropped instead of
+    /// being run against the stopped session — TALK-CRASH-FIX,
+    /// 2026-09-07).
+    ///
+    /// Speaks nothing itself; the caller supplies the follow-up on the
+    /// restart completion (re-prompt on tap, status notice on long-press
+    /// reset). Called from main (button/watchdog paths); the start
+    /// completion arrives on main.
+    private func recycleVoicePipeline(
+        onRestart completion: @escaping (Result<Void, Error>) -> Void
+    ) {
         cancelVoiceWatchdog()
-        print("[AppCoordinator] recovering voice cycle — recycling pipeline")
+        print("[AppCoordinator] recycling voice pipeline")
         voicePipeline?.stop()
         armVoiceStartWatchdog()
         voicePipeline?.start { [weak self] result in
@@ -1453,8 +1486,77 @@ final class AppCoordinator: ObservableObject {
                 self.voiceError = "\(err)"
                 self.voiceState = .error("\(err)")
             }
+            completion(result)
         }
-        speak(key: "router.reprompt")
+    }
+
+    /// Tap escape hatch + watchdog recovery: recycle the pipeline, and —
+    /// once the restart has actually landed (`.idle`) — speak the
+    /// re-prompt so the user knows the assistant is listening again.
+    ///
+    /// 2026-09-07 (TALK-CRASH-FIX): the re-prompt used to be spoken
+    /// BEFORE the restart completed. `speak()` then ran while the session
+    /// was still `.stopped`; when the restart delivered `.idle`,
+    /// `handlePipelineState` mapped it through `speakingCount > 0` to
+    /// `.speaking` — a `.stopped → .speaking` transition the state
+    /// machine rejects (DEBUG assertionFailure crash; the second half of
+    /// the Talk-button crash). Deferring the speech to the restart
+    /// completion keeps the session on the table's legal path:
+    /// `.stopped → .idle → .speaking`.
+    func recoverVoiceCycle() {
+        cancelVoiceWatchdog()
+        print("[AppCoordinator] recovering voice cycle — recycling pipeline")
+        recycleVoicePipeline { [weak self] result in
+            guard let self, case .success = result else { return }
+            self.speak(key: "router.reprompt")
+        }
+    }
+
+    /// Long-press reset of the Talk button (TALK-CRASH-FIX, 2026-09-07):
+    /// the "give up and go home" path. Holding the hero ~2 s cancels the
+    /// current talk cycle (or re-primes a dead/errored pipeline) through
+    /// the SAME `recycleVoicePipeline` core as a tap — but a reset must
+    /// not talk AT the user (it usually follows a wedged cycle they are
+    /// trying to silence), so instead of a spoken re-prompt it shows the
+    /// transient `voiceResetNotice` on the button's status line. The hero
+    /// itself passes through the recycle's brief `.stopped` ("Voice off")
+    /// flip before the restarted pipeline lands `.idle` — the honest
+    /// "reset happened" visual.
+    ///
+    /// Offered from `.idle`, `.listening`, `.transcribing`,
+    /// `.understanding`, `.error` and `.stopped` — see
+    /// `VoiceSessionState.supportsTalkReset`. The Home view gates the
+    /// gesture on that property too; the guard here is the
+    /// coordinator-side backstop (`.speaking` / `.awaitingConfirmation`
+    /// keep their plain tap semantics).
+    func resetVoiceActivation() {
+        guard voiceSession.state.supportsTalkReset else { return }
+        print("[AppCoordinator] talk long-press reset — recycling pipeline to idle")
+        recycleVoicePipeline { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.showVoiceResetNotice()
+            case .failure(let err):
+                self.voiceError = "\(err)"
+                self.voiceState = .error("\(err)")
+            }
+        }
+    }
+
+    private func showVoiceResetNotice() {
+        voiceResetNoticeToken += 1
+        let token = voiceResetNoticeToken
+        voiceResetNotice = L10n.str("voice.resetDone", locale: activeLocale)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.voiceResetNoticeSeconds) { [weak self] in
+            guard let self, self.voiceResetNoticeToken == token else { return }
+            self.voiceResetNotice = nil
+        }
+    }
+
+    private func clearVoiceResetNotice() {
+        voiceResetNoticeToken += 1
+        voiceResetNotice = nil
     }
 
     // MARK: - Pipeline start watchdog
