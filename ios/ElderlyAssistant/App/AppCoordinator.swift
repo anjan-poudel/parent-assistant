@@ -1748,6 +1748,57 @@ final class AppCoordinator: ObservableObject {
         ))
     }
 
+    // MARK: - WhatsApp contact-sync hint (wa-sync-hint, 2026-09-07)
+
+    /// The Phone leaf's "Open WhatsApp" hint-button target: WhatsApp
+    /// people only reach the system address book — which the leaf's
+    /// search sweeps — after the user enables WhatsApp's OWN
+    /// "Sync contacts" device setting (WhatsApp → Settings → Privacy),
+    /// something this app can only guide the user to, never flip.
+    /// Probes FIRST, like every app open path: if WhatsApp vanished
+    /// since the hint card rendered, the honest not-installed line is
+    /// announced instead of a silent dead tap (the `performAppLaunch`
+    /// rule). One `contact_leaf_launch` event per attempt names the
+    /// outcome.
+    func openWhatsAppContacts() {
+        let locale = activeLocale
+        let appName = L10n.str("app.name.whatsapp", locale: locale)
+        guard let url = URL(string: "whatsapp://"), canOpenWhatsApp(url) else {
+            let text = L10n.fmt("apps.announce.notInstalled", locale: locale, appName)
+            setOutcome(icon: "exclamationmark.triangle.fill", text: text)
+            speak(text: text)
+            observabilityBus.emit(ObservabilityEvent(
+                component: "contact_leaf_launch",
+                eventType: "tap",
+                durationMs: nil,
+                outcome: "whatsapp:notInstalled",
+                errorCode: nil,
+                metadata: [:]  // no contact identifiers — C9 policy
+            ))
+            return
+        }
+        DispatchQueue.main.async { UIApplication.shared.open(url) }
+        let text = L10n.fmt("apps.announce.opened", locale: locale, appName)
+        setOutcome(icon: "person.2.badge.gearshape", text: text)
+        speak(text: text)
+        observabilityBus.emit(ObservabilityEvent(
+            component: "contact_leaf_launch",
+            eventType: "tap",
+            durationMs: nil,
+            outcome: "whatsapp:opened",
+            errorCode: nil,
+            metadata: [:]  // no contact identifiers — C9 policy
+        ))
+    }
+
+    /// `UIApplication.canOpenURL` must run on the main thread (the same
+    /// rule `SystemCallLinkOpener` holds to). Taps land on main, but
+    /// keep the guarantee instead of inheriting whoever calls us.
+    private func canOpenWhatsApp(_ url: URL) -> Bool {
+        if Thread.isMainThread { return UIApplication.shared.canOpenURL(url) }
+        return DispatchQueue.main.sync { UIApplication.shared.canOpenURL(url) }
+    }
+
     // MARK: - Voice-triggered call & message (trial wiring)
     //
     // Deliberately scoped to the LLM-interpreted path only —
