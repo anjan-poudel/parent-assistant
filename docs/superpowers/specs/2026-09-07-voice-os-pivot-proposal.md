@@ -96,14 +96,18 @@ caregiver app while iOS is the parent device.
    reconcile ai-sdd state drift. Fold into first plan's preconditions.
 2. **Track 1 · Slice A: Background escalation machinery** — submit BGTaskScheduler
    medication check, `UNUserNotificationCenterDelegate` for ack deadlines, time-sensitive
-   notifications, keychain-as-database fix, strip phantom Info.plist background modes.
+   notifications, keychain-as-database fix, strip phantom Info.plist background modes,
+   `FamilyNotifier` stub → honest failure/unavailable state (critique Stage 0).
 3. **Track 2 · Slice A: Voice-OS shell v1** — FIRST SPEC (chosen). Kernel speak-queue +
    notification read-aloud + morning briefing.
 4. **Track 1 · Slice B: Family alerts + relay + pairing** — real FamilyNotifier path,
    double-ratchet broker, device pairing. Foundation of the caregiver app.
 5. **Caregiver app v1** — settings, schedules, plugin management (Android can go first).
-6. Later: auth (enrolment, lockout, liveness), app-control registry, dialog manager,
-   plugin manifest v2, MLOps.
+6. **Track 2 · Slice C: Repair model** — universal voice actions (undo/repeat/
+   read-state/correct/cancel/ask-missing/escalate) on top of the shell's speak-queue
+   and `OutcomeSummary.undo` slot. Then app-control registry + dialog manager.
+7. Later: auth (enrolment, lockout, liveness), My Day expansion ("what is next?",
+   "what did I miss?"), plugin manifest v2 with capability injection, MLOps.
 
 ## 6. Productionisation hardening roadmap
 
@@ -162,3 +166,57 @@ caregiver app while iOS is the parent device.
 - Don't fork the STT stack mid-WhisperKit migration (`ios-mvp-voice` unmerged).
 - Respect the Gemini daily cost cap; on-device-first constitution.
 - TTS espeak-ng GPL question open (App Store blocker).
+
+## 9. First-principles alignment (per docs/first-principles-project-critique.md)
+
+Adopted 2026-09-07. The critique's ordering matches this proposal's sequencing; the
+mapping is now explicit:
+
+```text
+Trust            -> Track 1 slices (hardening, Stage 0: make current claims true)
+Reliable voice   -> Track 2 slices (shell v1, repair model, app control)
+My Day           -> briefing (shell v1) grown into the unified daily planner
+Caregiver        -> Track 1 Slice B + caregiver app v1
+Native iOS depth -> health/emergency phases (later)
+Providers        -> one official adapter at a time, last
+```
+
+**Adopted recommendations (non-destructive):**
+
+1. **Honest product framing.** "Personal operating system" stays as the *internal*
+   architectural ambition; external language uses the critique's defensible framing
+   ("voice-first daily-life layer for iPhone users in their own language") and
+   measurable promises ("ask for today's plan in Nepali", "get clear confirmation of
+   what was saved"). No health-monitoring / emergency / 24-7 claims until those
+   implementations pass their release gates (critique §2.4, §4.6, Decision 5).
+2. **My Day is the product center.** The morning briefing is the seed of a unified
+   deterministic daily planner (medication, routines, calendar, tasks, shopping,
+   family calls). Next Track 2 slices after shell v1: "what is next?", "what did I
+   miss?", "repeat that". An LLM may phrase, never prioritise — deterministic ranking
+   (critique §5.2, Decision 2).
+3. **Repair model is a first-class voice capability.** Universal voice actions as the
+   next Track 2 slice: undo last safe mutation, repeat last confirmation, read current
+   state, correct one field, cancel pending confirmation, ask what's missing, escalate
+   to caregiver. `OutcomeSummary` already carries an `undo` slot — wire it for safe
+   mutations (critique §3.2).
+4. **Plugin discipline.** Plugins stay compiled-in (no marketplace). Adopt capability
+   injection: replace blanket `GeminiClient` + bus in `PluginExecutionContext` with a
+   declared `PluginCapabilities` (storage, non-critical reminders, provider registry,
+   speaking) — least privilege, better App Review story (critique §4.2, Decision 3).
+   Rule: no new plugin enters implementation until one core workflow passes its
+   end-to-end reliability gate (§4.1). Entity bags get per-plugin runtime schemas with
+   rejection before side effects (§4.3).
+5. **Stage 0 folded into Track 1 Slice A.** Explicitly added: `FamilyNotifier` stub
+   becomes an *honest failure/unavailable state* until the broker exists (never a
+   silent success); PII lock-screen/debug sweep; misleading health-monitoring copy
+   removed in the groundwork doc sweep.
+6. **Contradictions resolved in groundwork.** The on-device/cloud routing matrix
+   (critique §4.5 table) is written into constitution during the cleanup; native
+   per-platform decision replaces React Native (already planned).
+7. **Voice-criticality taxonomy** (voice-critical / voice-preferred / touch-admin)
+   adopted as a spec requirement for every new feature (§3.5).
+8. **Workflow quality gate.** Golden corpus grows from utterance-level to
+   workflow-level: correct end-state / attempted workflow per language, tracking
+   correct mutation, confirmation, language, recovery, no false success (§3.4).
+9. **Settings ownership.** Parent-facing vs caregiver-facing vs safety-core boundaries
+   are created in the caregiver-app slice, not later (§4.4).
