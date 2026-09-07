@@ -131,6 +131,107 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// appliance photo + overlay). AppCoordinator publishes it;
     /// ContentView renders the sheet.
     func presentPluginView(_ view: AnyView)
+
+    /// Voice-driven contact search (voice-contact-search, 2026-09-07):
+    /// the keyword pre-route ("मैयाको फोन नम्बर खोज" / "maiya ko phone
+    /// khoja") requests a Phone-screen search. The coordinator publishes
+    /// it so HomeView can push the Call leaf and the leaf can prefill
+    /// its search field with `query` (nil = navigate but leave the
+    /// field empty). Zero-touch hands-free: nothing is spoken here —
+    /// the leaf announces the result once the search has run.
+    func requestContactSearch(query: String?)
+
+    /// [INTENT-TOOLS] (2026-09-07) Tool-capability surface. True only when
+    /// the coordinator's interpreter chain can answer open-domain
+    /// questions from LIVE web data (Gemini Google-Search grounding). The
+    /// router yields the deterministic weather pre-answer ("weather data
+    /// is unavailable on-device") to the interpreter when this is true —
+    /// with the cloud on, a forecast question deserves a real grounded
+    /// forecast, not the no-data answer; with it false (on-device stack,
+    /// cloud disabled, or brain unavailable), the honest deterministic
+    /// answer stands. Deliberately a REQUIREMENT with the default in the
+    /// extension below: an extension-only member (no requirement) binds
+    /// statically when looked up through a protocol-typed reference, and
+    /// `CommandRouter` holds its coordinator as `VoiceCommandCoordinating?`
+    /// — the extension default would then shadow `AppCoordinator`'s
+    /// opt-in and the weather yield could never fire in production.
+    var canAnswerLiveQuestionsFromWeb: Bool { get }
+
+    /// [LOCAL-TOOLS] (2026-09-07) Local-tools stack surface. True only when
+    /// the coordinator's voice engine is the ON-DEVICE stack
+    /// (`VoiceEngineStack == .onDevice`). The router fires the live
+    /// weather/search tools only on that stack: the Gemini cloud stack
+    /// answers open-domain questions natively (grounded search), so the
+    /// local tools would be redundant — and gated off — there. Same
+    /// requirement-with-extension-default pattern as
+    /// `canAnswerLiveQuestionsFromWeb` (see above for why a requirement is
+    /// mandatory when the router holds the coordinator as a protocol
+    /// reference).
+    var isOnDeviceStack: Bool { get }
+
+    /// [DIRECTIONS] (2026-09-07) Navigation-target surface: the places a
+    /// voice-navigation request may drive to — saved places and family
+    /// contacts that carry a non-empty address, merged and trimmed by the
+    /// coordinator (`AppCoordinator` builds this from `SavedPlaceStore`
+    /// + `FamilyContactStore`). Requirement-with-extension-default pattern
+    /// like the tool surfaces above: the router holds the coordinator as
+    /// a protocol reference, so an extension-only member would bind
+    /// statically and the coordinator's candidates could never reach the
+    /// directions stage. The default `[]` keeps every conformer that does
+    /// not opt in (existing mocks) on exactly the pre-directions
+    /// behavior — with no candidates the stage can only resolve the bare
+    /// home, and its default handlers stay silent.
+    var navigationCandidates: [DirectionsCandidate] { get }
+
+    /// [DIRECTIONS] (2026-09-07) Executes a resolved navigation request
+    /// (default home / a saved place / a relative's address). The
+    /// coordinator resolves the target to a concrete address, picks the
+    /// map surface (`NavigationMapPolicy`), and owns every spoken line —
+    /// including the honest fallbacks (`directions.noHome` when no home
+    /// is saved, `directions.mapMissing` when no surface opens).
+    func requestNavigation(to target: DirectionsRoute.PlaceTarget)
+
+    /// [DIRECTIONS] (2026-09-07) Ambiguity walk: the decider found
+    /// several candidates close to the spoken name ("मैया" — a saved
+    /// place AND a relative), and the coordinator must never guess a
+    /// PLACE any more than the call path guesses a person. The
+    /// coordinator pends the candidates (setting
+    /// `isAwaitingNavigationDisambiguation`), and RETURNS the localized
+    /// yes/no question the router speaks — the first candidate asked
+    /// first ("के मैयाको घर लैजाऊँ?"). Returns nil when it could not
+    /// pend; the router then ends the turn without speech rather than
+    /// route a directions utterance onward.
+    func requestNavigationDisambiguation(targets: [DirectionsCandidate]) -> String?
+
+    /// [DIRECTIONS] (2026-09-07) True while a navigation ambiguity walk
+    /// is outstanding. Widens the router's confirmation path exactly like
+    /// `isAwaitingCallConfirmation`: the yes/no on the next transcript
+    /// goes to `handleConfirmationResponse` (which walks the pending
+    /// candidates), and the generic medication-flavored confirmation
+    /// speech is skipped.
+    var isAwaitingNavigationDisambiguation: Bool { get }
+}
+
+/// [INTENT-TOOLS] (2026-09-07) Tool-capability default. The default keeps
+/// every conformer that does not explicitly opt in (all mocks/doubles
+/// across the app and the test target) on the fully deterministic path —
+/// only a coordinator that explicitly returns true yields weather to the
+/// live-web interpreter. [LOCAL-TOOLS] (2026-09-07) `isOnDeviceStack` rides
+/// the same pattern: the default false leaves every existing conformer on
+/// its exact pre-tool behavior; only `AppCoordinator` (and a scripted mock
+/// under test) opt in.
+extension VoiceCommandCoordinating {
+    var canAnswerLiveQuestionsFromWeb: Bool { false }
+    var isOnDeviceStack: Bool { false }
+    // [DIRECTIONS] (2026-09-07) Navigation defaults — see the requirement
+    // docs above. Every member is inert: no candidates, nothing pending,
+    // a silent requestNavigation/requestNavigationDisambiguation. Only a
+    // coordinator that explicitly opts in (AppCoordinator, and a scripted
+    // mock under test) makes the directions stage do anything.
+    var navigationCandidates: [DirectionsCandidate] { [] }
+    var isAwaitingNavigationDisambiguation: Bool { false }
+    func requestNavigation(to target: DirectionsRoute.PlaceTarget) {}
+    func requestNavigationDisambiguation(targets: [DirectionsCandidate]) -> String? { nil }
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -155,6 +256,8 @@ final class CommandRouter {
         case blockedSensitiveAction
         case emergencyTriggered
         case callConfirmed
+        case contactSearchRequested
+        case navigationRequested
         case unrecognised(transcript: String)
     }
 
@@ -169,18 +272,52 @@ final class CommandRouter {
     private let pluginRegistry: PluginRegistry?
     private let geminiClient: GeminiClient?
 
+    // [LOCAL-TOOLS] (2026-09-07) Local-tool seams. Every one defaults to
+    // dormant, so pre-existing router construction sites (AppCoordinator
+    // aside) and every existing router test keep compiling and behaving
+    // exactly as before: nil search config / transports / fetcher factory
+    // means the tools can never fire.
+    private let searchConfigStore: SearchConfigStore?
+    /// Location seam for the weather tool — a FACTORY, because
+    /// `LocationFetcher` is strictly one request per instance (its
+    /// delegate + self-retention live exactly one request). The router
+    /// asks the factory for a fresh fetcher per weather question.
+    private let locationFetcherFactory: (() -> LocationFetching)?
+    private let weatherTransport: LocalToolTransport?
+    private let searchTransport: LocalToolTransport?
+    private let searchQuotaDefaults: UserDefaults
+
+    /// [TOOL-DEBUG-LOG] (2026-09-07) Encrypted on-device debug log of
+    /// every local-tool (weather/search) request + outcome — the store
+    /// behind Settings → Tool requests. Nil = dormant (pre-existing
+    /// construction sites and legacy tests behave exactly as before);
+    /// `AppCoordinator` injects its store. See `logToolRequest`.
+    private let localToolLogStore: LocalToolLogStore?
+
     init(coordinator: VoiceCommandCoordinating,
          observabilityBus: ObservabilityBus,
          speaker: Speaker? = nil,
          interpreter: CommandInterpreter = NullCommandInterpreter(),
          pluginRegistry: PluginRegistry? = nil,
-         geminiClient: GeminiClient? = nil) {
+         geminiClient: GeminiClient? = nil,
+         searchConfigStore: SearchConfigStore? = nil,
+         locationFetcherFactory: (() -> LocationFetching)? = nil,
+         weatherTransport: LocalToolTransport? = nil,
+         searchTransport: LocalToolTransport? = nil,
+         searchQuotaDefaults: UserDefaults = .standard,
+         localToolLogStore: LocalToolLogStore? = nil) {
         self.coordinator = coordinator
         self.observabilityBus = observabilityBus
         self.speaker = speaker
         self.interpreter = interpreter
         self.pluginRegistry = pluginRegistry
         self.geminiClient = geminiClient
+        self.searchConfigStore = searchConfigStore
+        self.locationFetcherFactory = locationFetcherFactory
+        self.weatherTransport = weatherTransport
+        self.searchTransport = searchTransport
+        self.searchQuotaDefaults = searchQuotaDefaults
+        self.localToolLogStore = localToolLogStore
     }
 
     @discardableResult
@@ -255,20 +392,27 @@ final class CommandRouter {
             // Call confirmations speak their own contextual response
             // (AppCoordinator.handleConfirmationResponse) — the generic
             // "confirmationYes"/"confirmationNo" catalog text below is
-            // medication-flavored and would be wrong here.
+            // medication-flavored and would be wrong here. The
+            // [DIRECTIONS] (2026-09-07) navigation ambiguity walk rides
+            // the same exemption: the coordinator speaks each candidate
+            // question (or the honest `directions.cancelled` line) as it
+            // walks the pending list, and a yes that resolves the walk
+            // reports `.navigationRequested`, never a medication ack.
             let isCallConfirmation = coordinator?.isAwaitingCallConfirmation == true
+            let isNavigationDisambiguation = coordinator?.isAwaitingNavigationDisambiguation == true
             if Self.isYesResponse(raw) {
                 coordinator?.handleConfirmationResponse(.yes)
                 emit(eventType: "confirmation_yes", outcome: "success")
-                if !isCallConfirmation {
+                if !isCallConfirmation && !isNavigationDisambiguation {
                     speak(key: "router.confirmationYes")
                 }
-                return isCallConfirmation ? .callConfirmed : .acknowledgedMedication
+                if isCallConfirmation { return .callConfirmed }
+                return isNavigationDisambiguation ? .navigationRequested : .acknowledgedMedication
             }
             if Self.isNoResponse(raw) {
                 coordinator?.handleConfirmationResponse(.no)
                 emit(eventType: "confirmation_no", outcome: "success")
-                if !isCallConfirmation {
+                if !isCallConfirmation && !isNavigationDisambiguation {
                     speak(key: "router.confirmationNo")
                 }
                 return .unrecognised(transcript: raw)
@@ -292,6 +436,80 @@ final class CommandRouter {
             return safetyResult
         }
 
+        // Voice-driven CONTACT SEARCH (voice-contact-search, 2026-09-07):
+        // "मैयाको फोन नम्बर खोज" / "maiya ko phone khoja" / "contact
+        // search <name>" opens the Phone screen with the extracted name
+        // already searching — zero-touch hands-free. Same deterministic
+        // pattern as `TopicPreAnswer`: no model, no IntentPrompt tokens
+        // (the prompt budget is pinned by IntentPromptTests).
+        //
+        // Placement: AFTER the safety net + confirmation flow (emergency /
+        // med-ack / yes-no utterances win exactly as before) and BEFORE
+        // the topic table + interpreter, so a greeting-prefixed search is
+        // a search, never small talk. The decision type carries its own
+        // direct-call veto ("फोन नम्बर लगाऊ" is a CALL intent — golden
+        // corpus), so the sensitive-call path below can never be shadowed.
+        // Nothing is spoken here: the Call leaf announces the outcome
+        // once results have actually rendered.
+        if case .openPhone(let query) = VoiceContactSearchRoute.decide(transcript: raw) {
+            coordinator?.requestContactSearch(query: query)
+            emit(eventType: "contact_search_command", outcome: "success")
+            return .contactSearchRequested
+        }
+
+        // Voice-driven DIRECTIONS (directions task, 2026-09-07): "मलाई
+        // घर लैजाऊ" (take me home), "मैयाको घर लैजाऊ" (take me to
+        // Maiya's home), "अस्पताल लैजाऊ" (take me to the hospital)
+        // starts navigation to the default home, a saved place, or a
+        // relative with an address. Same deterministic pattern as the
+        // contact-search stage above: no model, no IntentPrompt tokens
+        // (the prompt budget is pinned by IntentPromptTests).
+        //
+        // Placement: AFTER the safety net + confirmation flow + contact
+        // search — emergency / med-ack / yes-no / phone-search utterances
+        // win exactly as before, and a directions marker can never shadow
+        // them — and BEFORE the topic table, so a transport verb can
+        // never be answered as small talk. The decision type's own vetoes
+        // keep call talk ("फोन लैजाऊ" = carry the phone), medication
+        // markers ("दवाई लैजाऊ" = take the medicine) and third-person
+        // transport ("छोरालाई स्कुल लैजाऊ") off this stage entirely.
+        //
+        // The stage only DECIDES and hands off: candidates come from
+        // `navigationCandidates` (the coordinator's merged saved places +
+        // address-carrying relatives), and the coordinator owns every
+        // spoken line — execution speech, the no-home fallback, the
+        // map-surface chain, and the ambiguity walk.
+        switch DirectionsRoute.decide(transcript: raw,
+                                      candidates: coordinator?.navigationCandidates ?? []) {
+        case .navigate(let target):
+            coordinator?.requestNavigation(to: target)
+            emit(eventType: "directions_command", outcome: "success")
+            return .navigationRequested
+        case .ambiguous(let targets):
+            // Several candidates scored within the margin — ask, never
+            // guess a place. The returned question is the first
+            // candidate's yes/no prompt ("के … लैजाने?"); the user's
+            // answer comes back through the confirmation path widened by
+            // `isAwaitingNavigationDisambiguation`. A nil return means
+            // the coordinator could not pend: end the turn without
+            // speech rather than route a directions utterance onward.
+            if let question = coordinator?.requestNavigationDisambiguation(targets: targets) {
+                emit(eventType: "directions_disambiguation", outcome: "info")
+                speak(text: question)
+            }
+            return .navigationRequested
+        case .unknownPlace:
+            // Honest fallback: a place-name query matched no saved place
+            // and no address-carrying relative. Visible card + speech,
+            // exactly like the other fallback lines (the live-caption
+            // pill is gone by now, so spoken-only would vanish).
+            emit(eventType: "directions_command", outcome: "unknown_place")
+            speakWithVisibleOutcome(key: "directions.placeNotFound")
+            return .unrecognised(transcript: raw)
+        case .notDirections:
+            break   // not directions business — continue the ladder
+        }
+
         // [NO-GIBBERISH] Deterministic TOPIC PRE-ANSWERS (2026-09-07): the
         // most common Q&A topics — weather, time, date, greetings — are
         // answered from a pre-written, honest table (`TopicPreAnswer`)
@@ -305,18 +523,101 @@ final class CommandRouter {
         // block can never be shadowed by a topic answer.
         if let topic = TopicPreAnswer.match(transcript: raw),
            !Self.sensitiveCallPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
+            // [WEATHER-ROUTING] (2026-09-07) Weather routing matrix —
+            // which stack answers a WEATHER question:
+            //
+            //   · Gemini stack with the cloud brain live
+            //     (`canAnswerLiveQuestionsFromWeb` — cloud enabled AND
+            //     cloud brain available, mirroring the router's own
+            //     escalation guard): the topic is NOT intercepted here —
+            //     the weather question falls through to the
+            //     search-grounded interpreter below, which answers from
+            //     live web data. Intercepting with a dead answer would be
+            //     wrong on the one stack that CAN answer.
+            //   · On-device stack (`isOnDeviceStack`): the live
+            //     `WeatherTool` path (`fireLocalWeatherLookup`) — a named
+            //     place in the question is geocoded and answered for that
+            //     place, otherwise the current device location is used;
+            //     every live reply is hedged as forecast data
+            //     (`weather.replySource`).
+            //   · Neither (no key, cloud brain down/downloading, or any
+            //     other stack): the honest static
+            //     `topic.weather.unavailable` line below — never a
+            //     fabricated forecast.
+            //
+            // Time/date/greeting topics are unchanged: local facts, not
+            // web lookups, deterministic on every stack. The whole table
+            // runs BEFORE the interpreter/search stages, so a weather
+            // question can never reach the generic web-search fallback
+            // (Arncliffe report: stale snippet spoken as fact).
+            let liveWeb = coordinator?.canAnswerLiveQuestionsFromWeb ?? false
+            if topic == .weather && liveWeb {
+                // Fall through to the interpreter below.
+            } else if topic == .weather && (coordinator?.isOnDeviceStack ?? false) {
+                // [LOCAL-TOOLS] (2026-09-07) On the ON-DEVICE stack a
+                // weather question deserves the live open-meteo reading,
+                // not the deterministic "unavailable" line (see
+                // `fireLocalWeatherLookup` for the named-place /
+                // device-location flow). Any failure falls back to the
+                // EXISTING static `topic.weather.unavailable` answer —
+                // never a fabricated number, never a web snippet. The
+                // Gemini stack never reaches here (liveWeb already
+                // yielded to its grounded interpreter).
+                fireLocalWeatherLookup(transcript: raw)
+                return .unrecognised(transcript: raw)
+            } else {
+                let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+                let text = TopicPreAnswer.reply(for: topic, locale: locale, now: clock())
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "command_router",
+                    eventType: "topic_pre_answer",
+                    durationMs: nil,
+                    outcome: "success",
+                    errorCode: nil,
+                    metadata: ["topic": topic.rawValue]
+                ))
+                coordinator?.noteGenericReply(text)
+                speak(text: text, locale: locale)
+                return .unrecognised(transcript: raw)
+            }
+        }
+
+        // [INTENT-TOOLS] (2026-09-07) Deterministic CALCULATOR — see
+        // `CalculatorTool` for the full contract. This stage is the same
+        // pre-route pattern as TopicPreAnswer: after the safety net and
+        // topic answers, before any interpreter, on BOTH stacks, default
+        // on. The tool decides (nil → route on; computed/divisionByZero →
+        // answered here, the interpreter is never consulted for provable
+        // arithmetic).
+        if let decision = CalculatorTool.decide(raw) {
             let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
-            let text = TopicPreAnswer.reply(for: topic, locale: locale, now: clock())
-            observabilityBus.emit(ObservabilityEvent(
-                component: "command_router",
-                eventType: "topic_pre_answer",
-                durationMs: nil,
-                outcome: "success",
-                errorCode: nil,
-                metadata: ["topic": topic.rawValue]
-            ))
-            coordinator?.noteGenericReply(text)
-            speak(text: text, locale: locale)
+            switch decision {
+            case .computed(let calculation):
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "command_router",
+                    eventType: "intent_tool_calculator",
+                    durationMs: nil,
+                    outcome: "success",
+                    errorCode: nil,
+                    metadata: [:]
+                ))
+                let text = CalculatorTool.reply(for: calculation, locale: locale)
+                coordinator?.noteGenericReply(text)
+                speak(text: text, locale: locale)
+            case .divisionByZero:
+                // Honest error — the utterance WAS arithmetic but has no
+                // numeric answer; visible + spoken (elderly UX: an error
+                // spoken-only vanishes with the caption pill).
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "command_router",
+                    eventType: "intent_tool_calculator",
+                    durationMs: nil,
+                    outcome: "error",
+                    errorCode: "division_by_zero",
+                    metadata: [:]
+                ))
+                speakWithVisibleOutcome(key: "calculator.error.divByZero")
+            }
             return .unrecognised(transcript: raw)
         }
 
@@ -498,13 +799,427 @@ final class CommandRouter {
         // hearing assistance.
         switch coordinator?.brainReadiness ?? .available {
         case .available:
-            speak(key: "router.reprompt")
+            // [LOCAL-TOOLS] (2026-09-07) Web-search hook: this is the
+            // post-interpreter ABSTENTION point (an interpreter listened
+            // and did not understand — or did not exist), and the generic
+            // re-prompt below is what an abstained utterance normally
+            // gets. When the utterance is question-shaped AND a search
+            // credential pair is configured, the search tool answers
+            // instead — the generic re-prompt remains the fallback for
+            // everything the tool declines (not question-shaped, not
+            // configured, quota-capped, failed or empty results). The
+            // `fireWebSearchIfDue` cap path itself ends by speaking the
+            // generic re-prompt, so a capped day sounds exactly as
+            // honest as an unanswered one.
+            if !fireWebSearchIfDue(raw) {
+                speak(key: "router.reprompt")
+            }
         case .downloadingBrain:
             speakWithVisibleOutcome(key: "router.brainDownloading")
         case .needsSetup:
             speakWithVisibleOutcome(key: "router.brainNeedsSetup")
         }
         return .unrecognised(transcript: raw)
+    }
+
+    // MARK: - [LOCAL-TOOLS] Live weather + web search (on-device stack)
+
+    /// Timeout for the search-tool round-trip — same budget as
+    /// `WeatherTool.fetchTimeoutSeconds` (the router builds the search
+    /// request itself; only the weather tool owns its URLRequest).
+    private static let searchFetchTimeoutSeconds: TimeInterval = 8
+
+    /// [LOCAL-TOOLS] (2026-09-07) On-device live-weather path — called
+    /// from the topic pre-answer stage when `.weather` matched and the
+    /// stack is on-device (see the routing matrix there). Announces
+    /// "weather.checking", then answers the question that was ASKED:
+    ///
+    ///   1. A named place in the utterance ("is it raining in Arncliffe",
+    ///      "काठमाडौंको मौसम कस्तो छ?") is geocoded through open-meteo's
+    ///      free geocoding API (same transport seam as the forecast) and
+    ///      the forecast is read for THAT point. [WEATHER-ROUTING]
+    ///      (2026-09-07) This is the direct fix for the Arncliffe
+    ///      report: a question about a place must answer for that place,
+    ///      never for wherever the device happens to be.
+    ///   2. Any geocode failure (transport error, nothing found,
+    ///      malformed payload) falls back to the DEVICE location
+    ///      (point-of-use permission) — an honest answer about the
+    ///      device's place beats silence.
+    ///   3. No named place → device location directly.
+    ///
+    /// Every remaining failure (no transport, no fetcher factory,
+    /// location denied/unavailable/timed out, forecast transport failure,
+    /// malformed forecast payload) delivers the EXISTING static
+    /// `topic.weather.unavailable` answer with a `local_tools` `weather`
+    /// `fail` event — the deterministic no-data line is unchanged, and a
+    /// wrong or fabricated temperature is impossible. Live replies are
+    /// carded + spoken wrapped in the `weather.replySource` hedge (see
+    /// `deliverLiveWeather`) — forecast data is never presented as
+    /// unmediated ground truth.
+    private func fireLocalWeatherLookup(transcript raw: String) {
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        // Announce first — the user hears the lookup start before the
+        // (possibly multi-second) geocode/location + fetch round-trip.
+        speak(key: "weather.checking")
+
+        // [TOOL-DEBUG-LOG] (2026-09-07) Request capture BEFORE the round-
+        // trip: the RAW utterance is the logged query (place extraction
+        // below is the tool's own parsing — the log keeps what the user
+        // actually asked) and the stopwatch starts here so `durationMs`
+        // spans the whole lookup on every completion path.
+        let query = raw
+        let attemptStartedAt = Date()
+
+        Task { [weak self] in
+            guard let self else { return }
+            guard let transport = self.weatherTransport else {
+                await MainActor.run {
+                    self.deliverWeatherFallback(locale: locale, query: query,
+                                                startedAt: attemptStartedAt)
+                }
+                return
+            }
+
+            // Step 1 — a named place answers for that place. Any geocode
+            // failure falls through to the device fix below. The place is
+            // extracted ONCE up front so the device path below can tell
+            // "answered for a place that was asked but not geocoded"
+            // (log outcome "fallback") apart from "no place was named"
+            // (log outcome "ok") without re-parsing the utterance.
+            let namedPlace = WeatherTool.placeName(in: raw)
+            if let askedPlace = namedPlace {
+                do {
+                    let place = try await WeatherTool.fetchGeocode(name: askedPlace,
+                                                                   transport: transport)
+                    let conditions = try await WeatherTool.fetchCurrent(
+                        latitude: place.latitude, longitude: place.longitude, transport: transport)
+                    await MainActor.run {
+                        self.deliverLiveWeather(conditions, placeName: place.name, locale: locale,
+                                                query: query, outcome: "ok",
+                                                startedAt: attemptStartedAt)
+                    }
+                    return
+                } catch {
+                    // Fall through — an honest answer about the device's
+                    // place beats silence.
+                }
+            }
+
+            // Step 2 — device location. Create + start the fetcher on the
+            // main actor: CLLocationManager delivers delegate callbacks
+            // on the runloop of the thread that created it, so it must be
+            // born on main. (MainActor.run's body is synchronous, so the
+            // request is started from an inner @MainActor task and its
+            // exactly-once completion is bridged back through a
+            // continuation.)
+            let fixResult: Result<LocationFix, LocationFetchFailure>? = await withCheckedContinuation { continuation in
+                Task { @MainActor in
+                    guard let fetcher = self.locationFetcherFactory?() else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    fetcher.requestCurrentLocation { result in
+                        continuation.resume(returning: result)
+                    }
+                }
+            }
+            guard case .success(let fix)? = fixResult else {
+                await MainActor.run {
+                    self.deliverWeatherFallback(locale: locale, query: query,
+                                                startedAt: attemptStartedAt)
+                }
+                return
+            }
+            do {
+                let conditions = try await WeatherTool.fetchCurrent(latitude: fix.latitude,
+                                                                    longitude: fix.longitude,
+                                                                    transport: transport)
+                await MainActor.run {
+                    self.deliverLiveWeather(conditions, placeName: fix.placeName, locale: locale,
+                                            query: query,
+                                            outcome: namedPlace == nil ? "ok" : "fallback",
+                                            startedAt: attemptStartedAt)
+                }
+            } catch {
+                await MainActor.run {
+                    self.deliverWeatherFallback(locale: locale, query: query,
+                                                startedAt: attemptStartedAt)
+                }
+            }
+        }
+    }
+
+    /// [WEATHER-ROUTING] (2026-09-07) Live-conditions delivery — the
+    /// single point where a real open-meteo reading reaches the user:
+    /// the localized conditions sentence (`WeatherTool.reply`) is WRAPPED
+    /// in the `weather.replySource` hedge ("According to the weather
+    /// service, …") so a live reading is presented as forecast data,
+    /// never as unmediated ground truth. The bare sentence stays the
+    /// tool's own contract (WeatherToolTests pin it directly); the router
+    /// applies the hedge here, once, for every delivery path (geocoded
+    /// named place and device location alike).
+    private func deliverLiveWeather(_ conditions: WeatherTool.CurrentConditions,
+                                    placeName: String?,
+                                    locale: Locale,
+                                    query: String,
+                                    outcome: String,
+                                    startedAt: Date) {
+        emitLocalTool(eventType: "weather", outcome: "ok")
+        let conditionsText = WeatherTool.reply(for: conditions, placeName: placeName, locale: locale)
+        let text = L10n.fmt("weather.replySource", locale: locale, conditionsText)
+        coordinator?.noteGenericReply(text)
+        speak(text: text, locale: locale)
+        // [TOOL-DEBUG-LOG] (2026-09-07) The bus event stays "ok" on BOTH
+        // live deliveries (a live reading reached the user — the local-
+        // tools tests pin that); the DEBUG LOG's `outcome` is finer: the
+        // caller passes "fallback" when the named place failed to geocode
+        // and the device reading answered in its place.
+        logToolRequest(kind: .weather, query: query, response: text, outcome: outcome,
+                       statusCode: nil, durationMs: Self.elapsedMilliseconds(since: startedAt))
+    }
+
+    /// The tool's failure delivery — the unchanged deterministic weather
+    /// answer. Mirrors the pre-tool static block exactly (same text via
+    /// `TopicPreAnswer.reply(for: .weather)`, same carding + speak path);
+    /// the observability event differs deliberately: `topic_pre_answer`
+    /// is replaced by `local_tools`/`weather`/`fail` so a fallback that
+    /// followed a tool attempt is distinguishable from one that never
+    /// had live data to try.
+    private func deliverWeatherFallback(locale: Locale, query: String, startedAt: Date) {
+        emitLocalTool(eventType: "weather", outcome: "fail")
+        let text = TopicPreAnswer.reply(for: .weather, locale: locale)
+        coordinator?.noteGenericReply(text)
+        speak(text: text, locale: locale)
+        // [TOOL-DEBUG-LOG] (2026-09-07) Failure delivery → one "fail"
+        // entry carrying the honest no-data line the user actually heard.
+        logToolRequest(kind: .weather, query: query, response: text, outcome: "fail",
+                       statusCode: nil, durationMs: Self.elapsedMilliseconds(since: startedAt))
+    }
+
+    /// [LOCAL-TOOLS] (2026-09-07) The web-search hook — see the
+    /// `.available` call site. Returns true when the hook TOOK the turn
+    /// (announced something — the caller must NOT speak the generic
+    /// re-prompt); false when the utterance is not search business and
+    /// the caller speaks the re-prompt as before.
+    ///
+    /// Firing contract (all must hold):
+    ///  1. Deterministic-topic veto below (defense in depth).
+    ///  2. On-device stack (Gemini answers natively — never here).
+    ///  3. `SearchConfigStore.isConfigured` — search is family opt-in.
+    ///  4. `SearchTool.isQuestionShaped` — statements and noise never
+    ///     leave the device.
+    ///  5. Quota remains — otherwise the cap line + the generic re-prompt
+    ///     are spoken instead (the user hears WHY nothing was searched).
+    ///
+    /// The utterance never produced an intent/topic/tool by construction:
+    /// this hook runs only at the routeKeywordRemainder abstention point.
+    private func fireWebSearchIfDue(_ raw: String) -> Bool {
+        // [WEATHER-ROUTING] (2026-09-07) Deterministic-topic veto: a
+        // weather question must NEVER be answered from a web snippet
+        // (Arncliffe report — a stale snippet spoken as fact). The topic
+        // pre-answer stage above already intercepts every matched
+        // utterance before the interpreter, so a topic utterance cannot
+        // reach this hook TODAY — the veto is defense in depth against
+        // future reordering of the routing ladder, and it costs one
+        // cheap table match per abstention. Any matched topic (weather,
+        // time, date, greeting) is vetoed: all of them have a
+        // deterministic answer upstream that search must never bypass.
+        guard TopicPreAnswer.match(transcript: raw) == nil else {
+            return false
+        }
+        guard coordinator?.isOnDeviceStack == true,
+              let config = searchConfigStore, config.isConfigured,
+              let apiKey = config.apiKey,
+              let searchEngineID = config.searchEngineID,
+              SearchTool.isQuestionShaped(raw) else {
+            return false
+        }
+        // [TOOL-DEBUG-LOG] (2026-09-07) The hook is taking the turn —
+        // snapshot the request text + stopwatch BEFORE the quota check
+        // and the network round-trip, so the cap path and every delivery
+        // path below record the same original query and an honest
+        // duration. Guard failures above never reach here — a declined
+        // utterance is not a search attempt and logs nothing (matching
+        // the `local_tools` event gating).
+        let query = raw
+        let attemptStartedAt = Date()
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let quotaDefaults = searchQuotaDefaults
+        let remaining = SearchQuota.remaining(
+            today: Date(),
+            count: SearchQuota.readCount(defaults: quotaDefaults),
+            limit: SearchQuota.dailyLimit,
+            defaults: quotaDefaults
+        )
+        guard remaining > 0 else {
+            // Cap path: the cap notice is VISIBLE (the live-caption pill
+            // is long gone by now) and both lines are spoken as one
+            // uninterrupted sequence — the generic re-prompt follows the
+            // reason, exactly as an unanswered day would sound.
+            emitLocalTool(eventType: "search", outcome: "cap")
+            let capText = L10n.str("search.capReached", locale: locale)
+            coordinator?.noteGenericReply(capText)
+            speakSequentially([capText, L10n.str("router.reprompt", locale: locale)],
+                              locale: locale)
+            logToolRequest(kind: .search, query: query, response: capText, outcome: "cap",
+                           statusCode: nil,
+                           durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
+            return true
+        }
+        // Attempt-based accounting: the count ticks at FIRE time (an
+        // honest "we tried N times today"), before the network round-trip.
+        speak(key: "search.looking")
+        _ = SearchQuota.increment(defaults: quotaDefaults)
+        Task { [weak self] in
+            guard let self else { return }
+            guard let transport = self.searchTransport else {
+                await MainActor.run {
+                    self.deliverSearchFallback(locale: locale, query: query,
+                                               startedAt: attemptStartedAt)
+                }
+                return
+            }
+            var request = URLRequest(url: SearchTool.requestURL(query: raw,
+                                                                apiKey: apiKey,
+                                                                searchEngineId: searchEngineID))
+            request.timeoutInterval = Self.searchFetchTimeoutSeconds
+            do {
+                let (data, response) = try await transport.fetchData(for: request)
+                // [TOOL-DEBUG-LOG] (2026-09-07) The status code is captured
+                // here, before the delivery hop — a non-200 that falls
+                // back still records the code it got (nil only when the
+                // transport threw before any HTTP response).
+                let statusCode = (response as? HTTPURLResponse)?.statusCode
+                let httpOK = statusCode == 200
+                let summary = httpOK
+                    ? SearchTool.summaryReply(for: SearchTool.parseSearchJSON(data: data),
+                                              locale: locale)
+                    : nil
+                guard let summary else {
+                    await MainActor.run {
+                        self.deliverSearchFallback(locale: locale, query: query,
+                                                   startedAt: attemptStartedAt,
+                                                   statusCode: statusCode)
+                    }
+                    return
+                }
+                await MainActor.run {
+                    self.emitLocalTool(eventType: "search", outcome: "ok")
+                    self.coordinator?.noteGenericReply(summary)
+                    self.speak(text: summary, locale: locale)
+                    self.logToolRequest(kind: .search, query: query, response: summary,
+                                        outcome: "ok", statusCode: statusCode,
+                                        durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
+                }
+            } catch {
+                await MainActor.run {
+                    self.deliverSearchFallback(locale: locale, query: query,
+                                               startedAt: attemptStartedAt)
+                }
+            }
+        }
+        return true
+    }
+
+    /// Failure/empty delivery for the search tool — the SAME generic
+    /// re-prompt the abstention point would have spoken, plus a
+    /// `local_tools` `search` `fail` event. Never a fabricated answer,
+    /// never a dead end.
+    private func deliverSearchFallback(locale: Locale, query: String,
+                                       startedAt: Date, statusCode: Int? = nil) {
+        emitLocalTool(eventType: "search", outcome: "fail")
+        speak(key: "router.reprompt")
+        // [TOOL-DEBUG-LOG] (2026-09-07) Failure/empty delivery → one
+        // "fail" entry carrying the honest re-prompt line the user heard
+        // (and the HTTP status when a non-200 response caused it).
+        let reprompt = L10n.str("router.reprompt", locale: locale)
+        logToolRequest(kind: .search, query: query, response: reprompt, outcome: "fail",
+                       statusCode: statusCode,
+                       durationMs: Self.elapsedMilliseconds(since: startedAt))
+    }
+
+    // MARK: - [TOOL-DEBUG-LOG] Local-tool request log
+
+    /// [TOOL-DEBUG-LOG] (2026-09-07) One debug-log entry per local-tool
+    /// request (weather or search) — the helper behind every hook point
+    /// in the [LOCAL-TOOLS] section above. `query` was snapshotted
+    /// BEFORE the request went out; this call adds the outcome + what the
+    /// app answered on the completion path:
+    ///
+    ///   · ok — a live answer was delivered: the weather conditions
+    ///     sentence or the search summary (the spoken text),
+    ///   · fallback — weather only: the NAMED place failed to resolve
+    ///     (geocode error/empty) and the live DEVICE reading answered
+    ///     instead — still a live reading, but for the wrong place,
+    ///   · cap — search only: quota exhausted before any request; the cap
+    ///     line is the response,
+    ///   · fail — no live answer: the honest static weather no-data line
+    ///     or the generic search re-prompt was delivered.
+    ///
+    /// Scope note: the Gemini grounding path ([INTENT-TOOLS] — the cloud
+    /// stack's search-grounded interpreter) is deliberately OUT of scope.
+    /// These hooks sit in the LOCAL-tools stages, which only the
+    /// on-device stack reaches; cloud-stack answers never pass through
+    /// them, so nothing from Gemini is logged here.
+    ///
+    /// Privacy (C9): the entry carries raw user text but goes straight to
+    /// the encrypted on-device store — it never reaches the observability
+    /// bus (PII-free by policy) and never a console log. Nil store
+    /// (dormant default) = no-op, exactly the pre-tool behavior.
+    private func logToolRequest(kind: LocalToolLogEntry.Kind, query: String, response: String,
+                                outcome: String, statusCode: Int?, durationMs: Int?) {
+        guard let localToolLogStore else { return }
+        localToolLogStore.record(LocalToolLogEntry(
+            kind: kind, query: query, response: response, outcome: outcome,
+            statusCode: statusCode, durationMs: durationMs
+        ))
+    }
+
+    /// Whole-millisecond wall-clock span between the attempt start
+    /// (snapshotted before the round-trip) and a completion point —
+    /// `durationMs` for the tool log. Clamped at zero so a sub-millisecond
+    /// turn (the cap path) never records a negative duration.
+    private static func elapsedMilliseconds(since start: Date) -> Int {
+        max(0, Int(Date().timeIntervalSince(start) * 1000))
+    }
+
+    /// Speaks several already-resolved lines as ONE uninterrupted
+    /// sequence. The speaker cancels in-flight speech at the start of
+    /// each `speak(_:)` call, so naive back-to-back `speak(key:)` calls
+    /// would cut each other off — multi-line outcomes (the search cap
+    /// notice followed by the re-prompt) must await each line inside a
+    /// single task. Carding: each line is transcripted
+    /// (`noteAssistantSpoke`); the caller cards the outcome itself
+    /// (`noteGenericReply`) before calling, when a visible card is due.
+    private func speakSequentially(_ lines: [String], locale: Locale) {
+        guard let speaker, !lines.isEmpty else { return }
+        for line in lines {
+            coordinator?.noteAssistantSpoke(line)
+        }
+        coordinator?.noteSpeakingStarted()
+        Task {
+            for line in lines {
+                await speaker.speak(line, locale: locale)
+            }
+            coordinator?.noteSpeakingEnded()
+        }
+    }
+
+    /// [LOCAL-TOOLS] (2026-09-07) `local_tools` observability events —
+    /// one per local-tool turn. Component `local_tools`, eventType
+    /// `weather`/`search`, outcome `ok`/`cap`/`fail` (weather has no cap:
+    /// it is rate-limited by the user's own asking, and open-meteo needs
+    /// no key). No metadata keys are attached, so nothing user-identifying
+    /// (the query, the coordinates) ever reaches the bus.
+    private func emitLocalTool(eventType: String, outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "local_tools",
+            eventType: eventType,
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]
+        ))
     }
 
     // MARK: - LLM dispatch

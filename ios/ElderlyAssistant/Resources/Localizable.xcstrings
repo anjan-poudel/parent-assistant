@@ -11,6 +11,312 @@
         }
       }
     },
+    "app.name.calendar": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पात्रो"
+          }
+        }
+      }
+    },
+    "app.name.chrome": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Chrome"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्रोम"
+          }
+        }
+      }
+    },
+    "app.name.facebook": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Facebook"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फेसबुक"
+          }
+        }
+      }
+    },
+    "app.name.facetime": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "FaceTime"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फेसटाइम"
+          }
+        }
+      }
+    },
+    "app.name.gmail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gmail"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जीमेल"
+          }
+        }
+      }
+    },
+    "app.name.googlemaps": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google Maps"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल नक्सा"
+          }
+        }
+      }
+    },
+    "app.name.imo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Imo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "इमो"
+          }
+        }
+      }
+    },
+    "app.name.instagram": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Instagram"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "इन्स्टाग्राम"
+          }
+        }
+      }
+    },
+    "app.name.mail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mail"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेल"
+          }
+        }
+      }
+    },
+    "app.name.maps": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Maps"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नक्सा"
+          }
+        }
+      }
+    },
+    "app.name.messages": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messages"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सन्देश"
+          }
+        }
+      }
+    },
+    "app.name.messenger": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेसेन्जर"
+          }
+        }
+      }
+    },
+    "app.name.phone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Phone"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोन"
+          }
+        }
+      }
+    },
+    "app.name.telegram": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Telegram"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "टेलिग्राम"
+          }
+        }
+      }
+    },
+    "app.name.viber": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Viber"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भाइबर"
+          }
+        }
+      }
+    },
+    "app.name.whatsapp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WhatsApp"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ह्वाट्सएप"
+          }
+        }
+      }
+    },
+    "app.name.youtube": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YouTube"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "युट्युब"
+          }
+        }
+      }
+    },
+    "app.name.zoom": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Zoom"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जुम"
+          }
+        }
+      }
+    },
     "appliance.closerPhotoHint": {
       "extractionState": "manual",
       "localizations": {
@@ -147,52 +453,86 @@
         }
       }
     },
-    "appliance.manual.title": {
+    "appliance.manual.cancel": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Manuals"
+            "value": "Cancel"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "म्यानुअलहरू"
+            "value": "रद्द गर्नुहोस्"
           }
         }
       },
       "extractionState": "manual"
     },
-    "appliance.manual.openHint": {
+    "appliance.manual.deleteA11y": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Saved guides for your appliances"
+            "value": "Delete manual"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "तपाईंका उपकरणका बचत गरिएका गाइडहरू"
+            "value": "म्यानुअल मेट्नुहोस्"
           }
         }
       },
       "extractionState": "manual"
     },
-    "appliance.manual.searchPlaceholder": {
+    "appliance.manual.deleteAction": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Search manuals"
+            "value": "Delete"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "म्यानुअल खोज्नुहोस्"
+            "value": "मेटाउनुहोस्"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.deleteConfirmMessage": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Its saved photo and steps will be removed."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यसको बचत गरिएको फोटो र चरणहरू हटाइनेछन्।"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.deleteConfirmTitle": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete this manual?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो म्यानुअल मेट्ने हो?"
           }
         }
       },
@@ -232,86 +572,18 @@
       },
       "extractionState": "manual"
     },
-    "appliance.manual.deleteAction": {
+    "appliance.manual.openFailedMessage": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Delete"
+            "value": "It may have been deleted. The list has been refreshed."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "मेटाउनुहोस्"
-          }
-        }
-      },
-      "extractionState": "manual"
-    },
-    "appliance.manual.deleteA11y": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Delete manual"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "म्यानुअल मेट्नुहोस्"
-          }
-        }
-      },
-      "extractionState": "manual"
-    },
-    "appliance.manual.deleteConfirmTitle": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Delete this manual?"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "यो म्यानुअल मेट्ने हो?"
-          }
-        }
-      },
-      "extractionState": "manual"
-    },
-    "appliance.manual.deleteConfirmMessage": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Its saved photo and steps will be removed."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "यसको बचत गरिएको फोटो र चरणहरू हटाइनेछन्।"
-          }
-        }
-      },
-      "extractionState": "manual"
-    },
-    "appliance.manual.cancel": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Cancel"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "रद्द गर्नुहोस्"
+            "value": "यो मेटिएको हुन सक्छ। सूची नयाँ गरिएको छ।"
           }
         }
       },
@@ -334,18 +606,52 @@
       },
       "extractionState": "manual"
     },
-    "appliance.manual.openFailedMessage": {
+    "appliance.manual.openHint": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "It may have been deleted. The list has been refreshed."
+            "value": "Saved guides for your appliances"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "यो मेटिएको हुन सक्छ। सूची नयाँ गरिएको छ।"
+            "value": "तपाईंका उपकरणका बचत गरिएका गाइडहरू"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.searchPlaceholder": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search manuals"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्यानुअल खोज्नुहोस्"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manuals"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्यानुअलहरू"
           }
         }
       },
@@ -432,6 +738,193 @@
           "stringUnit": {
             "state": "translated",
             "value": "तपाईंको फोटो हेर्दैछु…"
+          }
+        }
+      }
+    },
+    "apps.announce.notInstalled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ is not installed on this phone."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ यो फोनमा स्थापित छैन।"
+          }
+        }
+      }
+    },
+    "apps.announce.opened": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ खोल्दैछु।"
+          }
+        }
+      }
+    },
+    "apps.notInstalled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not installed on this phone"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनमा स्थापित छैन"
+          }
+        }
+      }
+    },
+    "apps.probeNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only apps installed on this phone can be added."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनमा स्थापित भएका एपहरू मात्र थप्न सकिन्छ।"
+          }
+        }
+      }
+    },
+    "calculator.error.divByZero": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can't divide by zero."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "शून्यले भाग गर्न सकिँदैन।"
+          }
+        }
+      }
+    },
+    "calculator.op.dividedBy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "divided by"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भाग"
+          }
+        }
+      }
+    },
+    "calculator.op.minus": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "minus"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "घटाउ"
+          }
+        }
+      }
+    },
+    "calculator.op.plus": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "plus"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जोड"
+          }
+        }
+      }
+    },
+    "calculator.op.times": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "times"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुणा"
+          }
+        }
+      }
+    },
+    "calculator.result": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ equals %2$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ बराबर %2$@ हुन्छ।"
+          }
+        }
+      }
+    },
+    "calculator.result.general": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The answer is %1$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जवाफ %1$@ हुन्छ।"
           }
         }
       }
@@ -827,6 +1320,74 @@
         }
       }
     },
+    "call.channel.messenger": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेसेन्जर"
+          }
+        }
+      }
+    },
+    "call.channel.messengerLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Messenger chat with %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ सँग मेसेन्जर च्याट खोल्नुहोस्"
+          }
+        }
+      }
+    },
+    "call.channel.whatsapp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WhatsApp"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ह्वाट्सएप"
+          }
+        }
+      }
+    },
+    "call.channel.whatsappLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open WhatsApp chat with %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ सँग ह्वाट्सएप च्याट खोल्नुहोस्"
+          }
+        }
+      }
+    },
     "call.contactsEmpty": {
       "extractionState": "manual",
       "localizations": {
@@ -840,6 +1401,74 @@
           "stringUnit": {
             "state": "translated",
             "value": "अहिलेसम्म कुनै पारिवारिक सम्पर्क थपिएको छैन"
+          }
+        }
+      }
+    },
+    "call.historyRow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent calls & messages"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हालसालैका कल र सन्देशहरू"
+          }
+        }
+      }
+    },
+    "call.openMessengerContacts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger contacts"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेसेन्जर सम्पर्कहरू"
+          }
+        }
+      }
+    },
+    "call.openWhatsApp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open WhatsApp"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ह्वाट्सएप खोल्नुहोस्"
+          }
+        }
+      }
+    },
+    "call.openWhatsAppContacts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WhatsApp contacts"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ह्वाट्सएप सम्पर्कहरू"
           }
         }
       }
@@ -946,6 +1575,23 @@
         }
       }
     },
+    "call.search.familyChip": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Family"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "परिवार"
+          }
+        }
+      }
+    },
     "call.search.loadFailed": {
       "extractionState": "manual",
       "localizations": {
@@ -980,6 +1626,74 @@
         }
       }
     },
+    "call.search.micFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The mic couldn't hear. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माइकले सुन्न सकेन। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "call.search.micLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search by voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बोलेर खोज्नुहोस्"
+          }
+        }
+      }
+    },
+    "call.search.micListening": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listening — say the name"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्दै छु — नाम भन्नुहोस्"
+          }
+        }
+      }
+    },
+    "call.search.micStopLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop listening"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्न रोक्नुहोस्"
+          }
+        }
+      }
+    },
     "call.search.moreAvailable": {
       "extractionState": "manual",
       "localizations": {
@@ -1010,6 +1724,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "कोही भेटिएन। अर्को नाम वा नम्बर लेख्नुहोस्।"
+          }
+        }
+      }
+    },
+    "call.search.openLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search contacts"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्पर्कहरू खोज्नुहोस्"
           }
         }
       }
@@ -1065,87 +1796,36 @@
         }
       }
     },
-    "call.search.familyChip": {
+    "call.search.spokenFound": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Family"
+            "value": "Found %@. Tap to call."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "परिवार"
+            "value": "%@ फेला पर्‍यो। कल गर्न थिच्नुहोस्।"
           }
         }
       }
     },
-    "call.channel.whatsapp": {
+    "call.search.spokenNotFound": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "WhatsApp"
+            "value": "No one found for %@."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "ह्वाट्सएप"
-          }
-        }
-      }
-    },
-    "call.channel.messenger": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Messenger"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "मेसेन्जर"
-          }
-        }
-      }
-    },
-    "call.channel.whatsappLabel": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open WhatsApp chat with %@"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ सँग ह्वाट्सएप च्याट खोल्नुहोस्"
-          }
-        }
-      }
-    },
-    "call.channel.messengerLabel": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open Messenger chat with %@"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ सँग मेसेन्जर च्याट खोल्नुहोस्"
+            "value": "%@ भेटिएन।"
           }
         }
       }
@@ -1184,6 +1864,125 @@
         }
       }
     },
+    "call.waSyncHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not seeing your WhatsApp people? In WhatsApp go to Settings → Privacy and turn on Sync contacts."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ह्वाट्सएपका सम्पर्कहरू देखिनुभएन? ह्वाट्सएपमा सेटिङ → गोपनीयतामा गएर सम्पर्क सिंक खोल्नुहोस्।"
+          }
+        }
+      }
+    },
+    "calling.defaultApp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default calling app"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पूर्वनिर्धारित कल एप"
+          }
+        }
+      }
+    },
+    "calling.defaultCaption": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This becomes the default call button; Messenger needs a per-contact handle."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो पूर्वनिर्धारित कल बटन बन्छ; मेसेन्जरका लागि सम्पर्कमा नाम चाहिन्छ।"
+          }
+        }
+      }
+    },
+    "cloudFallback.off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only the on-device brain answers."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यन्त्रमै भएको दिमागले मात्र जवाफ दिन्छ।"
+          }
+        }
+      }
+    },
+    "cloudFallback.on": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questions the local brain can't answer go to Gemini."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "स्थानीय दिमागले नसक्ने प्रश्न जेमिनीमा जान्छ।"
+          }
+        }
+      }
+    },
+    "cloudFallback.requiresKey": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs a Gemini API key in Settings → Gemini AI."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सेटिङ → जेमिनी AI मा API कुञ्जी चाहिन्छ।"
+          }
+        }
+      }
+    },
+    "cloudFallback.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask Gemini when I can't answer"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मैले जवाफ दिन नसके जेमिनीलाई सोध्ने"
+          }
+        }
+      }
+    },
     "common.back": {
       "extractionState": "manual",
       "localizations": {
@@ -1218,6 +2017,193 @@
         }
       }
     },
+    "directions.empty.addAccessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a place in Settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सेटिङमा ठाउँ थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.empty.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save your home, hospital and family houses in Settings — then come back and tap Go."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आफ्नो घर, अस्पताल र परिवारका घरहरू सेटिङमा बचत गर्नुहोस् — अनि फर्केर जाऊ थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "directions.goAccessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Let's go to %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ मा जाऔँ"
+          }
+        }
+      }
+    },
+    "directions.goLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जाऊ"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जाऊ"
+          }
+        }
+      }
+    },
+    "directions.search.micFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The mic couldn't hear — please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माइकले सुन्न सकेन — फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "directions.search.micLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search by voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बोलेर खोज्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.search.micListening": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listening — say a place or a person"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्दै छु — ठाउँ वा मान्छेको नाम भन्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.search.micStopLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop listening"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्न रोक्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.search.noResults": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No place or person named \"%@\" was found. Try a different name."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” नामको ठाउँ वा मान्छे भेटिएन। अर्को नाम लेख्नुहोस्।"
+          }
+        }
+      }
+    },
+    "directions.search.placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search places and people"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठाउँ र मान्छे खोज्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Directions"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जाने बाटो"
+          }
+        }
+      }
+    },
     "emergency.noContact": {
       "extractionState": "manual",
       "localizations": {
@@ -1231,6 +2217,261 @@
           "stringUnit": {
             "state": "translated",
             "value": "अझै कुनै आपतकालीन सम्पर्क राखिएको छैन। सेटिङमा थप्नुहोस्।"
+          }
+        }
+      }
+    },
+    "externalReminders.allDay": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All day"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दिनभरि"
+          }
+        }
+      }
+    },
+    "externalReminders.leadHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ minutes before timed items (all-day items always announce at 8:00 AM)."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "समय तोकिएका वस्तुको %@ मिनेट अघि (दिनभरिका वस्तु सधैं बिहान ८ बजे)।"
+          }
+        }
+      }
+    },
+    "externalReminders.leadTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notify minutes before"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कति मिनेट अघि सूचना दिने"
+          }
+        }
+      }
+    },
+    "externalReminders.notificationTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reminder"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्झना"
+          }
+        }
+      }
+    },
+    "externalReminders.statusDenied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar and Reminders access was denied — everything here still works, just without those items."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पात्रो र सम्झना पहुँच अस्वीकार गरियो — यहाँ सबै काम गर्छ, तर ती वस्तुहरू बिना।"
+          }
+        }
+      }
+    },
+    "externalReminders.statusError": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Something went wrong reading items — will try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "वस्तुहरू पढ्दा समस्या भयो — फेरि प्रयास गरिनेछ।"
+          }
+        }
+      }
+    },
+    "externalReminders.statusHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Events and reminders you keep in the iPhone's Calendar and Reminders apps can appear here too."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आईफोनको पात्रो र सम्झना एपमा राखेका घटना र सम्झनाहरू यहाँ पनि देखिन सक्छन्।"
+          }
+        }
+      }
+    },
+    "externalReminders.statusOn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On — events and reminders are checked regularly."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खोलिएको छ — पात्रो र सम्झनाहरू नियमित जाँचिन्छन्।"
+          }
+        }
+      }
+    },
+    "externalReminders.statusPartial": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Partial access — only some items can be read."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आंशिक पहुँच मात्र — केही वस्तुहरू मात्र पढ्न सकिन्छ।"
+          }
+        }
+      }
+    },
+    "externalReminders.toggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import from Calendar & Reminders"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पात्रो र सम्झना एपबाट ल्याउनुहोस्"
+          }
+        }
+      }
+    },
+    "family.addManually": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add manually"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आफैं थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "family.addSearch.allowBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow access, search their name, and the fields below fill in by themselves — or just type the details yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पहुँच दिनुहोस्, नाम खोज्नुहोस्, तलका क्षेत्र आफै भरिनेछन् — वा आफैं पनि लेख्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "family.addSearch.allowTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find them in your contacts"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंका सम्पर्कहरूमा खोज्नुहोस्"
+          }
+        }
+      }
+    },
+    "family.addSearch.deniedBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Contacts access is off, so the search is hidden. You can still add the details by typing them below."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्पर्कहरूको पहुँच बन्द भएकाले खोज लुकाइएको छ। तल आफैं लेखेर पनि विवरण थप्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "family.addSearch.placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search contacts"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्पर्क खोज्नुहोस्"
           }
         }
       }
@@ -1337,6 +2578,363 @@
         }
       }
     },
+    "family.photo.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "family.photo.change": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो परिवर्तन"
+          }
+        }
+      }
+    },
+    "family.photo.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "family.relationship.brother": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brother"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दाइ/भाइ"
+          }
+        }
+      }
+    },
+    "family.relationship.daughter": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daughter"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "छोरी"
+          }
+        }
+      }
+    },
+    "family.relationship.father": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Father"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बुबा"
+          }
+        }
+      }
+    },
+    "family.relationship.friend": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Friend"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "साथी"
+          }
+        }
+      }
+    },
+    "family.relationship.grandfather": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Grandfather"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हजुरबुबा"
+          }
+        }
+      }
+    },
+    "family.relationship.grandmother": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Grandmother"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हजुरआमा"
+          }
+        }
+      }
+    },
+    "family.relationship.husband": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Husband"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "श्रीमान"
+          }
+        }
+      }
+    },
+    "family.relationship.mother": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mother"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आमा"
+          }
+        }
+      }
+    },
+    "family.relationship.sister": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sister"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दिदी/बहिनी"
+          }
+        }
+      }
+    },
+    "family.relationship.son": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Son"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "छोरा"
+          }
+        }
+      }
+    },
+    "family.relationship.wife": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wife"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "श्रीमती"
+          }
+        }
+      }
+    },
+    "family.step.find": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find the contact"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्पर्क खोज्नुहोस्"
+          }
+        }
+      }
+    },
+    "family.step.indicator": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Step %d of 5"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "चरण %d / ५"
+          }
+        }
+      }
+    },
+    "family.step.messenger": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger handle"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेसेन्जर नाम"
+          }
+        }
+      }
+    },
+    "family.step.next": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अर्को"
+          }
+        }
+      }
+    },
+    "family.step.nickname": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nickname"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उपनाम"
+          }
+        }
+      }
+    },
+    "family.step.photo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो"
+          }
+        }
+      }
+    },
+    "family.step.relationship": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Relationship"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नाता"
+          }
+        }
+      }
+    },
     "festival.advanceBody": {
       "extractionState": "manual",
       "localizations": {
@@ -1401,6 +2999,193 @@
           "stringUnit": {
             "state": "translated",
             "value": "चाडपर्वको सम्झना"
+          }
+        }
+      }
+    },
+    "history.callbackLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Call %@ back"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ लाई फेरि फोन गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "history.channel.call": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Call"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कल"
+          }
+        }
+      }
+    },
+    "history.channel.message": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Message"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सन्देश"
+          }
+        }
+      }
+    },
+    "history.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing here yet. Calls and messages you make through the assistant will appear here."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यहाँ अहिले केही छैन। सहायकबाट गरिएका कल र सन्देशहरू यहाँ देखिनेछन्।"
+          }
+        }
+      }
+    },
+    "history.liveCall": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A call is in progress"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले कल भइरहेको छ"
+          }
+        }
+      }
+    },
+    "history.messageLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Message %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ लाई सन्देश पठाउनुहोस्"
+          }
+        }
+      }
+    },
+    "history.showMore": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show more"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "थप देखाउनुहोस्"
+          }
+        }
+      }
+    },
+    "history.timeNow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Just now"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भर्खरै"
+          }
+        }
+      }
+    },
+    "history.timeToday": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आज"
+          }
+        }
+      }
+    },
+    "history.timeYesterday": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yesterday"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हिजो"
+          }
+        }
+      }
+    },
+    "history.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recent activity"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हालसालैको गतिविधि"
           }
         }
       }
@@ -1626,6 +3411,23 @@
         }
       }
     },
+    "home.hub.appliance": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show Me"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "देखाउनुहोस्"
+          }
+        }
+      }
+    },
     "home.hub.calendar": {
       "extractionState": "manual",
       "localizations": {
@@ -1656,6 +3458,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "फोन"
+          }
+        }
+      }
+    },
+    "home.hub.directions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Directions"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बाटो"
           }
         }
       }
@@ -1707,23 +3526,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "सेटिङ"
-          }
-        }
-      }
-    },
-    "home.hub.appliance": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show Me"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "देखाउनुहोस्"
           }
         }
       }
@@ -1983,6 +3785,40 @@
         }
       }
     },
+    "home.quickAccess.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a quick app"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "द्रुत एप थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "home.quickAccess.caption": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quick access"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "द्रुत पहुँच"
+          }
+        }
+      }
+    },
     "home.setupCardHint": {
       "extractionState": "manual",
       "localizations": {
@@ -2013,6 +3849,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "अझै %lld काम बाँकी"
+          }
+        }
+      }
+    },
+    "intentLog.clear": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clear"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हटाउनुहोस्"
           }
         }
       }
@@ -2115,6 +3968,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "अहिलेसम्म कुनै गतिविधि छैन"
+          }
+        }
+      }
+    },
+    "intentLog.export": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "निर्यात गर्नुहोस्"
           }
         }
       }
@@ -2357,6 +4227,159 @@
         }
       }
     },
+    "messenger.handleHints.line1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In Messenger, open the person's profile."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेसेन्जरमा उहाँको प्रोफाइल खोल्नुहोस्।"
+          }
+        }
+      }
+    },
+    "messenger.handleHints.line2": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Their username is below their name."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नामको तल उहाँको मेसेन्जर नाम हुन्छ।"
+          }
+        }
+      }
+    },
+    "messenger.handleHints.line3": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask them directly if you're not sure."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "थाहा नभए उहाँलाई नै सोध्नुहोस्।"
+          }
+        }
+      }
+    },
+    "messenger.handleHints.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Where to find their Messenger username"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उहाँको मेसेन्जर नाम कहाँ भेटिन्छ"
+          }
+        }
+      }
+    },
+    "messenger.handlePrompt.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger opens a person's chat by username, not phone number. Ask them for their Messenger username."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेसेन्जरले फोन नम्बरबाट नभई नामबाट च्याट खोल्छ। उहाँको मेसेन्जर नाम सोध्नुहोस्।"
+          }
+        }
+      }
+    },
+    "messenger.handlePrompt.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "रद्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "messenger.handlePrompt.placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Username"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेसेन्जर नाम"
+          }
+        }
+      }
+    },
+    "messenger.handlePrompt.save": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुरक्षित गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "messenger.handlePrompt.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enter %@'s Messenger username"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को मेसेन्जर नाम लेख्नुहोस्"
+          }
+        }
+      }
+    },
     "model.active": {
       "extractionState": "manual",
       "localizations": {
@@ -2442,6 +4465,23 @@
         }
       }
     },
+    "model.name.intent-ne-gemma-q4km": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistant brain — Gemma 1B (Nepali)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायक दिमाग मोडेल — Gemma १B (नेपाली)"
+          }
+        }
+      }
+    },
     "model.name.llama-3.2-1b-instruct-q4km": {
       "extractionState": "manual",
       "localizations": {
@@ -2476,6 +4516,23 @@
         }
       }
     },
+    "model.name.piper-ne-female-v1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nepali voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नेपाली आवाज"
+          }
+        }
+      }
+    },
     "model.name.qwen3-1.7b-instruct-q4km": {
       "extractionState": "manual",
       "localizations": {
@@ -2506,23 +4563,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "सहायक तर्क मोडल (Qwen3 ४B)"
-          }
-        }
-      }
-    },
-    "model.name.piper-ne-female-v1": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nepali voice"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "नेपाली आवाज"
           }
         }
       }
@@ -2612,6 +4652,23 @@
         }
       }
     },
+    "model.name.whisper-large-v3-ne-v2-q5_1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nepali — Large (new version)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नेपाली — ठूलो (नयाँ संस्करण)"
+          }
+        }
+      }
+    },
     "model.name.whisper-large-v3-nepali-ggml": {
       "extractionState": "manual",
       "localizations": {
@@ -2659,6 +4716,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "बहुभाषी — सानो"
+          }
+        }
+      }
+    },
+    "model.name.whisperkit-ne-medium": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nepali — Medium · WhisperKit (fast)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नेपाली — मध्यम · WhisperKit (छिटो)"
           }
         }
       }
@@ -3060,13 +5134,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Family contact"
+            "value": "Family and friends"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "परिवारको सम्पर्क"
+            "value": "परिवार र साथीहरू"
           }
         }
       }
@@ -3475,6 +5549,159 @@
           "stringUnit": {
             "state": "translated",
             "value": "माफ गर्नुहोस्, अहिले सम्झना राख्न सकिएन।"
+          }
+        }
+      }
+    },
+    "quickApps.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "quickApps.addFor": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "quickApps.added": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Added"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "थपिएको छ"
+          }
+        }
+      }
+    },
+    "quickApps.allApps": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All apps"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सबै एपहरू"
+          }
+        }
+      }
+    },
+    "quickApps.capNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can keep up to 8 quick apps. Remove one before adding another."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंले ८ वटासम्म द्रुत एप राख्न सक्नुहुन्छ। अर्को थप्नु अघि एउटा हटाउनुहोस्।"
+          }
+        }
+      }
+    },
+    "quickApps.installed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Installed"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "स्थापित छ"
+          }
+        }
+      }
+    },
+    "quickApps.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "quickApps.search.placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search apps"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "एपहरू खोज्नुहोस्"
+          }
+        }
+      }
+    },
+    "quickApps.yourApps": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your apps"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंका एपहरू"
           }
         }
       }
@@ -4125,6 +6352,23 @@
         }
       }
     },
+    "router.modelReplyUnclear": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I'm sorry, I couldn't make sense of that. Please say it again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस्, मैले त्यो बुझ्न सकिनँ। कृपया फेरि भन्नुहोस्।"
+          }
+        }
+      }
+    },
     "router.musicStub": {
       "extractionState": "manual",
       "localizations": {
@@ -4243,176 +6487,6 @@
           }
         }
       }
-    },
-    "router.modelReplyUnclear": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "I'm sorry, I couldn't make sense of that. Please say it again."
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "माफ गर्नुहोस्, मैले त्यो बुझ्न सकिनँ। कृपया फेरि भन्नुहोस्।"
-        }
-      }
-    }
-    },
-    "topic.weather.unavailable": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "I'm sorry, I can't check the live weather yet. It will be available soon."
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "माफ गर्नुहोस्, म अहिले मौसम हेर्न सक्दिनँ। मौसमको जानकारी चाँडै उपलब्ध हुनेछ।"
-        }
-      }
-    }
-    },
-    "topic.greeting": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "Hello! How can I help you today?"
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "नमस्ते! आज म तपाईंलाई के मद्दत गर्न सक्छु?"
-        }
-      }
-    }
-    },
-    "topic.date.now": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "Today is %1$@."
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "आज %1$@, %2$@ हो।"
-        }
-      }
-    }
-    },
-    "topic.time.nowOnHour": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "It's %1$@ %2$@."
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "अहिले %2$@ %1$@ बजेको छ।"
-        }
-      }
-    }
-    },
-    "topic.time.nowWithMinutes": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "It's %1$@:%2$@ %3$@."
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "अहिले %3$@ %1$@ बजेर %2$@ मिनेट भयो।"
-        }
-      }
-    }
-    },
-    "topic.time.period.morning": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "in the morning"
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "बिहान"
-        }
-      }
-    }
-    },
-    "topic.time.period.afternoon": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "in the afternoon"
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "दिउँसो"
-        }
-      }
-    }
-    },
-    "topic.time.period.evening": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "in the evening"
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "बेलुका"
-        }
-      }
-    }
-    },
-    "topic.time.period.night": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "at night"
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "राति"
-        }
-      }
-    }
     },
     "router.reprompt": {
       "extractionState": "manual",
@@ -4635,6 +6709,227 @@
         }
       }
     },
+    "search.capReached": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The daily search limit is reached. Try again tomorrow."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजको खोज सीमा पुग्यो। भोलि फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "search.looking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Let me search…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खोज्दैछु…"
+          }
+        }
+      }
+    },
+    "search.sourceLine": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "— %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "— %@"
+          }
+        }
+      }
+    },
+    "searchSettings.apiKey": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google API key"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल API कुञ्जी"
+          }
+        }
+      }
+    },
+    "searchSettings.engineId": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search engine ID"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खोज इन्जिन ID"
+          }
+        }
+      }
+    },
+    "searchSettings.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Answer open questions by searching the web. Search fires only in on-device voice mode."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खुला प्रश्नको जवाफ वेब खोजेर दिन्छ। खोज अन-डिभाइस आवाज मोडमा मात्र चल्छ।"
+          }
+        }
+      }
+    },
+    "searchSettings.privacy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search queries are sent to Google; weather sends your location, or the place you name, to open-meteo."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खोज प्रश्नहरू गुगलमा पठाइन्छ; मौसमले तपाईंको स्थान वा तपाईंले भन्नुभएको ठाउँ open-meteo मा पठाउँछ।"
+          }
+        }
+      }
+    },
+    "searchSettings.quotaNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Up to 50 searches per day."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दिनमा बढीमा ५० पटक खोज्न सकिन्छ।"
+          }
+        }
+      }
+    },
+    "searchSettings.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove credentials"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "प्रमाणहरू हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "searchSettings.removeConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove the search credentials? Web search will stop until they are added again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खोज प्रमाणहरू हटाउने हो? फेरि थपेसम्म वेब खोज बन्द हुनेछ।"
+          }
+        }
+      }
+    },
+    "searchSettings.save": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुरक्षित गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "searchSettings.statusConnected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जोडिएको"
+          }
+        }
+      }
+    },
+    "searchSettings.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Web search"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "वेब खोज"
+          }
+        }
+      }
+    },
     "settings.about.version": {
       "extractionState": "manual",
       "localizations": {
@@ -4720,6 +7015,40 @@
         }
       }
     },
+    "settings.ai.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI models"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI मोडेल"
+          }
+        }
+      }
+    },
+    "settings.appearance.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Appearance"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "रूप"
+          }
+        }
+      }
+    },
     "settings.brain.selection": {
       "extractionState": "manual",
       "localizations": {
@@ -4737,19 +7066,19 @@
         }
       }
     },
-    "settings.ai.title": {
+    "settings.calling.title": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "AI models"
+            "value": "Calling"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "AI मोडेल"
+            "value": "कलिङ"
           }
         }
       }
@@ -4784,6 +7113,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "मेटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "settings.family.edit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्पादन गर्नुहोस्"
           }
         }
       }
@@ -4828,13 +7174,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Family & emergency contacts"
+            "value": "Family and friends"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "परिवारको सम्पर्क"
+            "value": "परिवार र साथीहरू"
           }
         }
       }
@@ -5349,6 +7695,108 @@
         }
       }
     },
+    "settings.toolLog.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tool requests"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उपकरण अनुरोधहरू"
+          }
+        }
+      }
+    },
+    "toolLog.capNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keeps the latest 200 requests."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पछिल्ला २०० अनुरोधहरू राखिन्छ।"
+          }
+        }
+      }
+    },
+    "toolLog.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No tool requests logged yet."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिलेसम्म कुनै उपकरण अनुरोध लग भएको छैन।"
+          }
+        }
+      }
+    },
+    "toolLog.export": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export log"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "लग निर्यात गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "toolLog.kind.search": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Web search"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "वेब खोज"
+          }
+        }
+      }
+    },
+    "toolLog.kind.weather": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weather"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मौसम"
+          }
+        }
+      }
+    },
     "settings.language.region": {
       "extractionState": "manual",
       "localizations": {
@@ -5549,6 +7997,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "गोपनीयता"
+          }
+        }
+      }
+    },
+    "settings.quickApps.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Quick apps"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "द्रुत एपहरू"
           }
         }
       }
@@ -5940,6 +8405,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "औषधि खानुभयो?"
+          }
+        }
+      }
+    },
+    "state.awaitingConfirmation.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Please confirm"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कृपया पुष्टि गर्नुहोस्"
           }
         }
       }
@@ -6352,6 +8834,23 @@
         }
       }
     },
+    "stt.name.whisperLargeNepaliV2": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nepali — Large (new version)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नेपाली — ठूलो (नयाँ संस्करण)"
+          }
+        }
+      }
+    },
     "stt.name.whisperMediumFinetunedNepali": {
       "extractionState": "manual",
       "localizations": {
@@ -6399,6 +8898,244 @@
           "stringUnit": {
             "state": "translated",
             "value": "नेपाली — सानो (पुरानो संस्करण)"
+          }
+        }
+      }
+    },
+    "theme.cream": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Warm cream"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हल्का क्रीम"
+          }
+        }
+      }
+    },
+    "theme.dusk": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dusk"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "साँझ"
+          }
+        }
+      }
+    },
+    "theme.lavender": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Soft lavender"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हल्का बैजनी"
+          }
+        }
+      }
+    },
+    "theme.sage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Soft sage"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हल्का हरियो"
+          }
+        }
+      }
+    },
+    "theme.sky": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Soft sky"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हल्का आकाशे"
+          }
+        }
+      }
+    },
+    "topic.date.now": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today is %1$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आज %1$@, %2$@ हो।"
+          }
+        }
+      }
+    },
+    "topic.greeting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hello! How can I help you today?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नमस्ते! आज म तपाईंलाई के मद्दत गर्न सक्छु?"
+          }
+        }
+      }
+    },
+    "topic.time.nowOnHour": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It's %1$@ %2$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले %2$@ %1$@ बजेको छ।"
+          }
+        }
+      }
+    },
+    "topic.time.nowWithMinutes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It's %1$@:%2$@ %3$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले %3$@ %1$@ बजेर %2$@ मिनेट भयो।"
+          }
+        }
+      }
+    },
+    "topic.time.period.afternoon": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "in the afternoon"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दिउँसो"
+          }
+        }
+      }
+    },
+    "topic.time.period.evening": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "in the evening"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बेलुका"
+          }
+        }
+      }
+    },
+    "topic.time.period.morning": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "in the morning"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बिहान"
+          }
+        }
+      }
+    },
+    "topic.time.period.night": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "at night"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "राति"
+          }
+        }
+      }
+    },
+    "topic.weather.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I'm sorry, I can't check the live weather yet. It will be available soon."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस्, म अहिले मौसम हेर्न सक्दिनँ। मौसमको जानकारी चाँडै उपलब्ध हुनेछ।"
           }
         }
       }
@@ -6862,70 +9599,920 @@
         }
       }
     },
-    "history.showMore": {
+    "weather.checking": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Show more"
+            "value": "Checking the weather…"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "थप देखाउनुहोस्"
+            "value": "मौसम हेर्दैछु…"
           }
         }
       }
     },
-    "model.name.whisper-large-v3-ne-v2-q5_1": {
+    "weather.condition.clear": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nepali — Large (new version)"
+            "value": "clear"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "नेपाली — ठूलो (नयाँ संस्करण)"
+            "value": "खुला"
           }
         }
       }
     },
-    "model.name.whisperkit-ne-medium": {
+    "weather.condition.cloudy": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nepali — Medium · WhisperKit (fast)"
+            "value": "cloudy"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "नेपाली — मध्यम · WhisperKit (छिटो)"
+            "value": "बादल"
           }
         }
       }
     },
-    "stt.name.whisperLargeNepaliV2": {
+    "weather.condition.fog": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Nepali — Large (new version)"
+            "value": "fog"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "नेपाली — ठूलो (नयाँ संस्करण)"
+            "value": "कुहिरो"
+          }
+        }
+      }
+    },
+    "weather.condition.partlyCloudy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "partly cloudy"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आंशिक बादल"
+          }
+        }
+      }
+    },
+    "weather.condition.rain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "rain"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पानी परिरहेको"
+          }
+        }
+      }
+    },
+    "weather.condition.snow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "snow"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हिउँ"
+          }
+        }
+      }
+    },
+    "weather.condition.thunderstorm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "thunderstorm"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "चट्याङ"
+          }
+        }
+      }
+    },
+    "weather.condition.unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "weather"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मौसम"
+          }
+        }
+      }
+    },
+    "weather.reply": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It's %1$@°C and %2$@%3$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%3$@अहिले %1$@°C र %2$@ छ।"
+          }
+        }
+      }
+    },
+    "weather.replySource": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "According to the weather service, %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मौसम सेवा अनुसार, %@।"
+          }
+        }
+      }
+    },
+    "directions.cancelled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Okay, I'll cancel that."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठिक छ, त्यो रद्द गर्दैछु।"
+          }
+        }
+      }
+    },
+    "directions.disambiguateAsk": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Did you mean %@?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "के तपाईंको मतलब %@ हो?"
+          }
+        }
+      }
+    },
+    "directions.inApp.arrival": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You have arrived."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईं गन्तव्यमा पुग्नुभयो।"
+          }
+        }
+      }
+    },
+    "directions.inApp.calculating": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Planning the route…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बाटो तयार पार्दैछु…"
+          }
+        }
+      }
+    },
+    "directions.inApp.close": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बन्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.inApp.eta": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "About %lld minutes by car"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गाडीले झन्डै %lld मिनेट"
+          }
+        }
+      }
+    },
+    "directions.inApp.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I couldn't prepare these directions."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यी बाटोका निर्देशनहरू तयार पार्न सकिनँ।"
+          }
+        }
+      }
+    },
+    "directions.inApp.failedHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check the network connection, then try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "इन्टरनेट जडान जाँचेर फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "directions.inApp.geocoding": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finding the destination…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गन्तव्य खोज्दैछु…"
+          }
+        }
+      }
+    },
+    "directions.inApp.locating": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finding your location…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको स्थान खोज्दैछु…"
+          }
+        }
+      }
+    },
+    "directions.inApp.repeat": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Repeat steps"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फेरि सुनाउनुहोस्"
+          }
+        }
+      }
+    },
+    "directions.inApp.steps": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Steps"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "चरणहरू"
+          }
+        }
+      }
+    },
+    "directions.inApp.stepsNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Turn-by-turn text comes from the map, so it may be in this phone's language rather than the app language."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बाटोका निर्देशनहरू नक्साबाट आउँछन्, त्यसैले ती एपको भाषा नभएर फोनकै भाषामा हुन सक्छन्।"
+          }
+        }
+      }
+    },
+    "directions.inApp.stop": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "रोक्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.inApp.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Directions"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बाटो"
+          }
+        }
+      }
+    },
+    "directions.mapMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't open a map right now. Please try again in a moment."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले नक्सा खोल्न सक्दिनँ। केहीबेरपछि फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "directions.noHome": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You haven't saved a home address yet. Please add one in Settings, under Places and maps."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंले घरको ठेगाना बचत गर्नुभएको छैन। कृपया सेटिङको ठाउँ र नक्सा खण्डमा घर थप्नुहोस्।"
+          }
+        }
+      }
+    },
+    "directions.openingAppleMaps": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening %@ in Apple Maps."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ एप्पल नक्सामा खोल्दैछु।"
+          }
+        }
+      }
+    },
+    "directions.openingGoogleMaps": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening %@ in Google Maps."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ गुगल नक्सामा खोल्दैछु।"
+          }
+        }
+      }
+    },
+    "directions.openingInApp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Showing the way to %@ in the in-app map."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ सम्मको बाटो यही एपको नक्सामा देखाउँदैछु।"
+          }
+        }
+      }
+    },
+    "directions.outcome.opening": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening %@…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ खोल्दैछु…"
+          }
+        }
+      }
+    },
+    "directions.placeNotFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I couldn't find a place by that name."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यो नामको कुनै ठाउँ भेटिएन।"
+          }
+        }
+      }
+    },
+    "settings.family.address": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Address (optional)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठेगाना (ऐच्छिक)"
+          }
+        }
+      }
+    },
+    "settings.family.addressHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Optional. Lets the assistant give voice directions to this person's home."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ऐच्छिक। सहायकले यी व्यक्तिको घरसम्म स्वरबाट बाटो देखाउन सक्छ।"
+          }
+        }
+      }
+    },
+    "settings.places.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add place"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठाउँ थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.places.address": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Address"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठेगाना"
+          }
+        }
+      }
+    },
+    "settings.places.category": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Category"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "किसिम"
+          }
+        }
+      }
+    },
+    "settings.places.category.home": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Home"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "घर"
+          }
+        }
+      }
+    },
+    "settings.places.category.important": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Important place"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "महत्त्वपूर्ण ठाउँ"
+          }
+        }
+      }
+    },
+    "settings.places.defaultHome": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default home"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पूर्वनिर्धारित घर"
+          }
+        }
+      }
+    },
+    "settings.places.defaultHomeToggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Set as default home"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पूर्वनिर्धारित घर बनाउनुहोस्"
+          }
+        }
+      }
+    },
+    "settings.places.delete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete place"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठाउँ मेट्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.places.edit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit place"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठाउँ सम्पादन गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.places.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No places saved yet"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिलेसम्म कुनै ठाउँ बचत गरिएको छैन"
+          }
+        }
+      }
+    },
+    "settings.places.mapApp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Map app"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नक्सा एप"
+          }
+        }
+      }
+    },
+    "settings.places.mapApp.appleMaps": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apple Maps"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "एप्पल नक्सा"
+          }
+        }
+      }
+    },
+    "settings.places.mapApp.auto": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "स्वतः"
+          }
+        }
+      }
+    },
+    "settings.places.mapApp.googleMaps": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google Maps"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल नक्सा"
+          }
+        }
+      }
+    },
+    "settings.places.mapApp.inApp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inside this app"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यही एपभित्र"
+          }
+        }
+      }
+    },
+    "settings.places.mapAppHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice navigation opens the map app you pick here. If that app isn't installed, the next available one opens; otherwise directions show inside this app."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यहाँ छानेको नक्सा एपमा स्वरबाट बाटो खुल्छ। त्यो एप जडान नभए अर्को उपलब्ध एप खुल्छ; नभए यही एपभित्र बाटो देखिन्छ।"
+          }
+        }
+      }
+    },
+    "settings.places.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Place name"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठाउँको नाम"
+          }
+        }
+      }
+    },
+    "settings.places.saved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "My places"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेरा ठाउँहरू"
+          }
+        }
+      }
+    },
+    "settings.places.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Places and maps"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठाउँ र नक्सा"
           }
         }
       }

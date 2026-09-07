@@ -228,6 +228,48 @@ final class RoutineSchedulerTests: XCTestCase {
         XCTAssertTrue(alarm.scheduled.isEmpty)
     }
 
+    // MARK: - onScheduleChanged seam (calendar-driven task, 2026-09-07)
+
+    func testOnScheduleChangedFiresOncePerMutation() {
+        var fires = 0
+        scheduler.onScheduleChanged = { fires += 1 }
+
+        let entry = makeEntry(hour: 11)
+        XCTAssertTrue(scheduler.addEntry(entry))
+        scheduler.setEnabled(entry.id, enabled: false)
+        scheduler.setEnabled(entry.id, enabled: true)
+        scheduler.removeEntry(id: entry.id)
+
+        XCTAssertEqual(fires, 4,
+                       "add / disable / enable / remove each fire the seam exactly once")
+    }
+
+    func testOnScheduleChangedDoesNotFireOnScheduleAll() {
+        store.add(makeEntry(hour: 11))
+        var fires = 0
+        scheduler.onScheduleChanged = { fires += 1 }
+
+        scheduler.scheduleAll()
+        scheduler.scheduleAll()
+
+        XCTAssertEqual(fires, 0,
+                       "launch/BGTask re-queues must not re-trigger side channels per occurrence")
+    }
+
+    func testOnScheduleChangedNotFiredWhenMutationFails() {
+        var fires = 0
+        scheduler.onScheduleChanged = { fires += 1 }
+        storage.shouldFailWrite = true
+
+        let entry = makeEntry(hour: 11)
+        XCTAssertFalse(scheduler.addEntry(entry))   // persistence failed → nothing changed
+        XCTAssertEqual(fires, 0, "a failed add changes nothing, so the seam stays silent")
+
+        storage.shouldFailWrite = false
+        XCTAssertTrue(scheduler.addEntry(entry))
+        XCTAssertEqual(fires, 1)
+    }
+
     // MARK: - Today's list
 
     func testTodaysOccurrencesFiltersAndSorts() {

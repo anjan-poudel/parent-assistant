@@ -76,7 +76,17 @@ final class GeminiCommandInterpreter: CommandInterpreter {
         Task { [weak self] in
             guard let self else { return }
             do {
-                let raw = try await self.client.generateJSON(prompt: prompt)
+                // [INTENT-TOOLS] (2026-09-07) Web-search grounding is ON
+                // for the cloud brain's interpretation by default: this
+                // class IS the cloud-only interpreter, and its questions
+                // are exactly the open-domain ones Google Search exists
+                // for (live weather, "कुन डाक्टर राम्रो छ?", news).
+                // Gemini decides per question whether to search
+                // (observable via `intent_tool_websearch` grounded vs
+                // not_used), and the cost governor counts each attempt
+                // once at the transport boundary — no bypass.
+                let raw = try await self.client.generateJSON(prompt: prompt,
+                                                             useSearchGrounding: true)
                 #if DEBUG
                 print("[gemini_interpreter][DEBUG] raw JSON=\"\(raw)\"")
                 #endif

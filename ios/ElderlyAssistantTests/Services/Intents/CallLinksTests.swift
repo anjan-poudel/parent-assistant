@@ -322,6 +322,37 @@ final class CallLinksTests: XCTestCase {
         XCTAssertTrue(opener.opened.isEmpty)
         XCTAssertTrue(opener.canOpenChecks.isEmpty)
     }
+
+    // MARK: - Messenger chat by PHONE (field fix 2026-09-06)
+
+    func testOpenMessengerChatByPhoneOpensThreadFormWhenInstalled() {
+        // The bare fb-messenger:// root opened the app WITHOUT the
+        // contact (field report) — the phone thread form navigates
+        // Messenger to the person's thread when it holds one for the
+        // number.
+        let opener = FakeCallLinkOpener(canOpen: true)
+        let links = CallLinks(opener: opener)
+        let outcome = links.openMessengerChat(phone: "+977 9841 000001")
+        XCTAssertEqual(outcome, .openedApp)
+        XCTAssertEqual(opener.opened.map(\.absoluteString),
+                       ["fb-messenger://user-thread/9779841000001"])
+    }
+
+    func testOpenMessengerChatByPhoneFallsBackToMMeDigitsWhenAppAbsent() {
+        let opener = FakeCallLinkOpener(canOpen: false)
+        let links = CallLinks(opener: opener)
+        let outcome = links.openMessengerChat(phone: "+977 9841 000001")
+        XCTAssertEqual(outcome, .openedWebChat)
+        XCTAssertEqual(opener.opened.map(\.absoluteString),
+                       ["https://m.me/9779841000001"])
+    }
+
+    func testOpenMessengerChatByPhoneInvalidNumberOpensNothing() {
+        let opener = FakeCallLinkOpener(canOpen: true)
+        let links = CallLinks(opener: opener)
+        XCTAssertEqual(links.openMessengerChat(phone: "मोबाइल"), .invalidHandle)
+        XCTAssertTrue(opener.opened.isEmpty)
+    }
 }
 
 /// Scripted `CallLinkOpening` — records every check and open so tests

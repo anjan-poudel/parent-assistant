@@ -1,6 +1,19 @@
 import SwiftUI
 import UIKit
 
+extension Color {
+    /// The `Color` for an `AppTheme`'s background (skinnable home,
+    /// 2026-09-07) — the single view-layer bridge from the palette's
+    /// Foundation-only RGB tuple. Screen backgrounds read
+    /// `Color(theme: coordinator.appTheme)` so the whole app re-skins on
+    /// one change; swatches (Appearance settings) use it too.
+    init(theme: AppTheme) {
+        self.init(red: theme.background.red,
+                  green: theme.background.green,
+                  blue: theme.background.blue)
+    }
+}
+
 /// Shared visual components introduced by the 2026-09-03 UI redesign
 /// (docs/superpowers/specs/2026-09-03-ui-visual-redesign-design.md).
 /// Every piece here is wired to real `AppCoordinator` state — none of it
@@ -26,6 +39,38 @@ struct IconBadge: View {
 }
 
 // MARK: - Face avatar (initials — spec §3.1/§3.2, replaces generic phone icons)
+
+/// The OFFICIAL multicolor logo of a quick-access catalog app on a white
+/// circle (AppIcons.xcassets — Wikimedia Commons PNGs, 2026-09-07, see
+/// the catalog's README for sources), drawn as-is with its own colors, or
+/// the SF Symbol stand-in badge when the catalog carries no official logo
+/// (Apple built-ins use SF Symbols as their official glyphs; IMO's was
+/// removed from simple-icons over trademark concerns and Commons hosts
+/// none). Every tile is the same white circle with the logo at the same
+/// 0.6-of-diameter inset, whatever the logo's natural aspect, so the row
+/// reads uniform like iPhone drawer tiles. Hidden from VoiceOver — the
+/// surrounding tile/row reads the app name.
+struct AppGlyph: View {
+    let app: AppLauncher.App
+    let diameter: CGFloat
+
+    var body: some View {
+        Group {
+            if let imageName = app.imageName {
+                Image(imageName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: diameter * 0.6, height: diameter * 0.6)
+                    .frame(width: diameter, height: diameter)
+                    .background(Color.white)
+                    .clipShape(Circle())
+            } else {
+                IconBadge(systemImage: app.systemImage, tint: .apps, diameter: diameter)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
 
 struct FaceAvatar: View {
     let name: String
@@ -74,7 +119,7 @@ struct EmergencyIconButton: View {
     var body: some View {
         Button(action: trigger) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 14, weight: .bold))
+                .font(.system(size: 17, weight: .bold))
                 .foregroundColor(DesignTokens.BadgeTint.emergency.tint)
                 .frame(width: 32, height: 32)
                 .background(DesignTokens.BadgeTint.emergency.background)
@@ -152,13 +197,22 @@ struct HintCarousel: View {
 
 // MARK: - Live caption pill (Home, capturing — spec §3.1, §6)
 
-/// Shows a placeholder while capture/transcription is in progress, then
-/// reveals the REAL transcript with a brief typewriter effect once it
-/// arrives. This is a v1-honest implementation: today's STT is batch-only
-/// (no partial-result stream), so this cannot be true word-by-word live
+/// The capture-stage transcript surface: the "You're saying" label while
+/// the user talks, then the REAL transcript once STT completes. This is a
+/// v1-honest implementation: today's STT is batch-only (no
+/// partial-result stream), so this cannot be true word-by-word live
 /// captioning — see spec §6. It never fabricates interim text.
+///
+/// There is deliberately NO placeholder body under the label (call-UI
+/// fix, 2026-09-07): the pill used to repeat the session state's own
+/// phrase (`state.*.status` — e.g. "Go ahead, I'm listening") in the
+/// transcript slot, which duplicated the identical sentence already
+/// shown on the hero's status line and — sitting under the "You're
+/// saying" header — read as a fake transcript ("You're saying: Go ahead,
+/// I'm listening") until the real words replaced it. The state phrase
+/// lives on the hero's status line; this card holds only the label and
+/// the user's actual words.
 struct LiveCaptionPill: View {
-    let placeholderKey: String
     let transcript: String?
 
     private var readyText: String? {
@@ -186,10 +240,6 @@ struct LiveCaptionPill: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
                     .transition(.opacity)
-            } else {
-                Text(LocalizedStringKey(placeholderKey))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
             }
         }
         .padding(14)
@@ -300,7 +350,7 @@ struct OutcomeCardView: View {
                     .foregroundColor(DesignTokens.textPrimary)
                     .lineLimit(1)
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
                     .foregroundColor(DesignTokens.textSecondary)
             }
             .padding(.horizontal, 14)
@@ -440,7 +490,7 @@ struct ConversationHistorySheet: View {
             }
             .padding(20)
         }
-        .background(DesignTokens.background.ignoresSafeArea())
+        .background(Color(theme: coordinator.appTheme).ignoresSafeArea())
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }

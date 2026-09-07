@@ -30,7 +30,9 @@ struct OnboardingWizardView: View {
 
     var body: some View {
         ZStack {
-            DesignTokens.background.ignoresSafeArea()
+            // Skinnable background (2026-09-07) — follows the theme the
+            // rest of the app uses; see `AppTheme`.
+            Color(theme: coordinator.appTheme).ignoresSafeArea()
             VStack(spacing: 0) {
                 header
                 Spacer(minLength: 0)
@@ -309,7 +311,12 @@ private struct PermissionsStep: View {
     }
 }
 
-// MARK: - Step 3: Family contact (skippable — no hard gate)
+// MARK: - Step 3: Family & friends (skippable — no hard gate)
+//
+// (family-and-friends task, 2026-09-07) Comment/step-name refresh: the
+// collected person is now framed as the start of the curated "Family
+// and friends" list (spec §4.4.2), which the Settings editor grows to
+// `FamilyContactStore.maxContacts`.
 
 private struct FamilyContactStep: View {
     @EnvironmentObject var coordinator: AppCoordinator
@@ -338,15 +345,14 @@ private struct FamilyContactStep: View {
                     .keyboardType(.phonePad)
                 field(placeholderKey: "onboarding.stepFamily.relationship", text: $relationship)
                 field(placeholderKey: "onboarding.stepFamily.messenger", text: $messengerHandle)
+                    .keyboardType(.asciiCapable)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
                 Text("onboarding.stepFamily.messengerHint")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
-
-                    .keyboardType(.asciiCapable)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
             }
             VStack(spacing: 14) {
                 primaryButton(key: "onboarding.stepFamily.save") {

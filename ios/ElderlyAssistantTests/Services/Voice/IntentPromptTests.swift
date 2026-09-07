@@ -108,19 +108,26 @@ final class IntentPromptTests: XCTestCase {
         // The pre-fix prompt measured 2,361 tokens — the context overflowed,
         // inference finished EMPTY, and every utterance fell through to the
         // generic re-prompt. Measured with the real llama3.2:1b tokenizer
-        // (2026-09-06): this build() turn is ~3,050 chars ≈ 760 tokens; the
-        // formatted prompt (chat system ~330 chars + this turn + chat
-        // headers) is ~919 tokens, leaving ~105 tokens of output headroom.
-        // The ceiling below is the regression tripwire: ~3,300 chars of
-        // user turn is ~820 tokens even for transcripts a few hundred
-        // characters long — a silent prompt bloat that would re-open the
-        // overflow bug fails here instead.
+        // (2026-09-06): this build() turn is 2,936 Swift characters ≈ 785
+        // tokens for this fixture; the formatted prompt (51-token chat
+        // system + chat headers) is ~849 tokens — the worst observed
+        // base-model completion at device settings (176 tokens) would reach
+        // 1,025 total, i.e. the 1,024-token context is effectively full at
+        // the measured size, and this text is the empirically verified
+        // tightest size that still classifies correctly (the pre-trim
+        // prompt was ~919+ tokens; a 53-token deeper trim collapsed
+        // emergency recognition to 0/7 draws and a further 29-token trim
+        // broke JSON output entirely on the real model — see the NOTE in
+        // IntentPrompt.build). The ceiling below is the regression
+        // tripwire: 3,000 chars keeps the turn within ~2% of the measured
+        // size — a silent prompt bloat that would re-open the overflow bug
+        // fails here instead.
         let prompt = build(transcript: "भोलिको मौसम कस्तो छ?", meds: [],
                            languageHint: "ne")
         XCTAssertLessThanOrEqual(
-            prompt.count, 3_300,
+            prompt.count, 3_000,
             "build() must stay inside the 1,024-token on-device budget "
-            + "(measured 3,050 chars for this fixture; 2,361 tokens pre-fix "
+            + "(measured 2,936 chars for this fixture; 2,361 tokens pre-fix "
             + "overflowed the context and produced the empty-completion bug)")
     }
 

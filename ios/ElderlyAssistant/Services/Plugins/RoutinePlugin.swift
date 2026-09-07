@@ -35,6 +35,14 @@ final class RoutinePlugin: AssistantPlugin {
     /// parameter. Nil-safe: the query just answers with routine entries.
     var medicationSummaryProvider: (() -> [String])?
 
+    /// Today's imported native Calendar/Reminders items as ready-to-
+    /// speak lines (calendar-driven task, 2026-09-07) — the same fold,
+    /// so "what are my reminders today" spans ALL THREE reminder
+    /// systems. Same inject-after-init pattern as
+    /// `medicationSummaryProvider`; the coordinator supplies lines from
+    /// `ExternalCalendarService.todaysSpokenLines`.
+    var externalSummaryProvider: (() -> [String])?
+
     init(scheduler: RoutineScheduler) {
         self.scheduler = scheduler
     }
@@ -153,6 +161,7 @@ final class RoutinePlugin: AssistantPlugin {
                 return "\(entry.displayTitle(locale: context.locale)) — \(time)"
             }
         lines.append(contentsOf: medicationSummaryProvider?() ?? [])
+        lines.append(contentsOf: externalSummaryProvider?() ?? [])
 
         guard !lines.isEmpty else {
             emit(context: context, "routine_query_empty")

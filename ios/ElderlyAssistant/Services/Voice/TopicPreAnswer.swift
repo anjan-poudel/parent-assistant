@@ -76,13 +76,29 @@ enum TopicPreAnswer {
     // matching ("मौसम" as a token excludes "मौसमी" seasonal-fruit talk);
     // multi-word weather phrases use substring matching. English single
     // words match as whole tokens ("raining", "forecast"…).
+    //
+    // [WEATHER-ROUTING] (2026-09-07) Vocabulary widened after a field
+    // report ("Is it raining in Arncliffe?"): rain/sunny/hot/cold/…­
+    // phrasings fell through the table to the generic question-shaped
+    // WEB-SEARCH fallback, which spoke a stale snippet as fact. Every
+    // weather-shaped word below must land on `.weather` BEFORE the
+    // interpreter/search stages — whole-token discipline is what keeps
+    // the short English words safe: "rain" cannot fire on "brain"/
+    // "train"/"grain", "hot" on "hotel", "cold" on "coldwater", "snow"
+    // on "snowflake" (only whitespace/punctuation-delimited tokens
+    // match). Nepali bare nouns ("पानी", "घाम", "हिउँ"…) ride the same
+    // rule; multi-word Nepali weather phrases stay substring matches.
     private static let weatherTokens = [
-        "मौसम", "weather", "forecast", "temperature",
-        "rain", "rains", "raining", "rainy", "sunny", "cloudy"
+        "मौसम", "पानी", "घाम", "गर्मी", "जाडो", "चिसो", "तापक्रम",
+        "हिउँ", "आँधी",
+        "weather", "forecast", "temperature", "rain", "rains", "raining",
+        "rainy", "sunny", "cloudy", "snow", "snowing", "storm",
+        "hot", "cold", "humid", "windy"
     ]
     private static let weatherPhrases = [
         "पानी पर्छ", "पानी पर्ने", "पानी पर्", "पानी पर्यो", "पानी परेको",
-        "घाम लाग्ने", "घाम लाग्यो", "घाम छ", "बादल लागेको", "हिउँ पर्ने",
+        "पानी परिरहेको", "घाम लाग्ने", "घाम लाग्यो", "घाम छ",
+        "बादल लागेको", "हिउँ पर्ने", "हिउँ परिरहेको",
         "will it rain", "does it rain", "is it raining", "weather like"
     ]
 

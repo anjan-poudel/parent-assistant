@@ -5,6 +5,7 @@ import SwiftUI
 /// has been run through (spec §4.2 — the wizard runs before voice engages).
 struct ContentView: View {
     @EnvironmentObject var coordinator: AppCoordinator
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -19,6 +20,12 @@ struct ContentView: View {
                 coordinator.start()
             }
         }
+        // External calendar import stays fresh: foreground rescans
+        // (native-app edits land immediately), background queues the
+        // hourly BGAppRefresh (calendar-driven task, 2026-09-07).
+        .onChange(of: scenePhase) { phase in
+            coordinator.handleScenePhase(phase)
+        }
         // send_message trial wiring (AppCoordinator.composeMessage): the
         // native SMS compose sheet, presented app-wide so it can surface
         // regardless of which screen the voice command landed on.
@@ -31,6 +38,14 @@ struct ContentView: View {
         // photo + overlay), presented app-wide.
         .sheet(item: $coordinator.pendingPluginPresentation) { presentation in
             presentation.view
+        }
+        // Voice-driven navigation (directions task, 2026-09-07): the
+        // in-app MapKit fallback — a static route + spoken steps sheet
+        // for when no map app is installed or the user forced `.inApp`.
+        // The sheet's dismiss (Close button or swipe) clears the
+        // published item; the view stops its session on disappear.
+        .sheet(item: $coordinator.pendingNavigationPresentation) { presentation in
+            InAppNavigationView(session: presentation.session)
         }
     }
 }

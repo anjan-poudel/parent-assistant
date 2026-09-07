@@ -396,10 +396,13 @@ final class UnifiedContactSearchTests: XCTestCase {
     // MARK: - Result rows
 
     func testAvailabilityBadgesReflectLinkBuildabilityNotPlatformPresence() {
-        // Book row: the number can shape a WhatsApp link, but Messenger
-        // links are handle-addressed — no handle stored, so no badge —
-        // even though an app-synced copy of this person may exist on
-        // the device.
+        // Book row WITHOUT Facebook linkage (the twin fixture carries
+        // none): its dialable phone shapes the WhatsApp link — a phone
+        // number IS WhatsApp's official chat identity — but NEVER a
+        // Messenger surface (messenger-gate 2026-09-07, user direction:
+        // Messenger has no phone-number thread link, so the phone-based
+        // chat attempt is gone and a bare number earns no Messenger
+        // pill). `messengerHandle` stays nil and the badge stays off.
         let bookOutcome = UnifiedContactSearch.search(query: "शर्मा", family: [],
                                                       in: [sitaTwin, sitaSharma])
         guard let bookRow = bookOutcome.entries.first,
@@ -464,6 +467,38 @@ final class UnifiedContactSearchTests: XCTestCase {
         XCTAssertEqual(noDigitsContact.phone, "मोबाइल")
         XCTAssertFalse(noDigitsRow.whatsAppAvailable)
         XCTAssertFalse(noDigitsRow.messengerAvailable)
+    }
+
+    func testMessengerBadgeForLinkedBookRows() {
+        // A book row whose record carries derived Facebook linkage —
+        // the row shape `AddressBookEntry.make` now produces for a
+        // Facebook-synced person (handle pre-normalized at derivation
+        // time, exactly what `allEntries` hands the search) — earns
+        // the Messenger pill: a link CAN be built from that handle.
+        // This is availability from a real stored handle, never a
+        // claim that the person is on Messenger.
+        let linked = AddressBookEntry(name: "Maya Gurung", label: "mobile",
+                                      phone: "9841 000010",
+                                      normalized: "9841000010",
+                                      messengerHandle: "maya.gurung")
+        let outcome = UnifiedContactSearch.search(query: "maya", family: [],
+                                                  in: [sitaSharma, linked])
+        XCTAssertEqual(outcome.entries, [.addressBook(linked)])
+        guard let row = outcome.entries.first else {
+            XCTFail("expected Maya's row")
+            return
+        }
+        XCTAssertTrue(row.whatsAppAvailable)
+        XCTAssertTrue(row.messengerAvailable)
+        XCTAssertEqual(row.messengerHandle, "maya.gurung")
+
+        // The linkage-free neighbor in the same book earns NO Messenger
+        // pill (messenger-gate 2026-09-07): a phone alone is not a
+        // Messenger identity, and the phone-based chat attempt is gone
+        // for book rows. Its handle stays nil.
+        let plain = UnifiedContactSearch.Result.addressBook(sitaSharma)
+        XCTAssertFalse(plain.messengerAvailable)
+        XCTAssertNil(plain.messengerHandle)
     }
 
     func testResultIdentifiersAndLabelsStaySourceSpecific() {

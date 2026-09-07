@@ -3,6 +3,22 @@ import XCTest
 
 final class CalendarSyncServiceTests: XCTestCase {
 
+    override func setUp() {
+        super.setUp()
+        // Status persistence (2026-09-07 fix) makes these tests stateful:
+        // enablement + status live in UserDefaults and are restored by
+        // the service's init — clean slate per test, or the order tests
+        // run would decide their outcome.
+        UserDefaults.standard.removeObject(forKey: "calendarSync.enabled")
+        UserDefaults.standard.removeObject(forKey: "calendarSync.status")
+    }
+
+    override func tearDown() {
+        UserDefaults.standard.removeObject(forKey: "calendarSync.enabled")
+        UserDefaults.standard.removeObject(forKey: "calendarSync.status")
+        super.tearDown()
+    }
+
     private func makeEntry(name: String, hour: Int, minute: Int,
                            category: RoutineCategory = .medication) -> RoutineEntry {
         RoutineEntry(category: category,
@@ -61,6 +77,44 @@ final class CalendarSyncServiceTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertEqual(writer.removedEvents.map(\.title), ["old mirror"],
                        "rebuild must remove only our mirrored events, never the user's own")
+    }
+
+    // MARK: - Status persistence (2026-09-07 fix)
+
+    func testEnabledStatusRestoresAcrossInstances() async {
+        let (first, _) = makeService(granted: true)
+        first.isEnabled = true
+        await first.enableAndSync(entries: [])
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(first.status, .enabled)
+
+        // A relaunching app must know the truth WITHOUT re-prompting —
+        // the restored state is what lets `start()` re-mirror directly.
+        let (second, _) = makeService(granted: true)
+        XCTAssertEqual(second.status, .enabled)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "calendarSync.status"), "enabled")
+    }
+
+    func testDeniedAndErrorStatusesRestore() {
+        UserDefaults.standard.set("denied", forKey: "calendarSync.status")
+        XCTAssertEqual(makeService(granted: true).0.status, .denied)
+
+        UserDefaults.standard.set("error", forKey: "calendarSync.status")
+        XCTAssertEqual(makeService(granted: true).0.status, .error(""),
+                       "the error message is session diagnostics; the state itself restores")
+    }
+
+    func testDisablingPersistsNotRequested() {
+        UserDefaults.standard.set("enabled", forKey: "calendarSync.status")
+        let (service, _) = makeService(granted: true)
+        XCTAssertEqual(service.status, .enabled)
+
+        service.isEnabled = false
+
+        XCTAssertEqual(service.status, .notRequested)
+        XCTAssertEqual(UserDefaults.standard.string(forKey: "calendarSync.status"), "notRequested")
+        XCTAssertEqual(makeService(granted: true).0.status, .notRequested,
+                       "turning the mirror off must survive a relaunch")
     }
 }
 

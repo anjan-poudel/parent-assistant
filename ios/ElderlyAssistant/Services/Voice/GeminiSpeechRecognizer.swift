@@ -98,12 +98,25 @@ final class GeminiSpeechRecognizer: SpeechRecognizerProtocol {
                     // the router's interpret call is synchronous-after.
                     let understanding: GeminiUnderstanding
                     if let onPartial = self.onPartialTranscript {
+                        // [INTENT-TOOLS] (2026-09-07) Search grounding is ON
+                        // for the collapsed cloud path by default: this is
+                        // the utterance that answers open-domain questions
+                        // ("भोलि काठमाडौंमा पानी पर्छ?"), and Gemini decides
+                        // per question whether to search. Deterministic
+                        // per-utterance gating is impossible here (no
+                        // transcript exists until AFTER this call), and the
+                        // audio arrives only under the cloud/Gemini stack —
+                        // so the tool rides on every collapsed call. The
+                        // cost governor counts each attempt once (see
+                        // GeminiClient), so this is never a billing bypass.
                         understanding = try await self.client.understandStreaming(
                             audioData: wav, mimeType: "audio/wav", context: collapseContext,
+                            useSearchGrounding: true,
                             onPartialTranscript: onPartial)
                     } else {
                         understanding = try await self.client.understand(
-                            audioData: wav, mimeType: "audio/wav", context: collapseContext)
+                            audioData: wav, mimeType: "audio/wav", context: collapseContext,
+                            useSearchGrounding: true)
                     }
                     self.emit("understood", outcome: understanding.command == nil ? "no_command" : "success")
                     #if DEBUG

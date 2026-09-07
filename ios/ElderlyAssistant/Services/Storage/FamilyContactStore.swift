@@ -19,12 +19,41 @@ import Foundation
 /// ships later as UI only — the edit-defaults screen (deferred by the
 /// user) plugs in by writing these two fields through
 /// `FamilyContactStore.save`; nothing else needs to change.
+///
+/// `photoFilename` (family-and-friends task, 2026-09-07): the name of
+/// the contact's stored thumbnail under Application Support/
+/// ContactPhotos (see `ContactPhotoStore`) — just a file NAME, never a
+/// path. The model stores only the reference; the pixels are best-effort
+/// visuals that may legitimately be missing (nothing picked yet, file
+/// deleted or corrupt), so it is optional and the custom decoder reads a
+/// missing key as nil — the unversioned store's one migration pattern
+/// (an optional field IS its migration).
+///
+/// `nickname` (family-wizard task, 2026-09-07): the informal name the
+/// family calls the person — the wizard's optional final step. Same
+/// optional-field contract as the handle and the photo: the custom
+/// decoder reads a missing key as nil.
+///
+/// `address` (directions task, 2026-09-07): the contact's home address,
+/// so voice navigation can drive to a relative ("मैयाको घर लैजाऊ").
+/// Free-form text — whatever the user typed in the family editor; the
+/// navigation pipeline forward-geocodes it at request time. Optional,
+/// same unversioned-store migration rule: a payload written before the
+/// field existed loads address-less instead of failing the read.
 struct FamilyContact: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String
     var phone: String
     var relationship: String
     var messengerHandle: String?
+    /// ContactPhotoStore filename of the contact's thumbnail, nil when
+    /// no photo is on file.
+    var photoFilename: String?
+    /// The informal name the family uses, nil when none is set.
+    var nickname: String?
+    /// Free-form home address for voice navigation, nil when the user
+    /// never set one (the contact then cannot be a navigation target).
+    var address: String?
 
     /// App the video button opens for this contact. Default `.faceTime`
     /// (the global default) — the only app that truly starts a video
@@ -37,7 +66,9 @@ struct FamilyContact: Codable, Identifiable, Equatable {
 
     init(id: UUID = UUID(), name: String, phone: String, relationship: String,
          messengerHandle: String? = nil,
-         preferredVideoApp: CallApp = .faceTime, preferredCallApp: CallApp = .phone) {
+         preferredVideoApp: CallApp = .faceTime, preferredCallApp: CallApp = .phone,
+         photoFilename: String? = nil, nickname: String? = nil,
+         address: String? = nil) {
         self.id = id
         self.name = name
         self.phone = phone
@@ -45,6 +76,9 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         self.messengerHandle = messengerHandle
         self.preferredVideoApp = preferredVideoApp
         self.preferredCallApp = preferredCallApp
+        self.photoFilename = photoFilename
+        self.nickname = nickname
+        self.address = address
     }
 
     /// Custom decode: contacts persisted BEFORE the preference fields
@@ -63,6 +97,14 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         // `try?` turns both into the default.
         preferredVideoApp = (try? container.decode(CallApp.self, forKey: .preferredVideoApp)) ?? .faceTime
         preferredCallApp = (try? container.decode(CallApp.self, forKey: .preferredCallApp)) ?? .phone
+        // Same missing-key rule for the photo: a payload written before
+        // the field existed loads photo-less instead of failing the read.
+        photoFilename = (try? container.decodeIfPresent(String.self, forKey: .photoFilename)) ?? nil
+        // And for the nickname: a pre-field payload loads without one.
+        nickname = (try? container.decodeIfPresent(String.self, forKey: .nickname)) ?? nil
+        // Same rule for the address (directions task, 2026-09-07): a
+        // payload written before the field existed loads address-less.
+        address = (try? container.decodeIfPresent(String.self, forKey: .address)) ?? nil
     }
 
     /// The app a VIDEO button resolves to (task: contact preference →
@@ -80,12 +122,18 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     }
 }
 
-/// Persists the 1–3 family contacts. The Settings section and the
-/// onboarding step 3 both write through this store; `AppCoordinator` feeds
-/// the resulting list into the family notifier.
+/// Persists the curated "Family and friends" list (family-and-friends
+/// task, 2026-09-07 — raised the cap from 3 to 12; the feature is now
+/// the primary curated contact list, not just the emergency trio). The
+/// Settings section and the onboarding family step (which still collects
+/// a contact or two of its own) both write through this store;
+/// `AppCoordinator` feeds the resulting list into the family notifier.
 final class FamilyContactStore {
 
-    static let maxContacts = 3
+    /// How many curated contacts the store accepts. The onboarding flow
+    /// keeps collecting its own 1–3 regardless of this cap; the cap only
+    /// bounds what the Settings editor adds.
+    static let maxContacts = 12
     private static let storageKey = "family.contacts"
 
     private let storage: EncryptedLocalStorage

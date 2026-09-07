@@ -3,10 +3,12 @@ import Foundation
 // MARK: - Unified contact search (Phone leaf, 2026-09-06)
 //
 // One search over BOTH "people I might call" surfaces: the configured
-// family contacts (up to three, relationship-labelled, always reachable
-// through this app's own buttons) and the system address book (see
-// `SystemContactSearch` — the platform sweep; Contacts.app already
-// aggregates the user's own entries AND app-synced records).
+// family contacts (relationship-labelled, always reachable through this
+// app's own buttons — the curated list grew to twelve with the
+// family-and-friends task, 2026-09-07; the count is `FamilyContactStore
+// .maxContacts`, no number is hard-coded here) and the system address
+// book (see `SystemContactSearch` — the platform sweep; Contacts.app
+// already aggregates the user's own entries AND app-synced records).
 //
 // Layering mirrors AddressBookDirectory: the pure union logic — tiered
 // family matching, family-first ranking, matched-only dedupe, row
@@ -30,7 +32,12 @@ enum UnifiedContactSearch {
     /// cannot even be built from a bare phone number. A badge therefore
     /// only claims "a link to the app in question can be built from
     /// what this row has, IF the app is installed" — the honest maximum
-    /// iOS lets the app know. A row with every badge off is still a
+    /// iOS lets the app know. For book rows "what this row has"
+    /// (2026-09-06) includes the Facebook/Messenger linkage the system
+    /// stores with app-synced records (see
+    /// `AddressBookEntry.derivedMessengerHandle`): a record that
+    /// carries a real handle earns the Messenger pill, while a bare
+    /// number alone never does. A row with every badge off is still a
     /// row: its dial button reaches the person by number.
     enum Result: Equatable, Identifiable {
         case family(FamilyContact)
@@ -75,13 +82,17 @@ enum UnifiedContactSearch {
             }
         }
 
-        /// Raw Messenger handle — family rows only, and only when one
-        /// is stored. Book rows have no handle concept (and see
-        /// `messengerAvailable` for why that stays nil).
+        /// The Messenger handle the row's thread link is built from.
+        /// Family rows: the stored handle exactly as configured
+        /// ("@hari.thapa" stays "@hari.thapa"; link building
+        /// normalizes). Book rows: the handle derived at fetch time
+        /// from the record's Facebook linkage
+        /// (`AddressBookEntry.derivedMessengerHandle`) — already
+        /// normalized, or nil when the record carries no linkage.
         var messengerHandle: String? {
             switch self {
             case .family(let contact): return contact.messengerHandle
-            case .addressBook: return nil
+            case .addressBook(let entry): return entry.messengerHandle
             }
         }
 
@@ -92,19 +103,33 @@ enum UnifiedContactSearch {
             !ContactNumberKey.normalized(phone).isEmpty
         }
 
-        /// Whether a Messenger thread link can be built. Family rows:
-        /// the stored handle must normalize to Messenger's username
+        /// Whether a Messenger chat surface can be opened for this row
+        /// (2026-09-07, user direction — phone-based badging reverted).
+        /// The pill means "a handle exists for a real thread link",
+        /// never "this person is on Messenger" and never "this row has
+        /// a phone": Messenger has no phone-number thread link
+        /// (`m.me/<username>` is Meta's only official form), so the
+        /// phone-based chat attempt is GONE for book rows — a bare
+        /// number is not a Messenger identity and earns no pill.
+        ///
+        /// Family rows keep the existing handle-normalization gate: the
+        /// configured handle must be usable in Messenger's username
         /// alphabet (see `CallLinks.messengerHandle` — "सीता" is NOT a
-        /// usable handle, and no handle means no link). Book rows:
-        /// always false — Messenger addresses people by handle, and a
-        /// bare number cannot form one, even when an app-synced copy of
-        /// the person exists on the device.
+        /// usable handle, and no handle means no link).
+        ///
+        /// Book rows: the handle derived at fetch time from the record's
+        /// Facebook/Messenger linkage (`AddressBookEntry.messengerHandle`
+        /// — pre-normalized, nil when the record carries none). A handle
+        /// the app captured earlier for a book row lives in
+        /// `MessengerHandleStore` (keyed by normalized phone); the UI
+        /// layer resolves that on top of this pure search (see
+        /// CallView's messenger pill resolution).
         var messengerAvailable: Bool {
             switch self {
             case .family(let contact):
                 return !CallLinks.messengerHandle(contact.messengerHandle ?? "").isEmpty
-            case .addressBook:
-                return false
+            case .addressBook(let entry):
+                return entry.messengerHandle != nil
             }
         }
     }

@@ -944,3 +944,78 @@ App-absent fallbacks are disclosed aloud reusing existing announcement keys (`ca
 | `UnifiedContactResultRow` | FR-047, FR-048 |
 | `AppCoordinator` channel actions | FR-048 |
 | New `call.channel.*` / `call.search.familyChip` keys | NFR-023 |
+
+---
+
+## 17. Quick Access Apps (FR-049/FR-050)
+
+Home quick-access row + Settings picker feature (iOS): a curated 18-app catalog whose favourites (≤ 8) render as a Home-screen tile row and are managed in a Settings screen that adds an app only when it is actually installed.
+
+**`AppLauncher` (pure catalog + launch seam, new):** iOS cannot enumerate installed apps, so the design probes each catalog app's custom URL scheme and never assumes presence.
+- `catalog` — 18 apps in display order: Apple built-ins first (`phone`/`tel`, `messages`/`sms`, `facetime`, `mail`/`message`, `calendar`/`calshow`, `maps`/`maps`), then the commonly installed third-party apps (`whatsapp`, `messenger`/`fb-messenger`, `facebook`/`fb`, `instagram`, `youtube`, `gmail`/`googlegmail`, `googlemaps`/`comgooglemaps`, `chrome`/`googlechrome`, `zoom`/`zoomus`, `telegram`/`tg`, `viber`, `imo`). Each `App { id, nameKey, systemImage, scheme }` — `id` is the stable storage key, `nameKey` resolves through the UI locale, `rootURL` is the scheme-only `scheme://`.
+- `maxFavourites = 8` — the Home-row cap.
+- Pure statics, fully unit-tested: `app(for:)`, `apps(for:)` (stored-order mapping that drops ids naming no catalog app — a stale preference can never wedge the UI), `validatedFavouriteIDs(_:cap:)` (dedupe first-wins → drop unknowns → cap; the coordinator restores through it), `search(query:in:)` (trimmed empty query → []; case- and diacritic-insensitive `contains` over the active-locale name AND the English name AND the raw id — both "ह्वाट्सएप" and "whatsapp" find WhatsApp in a Nepali session; results in catalog order).
+- Instance `isInstalled` / `open` go through the same `CallLinkOpening` seam the call/message flows fake in tests (`SystemCallLinkOpener` in production): probe and open both use exactly the scheme root URL. Honest answers require every catalog scheme declared in Info.plist `LSApplicationQueriesSchemes` (19 entries incl. the pre-existing `tel`/`sms`/`facetime`/`facetime-audio`/`whatsapp`…; iOS cap 50 — `AppLauncherTests` pins the invariant against the real Info.plist).
+
+**`AppCoordinator` favourite state + launch (three thin additions):**
+- `favoriteAppIDs` — `@Published private(set)`, persisted to UserDefaults key `quickAccessApps`; restored in `init` through `validatedFavouriteIDs` (pure prune, no probes at launch, `didSet` bypassed by direct assignment). Computed `favoriteApps` maps ids → catalog apps for the Home row.
+- `addFavoriteApp` — catalog membership, not already added, under the 8-cap, and actually installed (refuses otherwise, honest add-only-when-installed); `removeFavoriteApp`; `isAppInstalled`.
+- `performAppLaunch` — probes first, then opens and speaks the truth: installed → "Opening %@." (`apps.announce.opened`); absent → "… is not installed on this phone." (`apps.announce.notInstalled`) and nothing opens — never a silent dead tap. Every launch emits `ObservabilityEvent(component: "app_launcher", eventType: "launch", outcome: "<app-id>:opened" | "<app-id>:notInstalled")`.
+
+**`HomeView` quick-access row (FR-049):** an inline row (a plain SwiftUI row, NOT a HomeWidget) directly below the setup strip: caption "Quick access" + horizontal scroll of `IconBadge(tint: .apps)` 48pt tiles with the app's localized name underneath, plus a "+" tile navigating to the Settings leaf. The whole row is hidden while `favoriteApps` is empty.
+
+**`QuickAccessAppsView` Settings picker (FR-050):** capsule search over the catalog (same chrome as the Call leaf's contact search) + the favourites section (remove per row) + the full catalog with per-app "Installed" badges and add controls offered only when the app is installed and the cap is not reached; `quickApps.capNote` discloses the 8-app cap and the probe note discloses that only installed apps can be added. Installation is probed once per appearance (`.task`), never cached long-term, and a refused add re-probes that app before announcing.
+
+**`DesignTokens.BadgeTint.apps`:** soft cyan background `#E0F0F2` / deep cyan-teal tint `#1F7A8C` — a fourth tile family, distinct from meds (green), call (blue) and settings (purple).
+
+**Info.plist `LSApplicationQueriesSchemes`:** 15 schemes added (2026-09 catalog: `tel`, `sms`, `message`, `calshow`, `maps`, `fb`, `fb-messenger`, `instagram`, `youtube`, `googlegmail`, `comgooglemaps`, `googlechrome`, `zoomus`, `tg`, `viber`, `imo`) on top of the existing four → 19 total, alphabetized.
+
+**New localization keys (en / ne):**
+- 18 `app.name.*` catalog names — e.g. `app.name.whatsapp` "WhatsApp" / "ह्वाट्सएप", `app.name.messenger` "Messenger" / "मेसेन्जर", `app.name.calendar` "Calendar" / "पात्रो", `app.name.maps` "Maps" / "नक्सा"
+- `settings.quickApps.title` — "Quick apps" / "द्रुत एपहरू"
+- `quickApps.search.placeholder`, `quickApps.yourApps`, `quickApps.allApps`, `quickApps.installed`, `quickApps.add`, `quickApps.addFor` ("Add %@" — formatted a11y label; %@-word-order-safe in Nepali), `quickApps.added`, `quickApps.remove` ("Remove %@"), `quickApps.capNote`
+- `home.quickAccess.caption` ("Quick access"), `home.quickAccess.add` ("Add a quick app")
+- `apps.notInstalled`, `apps.probeNote`, `apps.announce.opened` ("Opening %@."), `apps.announce.notInstalled` ("%@ is not installed on this phone.")
+
+## 18. Assistant Activity History & Live Call Detection (FR-051/FR-052)
+
+Recent-activity feature (iOS): an encrypted, newest-first log of every call/message the app ITSELF initiates, shown in a "Recent activity" leaf with per-row re-initiation, plus an honest identity-free "call in progress" indicator driven by CXCallObserver.
+
+**`AppActivityEntry` (new model):** Codable/Equatable/Identifiable row — id, timestamp, `Kind` (.call/.message), `Channel` (.phone/.faceTimeVideo/.faceTimeAudio/.whatsapp/.messenger/.sms), contactName, phone, optional messengerHandle, optional body. The channel vocabulary IS the platform wall: only the app's own opens are representable, never the system call log or other apps' messages. Kind is the surface that ACTUALLY appeared: a WhatsApp "call" deep-links to a chat and records `.message/.whatsapp` (WhatsApp exposes no call scheme — the app never claims a call it cannot make); a Messenger call request resolves to the opened thread and records `.call/.messenger` as the attempt it is, with the handle stored for re-opening. Rows are logged only inside the outcome branch that genuinely opened a surface — a failed/invalid open records nothing (same honesty rule as `CallRecencyStore`).
+
+**`AppActivityLog` (new store):** one JSON array under `storageKey = "app.activity.log"` via `EncryptedLocalStorage` (Keychain, Data Protection Complete — constitution §Security), `maxEntries = 100` (drop oldest, keep newest), `append(_:)` write-through, `entries()` newest-first. House pattern from `ChatHistoryStore`: lazy load guarded by `didLoadFromDisk`; missing/corrupt payloads read as empty, never crash, and recover on the next write. Main-queue confined by contract.
+
+**`LiveCallDetector` / `CallStateProviding` / `CXCallStateProvider` (new):** the coordinator talks only to the `CallStateProviding` seam (`hasActiveCall` + `addChangeListener`), so CallKit stays behind one thin wall and the detector is fully fakeable in tests. `CXCallStateProvider` mirrors CXCallObserver onto the seam (delegate on `.main`); detection is masked/anonymous BY PLATFORM DESIGN — iOS delivers no identity for calls involving other apps, so the only fact ever known or shown is "a call is connected", and nothing from the observer is read for storage or logged. `LiveCallDetector` is edge-triggered: snapshots the initial state at init (no phantom initial callback — the coordinator reads `hasActiveCall` for launch state), then fires `onChange` only on real transitions.
+
+**`AppCoordinator` (recording + wiring):** `activityLog`, a `@Published recentActivity` window over it (the `conversationHistory` window pattern — refreshed from the store after every write, so a row recorded while the leaf is open appears without a re-push), `@Published liveCallActive`, and a lazily armed `liveCallDetector` in `start()`. Recording hooks sit on the six existing genuine-open paths (voice `performCallAction`, tile `performContactCall`, system-contact call/WhatsApp/Messenger, `composeMessage`'s `.openedWhatsApp`, and inside `presentMessageDraft`'s main-async block for the SMS sheet — the one call that records off the synchronous path); `presentMessageDraft(phone:name:body:)` becomes internal so history rows can re-open drafts. Message bodies are stored only when non-blank. Spoken-output pause/resume around active calls: SKIPPED and documented in `start()` — the voice stack exposes no clean pause API (Speaker = speak/cancel only; VoicePipeline = start/stop, no pause state; VoiceSessionStateMachine has no pause transition; the AVSpeechSynthesizer is private inside SystemSpeechSpeaker), and a real call already interrupts the app's audio session at the OS level (AudioSessionManager observes AVAudioSession interruptions), stopping in-flight TTS — nothing talks over a call, so a half-broken teardown would buy nothing.
+
+**`HistoryView` (new leaf, no contacts permission needed):** `LeafScreen(titleKey: "history.title")`; card rows (≥44pt) with channel SF Symbols, bold contact name, caption = kind (`history.channel.call/.message`) + `HistoryTimeFormat` bucket; accessibility label via `history.callbackLabel`/`history.messageLabel`; honest empty state `history.empty`; small `history.liveCall` capsule while `liveCallActive`. Tap re-initiates the recorded channel: phone → `performSystemContactCall`, FaceTime → new `performFaceTimeCall(name:phone:video:)` (recorded rows need a video/audio choice the tile API doesn't make), WhatsApp → `performSystemContactWhatsApp`, Messenger → `performSystemContactMessenger` when a handle is stored (else the honest `router.call.messengerNoHandle` announce), SMS → `presentMessageDraft`. `HistoryTimeFormat.displayString(for:now:calendar:locale:)` is pure (injected clock/calendar/locale) — "Just now" < 60 s, then Today/Yesterday day-buckets, else a locale short date. The Call leaf gets a capsule row (`call.historyRow`) above the search — reachable with or without contacts permission.
+
+**New localization keys (en / ne):**
+- `call.historyRow` — "Recent calls & messages" / "हालसालैका कल र सन्देशहरू"
+- `history.title` — "Recent activity" / "हालसालैको गतिविधि"
+- `history.channel.call` — "Call" / "कल"
+- `history.channel.message` — "Message" / "सन्देश"
+- `history.callbackLabel` — "Call %@ back" / "%@ लाई फेरि फोन गर्नुहोस्"
+- `history.messageLabel` — "Message %@" / "%@ लाई सन्देश पठाउनुहोस्"
+- `history.timeNow` — "Just now" / "भर्खरै"
+- `history.timeToday` — "Today" / "आज"
+- `history.timeYesterday` — "Yesterday" / "हिजो"
+- `history.empty` — "Nothing here yet. Calls and messages you make through the assistant will appear here." / "यहाँ अहिले केही छैन। सहायकबाट गरिएका कल र सन्देशहरू यहाँ देखिनेछन्।"
+- `history.liveCall` — "A call is in progress" / "अहिले कल भइरहेको छ"
+
+**Traceability:**
+
+| Component | Requirements |
+|-----------|-------------|
+| `AppLauncher` | FR-049, FR-050 |
+| `HomeView` quick-access row | FR-049 |
+| `QuickAccessAppsView` | FR-050 |
+| `AppCoordinator` favourite state + `performAppLaunch` | FR-049, FR-050 |
+| `AppLauncherTests` | FR-049, FR-050 |
+| New `app.name.*` / `quickApps.*` / `home.quickAccess.*` / `apps.*` keys | NFR-023 |
+| `AppActivityEntry` / `AppActivityLog` | FR-051 |
+| `AppCoordinator` recording hooks + `recentActivity` | FR-051 |
+| `HistoryView` / `HistoryTimeFormat` | FR-051 |
+| `LiveCallDetector` / `CXCallStateProvider` | FR-052 |
+| New `history.*` / `call.historyRow` keys | NFR-023 |

@@ -10,12 +10,55 @@ final class BrainModelSelectionTests: XCTestCase {
     func testAvailableBrainEntriesListsEveryRealBrainArtifact() {
         XCTAssertEqual(ModelCatalog.availableBrainEntries.map(\.id),
                        [ModelCatalog.llama3_2_1B,
+                        ModelCatalog.intentGemma1B,
                         ModelCatalog.llama3_2_3B,
                         ModelCatalog.qwen3_1_7BInstruct,
                         ModelCatalog.qwen3_4BInstruct])
         // The fine-tune placeholder must never be selectable: its URLs
         // are `.invalid` stubs and nothing could fetch it.
         XCTAssertFalse(ModelCatalog.availableBrainEntries.contains { $0.id == ModelCatalog.intentNepali1B })
+    }
+
+    func testGemmaIntentBrainEntryPinsRealArtifact() {
+        guard let entry = ModelCatalog.entry(for: ModelCatalog.intentGemma1B) else {
+            XCTFail("gemma intent brain entry missing")
+            return
+        }
+        XCTAssertEqual(entry.kind, .llamaBase)
+        XCTAssertEqual(entry.filename, "intent-ne-gemma-q4_k_m.gguf")
+        // Pinned from the release artifact (export_history.tsv,
+        // 2026-09-07 09:40:09 — tag `gemma`, base google/gemma-3-1b-it).
+        XCTAssertEqual(entry.sizeBytes, 814_261_088)
+        XCTAssertEqual(entry.sha256,
+                       "58e59847cdd3c6a1607d0409478405bde9d15ae313e861a35c412cbafc966f95")
+        XCTAssertTrue(entry.downloadURL.absoluteString
+            .contains("github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v7"))
+        XCTAssertTrue(entry.downloadURL.absoluteString.hasSuffix("intent-ne-gemma-q4_k_m.gguf"))
+        // Real, hosted artifact → the picker must offer it (downloadable
+        // through the same flow as every other brain).
+        XCTAssertTrue(ModelCatalog.availableBrainEntries.contains { $0.id == ModelCatalog.intentGemma1B })
+    }
+
+    // MARK: - L10n naming for the Gemma brain
+
+    func testGemmaBrainNameIsLocalizedEnAndNe() {
+        let en = Locale(identifier: "en")
+        let ne = Locale(identifier: "ne-NP")
+        guard let entry = ModelCatalog.entry(for: ModelCatalog.intentGemma1B) else {
+            XCTFail("gemma intent brain entry missing")
+            return
+        }
+        // en L10n == the catalog displayName (the ModelCatalogSTTNaming
+        // contract applied to the Gemma brain).
+        XCTAssertEqual(entry.displayName(locale: en), entry.displayName)
+        let neName = entry.displayName(locale: ne)
+        XCTAssertNotEqual(neName, entry.displayName,
+                          "Nepali picker row must actually be Nepali")
+        // The Nepali row stays distinguishable from every other brain row.
+        let otherNeNames = ModelCatalog.availableBrainEntries
+            .filter { $0.id != ModelCatalog.intentGemma1B }
+            .map { $0.displayName(locale: ne) }
+        XCTAssertFalse(otherNeNames.contains(neName))
     }
 
     func testQwen3BrainEntryPinsRealArtifact() {

@@ -152,6 +152,12 @@ enum ModelCatalog {
     /// of the Gemma/Qwen bake-off in tools/train-intent/, exported to
     /// GGUF. PLACEHOLDER until the bake-off produces a release artifact.
     static let intentNepali1B     = ModelID("intent-ne-1b-q4km")
+    /// The GEMMA leg of the bake-off (2026-09-07): the QLoRA fine-tune
+    /// over google/gemma-3-1b-it, merged to fp16 and exported Q4_K_M
+    /// (`intent-ne-gemma-q4_k_m.gguf`, release v7). A real, hosted
+    /// artifact — the fine-tuned intent brain can be selected and
+    /// downloaded through the same picker as the general brains.
+    static let intentGemma1B      = ModelID("intent-ne-gemma-q4km")
     static let llama3_2_3B        = ModelID("llama-3.2-3b-instruct-q4km")
     static let sileroVAD          = ModelID("silero-vad-v5")
     static let piperNepali        = ModelID("piper-ne-female-v1")
@@ -378,6 +384,26 @@ enum ModelCatalog {
             dependsOn: nil
         ),
         ModelCatalogEntry(
+            id: intentGemma1B,
+            kind: .llamaBase,
+            displayName: "Assistant brain — Gemma 1B (Nepali)",
+            // GEMMA leg of the bake-off (tools/train-intent, tag gemma):
+            // QLoRA fine-tune merged into google/gemma-3-1b-it (fp16) then
+            // converted + quantized Q4_K_M with llama.cpp 9e0e220
+            // (2026-09-07). GGUF arch `gemma3` — compiled into the
+            // vendored llama.cpp b10068 runtime; on-device load remains
+            // the final proof. sha256 + size pinned from the release
+            // artifact (export_history.tsv row, same day).
+            filename: "intent-ne-gemma-q4_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v7/intent-ne-gemma-q4_k_m.gguf")!,
+            sizeBytes: 814_261_088,
+            sha256: "58e59847cdd3c6a1607d0409478405bde9d15ae313e861a35c412cbafc966f95",
+            // 1B-class Q4 brain with the same compact 1,024-token context
+            // as the LLaMA 1B entry — same memory gate as that sibling.
+            minDeviceRAMBytes: 3_000_000_000,
+            dependsOn: nil
+        ),
+        ModelCatalogEntry(
             id: llama3_2_3B,
             kind: .llamaBase,
             displayName: "Assistant brain — 3B",
@@ -497,7 +523,9 @@ enum ModelCatalog {
     /// entry with a real, hosted artifact. Excludes `intentNepali1B`, the
     /// fine-tune PLACEHOLDER — its URLs are `.invalid` stubs and its
     /// sha256 is all-zero, nothing can fire a real request against it
-    /// (same rule `availableSTTEntries` used to hold).
+    /// (same rule `availableSTTEntries` used to hold). `intentGemma1B`
+    /// (the released Gemma-leg fine-tune, v7) IS offered like any other
+    /// brain.
     static let availableBrainEntries: [ModelCatalogEntry] = {
         entries(kind: .llamaBase).filter { $0.id != intentNepali1B }
     }()

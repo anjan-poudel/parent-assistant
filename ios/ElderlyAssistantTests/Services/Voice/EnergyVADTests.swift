@@ -101,4 +101,131 @@ final class EnergyVADTests: XCTestCase {
         for f in frames(0, count: 4) { vad.process(f) }
         XCTAssertTrue(ended, "soft speech in a quiet room must be detected and ended")
     }
+
+    // MARK: - Hangover at the production 900 ms setting (2026-09-07)
+    //
+    // VoicePipeline has configured `endOfUtteranceMs = 900` since
+    // 2026-09-07, i.e. 29 frames at 32 ms/frame (928 ms) of trailing
+    // silence. These tests pin the endpointing contract at that setting:
+    // a real trailing silence of ~1 s closes the utterance, mid-utterance
+    // pauses of 0.5-0.7 s (normal for elderly speakers) do NOT close it,
+    // and modulated background noise can no longer keep a finished
+    // utterance open indefinitely.
+
+    /// A finished utterance ends after ~1 s of trailing silence, at the
+    /// exact boundary: 28 quiet frames (896 ms) keep listening, the 29th
+    /// (928 ms) fires.
+    func testTrailingSilenceOfAboutOneSecondClosesUtterance() {
+        let vad = EnergyVAD()
+        var ended = false
+        vad.onEndOfUtterance = { ended = true }
+
+        vad.start(endOfUtteranceMs: 900)   // 29-frame hangover
+        for f in frames(3_000, count: 4) { vad.process(f) }   // speech, RMS 0.0916
+        XCTAssertFalse(ended, "must not fire while speech is still arriving")
+        for f in frames(0, count: 28) { vad.process(f) }      // 896 ms silence
+        XCTAssertFalse(ended, "896 ms of trailing silence must not close yet")
+        for f in frames(0, count: 1) { vad.process(f) }       // 928 ms total
+        XCTAssertTrue(ended, "~1 s of trailing silence must close the utterance")
+    }
+
+    /// A 0.5 s mid-utterance pause — a slow speaker's breath or word
+    /// search — must NOT close the utterance: 16 quiet frames (512 ms)
+    /// is well short of the 29-frame hangover, and the resumed speech
+    /// restarts the hangover from zero.
+    func testMidUtterancePauseOfHalfSecondDoesNotClose() {
+        let vad = EnergyVAD()
+        var fireCount = 0
+        vad.onEndOfUtterance = { fireCount += 1 }
+
+        vad.start(endOfUtteranceMs: 900)
+        for f in frames(3_000, count: 8) { vad.process(f) }   // speech
+        for f in frames(0, count: 16) { vad.process(f) }      // 512 ms pause
+        XCTAssertEqual(fireCount, 0, "a 0.5 s pause must not close the utterance")
+        for f in frames(3_000, count: 8) { vad.process(f) }   // resumed speech
+        XCTAssertEqual(fireCount, 0)
+        for f in frames(0, count: 28) { vad.process(f) }      // fresh trailing silence
+        XCTAssertEqual(fireCount, 0, "hangover must restart after the pause")
+        for f in frames(0, count: 1) { vad.process(f) }
+        XCTAssertEqual(fireCount, 1)
+    }
+
+    /// A 0.7 s mid-utterance pause (704 ms = 22 frames) must also NOT
+    /// close — and must not leave the hangover partially counted: only 7
+    /// quiet frames after the resumed speech would be enough to fire had
+    /// the 22 pause frames carried over (22 + 7 = 29). Resumed speech
+    /// resets the counter, so a full fresh ~1 s is required.
+    func testMidUtterancePauseOfSevenTenthsSecondDoesNotClose() {
+        let vad = EnergyVAD()
+        var fireCount = 0
+        vad.onEndOfUtterance = { fireCount += 1 }
+
+        vad.start(endOfUtteranceMs: 900)
+        for f in frames(3_000, count: 8) { vad.process(f) }   // speech
+        for f in frames(0, count: 22) { vad.process(f) }      // 704 ms pause
+        XCTAssertEqual(fireCount, 0, "a 0.7 s pause must not close the utterance")
+        for f in frames(3_000, count: 8) { vad.process(f) }   // resumed speech
+        for f in frames(0, count: 7) { vad.process(f) }
+        XCTAssertEqual(fireCount, 0, "pause frames must not carry over the hangover")
+        for f in frames(0, count: 22) { vad.process(f) }      // 7 + 22 = 29 fresh frames
+        XCTAssertEqual(fireCount, 1, "a full fresh ~1 s of silence must close")
+    }
+
+    /// REGRESSION (2026-09-07, "still listening after I've stopped
+    /// speaking"): a soft trailing clause used to wedge the end forever.
+    /// The old symmetric EMA dragged speechLevel toward every frame above
+    /// the end line — a soft ending ~5 dB below the loud body of the
+    /// utterance pulled the reference down onto the background, the end
+    /// line sank below the ambient, and no frame ever counted as quiet.
+    /// Now the soft tail (RMS 0.1038, above the end line but below the
+    /// decaying reference) merely HOLDS the counter, and the room noise
+    /// (RMS 0.0549, below the end line) closes the utterance on the 29th
+    /// frame. The reference decays at only 0.096 dB/frame (3 dB/s), so
+    /// even after the full 10-tail + 29-noise frame window it has fallen
+    /// from 0.183 to ~0.120 and the end line (~0.060) still sits above
+    /// the noise (0.055) — a few frames' margin, but the utterance is
+    /// already over by then.
+    func testSoftEndWordsCannotWedgeTheEndInBackgroundNoise() {
+        let vad = EnergyVAD()
+        var ended = false
+        vad.onEndOfUtterance = { ended = true }
+
+        vad.start(endOfUtteranceMs: 900)
+        for f in frames(0, count: 4) { vad.process(f) }        // quiet room
+        for f in frames(6_000, count: 16) { vad.process(f) }   // loud body, RMS 0.183
+        XCTAssertFalse(ended, "must not fire during the loud body")
+        for f in frames(3_400, count: 10) { vad.process(f) }   // soft tail, RMS 0.1038
+        XCTAssertFalse(ended, "soft final words must not fire the end")
+        for f in frames(1_800, count: 28) { vad.process(f) }   // room noise, RMS 0.0549
+        XCTAssertFalse(ended, "28 frames of background must not close yet")
+        for f in frames(1_800, count: 1) { vad.process(f) }
+        XCTAssertTrue(ended, "must endpoint onto the background after the soft tail")
+    }
+
+    /// REGRESSION (2026-09-07): modulated background noise — dips below
+    /// the end line, then peaks back across it (TV words, fan gusts) —
+    /// used to reset the silence counter at every crossing, so a finished
+    /// utterance under such noise never ended. The band between endLevel
+    /// and the reference now HOLDS the counter on peak frames: 3 full
+    /// dip/peak cycles accrue 24 quiet frames without firing, and the
+    /// 4th cycle's quiet run reaches 29 and closes.
+    func testModulatedNoiseCannotPerpetuallyResetTheHangover() {
+        let vad = EnergyVAD()
+        var ended = false
+        vad.onEndOfUtterance = { ended = true }
+
+        vad.start(endOfUtteranceMs: 900)
+        for f in frames(6_000, count: 16) { vad.process(f) }   // the utterance
+        XCTAssertFalse(ended)
+        // Noise cycle (320 ms): 8 quiet dips at RMS 0.0397 (below the end
+        // line, accrue) + 2 peaks at RMS 0.0977 (above the end line but
+        // below the decaying reference — the band, which must HOLD).
+        for _ in 0..<3 {
+            for f in frames(1_300, count: 8) { vad.process(f) }
+            for f in frames(3_200, count: 2) { vad.process(f) }
+        }
+        XCTAssertFalse(ended, "band peaks must not reset the accumulated silence")
+        for f in frames(1_300, count: 8) { vad.process(f) }   // 4th cycle: 24 + 5 >= 29
+        XCTAssertTrue(ended, "quiet dips must keep accruing across band peaks")
+    }
 }

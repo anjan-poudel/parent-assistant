@@ -413,18 +413,26 @@ final class CallLinks {
     }
 
     /// Opens Messenger for a per-contact call button (contact-call-
-    /// buttons task). No public API deep-links a Messenger call by phone
-    /// number, so this opens the app's chat surface and the user taps
-    /// the video/audio icon inside — the caller's spoken line says
-    /// exactly that. Absent-app chain per the task: `fb-messenger://`
-    /// when installed, else the `https://m.me/<digits>` web chat.
-    /// (`m.me` resolves a phone number only when the person's Facebook
-    /// is discoverable by it; otherwise it lands on Messenger web's
-    /// home — still a real surface, disclosed as the web fallback.)
+    /// buttons task). No OFFICIAL API deep-links a Messenger thread by
+    /// phone number, but `fb-messenger://user-thread/<digits>` is the
+    /// community-documented phone form that makes the app OPEN THE
+    /// PERSON'S THREAD when Messenger holds one for that number
+    /// (Messenger matches contacts by phone, so a registered number
+    /// resolves; an unmatched number lands on Messenger's own screen).
+    /// Field fix (2026-09-06): the previous bare `fb-messenger://` fired
+    /// the app root and left the user to search the contact by hand.
+    /// The outcome is still an ATTEMPT from the app's side — the
+    /// caller's spoken line says "opening Messenger", never "thread
+    /// opened". Absent-app chain unchanged: the `https://m.me/<digits>`
+    /// web chat. (`m.me` resolves a phone number only when the person's
+    /// Facebook is discoverable by it; otherwise it lands on Messenger
+    /// web's home — still a real surface, disclosed as the web
+    /// fallback.)
     func openMessengerChat(phone rawPhone: String) -> MessengerChatOutcome {
         let digits = Self.whatsAppDigits(rawPhone)
         guard !digits.isEmpty else { return .invalidHandle }
-        if let appURL = URL(string: "fb-messenger://"), opener.canOpenURL(appURL) {
+        if let appURL = URL(string: "fb-messenger://user-thread/\(digits)"),
+           opener.canOpenURL(appURL) {
             opener.open(appURL)
             return .openedApp
         }

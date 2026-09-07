@@ -64,7 +64,8 @@ def main() -> None:
     from datasets import Dataset
     from peft import LoraConfig, prepare_model_for_kbit_training
     from transformers import (AutoModelForCausalLM, AutoTokenizer,
-                              BitsAndBytesConfig, Trainer, TrainingArguments)
+                              BitsAndBytesConfig, DataCollatorForLanguageModeling,
+                              Trainer, TrainingArguments)
 
     tag = args.out or args.base
     out_dir = ROOT / "checkpoints" / tag
@@ -99,14 +100,21 @@ def main() -> None:
                       task_type="CAUSAL_LM")
     model.add_adapter(lora, adapter_name="intent")
 
+    # transformers v5 removed warmup_ratio — compute the same ~3% warmup in steps.
+    warmup_steps = max(1, int(0.03 * float(cfg["training.epochs"])
+                              * len(train_rows) / (8 * 4)))
+
     targs = TrainingArguments(
         output_dir=str(out_dir),
-        per_device_train_batch_size=8,
-        gradient_accumulation_steps=4,
+        # Batch 8/accum 4 OOMs on the 24 GB 3090 with transformers v5: the
+        # loss upcasts logits to fp32 (~8 GiB at seq 1024 / vocab 262k).
+        # 4/8 keeps the same effective batch 32 — steps and recipe unchanged.
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=8,
         num_train_epochs=float(cfg["training.epochs"]),
         learning_rate=float(cfg["training.lr"]),
         lr_scheduler_type="cosine",
-        warmup_ratio=0.03,
+        warmup_steps=warmup_steps,
         bf16=True,
         logging_steps=20,
         save_steps=250,
@@ -125,8 +133,10 @@ def main() -> None:
     train_tok = train_ds.map(tokenize, batched=True, remove_columns=["text"])
     eval_tok = eval_ds.map(tokenize, batched=True, remove_columns=["text"]) if eval_ds else None
 
+    collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
     trainer = Trainer(model=model, args=targs,
-                      train_dataset=train_tok, eval_dataset=eval_tok)
+                      train_dataset=train_tok, eval_dataset=eval_tok,
+                      data_collator=collator)
 
     resume = latest_checkpoint(out_dir)
     if resume:

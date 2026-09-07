@@ -12,52 +12,68 @@ struct IntentLogReviewView: View {
     @State private var showClearConfirm = false
 
     var body: some View {
-        ZStack {
-            DesignTokens.background.ignoresSafeArea()
-            if records.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "checklist")
-                        .font(.system(size: 44))
-                        .foregroundColor(DesignTokens.textSecondary)
-                    Text(L10n.str("intentLog.empty", locale: coordinator.activeLocale))
-                        .font(.body)
-                        .foregroundColor(DesignTokens.textSecondary)
+        // LeafScreen chrome (2026-09-07): this screen used the system
+        // toolbar in a hidden-nav-bar context — no back button and an
+        // invisible ShareLink/trash toolbar. The house chrome restores
+        // the back affordance and moves the actions in-content.
+        LeafScreen(titleKey: "settings.intentLog.title") {
+            VStack(spacing: 12) {
+                if !records.isEmpty {
+                    HStack(spacing: 12) {
+                        if let exportURL {
+                            ShareLink(item: exportURL) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "square.and.arrow.up")
+                                    Text("intentLog.export")
+                                }
+                                .font(.system(size: DesignTokens.minCaptionPointSize,
+                                              weight: .semibold))
+                                .foregroundColor(DesignTokens.accent)
+                                .frame(minHeight: DesignTokens.minTapTargetSize)
+                            }
+                        }
+                        Spacer()
+                        Button(role: .destructive) {
+                            showClearConfirm = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "trash")
+                                Text("intentLog.clear")
+                            }
+                            .font(.system(size: DesignTokens.minCaptionPointSize,
+                                          weight: .semibold))
+                            .foregroundColor(DesignTokens.stateError)
+                            .frame(minHeight: DesignTokens.minTapTargetSize)
+                        }
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List {
-                    ForEach(records) { record in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
+                if records.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "checklist")
+                            .font(.system(size: 44))
+                            .foregroundColor(DesignTokens.textSecondary)
+                        Text(L10n.str("intentLog.empty", locale: coordinator.activeLocale))
+                            .font(.system(size: DesignTokens.minBodyPointSize))
+                            .foregroundColor(DesignTokens.textSecondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 320)
+                } else {
+                    VStack(spacing: 8) {
+                        ForEach(records) { record in
+                            HStack(spacing: 10) {
                                 Image(systemName: icon(for: record))
                                     .foregroundColor(DesignTokens.accent)
                                 Text(summary(for: record))
-                                    .font(.body)
+                                    .font(.system(size: DesignTokens.minBodyPointSize))
                                     .foregroundColor(DesignTokens.textPrimary)
+                                    .multilineTextAlignment(.leading)
+                                Spacer(minLength: 0)
                             }
-                            Text(record.timestamp.formatted(date: .abbreviated, time: .shortened))
-                                .font(.caption)
-                                .foregroundColor(DesignTokens.textSecondary)
+                            .padding(16)
+                            .background(DesignTokens.card)
+                            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
                         }
-                        .padding(.vertical, 4)
-                    }
-                }
-                .scrollContentBackground(.hidden)
-            }
-        }
-        .navigationTitle(L10n.str("intentLog.title", locale: coordinator.activeLocale))
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                if let exportURL {
-                    ShareLink(item: exportURL) {
-                        Image(systemName: "square.and.arrow.up")
-                    }
-                }
-                if !records.isEmpty {
-                    Button(role: .destructive) {
-                        showClearConfirm = true
-                    } label: {
-                        Image(systemName: "trash")
                     }
                 }
             }

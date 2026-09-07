@@ -73,6 +73,17 @@ final class VoicePipeline {
     /// (a cloud recognizer's full network round-trip, not just on-device
     /// inference) — see the wiring comment at the watchdog's call site.
     private static let wedgeGuardMarginSeconds: TimeInterval = 10.0
+    /// Trailing silence (ms) the VAD must observe before declaring the
+    /// utterance over. Raised 200 -> 900 on 2026-09-07: the 200 ms
+    /// hangover was shorter than a natural mid-utterance pause for
+    /// elderly speakers (0.5-0.7 s — a breath, a word-search, a slow
+    /// clause), so pauses cut captures in half; 900 ms (29 frames at
+    /// 32 ms/frame) both survives those pauses and still ends a finished
+    /// utterance ~0.9 s after the last word — well inside the 8 s capture
+    /// cap and the target "end within ~0.8-1.5 s of trailing silence".
+    /// Long enough is cheap here: the VAD only fires once per capture,
+    /// and the recognizer simply transcribes everything up to that point.
+    private static let endOfUtteranceMs: Int = 900
     private var pcmBuffer: [Int16] = []
     /// Held only during the VAD-gated capture phase — how far past silence
     /// onset we've counted before firing `finish()`.
@@ -302,7 +313,7 @@ final class VoicePipeline {
         } else {
             // Push mode: our tap stays live. Prime the VAD.
             vad?.reset()
-            vad?.start(endOfUtteranceMs: 200)
+            vad?.start(endOfUtteranceMs: Self.endOfUtteranceMs)
         }
 
         // `Self.captureTimeoutSeconds` after startListening, if we haven't

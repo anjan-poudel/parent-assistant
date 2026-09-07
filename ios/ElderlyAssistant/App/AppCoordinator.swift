@@ -71,6 +71,7 @@ final class AppCoordinator: ObservableObject {
         familyNotifier.locale = activeLocale
         routineAlarmScheduler.locale = activeLocale
         routineScheduler.locale = activeLocale
+        externalCalendar.locale = activeLocale
     }
 
     /// First-run onboarding progress (spec §4.2). Persisted per step.
@@ -94,6 +95,51 @@ final class AppCoordinator: ObservableObject {
         }
     }
     private static let sttPreferenceKey = "sttModelPreference"
+
+    /// The app-wide background theme (skinnable home, 2026-09-07) — a UI
+    /// preference, not a secret, persisted in UserDefaults the same way as
+    /// `sttModelPreference`. Every screen draws its background from this
+    /// through the `Color(theme:)` helper, so one change re-skins the
+    /// whole app at once. didSet persists; the init-time restore assigns
+    /// directly (house pattern — didSet does not fire there).
+    @Published var appTheme: AppTheme {
+        didSet {
+            UserDefaults.standard.set(appTheme.rawValue, forKey: Self.themeKey)
+        }
+    }
+    private static let themeKey = "appTheme"
+
+    /// The app an ADDRESS-BOOK row's call button opens when the row has no
+    /// per-contact channel pick saved — per-row picks live in
+    /// `channelPreferenceStore`, and a row without one resolves here
+    /// (Phone-tab redesign, 2026-09-07). The Settings → Calling screen's
+    /// picker binds this. A UI preference, not a secret — persisted in
+    /// UserDefaults the same way as `appTheme`. didSet persists; the
+    /// init-time restore assigns directly (house pattern — didSet does
+    /// not fire there).
+    @Published var defaultCallApp: CallApp {
+        didSet {
+            UserDefaults.standard.set(defaultCallApp.rawValue, forKey: Self.defaultCallAppKey)
+        }
+    }
+    private static let defaultCallAppKey = "defaultCallApp"
+
+    /// Which map surface voice navigation opens (directions task,
+    /// 2026-09-07) — Settings → Places. `.auto` (the default) opens
+    /// Google Maps when installed, else Apple Maps, else the in-app map;
+    /// the override expresses PREFERENCE, never a promise — the open
+    /// decision re-derives installed-ness at request time via
+    /// `NavigationMapPolicy` (a deleted Google Maps falls through, it
+    /// never dead-ends). A UI preference, not a secret — persisted in
+    /// UserDefaults the same way as `appTheme`. didSet persists; the
+    /// init-time restore assigns directly (house pattern — didSet does
+    /// not fire there).
+    @Published var navigationMapApp: NavigationMapApp {
+        didSet {
+            UserDefaults.standard.set(navigationMapApp.rawValue, forKey: Self.navigationMapAppKey)
+        }
+    }
+    private static let navigationMapAppKey = "navigationMapApp"
 
     /// Which brain model the local LLaMA interpreter runs (Settings →
     /// "AI मोडेल" → Assistant brain, 2026-09-06). nil = the default
@@ -126,6 +172,69 @@ final class AppCoordinator: ObservableObject {
         }
     }
     private static let voiceEngineStackKey = "voiceEngineStack"
+
+    /// Whether the ON-DEVICE stack may escalate questions its local
+    /// chain cannot answer (an abstention / mid-band drop) to the cloud
+    /// brain (cloud-fallback task, 2026-09-07) — a second, OPT-IN layer
+    /// on top of `voiceEngineStack`. OFF by default: the old "strictly
+    /// on-device" contract survives until the household switches this
+    /// on, and even then escalation happens ONLY while the Gemini
+    /// interpreter is actually available (see
+    /// `CloudProvider.cloudFallbackEngages`) — the .gemini stack's
+    /// hybrid behavior is untouched and ignores this flag. A UI
+    /// preference, not a secret — persisted in UserDefaults the same
+    /// way as `voiceEngineStack`. didSet persists AND re-applies the
+    /// stack, so flipping the toggle in Settings acts immediately (the
+    /// same instant-apply rule as the engine toggle itself).
+    @Published var cloudFallbackEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(cloudFallbackEnabled, forKey: Self.cloudFallbackKey)
+            applyVoiceEngineStack()
+        }
+    }
+    private static let cloudFallbackKey = "cloudFallbackEnabled"
+
+    /// Which cloud provider an opted-in on-device escalation may reach
+    /// (cloud-fallback task, 2026-09-07). Provider-ready for a future
+    /// Settings dropdown: today only `.gemini` exists, but the choice is
+    /// persisted as a raw-value string under "cloudProvider" so a later
+    /// provider needs no migration. A UI preference, not a secret.
+    /// didSet persists only — the provider takes effect the next time
+    /// `applyVoiceEngineStack()` runs (nothing needs a live switch until
+    /// a second provider exists to switch between).
+    @Published var cloudProvider: CloudProvider {
+        didSet {
+            UserDefaults.standard.set(cloudProvider.rawValue, forKey: Self.cloudProviderKey)
+        }
+    }
+    private static let cloudProviderKey = "cloudProvider"
+
+    /// The user's favourite apps for the Home quick-access row
+    /// (quick-access-apps task, 2026-09-06), in stored order.
+    /// `private(set)`: mutation is confined to `addFavoriteApp` /
+    /// `removeFavoriteApp`, which validate. Persisted in UserDefaults the
+    /// same way as the other UI preferences — the ids are catalog keys,
+    /// not secrets. Mutating the array REPLACES it (never in-place), so
+    /// the didSet always sees the new value.
+    @Published private(set) var favoriteAppIDs: [String] {
+        didSet {
+            UserDefaults.standard.set(favoriteAppIDs, forKey: Self.quickAccessAppsKey)
+        }
+    }
+    private static let quickAccessAppsKey = "quickAccessApps"
+
+    /// The favourited catalog apps in stored order — what the Home row
+    /// and the picker's "Your apps" section render. Stale ids (an app
+    /// removed from the catalog) never surface (`AppLauncher.apps(for:)`
+    /// is stale-proof).
+    var favoriteApps: [AppLauncher.App] {
+        AppLauncher.apps(for: favoriteAppIDs)
+    }
+
+    /// Catalog + scheme launcher for the quick-access feature. Shares the
+    /// `CallLinkOpening` seam the call/message flows use, so the same
+    /// fake covers both in tests. Stateless, so no lazy needed.
+    private let appLauncher = AppLauncher()
 
     /// Last user utterance and assistant reply — the Home conversation
     /// card (spec §4.1.4).
@@ -217,6 +326,37 @@ final class AppCoordinator: ObservableObject {
     /// the intent-layer stores below: `storage` is assigned at the top of
     /// `init`, long before anything can record a turn.
     private lazy var chatHistoryStore = ChatHistoryStore(storage: storage)
+
+    // MARK: - Assistant activity history + live-call detection
+    // (call-history task, 2026-09-06)
+
+    /// Encrypted, bounded (100-entry) log of what THIS app itself
+    /// called/messaged — the Recent activity leaf's source of truth.
+    /// Never the system call log, never other apps' messages (iOS
+    /// platform wall). Lazy like `chatHistoryStore`: `storage` is
+    /// assigned at the top of `init`, long before any call/message path
+    /// can record. Main-queue confined by contract.
+    private(set) lazy var activityLog = AppActivityLog(storage: storage)
+
+    /// Published window over `activityLog`, newest first — the leaf's
+    /// read side. Mirrors the `conversationHistory` window pattern:
+    /// the store stays the source of truth and `recordActivity` refreshes
+    /// this window after every write, so a row recorded while the leaf is
+    /// open (a re-initiated call/message) appears without a re-push.
+    @Published private(set) var recentActivity: [AppActivityEntry] = []
+
+    /// True while a call is connected (CXCallObserver via
+    /// `liveCallDetector`). Identity-free BY PLATFORM DESIGN: iOS masks
+    /// calls that involve other apps — no handle, number, or identity is
+    /// ever delivered, so this flag says "a call is in progress" and the
+    /// app never learns (or claims) whose. Nothing from the observer is
+    /// read for storage or logged.
+    @Published private(set) var liveCallActive = false
+
+    /// Edge-triggered detector; armed (constructed) in `start()`. Lazy
+    /// so it is created only after init has finished and on the main
+    /// queue, where it stays confined.
+    private(set) lazy var liveCallDetector = makeLiveCallDetector()
 
     @Published var lastOutcome: OutcomeSummary?
 
@@ -318,10 +458,18 @@ final class AppCoordinator: ObservableObject {
     /// initialised, so the closure can't be captured at registration time.
     private let routinePlugin: RoutinePlugin
 
-    /// Family contacts (spec §4.4.2) — persisted encrypted, feeds the
-    /// notifier whenever the list changes.
+    /// The curated "Family and friends" list (spec §4.4.2) — persisted
+    /// encrypted, feeds the notifier whenever the list changes.
     let familyContactStore: FamilyContactStore
     @Published private(set) var familyContacts: [FamilyContact]
+
+    /// Saved places for voice navigation (directions task, 2026-09-07) —
+    /// see `SavedPlaceStore` for the cap and the default-home rules.
+    /// Loaded once in `init`; every mutation below (Settings editor)
+    /// refreshes the published list from the store, so views and the
+    /// router's navigation-candidate list read the same truth.
+    let placeStore: SavedPlaceStore
+    @Published private(set) var savedPlaces: [SavedPlace]
 
     // Voice
     private let audioEngine: AVAudioEngine
@@ -397,6 +545,25 @@ final class AppCoordinator: ObservableObject {
     /// activation". `makeWakeWordEngine()` reads it as the FALLBACK when
     /// the build-time Info.plist key (`PicovoiceAccessKey`) is absent.
     let wakeWordAccessKeyStore: WakeWordAccessKeyStore
+
+    // MARK: - Local tools (weather + web search, on-device stack)
+
+    /// [LOCAL-TOOLS] (2026-09-07) Google Custom Search credentials
+    /// (API key + engine ID) for the on-device-stack web-search tool —
+    /// the same Keychain `EncryptedLocalStorage` pattern as
+    /// `geminiConfigStore`/`wakeWordAccessKeyStore` above; a family member
+    /// enters them via Settings → Web search. Exposed for that Settings
+    /// screen; `CommandRouter` consults `isConfigured` before the search
+    /// tool may ever fire.
+    let searchConfigStore: SearchConfigStore
+
+    /// [TOOL-DEBUG-LOG] (2026-09-07) Encrypted debug log of every
+    /// local-tool (weather + web search) request and outcome — the store
+    /// behind Settings → Tool requests (review + family export). Same
+    /// lazy pattern as the intent-layer stores: `storage` is assigned at
+    /// the top of `init`, long before any voice turn can record one, and
+    /// `start()` injects it into the `CommandRouter` it builds.
+    private(set) lazy var localToolLogStore = LocalToolLogStore(storage: storage)
 
     /// Persisted "listen for Hey Sahayak" UI preference — UserDefaults
     /// (not a secret), same shape as `sttModelPreference` /
@@ -475,6 +642,26 @@ final class AppCoordinator: ObservableObject {
     /// Stateless, so no lazy needed; tests fake it via `CallLinkOpening`.
     private let callLinks = CallLinks()
 
+    /// Per-contact Messenger handles for ADDRESS-BOOK people, keyed by
+    /// normalized phone (Messenger deep-link fix, 2026-09-07) — Messenger
+    /// has NO phone-number thread link, so a captured handle is what
+    /// opens a book row's real thread. The capture prompt is gone
+    /// (messenger-gate, 2026-09-07); `storedMessengerHandle` still READS
+    /// this so a previously captured handle keeps its pill. (Family
+    /// handles live on `FamilyContact`, not here.)
+    private(set) lazy var messengerHandleStore = MessengerHandleStore(storage: storage)
+
+    /// Per-contact calling-channel preferences for ADDRESS-BOOK people,
+    /// keyed by normalized phone (Phone-tab redesign, 2026-09-07) — the
+    /// row's channel chooser persists the user's pick here, and rows
+    /// without an entry resolve to the global `defaultCallApp`. Lazy
+    /// like `messengerHandleStore`: `storage` is assigned at the top of
+    /// `init`, long before any row can query or write a preference. UI
+    /// code goes through the `storedChannelPreference` /
+    /// `setChannelPreference` helpers in this class, never this store
+    /// directly.
+    private(set) lazy var channelPreferenceStore = ChannelPreferenceStore(storage: storage)
+
     /// The plugin registry backing `.plugin` intent dispatch and plugin
     /// prompt composition (design doc 2026-09-05).
     private(set) var pluginRegistry: PluginRegistry!
@@ -517,8 +704,10 @@ final class AppCoordinator: ObservableObject {
 
     /// Whether `start()` should kick the assistant-brain model's one-time
     /// download: the model isn't cached AND no live cloud brain exists.
-    /// The on-device stack always needs the local model (a configured
-    /// Gemini key stays out of its chain — `cloudEnabled` is false), and
+    /// The on-device stack always needs the local model (this decision
+    /// runs BEFORE `applyVoiceEngineStack()` applies any cloud-fallback
+    /// opt-in, so the router is still strict here — `cloudEnabled` is
+    /// false for the on-device stack regardless of the opt-in), and
     /// the Gemini stack needs it too while no key is configured, which is
     /// exactly the shape of the reported bug (correct transcript, apology
     /// reply, nothing listening). Pure static so the decision is
@@ -531,6 +720,24 @@ final class AppCoordinator: ObservableObject {
                                                  cloudBrainAvailable: Bool) -> Bool {
         guard !modelCached else { return false }
         return !(cloudEnabled && cloudBrainAvailable)
+    }
+
+    /// Resolves which channel an ADDRESS-BOOK row's call button opens
+    /// (Phone-tab redesign, 2026-09-07): the row's explicit per-contact
+    /// pick wins, else the global default (`defaultCallApp`). One hard
+    /// rule on top of the fallback chain — never resolve to a channel
+    /// the row cannot open: a `.messenger` result needs an on-file
+    /// handle (Messenger addresses people by username, not number), so
+    /// without one the result drops to `.phone` rather than dead-ending
+    /// the tap. Pure static so the whole matrix is unit-testable without
+    /// an AppCoordinator instance (same seam as
+    /// `shouldAutoDownloadAssistantBrain`).
+    static func resolvedCallChannel(explicit: CallApp?,
+                                    defaultApp: CallApp,
+                                    messengerHandleAvailable: Bool) -> CallApp {
+        let resolved = explicit ?? defaultApp
+        if resolved == .messenger && !messengerHandleAvailable { return .phone }
+        return resolved
     }
 
     /// Compile-time: is the vendored LLM.swift runtime linked into THIS
@@ -582,6 +789,15 @@ final class AppCoordinator: ObservableObject {
             apnsProvider: APNsProvider()
         )
 
+        // Saved navigation places (directions task, 2026-09-07) —
+        // encrypted like the contacts above; loaded immediately so the
+        // published list (Settings editor) and the router's candidate
+        // list start populated. The store self-heals legacy payloads on
+        // this read (hard default-home invariant).
+        let placeStore = SavedPlaceStore(storage: storage)
+        self.placeStore = placeStore
+        self.savedPlaces = placeStore.load()
+
         // Safety-critical service (no LLM dependency)
         self.medicationScheduler = MedicationScheduler(
             storage: storage,
@@ -608,9 +824,45 @@ final class AppCoordinator: ObservableObject {
         self.routineScheduler = routineScheduler
         self.routinePlugin = RoutinePlugin(scheduler: routineScheduler)
 
+        // Read-only native Calendar/Reminders integration (2026-09-07).
+        // Created here (right after the bus exists) so the language
+        // sync below reaches it; no permissions are touched by
+        // construction — enablement is a Settings toggle + point-of-use
+        // ask.
+        let externalCalendar = ExternalCalendarService(observabilityBus: bus)
+        self.externalCalendar = externalCalendar
+
         // Language — restore the persisted choice, defaulting to the Nepali
         // pilot language (spec §3.2).
         self.appLanguage = AppLanguage.persisted()
+
+        // Theme — restore the persisted background theme (skinnable home,
+        // 2026-09-07). Unknown/missing raw values fall back to `.cream`
+        // (`AppTheme(rawOrDefault:)`). This is the property's ONLY initial
+        // assignment, so its didSet does not fire here — nothing needs to
+        // react to the restored value (same rule as `voiceEngineStack`).
+        self.appTheme = AppTheme(rawOrDefault:
+            UserDefaults.standard.string(forKey: Self.themeKey))
+
+        // Default call channel (Phone-tab redesign, 2026-09-07) — restore
+        // the persisted default call app; missing/unknown raw values fall
+        // back to `.phone`, the zero-assumption channel that works for
+        // every row. This is the property's ONLY initial assignment, so
+        // its didSet does not fire here (same rule as `appTheme` above) —
+        // nothing needs to react to the restored value.
+        self.defaultCallApp = UserDefaults.standard
+            .string(forKey: Self.defaultCallAppKey)
+            .flatMap(CallApp.init(rawValue:)) ?? .phone
+
+        // Default map surface (directions task, 2026-09-07) — restore
+        // the persisted map-app override; missing/unknown raw values fall
+        // back to `.auto`, the preference that opens whatever is actually
+        // installed at request time. This is the property's ONLY initial
+        // assignment, so its didSet does not fire here (same rule as
+        // `appTheme` above) — nothing reacts to the restored value.
+        self.navigationMapApp = UserDefaults.standard
+            .string(forKey: Self.navigationMapAppKey)
+            .flatMap(NavigationMapApp.init(rawValue:)) ?? .auto
 
         // Model store + download service. First-run UI drives downloads
         // via `modelDownloadService`; the coordinator watches state changes
@@ -645,6 +897,12 @@ final class AppCoordinator: ObservableObject {
         // writes to. makeWakeWordEngine() reads it as the fallback when
         // the build-time Info.plist `PicovoiceAccessKey` is absent.
         self.wakeWordAccessKeyStore = WakeWordAccessKeyStore(storage: storage)
+
+        // [LOCAL-TOOLS] (2026-09-07): Google Custom Search credentials for
+        // the on-device-stack web-search tool (Settings → Web search).
+        // Deliberately created BEFORE the router below — the router must
+        // receive the store (not nil) or the search hook stays dormant.
+        self.searchConfigStore = SearchConfigStore(storage: storage)
 
         // Voice pipeline. Uses NullWakeWordEngine unless the Porcupine SPM
         // package is present AND the Settings toggle is ON AND a valid
@@ -750,6 +1008,27 @@ final class AppCoordinator: ObservableObject {
         self.voiceEngineStack = UserDefaults.standard.string(forKey: Self.voiceEngineStackKey)
             .flatMap(VoiceEngineStack.init(rawValue:)) ?? .gemini
 
+        // Restore the persisted cloud-fallback opt-in (default OFF — the
+        // strictly-on-device contract) and its provider (default Gemini).
+        // These are the properties' ONLY initial assignments, so their
+        // didSets do not fire here (same rule as `voiceEngineStack`
+        // above); `applyVoiceEngineStack()` — which runs once in the
+        // startup callback — applies the restored opt-in for real.
+        self.cloudFallbackEnabled = UserDefaults.standard.bool(forKey: Self.cloudFallbackKey)
+        self.cloudProvider = UserDefaults.standard.string(forKey: Self.cloudProviderKey)
+            .flatMap(CloudProvider.init(rawValue:)) ?? .gemini
+
+        // Restore the persisted quick-access favourites (quick-access-apps
+        // task, 2026-09-06). Pure prune — dedupe, drop ids naming no
+        // catalog app, cap at 8 — with NO scheme probes at launch, so no
+        // main-thread requirement. This is the property's ONLY initial
+        // assignment, so its didSet does not fire here (same rule as
+        // `voiceEngineStack` above) — nothing else needs to react to the
+        // restored list.
+        self.favoriteAppIDs = AppLauncher.validatedFavouriteIDs(
+            UserDefaults.standard.stringArray(forKey: Self.quickAccessAppsKey) ?? []
+        )
+
         // Restore the persisted wake-word listening preference (default
         // ON — inert until the access key + .ppn exist, see
         // `WakeWordPreferences`). This is the property's ONLY initial
@@ -813,6 +1092,26 @@ final class AppCoordinator: ObservableObject {
         routinePlugin.medicationSummaryProvider = { [weak self] in
             self?.todayMedicationSummaryLines() ?? []
         }
+        // Same fold for imported native Calendar/Reminders items — one
+        // spoken list spanning all three reminder systems.
+        routinePlugin.externalSummaryProvider = { [weak self] in
+            self?.externalCalendar.todaysSpokenLines(locale: self?.activeLocale
+                                                     ?? Locale(identifier: "en")) ?? []
+        }
+        // Mirror staleness seam (calendar-driven task, 2026-09-07): every
+        // routine mutation re-mirrors the schedule — one seam covering
+        // the voice path (RoutinePlugin.handleSet → addEntry) and the
+        // Reminders leaf toggles alike.
+        routineScheduler.onScheduleChanged = { [weak self] in
+            self?.calendarSync.syncNow(entries: self?.routineScheduler.entries() ?? [])
+        }
+        // Forward the external calendar service's publishes (Settings
+        // status/lead, scan results reaching the Reminders + Calendar
+        // leaves) — nested ObservableObject, see the property docs.
+        externalCalendarCancellable = externalCalendar.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
     }
 
     func start() {
@@ -827,6 +1126,26 @@ final class AppCoordinator: ObservableObject {
         // never a crash.
         chatHistoryStore.load()
         conversationHistory = chatHistoryStore.recent()
+
+        // Activity history (call-history task, 2026-09-06): prime the
+        // leaf's window from disk — rows from previous launches must show
+        // even before anything new is recorded this session.
+        refreshRecentActivity()
+
+        // Live-call detection (call-history task, 2026-09-06): force the
+        // lazy detector to construct + subscribe so `liveCallActive`
+        // tracks reality from launch. Pause/resume of spoken output
+        // around calls: SKIPPED — the voice stack exposes no clean pause
+        // API to hang this on (Speaker = speak/cancel only; VoicePipeline
+        // = start/stop with no pause state; VoiceSessionStateMachine has
+        // no pause transition; the AVSpeechSynthesizer is private inside
+        // SystemSpeechSpeaker). It is also unnecessary: a real call
+        // interrupts the app's audio session at the OS level
+        // (AudioSessionManager already observes AVAudioSession
+        // interruptions), which stops in-flight TTS — nothing in the app
+        // talks over an active call, so a half-broken teardown would buy
+        // nothing.
+        _ = liveCallDetector
 
         // Register background tasks (iOS)
         registerBackgroundTasks()
@@ -855,6 +1174,18 @@ final class AppCoordinator: ObservableObject {
         // every catalog festival + advance N-day reminders for important
         // ones (default 2, Settings-configurable). Idempotent rebuild.
         festivalCalendar.scheduleAll()
+
+        // Read-only native Calendar/Reminders integration (2026-09-07):
+        // launch-time refresh — NO prompts (startIfEnabled only scans
+        // when the family already enabled + granted access), then the
+        // hourly BGAppRefresh keeps it current while backgrounded.
+        Task { await externalCalendar.startIfEnabled() }
+        // Mirror staleness fix: re-mirror at launch when enabled (the
+        // restored status survives relaunches now), so the family's
+        // calendar view of the routine is current from a fresh start.
+        if calendarSync.isEnabled {
+            calendarSync.syncNow(entries: routineScheduler.entries())
+        }
 
         // Voice pipeline is built lazily here so the CommandRouter can hold a
         // weak ref back to this fully-initialised coordinator.
@@ -939,7 +1270,21 @@ final class AppCoordinator: ObservableObject {
             speaker: speaker,
             interpreter: router3,
             pluginRegistry: pluginRegistry,
-            geminiClient: geminiClient
+            geminiClient: geminiClient,
+            // [LOCAL-TOOLS] (2026-09-07) Live weather/search seams for the
+            // on-device stack: the search credential store, a fresh
+            // LocationFetcher per weather question (one request per
+            // instance — see LocationFetcher's doc), and URLSession for
+            // both transports (each tool's request carries its own
+            // timeout; see WeatherTool + the router's search timeout).
+            // [TOOL-DEBUG-LOG] (2026-09-07) The encrypted request log
+            // store — the router records one entry per weather/search
+            // attempt (see CommandRouter.logToolRequest).
+            searchConfigStore: searchConfigStore,
+            locationFetcherFactory: { LocationFetcher() },
+            weatherTransport: URLSession.shared,
+            searchTransport: URLSession.shared,
+            localToolLogStore: localToolLogStore
         )
         // Start with the fallback STT. Gemini is swapped in below once an
         // API key is configured.
@@ -1135,6 +1480,91 @@ final class AppCoordinator: ObservableObject {
         voiceStartWatchdog = nil
     }
 
+    // MARK: - One-shot search-phrase capture (Phone leaf mic button)
+
+    /// The leaf-owned capture runs while the always-on voice pipeline is
+    /// SUSPENDED — the pipeline's tap is the shared engine's single tap
+    /// slot (see `SearchPhraseCapture`'s design note, 2026-09-07). True
+    /// when we stopped a LIVE pipeline that must be restarted once the
+    /// capture completes; false when the pipeline was already stopped.
+    private var voiceWasSuspendedForSearchCapture = false
+    private var searchPhraseCaptureActive = false
+
+    private lazy var searchPhraseCapture = SearchPhraseCapture(
+        audioSession: audioSessionManager,
+        audioEngine: audioEngine,
+        recognizer: fallbackSpeechRecognizer
+    )
+
+    /// Begins a one-shot mic capture for the Phone leaf's search field
+    /// (`VoiceCommandCoordinating` peers — the leaf drives this directly,
+    /// not through the router). Refuses (`.busy`) while a talk cycle is
+    /// mid-flight or the assistant is mid-reply: deactivating the audio
+    /// session then would tear down the wake-word capture in progress or
+    /// cut the TTS mid-utterance and strand the speaking state. The
+    /// pipeline is stopped for the capture's duration and restarted
+    /// afterwards — the resume path mirrors `recoverVoiceCycle` minus
+    /// the spoken re-prompt and the start watchdog (mic permission was
+    /// just exercised by the capture, so the async start gap is a
+    /// dispatch, not a 10-second question mark).
+    func startSearchPhraseCapture(completion: @escaping (Result<String, SearchPhraseCapture.Failure>) -> Void) {
+        guard !searchPhraseCaptureActive else {
+            completion(.failure(.busy))
+            return
+        }
+        guard let voicePipeline else {
+            completion(.failure(.audioUnavailable))
+            return
+        }
+        switch voicePipeline.state {
+        case .idle:
+            guard speakingCount == 0 else {
+                completion(.failure(.busy))
+                return
+            }
+            voiceWasSuspendedForSearchCapture = true
+            voicePipeline.stop()
+        case .capturingCommand, .processing, .routing:
+            completion(.failure(.busy))
+            return
+        case .stopped, .error:
+            // Nothing to suspend, but stop anyway: a half-failed start
+            // (.error paths can leave the engine running with a tap
+            // installed) must never collide with the capture's own tap.
+            voiceWasSuspendedForSearchCapture = false
+            voicePipeline.stop()
+        }
+        searchPhraseCaptureActive = true
+        searchPhraseCapture.start { [weak self] result in
+            guard let self else { return }
+            self.searchPhraseCaptureActive = false
+            self.resumeVoiceAfterSearchCaptureIfNeeded()
+            completion(result)
+        }
+    }
+
+    /// Ends an in-flight capture early (user tapped stop, or the leaf
+    /// disappeared). The capture's own completion — which restarts a
+    /// suspended pipeline — still fires.
+    func cancelSearchPhraseCapture() {
+        searchPhraseCapture.cancel()
+    }
+
+    private func resumeVoiceAfterSearchCaptureIfNeeded() {
+        guard voiceWasSuspendedForSearchCapture else { return }
+        voiceWasSuspendedForSearchCapture = false
+        voicePipeline?.start { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.voiceState = .idle
+            case .failure(let err):
+                self.voiceError = "\(err)"
+                self.voiceState = .error("\(err)")
+            }
+        }
+    }
+
     /// Called by `CommandRouter` when a speak begins/ends — drives the
     /// derived `speaking` state. Callers may be on any queue; mutations
     /// are pinned to main (H1).
@@ -1159,7 +1589,22 @@ final class AppCoordinator: ObservableObject {
             guard let self else { return }
             self.speakingCount += 1
             self.wakeWordActivityGate.setSpeaking(true)
-            self.handlePipelineState(self.lastPipelineState)
+            // Promote straight to .speaking when TTS starts during the
+            // busy pre-speech states (call-ui fix, 2026-09-07): the old
+            // path re-ran handlePipelineState(lastPipelineState), whose
+            // .capturingCommand/.processing/.routing cases map back to
+            // .listening/.transcribing/.understanding regardless of
+            // speakingCount — so the hero kept showing the "listening"
+            // visuals after the reply's speech had actually begun, until
+            // the pipeline eventually emitted .idle. All three pre-speech
+            // states legally transition to .speaking (VoiceSessionState
+            // transition table).
+            let preSpeech: Set<VoiceSessionState> = [.listening, .transcribing, .understanding]
+            if preSpeech.contains(self.voiceSession.state) {
+                self.voiceSession.transition(to: .speaking)
+            } else {
+                self.handlePipelineState(self.lastPipelineState)
+            }
         }
     }
 
@@ -1235,8 +1680,43 @@ final class AppCoordinator: ObservableObject {
             intentRouter?.cloudEnabled = true
             trySwapToGemini()
         case .onDevice:
-            // Strictly on-device: no cloud brain even if a key exists.
-            intentRouter?.cloudEnabled = false
+            // Strictly on-device STT + local brain — with an OPT-IN
+            // cloud escalation (cloud-fallback task, 2026-09-07): the
+            // "Ask Gemini when I can't answer" Settings toggle
+            // intentionally reverses the old rule that the on-device
+            // stack keeps a configured Gemini key out of the chain — by
+            // explicit user opt-in only (constitution-consistent:
+            // opt-in, disclosed in the Settings leaf). Escalation is
+            // provider-shaped for the future dropdown: which cloud brain
+            // may receive an abstained question is `cloudProvider`'s
+            // job — new providers plug in as new cases here, each gated
+            // on its own interpreter's availability. The STT recognizer
+            // is NEVER swapped in this branch — a Gemini recognizer
+            // stays a `.gemini`-stack privilege (`trySwapToGemini()`
+            // guards on the stack).
+            switch cloudProvider {
+            case .gemini:
+                // Gemini is the only provider today. Availability =
+                // `geminiCommandInterpreter.isAvailable` — the same
+                // gate `IntentRouter` applies to its cloud layer.
+                let fallbackEngages = CloudProvider.cloudFallbackEngages(
+                    enabled: cloudFallbackEnabled,
+                    geminiAvailable: geminiCommandInterpreter?.isAvailable ?? false
+                )
+                intentRouter?.cloudEnabled = fallbackEngages
+                // Observability: report the on-device chain's cloud
+                // state each time it applies, so a dashboard can tell an
+                // opted-in escalation from a strictly-local run (C9 —
+                // no utterance content, provider id only).
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "cloud_fallback",
+                    eventType: "state",
+                    durationMs: nil,
+                    outcome: fallbackEngages ? "enabled" : "disabled",
+                    errorCode: nil,
+                    metadata: ["provider": cloudProvider.rawValue]
+                ))
+            }
             // Whisper if its model is actually cached and the runtime is
             // linked; else the SFSpeechRecognizer fallback rather than
             // silently doing nothing (spec §7: no dead-end states).
@@ -1281,9 +1761,10 @@ final class AppCoordinator: ObservableObject {
     /// disagree: the local chain (preferred intent GGUF / LLaMA stand-in)
     /// counts when `isAvailable`; the cloud brain counts only when
     /// `cloudEnabled` (the on-device stack keeps a configured Gemini key
-    /// out of the chain — same guard as `IntentRouter`'s escalation).
-    /// The model-download state supplies the distinction between the two
-    /// honest no-brain messages (downloading vs setup needed).
+    /// out of the chain unless the household opted into cloud fallback —
+    /// same guard as `IntentRouter`'s escalation). The model-download
+    /// state supplies the distinction between the two honest no-brain
+    /// messages (downloading vs setup needed).
     var brainReadiness: BrainReadiness {
         BrainReadiness.resolve(
             localBrainAvailable: intentRouter?.localBrain?.isAvailable ?? false,
@@ -1292,6 +1773,31 @@ final class AppCoordinator: ObservableObject {
             brainDownloadInFlight: isAssistantBrainDownloadInFlight
         )
     }
+
+    /// [INTENT-TOOLS] (2026-09-07) Live-web answering capability for
+    /// `CommandRouter`'s tool wiring. True ONLY when the cloud brain is
+    /// actually in the chain — the derivation mirrors the exact escalation
+    /// guard `IntentRouter` applies at route time (`cloudEnabled` AND the
+    /// cloud brain available), so the router's weather yield can never
+    /// disagree with what the chain would do next: on the on-device stack
+    /// a configured Gemini key stays out of the chain (`cloudEnabled` is
+    /// false, absent the cloud-fallback opt-in) and this is false → the
+    /// deterministic weather pre-answer stands; on the Gemini stack with
+    /// the key configured this is true → weather questions fall through
+    /// to the search-grounded interpreter.
+    var canAnswerLiveQuestionsFromWeb: Bool {
+        (intentRouter?.cloudEnabled ?? false)
+            && (intentRouter?.cloudBrain?.isAvailable ?? false)
+    }
+
+    /// [LOCAL-TOOLS] (2026-09-07) Local-tools stack gate for
+    /// `CommandRouter`. True only when the voice engine is the ON-DEVICE
+    /// stack — the live weather/search tools fire exclusively there,
+    /// because the Gemini stack answers open-domain questions natively
+    /// (search-grounded interpreter) and the tools would be redundant.
+    /// Mirrors the `voiceEngineStack` toggle directly, so flipping the
+    /// stack in Settings gates the tools with no other wiring.
+    var isOnDeviceStack: Bool { voiceEngineStack == .onDevice }
 
     /// Whether the assistant-brain model is currently arriving (queued /
     /// downloading / verifying) — the one state that turns `.needsSetup`
@@ -1412,7 +1918,7 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    // MARK: - Family contacts (spec §4.4.2)
+    // MARK: - Family & friends — curated contacts (spec §4.4.2)
 
     /// Maps stored family contacts onto the notifier's contact type.
     /// Device tokens stay unprovisioned until the broker relay exists
@@ -1429,12 +1935,120 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// Photo thumbnails for curated contacts (family-and-friends task,
+    /// 2026-09-07). Lazy like the intent-layer stores: nothing touches
+    /// Application Support paths before launch completes. Photos are
+    /// best-effort visuals — the store is non-throwing, and every call
+    /// site below tolerates a nil filename.
+    lazy var contactPhotoStore = ContactPhotoStore()
+
+    /// The stored thumbnail for a curated contact, or nil when none is
+    /// on file (or the file vanished) — the single lookup every row
+    /// renders through, so the Photo-tab UI needs nothing but a contact.
+    func contactPhoto(for contact: FamilyContact) -> UIImage? {
+        contactPhotoStore.load(named: contact.photoFilename)
+    }
+
+    /// Adds a curated contact (spec §4.4.2). `photo`, when given, is
+    /// persisted to `ContactPhotoStore` FIRST and its file name stored
+    /// on the contact — and if the store rejects the contact (list full)
+    /// the just-written file is deleted again, so a failed add never
+    /// orphans a photo on disk.
+    ///
+    /// `nickname` (family-wizard task, 2026-09-07): the optional
+    /// informal name from the wizard's last step; defaulted so the
+    /// onboarding call site (which never collects one) is unchanged.
+    ///
+    /// `address` (directions task, 2026-09-07) is the contact's optional
+    /// home address for voice navigation — blank text is stored as nil.
     @discardableResult
     func addFamilyContact(name: String, phone: String, relationship: String,
-                          messengerHandle: String? = nil) -> Bool {
+                          messengerHandle: String? = nil,
+                          photo: UIImage? = nil,
+                          nickname: String? = nil,
+                          address: String? = nil) -> Bool {
+        let filename = photo.flatMap { contactPhotoStore.save($0) }
         let contact = FamilyContact(name: name, phone: phone, relationship: relationship,
-                                    messengerHandle: messengerHandle)
-        guard familyContactStore.add(contact) else { return false }
+                                    messengerHandle: messengerHandle,
+                                    photoFilename: filename,
+                                    nickname: nickname,
+                                    address: Self.normalizedOptionalText(address))
+        guard familyContactStore.add(contact) else {
+            if let filename { contactPhotoStore.delete(named: filename) }
+            return false
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.familyContacts = self.familyContactStore.load()
+            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts))
+        }
+        return true
+    }
+
+    /// Field edit of a curated contact (family-and-friends task,
+    /// 2026-09-07 — the Settings editor's five-step add/edit wizard).
+    /// The photo arguments express the wizard's three intents exactly:
+    /// `photo` non-nil REPLACES the stored photo, `removingPhoto` clears
+    /// it, and both nil keeps whatever is on file. The record save is
+    /// the commit point — a written replacement file is deleted again
+    /// when the store write fails, and the old photo file is only
+    /// deleted after the new record is safely persisted, so a failed
+    /// edit never loses the photo the contact already had.
+    ///
+    /// `nickname` (family-wizard task, 2026-09-07): the wizard's
+    /// optional informal name; nil clears a stored one, defaulted so
+    /// pre-wizard callers compile unchanged.
+    @discardableResult
+    func updateFamilyContact(id: UUID, name: String, phone: String, relationship: String,
+                             messengerHandle: String?,
+                             photo: UIImage? = nil, removingPhoto: Bool = false,
+                             nickname: String? = nil,
+                             address: String? = nil) -> Bool {
+        guard var contact = familyContacts.first(where: { $0.id == id }) else { return false }
+        contact.name = name
+        contact.phone = phone
+        contact.relationship = relationship
+        contact.messengerHandle = messengerHandle
+        contact.nickname = nickname
+        // The editor passes the CURRENT text each save; blank clears the
+        // stored address (nil), so "remove the address" is an edit, not a
+        // separate affordance (directions task, 2026-09-07).
+        contact.address = Self.normalizedOptionalText(address)
+
+        let oldFilename = contact.photoFilename
+        var newFilename = oldFilename
+        if removingPhoto {
+            newFilename = nil
+        } else if let photo {
+            // A failed thumbnail write KEEPS the photo the contact
+            // already had — a pick that couldn't be stored is a failed
+            // replacement, never a removal. (Only a first add with no
+            // old photo proceeds photo-less.)
+            if let saved = contactPhotoStore.save(photo) {
+                newFilename = saved
+            }
+        }
+
+        var all = familyContactStore.load()
+        guard let index = all.firstIndex(where: { $0.id == id }) else {
+            if let newFilename, newFilename != oldFilename {
+                contactPhotoStore.delete(named: newFilename)
+            }
+            return false
+        }
+        contact.photoFilename = newFilename
+        all[index] = contact
+        guard familyContactStore.save(all) else {
+            if let newFilename, newFilename != oldFilename {
+                contactPhotoStore.delete(named: newFilename)
+            }
+            return false
+        }
+        // The new record is safely on disk — the replaced/removed old
+        // file can go now.
+        if let oldFilename, oldFilename != newFilename {
+            contactPhotoStore.delete(named: oldFilename)
+        }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.familyContacts = self.familyContactStore.load()
@@ -1444,7 +2058,13 @@ final class AppCoordinator: ObservableObject {
     }
 
     func removeFamilyContact(id: UUID) {
+        // The photo file is deleted with its contact — a removed person's
+        // thumbnail must not linger on disk.
+        let removed = familyContacts.first { $0.id == id }
         familyContactStore.remove(id: id)
+        if let filename = removed?.photoFilename {
+            contactPhotoStore.delete(named: filename)
+        }
         callMethodPreferences.removeAll(for: id)
         confirmedMethodHistory.removeAll(for: id)
         DispatchQueue.main.async { [weak self] in
@@ -1452,6 +2072,67 @@ final class AppCoordinator: ObservableObject {
             self.familyContacts = self.familyContactStore.load()
             self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts))
         }
+    }
+
+    // MARK: - Saved places (directions task, 2026-09-07)
+
+    /// Blank-or-whitespace optional text (an editor field the user left
+    /// empty) is stored as nil — shared by the contact-address and
+    /// saved-place writes so "no address" is always `nil`, never `""`.
+    private static func normalizedOptionalText(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Adds a saved place (Settings → Places editor). The store enforces
+    /// the cap and the default-home rules (first `.home` auto-promotes);
+    /// on success the published list refreshes from the store so views
+    /// and the router's candidate list see the same truth. UI-thread
+    /// callers only (Settings), so the published mutation stays on main.
+    @discardableResult
+    func addPlace(name: String, address: String, category: SavedPlace.Category,
+                  isDefaultHome: Bool) -> Bool {
+        let normalized = Self.normalizedOptionalText(address) ?? ""
+        let place = SavedPlace(name: name, address: normalized,
+                               category: category, isDefaultHome: isDefaultHome)
+        guard placeStore.add(place) else { return false }
+        savedPlaces = placeStore.load()
+        return true
+    }
+
+    /// Field edit of a saved place (the Settings editor's save). The
+    /// default-home toggle wins exactly like the store's rule: a `.home`
+    /// saved with the flag set becomes THE default, and a demoted save
+    /// of the current default auto-promotes the next `.home`.
+    @discardableResult
+    func updatePlace(id: UUID, name: String, address: String, category: SavedPlace.Category,
+                     isDefaultHome: Bool) -> Bool {
+        guard savedPlaces.contains(where: { $0.id == id }) else { return false }
+        let normalized = Self.normalizedOptionalText(address) ?? ""
+        let place = SavedPlace(id: id, name: name, address: normalized,
+                               category: category, isDefaultHome: isDefaultHome)
+        guard placeStore.update(place) else { return false }
+        savedPlaces = placeStore.load()
+        return true
+    }
+
+    /// Removes a saved place. Removing the current default auto-promotes
+    /// the first remaining `.home` (store rule); an important-place-only
+    /// list simply has no default, and the router speaks the honest
+    /// `directions.noHome` line until one is saved.
+    func removePlace(id: UUID) {
+        placeStore.remove(id: id)
+        savedPlaces = placeStore.load()
+    }
+
+    /// Makes the `.home` place with `id` THE default home ("take me
+    /// home" target). Returns false when no such `.home` place exists.
+    @discardableResult
+    func setDefaultHomePlace(id: UUID) -> Bool {
+        guard placeStore.setDefaultHome(id: id) else { return false }
+        savedPlaces = placeStore.load()
+        return true
     }
 
     // MARK: - Emergency (redesign spec §3.1/§3.2 — persistent icon everywhere)
@@ -1483,6 +2164,147 @@ final class AppCoordinator: ObservableObject {
         )
         UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
         speak(key: "router.emergencyAck")
+    }
+
+    // MARK: - Quick access apps (Home row + Settings picker, 2026-09-06)
+
+    /// Honest installed probe for a catalog app — `canOpenURL` on its
+    /// declared scheme (iOS cannot enumerate installed apps; the schemes
+    /// live in Info.plist LSApplicationQueriesSchemes and every catalog
+    /// scheme is pinned by AppLauncherTests). Main-thread safe
+    /// (`SystemCallLinkOpener` hops to main for the system probe).
+    func isAppInstalled(_ app: AppLauncher.App) -> Bool {
+        appLauncher.isInstalled(app)
+    }
+
+    /// Adds `app` to the quick-access favourites. Every precondition is
+    /// re-validated here — the picker gates its buttons on the same
+    /// checks, but the coordinator is the backstop (a scheme probe can
+    /// go stale between the row's appearance and the tap): catalog
+    /// membership, genuinely installed on this phone, room under the
+    /// cap, not already favourited. Returns false (and changes nothing)
+    /// when any check fails.
+    @discardableResult
+    func addFavoriteApp(_ app: AppLauncher.App) -> Bool {
+        guard AppLauncher.app(for: app.id) != nil,
+              !favoriteAppIDs.contains(app.id),
+              favoriteAppIDs.count < AppLauncher.maxFavourites,
+              isAppInstalled(app) else { return false }
+        favoriteAppIDs.append(app.id)
+        return true
+    }
+
+    /// Removes `app` from the quick-access favourites. No-op when it
+    /// isn't there (the picker and a stale row can both call it).
+    func removeFavoriteApp(_ app: AppLauncher.App) {
+        favoriteAppIDs.removeAll { $0 == app.id }
+    }
+
+    /// Launches a quick-access app from the Home row / picker, with the
+    /// dual-channel honesty every open path holds: probe FIRST, and when
+    /// the app is gone (deleted after the row appeared) say so out loud
+    /// and show it on the outcome card — never a silent dead tap. One
+    /// `app_launcher` event per attempt; the outcome names which surface
+    /// appeared (`<id>:opened`) or why nothing did (`<id>:notInstalled`).
+    func performAppLaunch(_ app: AppLauncher.App) {
+        let locale = activeLocale
+        let name = L10n.str(app.nameKey, locale: locale)
+        guard isAppInstalled(app) else {
+            let text = L10n.fmt("apps.announce.notInstalled", locale: locale, name)
+            setOutcome(icon: "exclamationmark.triangle.fill", text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):notInstalled")
+            return
+        }
+        appLauncher.open(app)
+        let text = L10n.fmt("apps.announce.opened", locale: locale, name)
+        setOutcome(icon: app.systemImage, text: text)
+        speak(text: text)
+        emitAppLaunch(outcome: "\(app.id):opened")
+    }
+
+    private func emitAppLaunch(outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "app_launcher",
+            eventType: "launch",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]  // catalog app id only — no contact identifiers (C9)
+        ))
+    }
+
+    // MARK: - Phone-leaf contact-list launches (contact-leaf-launch task,
+    // 2026-09-07)
+
+    /// Opens WhatsApp's own chat list — the Phone leaf's "WhatsApp
+    /// contacts" button (contact-leaf-launch task, 2026-09-07). The app
+    /// has no API to render a WhatsApp contact list in-process, so one
+    /// tap hands the elder INTO WhatsApp: its scheme root IS the chat
+    /// list. Same dual-channel honesty as `performAppLaunch` — probe
+    /// `canOpenURL` first, and when WhatsApp is gone say so aloud with a
+    /// failure outcome, never a silent dead tap.
+    func openWhatsAppContacts() {
+        let locale = activeLocale
+        let name = L10n.str("app.name.whatsapp", locale: locale)
+        // Scheme root is a compile-time constant — the unwrap can never
+        // trap (same rationale as `AppLauncher.App.rootURL`).
+        let url = URL(string: "whatsapp://")!
+        guard canOpenURLOnMain(url) else {
+            let text = L10n.fmt("apps.announce.notInstalled", locale: locale, name)
+            setOutcome(icon: "exclamationmark.triangle.fill", text: text)
+            speak(text: text)
+            emitContactLeafLaunch(outcome: "whatsapp:notInstalled")
+            return
+        }
+        DispatchQueue.main.async { UIApplication.shared.open(url) }
+        let text = L10n.fmt("apps.announce.opened", locale: locale, name)
+        setOutcome(icon: "bubble.left.and.bubble.right.fill", text: text)
+        speak(text: text)
+        emitContactLeafLaunch(outcome: "whatsapp:opened")
+    }
+
+    /// Messenger analogue of `openWhatsAppContacts` — `fb-messenger://`
+    /// (its scheme root) opens Messenger's people list. Same
+    /// probe-first, announce-honestly, never-silent-dead-tap contract.
+    func openMessengerContacts() {
+        let locale = activeLocale
+        let name = L10n.str("app.name.messenger", locale: locale)
+        // Scheme root is a compile-time constant — the unwrap can never
+        // trap (same rationale as `AppLauncher.App.rootURL`).
+        let url = URL(string: "fb-messenger://")!
+        guard canOpenURLOnMain(url) else {
+            let text = L10n.fmt("apps.announce.notInstalled", locale: locale, name)
+            setOutcome(icon: "exclamationmark.triangle.fill", text: text)
+            speak(text: text)
+            emitContactLeafLaunch(outcome: "messenger:notInstalled")
+            return
+        }
+        DispatchQueue.main.async { UIApplication.shared.open(url) }
+        let text = L10n.fmt("apps.announce.opened", locale: locale, name)
+        setOutcome(icon: "paperplane.fill", text: text)
+        speak(text: text)
+        emitContactLeafLaunch(outcome: "messenger:opened")
+    }
+
+    /// `UIApplication.shared.canOpenURL` is main-thread bound — hop to
+    /// main when a caller runs off it (the same shape as
+    /// `SystemCallLinkOpener`). View taps arrive on main already; this
+    /// covers any other caller.
+    private func canOpenURLOnMain(_ url: URL) -> Bool {
+        if Thread.isMainThread { return UIApplication.shared.canOpenURL(url) }
+        return DispatchQueue.main.sync { UIApplication.shared.canOpenURL(url) }
+    }
+
+    private func emitContactLeafLaunch(outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "contact_leaf_launch",
+            eventType: "tap",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]  // app id only — no contact identifiers (C9)
+        ))
     }
 
     // MARK: - Voice-triggered call & message (trial wiring)
@@ -1675,6 +2497,9 @@ final class AppCoordinator: ObservableObject {
                        text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
             speak(text: L10n.fmt("router.call.calling", locale: locale, action.contact.name))
             noteConfirmedCallExecution(action)
+            recordActivity(kind: .call, channel: .phone,
+                           contactName: action.contact.name,
+                           phone: action.contact.phone)
         case .facetimeVideo, .facetimeAudio:
             let isVideo = action.method == .facetimeVideo
             switch callLinks.openFaceTime(handle: action.contact.phone, video: isVideo) {
@@ -1684,6 +2509,10 @@ final class AppCoordinator: ObservableObject {
                 speak(text: L10n.fmt("router.call.calling", locale: locale, action.contact.name))
                 noteConfirmedCallExecution(action)
                 contactNumberUsed(action.contact.phone)
+                recordActivity(kind: .call,
+                               channel: isVideo ? .faceTimeVideo : .faceTimeAudio,
+                               contactName: action.contact.name,
+                               phone: action.contact.phone)
             case .unavailable, .invalidHandle:
                 // FaceTime absent is near-impossible on a real iPhone but
                 // real on simulator — say what actually happened, and
@@ -1699,6 +2528,11 @@ final class AppCoordinator: ObservableObject {
                        text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, action.contact.name))
             speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, action.contact.name))
             noteConfirmedCallExecution(action)
+            // The wa.me chat opened — a genuine MESSAGE surface (the only
+            // one WhatsApp exposes to a deep link; see Channel.whatsapp).
+            recordActivity(kind: .message, channel: .whatsapp,
+                           contactName: action.contact.name,
+                           phone: action.contact.phone)
         case .messengerAudio, .messengerVideo:
             switch callLinks.openMessengerThread(handle: action.contact.messengerHandle ?? "") {
             case .openedThread:
@@ -1706,6 +2540,13 @@ final class AppCoordinator: ObservableObject {
                            text: L10n.fmt("home.outcome.messengerOpened", locale: locale, action.contact.name))
                 speak(text: L10n.fmt("router.call.messengerOpened", locale: locale, action.contact.name))
                 noteConfirmedCallExecution(action)
+                // A call request resolves to the opened thread — recorded
+                // honestly as the attempt it was (the app never claims a
+                // Messenger "call"; no documented scheme can start one).
+                recordActivity(kind: .call, channel: .messenger,
+                               contactName: action.contact.name,
+                               phone: action.contact.phone,
+                               messengerHandle: action.contact.messengerHandle)
             case .fellBackToWeb:
                 // Messenger app absent — the m.me chat opened in Safari
                 // instead. A real surface appeared (the user CAN reach the
@@ -1715,6 +2556,11 @@ final class AppCoordinator: ObservableObject {
                            text: L10n.fmt("home.outcome.messengerWebFallback", locale: locale, action.contact.name))
                 speak(text: L10n.fmt("router.call.messengerWebFallback", locale: locale, action.contact.name))
                 noteConfirmedCallExecution(action)
+                // Same attempt recorded for the web surface that opened.
+                recordActivity(kind: .call, channel: .messenger,
+                               contactName: action.contact.name,
+                               phone: action.contact.phone,
+                               messengerHandle: action.contact.messengerHandle)
             case .invalidHandle:
                 // The handle went missing/invalid between confirmation and
                 // execution — say what happened, record NOTHING (same rule
@@ -1776,6 +2622,8 @@ final class AppCoordinator: ObservableObject {
                            text: L10n.fmt("home.outcome.callPlaced", locale: locale, contact.name))
                 speak(text: L10n.fmt("call.announce.faceTimeVideo", locale: locale, contact.name))
                 contactNumberUsed(contact.phone)
+                recordActivity(kind: .call, channel: .faceTimeVideo,
+                               contactName: contact.name, phone: contact.phone)
             case .unavailable, .invalidHandle:
                 setOutcome(icon: "exclamationmark.triangle.fill",
                            text: L10n.str("router.call.facetimeUnavailable", locale: locale))
@@ -1790,16 +2638,24 @@ final class AppCoordinator: ObservableObject {
             setOutcome(icon: "phone.fill",
                        text: L10n.fmt("home.outcome.callPlaced", locale: locale, contact.name))
             speak(text: L10n.fmt("router.call.calling", locale: locale, contact.name))
+            recordActivity(kind: .call, channel: .phone,
+                           contactName: contact.name, phone: contact.phone)
         case .messenger:
             switch callLinks.openMessengerChat(phone: contact.phone) {
             case .openedApp:
                 setOutcome(icon: "message.fill",
                            text: L10n.fmt("home.outcome.messengerOpened", locale: locale, contact.name))
                 speak(text: L10n.fmt("call.announce.messenger", locale: locale, contact.name))
+                recordActivity(kind: .call, channel: .messenger,
+                               contactName: contact.name, phone: contact.phone,
+                               messengerHandle: contact.messengerHandle)
             case .openedWebChat:
                 setOutcome(icon: "message.fill",
                            text: L10n.fmt("home.outcome.messengerOpened", locale: locale, contact.name))
                 speak(text: L10n.fmt("call.announce.messengerWebFallback", locale: locale, contact.name))
+                recordActivity(kind: .call, channel: .messenger,
+                               contactName: contact.name, phone: contact.phone,
+                               messengerHandle: contact.messengerHandle)
             case .invalidHandle:
                 announceNoUsableNumber(contact: contact, locale: locale)
             }
@@ -1809,6 +2665,8 @@ final class AppCoordinator: ObservableObject {
                 setOutcome(icon: "message.fill",
                            text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, contact.name))
                 speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, contact.name))
+                recordActivity(kind: .message, channel: .whatsapp,
+                               contactName: contact.name, phone: contact.phone)
             case .needsNativeCompose:
                 // WhatsApp absent → native Messages sheet to the same
                 // number (task's sms/copy chain), disclosed out loud.
@@ -1847,6 +2705,32 @@ final class AppCoordinator: ObservableObject {
         setOutcome(icon: "phone.fill",
                    text: L10n.fmt("home.outcome.callPlaced", locale: activeLocale, name))
         speak(text: L10n.fmt("router.call.calling", locale: activeLocale, name))
+        recordActivity(kind: .call, channel: .phone,
+                       contactName: name, phone: phone)
+    }
+
+    /// FaceTime re-initiation for a Recent activity row (call-history
+    /// task, 2026-09-06): the row stored the number a FaceTime link
+    /// opened before, and tapping it opens FaceTime again — the same
+    /// genuine-open path performContactCall's faceTime case uses, with
+    /// the same "record only a real open" rule.
+    func performFaceTimeCall(name: String, phone: String, video: Bool) {
+        let locale = activeLocale
+        switch callLinks.openFaceTime(handle: phone, video: video) {
+        case .opened:
+            setOutcome(icon: video ? "video.fill" : "phone.fill",
+                       text: L10n.fmt("home.outcome.callPlaced", locale: locale, name))
+            speak(text: L10n.fmt("router.call.calling", locale: locale, name))
+            contactNumberUsed(phone)
+            recordActivity(kind: .call,
+                           channel: video ? .faceTimeVideo : .faceTimeAudio,
+                           contactName: name, phone: phone)
+        case .unavailable, .invalidHandle:
+            // Same honest line the tiles speak when FaceTime can't open.
+            setOutcome(icon: "exclamationmark.triangle.fill",
+                       text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+            speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+        }
     }
 
     /// WhatsApp surface for a SYSTEM-address-book search row (unified
@@ -1865,6 +2749,8 @@ final class AppCoordinator: ObservableObject {
                        text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, name))
             speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, name))
             noteSearchChannelTap(outcome: "whatsapp:openedChat")
+            recordActivity(kind: .message, channel: .whatsapp,
+                           contactName: name, phone: phone)
         case .needsNativeCompose:
             // WhatsApp absent → the same native Messages sheet to the
             // same number the family whatsApp button falls back to.
@@ -1886,13 +2772,57 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// The Messenger handle the app captured for a book-row contact —
+    /// `MessengerHandleStore`, keyed by the normalized phone (messenger-
+    /// gate, 2026-09-07: the old capture prompt is gone; the Phone-tab
+    /// redesign's add-handle sheet writes again via
+    /// `storeMessengerHandle`). The Phone leaf's messenger pill and tap
+    /// resolve it for book rows whose record itself carries no Facebook
+    /// linkage. Nil when none was ever saved.
+    func storedMessengerHandle(forNormalizedPhone normalized: String) -> String? {
+        messengerHandleStore.handle(forNormalizedPhone: normalized)
+    }
+
+    /// Saves the Messenger handle a book-row contact's add-handle sheet
+    /// captured (Phone-tab redesign, 2026-09-07). RE-ADDED: messenger-
+    /// gate removed this when it deleted the old capture prompt; the
+    /// redesign's sheet brings the write side back — a saved handle is
+    /// what keeps the row's messenger pill and opens the real thread.
+    /// The caller has already validated the username; this just persists
+    /// via the encrypted `MessengerHandleStore` and returns whether the
+    /// write landed.
+    @discardableResult
+    func storeMessengerHandle(_ handle: String, forNormalizedPhone normalized: String) -> Bool {
+        messengerHandleStore.set(handle: handle, forNormalizedPhone: normalized)
+    }
+
+    /// The per-contact calling channel the Phone-tab row's channel
+    /// chooser saved for an ADDRESS-BOOK row (Phone-tab redesign,
+    /// 2026-09-07) — nil when the user never picked one (or the stored
+    /// value is corrupt), in which case the row resolves to the global
+    /// `defaultCallApp` via `resolvedCallChannel`.
+    func storedChannelPreference(forNormalizedPhone normalized: String) -> CallApp? {
+        channelPreferenceStore.preference(forNormalizedPhone: normalized)
+    }
+
+    /// Persists the row's channel-chooser pick for an ADDRESS-BOOK row
+    /// (Phone-tab redesign, 2026-09-07). Returns whether the encrypted
+    /// write landed — the chooser can surface a failed write honestly
+    /// instead of silently showing a pick that won't survive relaunch.
+    @discardableResult
+    func setChannelPreference(_ app: CallApp, forNormalizedPhone normalized: String) -> Bool {
+        channelPreferenceStore.set(app, forNormalizedPhone: normalized)
+    }
+
     /// Messenger thread for a SYSTEM-address-book search row — the
     /// messenger analogue of `performSystemContactWhatsApp`, keyed on
-    /// the person's Messenger handle (a row shows the pill only when one
-    /// is on file). Same tap model and disclosures as `performContactCall`'s
-    /// messenger case: the thread opens in-app when Messenger is
-    /// installed, as the m.me web chat in Safari when it is not, and a
-    /// missing handle opens nothing and says so. No recency entry.
+    /// the person's Messenger handle (a row shows the pill only when a
+    /// usable handle is on file — the row's own, or one the app
+    /// captured earlier; see `storedMessengerHandle`). Same tap model
+    /// and disclosures as `performContactCall`'s messenger case: the
+    /// thread opens in-app when Messenger is installed, as the m.me web
+    /// chat in Safari when it is not, and a missing handle opens nothing
+    /// and says so. No recency entry.
     func performSystemContactMessenger(name: String, handle: String) {
         let locale = activeLocale
         switch callLinks.openMessengerThread(handle: handle) {
@@ -1901,6 +2831,11 @@ final class AppCoordinator: ObservableObject {
                        text: L10n.fmt("home.outcome.messengerOpened", locale: locale, name))
             speak(text: L10n.fmt("call.announce.messenger", locale: locale, name))
             noteSearchChannelTap(outcome: "messenger:openedThread")
+            // A thread (chat) surface opened — recorded as the message
+            // channel it is; no phone number rides on this API, the
+            // handle is what re-opening needs.
+            recordActivity(kind: .message, channel: .messenger,
+                           contactName: name, messengerHandle: handle)
         case .fellBackToWeb:
             // Messenger absent — the m.me chat opened in Safari instead;
             // the same web-fallback disclosure the family messenger
@@ -1941,6 +2876,55 @@ final class AppCoordinator: ObservableObject {
     /// didn't happen must not make its number look recently used.
     private func contactNumberUsed(_ phone: String) {
         callRecencyStore.record(phone: phone)
+    }
+
+    // MARK: - Activity recording + live-call wiring (call-history task,
+    // 2026-09-06)
+
+    /// One line in the Recent activity log, per GENUINE channel open.
+    /// Every call site pairs a `recordActivity` with the outcome branch
+    /// that actually opened a surface — never with a failure branch:
+    /// recording an open that didn't happen would lie about what the
+    /// assistant did (the same honesty rule `contactNumberUsed` holds
+    /// to). Called on the main queue only.
+    private func recordActivity(kind: AppActivityEntry.Kind,
+                                channel: AppActivityEntry.Channel,
+                                contactName: String,
+                                phone: String = "",
+                                messengerHandle: String? = nil,
+                                body: String? = nil) {
+        // Message text is stored only when it is non-blank (a pre-filled
+        // draft is content; an empty compose sheet is not).
+        let trimmed = body?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let storedBody = trimmed.flatMap { $0.isEmpty ? nil : $0 }
+        activityLog.append(AppActivityEntry(kind: kind, channel: channel,
+                                            contactName: contactName,
+                                            phone: phone,
+                                            messengerHandle: messengerHandle,
+                                            body: storedBody))
+        refreshRecentActivity()
+    }
+
+    /// Refreshes the published window from the store (see
+    /// `recentActivity`). Main queue.
+    private func refreshRecentActivity() {
+        recentActivity = activityLog.entries()
+    }
+
+    /// Builds the live-call detector. Instance method (not a closure over
+    /// `self` in the lazy declaration) so the onChange closure can hold
+    /// `self` weakly without capture-list gymnastics in a lazy
+    /// initializer. Main queue by contract — CXCallStateProvider's
+    /// delegate is `.main`, and `liveCallActive` is main-queue confined.
+    private func makeLiveCallDetector() -> LiveCallDetector {
+        let detector = LiveCallDetector(provider: CXCallStateProvider()) { [weak self] active in
+            DispatchQueue.main.async { self?.liveCallActive = active }
+        }
+        // Initial state: a call already connected at launch must show on
+        // the leaf immediately (the detector does not fire onChange for
+        // its initial snapshot — that is exactly what this read is for).
+        liveCallActive = detector.hasActiveCall
+        return detector
     }
 
     /// Normalized-number → last-call-date index for ranking search
@@ -2035,6 +3019,304 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    // MARK: - Contact-search requests (voice-contact-search, 2026-09-07)
+
+    /// A voice command routed to contact search ("मैयाको फोन नम्बर खोज" —
+    /// `VoiceContactSearchRoute`). HomeView observes the `id` and pushes
+    /// the Phone leaf; the leaf consumes the query via
+    /// `takePendingContactSearchRequest` and runs the search so results
+    /// (incl. WhatsApp/Messenger badges) are on screen, zero-touch.
+    /// Nothing is spoken here — the leaf announces the outcome.
+    struct ContactSearchRequest: Identifiable, Equatable {
+        let id = UUID()
+        let query: String?
+    }
+    @Published var pendingContactSearchRequest: ContactSearchRequest?
+
+    /// `VoiceCommandCoordinating.requestContactSearch`. Publishes a
+    /// fresh request — safe from any queue (observable mutation is
+    /// pinned to main, H1). A repeated utterance while one request is
+    /// still pending replaces it; the leaf consumes whatever is newest.
+    func requestContactSearch(query: String?) {
+        DispatchQueue.main.async { [weak self] in
+            self?.pendingContactSearchRequest = ContactSearchRequest(query: query)
+        }
+    }
+
+    /// Consumes and clears the pending request — called by the Phone
+    /// leaf once it has applied the query, so a stale request can never
+    /// push a second Phone screen. Main queue only (observable mutation).
+    func takePendingContactSearchRequest() -> ContactSearchRequest? {
+        let request = pendingContactSearchRequest
+        pendingContactSearchRequest = nil
+        return request
+    }
+
+    // MARK: - Voice-driven navigation (directions task, 2026-09-07)
+
+    /// A navigation session awaiting sheet presentation — ContentView
+    /// renders it, same pattern as `pendingPluginPresentation`. The
+    /// session is created FRESH per request (its fetcher/geocoder/
+    /// calculator seams are all one-request-per-instance) and is
+    /// `@MainActor`-isolated, so it is born inside the main-queue hop
+    /// below.
+    struct NavigationPresentation: Identifiable {
+        let id = UUID()
+        let session: InAppNavigationSession
+    }
+    @Published var pendingNavigationPresentation: NavigationPresentation?
+
+    /// The ambiguity walk's remaining candidates, top-scored first
+    /// (`DirectionsRoute` already sorted them). While non-empty, the
+    /// router treats the next transcript as the yes/no answer — see
+    /// `handleConfirmationResponse`'s navigation branch. Mutually
+    /// exclusive with the other pending confirmations by construction
+    /// (the directions stage only runs while nothing else is pending).
+    private var pendingNavigationWalk: [DirectionsCandidate] = []
+
+    /// `VoiceCommandCoordinating.navigationCandidates` — every saved
+    /// place and every family contact that carries a NON-EMPTY address
+    /// (blank text was stored as nil by `normalizedOptionalText`; the
+    /// decider re-filters defensively anyway). Address-less entries are
+    /// deliberately absent: the pipeline never promises a route it
+    /// cannot draw.
+    var navigationCandidates: [DirectionsCandidate] {
+        var candidates: [DirectionsCandidate] = []
+        for place in savedPlaces where !place.address.isEmpty {
+            candidates.append(DirectionsCandidate(id: place.id, source: .savedPlace,
+                                                  name: place.name, address: place.address,
+                                                  relationship: nil))
+        }
+        for contact in familyContacts {
+            guard let address = contact.address, !address.isEmpty else { continue }
+            candidates.append(DirectionsCandidate(id: contact.id, source: .familyContact,
+                                                  name: contact.name, address: address,
+                                                  relationship: contact.relationship))
+        }
+        return candidates
+    }
+
+    /// `VoiceCommandCoordinating.isAwaitingNavigationDisambiguation`.
+    var isAwaitingNavigationDisambiguation: Bool { !pendingNavigationWalk.isEmpty }
+
+    /// `VoiceCommandCoordinating.requestNavigationDisambiguation` — pends
+    /// the walk and returns the FIRST candidate's localized yes/no
+    /// question for the router to speak. Subsequent candidates are asked
+    /// by `handleConfirmationResponse` as the walk proceeds; an exhausted
+    /// walk speaks the honest `directions.cancelled` line.
+    func requestNavigationDisambiguation(targets: [DirectionsCandidate]) -> String? {
+        guard let first = targets.first else { return nil }
+        pendingNavigationWalk = targets
+        DispatchQueue.main.async { [weak self] in
+            self?.voiceSession.transition(to: .awaitingConfirmation)
+        }
+        return navigationQuestion(for: first)
+    }
+
+    /// The yes/no question the ambiguity walk asks for one candidate —
+    /// shape matches the call-confirmation prompts ("के … लैजाने?") and
+    /// ends with the answer hint so the elder knows yes/no is expected.
+    private func navigationQuestion(for candidate: DirectionsCandidate) -> String {
+        L10n.fmt("directions.disambiguateAsk", locale: activeLocale, candidate.name)
+    }
+
+    /// `VoiceCommandCoordinating.requestNavigation` — a resolved
+    /// navigation request (router already decided; nothing is pended).
+    func requestNavigation(to target: DirectionsRoute.PlaceTarget) {
+        executeNavigation(to: target)
+    }
+
+    // MARK: - Touch wrappers for the Directions leaf (directions-screen
+    // task, 2026-09-07)
+
+    /// Navigates to the saved place with `id` — thin named surface for
+    /// the Directions leaf's जाऊ buttons. Delegates straight into the
+    /// shared navigation executor (`requestNavigation`), so map-app
+    /// policy, geocode/open fallbacks, in-app presentation and the
+    /// honest spoken lines all stay owned in exactly one place; a
+    /// missing id resolves honestly (`directions.placeNotFound`) instead
+    /// of dead-ending.
+    func navigateToPlace(id: UUID) {
+        requestNavigation(to: .place(id))
+    }
+
+    /// Navigates to the family contact with `id` — thin named surface
+    /// for the Directions leaf's जाऊ buttons (same single-executor
+    /// rule as `navigateToPlace(id:)`).
+    func navigateToFamilyContact(id: UUID) {
+        requestNavigation(to: .familyContact(id))
+    }
+
+    /// Drives to the default home — thin named surface for the "take me
+    /// home" path every caller reaches for by name. With no `.home`
+    /// place saved the executor speaks the honest `directions.noHome`
+    /// fallback.
+    func navigateHome() {
+        requestNavigation(to: .defaultHome)
+    }
+
+    /// The core navigation executor — shared by `requestNavigation` and
+    /// the ambiguity walk's yes branch. Resolves the target to a concrete
+    /// destination, then launches the map surface the current override
+    /// + installed-ness picks. Every resolution failure speaks an honest
+    /// visible line — never a silent no-op.
+    private func executeNavigation(to target: DirectionsRoute.PlaceTarget) {
+        let destination: (name: String, address: String)
+        switch target {
+        case .defaultHome:
+            guard let home = placeStore.defaultHome else {
+                emitDirections(eventType: "command", outcome: "no_home")
+                replyHonestly(key: "directions.noHome")
+                return
+            }
+            destination = (home.name, home.address)
+        case .place(let id):
+            guard let place = savedPlaces.first(where: { $0.id == id }) else {
+                emitDirections(eventType: "command", outcome: "place_missing")
+                replyHonestly(key: "directions.placeNotFound")
+                return
+            }
+            destination = (place.name, place.address)
+        case .familyContact(let id):
+            guard let contact = familyContacts.first(where: { $0.id == id }) else {
+                emitDirections(eventType: "command", outcome: "place_missing")
+                replyHonestly(key: "directions.placeNotFound")
+                return
+            }
+            destination = (contact.name, contact.address ?? "")
+        }
+        guard !destination.address.isEmpty else {
+            // A candidate with an empty address can only have raced a
+            // concurrent edit — resolve honestly, never dead-end.
+            emitDirections(eventType: "command", outcome: "place_missing")
+            replyHonestly(key: "directions.placeNotFound")
+            return
+        }
+        launchNavigation(name: destination.name, address: destination.address)
+    }
+
+    /// Picks the map surface and opens it. The probe-based resolve never
+    /// returns a surface that cannot open: `.auto`/override falls
+    /// through Google → Apple → the in-app map, and `.inApp` needs no
+    /// external app at all — so the walk always terminates somewhere
+    /// real.
+    private func launchNavigation(name: String, address: String) {
+        let locale = activeLocale
+        let resolved = NavigationMapPolicy.resolve(
+            override: navigationMapApp,
+            googleMapsInstalled: canOpenURLOnMain(MapsLinks.googleMapsProbeURL),
+            appleMapsInstalled: canOpenURLOnMain(MapsLinks.appleMapsProbeURL)
+        )
+        switch resolved {
+        case .googleMaps:
+            emitDirections(eventType: "launch", outcome: "googleMaps")
+            setOutcome(icon: "map.fill",
+                       text: L10n.fmt("directions.outcome.opening", locale: locale, name))
+            speak(text: L10n.fmt("directions.openingGoogleMaps", locale: locale, name))
+            openExternalNavigation(app: .googleMaps, name: name, address: address)
+        case .appleMaps:
+            emitDirections(eventType: "launch", outcome: "appleMaps")
+            setOutcome(icon: "map.fill",
+                       text: L10n.fmt("directions.outcome.opening", locale: locale, name))
+            speak(text: L10n.fmt("directions.openingAppleMaps", locale: locale, name))
+            openExternalNavigation(app: .appleMaps, name: name, address: address)
+        case .inApp:
+            emitDirections(eventType: "launch", outcome: "inApp")
+            speak(text: L10n.fmt("directions.openingInApp", locale: locale, name))
+            presentInAppNavigation(name: name, address: address)
+        case .auto:
+            return   // resolve never returns .auto — it always falls through
+        }
+    }
+
+    /// External map app: forward-geocode the address to coordinates
+    /// FIRST (both map apps take a coordinate `daddr` reliably), then
+    /// open the coordinate URL. Geocode failure is an honest degradation,
+    /// never a dead end: Apple Maps opens the address STRING (it resolves
+    /// address text well) and Google Maps gets the same documented
+    /// fallback form.
+    private func openExternalNavigation(app: NavigationMapApp, name: String, address: String) {
+        let geocoder = NavigationGeocoder()
+        geocoder.geocode(address: address) { [weak self] result in
+            guard let self else { return }
+            let url: URL?
+            switch result {
+            case .success(let destination):
+                self.emitDirections(eventType: "geocode", outcome: "ok")
+                url = MapsLinks.directionsURL(for: app,
+                                              latitude: destination.latitude,
+                                              longitude: destination.longitude)
+            case .failure:
+                self.emitDirections(eventType: "geocode", outcome: "fallback_address")
+                url = app == .appleMaps
+                    ? MapsLinks.appleMapsDirectionsURL(address: address)
+                    : MapsLinks.googleMapsDirectionsURL(address: address)
+            }
+            guard let url else {
+                // No URL at all (both builders refused the input) — say
+                // so honestly; the in-app map is the standing fallback.
+                self.emitDirections(eventType: "open", outcome: "map_missing")
+                self.replyHonestly(key: "directions.mapMissing")
+                return
+            }
+            // The geocoder delivers on the main queue — the probe was
+            // already done; this open is the same main-bound UIApplication
+            // hop the call/message flows use.
+            DispatchQueue.main.async {
+                UIApplication.shared.open(url)
+            }
+        }
+    }
+
+    /// The in-app MapKit fallback sheet (static route — no live
+    /// re-routing, plan constraint). A fresh `LocationFetcher` +
+    /// `NavigationGeocoder` + `MapKitDirectionsCalculator` are born with
+    /// the session (all one-request-per-instance), the app's speaker is
+    /// handed over for the spoken steps, and ContentView's sheet renders
+    /// the session. Created on the main actor: `CLLocationManager` must
+    /// be born on the main thread (delegate runloop rule).
+    private func presentInAppNavigation(name: String, address: String) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let session = InAppNavigationSession(
+                destinationName: name,
+                destinationAddress: address,
+                locationFetcher: LocationFetcher(),
+                geocoder: NavigationGeocoder(),
+                directionsCalculator: MapKitDirectionsCalculator(),
+                speaker: self.speaker ?? NullSpeaker(),
+                locale: self.activeLocale
+            )
+            self.pendingNavigationPresentation = NavigationPresentation(session: session)
+        }
+    }
+
+    /// Honest visible fallback lines (noHome / placeNotFound /
+    /// mapMissing / cancelled): carded AND spoken, same dual-channel
+    /// delivery the router's `speakWithVisibleOutcome` uses — the
+    /// live-caption pill is gone by the time these land.
+    private func replyHonestly(key: String) {
+        let text = L10n.str(key, locale: activeLocale)
+        guard !text.isEmpty else { return }
+        noteGenericReply(text)
+        speak(text: text)
+    }
+
+    /// `directions` observability events — every navigation outcome that
+    /// matters is observable; no metadata keys are attached, so nothing
+    /// user-identifying (names, addresses, coordinates) ever reaches the
+    /// bus (constitution C9).
+    private func emitDirections(eventType: String, outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "directions",
+            eventType: eventType,
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+
     /// Design §4 "Show Me" button path: a dock tile presents the
     /// appliance camera surface directly with no question attached —
     /// skipping the LLM round trip entirely (the tap IS the intent, so
@@ -2073,6 +3355,12 @@ final class AppCoordinator: ObservableObject {
                 setOutcome(icon: "message.fill",
                            text: L10n.fmt("home.outcome.whatsappMessageReady", locale: locale, contact.name))
                 speak(text: L10n.fmt("router.message.whatsappReady", locale: locale, contact.name))
+                // The WhatsApp chat with the pre-filled body opened — a
+                // genuine message surface (FR-049 completeness: the
+                // send_message path is an assistant action like any other).
+                recordActivity(kind: .message, channel: .whatsapp,
+                               contactName: contact.name, phone: contact.phone,
+                               body: body)
                 return .whatsAppChatOpened
             case .needsNativeCompose:
                 presentMessageDraft(contact: contact, body: body)
@@ -2102,10 +3390,19 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Phone/name variant of `presentMessageDraft(contact:body:)` — same
-    /// sheet, same outcome line, no `FamilyContact` required.
-    private func presentMessageDraft(phone: String, name: String, body: String) {
+    /// sheet, same outcome line, no `FamilyContact` required. Internal
+    /// since call-history task, 2026-09-06: the Recent activity leaf's
+    /// SMS rows re-open drafts through this entry point.
+    func presentMessageDraft(phone: String, name: String, body: String) {
         DispatchQueue.main.async { [weak self] in
             self?.pendingMessageDraft = MessageDraft(recipients: [phone], body: body)
+            // The compose sheet IS a genuine open of the SMS channel
+            // (call-history task, 2026-09-06) — recorded inside this
+            // block so the row lands after the sheet is actually up.
+            // `recordActivity` prunes blank bodies itself.
+            self?.recordActivity(kind: .message, channel: .sms,
+                                 contactName: name, phone: phone,
+                                 body: body)
         }
         setOutcome(icon: "message.fill",
                    text: L10n.fmt("home.outcome.messageReady", locale: activeLocale, name))
@@ -2180,6 +3477,21 @@ final class AppCoordinator: ObservableObject {
     /// was dropped in favor of it).
     private(set) lazy var calendarSync = CalendarSyncService(observabilityBus: observabilityBus)
 
+    /// Read-only native Calendar/Reminders integration (2026-09-07): the
+    /// REVERSE direction of `calendarSync` — native events/reminders
+    /// import as in-app reminders with notifications, and rows open the
+    /// native app (never written back). Eager (not lazy) because the
+    /// objectWillChange forwarding below must observe it from init;
+    /// constructing it touches no permissions.
+    private(set) var externalCalendar: ExternalCalendarService
+
+    /// Forwards the external calendar service's publishes (2026-09-07):
+    /// it is a nested ObservableObject, so a scan/status/lead change
+    /// alone would not invalidate views observing the coordinator — the
+    /// Settings card, Reminders leaf and Calendar leaf must refresh the
+    /// moment a scan lands (same pattern as `wakeWordKeyStoreCancellable`).
+    private var externalCalendarCancellable: AnyCancellable?
+
     /// Offline Bikram Sambat + tithi + festival overlay and festival
     /// notification scheduling (2026-09-06 BS calendar feature).
     private(set) lazy var festivalCalendar = FestivalCalendarService(observabilityBus: observabilityBus)
@@ -2190,6 +3502,50 @@ final class AppCoordinator: ObservableObject {
         calendarSync.isEnabled = enabled
         if enabled {
             await calendarSync.enableAndSync(entries: routineScheduler.entries())
+        }
+    }
+
+    // MARK: - Read-only external Calendar/Reminders surface (2026-09-07)
+
+    /// Settings toggle handler for the native-item import: ON asks for
+    /// calendar + reminders access at point of use and scans; OFF
+    /// cancels every notification this feature armed (scoped — the
+    /// medication/routine alarms on the same center are untouched).
+    func setExternalCalendarEnabled(_ enabled: Bool) async {
+        if enabled {
+            await externalCalendar.enable()
+        } else {
+            await externalCalendar.disable()
+        }
+    }
+
+    /// Today's imported native items (events + due reminders, oldest
+    /// first) — merged into the Reminders leaf's today list and the
+    /// Calendar leaf's schedule section.
+    var externalRemindersToday: [ExternalReminder] {
+        externalCalendar.todaysItems()
+    }
+
+    /// Tap on an external row — read-only integration: opens the item's
+    /// native app (Calendar `calshow:` / Reminders `x-apple-reminderkit://`),
+    /// best-effort behind canOpenURL.
+    func openExternalReminder(_ item: ExternalReminder) {
+        externalCalendar.open(item)
+    }
+
+    /// Scene-phase reactions wired from `ContentView`: foreground
+    /// rescans (family edits in the native apps land immediately),
+    /// background submits the hourly BGAppRefresh that keeps scans
+    /// coming while the app isn't running.
+    func handleScenePhase(_ phase: ScenePhase) {
+        guard started else { return }   // start() already refreshes
+        switch phase {
+        case .active:
+            Task { await externalCalendar.startIfEnabled() }
+        case .background:
+            externalCalendar.submitBackgroundRefresh()
+        default:
+            break
         }
     }
 
@@ -2277,6 +3633,36 @@ final class AppCoordinator: ObservableObject {
     /// reflecting reality. The session machine returns to idle (and its
     /// timeout timer is cancelled — C12).
     func handleConfirmationResponse(_ response: ConfirmationResponse) {
+        // Navigation ambiguity walk (directions task, 2026-09-07) — an
+        // additive flow like the call branch below: checked first and
+        // returned early so the medication path is completely untouched.
+        // Yes → execute the TOP candidate (never guess a place — the
+        // decider only pends when it cannot pick); no → ask the next
+        // candidate, or speak the honest cancelled line when the walk is
+        // exhausted. The voice session stays `.awaitingConfirmation`
+        // while candidates remain, and returns to idle when the walk
+        // resolves.
+        if !pendingNavigationWalk.isEmpty {
+            let answered = pendingNavigationWalk.removeFirst()
+            switch response {
+            case .yes:
+                pendingNavigationWalk = []
+                executeNavigation(to: answered.target)
+            case .no:
+                if let next = pendingNavigationWalk.first {
+                    speak(text: navigationQuestion(for: next))
+                } else {
+                    emitDirections(eventType: "command", outcome: "cancelled")
+                    replyHonestly(key: "directions.cancelled")
+                }
+            }
+            if pendingNavigationWalk.isEmpty {
+                DispatchQueue.main.async { [weak self] in
+                    self?.voiceSession.transition(to: .idle)
+                }
+            }
+            return
+        }
         // Call confirmations are a separate, additive flow (2026-09-05) —
         // checked first and returned early so the medication path below
         // is completely untouched (safety-critical, 100%-covered code;
@@ -2316,8 +3702,12 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Whether a confirmation follow-up is currently expected.
+    /// [DIRECTIONS] (2026-09-07) The navigation ambiguity walk pends the
+    /// same way — while candidates remain, the router's yes/no parsing
+    /// stays in force.
     var isAwaitingConfirmation: Bool {
         pendingConfirmationEntryId != nil || pendingCallAction != nil || pendingRephrase != nil
+            || !pendingNavigationWalk.isEmpty
     }
 
     /// Used by `CommandRouter` to identify what "I took my medication" refers
@@ -2380,6 +3770,24 @@ final class AppCoordinator: ObservableObject {
             self?.medicationScheduler.scheduleAll()
             self?.routineScheduler.scheduleAll()
             task.setTaskCompleted(success: true)
+        }
+        // External calendar rescan (calendar-driven task, 2026-09-07):
+        // the handler IS a rescan pass — same idempotent scan as the
+        // foreground refresh, so the native Calendar/Reminders changes
+        // a family member made while the app sat backgrounded land
+        // within the hourly cadence.
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: ExternalCalendarService.backgroundTaskIdentifier,
+            using: nil
+        ) { [weak self] task in
+            guard let self else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            Task {
+                await self.externalCalendar.rescan()
+                task.setTaskCompleted(success: true)
+            }
         }
     }
 

@@ -256,6 +256,116 @@ Feature: Unified contact search and channel actions
     Then the system must disclose the fallback aloud (native Messages sheet or pasted number)
 ```
 
+### 1.11 Quick Access Apps (Home row + Settings picker)
+
+**FR-049**
+The Home screen must show a quick-access row of the user's favourite apps — up to 8, each a 48pt icon tile with the app's localized name — directly below the setup strip, hidden entirely until at least one app has been added. Tapping a tile must open the app; when the app is no longer installed the system must say so aloud and open nothing rather than fail silently.
+
+**FR-050**
+Settings must offer a "Quick apps" screen that searches a curated catalog of apps and lists the user's favourites (add, remove, order preserved). An app may be added as a favourite only when it is actually installed on the device — presence must be probed per app, never assumed from the catalog — additions must stop at the 8-app cap with the cap disclosed, and favourite state must survive relaunch.
+
+#### Feature: Quick Access Apps (FR-049, FR-050)
+
+```gherkin
+Feature: Quick access apps
+  As an elderly user
+  I want my most-used apps one tap away on the Home screen
+  So that I can open them without hunting through screens or remembering names
+
+  Scenario: Home row appears only after an app is added
+    Given the user has not added any quick access apps
+    Then the Home screen must show no quick access row
+    When the user adds a favourite app in Settings
+    Then the Home screen must show the quick access row with that app
+
+  Scenario: Tapping a favourite tile opens the app
+    Given the user has added WhatsApp as a quick access app
+    When the user taps the WhatsApp tile on the Home row
+    Then the system must open WhatsApp
+
+  Scenario: Row is capped at eight apps
+    Given the user has added 8 quick access apps
+    When the user tries to add a 9th app in the Settings picker
+    Then the picker must refuse the add
+    And the cap must be disclosed on screen
+
+  Scenario: Only installed apps can be added
+    Given an app in the catalog is not installed on this phone
+    When the user opens the Settings picker
+    Then the picker must not offer an add control for that app
+
+  Scenario: Honest launch when an app has been uninstalled
+    Given a favourite app has been uninstalled since it was added
+    When the user taps its tile on the Home row
+    Then the system must open nothing
+    And the system must say aloud that the app is not installed on this phone
+```
+
+---
+
+### 1.12 Assistant Activity History & Live Call Detection (Recent activity leaf)
+
+**FR-051**
+The app must record every call or message IT initiates — the channel opened (phone, FaceTime video/audio, WhatsApp, Messenger, SMS), the contact name and number/handle, the timestamp, and any pre-filled message body — under one encrypted-at-rest key, capped at 100 entries with the oldest pruned, and show them newest-first in a Recent activity leaf with per-row re-initiation (call back / open the channel again); rows must be logged ONLY on a genuine open (a failed or impossible open records nothing), the recorded surface must be the surface that actually appeared (a WhatsApp "call" opens a chat and is recorded as a message open, never claimed as a call), and the app may never log or claim anything beyond its own actions — it cannot read the system call log or other apps' messages (iOS platform wall).
+
+**FR-052**
+The app must detect when a call is in progress (CXCallObserver) and show an honest, identity-free indicator on the Recent activity screen; detection is masked/anonymous by platform design — the app never learns (and never claims to know) whose call it is, records no call detail from the observer, and the detector is edge-triggered (state-change only). Spoken output around active calls must pause/resume where the voice stack exposes a clean pause API; where it exposes none, the skip must be documented with evidence (an active call interrupts the app's audio session at the OS level, which already stops in-flight TTS).
+
+#### Feature: Assistant activity history and live call detection (FR-051, FR-052)
+
+```gherkin
+Feature: Assistant activity history and live call detection
+  As an elderly user
+  I want the assistant to remember which calls and messages it made for me
+  So that I can re-check or repeat an action without fumbling
+
+  Scenario: A call made through the assistant appears in Recent activity
+    Given the user asked the assistant to call a contact
+    When the phone dialer genuinely opens for that contact's number
+    Then the activity log must record a call row with the contact name, number, channel, and timestamp
+    And the Recent activity leaf must show the row newest first
+
+  Scenario: A failed open records nothing
+    Given a call or chat cannot open (invalid handle, unusable number, FaceTime unavailable)
+    When the assistant announces what happened instead
+    Then no activity row must be recorded
+
+  Scenario: The log keeps the newest 100 rows
+    Given the activity log holds 100 rows
+    When a new row is recorded
+    Then the oldest row must be pruned
+    And all rows must survive an app relaunch (encrypted at rest)
+
+  Scenario: A WhatsApp chat open is recorded as the surface it is
+    Given the user asked the assistant to message or "call" a contact on WhatsApp
+    When the WhatsApp chat opens for that number
+    Then the log must record a message-channel row (WhatsApp exposes no call deep link)
+    And no row may claim a WhatsApp call was placed
+
+  Scenario: A Recent activity row re-initiates its channel
+    Given a phone-call row exists in Recent activity
+    When the user taps the row
+    Then the assistant must dial that number again
+    And the re-initiation must itself appear as a new row
+
+  Scenario: A Messenger row without a handle says so instead of a dead tap
+    Given a Messenger row has no stored handle
+    When the user taps the row
+    Then the assistant must announce that the handle is missing rather than silently do nothing
+
+  Scenario: The live call indicator is honest and identity-free
+    Given a call is connected on the device
+    When the user opens the Recent activity leaf
+    Then the leaf must show that a call is in progress
+    And the app must never show or store who is calling (iOS masks the identity)
+
+  Scenario: The Recent activity leaf has an honest empty state
+    Given no calls or messages have been initiated through the assistant
+    When the user opens the Recent activity leaf
+    Then the leaf must say nothing is here yet
+    And the app must never suggest rows from the system call log or other apps' messages
+```
+
 ---
 
 ## 2. Non-Functional Requirements
@@ -717,6 +827,39 @@ Feature: Health metric monitoring via HealthKit and Health Connect
     When the remote configuration is applied
     Then subsequent blood pressure readings must be evaluated against the new threshold of 170 mmHg
     And readings at or above 170 mmHg must trigger the emergency response sequence (FR-033)
+```
+
+### Feature: Quick Access Apps (FR-049, FR-050)
+
+```gherkin
+Feature: Quick access apps (FR-049, FR-050)
+  As an elderly user
+  I want my most-used apps one tap away on the Home screen
+  So that I can open them without hunting through screens
+
+  Scenario: Adding only what is installed
+    Given the user opens the Quick apps screen in Settings
+    When an app in the catalog is not installed on this phone
+    Then that app must not be offered for adding
+    And apps that are installed must be offered with an add control
+
+  Scenario: Adding up to the cap
+    Given the user already has 8 quick access apps
+    When the user tries to add another installed app
+    Then the add must be refused
+    And the on-screen note must disclose the 8-app cap
+
+  Scenario: Removing a favourite from the Home row
+    Given the user has WhatsApp as a quick access app
+    When the user removes WhatsApp in the Quick apps screen
+    Then the Home row must no longer show WhatsApp
+    And the row must stay hidden if no favourites remain
+
+  Scenario: Launching announces an absent app
+    Given a favourite app is not installed on the device
+    When the user taps its Home-row tile
+    Then nothing must be opened
+    And the system must announce that the app is not installed
 ```
 
 ---

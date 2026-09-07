@@ -20,11 +20,14 @@ enum DesignTokens {
 
     // Voice-session state colors (§3.3)
     static let stateIdle = accent
-    /// Assistant-is-speaking state. Call-blue (#2A5F8F, the same blue as
-    /// the call badge tint) instead of the idle color so rest vs speak
-    /// are distinguishable at a glance — they previously rendered too
-    /// close to tell apart (2026-09-06 field report).
-    static let stateSpeaking = Color(red: 0.165, green: 0.373, blue: 0.561)
+    /// Assistant-is-speaking state — "the assistant talks" green
+    /// (#279E6B, 2026-09-07). Deliberately hue-separated from the
+    /// listening amber so speaking can never be mistaken for listening
+    /// at the hero's size; earlier attempts in the blue family (#2A5F8F
+    /// muted, then #2A7ADA vivid) still sat close enough to the warm
+    /// mid-cycle tones that listening and speaking read as one color.
+    /// The static call badge tint keeps its own #2A5F8F.
+    static let stateSpeaking = Color(red: 0.153, green: 0.620, blue: 0.420)  // #279E6B
     static let stateListening = Color(red: 0.780, green: 0.498, blue: 0.161)  // #C77F2A
     static let stateTranscribing = Color(red: 0.541, green: 0.427, blue: 0.231) // #8A6D3B
     static let stateUnderstanding = Color(red: 0.361, green: 0.353, blue: 0.541) // #5C5A8A
@@ -44,7 +47,7 @@ enum DesignTokens {
     /// color family used elsewhere (meds/reminders = accent family, call =
     /// blue, settings = purple, emergency = red).
     enum BadgeTint {
-        case meds, reminders, call, appliance, settings, emergency
+        case meds, reminders, call, appliance, settings, apps, emergency, directions
 
         var background: Color {
             switch self {
@@ -53,7 +56,9 @@ enum DesignTokens {
             case .call: return Color(red: 0.906, green: 0.933, blue: 0.973)      // #E6EEF8
             case .appliance: return Color(red: 0.992, green: 0.945, blue: 0.890)  // #FDF1E3
             case .settings: return Color(red: 0.937, green: 0.918, blue: 0.965)  // #EFEAF6
+            case .apps: return Color(red: 0.878, green: 0.941, blue: 0.949)      // #E0F0F2
             case .emergency: return Color.white
+            case .directions: return Color(red: 0.867, green: 0.945, blue: 0.969) // #DDF1F7
             }
         }
         var tint: Color {
@@ -63,7 +68,13 @@ enum DesignTokens {
             case .call: return Color(red: 0.165, green: 0.373, blue: 0.561)      // #2A5F8F
             case .appliance: return Color(red: 0.541, green: 0.427, blue: 0.231)  // #8A6D3B
             case .settings: return DesignTokens.stateUnderstanding
+            case .apps: return Color(red: 0.122, green: 0.478, blue: 0.549)      // #1F7A8C
             case .emergency: return Color(red: 0.706, green: 0.251, blue: 0.118) // #B4401E
+            // Directions/maps (2026-09-07): the one dock badge in the
+            // blue-cyan family that reads "navigation" — lighter and
+            // brighter than the call badge's navy so the two never
+            // merge, and far from the map-free teal of the Quick apps.
+            case .directions: return Color(red: 0.106, green: 0.522, blue: 0.639) // #1B85A3
             }
         }
     }
@@ -78,11 +89,11 @@ enum DesignTokens {
     // up automatically — no per-view changes needed.
 
     /// Minimum body size — accessibility floor, not a suggestion.
-    static var minBodyPointSize: CGFloat { scaled(18) }
+    static var minBodyPointSize: CGFloat { scaled(21) }
     /// Minimum caption/label size — captions are "secondary" text, still ≥15pt.
-    static var minCaptionPointSize: CGFloat { scaled(15) }
-    static var titlePointSize: CGFloat { scaled(28) }
-    static var greetingPointSize: CGFloat { scaled(30) }
+    static var minCaptionPointSize: CGFloat { scaled(18) }
+    static var titlePointSize: CGFloat { scaled(32) }
+    static var greetingPointSize: CGFloat { scaled(33) }
 
     private static func scaled(_ base: CGFloat) -> CGFloat {
         UIFontMetrics.default.scaledValue(for: base)
@@ -105,6 +116,6 @@ enum DesignTokens {
     static let chipHeight: CGFloat = 60
     /// Bottom shortcut dock (redesign spec §3.1 — replaces the 2×2 hub grid;
     /// Home is the only screen that shows it).
-    static let dockHeight: CGFloat = 76
-    static let iconBadgeDiameter: CGFloat = 40
+    static let dockHeight: CGFloat = 88
+    static let iconBadgeDiameter: CGFloat = 44
 }

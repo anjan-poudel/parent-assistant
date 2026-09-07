@@ -107,7 +107,10 @@ final class ContactCallButtonsTests: XCTestCase {
         let links = CallLinks(opener: opener)
         let outcome = links.openMessengerChat(phone: "+977-9841 234567")
         XCTAssertEqual(outcome, .openedApp)
-        XCTAssertEqual(opener.opened.map(\.absoluteString), ["fb-messenger://"])
+        // Thread form by phone (field fix 2026-09-06): the bare
+        // fb-messenger:// root opened the app without the contact.
+        XCTAssertEqual(opener.opened.map(\.absoluteString),
+                       ["fb-messenger://user-thread/9779841234567"])
     }
 
     func testMessengerFallsBackToMMeWebChatWhenAbsent() {
@@ -116,8 +119,9 @@ final class ContactCallButtonsTests: XCTestCase {
         let outcome = links.openMessengerChat(phone: "+977-9841 234567")
         XCTAssertEqual(outcome, .openedWebChat)
         XCTAssertEqual(opener.opened.map(\.absoluteString), ["https://m.me/9779841234567"])
-        // The app scheme was checked, the dead link never opened.
-        XCTAssertEqual(opener.canOpenChecks.map(\.absoluteString), ["fb-messenger://"])
+        // The thread-form app scheme was checked, the dead link never opened.
+        XCTAssertEqual(opener.canOpenChecks.map(\.absoluteString),
+                       ["fb-messenger://user-thread/9779841234567"])
     }
 
     func testMessengerInvalidPhoneOpensAndChecksNothing() {

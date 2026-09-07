@@ -25,6 +25,14 @@ final class RoutineScheduler {
     private var occurrences: [UUID: RoutineOccurrence] = [:]
     private var didRestore = false
 
+    /// Invoked at the end of every schedule-mutating operation
+    /// (`addEntry` / `setEnabled` / `removeEntry`) — the single seam
+    /// through which the calendar mirror re-syncs (`AppCoordinator`
+    /// wires it to `calendarSync.syncNow`) and any other side channel
+    /// reacts. Deliberately NOT fired by `scheduleAll()` itself: launch
+    /// and BGTask re-queues must not re-mirror per occurrence.
+    var onScheduleChanged: (() -> Void)?
+
     init(
         store: RoutineStore,
         alarmScheduler: RoutineAlarmScheduling,
@@ -60,6 +68,7 @@ final class RoutineScheduler {
         emit("entry_added", metadata: ["entry_id_hash": idHash(entry.id),
                                        "category": entry.category.rawValue])
         scheduleAll()
+        onScheduleChanged?()
         return true
     }
 
@@ -73,12 +82,14 @@ final class RoutineScheduler {
         emit(enabled ? "entry_enabled" : "entry_disabled",
              metadata: ["entry_id_hash": idHash(entryId)])
         scheduleAll()
+        onScheduleChanged?()
     }
 
     func removeEntry(id: UUID) {
         guard store.remove(id: id) else { return }
         emit("entry_removed", metadata: ["entry_id_hash": idHash(id)])
         scheduleAll()
+        onScheduleChanged?()
     }
 
     // MARK: - Schedule All (launch + BGTask wake, mirrors MedicationScheduler)
