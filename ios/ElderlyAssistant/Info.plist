@@ -71,7 +71,7 @@
 	<key>NSContactsUsageDescription</key>
 	<string>Searching from the phone screen can call anyone in your phone book — including people added by WhatsApp, Messenger and other apps. The app works fully even if you say no.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>The assistant uses your location to tell you the local weather. Nothing else in the app uses it, and you can say no.</string>
+	<string>The assistant uses your location to tell you the local weather and to give you driving directions to your home or saved places (your current location is the route's start point). Nothing else in the app uses it, and you can say no.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>The assistant needs microphone access to listen for your voice commands and wake word. Your voice data never leaves this device.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

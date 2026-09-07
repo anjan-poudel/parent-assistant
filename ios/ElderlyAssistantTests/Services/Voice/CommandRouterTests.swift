@@ -480,6 +480,28 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
         contactSearchRequests.append(query)
     }
 
+    /// [DIRECTIONS] (2026-09-07) Navigation members — protocol
+    /// requirements satisfied by stored vars/recorders so the directions
+    /// tests can script BOTH sides: an empty candidate list keeps every
+    /// pre-existing router test on its exact historical path (the stage
+    /// still owns bare-home requests), and populated lists arm the
+    /// candidate-resolution tests.
+    var navigationCandidates: [DirectionsCandidate] = []
+    var isAwaitingNavigationDisambiguation = false
+    var navigationRequests: [DirectionsRoute.PlaceTarget] = []
+    func requestNavigation(to target: DirectionsRoute.PlaceTarget) {
+        navigationRequests.append(target)
+    }
+    /// Canned yes/no question the mock "asks" for the first candidate —
+    /// nil by default (router then ends the turn silently), non-nil in
+    /// the disambiguation tests (router speaks it verbatim).
+    var navigationDisambiguationPrompt: String? = nil
+    var navigationDisambiguationRequests: [[DirectionsCandidate]] = []
+    func requestNavigationDisambiguation(targets: [DirectionsCandidate]) -> String? {
+        navigationDisambiguationRequests.append(targets)
+        return navigationDisambiguationPrompt
+    }
+
     var pendingRephraseCommand: InterpretedCommand? { rephrasePended?.command }
     private(set) var rephrasePended: (command: InterpretedCommand, sourceTranscript: String?)?
     func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?) {
@@ -1524,5 +1546,292 @@ private final class StubLocalToolTransport: LocalToolTransport {
                                        httpVersion: nil,
                                        headerFields: nil)!
         return (payload, response)
+    }
+}
+
+// MARK: - Voice-driven directions stage (directions task, 2026-09-07)
+
+/// Wiring of the deterministic directions stage: `DirectionsRoute` decides
+/// after the safety net, confirmation flow and contact search, and before
+/// the topic table + interpreter; the coordinator receives the resolved
+/// target, an ambiguous name match becomes a yes/no question (never a
+/// guessed place), and an unknown name gets the honest fallback line.
+/// Ordering proofs: emergency, contact search and a pending yes/no answer
+/// all win over a directions marker, and a transport verb without
+/// navigation shape ("म बजार जान्छु") never routes.
+final class CommandRouterDirectionsTests: XCTestCase {
+
+    private func makeRouter(_ coordinator: MockVoiceCommandCoordinator)
+        -> (CommandRouter, MockObservabilityBus) {
+        let bus = MockObservabilityBus()
+        let router = CommandRouter(coordinator: coordinator,
+                                   observabilityBus: bus,
+                                   speaker: MockSpeaker())
+        return (router, bus)
+    }
+
+    /// Resolves a catalog key exactly as the router does (hosted tests:
+    /// Bundle.main is the app, so lproj lookup works) — deterministic
+    /// twin of the spoken/visible lines.
+    private func text(_ key: String) -> String {
+        L10n.str(key, locale: Locale(identifier: "ne-NP"))
+    }
+
+    private func place(id: UUID, name: String) -> DirectionsCandidate {
+        DirectionsCandidate(id: id, source: .savedPlace, name: name,
+                            address: "काठमाडौं", relationship: nil)
+    }
+
+    private func relative(id: UUID, name: String, relationship: String)
+        -> DirectionsCandidate {
+        DirectionsCandidate(id: id, source: .familyContact, name: name,
+                            address: "बूढानीलकण्ठ", relationship: relationship)
+    }
+
+    // MARK: - Navigate
+
+    /// "मलाई घर लैजाऊ" needs NO candidate list — the bare-home
+    /// destination resolves to `.defaultHome` and the COORDINATOR decides
+    /// what home is (and speaks the honest no-home line when none is on
+    /// file). Never small talk, never an interpreter question.
+    func testBareHomeTakeMeHomeRoutesDefaultHome() {
+        let coordinator = MockVoiceCommandCoordinator()   // no candidates
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "मलाई घर लैजाऊ")
+
+        XCTAssertEqual(result, .navigationRequested)
+        XCTAssertEqual(coordinator.navigationRequests, [.defaultHome])
+        XCTAssertTrue(coordinator.genericReplies.isEmpty,
+                      "a routed request speaks nothing here — the coordinator owns execution speech")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "directions_command" && $0.outcome == "success"
+        })
+    }
+
+    /// "अस्पताल लैजाऊ" against a saved place named अस्पताल resolves to
+    /// that place's id — the coordinator's execution target.
+    func testSavedPlaceByNameRoutesItsPlaceTarget() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let hospital = UUID()
+        coordinator.navigationCandidates = [place(id: hospital, name: "अस्पताल")]
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "अस्पताल लैजाऊ")
+
+        XCTAssertEqual(result, .navigationRequested)
+        XCTAssertEqual(coordinator.navigationRequests, [.place(hospital)])
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "directions_command" && $0.outcome == "success"
+        })
+    }
+
+    /// The GO family fires with a home word: "घर जानुहोस्" is a
+    /// navigation request even though it carries no TAKE verb.
+    func testGoHomePhraseRoutesDefaultHome() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "घर जानुहोस्")
+
+        XCTAssertEqual(result, .navigationRequested)
+        XCTAssertEqual(coordinator.navigationRequests, [.defaultHome])
+    }
+
+    /// Relationship-anchored navigation: "छोरीको घर लैजाऊ" resolves to
+    /// the daughter's stored address through the relationship tier, not
+    /// through her name.
+    func testRelationshipAnchorRoutesContactHome() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let sita = UUID()
+        coordinator.navigationCandidates = [relative(id: sita, name: "सीता",
+                                                     relationship: "छोरी")]
+        let (router, _) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "छोरीको घर लैजाऊ")
+
+        XCTAssertEqual(result, .navigationRequested)
+        XCTAssertEqual(coordinator.navigationRequests, [.familyContact(sita)])
+    }
+
+    /// A greeting-prefixed navigation request is navigation, not small
+    /// talk — the stage sits before the TopicPreAnswer table.
+    func testGreetingPrefixedTakeMeHomeIsNavigationNotSmallTalk() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "नमस्ते, मलाई घर लैजाऊ")
+
+        XCTAssertEqual(result, .navigationRequested)
+        XCTAssertEqual(coordinator.navigationRequests, [.defaultHome])
+        XCTAssertTrue(coordinator.genericReplies.isEmpty,
+                      "no greeting reply may shadow the navigation request")
+    }
+
+    /// English "take me home" — same default-home resolution.
+    func testEnglishTakeMeHomeRoutesDefaultHome() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "take me home")
+
+        XCTAssertEqual(result, .navigationRequested)
+        XCTAssertEqual(coordinator.navigationRequests, [.defaultHome])
+    }
+
+    // MARK: - Ordering (what wins over a directions marker)
+
+    /// A contact-search request that happens to carry home/direction
+    /// words ("मैयाको घरको बाटो खोज") is a SEARCH — the contact-search
+    /// stage runs before the directions stage, and the directions
+    /// decision vetoes खोज markers anyway. Never both.
+    func testSearchShapedUtteranceNeverReachesDirectionsStage() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "मैयाको घरको बाटो खोज")
+
+        XCTAssertEqual(result, .contactSearchRequested)
+        XCTAssertEqual(coordinator.contactSearchRequests, ["मैया घर बाटो"])
+        XCTAssertTrue(coordinator.navigationRequests.isEmpty)
+        XCTAssertTrue(coordinator.navigationDisambiguationRequests.isEmpty)
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "contact_search_command" })
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "directions_command" })
+    }
+
+    /// Emergency outranks a directions marker — "मद्दत गर्नुहोस्, मलाई
+    /// घर लैजाऊ" is a distress call, never a drive (constitution: never
+    /// blocked, by anything, ever).
+    func testEmergencyOutranksNavigationMarker() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "मद्दत गर्नुहोस्, मलाई घर लैजाऊ")
+
+        XCTAssertEqual(result, .emergencyTriggered)
+        XCTAssertTrue(coordinator.navigationRequests.isEmpty)
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_emergency_keyword" })
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "directions_command" })
+    }
+
+    /// A plain statement with a transport-shaped word but no request
+    /// shape ("म बजार जान्छु" = I go to the market) is not directions —
+    /// no requestNavigation, no disambiguation, no directions event.
+    func testGoingToMarketStatementIsNotDirections() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "म बजार जान्छु")
+
+        XCTAssertNotEqual(result, .navigationRequested)
+        XCTAssertTrue(coordinator.navigationRequests.isEmpty)
+        XCTAssertTrue(coordinator.navigationDisambiguationRequests.isEmpty)
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "directions_command" })
+    }
+
+    // MARK: - Honest fallbacks
+
+    /// A directions-shaped request whose name matches nothing speaks the
+    /// honest "place not found" line (visible card + speech) and never
+    /// routes onward to a model — the stage OWNS the outcome.
+    func testUnknownPlaceSpeaksHonestFallbackLine() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "गाउँ लैजाऊ")
+
+        XCTAssertEqual(result, .unrecognised(transcript: "गाउँ लैजाऊ"))
+        XCTAssertTrue(coordinator.navigationRequests.isEmpty)
+        let expected = text("directions.placeNotFound")
+        XCTAssertEqual(coordinator.genericReplies, [expected],
+                       "the visible outcome card must carry the honest fallback")
+        XCTAssertEqual(coordinator.assistantSpoken, [expected],
+                       "the fallback must also be spoken")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "directions_command" && $0.outcome == "unknown_place"
+        })
+    }
+
+    /// Two candidates too close to call become a yes/no question — the
+    /// coordinator is asked (with the top candidate first), the returned
+    /// question is spoken, and NO place is guessed. The pending walk then
+    /// resolves through the confirmation path.
+    func testAmbiguousMatchAsksInsteadOfGuessing() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let first = UUID()
+        let second = UUID()
+        coordinator.navigationCandidates = [
+            relative(id: first, name: "मैया", relationship: "दिदी"),
+            relative(id: second, name: "मैया", relationship: "बहिनी")
+        ]
+        coordinator.navigationDisambiguationPrompt = "कुन मैया लैजाने?"
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "मैयाको घर लैजाऊ")
+
+        XCTAssertEqual(result, .navigationRequested)
+        XCTAssertTrue(coordinator.navigationRequests.isEmpty,
+                      "a disambiguation ask is not an execution — no target is chosen")
+        XCTAssertEqual(coordinator.navigationDisambiguationRequests.count, 1)
+        XCTAssertEqual(coordinator.navigationDisambiguationRequests.first?.map(\.id),
+                       [first, second],
+                       "the ask must be answered by the user, top candidate first")
+        XCTAssertEqual(coordinator.assistantSpoken, ["कुन मैया लैजाने?"],
+                       "the coordinator's question is spoken verbatim")
+        XCTAssertTrue(coordinator.genericReplies.isEmpty)
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "directions_disambiguation" && $0.outcome == "info"
+        })
+    }
+
+    // MARK: - The pending-walk confirmation path
+
+    /// YES during a pending disambiguation resolves the walk through
+    /// `handleConfirmationResponse` — it must NOT re-enter the directions
+    /// stage (no fresh requestNavigation) and must not speak the generic
+    /// medication-flavored "confirmationYes" line.
+    func testYesDuringPendingDisambiguationNeverReEntersDirectionsStage() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isAwaitingConfirmation = true
+        coordinator.isAwaitingNavigationDisambiguation = true
+        let speaker = MockSpeaker()
+        let bus = MockObservabilityBus()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: speaker)
+
+        let result = router.route(transcript: "हजुर")
+
+        XCTAssertEqual(result, .navigationRequested)
+        XCTAssertEqual(coordinator.confirmationResponses, [.yes])
+        XCTAssertTrue(coordinator.navigationRequests.isEmpty,
+                      "resolving the walk is handleConfirmationResponse's business — never a new route()")
+        XCTAssertTrue(coordinator.assistantSpoken.isEmpty,
+                      "CommandRouter must not speak — the coordinator owns the walk's response")
+        XCTAssertTrue(speaker.utterances.isEmpty)
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "confirmation_yes" })
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "directions_command" })
+    }
+
+    /// NO during a pending disambiguation cancels the walk — the
+    /// coordinator speaks its own `directions.cancelled` (or walks to the
+    /// next candidate), so the router stays silent and reports the
+    /// utterance as consumed.
+    func testNoDuringPendingDisambiguationCancelsSilently() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isAwaitingConfirmation = true
+        coordinator.isAwaitingNavigationDisambiguation = true
+        let speaker = MockSpeaker()
+        let bus = MockObservabilityBus()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: speaker)
+
+        let result = router.route(transcript: "होइन")
+
+        XCTAssertEqual(result, .unrecognised(transcript: "होइन"))
+        XCTAssertEqual(coordinator.confirmationResponses, [.no])
+        XCTAssertTrue(coordinator.navigationRequests.isEmpty)
+        XCTAssertTrue(coordinator.assistantSpoken.isEmpty)
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "confirmation_no" })
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "directions_command" })
     }
 }

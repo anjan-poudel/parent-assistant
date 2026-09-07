@@ -16,13 +16,14 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case appearance, language, calling, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, quickApps, privacy, intentLog
+        case appearance, language, calling, places, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, quickApps, privacy, intentLog
 
         var id: String {
             switch self {
             case .appearance: return "appearance"
             case .language: return "language"
             case .calling: return "calling"
+            case .places: return "places"
             case .family: return "family"
             case .meds: return "meds"
             case .geminiAI: return "geminiAI"
@@ -75,6 +76,9 @@ struct SettingsView: View {
                         // Default app for ADDRESS-BOOK call buttons
                         // (Phone-tab redesign, 2026-09-07).
                         sectionRow(.calling, icon: "phone.badge.plus", titleKey: "settings.calling.title")
+                        // Saved places + the map voice navigation opens
+                        // (directions task, 2026-09-07).
+                        sectionRow(.places, icon: "mappin.and.ellipse", titleKey: "settings.places.title")
                         geminiSectionRow
                         voiceEngineSectionRow
                         wakeWordSectionRow
@@ -107,6 +111,7 @@ struct SettingsView: View {
             case .appearance: AppearanceSettingsView()
             case .language: LanguageSettingsView()
             case .calling: CallingSettingsView()
+            case .places: PlacesSettingsView()
             case .family: FamilyContactsSettingsView()
             case .meds: MedicationScheduleSettingsView()
             case .geminiAI: GeminiAPISettingsView()
@@ -1127,7 +1132,9 @@ struct WakeWordSettingsView: View {
 // tab, capped at `FamilyContactStore.maxContacts`. Adding and editing
 // share one five-step wizard (`FamilyContactWizardSheet`): search
 // first, then a fixed relationship dropdown, then optional photo,
-// messenger handle and nickname — manual name/number entry appears on
+// messenger handle, nickname and home address (the last two on the
+// final step — the address is the voice-navigation target, directions
+// task, 2026-09-07) — manual name/number entry appears on
 // step 1 only when the search found nobody. An edit opens on the
 // relationship step with everything pre-filled and may step back to
 // re-search. The row list below is unchanged. Every write goes
@@ -1287,7 +1294,10 @@ struct FamilyContactsSettingsView: View {
 ///      avatar).
 ///   4. Messenger handle — OPTIONAL (with the `messenger.handleHints.*`
 ///      where-to-look lines from the call leaf's capture sheet).
-///   5. Nickname — OPTIONAL. Save lives here, enabled only when the
+///   5. Nickname — OPTIONAL, plus the home address (also OPTIONAL;
+///      directions task, 2026-09-07 — the address is what makes a
+///      relative a voice-navigation target, blank saves as none).
+///      Save lives here, enabled only when the
 ///      mandatory name + number + relationship contract holds.
 /// An `.edit` target opens at Step 2 with every field pre-filled and
 /// stays free to step back into the search. Save closes the sheet only
@@ -1346,6 +1356,10 @@ private struct FamilyContactWizardSheet: View {
     @State private var relationshipOption: RelationshipOption?
     @State private var messengerHandle = ""
     @State private var nickname = ""
+    // Home address for voice navigation (directions task, 2026-09-07) —
+    // free-form text; blank saves as nil (no address = not a navigation
+    // target).
+    @State private var address = ""
 
     // Photo draft state: a just-picked image, whether the user asked to
     // remove the stored one, and the stored one itself (loaded once on
@@ -1993,7 +2007,7 @@ private struct FamilyContactWizardSheet: View {
         .padding(.horizontal, 4)
     }
 
-    // MARK: Step 5 — nickname (optional) + save
+    // MARK: Step 5 — optional details (nickname, home address) + save
 
     private var nicknameStep: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -2004,6 +2018,19 @@ private struct FamilyContactWizardSheet: View {
                 .frame(height: 56)
                 .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            Text(L10n.str("settings.family.address", locale: coordinator.activeLocale))
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .foregroundColor(DesignTokens.textSecondary)
+            TextField("", text: $address)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .padding(14)
+                .frame(height: 56)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            Text("settings.family.addressHint")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+                .padding(.horizontal, 4)
         }
     }
 
@@ -2069,6 +2096,7 @@ private struct FamilyContactWizardSheet: View {
         phone = contact.phone
         messengerHandle = contact.messengerHandle ?? ""
         nickname = contact.nickname ?? ""
+        address = contact.address ?? ""
         // Pre-select the stored relationship when it is one of the fixed
         // options (see `preselectedOption(for:)`). A legacy free-text
         // value that is none of them stays unselected — the step is
@@ -2111,6 +2139,9 @@ private struct FamilyContactWizardSheet: View {
     private func save() {
         let messenger = trimmedOrNil(messengerHandle)
         let nick = trimmedOrNil(nickname)
+        // Blank address saves as nil — no address = not a navigation
+        // target (directions task, 2026-09-07).
+        let homeAddress = trimmedOrNil(address)
         // The stored relationship is the chosen option's label in the
         // active locale — the display word the picker showed, which is
         // what the free-text field before it used to store.
@@ -2123,12 +2154,12 @@ private struct FamilyContactWizardSheet: View {
                 id: contact.id, name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
                 photo: pickedPhoto, removingPhoto: removingStoredPhoto,
-                nickname: nick)
+                nickname: nick, address: homeAddress)
         } else {
             succeeded = coordinator.addFamilyContact(
                 name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
-                photo: pickedPhoto, nickname: nick)
+                photo: pickedPhoto, nickname: nick, address: homeAddress)
         }
         if succeeded { dismiss() }
         // A failed store write keeps the draft on screen — Save again to
@@ -2138,6 +2169,407 @@ private struct FamilyContactWizardSheet: View {
     private func trimmedOrNil(_ text: String) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+// MARK: - Saved places (directions task, 2026-09-07)
+
+/// The "Places" screen (Settings hub row): which map surface voice
+/// navigation opens, the saved-places list, and the add button. Map-app
+/// radio rows copy `CallingSettingsView`'s channel-row pattern (the
+/// elder's pick is stored on the coordinator; the OPEN decision still
+/// re-derives installed-ness at request time — see `NavigationMapPolicy`).
+/// Place rows show the category + default-home radio for `.home` places,
+/// with edit/delete controls mirroring the Family & friends rows.
+struct PlacesSettingsView: View {
+    @EnvironmentObject var coordinator: AppCoordinator
+
+    /// The open add/edit sheet — nil when closed. Item-driven so a
+    /// swipe-dismiss also clears it (same pattern as the family editor).
+    @State private var editorTarget: PlacesEditorTarget?
+
+    enum PlacesEditorTarget: Identifiable {
+        case add
+        case edit(SavedPlace)
+
+        var id: String {
+            switch self {
+            case .add: return "add"
+            case .edit(let place): return place.id.uuidString
+            }
+        }
+    }
+
+    var body: some View {
+        LeafScreen(titleKey: "settings.places.title") {
+            VStack(spacing: 12) {
+                mapAppSection
+                savedPlacesSection
+                if coordinator.savedPlaces.count < SavedPlaceStore.maxPlaces {
+                    addButton
+                }
+            }
+        }
+        .sheet(item: $editorTarget) { target in
+            PlacesEditorSheet(target: target)
+        }
+    }
+
+    // MARK: Map surface
+
+    /// Which app opens when the user asks for directions. `.auto` — the
+    /// default — opens whichever is actually installed (Google first),
+    /// so the option rows carry no "requires X installed" caveat text;
+    /// the request-time resolve handles absence honestly.
+    private var mapAppSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("settings.places.mapApp")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textPrimary)
+            ForEach(NavigationMapApp.allCases, id: \.self) { app in
+                mapAppRow(app)
+            }
+            Text("settings.places.mapAppHint")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    private func mapAppRow(_ app: NavigationMapApp) -> some View {
+        let isSelected = app == coordinator.navigationMapApp
+        return Button {
+            coordinator.navigationMapApp = app
+        } label: {
+            HStack {
+                Text(LocalizedStringKey(Self.nameKey(for: app)))
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 26))
+                        .foregroundColor(DesignTokens.accent)
+                }
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius)
+                    .stroke(isSelected ? DesignTokens.accent : Color.clear, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Catalog key for a map-app option — same string every surface
+    /// shows. Keyed by switch, not rawValue, so the stored id and the
+    /// catalog key can't silently drift (the CallingSettingsView rule).
+    static func nameKey(for app: NavigationMapApp) -> String {
+        switch app {
+        case .auto: return "settings.places.mapApp.auto"
+        case .googleMaps: return "settings.places.mapApp.googleMaps"
+        case .appleMaps: return "settings.places.mapApp.appleMaps"
+        case .inApp: return "settings.places.mapApp.inApp"
+        }
+    }
+
+    // MARK: Saved places
+
+    private var savedPlacesSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("settings.places.saved")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textPrimary)
+            if coordinator.savedPlaces.isEmpty {
+                Text("settings.places.empty")
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(24)
+                    .frame(maxWidth: .infinity)
+                    .background(DesignTokens.card)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            } else {
+                ForEach(coordinator.savedPlaces) { place in
+                    placeRow(place)
+                }
+            }
+        }
+    }
+
+    /// One saved place: name + address, a category line, the default-home
+    /// radio (`.home` places only — "take me home" drives to the checked
+    /// one), and edit/delete controls.
+    private func placeRow(_ place: SavedPlace) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: place.category == .home ? "house.fill" : "mappin.circle.fill")
+                    .font(.system(size: 26))
+                    .foregroundColor(DesignTokens.accent)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(place.name)
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                    Text(place.address)
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Button {
+                    editorTarget = .edit(place)
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 20))
+                        .foregroundColor(DesignTokens.textSecondary)
+                        .frame(width: DesignTokens.minTapTargetSize,
+                               height: DesignTokens.minTapTargetSize)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("settings.places.edit"))
+                Button(role: .destructive) {
+                    coordinator.removePlace(id: place.id)
+                } label: {
+                    Image(systemName: "trash.fill")
+                        .font(.system(size: 22))
+                        .foregroundColor(DesignTokens.stateError)
+                        .frame(width: DesignTokens.minTapTargetSize,
+                               height: DesignTokens.minTapTargetSize)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("settings.places.delete"))
+            }
+            if place.category == .home {
+                HStack(spacing: 8) {
+                    Image(systemName: place.isDefaultHome
+                          ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 22))
+                        .foregroundColor(place.isDefaultHome
+                                         ? DesignTokens.accent : DesignTokens.textSecondary)
+                    Text("settings.places.defaultHome")
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    coordinator.setDefaultHomePlace(id: place.id)
+                }
+                .accessibilityAddTraits(place.isDefaultHome ? .isSelected : [])
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    private var addButton: some View {
+        Button {
+            editorTarget = .add
+        } label: {
+            Text("settings.places.add")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: DesignTokens.chipHeight)
+                .background(DesignTokens.accent)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// The add/edit sheet of the Places screen — one form for both duties
+/// (blank for `.add`, pre-filled for `.edit`), mirroring the family
+/// editor: name, address, category (home / important place), the
+/// default-home toggle for `.home` places, then Save. Save closes only on
+/// success; a failed store write keeps the draft on screen (nothing is
+/// claimed that didn't happen).
+private struct PlacesEditorSheet: View {
+    @EnvironmentObject var coordinator: AppCoordinator
+    @Environment(\.dismiss) private var dismiss
+
+    let target: PlacesSettingsView.PlacesEditorTarget
+
+    @State private var name = ""
+    @State private var address = ""
+    @State private var category: SavedPlace.Category = .home
+    @State private var isDefaultHome = false
+
+    private var editingPlace: SavedPlace? {
+        if case .edit(let place) = target { return place }
+        return nil
+    }
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    /// An address is REQUIRED — a place with no address can never be a
+    /// navigation target, so saving one would only create a dead row.
+    private var canSave: Bool {
+        !trimmedName.isEmpty
+            && !address.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            header
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    field(placeholderKey: "settings.places.name", text: $name)
+                    field(placeholderKey: "settings.places.address", text: $address)
+                        .textInputAutocapitalization(.words)
+                    categoryPicker
+                    if category == .home {
+                        defaultHomeToggle
+                    }
+                    saveButton
+                }
+            }
+        }
+        .padding(20)
+        .onAppear { loadDraft() }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                    .frame(width: DesignTokens.minTapTargetSize,
+                           height: DesignTokens.minTapTargetSize)
+                    .background(DesignTokens.card)
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("common.back"))
+            Text(editingPlace == nil
+                 ? LocalizedStringKey("settings.places.add")
+                 : LocalizedStringKey("settings.places.edit"))
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textPrimary)
+            Spacer()
+        }
+    }
+
+    private func field(placeholderKey: String, text: Binding<String>) -> some View {
+        TextField(LocalizedStringKey(placeholderKey), text: text)
+            .font(.system(size: DesignTokens.minBodyPointSize))
+            .padding(14)
+            .frame(height: 56)
+            .background(DesignTokens.background)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+    }
+
+    /// Home vs important place. Switching a place to `.important` clears
+    /// its default-home flag in the store (a non-home place can never be
+    /// "home"), and the flag auto-promotes the next `.home` — the toggle
+    /// below simply reflects whatever the store ended up with.
+    private var categoryPicker: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("settings.places.category")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textPrimary)
+            HStack(spacing: 10) {
+                categoryChip(.home, key: "settings.places.category.home")
+                categoryChip(.important, key: "settings.places.category.important")
+            }
+        }
+    }
+
+    private func categoryChip(_ value: SavedPlace.Category, key: String) -> some View {
+        let isSelected = category == value
+        return Button {
+            category = value
+            if value == .important {
+                // Mirrors the store rule visibly: an important place can
+                // never be the default home.
+                isDefaultHome = false
+            }
+        } label: {
+            Text(LocalizedStringKey(key))
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(isSelected ? .white : DesignTokens.textPrimary)
+                .frame(maxWidth: .infinity)
+                .frame(height: DesignTokens.minTapTargetSize)
+                .background(isSelected ? DesignTokens.accent : DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// The default-home toggle — only meaningful for `.home` places, so
+    /// it only appears then. The store (not this sheet) is the referee
+    /// for the at-most-one rule: the coordinator's update path demotes
+    /// any previous default when this one is saved with the flag set.
+    private var defaultHomeToggle: some View {
+        Button {
+            isDefaultHome.toggle()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: isDefaultHome ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 26))
+                    .foregroundColor(isDefaultHome ? DesignTokens.accent : DesignTokens.textSecondary)
+                Text("settings.places.defaultHomeToggle")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Spacer()
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var saveButton: some View {
+        Button {
+            save()
+        } label: {
+            Text("onboarding.stepFamily.save")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: DesignTokens.chipHeight)
+                .background(canSave ? DesignTokens.accent
+                                    : DesignTokens.textSecondary.opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSave)
+        .padding(.top, 4)
+    }
+
+    private func loadDraft() {
+        guard let place = editingPlace else { return }
+        name = place.name
+        address = place.address
+        category = place.category
+        isDefaultHome = place.isDefaultHome
+    }
+
+    private func save() {
+        let succeeded: Bool
+        if let place = editingPlace {
+            succeeded = coordinator.updatePlace(id: place.id, name: trimmedName,
+                                                address: address, category: category,
+                                                isDefaultHome: isDefaultHome)
+        } else {
+            succeeded = coordinator.addPlace(name: trimmedName, address: address,
+                                             category: category, isDefaultHome: isDefaultHome)
+        }
+        if succeeded { dismiss() }
+        // A failed store write keeps the draft on screen — Save again to
+        // retry; nothing was claimed that didn't happen.
     }
 }
 

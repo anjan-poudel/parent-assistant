@@ -168,6 +168,48 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// mandatory when the router holds the coordinator as a protocol
     /// reference).
     var isOnDeviceStack: Bool { get }
+
+    /// [DIRECTIONS] (2026-09-07) Navigation-target surface: the places a
+    /// voice-navigation request may drive to — saved places and family
+    /// contacts that carry a non-empty address, merged and trimmed by the
+    /// coordinator (`AppCoordinator` builds this from `SavedPlaceStore`
+    /// + `FamilyContactStore`). Requirement-with-extension-default pattern
+    /// like the tool surfaces above: the router holds the coordinator as
+    /// a protocol reference, so an extension-only member would bind
+    /// statically and the coordinator's candidates could never reach the
+    /// directions stage. The default `[]` keeps every conformer that does
+    /// not opt in (existing mocks) on exactly the pre-directions
+    /// behavior — with no candidates the stage can only resolve the bare
+    /// home, and its default handlers stay silent.
+    var navigationCandidates: [DirectionsCandidate] { get }
+
+    /// [DIRECTIONS] (2026-09-07) Executes a resolved navigation request
+    /// (default home / a saved place / a relative's address). The
+    /// coordinator resolves the target to a concrete address, picks the
+    /// map surface (`NavigationMapPolicy`), and owns every spoken line —
+    /// including the honest fallbacks (`directions.noHome` when no home
+    /// is saved, `directions.mapMissing` when no surface opens).
+    func requestNavigation(to target: DirectionsRoute.PlaceTarget)
+
+    /// [DIRECTIONS] (2026-09-07) Ambiguity walk: the decider found
+    /// several candidates close to the spoken name ("मैया" — a saved
+    /// place AND a relative), and the coordinator must never guess a
+    /// PLACE any more than the call path guesses a person. The
+    /// coordinator pends the candidates (setting
+    /// `isAwaitingNavigationDisambiguation`), and RETURNS the localized
+    /// yes/no question the router speaks — the first candidate asked
+    /// first ("के मैयाको घर लैजाऊँ?"). Returns nil when it could not
+    /// pend; the router then ends the turn without speech rather than
+    /// route a directions utterance onward.
+    func requestNavigationDisambiguation(targets: [DirectionsCandidate]) -> String?
+
+    /// [DIRECTIONS] (2026-09-07) True while a navigation ambiguity walk
+    /// is outstanding. Widens the router's confirmation path exactly like
+    /// `isAwaitingCallConfirmation`: the yes/no on the next transcript
+    /// goes to `handleConfirmationResponse` (which walks the pending
+    /// candidates), and the generic medication-flavored confirmation
+    /// speech is skipped.
+    var isAwaitingNavigationDisambiguation: Bool { get }
 }
 
 /// [INTENT-TOOLS] (2026-09-07) Tool-capability default. The default keeps
@@ -181,6 +223,15 @@ protocol VoiceCommandCoordinating: AnyObject {
 extension VoiceCommandCoordinating {
     var canAnswerLiveQuestionsFromWeb: Bool { false }
     var isOnDeviceStack: Bool { false }
+    // [DIRECTIONS] (2026-09-07) Navigation defaults — see the requirement
+    // docs above. Every member is inert: no candidates, nothing pending,
+    // a silent requestNavigation/requestNavigationDisambiguation. Only a
+    // coordinator that explicitly opts in (AppCoordinator, and a scripted
+    // mock under test) makes the directions stage do anything.
+    var navigationCandidates: [DirectionsCandidate] { [] }
+    var isAwaitingNavigationDisambiguation: Bool { false }
+    func requestNavigation(to target: DirectionsRoute.PlaceTarget) {}
+    func requestNavigationDisambiguation(targets: [DirectionsCandidate]) -> String? { nil }
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -206,6 +257,7 @@ final class CommandRouter {
         case emergencyTriggered
         case callConfirmed
         case contactSearchRequested
+        case navigationRequested
         case unrecognised(transcript: String)
     }
 
@@ -331,20 +383,27 @@ final class CommandRouter {
             // Call confirmations speak their own contextual response
             // (AppCoordinator.handleConfirmationResponse) — the generic
             // "confirmationYes"/"confirmationNo" catalog text below is
-            // medication-flavored and would be wrong here.
+            // medication-flavored and would be wrong here. The
+            // [DIRECTIONS] (2026-09-07) navigation ambiguity walk rides
+            // the same exemption: the coordinator speaks each candidate
+            // question (or the honest `directions.cancelled` line) as it
+            // walks the pending list, and a yes that resolves the walk
+            // reports `.navigationRequested`, never a medication ack.
             let isCallConfirmation = coordinator?.isAwaitingCallConfirmation == true
+            let isNavigationDisambiguation = coordinator?.isAwaitingNavigationDisambiguation == true
             if Self.isYesResponse(raw) {
                 coordinator?.handleConfirmationResponse(.yes)
                 emit(eventType: "confirmation_yes", outcome: "success")
-                if !isCallConfirmation {
+                if !isCallConfirmation && !isNavigationDisambiguation {
                     speak(key: "router.confirmationYes")
                 }
-                return isCallConfirmation ? .callConfirmed : .acknowledgedMedication
+                if isCallConfirmation { return .callConfirmed }
+                return isNavigationDisambiguation ? .navigationRequested : .acknowledgedMedication
             }
             if Self.isNoResponse(raw) {
                 coordinator?.handleConfirmationResponse(.no)
                 emit(eventType: "confirmation_no", outcome: "success")
-                if !isCallConfirmation {
+                if !isCallConfirmation && !isNavigationDisambiguation {
                     speak(key: "router.confirmationNo")
                 }
                 return .unrecognised(transcript: raw)
@@ -387,6 +446,59 @@ final class CommandRouter {
             coordinator?.requestContactSearch(query: query)
             emit(eventType: "contact_search_command", outcome: "success")
             return .contactSearchRequested
+        }
+
+        // Voice-driven DIRECTIONS (directions task, 2026-09-07): "मलाई
+        // घर लैजाऊ" (take me home), "मैयाको घर लैजाऊ" (take me to
+        // Maiya's home), "अस्पताल लैजाऊ" (take me to the hospital)
+        // starts navigation to the default home, a saved place, or a
+        // relative with an address. Same deterministic pattern as the
+        // contact-search stage above: no model, no IntentPrompt tokens
+        // (the prompt budget is pinned by IntentPromptTests).
+        //
+        // Placement: AFTER the safety net + confirmation flow + contact
+        // search — emergency / med-ack / yes-no / phone-search utterances
+        // win exactly as before, and a directions marker can never shadow
+        // them — and BEFORE the topic table, so a transport verb can
+        // never be answered as small talk. The decision type's own vetoes
+        // keep call talk ("फोन लैजाऊ" = carry the phone), medication
+        // markers ("दवाई लैजाऊ" = take the medicine) and third-person
+        // transport ("छोरालाई स्कुल लैजाऊ") off this stage entirely.
+        //
+        // The stage only DECIDES and hands off: candidates come from
+        // `navigationCandidates` (the coordinator's merged saved places +
+        // address-carrying relatives), and the coordinator owns every
+        // spoken line — execution speech, the no-home fallback, the
+        // map-surface chain, and the ambiguity walk.
+        switch DirectionsRoute.decide(transcript: raw,
+                                      candidates: coordinator?.navigationCandidates ?? []) {
+        case .navigate(let target):
+            coordinator?.requestNavigation(to: target)
+            emit(eventType: "directions_command", outcome: "success")
+            return .navigationRequested
+        case .ambiguous(let targets):
+            // Several candidates scored within the margin — ask, never
+            // guess a place. The returned question is the first
+            // candidate's yes/no prompt ("के … लैजाने?"); the user's
+            // answer comes back through the confirmation path widened by
+            // `isAwaitingNavigationDisambiguation`. A nil return means
+            // the coordinator could not pend: end the turn without
+            // speech rather than route a directions utterance onward.
+            if let question = coordinator?.requestNavigationDisambiguation(targets: targets) {
+                emit(eventType: "directions_disambiguation", outcome: "info")
+                speak(text: question)
+            }
+            return .navigationRequested
+        case .unknownPlace:
+            // Honest fallback: a place-name query matched no saved place
+            // and no address-carrying relative. Visible card + speech,
+            // exactly like the other fallback lines (the live-caption
+            // pill is gone by now, so spoken-only would vanish).
+            emit(eventType: "directions_command", outcome: "unknown_place")
+            speakWithVisibleOutcome(key: "directions.placeNotFound")
+            return .unrecognised(transcript: raw)
+        case .notDirections:
+            break   // not directions business — continue the ladder
         }
 
         // [NO-GIBBERISH] Deterministic TOPIC PRE-ANSWERS (2026-09-07): the

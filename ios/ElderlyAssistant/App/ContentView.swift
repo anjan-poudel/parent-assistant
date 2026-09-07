@@ -39,5 +39,13 @@ struct ContentView: View {
         .sheet(item: $coordinator.pendingPluginPresentation) { presentation in
             presentation.view
         }
+        // Voice-driven navigation (directions task, 2026-09-07): the
+        // in-app MapKit fallback — a static route + spoken steps sheet
+        // for when no map app is installed or the user forced `.inApp`.
+        // The sheet's dismiss (Close button or swipe) clears the
+        // published item; the view stops its session on disappear.
+        .sheet(item: $coordinator.pendingNavigationPresentation) { presentation in
+            InAppNavigationView(session: presentation.session)
+        }
     }
 }

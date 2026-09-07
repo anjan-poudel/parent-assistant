@@ -33,6 +33,13 @@ import Foundation
 /// family calls the person — the wizard's optional final step. Same
 /// optional-field contract as the handle and the photo: the custom
 /// decoder reads a missing key as nil.
+///
+/// `address` (directions task, 2026-09-07): the contact's home address,
+/// so voice navigation can drive to a relative ("मैयाको घर लैजाऊ").
+/// Free-form text — whatever the user typed in the family editor; the
+/// navigation pipeline forward-geocodes it at request time. Optional,
+/// same unversioned-store migration rule: a payload written before the
+/// field existed loads address-less instead of failing the read.
 struct FamilyContact: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String
@@ -44,6 +51,9 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     var photoFilename: String?
     /// The informal name the family uses, nil when none is set.
     var nickname: String?
+    /// Free-form home address for voice navigation, nil when the user
+    /// never set one (the contact then cannot be a navigation target).
+    var address: String?
 
     /// App the video button opens for this contact. Default `.faceTime`
     /// (the global default) — the only app that truly starts a video
@@ -57,7 +67,8 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     init(id: UUID = UUID(), name: String, phone: String, relationship: String,
          messengerHandle: String? = nil,
          preferredVideoApp: CallApp = .faceTime, preferredCallApp: CallApp = .phone,
-         photoFilename: String? = nil, nickname: String? = nil) {
+         photoFilename: String? = nil, nickname: String? = nil,
+         address: String? = nil) {
         self.id = id
         self.name = name
         self.phone = phone
@@ -67,6 +78,7 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         self.preferredCallApp = preferredCallApp
         self.photoFilename = photoFilename
         self.nickname = nickname
+        self.address = address
     }
 
     /// Custom decode: contacts persisted BEFORE the preference fields
@@ -90,6 +102,9 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         photoFilename = (try? container.decodeIfPresent(String.self, forKey: .photoFilename)) ?? nil
         // And for the nickname: a pre-field payload loads without one.
         nickname = (try? container.decodeIfPresent(String.self, forKey: .nickname)) ?? nil
+        // Same rule for the address (directions task, 2026-09-07): a
+        // payload written before the field existed loads address-less.
+        address = (try? container.decodeIfPresent(String.self, forKey: .address)) ?? nil
     }
 
     /// The app a VIDEO button resolves to (task: contact preference →

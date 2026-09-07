@@ -95,14 +95,39 @@ final class FamilyContactStoreTests: XCTestCase {
                      "a contact created without a nickname stores none")
     }
 
+    func testAddressRoundTrips() {
+        // (directions task, 2026-09-07) The free-form home address makes
+        // a relative a voice-navigation target ("मैयाको घर लैजाऊ"); nil
+        // when the user never set one.
+        let store = FamilyContactStore(storage: InMemoryEncryptedStorage())
+        let contact = FamilyContact(name: "मैया", phone: "9812345678",
+                                    relationship: "दिदी",
+                                    address: "बूढानीलकण्ठ, काठमाडौं ९")
+        XCTAssertTrue(store.add(contact))
+
+        let loaded = store.load()
+        XCTAssertEqual(loaded.first?.address, "बूढानीलकण्ठ, काठमाडौं ९")
+    }
+
+    func testContactWithoutAddressLoadsNil() {
+        let store = FamilyContactStore(storage: InMemoryEncryptedStorage())
+        let contact = FamilyContact(name: "राम", phone: "9812345678",
+                                    relationship: "छोरा")
+        XCTAssertTrue(store.add(contact))
+
+        XCTAssertNil(store.load().first?.address,
+                     "no address typed means nil — the navigation candidate list excludes the contact")
+    }
+
     func testLegacyPayloadWithoutOptionalFieldsDecodesAsNil() {
         // Payloads written before the optional fields existed (the
         // unversioned store's only "migration" is each field being
         // optional) must still load — written here through a legacy-shaped
-        // struct that provably lacks all three optional fields:
+        // struct that provably lacks all four optional fields:
         // `messengerHandle` (added 2026-09-06), `photoFilename` (added
-        // 2026-09-07 by the family-and-friends task) and `nickname`
-        // (added 2026-09-07 by the family-wizard task).
+        // 2026-09-07 by the family-and-friends task), `nickname` (added
+        // 2026-09-07 by the family-wizard task) and `address` (added
+        // 2026-09-07 by the directions task).
         let storage = InMemoryEncryptedStorage()
         let legacy = LegacyFamilyContact(id: UUID(), name: "राम",
                                          phone: "9812345678", relationship: "छोरा")
@@ -120,14 +145,17 @@ final class FamilyContactStoreTests: XCTestCase {
                      "a pre-photo-field payload decodes photo-less, not a failure")
         XCTAssertNil(loaded.first?.nickname,
                      "a pre-nickname-field payload decodes nickname-less, not a failure")
+        XCTAssertNil(loaded.first?.address,
+                     "a pre-address payload decodes address-less, not a failure")
     }
 }
 
 /// The pre-optional-fields contact shape — no `messengerHandle` (added
-/// 2026-09-06), no `photoFilename` (added 2026-09-07) and no `nickname`
-/// (added 2026-09-07 by the family-wizard task). Exists to write
-/// old-shape payloads into storage for the backward-decode test; its
-/// JSON is byte-compatible with what the old app version stored.
+/// 2026-09-06), no `photoFilename` (added 2026-09-07), no `nickname`
+/// (added 2026-09-07 by the family-wizard task) and no `address` (added
+/// 2026-09-07 by the directions task). Exists to write old-shape
+/// payloads into storage for the backward-decode test; its JSON is
+/// byte-compatible with what the old app version stored.
 private struct LegacyFamilyContact: Codable {
     let id: UUID
     var name: String
