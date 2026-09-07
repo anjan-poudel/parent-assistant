@@ -3088,6 +3088,23 @@
         }
       }
     },
+    "history.openPhone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Phone app"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोन एप खोल्नुहोस्"
+          }
+        }
+      }
+    },
     "history.messageLabel": {
       "extractionState": "manual",
       "localizations": {
@@ -3186,6 +3203,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "हालसालैको गतिविधि"
+          }
+        }
+      }
+    },
+    "history.unanswered": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unanswered call"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नउठाएको कल"
           }
         }
       }

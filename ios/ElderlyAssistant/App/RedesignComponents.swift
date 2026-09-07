@@ -105,6 +105,30 @@ enum PhoneDialer {
     }
 }
 
+// MARK: - Unanswered-call row action (missed-calls task, 2026-09-07)
+
+/// Opens the Phone app with an EMPTY dialer — the unanswered-call row's
+/// action in HistoryView and CallView's recentActivitySection.
+///
+/// Why an empty `tel://` is the best available deep link: the caller of
+/// an unanswered call is ANONYMOUS to this app (iOS masks the identity
+/// AND the number of calls that involve other apps), so there is no
+/// number to dial; and no public URL scheme opens the Phone app's
+/// Recents tab directly. An empty `tel://` is the closest honest
+/// surface — the Phone app opens and the call genuinely lives in
+/// Recents, one tab away. Never dials anything: no digits ride on the
+/// link.
+///
+/// Views call this from button actions — main queue by contract, the
+/// same direct `UIApplication.shared.open` pattern as
+/// `EmergencyIconButton`.
+enum PhoneAppOpener {
+    static func openDialer() {
+        guard let url = URL(string: "tel://") else { return }
+        UIApplication.shared.open(url)
+    }
+}
+
 // MARK: - Emergency icon (persistent everywhere — spec §3.1/§3.2)
 
 /// The one voice/safety affordance allowed outside Home. Real behavior:
