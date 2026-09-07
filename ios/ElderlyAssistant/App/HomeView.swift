@@ -51,7 +51,9 @@ struct HomeView: View {
     var body: some View {
         NavigationStack(path: $navPath) {
             ZStack {
-                DesignTokens.background.ignoresSafeArea()
+                // Skinnable background (2026-09-07) — the theme's cream is
+                // today's DesignTokens.background; see `AppTheme`.
+                Color(theme: coordinator.appTheme).ignoresSafeArea()
                 VStack(spacing: 14) {
                     topBar
                     if let line = coordinator.homeCalendarLine {

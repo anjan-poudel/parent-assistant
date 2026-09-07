@@ -30,7 +30,9 @@ struct OnboardingWizardView: View {
 
     var body: some View {
         ZStack {
-            DesignTokens.background.ignoresSafeArea()
+            // Skinnable background (2026-09-07) — follows the theme the
+            // rest of the app uses; see `AppTheme`.
+            Color(theme: coordinator.appTheme).ignoresSafeArea()
             VStack(spacing: 0) {
                 header
                 Spacer(minLength: 0)
