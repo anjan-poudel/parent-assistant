@@ -14,12 +14,13 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case appearance, language, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, quickApps, privacy, intentLog
+        case appearance, language, calling, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, quickApps, privacy, intentLog
 
         var id: String {
             switch self {
             case .appearance: return "appearance"
             case .language: return "language"
+            case .calling: return "calling"
             case .family: return "family"
             case .meds: return "meds"
             case .geminiAI: return "geminiAI"
@@ -69,6 +70,9 @@ struct SettingsView: View {
                         // noted future option.
                         sectionRow(.appearance, icon: "paintpalette.fill", titleKey: "settings.appearance.title")
                         sectionRow(.language, icon: "globe", titleKey: "settings.language.title")
+                        // Default app for ADDRESS-BOOK call buttons
+                        // (Phone-tab redesign, 2026-09-07).
+                        sectionRow(.calling, icon: "phone.badge.plus", titleKey: "settings.calling.title")
                         geminiSectionRow
                         voiceEngineSectionRow
                         wakeWordSectionRow
@@ -100,6 +104,7 @@ struct SettingsView: View {
             switch section {
             case .appearance: AppearanceSettingsView()
             case .language: LanguageSettingsView()
+            case .calling: CallingSettingsView()
             case .family: FamilyContactsSettingsView()
             case .meds: MedicationScheduleSettingsView()
             case .geminiAI: GeminiAPISettingsView()
@@ -1276,6 +1281,7 @@ struct MedicationScheduleSettingsView: View {
                 addForm
                 festivalReminderCard
                 calendarSyncCard
+                externalCalendarCard
             }
         }
     }
@@ -1382,6 +1388,75 @@ struct MedicationScheduleSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// Native Calendar/Reminders import (calendar-driven task,
+    /// 2026-09-07) — the mirror card above writes the app's schedule
+    /// OUT to EventKit; this card reads the family's native events and
+    /// due reminders IN (in-app notifications + today's lists). Ask
+    /// happens at point of use (the toggle); the app never writes back.
+    /// Same intent-vs-truth split as the mirror: the toggle is intent,
+    /// the status line is the OS's answer.
+    private var externalCalendarCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: Binding(
+                get: { coordinator.externalCalendar.isEnabled },
+                set: { newValue in
+                    Task { await coordinator.setExternalCalendarEnabled(newValue) }
+                }
+            )) {
+                Label("externalReminders.toggle", systemImage: "calendar.badge.clock")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+
+            if coordinator.externalCalendar.isEnabled {
+                HStack {
+                    Text("externalReminders.leadTitle")
+                        .font(.system(size: DesignTokens.minBodyPointSize))
+                        .foregroundColor(DesignTokens.textPrimary)
+                    Spacer()
+                    // Setting the lead re-scans immediately (the
+                    // service's didSet) so armed notifications follow.
+                    Stepper(value: Binding(
+                        get: { coordinator.externalCalendar.leadMinutes },
+                        set: { coordinator.externalCalendar.leadMinutes = $0 }
+                    ), in: 0...ExternalCalendarService.maxLeadMinutes) {
+                        Text(BikramSambat.devanagariDigits(coordinator.externalCalendar.leadMinutes))
+                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                            .foregroundColor(DesignTokens.accent)
+                    }
+                }
+                .padding(14)
+                .frame(height: 56)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+
+                Text(L10n.fmt("externalReminders.leadHint", locale: coordinator.activeLocale,
+                              BikramSambat.devanagariDigits(coordinator.externalCalendar.leadMinutes)))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
+
+            Text(externalStatusText)
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    private var externalStatusText: String {
+        switch coordinator.externalCalendar.status {
+        case .enabled: return L10n.str("externalReminders.statusOn", locale: coordinator.activeLocale)
+        case .partial: return L10n.str("externalReminders.statusPartial", locale: coordinator.activeLocale)
+        case .denied: return L10n.str("externalReminders.statusDenied", locale: coordinator.activeLocale)
+        case .error: return L10n.str("externalReminders.statusError", locale: coordinator.activeLocale)
+        case .notRequested: return L10n.str("externalReminders.statusHint", locale: coordinator.activeLocale)
+        }
     }
 
     /// Advance-reminder days for important festivals (BS calendar,

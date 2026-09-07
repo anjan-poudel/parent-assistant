@@ -71,6 +71,7 @@ final class AppCoordinator: ObservableObject {
         familyNotifier.locale = activeLocale
         routineAlarmScheduler.locale = activeLocale
         routineScheduler.locale = activeLocale
+        externalCalendar.locale = activeLocale
     }
 
     /// First-run onboarding progress (spec §4.2). Persisted per step.
@@ -107,6 +108,21 @@ final class AppCoordinator: ObservableObject {
         }
     }
     private static let themeKey = "appTheme"
+
+    /// The app an ADDRESS-BOOK row's call button opens when the row has no
+    /// per-contact channel pick saved — per-row picks live in
+    /// `channelPreferenceStore`, and a row without one resolves here
+    /// (Phone-tab redesign, 2026-09-07). The Settings → Calling screen's
+    /// picker binds this. A UI preference, not a secret — persisted in
+    /// UserDefaults the same way as `appTheme`. didSet persists; the
+    /// init-time restore assigns directly (house pattern — didSet does
+    /// not fire there).
+    @Published var defaultCallApp: CallApp {
+        didSet {
+            UserDefaults.standard.set(defaultCallApp.rawValue, forKey: Self.defaultCallAppKey)
+        }
+    }
+    private static let defaultCallAppKey = "defaultCallApp"
 
     /// Which brain model the local LLaMA interpreter runs (Settings →
     /// "AI मोडेल" → Assistant brain, 2026-09-06). nil = the default
@@ -602,6 +618,17 @@ final class AppCoordinator: ObservableObject {
     /// handles live on `FamilyContact`, not here.)
     private(set) lazy var messengerHandleStore = MessengerHandleStore(storage: storage)
 
+    /// Per-contact calling-channel preferences for ADDRESS-BOOK people,
+    /// keyed by normalized phone (Phone-tab redesign, 2026-09-07) — the
+    /// row's channel chooser persists the user's pick here, and rows
+    /// without an entry resolve to the global `defaultCallApp`. Lazy
+    /// like `messengerHandleStore`: `storage` is assigned at the top of
+    /// `init`, long before any row can query or write a preference. UI
+    /// code goes through the `storedChannelPreference` /
+    /// `setChannelPreference` helpers in this class, never this store
+    /// directly.
+    private(set) lazy var channelPreferenceStore = ChannelPreferenceStore(storage: storage)
+
     /// The plugin registry backing `.plugin` intent dispatch and plugin
     /// prompt composition (design doc 2026-09-05).
     private(set) var pluginRegistry: PluginRegistry!
@@ -660,6 +687,24 @@ final class AppCoordinator: ObservableObject {
                                                  cloudBrainAvailable: Bool) -> Bool {
         guard !modelCached else { return false }
         return !(cloudEnabled && cloudBrainAvailable)
+    }
+
+    /// Resolves which channel an ADDRESS-BOOK row's call button opens
+    /// (Phone-tab redesign, 2026-09-07): the row's explicit per-contact
+    /// pick wins, else the global default (`defaultCallApp`). One hard
+    /// rule on top of the fallback chain — never resolve to a channel
+    /// the row cannot open: a `.messenger` result needs an on-file
+    /// handle (Messenger addresses people by username, not number), so
+    /// without one the result drops to `.phone` rather than dead-ending
+    /// the tap. Pure static so the whole matrix is unit-testable without
+    /// an AppCoordinator instance (same seam as
+    /// `shouldAutoDownloadAssistantBrain`).
+    static func resolvedCallChannel(explicit: CallApp?,
+                                    defaultApp: CallApp,
+                                    messengerHandleAvailable: Bool) -> CallApp {
+        let resolved = explicit ?? defaultApp
+        if resolved == .messenger && !messengerHandleAvailable { return .phone }
+        return resolved
     }
 
     /// Compile-time: is the vendored LLM.swift runtime linked into THIS
@@ -737,6 +782,14 @@ final class AppCoordinator: ObservableObject {
         self.routineScheduler = routineScheduler
         self.routinePlugin = RoutinePlugin(scheduler: routineScheduler)
 
+        // Read-only native Calendar/Reminders integration (2026-09-07).
+        // Created here (right after the bus exists) so the language
+        // sync below reaches it; no permissions are touched by
+        // construction — enablement is a Settings toggle + point-of-use
+        // ask.
+        let externalCalendar = ExternalCalendarService(observabilityBus: bus)
+        self.externalCalendar = externalCalendar
+
         // Language — restore the persisted choice, defaulting to the Nepali
         // pilot language (spec §3.2).
         self.appLanguage = AppLanguage.persisted()
@@ -748,6 +801,16 @@ final class AppCoordinator: ObservableObject {
         // react to the restored value (same rule as `voiceEngineStack`).
         self.appTheme = AppTheme(rawOrDefault:
             UserDefaults.standard.string(forKey: Self.themeKey))
+
+        // Default call channel (Phone-tab redesign, 2026-09-07) — restore
+        // the persisted default call app; missing/unknown raw values fall
+        // back to `.phone`, the zero-assumption channel that works for
+        // every row. This is the property's ONLY initial assignment, so
+        // its didSet does not fire here (same rule as `appTheme` above) —
+        // nothing needs to react to the restored value.
+        self.defaultCallApp = UserDefaults.standard
+            .string(forKey: Self.defaultCallAppKey)
+            .flatMap(CallApp.init(rawValue:)) ?? .phone
 
         // Model store + download service. First-run UI drives downloads
         // via `modelDownloadService`; the coordinator watches state changes
@@ -977,6 +1040,26 @@ final class AppCoordinator: ObservableObject {
         routinePlugin.medicationSummaryProvider = { [weak self] in
             self?.todayMedicationSummaryLines() ?? []
         }
+        // Same fold for imported native Calendar/Reminders items — one
+        // spoken list spanning all three reminder systems.
+        routinePlugin.externalSummaryProvider = { [weak self] in
+            self?.externalCalendar.todaysSpokenLines(locale: self?.activeLocale
+                                                     ?? Locale(identifier: "en")) ?? []
+        }
+        // Mirror staleness seam (calendar-driven task, 2026-09-07): every
+        // routine mutation re-mirrors the schedule — one seam covering
+        // the voice path (RoutinePlugin.handleSet → addEntry) and the
+        // Reminders leaf toggles alike.
+        routineScheduler.onScheduleChanged = { [weak self] in
+            self?.calendarSync.syncNow(entries: self?.routineScheduler.entries() ?? [])
+        }
+        // Forward the external calendar service's publishes (Settings
+        // status/lead, scan results reaching the Reminders + Calendar
+        // leaves) — nested ObservableObject, see the property docs.
+        externalCalendarCancellable = externalCalendar.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
     }
 
     func start() {
@@ -1039,6 +1122,18 @@ final class AppCoordinator: ObservableObject {
         // every catalog festival + advance N-day reminders for important
         // ones (default 2, Settings-configurable). Idempotent rebuild.
         festivalCalendar.scheduleAll()
+
+        // Read-only native Calendar/Reminders integration (2026-09-07):
+        // launch-time refresh — NO prompts (startIfEnabled only scans
+        // when the family already enabled + granted access), then the
+        // hourly BGAppRefresh keeps it current while backgrounded.
+        Task { await externalCalendar.startIfEnabled() }
+        // Mirror staleness fix: re-mirror at launch when enabled (the
+        // restored status survives relaunches now), so the family's
+        // calendar view of the routine is current from a fresh start.
+        if calendarSync.isEnabled {
+            calendarSync.syncNow(entries: routineScheduler.entries())
+        }
 
         // Voice pipeline is built lazily here so the CommandRouter can hold a
         // weak ref back to this fully-initialised coordinator.
@@ -2446,15 +2541,46 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    /// The Messenger handle the app captured earlier for a book-row
-    /// contact — `MessengerHandleStore`, keyed by the normalized phone
-    /// (messenger-gate, 2026-09-07: the capture prompt is gone, so this
-    /// READS handles saved before the revert; nothing writes the store
-    /// anymore). The Phone leaf's messenger pill and tap resolve it for
-    /// book rows whose record itself carries no Facebook linkage. Nil
-    /// when none was ever saved.
+    /// The Messenger handle the app captured for a book-row contact —
+    /// `MessengerHandleStore`, keyed by the normalized phone (messenger-
+    /// gate, 2026-09-07: the old capture prompt is gone; the Phone-tab
+    /// redesign's add-handle sheet writes again via
+    /// `storeMessengerHandle`). The Phone leaf's messenger pill and tap
+    /// resolve it for book rows whose record itself carries no Facebook
+    /// linkage. Nil when none was ever saved.
     func storedMessengerHandle(forNormalizedPhone normalized: String) -> String? {
         messengerHandleStore.handle(forNormalizedPhone: normalized)
+    }
+
+    /// Saves the Messenger handle a book-row contact's add-handle sheet
+    /// captured (Phone-tab redesign, 2026-09-07). RE-ADDED: messenger-
+    /// gate removed this when it deleted the old capture prompt; the
+    /// redesign's sheet brings the write side back — a saved handle is
+    /// what keeps the row's messenger pill and opens the real thread.
+    /// The caller has already validated the username; this just persists
+    /// via the encrypted `MessengerHandleStore` and returns whether the
+    /// write landed.
+    @discardableResult
+    func storeMessengerHandle(_ handle: String, forNormalizedPhone normalized: String) -> Bool {
+        messengerHandleStore.set(handle: handle, forNormalizedPhone: normalized)
+    }
+
+    /// The per-contact calling channel the Phone-tab row's channel
+    /// chooser saved for an ADDRESS-BOOK row (Phone-tab redesign,
+    /// 2026-09-07) — nil when the user never picked one (or the stored
+    /// value is corrupt), in which case the row resolves to the global
+    /// `defaultCallApp` via `resolvedCallChannel`.
+    func storedChannelPreference(forNormalizedPhone normalized: String) -> CallApp? {
+        channelPreferenceStore.preference(forNormalizedPhone: normalized)
+    }
+
+    /// Persists the row's channel-chooser pick for an ADDRESS-BOOK row
+    /// (Phone-tab redesign, 2026-09-07). Returns whether the encrypted
+    /// write landed — the chooser can surface a failed write honestly
+    /// instead of silently showing a pick that won't survive relaunch.
+    @discardableResult
+    func setChannelPreference(_ app: CallApp, forNormalizedPhone normalized: String) -> Bool {
+        channelPreferenceStore.set(app, forNormalizedPhone: normalized)
     }
 
     /// Messenger thread for a SYSTEM-address-book search row — the
@@ -2855,6 +2981,21 @@ final class AppCoordinator: ObservableObject {
     /// was dropped in favor of it).
     private(set) lazy var calendarSync = CalendarSyncService(observabilityBus: observabilityBus)
 
+    /// Read-only native Calendar/Reminders integration (2026-09-07): the
+    /// REVERSE direction of `calendarSync` — native events/reminders
+    /// import as in-app reminders with notifications, and rows open the
+    /// native app (never written back). Eager (not lazy) because the
+    /// objectWillChange forwarding below must observe it from init;
+    /// constructing it touches no permissions.
+    private(set) var externalCalendar: ExternalCalendarService
+
+    /// Forwards the external calendar service's publishes (2026-09-07):
+    /// it is a nested ObservableObject, so a scan/status/lead change
+    /// alone would not invalidate views observing the coordinator — the
+    /// Settings card, Reminders leaf and Calendar leaf must refresh the
+    /// moment a scan lands (same pattern as `wakeWordKeyStoreCancellable`).
+    private var externalCalendarCancellable: AnyCancellable?
+
     /// Offline Bikram Sambat + tithi + festival overlay and festival
     /// notification scheduling (2026-09-06 BS calendar feature).
     private(set) lazy var festivalCalendar = FestivalCalendarService(observabilityBus: observabilityBus)
@@ -2865,6 +3006,50 @@ final class AppCoordinator: ObservableObject {
         calendarSync.isEnabled = enabled
         if enabled {
             await calendarSync.enableAndSync(entries: routineScheduler.entries())
+        }
+    }
+
+    // MARK: - Read-only external Calendar/Reminders surface (2026-09-07)
+
+    /// Settings toggle handler for the native-item import: ON asks for
+    /// calendar + reminders access at point of use and scans; OFF
+    /// cancels every notification this feature armed (scoped — the
+    /// medication/routine alarms on the same center are untouched).
+    func setExternalCalendarEnabled(_ enabled: Bool) async {
+        if enabled {
+            await externalCalendar.enable()
+        } else {
+            await externalCalendar.disable()
+        }
+    }
+
+    /// Today's imported native items (events + due reminders, oldest
+    /// first) — merged into the Reminders leaf's today list and the
+    /// Calendar leaf's schedule section.
+    var externalRemindersToday: [ExternalReminder] {
+        externalCalendar.todaysItems()
+    }
+
+    /// Tap on an external row — read-only integration: opens the item's
+    /// native app (Calendar `calshow:` / Reminders `x-apple-reminderkit://`),
+    /// best-effort behind canOpenURL.
+    func openExternalReminder(_ item: ExternalReminder) {
+        externalCalendar.open(item)
+    }
+
+    /// Scene-phase reactions wired from `ContentView`: foreground
+    /// rescans (family edits in the native apps land immediately),
+    /// background submits the hourly BGAppRefresh that keeps scans
+    /// coming while the app isn't running.
+    func handleScenePhase(_ phase: ScenePhase) {
+        guard started else { return }   // start() already refreshes
+        switch phase {
+        case .active:
+            Task { await externalCalendar.startIfEnabled() }
+        case .background:
+            externalCalendar.submitBackgroundRefresh()
+        default:
+            break
         }
     }
 
@@ -3055,6 +3240,24 @@ final class AppCoordinator: ObservableObject {
             self?.medicationScheduler.scheduleAll()
             self?.routineScheduler.scheduleAll()
             task.setTaskCompleted(success: true)
+        }
+        // External calendar rescan (calendar-driven task, 2026-09-07):
+        // the handler IS a rescan pass — same idempotent scan as the
+        // foreground refresh, so the native Calendar/Reminders changes
+        // a family member made while the app sat backgrounded land
+        // within the hourly cadence.
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: ExternalCalendarService.backgroundTaskIdentifier,
+            using: nil
+        ) { [weak self] task in
+            guard let self else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            Task {
+                await self.externalCalendar.rescan()
+                task.setTaskCompleted(success: true)
+            }
         }
     }
 

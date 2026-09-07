@@ -1813,6 +1813,125 @@
         }
       }
     },
+    "calling.defaultApp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default calling app"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पूर्वनिर्धारित कल एप"
+          }
+        }
+      }
+    },
+    "calling.defaultCaption": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This becomes the default call button; Messenger needs a per-contact handle."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो पूर्वनिर्धारित कल बटन बन्छ; मेसेन्जरका लागि सम्पर्कमा नाम चाहिन्छ।"
+          }
+        }
+      }
+    },
+    "messenger.handleHints.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Where to find their Messenger username"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उहाँको मेसेन्जर नाम कहाँ भेटिन्छ"
+          }
+        }
+      }
+    },
+    "messenger.handleHints.line1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In Messenger, open the person's profile."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेसेन्जरमा उहाँको प्रोफाइल खोल्नुहोस्।"
+          }
+        }
+      }
+    },
+    "messenger.handleHints.line2": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Their username is below their name."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नामको तल उहाँको मेसेन्जर नाम हुन्छ।"
+          }
+        }
+      }
+    },
+    "messenger.handleHints.line3": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask them directly if you're not sure."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "थाहा नभए उहाँलाई नै सोध्नुहोस्।"
+          }
+        }
+      }
+    },
+    "settings.calling.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calling"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कलिङ"
+          }
+        }
+      }
+    },
     "call.title": {
       "extractionState": "manual",
       "localizations": {
@@ -1928,6 +2047,176 @@
           "stringUnit": {
             "state": "translated",
             "value": "अझै कुनै आपतकालीन सम्पर्क राखिएको छैन। सेटिङमा थप्नुहोस्।"
+          }
+        }
+      }
+    },
+    "externalReminders.allDay": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "All day"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दिनभरि"
+          }
+        }
+      }
+    },
+    "externalReminders.leadHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ minutes before timed items (all-day items always announce at 8:00 AM)."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "समय तोकिएका वस्तुको %@ मिनेट अघि (दिनभरिका वस्तु सधैं बिहान ८ बजे)।"
+          }
+        }
+      }
+    },
+    "externalReminders.leadTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notify minutes before"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कति मिनेट अघि सूचना दिने"
+          }
+        }
+      }
+    },
+    "externalReminders.notificationTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reminder"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्झना"
+          }
+        }
+      }
+    },
+    "externalReminders.statusDenied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar and Reminders access was denied — everything here still works, just without those items."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पात्रो र सम्झना पहुँच अस्वीकार गरियो — यहाँ सबै काम गर्छ, तर ती वस्तुहरू बिना।"
+          }
+        }
+      }
+    },
+    "externalReminders.statusError": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Something went wrong reading items — will try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "वस्तुहरू पढ्दा समस्या भयो — फेरि प्रयास गरिनेछ।"
+          }
+        }
+      }
+    },
+    "externalReminders.statusHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Events and reminders you keep in the iPhone's Calendar and Reminders apps can appear here too."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आईफोनको पात्रो र सम्झना एपमा राखेका घटना र सम्झनाहरू यहाँ पनि देखिन सक्छन्।"
+          }
+        }
+      }
+    },
+    "externalReminders.statusOn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On — events and reminders are checked regularly."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खोलिएको छ — पात्रो र सम्झनाहरू नियमित जाँचिन्छन्।"
+          }
+        }
+      }
+    },
+    "externalReminders.statusPartial": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Partial access — only some items can be read."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आंशिक पहुँच मात्र — केही वस्तुहरू मात्र पढ्न सकिन्छ।"
+          }
+        }
+      }
+    },
+    "externalReminders.toggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import from Calendar & Reminders"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पात्रो र सम्झना एपबाट ल्याउनुहोस्"
           }
         }
       }
