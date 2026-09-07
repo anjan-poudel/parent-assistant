@@ -15,7 +15,7 @@ the table; completed items are struck through with the landing commit noted.
 | # | Item | Status | Branch / Worktree | Notes |
 |---|------|--------|-------------------|-------|
 | 7 | Query path structured-response contract ([QUERY-FIX]): kill the invariant "माफ गर्नुहोस्" apology for correctly-transcribed questions | landed `7ac8b33` | ~~`fix-query-end-to-end` (`.claude/worktrees/fix-query-end-to-end`)~~ | e2e suite `QueryEndToEndRegressionTests`; train-intent must mirror the canonical contract — see section below |
-| 6 | Intent-model base bake-off (Gemma 3 1B vs Qwen 3 1.7B) | not started | none (runs on GPU server 192.168.1.117 via `tools/train-intent/`) | Spec: design 2026-09-05 §7/§9.5, ship gates §10; unblocks `ModelCatalog.intentNepali1B` placeholder |
+| 6 | Intent-model base bake-off (Gemma 3 1B vs Qwen 3 1.7B) | in progress — gemma leg trained + exported + published (models v7, `intent-ne-gemma-q4_k_m.gguf`, catalog `intentGemma1B`); qwen leg retraining on GPU | none (runs on GPU server 192.168.1.117 via `tools/train-intent/`) | Spec: design 2026-09-05 §7/§9.5, ship gates §10; unblocks `ModelCatalog.intentNepali1B` placeholder |
 | 4 | ~~Wake word ("Hey Sahayak")~~ | landed `95b7ff7` | ~~`task/wake-word` (`.claude/worktrees/wake-word`)~~ | ~~Brief at `TASK.md` in that worktree~~ |
 | 5 | ~~Gemini cost governance~~ | landed `a50b61c` | ~~`task/cost-governance` (`.claude/worktrees/cost-governance`)~~ | ~~Brief at `TASK.md` in that worktree~~ |
 
