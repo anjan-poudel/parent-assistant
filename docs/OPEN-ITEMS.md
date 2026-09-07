@@ -15,64 +15,97 @@ the table; completed items are struck through with the landing commit noted.
 | # | Item | Status | Branch / Worktree | Notes |
 |---|------|--------|-------------------|-------|
 | 7 | Query path structured-response contract ([QUERY-FIX]): kill the invariant "माफ गर्नुहोस्" apology for correctly-transcribed questions | landed `7ac8b33` | ~~`fix-query-end-to-end` (`.claude/worktrees/fix-query-end-to-end`)~~ | e2e suite `QueryEndToEndRegressionTests`; train-intent must mirror the canonical contract — see section below |
-| 6 | Intent-model base bake-off (Gemma 3 1B vs Qwen 3 1.7B) | eval complete (2026-09-07) — BOTH legs fail the §10 ship gates on the golden corpus; no winner published (data-quality call for the user); gemma v7 artifact stays the only real intent brain | none (runs on GPU server 192.168.1.117 via `tools/train-intent/`) | Spec: design 2026-09-05 §7/§9.5, ship gates §10; gemma 0.882 / qwen 0.706 closed-intent, emergency recall 0.667 both — full numbers + diagnosis in the section below |
+| 6 | Intent-model base bake-off (Gemma 3 1B vs Qwen 3 1.7B) | eval complete (2026-09-07) — phase-3 [EVAL-DEGENERATION] re-eval: no-EOS generation degeneration fixed in the harness; qwen now passes the §10 emergency hard gate (recall 1.000) and closed-intent 0.706 → 0.765, but BOTH legs still fail closed-intent accuracy (0.882 / 0.765 < 0.95); no winner published (data-quality call for the user) | none (runs on GPU server 192.168.1.117 via `tools/train-intent/`) | Spec: design 2026-09-05 §7/§9.5, ship gates §10; before/after table + remaining failure clusters in the section below |
 | 4 | ~~Wake word ("Hey Sahayak")~~ | landed `95b7ff7` | ~~`task/wake-word` (`.claude/worktrees/wake-word`)~~ | ~~Brief at `TASK.md` in that worktree~~ |
 | 5 | ~~Gemini cost governance~~ | landed `a50b61c` | ~~`task/cost-governance` (`.claude/worktrees/cost-governance`)~~ | ~~Brief at `TASK.md` in that worktree~~ |
 
 ---
 
-## #6 — Intent-model base bake-off (phase-2 eval outcome, 2026-09-07)
+## #6 — Intent-model base bake-off (phase-3 degenfix eval outcome, 2026-09-07)
 
-Phase 2 ran on the GPU server (`tools/train-intent/`): the Qwen leg was
-re-trained with the context-truncation fix (`max_seq_len` 1024→1536, commit
-2b0ccdc on the server checkout) and both legs were exported to Q4_K_M GGUF
-(gemma `models/intent-ne-gemma-q4_k_m.gguf` 814,261,088 B sha
-58e59847… — already published as models v7; qwen
-`models/intent-ne-qwen-q4_k_m.gguf` 1,107,408,576 B sha
-e4e8b748… — NOT published) and evaluated against the held-out golden
-corpus (`eval/golden_corpus.jsonl`, 20 rows) on the fixed harness
-(`src/eval_golden.py`; earlier `--backend gguf` row-1 crash = llama-cpp
-`n_ctx` 1024 < 1214-token prompt, already fixed in the working copy to
-2048; this phase added an env-controlled thread cap
-`LLAMA_N_THREADS`/`LLAMA_N_THREADS_BATCH` — llama-cpp-python's default
-~cpu-count OpenMP threads thrashed a shared box to ~1 tok/s).
+### Phase-2 → phase-3 summary
 
-| metric | gate | gemma-q4_k_m | qwen-q4_k_m | gemini baseline |
-|---|---|---|---|---|
-| closed-intent accuracy | ≥ 0.95 | **0.882** FAIL | **0.706** FAIL | 1.000 |
-| contact slot F1 | ≥ 0.90 | 1.000 | 1.000 | 1.000 |
-| time slot F1 | ≥ 0.90 | 0.909 | 0.923 | 1.000 |
-| emergency recall | = 1.00 | **0.667** FAIL | **0.667** FAIL | 1.000 |
-| call/message precision | ≥ 0.97 | 1.000 | 1.000 | 1.000 |
-| Δ closed vs gemini | ≥ −3 pts | −11.8 FAIL | −29.4 FAIL | — |
-| calibration (±10%) | — | 0.9+ bucket 0.89 (16/18); 1 row at conf 0.0 | 0.8+ bucket 0.79 (11/14); 0.3+ 0.67 | 1.00 all |
+Phase 2 (2026-09-07) ran both legs (`models/intent-ne-gemma-q4_k_m.gguf`
+sha 58e59847…, already published as models v7; qwen
+`models/intent-ne-qwen-q4_k_m.gguf` sha e4e8b748…, NOT published) against
+the held-out golden corpus (`eval/golden_corpus.jsonl`, 20 rows) with the
+fixed harness (`n_ctx` 2048, `LLAMA_N_THREADS`/`LLAMA_N_THREADS_BATCH` env
+caps, `max_tokens` 700). Both legs failed the §10 gates with a shared
+symptom: **no-EOS degeneration — every row ran to the 700-token cap
+without emitting any end-of-generation token**, and Qwen's gc-emergency-003
+produced a correct `{"action":"emergency"…}` truncated before its closing
+brace.
 
-Per-intent (correct/n): gemma — ack_med 0/1, call 5/5, emergency 2/3,
-guide 1/1, health_query 2/2, music 2/2, none 2/2, query 0/1,
-send_message 1/1, set_reminder 2/2. Qwen — same except guide 0/1,
-health_query 0/2, query 1/1.
+Phase 3 (this item, commit `[EVAL-DEGENERATION]` on `master`) fixed the
+harness and re-ran all three legs. Before/after (label `-degenfix` rows in
+`tools/train-intent/eval/results.csv` on the server):
 
-**Diagnosis (raw-output probes on the missed rows):** both legs share two
-generation faults — no EOS discipline (most rows run to the 700-token cap;
-gemma stacks multiple JSON objects, qwen appends prose/degrades into
-repetition) and wrong labels on edge intents. Gemma misses the bare
-emergency "मद्दत गर्नुहोस्" (gc-emergency-001 → `none` + "के समस्या छ?" at
-conf 0.9), "औषधि खाएँ" (ack → set_reminder), and the weather query
-(echoes the prompt template, never reaches JSON). Qwen over-collapses onto
-`query` (both health_query rows + guide row → `query`), also ack →
-set_reminder, and misses "म लडेँ, उठ्न सकिन" ONLY because the correct
-`{"action":"emergency"…}` JSON was truncated by repetition before its
-closing brace.
+| metric | gate | gemma before | gemma after | qwen before | qwen after | gemini baseline |
+|---|---|---|---|---|---|---|
+| closed-intent accuracy | ≥ 0.95 | 0.882 FAIL | **0.882** FAIL | 0.706 FAIL | **0.765** FAIL | 1.000 |
+| contact slot F1 | ≥ 0.90 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+| time slot F1 | ≥ 0.90 | 0.909 | 0.909 | 0.923 | 0.923 | 1.000 |
+| emergency recall | = 1.00 | 0.667 FAIL | **0.667** FAIL | 0.667 FAIL | **1.000** PASS | 1.000 |
+| call/message precision | ≥ 0.97 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+| Δ closed vs gemini | ≥ −3 pts | −11.8 FAIL | −11.8 FAIL | −29.4 FAIL | −23.5 FAIL | — |
+| calibration (±10%) | — | 0.9+ 0.89 (16/18); conf-0 abstention ×1 | same | 0.3+ 0.67 (3 rows) | 0.8+ 0.81 (13/16); 0.3+ 0.67 (misses) | 1.00 all |
 
-**Decision left to the user (data quality, not code):** neither leg clears
-the gates → NOT published; `ModelCatalog` stays with `intentGemma1B`
-(v7) only, no `intentQwen1B` entry, `intentNepali1B` placeholder
-untouched. Canonical eval rows sit in `tools/train-intent/eval/results.csv`
-on the server. Candidate next steps: fix the data (bare-emergency and
-ack/health/guide rows under-represented or mis-taught in the mixture),
-emergency adversarial near-miss set (§10, not yet in the corpus), then
-retrain; also the on-device latency leg (p50 ≤ 1.0 s) is still open on
-real hardware.
+Per-intent after (correct/n): gemma — ack_med 0/1, call 5/5, emergency
+2/3, guide 1/1, health_query 2/2, music 2/2, none 2/2, query 0/1,
+send_message 1/1, set_reminder 2/2. Qwen — same except emergency 3/3,
+guide 0/1, health_query 0/2, query 1/1.
+
+**Root cause (evidence-first, probes at temp 0 over all 20 rows):**
+`train_qlora.py` builds training text as raw `prompt_template.txt` +
+`\n` + JSON label — tokenized **without chat-template wrapping and with no
+EOS appended** (`to_text`, `tokenizer(batch["text"])`, CLM collator). The
+models therefore never learned a terminator: llama.cpp's EOG tokens
+(gemma `<eos>`/`<end_of_turn>`, qwen `<|endoftext|>`) are never emitted
+(0 EOG hits in 2×20×320 probe tokens), so greedy decoding continued into
+synthetic "next training row" continuations (`\n\nUser said: …`, stacked
+JSON objects, template-fragment echo) until the cap cut it — truncating
+late JSON (qwen gc-emergency-003) or producing unparseable preamble
+(gemma gc-query-001 weather row). The eval template itself MATCHES
+training (both raw — no chat-template wrap anywhere), so no template
+mismatch exists; the diagnosis in OPEN-ITEMS phase-2 text ("template
+echo") was the model continuing mid-template text, not an eval-format
+bug. `n_ctx` was never the issue at 2048 (longest prompt 1224 tokens).
+
+**Fixes (`src/eval_golden.py`, phase-3):** per-family stop strings
+(EOG tokens + observed `\n\nUser said:` / `\n\n{` stacking markers);
+`max_tokens` 700 → 956; `n_ctx` 4096; per-family repeat penalty
+(qwen 1.05 — breaks the gc-emergency-003 repetition attractor at 1.0
+where the correct emergency JSON never closed; gemma stays 1.0 because
+higher penalties perturb fine-grained slots, e.g. contact
+माइया → माइयालाई at 1.15); JSON extraction now takes the FIRST complete
+JSON object anywhere in the output (template-echo preamble / stacked
+objects / trailing prose skipped) instead of first-brace-to-last-brace.
+Temperature stays 0. Result: qwen 0 parse-loss rows (was 1), gemma 1
+(un-gated weather row, unchanged); rows now terminate at 33–216 tokens
+instead of running to the cap — a full leg takes ~1.5–4 min instead of
+the phase-2 ~10 min.
+
+**Remaining failure clusters (model/data quality, not harness):**
+- gemma gc-emergency-001 "मद्दत गर्नुहोस्" (bare help) → `none` conf
+  0.9, reply "के समस्या छ?" — hard-gate miss on the canonical bare
+  emergency; qwen gets this row right.
+- both legs gc-ack-001 "औषधि खाएँ" → `set_reminder` (gemma adds
+  medication "औषधि"; qwen fabricates time "७:३०") — ack intent never
+  fires.
+- qwen gc-health-001/002 and gc-guide-001 over-collapse onto `query`
+  (health questions about blood pressure / kidney diet, and the
+  microwave guide) at conf 0.3.
+- gemma gc-query-001 "भोलि मौसम कस्तो हुन्छ" degenerates into
+  mid-template text continuation (no JSON; un-gated query row).
+
+**Decision left to the user (data quality, not code):** neither leg
+clears the gates → NOT published; `ModelCatalog` stays with
+`intentGemma1B` (v7) only, no `intentQwen1B` entry. Candidate next
+steps: teach a terminator (append EOS in `to_text`) on retrain; fix the
+data (bare-emergency and ack/health/guide rows under-represented or
+mis-taught in the mixture); emergency adversarial near-miss set (§10,
+not yet in the corpus); then retrain + re-export + re-eval. On-device
+latency leg (p50 ≤ 1.0 s) still open on real hardware.
 
 ---
 
