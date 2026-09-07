@@ -338,15 +338,14 @@ private struct FamilyContactStep: View {
                     .keyboardType(.phonePad)
                 field(placeholderKey: "onboarding.stepFamily.relationship", text: $relationship)
                 field(placeholderKey: "onboarding.stepFamily.messenger", text: $messengerHandle)
+                    .keyboardType(.asciiCapable)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
                 Text("onboarding.stepFamily.messengerHint")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
-
-                    .keyboardType(.asciiCapable)
-                    .autocapitalization(.none)
-                    .disableAutocorrection(true)
             }
             VStack(spacing: 14) {
                 primaryButton(key: "onboarding.stepFamily.save") {
