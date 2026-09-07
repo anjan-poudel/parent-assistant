@@ -21,7 +21,10 @@ final class AppLauncher {
     /// `scheme` is the custom URL scheme that both the installed-probe
     /// and the open use. `imageName` (2026-09-07) names the app's
     /// OFFICIAL brand glyph from `AppIcons.xcassets` (CC0 simple-icons
-    /// vectors); nil keeps the SF Symbol stand-in.
+    /// vectors) and `glyphTintHex` carries that glyph's OFFICIAL brand
+    /// color — the vectors are single-color paths that otherwise render
+    /// black, which is why every glyph needs its tint to travel with it;
+    /// nil imageName keeps the SF Symbol stand-in.
     struct App: Equatable, Identifiable {
         let id: String
         let nameKey: String
@@ -32,14 +35,21 @@ final class AppLauncher {
         /// Asset-catalog image name for the official brand glyph, or nil
         /// for the SF Symbol stand-in.
         let imageName: String?
+        /// The `imageName` glyph's official brand color as a 6-digit
+        /// "RRGGBB" hex string (e.g. "25D366" for WhatsApp), resolved to
+        /// a SwiftUI `Color` in the view layer (`Color(hex:)` in
+        /// RedesignComponents — AppLauncher stays Foundation-only). nil
+        /// only alongside a nil `imageName` (Apple built-ins, imo).
+        let glyphTintHex: String?
 
         init(id: String, nameKey: String, systemImage: String, scheme: String,
-             imageName: String? = nil) {
+             imageName: String? = nil, glyphTintHex: String? = nil) {
             self.id = id
             self.nameKey = nameKey
             self.systemImage = systemImage
             self.scheme = scheme
             self.imageName = imageName
+            self.glyphTintHex = glyphTintHex
         }
 
         /// The scheme-only root URL `canOpenURL` probes and `open` opens
@@ -59,20 +69,26 @@ final class AppLauncher {
         App(id: "mail", nameKey: "app.name.mail", systemImage: "envelope.fill", scheme: "message"),
         App(id: "calendar", nameKey: "app.name.calendar", systemImage: "calendar", scheme: "calshow"),
         App(id: "maps", nameKey: "app.name.maps", systemImage: "map.fill", scheme: "maps"),
-        App(id: "whatsapp", nameKey: "app.name.whatsapp", systemImage: "phone.arrow.down.left.fill", scheme: "whatsapp", imageName: "appIcon.whatsapp"),
-        App(id: "messenger", nameKey: "app.name.messenger", systemImage: "bolt.fill", scheme: "fb-messenger", imageName: "appIcon.messenger"),
-        App(id: "facebook", nameKey: "app.name.facebook", systemImage: "person.2.fill", scheme: "fb", imageName: "appIcon.facebook"),
-        App(id: "instagram", nameKey: "app.name.instagram", systemImage: "camera.fill", scheme: "instagram", imageName: "appIcon.instagram"),
-        App(id: "youtube", nameKey: "app.name.youtube", systemImage: "play.rectangle.fill", scheme: "youtube", imageName: "appIcon.youtube"),
-        App(id: "gmail", nameKey: "app.name.gmail", systemImage: "envelope.circle.fill", scheme: "googlegmail", imageName: "appIcon.gmail"),
-        App(id: "googlemaps", nameKey: "app.name.googlemaps", systemImage: "location.fill", scheme: "comgooglemaps", imageName: "appIcon.googlemaps"),
-        App(id: "chrome", nameKey: "app.name.chrome", systemImage: "globe", scheme: "googlechrome", imageName: "appIcon.googlechrome"),
-        App(id: "zoom", nameKey: "app.name.zoom", systemImage: "videocam.fill", scheme: "zoomus", imageName: "appIcon.zoom"),
-        App(id: "telegram", nameKey: "app.name.telegram", systemImage: "paperplane.fill", scheme: "tg", imageName: "appIcon.telegram"),
-        App(id: "viber", nameKey: "app.name.viber", systemImage: "phone.badge.waveform.fill", scheme: "viber", imageName: "appIcon.viber"),
+        // Official single-representative brand colors ("RRGGBB") for each
+        // glyph — where a real logo is multi-color/gradient, one color
+        // represents it on the white tile, mirroring iPhone drawer tiles.
+        // Chromes and Google Maps share Google's blue; WhatsApp uses the
+        // light green that reads on white. (2026-09-07)
+        App(id: "whatsapp", nameKey: "app.name.whatsapp", systemImage: "phone.arrow.down.left.fill", scheme: "whatsapp", imageName: "appIcon.whatsapp", glyphTintHex: "25D366"),
+        App(id: "messenger", nameKey: "app.name.messenger", systemImage: "bolt.fill", scheme: "fb-messenger", imageName: "appIcon.messenger", glyphTintHex: "0084FF"),
+        App(id: "facebook", nameKey: "app.name.facebook", systemImage: "person.2.fill", scheme: "fb", imageName: "appIcon.facebook", glyphTintHex: "1877F2"),
+        App(id: "instagram", nameKey: "app.name.instagram", systemImage: "camera.fill", scheme: "instagram", imageName: "appIcon.instagram", glyphTintHex: "E4405F"),
+        App(id: "youtube", nameKey: "app.name.youtube", systemImage: "play.rectangle.fill", scheme: "youtube", imageName: "appIcon.youtube", glyphTintHex: "FF0000"),
+        App(id: "gmail", nameKey: "app.name.gmail", systemImage: "envelope.circle.fill", scheme: "googlegmail", imageName: "appIcon.gmail", glyphTintHex: "EA4335"),
+        App(id: "googlemaps", nameKey: "app.name.googlemaps", systemImage: "location.fill", scheme: "comgooglemaps", imageName: "appIcon.googlemaps", glyphTintHex: "4285F4"),
+        App(id: "chrome", nameKey: "app.name.chrome", systemImage: "globe", scheme: "googlechrome", imageName: "appIcon.googlechrome", glyphTintHex: "4285F4"),
+        App(id: "zoom", nameKey: "app.name.zoom", systemImage: "videocam.fill", scheme: "zoomus", imageName: "appIcon.zoom", glyphTintHex: "2D8CFF"),
+        App(id: "telegram", nameKey: "app.name.telegram", systemImage: "paperplane.fill", scheme: "tg", imageName: "appIcon.telegram", glyphTintHex: "26A5E4"),
+        App(id: "viber", nameKey: "app.name.viber", systemImage: "phone.badge.waveform.fill", scheme: "viber", imageName: "appIcon.viber", glyphTintHex: "7360F2"),
         // IMO has NO clean-licensed official glyph (simple-icons removed
-        // it over trademark concerns) — the SF Symbol stand-in stays, and
-        // the catalog must not pretend otherwise.
+        // it over trademark concerns) — the SF Symbol stand-in stays, so
+        // there is no glyph and no glyph tint, and the catalog must not
+        // pretend otherwise.
         App(id: "imo", nameKey: "app.name.imo", systemImage: "person.crop.circle.fill", scheme: "imo")
     ]
 
