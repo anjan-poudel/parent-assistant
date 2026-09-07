@@ -5,15 +5,20 @@ import SwiftUI
 /// "Recent activity": everything the assistant itself has called or
 /// messaged, newest first, plus an honest live-call banner while a call
 /// is connected. Reads `coordinator.recentActivity` — the store logs ONLY
-/// the app's own channel opens, so this leaf needs no contacts permission
-/// and nothing on it ever came from the system call log or another app's
-/// messages (iOS platform wall).
+/// the app's own channel opens (plus the one anonymous unanswered-call
+/// row, missed-calls task, 2026-09-07), so this leaf needs no contacts
+/// permission and nothing on it ever came from the system call log or
+/// another app's messages (iOS platform wall).
 ///
 /// Rows re-initiate the recorded channel on tap (the tap IS the
 /// confirmation, same trust model as the contact tiles): phone rows dial,
 /// FaceTime rows open FaceTime again, WhatsApp rows open the chat,
 /// Messenger rows reopen the thread when a handle is on file (otherwise
-/// the app says so honestly), SMS rows re-open the compose sheet.
+/// the app says so honestly), SMS rows re-open the compose sheet. An
+/// UNANSWERED row (missed-calls task, 2026-09-07) has no number — iOS
+/// masks the caller's identity AND number — so its tap opens the Phone
+/// app instead (empty `tel://`), where the call genuinely lives in
+/// Recents, one tab away.
 struct HistoryView: View {
     @EnvironmentObject private var coordinator: AppCoordinator
 
@@ -54,7 +59,7 @@ struct HistoryView: View {
                       tint: tint(for: entry.channel),
                       diameter: 40)
             VStack(alignment: .leading, spacing: 4) {
-                Text(entry.contactName)
+                Text(ActivityRowText.name(for: entry, locale: coordinator.activeLocale))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(DesignTokens.textPrimary)
                     .lineLimit(1)
@@ -64,6 +69,15 @@ struct HistoryView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
+            if entry.channel == .unanswered {
+                // The visible dialer affordance (missed-calls task,
+                // 2026-09-07): the WHOLE row is the button and opens the
+                // Phone app — the accent circle is the visual affordance
+                // inside it, hidden from VoiceOver so the row reads once
+                // (the same rule CallView's rows already follow; SwiftUI
+                // forbids a button nested inside a button).
+                dialerCircle
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
@@ -71,10 +85,28 @@ struct HistoryView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
+    /// Accent ≥44pt phone circle — the unanswered row's "this opens the
+    /// Phone app" affordance (missed-calls task, 2026-09-07), mirroring
+    /// the trailing circle CallView draws on every activity row.
+    private var dialerCircle: some View {
+        Image(systemName: "phone.fill")
+            .font(.system(size: 18, weight: .semibold))
+            .foregroundColor(.white)
+            .frame(width: DesignTokens.minTapTargetSize,
+                   height: DesignTokens.minTapTargetSize)
+            .background(DesignTokens.accent)
+            .clipShape(Circle())
+            .accessibilityHidden(true)
+    }
+
     /// Row channel symbols (call-history task spec): phone.fill for phone,
     /// video.fill for FaceTime video, the WhatsApp chat bubble, the
     /// Messenger paperplane, message.fill for SMS. FaceTime audio reuses
-    /// phone.fill — it IS an audio call surface.
+    /// phone.fill — it IS an audio call surface. Unanswered rows
+    /// (missed-calls task, 2026-09-07) wear the missed-call glyph —
+    /// phone.arrow.down.left, the incoming-call-that-ended symbol — and
+    /// never a name or number (the badge plus the "Unanswered call" name
+    /// line are the whole identity the row has).
     private func icon(for channel: AppActivityEntry.Channel) -> String {
         switch channel {
         case .phone, .faceTimeAudio: return "phone.fill"
@@ -82,6 +114,7 @@ struct HistoryView: View {
         case .whatsapp: return "bubble.left.and.bubble.right.fill"
         case .messenger: return "paperplane.fill"
         case .sms: return "message.fill"
+        case .unanswered: return "phone.arrow.down.left"
         }
     }
 
@@ -89,17 +122,23 @@ struct HistoryView: View {
         switch channel {
         case .phone, .faceTimeVideo, .faceTimeAudio: return .call
         case .whatsapp, .messenger, .sms: return .reminders
+        case .unanswered: return .call
         }
     }
 
     private func caption(for entry: AppActivityEntry) -> String {
         let locale = coordinator.activeLocale
-        let kind = L10n.str(entry.kind == .call ? "history.channel.call" : "history.channel.message",
-                            locale: locale)
         let time = HistoryTimeFormat.displayString(for: entry.timestamp,
                                                    now: Date(),
                                                    calendar: Calendar.current,
                                                    locale: locale)
+        if entry.channel == .unanswered {
+            // The name line already reads "Unanswered call" — a "Call"
+            // kind chip beneath it would repeat it. Time alone.
+            return time
+        }
+        let kind = L10n.str(entry.kind == .call ? "history.channel.call" : "history.channel.message",
+                            locale: locale)
         return "\(kind) · \(time)"
     }
 
@@ -138,6 +177,13 @@ struct HistoryView: View {
             coordinator.performSystemContactMessenger(name: name, handle: handle)
         case .sms:
             coordinator.presentMessageDraft(phone: phone, name: name, body: "")
+        case .unanswered:
+            // No number exists to dial — the caller is anonymous by
+            // platform design — so the row opens the Phone app, where
+            // the call genuinely lives in Recents, one tab away
+            // (missed-calls task, 2026-09-07). NOT a dead tap: this is
+            // the honest resolution of an anonymous row.
+            PhoneAppOpener.openDialer()
         }
     }
 
@@ -152,9 +198,17 @@ struct HistoryView: View {
 
     /// Screen-reader label: "Call <name> back" for call rows,
     /// "Message <name>" for message rows (history.callbackLabel /
-    /// history.messageLabel), so one gesture reads the row's action.
+    /// history.messageLabel), so one gesture reads the row's action. An
+    /// UNANSWERED row (missed-calls task, 2026-09-07) announces what the
+    /// row is AND what its tap does — "Unanswered call, Open Phone app"
+    /// (history.unanswered / history.openPhone) — because no name exists
+    /// to fold into a "call back" phrase.
     private func rowAccessibilityLabel(_ entry: AppActivityEntry) -> String {
         let locale = coordinator.activeLocale
+        if entry.channel == .unanswered {
+            return "\(ActivityRowText.name(for: entry, locale: locale)), "
+                + L10n.str("history.openPhone", locale: locale)
+        }
         if entry.kind == .call {
             return L10n.fmt("history.callbackLabel", locale: locale, entry.contactName)
         }
@@ -192,6 +246,25 @@ struct HistoryView: View {
             .frame(maxWidth: .infinity)
             .background(DesignTokens.card)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+}
+
+/// Row-name presentation shared by HistoryView and CallView's
+/// recentActivitySection (missed-calls task, 2026-09-07) — a sibling of
+/// `HistoryTimeFormat`, resolved at RENDER time so the row never stores
+/// a locale string.
+enum ActivityRowText {
+    /// The row's NAME line. `.unanswered` rows show the localized
+    /// "Unanswered call" label (`history.unanswered`) because their
+    /// stored `contactName` is EMPTY BY DESIGN: iOS masks the identity
+    /// AND the number of calls that involve other apps, so there is no
+    /// name to store and no number an address book could match. Every
+    /// other row shows its stored contact name.
+    static func name(for entry: AppActivityEntry, locale: Locale) -> String {
+        if entry.channel == .unanswered {
+            return L10n.str("history.unanswered", locale: locale)
+        }
+        return entry.contactName
     }
 }
 

@@ -1212,7 +1212,7 @@ struct CallView: View {
                           tint: recentChannelTint(for: entry.channel),
                           diameter: 40)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.contactName)
+                    Text(ActivityRowText.name(for: entry, locale: coordinator.activeLocale))
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                         .foregroundColor(DesignTokens.textPrimary)
                         .lineLimit(1)
@@ -1243,9 +1243,17 @@ struct CallView: View {
     /// Screen-reader label of the row above — HistoryView's split: call
     /// rows say "call <name> back", message rows say "message <name>"
     /// (history.callbackLabel / history.messageLabel), so one gesture
-    /// reads the row's action.
+    /// reads the row's action. An UNANSWERED row (missed-calls task,
+    /// 2026-09-07) announces what the row is and what its tap does —
+    /// "Unanswered call, Open Phone app" (history.unanswered /
+    /// history.openPhone) — mirror of HistoryView.rowAccessibilityLabel;
+    /// keep in step.
     private func recentActivityRowLabel(_ entry: AppActivityEntry) -> String {
         let locale = coordinator.activeLocale
+        if entry.channel == .unanswered {
+            return "\(ActivityRowText.name(for: entry, locale: locale)), "
+                + L10n.str("history.openPhone", locale: locale)
+        }
         if entry.kind == .call {
             return L10n.fmt("history.callbackLabel", locale: locale, entry.contactName)
         }
@@ -1266,8 +1274,10 @@ struct CallView: View {
     /// helper per the Phone review ("reuse HistoryView's icon mapping"):
     /// phone.fill for phone AND FaceTime audio (an audio call surface is
     /// a phone surface), video.fill for FaceTime video, the WhatsApp
-    /// bubble, the Messenger paperplane, message.fill for SMS. Keep in
-    /// step with `HistoryView.icon(for:)`.
+    /// bubble, the Messenger paperplane, message.fill for SMS, and the
+    /// missed-call glyph (phone.arrow.down.left) for unanswered rows
+    /// (missed-calls task, 2026-09-07). Keep in step with
+    /// `HistoryView.icon(for:)`.
     private func recentChannelIcon(for channel: AppActivityEntry.Channel) -> String {
         switch channel {
         case .phone, .faceTimeAudio: return "phone.fill"
@@ -1275,6 +1285,7 @@ struct CallView: View {
         case .whatsapp: return "bubble.left.and.bubble.right.fill"
         case .messenger: return "paperplane.fill"
         case .sms: return "message.fill"
+        case .unanswered: return "phone.arrow.down.left"
         }
     }
 
@@ -1283,6 +1294,7 @@ struct CallView: View {
         switch channel {
         case .phone, .faceTimeVideo, .faceTimeAudio: return .call
         case .whatsapp, .messenger, .sms: return .reminders
+        case .unanswered: return .call
         }
     }
 
@@ -1292,6 +1304,11 @@ struct CallView: View {
     /// rows re-present the compose sheet, and rows whose stored identity
     /// (number for phone/WhatsApp, handle for Messenger) normalized to
     /// nothing speak the honest line instead of a silent dead tap.
+    /// UNANSWERED rows (missed-calls task, 2026-09-07) have no stored
+    /// identity at all by design — iOS masks the caller — so their tap
+    /// opens the Phone app (Recents is one tab away) rather than
+    /// speaking a dead-row line: the dialer open resolves the row
+    /// honestly.
     private func initiateRecentActivity(_ entry: AppActivityEntry) {
         let name = entry.contactName
         let phone = entry.phone
@@ -1325,6 +1342,13 @@ struct CallView: View {
             coordinator.performSystemContactMessenger(name: name, handle: handle)
         case .sms:
             coordinator.presentMessageDraft(phone: phone, name: name, body: "")
+        case .unanswered:
+            // No number exists to dial — the caller is anonymous by
+            // platform design (iOS masks identity AND number) — so the
+            // row opens the Phone app, where the call genuinely lives in
+            // Recents, one tab away (missed-calls task, 2026-09-07).
+            // Mirror of HistoryView's `.unanswered` case; keep in step.
+            PhoneAppOpener.openDialer()
         }
     }
 

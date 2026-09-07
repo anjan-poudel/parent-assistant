@@ -1,16 +1,20 @@
 import Foundation
 
 /// One call or message the ASSISTANT initiated (call-history task,
-/// 2026-09-06).
+/// 2026-09-06) — plus ONE anonymous exception, the unanswered-call event
+/// (missed-calls task, 2026-09-07).
 ///
 /// The app logs ONLY what it itself did through the channel vocabulary
 /// below — never the system call log and never other apps' messages (iOS
 /// platform wall: no API exposes another app's call/message history to an
 /// app, and the app must never fake knowing one). A row is a fact about a
 /// channel the user asked the assistant to open, not about the person on
-/// the other end. Live-call detection (CXCallObserver) is deliberately
-/// NOT recorded here either — the observer reveals presence only, no
-/// identity, and nothing from it may be stored.
+/// the other end. The single exception is `Channel.unanswered`: live-call
+/// detection (CXCallObserver) observed a call END without ever
+/// connecting, and the row records that presence-only fact — no name, no
+/// number, no identity (iOS masks all three for calls that involve other
+/// apps; see the channel's docs). Nothing else from the observer is ever
+/// stored.
 struct AppActivityEntry: Codable, Equatable, Identifiable {
     let id: UUID
     let timestamp: Date
@@ -21,6 +25,9 @@ struct AppActivityEntry: Codable, Equatable, Identifiable {
         /// Messenger, the chat/thread a call request resolves to. The app
         /// never claims an actual Messenger "call": no documented scheme
         /// can start one, so the honest record is the thread that opened.
+        /// Also the kind of an unanswered-call row (`.channel ==
+        /// .unanswered`) — a call event that came to the USER rather than
+        /// one the assistant opened.
         case call
         /// A chat/message surface was opened or a message drafted.
         case message
@@ -38,6 +45,19 @@ struct AppActivityEntry: Codable, Equatable, Identifiable {
                               // a call)
         case messenger
         case sms              // native Messages compose sheet
+        /// ANONYMOUS unanswered call (missed-calls task, 2026-09-07):
+        /// live-call detection saw a call end without ever connecting —
+        /// a missed or declined incoming call, or an attempted outgoing
+        /// call nobody picked up (iOS reports these indistinguishably).
+        /// iOS masks the identity AND the number of calls that involve
+        /// other apps, so this row stores an EMPTY `contactName` and
+        /// EMPTY `phone` — there is no name to store, no number to look
+        /// up, and no address-book match possible. The UI renders the
+        /// localized "Unanswered call" label (`history.unanswered`)
+        /// instead of a stored locale string, and the row's action opens
+        /// the Phone app (Recents is one tab away) — the only surface
+        /// where the caller's identity genuinely lives.
+        case unanswered
     }
 
     let kind: Kind
@@ -67,7 +87,11 @@ struct AppActivityEntry: Codable, Equatable, Identifiable {
 }
 
 /// The assistant's own call/message history (call-history task,
-/// 2026-09-06) — the Recent activity leaf's store.
+/// 2026-09-06) — the Recent activity leaf's store. Also holds the one
+/// anonymous exception described on `AppActivityEntry` — the
+/// unanswered-call row (missed-calls task, 2026-09-07), appended by the
+/// coordinator when live-call detection observes a call ending without
+/// ever connecting.
 ///
 /// Append-only in spirit (rows are never edited or deleted by the app),
 /// newest-first on read, capped at `maxEntries` by dropping the OLDEST

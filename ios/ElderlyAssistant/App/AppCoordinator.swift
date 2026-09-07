@@ -328,29 +328,38 @@ final class AppCoordinator: ObservableObject {
     private lazy var chatHistoryStore = ChatHistoryStore(storage: storage)
 
     // MARK: - Assistant activity history + live-call detection
-    // (call-history task, 2026-09-06)
+    // (call-history task, 2026-09-06; unanswered-call capture,
+    // missed-calls task, 2026-09-07)
 
     /// Encrypted, bounded (100-entry) log of what THIS app itself
     /// called/messaged — the Recent activity leaf's source of truth.
     /// Never the system call log, never other apps' messages (iOS
-    /// platform wall). Lazy like `chatHistoryStore`: `storage` is
-    /// assigned at the top of `init`, long before any call/message path
-    /// can record. Main-queue confined by contract.
+    /// platform wall). The ONE exception is the anonymous unanswered-call
+    /// row (missed-calls task, 2026-09-07): a presence-only fact the
+    /// live-call observer saw — a call ended without ever connecting —
+    /// recorded with no name and no number, never the identity the
+    /// system call log would carry (iOS does not expose it). Lazy like
+    /// `chatHistoryStore`: `storage` is assigned at the top of `init`,
+    /// long before any call/message path can record. Main-queue confined
+    /// by contract.
     private(set) lazy var activityLog = AppActivityLog(storage: storage)
 
     /// Published window over `activityLog`, newest first — the leaf's
     /// read side. Mirrors the `conversationHistory` window pattern:
     /// the store stays the source of truth and `recordActivity` refreshes
     /// this window after every write, so a row recorded while the leaf is
-    /// open (a re-initiated call/message) appears without a re-push.
+    /// open (a re-initiated call/message, or a call that just went
+    /// unanswered) appears without a re-push.
     @Published private(set) var recentActivity: [AppActivityEntry] = []
 
     /// True while a call is connected (CXCallObserver via
     /// `liveCallDetector`). Identity-free BY PLATFORM DESIGN: iOS masks
     /// calls that involve other apps — no handle, number, or identity is
     /// ever delivered, so this flag says "a call is in progress" and the
-    /// app never learns (or claims) whose. Nothing from the observer is
-    /// read for storage or logged.
+    /// app never learns (or claims) whose. The observer's ONLY other
+    /// output is the unanswered event (missed-calls task, 2026-09-07),
+    /// recorded by `recordUnansweredCall` — one anonymous "ended without
+    /// connecting" row, still no identity or number.
     @Published private(set) var liveCallActive = false
 
     /// Edge-triggered detector; armed (constructed) in `start()`. Lazy
@@ -2886,23 +2895,48 @@ final class AppCoordinator: ObservableObject {
     /// that actually opened a surface — never with a failure branch:
     /// recording an open that didn't happen would lie about what the
     /// assistant did (the same honesty rule `contactNumberUsed` holds
-    /// to). Called on the main queue only.
+    /// to). `timestamp` defaults to now and is overridden only by the
+    /// unanswered-call path, which records the moment the live-call
+    /// observer reported the call's end (missed-calls task, 2026-09-07).
+    /// Called on the main queue only.
     private func recordActivity(kind: AppActivityEntry.Kind,
                                 channel: AppActivityEntry.Channel,
                                 contactName: String,
                                 phone: String = "",
                                 messengerHandle: String? = nil,
-                                body: String? = nil) {
+                                body: String? = nil,
+                                timestamp: Date = Date()) {
         // Message text is stored only when it is non-blank (a pre-filled
         // draft is content; an empty compose sheet is not).
         let trimmed = body?.trimmingCharacters(in: .whitespacesAndNewlines)
         let storedBody = trimmed.flatMap { $0.isEmpty ? nil : $0 }
-        activityLog.append(AppActivityEntry(kind: kind, channel: channel,
+        activityLog.append(AppActivityEntry(timestamp: timestamp,
+                                            kind: kind, channel: channel,
                                             contactName: contactName,
                                             phone: phone,
                                             messengerHandle: messengerHandle,
                                             body: storedBody))
         refreshRecentActivity()
+    }
+
+    /// Records one ANONYMOUS unanswered call — the coordinator side of
+    /// the live-call detector's `onUnanswered` (missed-calls task,
+    /// 2026-09-07). Fired when CXCallObserver reported a call that ended
+    /// without ever connecting: a missed or declined incoming call, or
+    /// an attempted outgoing call nobody picked up. iOS masks calls that
+    /// involve other apps so completely that these are
+    /// indistinguishable — this row claims only the shared fact, "a call
+    /// ended unanswered". `contactName` and `phone` are EMPTY ON
+    /// PURPOSE: the caller's identity AND number are masked by iOS —
+    /// there is no name to store, no number to look up or dial, and no
+    /// address-book match is possible — and the UI renders the localized
+    /// "Unanswered call" label (`history.unanswered`) instead of a
+    /// stored locale string. The row's action opens the Phone app
+    /// (`PhoneAppOpener`), where the caller's identity genuinely lives
+    /// (its Recents tab, one tap from the dialer).
+    private func recordUnansweredCall(at timestamp: Date) {
+        recordActivity(kind: .call, channel: .unanswered,
+                       contactName: "", phone: "", timestamp: timestamp)
     }
 
     /// Refreshes the published window from the store (see
@@ -2912,14 +2946,25 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Builds the live-call detector. Instance method (not a closure over
-    /// `self` in the lazy declaration) so the onChange closure can hold
-    /// `self` weakly without capture-list gymnastics in a lazy
-    /// initializer. Main queue by contract — CXCallStateProvider's
-    /// delegate is `.main`, and `liveCallActive` is main-queue confined.
+    /// `self` in the lazy declaration) so the closures can hold `self`
+    /// weakly without capture-list gymnastics in a lazy initializer.
+    /// Main queue by contract — CXCallStateProvider's delegate is
+    /// `.main`, and `liveCallActive`/`recentActivity` are main-queue
+    /// confined.
     private func makeLiveCallDetector() -> LiveCallDetector {
-        let detector = LiveCallDetector(provider: CXCallStateProvider()) { [weak self] active in
-            DispatchQueue.main.async { self?.liveCallActive = active }
-        }
+        let detector = LiveCallDetector(
+            provider: CXCallStateProvider(),
+            onChange: { [weak self] active in
+                DispatchQueue.main.async { self?.liveCallActive = active }
+            },
+            onUnanswered: { [weak self] timestamp in
+                // Record the anonymous unanswered row (missed-calls task,
+                // 2026-09-07). Same main-hop rule as onChange: the store
+                // is main-queue confined, whatever queue the provider
+                // fired on.
+                DispatchQueue.main.async { self?.recordUnansweredCall(at: timestamp) }
+            }
+        )
         // Initial state: a call already connected at launch must show on
         // the leaf immediately (the detector does not fire onChange for
         // its initial snapshot — that is exactly what this read is for).
