@@ -9140,6 +9140,57 @@
         }
       }
     },
+    "voice.resetA11y": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Double-tap to talk, or press and hold to reset voice activation."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बोल्न दुई पटक थिच्नुहोस्, वा आवाज रिसेट गर्न थिचिराख्नुहोस्।"
+          }
+        }
+      }
+    },
+    "voice.resetDone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice reset. I'm ready."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज रिसेट भयो। म तयार छु।"
+          }
+        }
+      }
+    },
+    "voice.resetHold": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep holding to reset voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज रिसेट गर्न थिचिराख्नुहोस्"
+          }
+        }
+      }
+    },
     "wakeWord.active.detail": {
       "extractionState": "manual",
       "localizations": {

@@ -33,4 +33,13 @@ final class DesignTokensTests: XCTestCase {
     func testConfirmationChipsAreAtLeast60ptTall() {
         XCTAssertGreaterThanOrEqual(DesignTokens.chipHeight, 60)
     }
+
+    /// Hold-to-reset duration (TALK-CRASH-FIX, 2026-09-07) stays in the
+    /// intended band: comfortably past accidental holds (<0.5s), well
+    /// within the "a few seconds" the feature asked for, and never so
+    /// long that the progress ring's wait feels like a dead button.
+    func testTalkResetHoldIsWithinTheIntendedBand() {
+        XCTAssertGreaterThanOrEqual(DesignTokens.talkResetHoldSeconds, 1.0)
+        XCTAssertLessThanOrEqual(DesignTokens.talkResetHoldSeconds, 3.5)
+    }
 }

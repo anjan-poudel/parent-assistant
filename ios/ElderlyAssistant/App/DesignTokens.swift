@@ -113,6 +113,16 @@ enum DesignTokens {
     static let interElementSpacing: CGFloat = 8
     /// The hero Talk button is a full circle ≥120pt (spec §3.1, D5).
     static let talkButtonDiameter: CGFloat = 132
+    /// Long-press duration for the Talk hero's hold-to-reset path
+    /// (TALK-CRASH-FIX, 2026-09-07): how long a hold must last before
+    /// voice activation is cancelled and the session returns to idle.
+    /// 2.0s — comfortably past any accidental hold (taps are sub-0.3s),
+    /// short enough that the wait never feels like a dead button (the
+    /// progress ring + "keep holding" hint make it legible either way),
+    /// and inside the "a few seconds" the feature brief asked for. If it
+    /// ever changes, the progress ring animates over this same value, so
+    /// ring completion and the reset stay in sync automatically.
+    static let talkResetHoldSeconds: TimeInterval = 2.0
     static let chipHeight: CGFloat = 60
     /// Bottom shortcut dock (redesign spec §3.1 — replaces the 2×2 hub grid;
     /// Home is the only screen that shows it).
