@@ -55,6 +55,10 @@ final class ApplianceHelperSession: ObservableObject {
     /// view hides the retake/closer-photo affordances that only make
     /// sense mid-capture.
     @Published private(set) var isViewingManual = false
+    /// Per-step images for a presented BUNDLED manual, keyed by step
+    /// number (2026-09-07) — step annotations are measured on the step's
+    /// own screenshot, not the overview.
+    @Published private(set) var bundledStepImages: [Int: UIImage] = [:]
 
     /// The elder's question from the voice turn (nil = general how-to-use).
     let question: String?
@@ -125,6 +129,34 @@ final class ApplianceHelperSession: ObservableObject {
               let image = UIImage(data: jpeg) else { return false }
         isViewingManual = true
         present(hit.entry.guidance, image: image)
+        return true
+    }
+
+    /// Opens a BUNDLED default manual (2026-09-07, bundled-manuals task):
+    /// the shipped catalog replaces both camera and Gemini — zero
+    /// network, zero identification. `BundledManualCatalog` maps the
+    /// manual onto the same `ApplianceGuidance` shape a fresh photo
+    /// answer produces, so the existing per-step card UI (zoomable
+    /// close-ups included) renders it unchanged against the manual's
+    /// overview image.
+    ///
+    /// `locale` selects the catalog's language for the spoken summary,
+    /// card text, and control labels. Returns false when the overview
+    /// image cannot be loaded (the images folder is a separate content
+    /// deliverable) — the caller then stays put rather than presenting a
+    /// broken photo-less manual.
+    func presentBundledManual(_ manual: BundledManual, locale: Locale) -> Bool {
+        guard let image = BundledManualCatalog.image(named: manual.overviewImage) else { return false }
+        isViewingManual = true
+        var stepImages: [Int: UIImage] = [:]
+        for step in manual.steps {
+            if let name = step.image,
+               let stepImage = BundledManualCatalog.image(named: name) {
+                stepImages[step.number] = stepImage
+            }
+        }
+        bundledStepImages = stepImages
+        present(BundledManualCatalog.guidance(for: manual, locale: locale), image: image)
         return true
     }
 

@@ -268,8 +268,13 @@ enum ActivityRowText {
     }
 }
 
-/// Pure, static time bucketing for activity rows — no clock reads and no
-/// hidden singletons, so tests can pin `now`, `calendar`, and `locale`.
+/// Pure, static relative-time bucketing for list rows — no clock reads
+/// and no hidden singletons, so tests can pin `now`, `calendar`, and
+/// `locale`. Activity/history rows pass PAST timestamps; the Reminders
+/// leaf's upcoming-events section passes FUTURE ones (upcoming-events
+/// task, 2026-09-07), which read the same shape mirrored: later today
+/// "Today", tomorrow "Tomorrow", anything further ahead its localized
+/// short date.
 enum HistoryTimeFormat {
     static func displayString(for timestamp: Date,
                               now: Date,
@@ -286,6 +291,21 @@ enum HistoryTimeFormat {
         // date happened to be the real today. Bucketing off `now`'s own
         // day makes the function a pure function of its inputs.
         let dayStart = calendar.startOfDay(for: now)
+        if interval < 0 {
+            // Future timestamps (upcoming-events task, 2026-09-07): the
+            // `timestamp >= dayStart` check below would otherwise
+            // swallow EVERY future date as "Today". Later today keeps
+            // the today bucket, tomorrow gets its own, and anything
+            // further ahead mirrors the past side's short date.
+            if timestamp >= dayStart {
+                return L10n.str("history.timeToday", locale: locale)
+            }
+            if let tomorrowStart = calendar.date(byAdding: .day, value: 1, to: dayStart),
+               timestamp < tomorrowStart {
+                return L10n.str("history.timeTomorrow", locale: locale)
+            }
+            return shortDateFormatter(locale: locale).string(from: timestamp)
+        }
         if timestamp >= dayStart {
             return L10n.str("history.timeToday", locale: locale)
         }

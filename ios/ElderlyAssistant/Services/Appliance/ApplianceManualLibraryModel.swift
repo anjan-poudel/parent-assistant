@@ -70,6 +70,29 @@ final class ApplianceManualLibraryModel: ObservableObject {
         }
     }
 
+    // MARK: - Bundled default manuals (2026-09-07, bundled-manuals task)
+
+    /// The shipped default-manual catalog (bundle Manifest), or [] when
+    /// the catalog is absent — the view then shows its honest empty
+    /// state. Static because the content is fixed at build time; it is
+    /// NOT part of the saved cache and can never be deleted.
+    static func bundledManuals() -> [BundledManual] {
+        BundledManualCatalog.loadManifest() ?? []
+    }
+
+    /// Pure filter for the bundled rows' searchable fields (title and
+    /// overview, resolved in the ACTIVE locale — bundled manuals carry no
+    /// brand/model/question). Directly unit-testable like `filter`.
+    static func filterBundled(_ manuals: [BundledManual], query: String,
+                              locale: Locale) -> [BundledManual] {
+        guard !query.isEmpty else { return manuals }
+        return manuals.filter { manual in
+            let haystacks = [BundledManualCatalog.localized(manual.title, locale: locale),
+                             BundledManualCatalog.localized(manual.overview, locale: locale)]
+            return haystacks.contains { $0.localizedStandardContains(query) }
+        }
+    }
+
     /// Reloads from the cache (most recently saved first). Cheap enough
     /// for a synchronous reload on library open — ≤40 small entries, each
     /// with a ~256px JPEG.

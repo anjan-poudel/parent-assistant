@@ -148,14 +148,110 @@ final class FamilyContactStoreTests: XCTestCase {
         XCTAssertNil(loaded.first?.address,
                      "a pre-address payload decodes address-less, not a failure")
     }
+
+    // MARK: - Emergency flag (family-emergency task, 2026-09-07)
+
+    func testIsEmergencyContactRoundTrips() {
+        // The wizard's "Emergency contact" toggle writes the flag on the
+        // record; the store must hand it back so an edit shows the
+        // toggle pre-set and `AppCoordinator.emergencyContact` can
+        // prefer the flagged person.
+        let store = FamilyContactStore(storage: InMemoryEncryptedStorage())
+        let contact = FamilyContact(name: "बहिनी", phone: "9812345678",
+                                    relationship: "बहिनी",
+                                    isEmergencyContact: true)
+        XCTAssertTrue(store.add(contact))
+
+        let loaded = store.load()
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertTrue(loaded.first?.isEmergencyContact ?? false,
+                      "the flagged contact must read back flagged")
+    }
+
+    func testEmergencyFlagDefaultsToFalse() {
+        // A contact created without the flag — every pre-toggle call
+        // site, onboarding included — stores false, never a surprise.
+        let store = FamilyContactStore(storage: InMemoryEncryptedStorage())
+        let contact = FamilyContact(name: "राम", phone: "9812345678", relationship: "छोरा")
+        XCTAssertFalse(contact.isEmergencyContact)
+        XCTAssertTrue(store.add(contact))
+        XCTAssertFalse(store.load().first?.isEmergencyContact ?? true)
+    }
+
+    func testLegacyPayloadWithoutEmergencyFlagDecodesFalse() {
+        // The flag is the one NON-optional field added since the
+        // optional era — its migration is a decoder default, not nil:
+        // a payload written before the flag existed (same four-field
+        // shape as `LegacyFamilyContact`) must load as false, not fail
+        // the whole store read — the pre-flag behavior (first contact
+        // wins) is exactly what `AppCoordinator.emergencyContact`
+        // keeps as its fallback.
+        let storage = InMemoryEncryptedStorage()
+        let legacy = LegacyFamilyContact(id: UUID(), name: "राम",
+                                         phone: "9812345678", relationship: "छोरा")
+        guard case .success = storage.write(key: "family.contacts", value: [legacy]) else {
+            return XCTFail("legacy payload write failed")
+        }
+
+        let store = FamilyContactStore(storage: storage)
+        let loaded = store.load()
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertFalse(loaded.first?.isEmergencyContact ?? true,
+                       "a pre-flag payload decodes as not-emergency, not a failure")
+    }
+
+    // MARK: - Emergency-preference rule — AppCoordinator.preferredEmergencyContact
+
+    func testPreferredEmergencyPrefersFlaggedContact() {
+        // The wizard's flagged person is whom the Emergency button
+        // dials first, even when an unflagged relative sits earlier in
+        // the list.
+        let son = FamilyContact(name: "छोरा", phone: "9812345678", relationship: "छोरा")
+        let daughter = FamilyContact(name: "छोरी", phone: "9812000000",
+                                     relationship: "छोरी", isEmergencyContact: true)
+        XCTAssertEqual(AppCoordinator.preferredEmergencyContact([son, daughter])?.id,
+                       daughter.id)
+    }
+
+    func testPreferredEmergencyFirstFlagWinsAmongSeveral() {
+        // The toggle caption promises "dials this person first" — with
+        // several flagged contacts the FIRST flag is the number, list
+        // order is the tiebreak.
+        let first = FamilyContact(name: "आमा", phone: "1", relationship: "आमा",
+                                  isEmergencyContact: true)
+        let middle = FamilyContact(name: "छोरा", phone: "2", relationship: "छोरा")
+        let last = FamilyContact(name: "छोरी", phone: "3", relationship: "छोरी",
+                                 isEmergencyContact: true)
+        XCTAssertEqual(AppCoordinator.preferredEmergencyContact([first, middle, last])?.id,
+                       first.id)
+    }
+
+    func testPreferredEmergencyFallsBackToFirstWhenNoneFlagged() {
+        // No flagged contact (every record written before the flag
+        // existed, or none toggled) keeps the pre-flag behavior: the
+        // first configured contact is the emergency number.
+        let ram = FamilyContact(name: "राम", phone: "9812345678", relationship: "छोरा")
+        let sita = FamilyContact(name: "सीता", phone: "9812345678", relationship: "छोरी")
+        XCTAssertEqual(AppCoordinator.preferredEmergencyContact([ram, sita])?.id, ram.id)
+    }
+
+    func testPreferredEmergencyEmptyListIsNil() {
+        // No configured contacts — the view surfaces that honestly
+        // (the emergency button's no-contact alert) instead of
+        // resolving to somebody who is not there.
+        XCTAssertNil(AppCoordinator.preferredEmergencyContact([]))
+    }
 }
 
 /// The pre-optional-fields contact shape — no `messengerHandle` (added
 /// 2026-09-06), no `photoFilename` (added 2026-09-07), no `nickname`
 /// (added 2026-09-07 by the family-wizard task) and no `address` (added
-/// 2026-09-07 by the directions task). Exists to write old-shape
-/// payloads into storage for the backward-decode test; its JSON is
-/// byte-compatible with what the old app version stored.
+/// 2026-09-07 by the directions task). It also lacks the
+/// `isEmergencyContact` flag (added 2026-09-07 by the family-emergency
+/// task), which — unlike the optionals — decodes as false rather than
+/// nil. Exists to write old-shape payloads into storage for the
+/// backward-decode test; its JSON is byte-compatible with what the old
+/// app version stored.
 private struct LegacyFamilyContact: Codable {
     let id: UUID
     var name: String

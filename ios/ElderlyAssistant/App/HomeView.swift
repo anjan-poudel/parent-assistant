@@ -445,9 +445,10 @@ struct HomeView: View {
     // MARK: - Dock (redesign spec §3.1 — replaces the 2×2 hub grid; Home
     // is the only screen that shows it). Items share width equally
     // (`frame(maxWidth: .infinity)` per tile) and labels wrap when they
-    // must, so the five tiles — meds, reminders, call, appliance,
-    // directions (directions-screen task, 2026-09-07) — fit one row at
-    // the standard widths the surrounding screens were tuned at.
+    // must, so the five tiles — medical (the renamed meds tile, medical
+    // task 2026-09-07), reminders, call, appliance, directions
+    // (directions-screen task, 2026-09-07) — fit one row at the standard
+    // widths the surrounding screens were tuned at.
 
     private var dock: some View {
         HStack(spacing: 2) {
@@ -526,7 +527,7 @@ struct HomeView: View {
     private func leafView(for destination: LeafDestination) -> some View {
         switch destination {
         case .meds:
-            MedsView()
+            MedicalView()
         case .reminders:
             RemindersView()
         case .calendar:

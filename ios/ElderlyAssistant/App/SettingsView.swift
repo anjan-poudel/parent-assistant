@@ -16,7 +16,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case appearance, language, calling, places, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, quickApps, privacy, intentLog, toolLog
+        case appearance, language, calling, places, family, meds, calendar, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, quickApps, privacy, intentLog, toolLog
 
         var id: String {
             switch self {
@@ -26,6 +26,8 @@ struct SettingsView: View {
             case .places: return "places"
             case .family: return "family"
             case .meds: return "meds"
+            case .calendar: return "calendar"
+            case .alarms: return "alarms"
             case .geminiAI: return "geminiAI"
             case .voiceEngine: return "voiceEngine"
             case .wakeWord: return "wakeWord"
@@ -91,6 +93,16 @@ struct SettingsView: View {
                         sectionRow(.quickApps, icon: "square.grid.2x2.fill", titleKey: "settings.quickApps.title")
                         sectionRow(.family, icon: "person.2.fill", titleKey: "settings.family.title")
                         sectionRow(.meds, icon: "pills.fill", titleKey: "settings.meds.title")
+                        // Native calendar bridge (calendar-settings task,
+                        // 2026-09-07): the mirror/two-way/import cards left
+                        // the meds leaf — this row is their hub entry.
+                        sectionRow(.calendar, icon: "calendar.badge.clock",
+                                   titleKey: "settings.calendar.title")
+                        // Voice-set alarms + in-app countdown timers
+                        // (alarms-timers task, 2026-09-07). See the leaf's
+                        // honesty caption — iOS alarms ring through the
+                        // app's own notifications, not the Clock app.
+                        sectionRow(.alarms, icon: "alarm.fill", titleKey: "settings.alarms.title")
                         sectionRow(.privacy, icon: "lock.shield.fill", titleKey: "settings.privacy.title")
                         sectionRow(.intentLog, icon: "checklist", titleKey: "settings.intentLog.title")
                         // [TOOL-DEBUG-LOG] (2026-09-07) Tool requests —
@@ -121,6 +133,11 @@ struct SettingsView: View {
             case .places: PlacesSettingsView()
             case .family: FamilyContactsSettingsView()
             case .meds: MedicationScheduleSettingsView()
+            // Calendar settings (calendar-settings task, 2026-09-07) —
+            // the mirror/two-way/import cards that used to crowd the
+            // Medication schedule leaf.
+            case .calendar: CalendarSettingsView()
+            case .alarms: AlarmsTimersSettingsView()
             case .geminiAI: GeminiAPISettingsView()
             case .voiceEngine: VoiceEngineSettingsView()
             case .wakeWord: WakeWordSettingsView()
@@ -1224,9 +1241,24 @@ struct FamilyContactsSettingsView: View {
                 Text(contact.name)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(DesignTokens.textPrimary)
-                Text(contact.relationship)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    // Role chips (family-emergency task, 2026-09-07):
+                    // the emergency number and the doctor/GP stand out
+                    // next to the plain relationship caption.
+                    if contact.isEmergencyContact {
+                        roleChip(L10n.str("family.emergencyBadge",
+                                          locale: coordinator.activeLocale),
+                                 tint: DesignTokens.BadgeTint.emergency.tint)
+                    }
+                    if isDoctorRelationship(contact.relationship) {
+                        roleChip(L10n.str("family.relationship.doctor",
+                                          locale: coordinator.activeLocale),
+                                 tint: DesignTokens.accent)
+                    }
+                    Text(contact.relationship)
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
                 Text(contact.phone)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
@@ -1267,6 +1299,39 @@ struct FamilyContactsSettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
+    /// One small role capsule (family-emergency task, 2026-09-07) —
+    /// the same accent-tint capsule the call results' `familyChip`
+    /// uses, parameterized by text and tint so the emergency flag can
+    /// wear the emergency red while the doctor wears the accent.
+    /// Decorative for VoiceOver like its call-row sibling: the
+    /// relationship caption right beside it already says who the
+    /// person is.
+    private func roleChip(_ text: String, tint: Color) -> some View {
+        Text(text)
+            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+            .foregroundColor(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(tint.opacity(0.12))
+            .clipShape(Capsule())
+            .accessibilityHidden(true)
+    }
+
+    /// True when the stored relationship is the wizard's doctor option
+    /// (the GP kind chip's condition). Records store the option's
+    /// LABEL in the save-time language, and en+ne are the only two
+    /// this app writes — so an exact match against the option label in
+    /// both shipped locales covers every doctor record, whichever
+    /// language the list is being viewed in.
+    private func isDoctorRelationship(_ stored: String) -> Bool {
+        stored == Self.doctorOptionLabel(for: .english)
+            || stored == Self.doctorOptionLabel(for: .nepali)
+    }
+
+    private static func doctorOptionLabel(for language: AppLanguage) -> String {
+        L10n.str("family.relationship.doctor", locale: language.locale)
+    }
+
     /// The row's 44pt visual: the stored photo when one is on file,
     /// else the initials avatar. Photos are best-effort — a missing or
     /// unreadable file reads back as nil and falls through to initials.
@@ -1297,7 +1362,10 @@ struct FamilyContactsSettingsView: View {
 ///      (see `RelationshipOption`). The stored value is the chosen
 ///      option's label; editing recognizes it again by exact label or
 ///      by its `ContactResolver` anchor (see
-///      `preselectedOption(for:)`).
+///      `preselectedOption(for:)`). Below the dropdown sits the
+///      optional "Emergency contact" toggle (family-emergency task,
+///      2026-09-07) — flagged contacts are whom the Emergency button
+///      dials first (see `AppCoordinator.emergencyContact`).
 ///   3. Photo — OPTIONAL (add / change / remove over the initials
 ///      avatar).
 ///   4. Messenger handle — OPTIONAL (with the `messenger.handleHints.*`
@@ -1342,15 +1410,24 @@ private struct FamilyContactWizardSheet: View {
     /// table does not know; that is fine — it simply has no anchor to
     /// compare on edit (see `preselectedOption(for:)`), so
     /// cross-locale edits of a friend need one fresh pick.
+    ///
+    /// `doctor` (family-emergency task, 2026-09-07 — the GP's option,
+    /// last in the user-specified list) is the other one the resolver
+    /// vocabulary lacks: its `anchorWord` is set ("doctor") but no
+    /// resolver word maps onto it, so the anchor never fires and only
+    /// the exact-label rule can select it — a doctor saved in the other
+    /// locale needs one fresh pick, same as a friend.
     private enum RelationshipOption: String, CaseIterable, Identifiable {
         case daughter, son, mother, father, sister, brother, husband,
-             wife, grandmother, grandfather, friend
+             wife, grandmother, grandfather, friend, doctor
 
         var id: String { rawValue }
         /// The `family.relationship.*` localization key for this option.
         var labelKey: String { "family.relationship.\(rawValue)" }
         /// The anchor word this option's labels normalize onto — nil
-        /// for `friend`, which the resolver vocabulary lacks.
+        /// for `friend`, which the resolver vocabulary lacks (`doctor`
+        /// keeps its word even though the resolver has no entry for it,
+        /// so the anchor stays inert rather than pretending to be one).
         var anchorWord: String? { rawValue == "friend" ? nil : rawValue }
     }
 
@@ -1368,6 +1445,11 @@ private struct FamilyContactWizardSheet: View {
     // free-form text; blank saves as nil (no address = not a navigation
     // target).
     @State private var address = ""
+    // Whether the "Emergency contact" toggle is on (family-emergency
+    // task, 2026-09-07) — flagged contacts are whom the Emergency
+    // button dials first. Optional like the photo: an add starts off,
+    // an edit loads the stored flag in `loadDraft`.
+    @State private var isEmergencyContact = false
 
     // Photo draft state: a just-picked image, whether the user asked to
     // remove the stored one, and the stored one itself (loaded once on
@@ -1846,9 +1928,21 @@ private struct FamilyContactWizardSheet: View {
         }
     }
 
-    // MARK: Step 2 — relationship (mandatory dropdown)
+    // MARK: Step 2 — relationship (mandatory dropdown) + emergency flag
 
+    /// The step's content (family-emergency task, 2026-09-07): the
+    /// mandatory relationship dropdown, with the optional "Emergency
+    /// contact" toggle beneath it — which number the emergency button
+    /// dials first is a property of the person being added, so the two
+    /// choices share one decision point.
     private var relationshipStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            relationshipMenu
+            emergencyToggleCard
+        }
+    }
+
+    private var relationshipMenu: some View {
         Menu {
             ForEach(RelationshipOption.allCases) { option in
                 Button {
@@ -1896,6 +1990,31 @@ private struct FamilyContactWizardSheet: View {
         .frame(maxWidth: .infinity, minHeight: 56)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+    }
+
+    /// The optional "Emergency contact" toggle (family-emergency task,
+    /// 2026-09-07) — the same on/off card shape as the wake-word
+    /// toggle. The caption states exactly what the flag does ("the
+    /// emergency button dials this person first"), so the toggle cannot
+    /// be read as "the only person who may be called".
+    private var emergencyToggleCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: $isEmergencyContact) {
+                Text("family.emergencyToggle")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            Text("family.emergencyToggleHint")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
     // MARK: Step 3 — photo (optional)
@@ -2105,6 +2224,9 @@ private struct FamilyContactWizardSheet: View {
         messengerHandle = contact.messengerHandle ?? ""
         nickname = contact.nickname ?? ""
         address = contact.address ?? ""
+        // The stored flag shows in the step-2 toggle (family-emergency
+        // task, 2026-09-07) — an edit opens with it pre-set.
+        isEmergencyContact = contact.isEmergencyContact
         // Pre-select the stored relationship when it is one of the fixed
         // options (see `preselectedOption(for:)`). A legacy free-text
         // value that is none of them stays unselected — the step is
@@ -2131,7 +2253,10 @@ private struct FamilyContactWizardSheet: View {
     ///      father), normalizes onto the same anchor word as one of the
     ///      option labels. `friend` has no anchor (see
     ///      `RelationshipOption`), so only rule 1 can select it — a
-    ///      friend saved in the other locale needs one fresh pick.
+    ///      friend saved in the other locale needs one fresh pick. The
+    ///      same holds for `doctor` (family-emergency task, 2026-09-07):
+    ///      its anchor is inert because the resolver vocabulary has no
+    ///      doctor word.
     private func preselectedOption(for stored: String) -> RelationshipOption? {
         let locale = coordinator.activeLocale
         if let exact = RelationshipOption.allCases.first(where: {
@@ -2162,12 +2287,14 @@ private struct FamilyContactWizardSheet: View {
                 id: contact.id, name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
                 photo: pickedPhoto, removingPhoto: removingStoredPhoto,
-                nickname: nick, address: homeAddress)
+                nickname: nick, address: homeAddress,
+                isEmergencyContact: isEmergencyContact)
         } else {
             succeeded = coordinator.addFamilyContact(
                 name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
-                photo: pickedPhoto, nickname: nick, address: homeAddress)
+                photo: pickedPhoto, nickname: nick, address: homeAddress,
+                isEmergencyContact: isEmergencyContact)
         }
         if succeeded { dismiss() }
         // A failed store write keeps the draft on screen — Save again to
@@ -2608,10 +2735,11 @@ struct MedicationScheduleSettingsView: View {
                     }
                 }
                 addForm
+                // Native-calendar mirror/two-way/import cards moved to
+                // the Calendar settings leaf (calendar-settings task,
+                // 2026-09-07); this leaf now edits medications (and
+                // festival advance reminders) alone.
                 festivalReminderCard
-                calendarSyncCard
-                twoWayCard
-                externalCalendarCard
             }
         }
     }
@@ -2694,150 +2822,6 @@ struct MedicationScheduleSettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
-    /// EventKit mirror toggle (v2 design §4.1) — requests calendar
-    /// access at point of use; denial leaves the app fully working in
-    /// local-only mode, honestly reported.
-    private var calendarSyncCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle(isOn: Binding(
-                get: { coordinator.calendarSync.isEnabled },
-                set: { newValue in
-                    Task { await coordinator.setCalendarSyncEnabled(newValue) }
-                }
-            )) {
-                Label("calendarSync.toggle", systemImage: "calendar")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-            }
-            .tint(DesignTokens.accent)
-            Text(statusText)
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-    }
-
-    /// Two-way mirroring (calendar-driven task, 2026-09-07) — the
-    /// default-OFF extension of the mirror card above: mirrored
-    /// routine events live in a dedicated "Sahayak" calendar, and
-    /// edits the family makes THERE — time changes, daily↔weekly
-    /// changes, deletions, even the whole calendar — apply back to the
-    /// app's schedule. FULL access is requested only at the point of
-    /// use (this toggle turning ON — reconciliation must READ events,
-    /// which write-only access cannot); the caption below follows
-    /// `twoWaySyncDecision` (toggle intent vs the OS's permission
-    /// truth). Disabled while the mirror itself is off — two-way is a
-    /// mode of the mirror.
-    private var twoWayCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle(isOn: Binding(
-                get: { coordinator.calendarSync.twoWayEnabled },
-                set: { newValue in
-                    Task { await coordinator.setCalendarTwoWayEnabled(newValue) }
-                }
-            )) {
-                Label("calendar.twoWay.title", systemImage: "arrow.triangle.2.circlepath")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-            }
-            .tint(DesignTokens.accent)
-            .disabled(!coordinator.calendarSync.isEnabled)
-            Text(twoWayStatusText)
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-    }
-
-    private var twoWayStatusText: String {
-        let sync = coordinator.calendarSync
-        switch CalendarSyncService.twoWaySyncDecision(
-            eventsAccess: sync.currentEventsAccess,
-            twoWayEnabled: sync.twoWayEnabled) {
-        case .idle:
-            return L10n.str("calendar.twoWay.hint", locale: coordinator.activeLocale)
-        case .sync:
-            return L10n.str("calendar.twoWay.caption", locale: coordinator.activeLocale)
-        case .needsFullAccessPrompt, .unavailable:
-            return L10n.str("calendar.twoWay.denied", locale: coordinator.activeLocale)
-        }
-    }
-
-    /// Native Calendar/Reminders import (calendar-driven task,
-    /// 2026-09-07) — the mirror card above writes the app's schedule
-    /// OUT to EventKit; this card reads the family's native events and
-    /// due reminders IN (in-app notifications + today's lists). Ask
-    /// happens at point of use (the toggle); the app never writes back.
-    /// Same intent-vs-truth split as the mirror: the toggle is intent,
-    /// the status line is the OS's answer.
-    private var externalCalendarCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle(isOn: Binding(
-                get: { coordinator.externalCalendar.isEnabled },
-                set: { newValue in
-                    Task { await coordinator.setExternalCalendarEnabled(newValue) }
-                }
-            )) {
-                Label("externalReminders.toggle", systemImage: "calendar.badge.clock")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-            }
-            .tint(DesignTokens.accent)
-
-            if coordinator.externalCalendar.isEnabled {
-                HStack {
-                    Text("externalReminders.leadTitle")
-                        .font(.system(size: DesignTokens.minBodyPointSize))
-                        .foregroundColor(DesignTokens.textPrimary)
-                    Spacer()
-                    // Setting the lead re-scans immediately (the
-                    // service's didSet) so armed notifications follow.
-                    Stepper(value: Binding(
-                        get: { coordinator.externalCalendar.leadMinutes },
-                        set: { coordinator.externalCalendar.leadMinutes = $0 }
-                    ), in: 0...ExternalCalendarService.maxLeadMinutes) {
-                        Text(BikramSambat.devanagariDigits(coordinator.externalCalendar.leadMinutes))
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                            .foregroundColor(DesignTokens.accent)
-                    }
-                }
-                .padding(14)
-                .frame(height: 56)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
-
-                Text(L10n.fmt("externalReminders.leadHint", locale: coordinator.activeLocale,
-                              BikramSambat.devanagariDigits(coordinator.externalCalendar.leadMinutes)))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
-            }
-
-            Text(externalStatusText)
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-    }
-
-    private var externalStatusText: String {
-        switch coordinator.externalCalendar.status {
-        case .enabled: return L10n.str("externalReminders.statusOn", locale: coordinator.activeLocale)
-        case .partial: return L10n.str("externalReminders.statusPartial", locale: coordinator.activeLocale)
-        case .denied: return L10n.str("externalReminders.statusDenied", locale: coordinator.activeLocale)
-        case .error: return L10n.str("externalReminders.statusError", locale: coordinator.activeLocale)
-        case .notRequested: return L10n.str("externalReminders.statusHint", locale: coordinator.activeLocale)
-        }
-    }
-
     /// Advance-reminder days for important festivals (BS calendar,
     /// 2026-09-06) — default 2, family-configurable. Changing it
     /// reschedules festival notifications immediately.
@@ -2873,14 +2857,6 @@ struct MedicationScheduleSettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
-    private var statusText: String {
-        switch coordinator.calendarSync.status {
-        case .enabled: return L10n.str("calendarSync.statusOn", locale: coordinator.activeLocale)
-        case .denied: return L10n.str("calendarSync.statusDenied", locale: coordinator.activeLocale)
-        case .error: return L10n.str("calendarSync.statusError", locale: coordinator.activeLocale)
-        case .notRequested: return L10n.str("calendarSync.statusHint", locale: coordinator.activeLocale)
-        }
-    }
 
     private func timesText(_ times: [DateComponents]) -> String {
         times
