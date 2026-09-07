@@ -17,6 +17,11 @@ protocol HomeWidgetDataSource: AnyObject {
     var homeCalendarLine: String? { get }
     var activeLocale: Locale { get }
     var pendingReminders: [ScheduledReminder] { get }
+    /// Today's stored morning briefing (briefing persistence task,
+    /// 2026-09-08) — non-nil only while a briefing was composed for the
+    /// current calendar day. Drives the "Today's briefing" widget's
+    /// presence: no stored briefing for today → no widget.
+    var todayBriefing: StoredBriefing? { get }
     func refreshHomeCalendarLineIfNeeded()
     func medicationName(for entryId: UUID) -> String
 }
@@ -56,6 +61,7 @@ final class HomeWidgetRegistry {
     static func builtIns() -> [HomeWidget] {
         [
             CalendarStripWidget(),
+            TodayBriefingWidget(),
             NextReminderWidget(),
             MedsStatusWidget()
         ]

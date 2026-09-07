@@ -2677,6 +2677,74 @@ struct CalendarView: View {
     }
 }
 
+// MARK: - Today's briefing (briefing persistence task, 2026-09-08)
+
+/// The stored morning briefing's viewer — the leaf behind the Home
+/// "Today's briefing" widget. Shows the FULL text `fire()` composed and
+/// stored that morning (the briefing is persistent for its calendar
+/// day), plus a "Speak again" button that re-speaks the STORED text
+/// through the interactive lane (`coordinator.speak(text:)`) — it never
+/// re-fires the briefing, so the once-per-day composition budget is
+/// untouched and the replayed text is always exactly what was heard
+/// (and possibly already heard) today, even if the user has since
+/// edited their schedule.
+///
+/// Honest empty state: after midnight, before the new day's composition,
+/// `todayBriefing` is nil and the leaf says so instead of showing
+/// yesterday's text as if it were today's.
+struct BriefingView: View {
+    @EnvironmentObject var coordinator: AppCoordinator
+
+    var body: some View {
+        LeafScreen(titleKey: "briefing.view.title") {
+            VStack(spacing: 12) {
+                if let stored = coordinator.todayBriefing {
+                    briefingCard(stored)
+                    speakAgainButton(stored)
+                } else {
+                    emptyState(key: "briefing.view.empty")
+                }
+            }
+        }
+    }
+
+    /// The day's stored text, verbatim — greeting, date, routines,
+    /// medications, calendar events, weather, one line each.
+    private func briefingCard(_ stored: StoredBriefing) -> some View {
+        Text(stored.text)
+            .font(.system(size: DesignTokens.minBodyPointSize))
+            .foregroundColor(DesignTokens.textPrimary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(18)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// Replays the stored text through the existing speak path
+    /// (interactive lane — speech only, no announcement card, no
+    /// briefing re-fire).
+    private func speakAgainButton(_ stored: StoredBriefing) -> some View {
+        Button {
+            coordinator.speak(text: stored.text)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "speaker.wave.2.fill")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                Text(L10n.str("briefing.view.speakAgain", locale: coordinator.activeLocale))
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                Spacer(minLength: 0)
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 18)
+            .frame(maxWidth: .infinity)
+            .frame(height: DesignTokens.minTapTargetSize)
+            .background(DesignTokens.accent)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Shared
 
 private func emptyState(key: String) -> some View {

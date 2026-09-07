@@ -192,6 +192,16 @@ final class TopicPreAnswerTests: XCTestCase {
                        "अहिले बिहान ९ बजेर ३० मिनेट भयो।")
     }
 
+    /// Single-digit Nepali minutes are UNPADDED — "बजेर ५ मिनेट", never
+    /// "बजेर ०५ मिनेट" — matching the `SpokenTime` spoken-minute
+    /// convention (spoken-text audit, 2026-09-08), so "०५" can never be
+    /// read back as a two-digit run by the TTS.
+    func testTimeReplyNepaliSingleDigitMinutesAreUnpadded() {
+        let (now, tz) = ktm(9, 5)
+        XCTAssertEqual(TopicPreAnswer.reply(for: .time, locale: ne, now: now, timeZone: tz),
+                       "अहिले बिहान ९ बजेर ५ मिनेट भयो।")
+    }
+
     func testTimeReplyNepaliEveningAndNight() {
         let (evening, tzE) = ktm(18, 15)
         XCTAssertEqual(TopicPreAnswer.reply(for: .time, locale: ne, now: evening, timeZone: tzE),

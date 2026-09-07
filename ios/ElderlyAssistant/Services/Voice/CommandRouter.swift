@@ -1726,11 +1726,15 @@ final class CommandRouter {
         }
     }
 
+    /// Spoken-form time for alarm/reminder confirmations (spoken-time
+    /// task, 2026-09-08): the old `.shortened` clock text made the TTS
+    /// read "१३:००"/"13:00" as digits ("thirteen hundred") instead of
+    /// "1 pm" / "दिउँसो १ बजे". All speech-bound lines share
+    /// `SpokenTime`; UI display formatting is untouched.
     private func formattedTime(_ components: DateComponents, locale: Locale) -> String {
-        let calendar = Calendar.current
-        guard let date = calendar.date(from: components) else { return "" }
-        return date.formatted(Date.FormatStyle(date: .omitted, time: .shortened)
-            .locale(locale))
+        SpokenTime.string(hour: components.hour ?? 0,
+                          minute: components.minute ?? 0,
+                          locale: locale)
     }
 
     private func handleMedicationAcknowledgement(replyOverride: String? = nil) {

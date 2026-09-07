@@ -39,6 +39,56 @@ final class CalendarStripWidget: HomeWidget {
     }
 }
 
+// MARK: - Today's briefing (briefing persistence task, 2026-09-08)
+
+/// "Today's briefing" presence on Home: the morning briefing is
+/// persistent for its calendar day (stored encrypted when `fire()`
+/// composed it), and this capsule is the way back to it — a glanceable
+/// preview line, tappable into the briefing leaf where the full stored
+/// text lives with its "Speak again" button.
+///
+/// Appears ONLY while a briefing exists for the CURRENT calendar day
+/// (the coordinator's `todayBriefing`): before the day's first
+/// composition, and after midnight before the next one, there is
+/// nothing real to show and the widget hides itself (the redesign's
+/// no-mockups rule).
+final class TodayBriefingWidget: HomeWidget {
+    let widgetID = "todayBriefing"
+    let priority = 15
+
+    func isVisible(coordinator: any HomeWidgetDataSource) -> Bool {
+        coordinator.todayBriefing != nil
+    }
+
+    func makeView(coordinator: any HomeWidgetDataSource) -> AnyView {
+        guard let stored = coordinator.todayBriefing else {
+            return AnyView(EmptyView())
+        }
+        return AnyView(
+            NavigationLink(value: LeafDestination.briefing) {
+                HStack(spacing: 8) {
+                    Image(systemName: "sunrise.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(DesignTokens.accent)
+                    Text(L10n.fmt("briefing.widget.summary", locale: coordinator.activeLocale,
+                                  stored.previewLine))
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity)
+                .background(DesignTokens.card)
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        )
+    }
+}
+
 // MARK: - Next reminder
 
 /// The next pending dose/routine still ahead of us today — the thing the

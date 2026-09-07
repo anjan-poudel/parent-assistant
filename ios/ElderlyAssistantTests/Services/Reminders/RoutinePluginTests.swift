@@ -89,6 +89,47 @@ final class RoutinePluginTests: XCTestCase {
         XCTAssertEqual(alarm.scheduled.count, 2)
     }
 
+    /// Spoken-text audit (2026-09-08): the routine-set confirmations'
+    /// time argument is the FULL `SpokenTime` form, which already ends in
+    /// बजे ("बेलुका ५ बजे", "बिहान ९ बजेर ५ मिनेट") — the ne frames must
+    /// NOT append a literal बजे of their own (the pre-fix rendering was
+    /// "…बेलुका ५ बजे बजे राखियो"), and the weekly frame must speak the
+    /// time exactly once in the natural word order.
+    func testNepaliConfirmationSpeaksSingleNaturalBajeForm() async {
+        // Daily confirmation.
+        let daily = await plugin.handle(
+            command("routine.set", entities: [
+                "category": "walk", "time": "बेलुका ५ बजे"
+            ]),
+            context: makeContext())
+        guard case .spoken(let dailyText) = daily else {
+            XCTFail("expected .spoken, got \(daily)")
+            return
+        }
+        XCTAssertTrue(dailyText.contains("बेलुका ५ बजे राखियो"),
+                      "spoken time flows straight into राखियो: \(dailyText)")
+        XCTAssertFalse(dailyText.contains("बजे बजे"),
+                       "frame must not add a second बजे: \(dailyText)")
+
+        // Weekly confirmation.
+        let weekly = await plugin.handle(
+            command("routine.set", entities: [
+                "category": "gym", "time": "बिहान ९ बजे",
+                "frequency": "weekly", "weekday": "सोमबार"
+            ]),
+            context: makeContext())
+        guard case .spoken(let weeklyText) = weekly else {
+            XCTFail("expected .spoken, got \(weekly)")
+            return
+        }
+        XCTAssertTrue(weeklyText.contains("हरेक सोमबार"),
+                      "weekly word order must be title हरेक weekday time: \(weeklyText)")
+        XCTAssertTrue(weeklyText.contains("बिहान ९ बजे राखियो"),
+                      "weekly confirmation must speak the time exactly once: \(weeklyText)")
+        XCTAssertFalse(weeklyText.contains("बजे बजे"),
+                       "weekly frame must not duplicate बजे: \(weeklyText)")
+    }
+
     func testSetWithoutTimeFailsHonestly() async {
         let result = await plugin.handle(
             command("routine.set", entities: ["category": "walk"]),
@@ -182,8 +223,10 @@ final class RoutinePluginTests: XCTestCase {
                                          locale: Locale(identifier: "ne")))
         // Time formatting and catalog resolution vary by host
         // locale/bundle; the query answer must mention the reminder
-        // SOMEHOW — localized title or a time rendering.
-        let mentionsReminder = ["हिँड्ने", "Walk", "17:30", "5:30", "५:३०"]
+        // SOMEHOW — localized title or a time rendering. 17:30 speaks as
+        // the SpokenTime form ("बेलुका ५ बजेर ३० मिनेट") — never a
+        // "17:30"/"५:३०" clock token (spoken-time task, 2026-09-08).
+        let mentionsReminder = ["हिँड्ने", "Walk", "बेलुका ५ बजेर ३० मिनेट"]
             .contains { text.contains($0) }
         XCTAssertTrue(mentionsReminder,
                       "query answer should carry the reminder, got: \(text)")

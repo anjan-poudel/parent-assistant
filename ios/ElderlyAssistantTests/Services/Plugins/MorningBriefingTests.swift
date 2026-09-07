@@ -11,6 +11,11 @@ import XCTest
 ///    `medicationEntries()`, `ExternalCalendarService.todaysSpokenLines(locale:)`),
 ///  - honest empty lines per source and the honest weather-unavailable line,
 ///  - fire() idempotency per calendar day,
+///  - fire() persistence (briefing persistence task, 2026-09-08): the
+///    composed text lands in the injected `MorningBriefingStore` for its
+///    calendar day; a same-day no-op never clobbers; the next-day fire
+///    replaces the slot; a storage failure still speaks and emits a
+///    sanitised `briefing_persist_failed` event,
 ///  - determinism: identical inputs → identical announcement text.
 ///
 /// English expectations pin the plan's en catalog values verbatim
@@ -160,6 +165,20 @@ final class MorningBriefingTests: XCTestCase {
             var summary: String?
             func todaySummary(locale: Locale) -> String? { summary }
         }
+
+        /// Storage that always fails to write — pins the best-effort
+        /// contract: a briefing still speaks when persistence misses.
+        final class FailingEncryptedStorage: EncryptedLocalStorage {
+            func write<T: Encodable>(key: String, value: T) -> Result<Void, StorageError> {
+                .failure(.encryptedWriteFailed)
+            }
+            func read<T: Decodable>(key: String, type: T.Type) -> Result<T, StorageError> {
+                .failure(.encryptedReadFailed)
+            }
+            func delete(key: String) -> Result<Void, StorageError> {
+                .failure(.encryptedWriteFailed)
+            }
+        }
     }
 
     private struct Harness {
@@ -173,6 +192,7 @@ final class MorningBriefingTests: XCTestCase {
         func briefing(
             locale: Locale = Locale(identifier: "en-US"),
             weatherAvailable: Bool = true,
+            briefingStore: MorningBriefingStore? = nil,
             now: @escaping () -> Date = Date.init
         ) -> MorningBriefing {
             MorningBriefing(
@@ -182,6 +202,7 @@ final class MorningBriefingTests: XCTestCase {
                 medicationSource: medications,
                 calendarSource: calendar,
                 weatherSource: weatherAvailable ? weather : nil,
+                briefingStore: briefingStore,
                 locale: locale,
                 now: now
             )
@@ -289,8 +310,8 @@ final class MorningBriefingTests: XCTestCase {
         XCTAssertEqual(announcement.text,
                        "Good morning\n" +
                        "Today is Sunday, September 6, 2026\n" +
-                       "Your routines today: Morning walk — 7:00\u{202F}AM, Morning walk — 9:00\u{202F}AM\n" +
-                       "Your medications today: Amlodipine — 5 mg — 8:00\u{202F}AM\n" +
+                       "Your routines today: Morning walk — 7 am, Morning walk — 9 am\n" +
+                       "Your medications today: Amlodipine — 5 mg — 8 am\n" +
                        "Your events today: Doctor — 10:30 AM, Lunch with Maya — 12:00 PM\n" +
                        "The weather today: Sunny and 22 degrees")
         // Outcome card mirrors the spoken text; body is never log metadata.
@@ -308,10 +329,10 @@ final class MorningBriefingTests: XCTestCase {
         let briefing = harness.briefing(now: { self.day(6, 7, 0) })
         await briefing.fire()
         let text = harness.queue.enqueued.first!.text
-        XCTAssertTrue(text.contains("Morning walk — 7:00\u{202F}AM, Morning walk — 9:00\u{202F}AM"))
-        XCTAssertFalse(text.contains("6:30\u{202F}AM"))
-        XCTAssertFalse(text.contains("6:45\u{202F}AM"))
-        XCTAssertFalse(text.contains("6:00\u{202F}AM"))
+        XCTAssertTrue(text.contains("Morning walk — 7 am, Morning walk — 9 am"))
+        XCTAssertFalse(text.contains("6:30 am"))
+        XCTAssertFalse(text.contains("6:45 am"))
+        XCTAssertFalse(text.contains("6:00 am"))
         XCTAssertFalse(text.contains("Sunday, September 7"))
     }
 
@@ -331,6 +352,54 @@ final class MorningBriefingTests: XCTestCase {
         XCTAssertTrue(lines[2].contains("Morning walk"))
         XCTAssertTrue(lines[3].contains("Amlodipine"))
         XCTAssertTrue(lines[5].contains("Sunny and 22 degrees"))
+    }
+
+    /// Spoken-text audit (2026-09-08): every briefing line that embeds a
+    /// clock goes through `SpokenTime`, so the Nepali composition must
+    /// never carry an ASCII clock token — and single-digit minutes speak
+    /// UNPADDED ("बजेर ५ मिनेट", never "बजेर ०५ मिनेट" or "7:05"). The
+    /// calendar line is out of scope here: it renders the source's
+    /// verbatim spoken lines verbatim.
+    func testNepaliCompositionMinutesUseUnpaddedSpokenForm() async throws {
+        let harness = Harness()
+        let routine = makeRoutineFixture()
+        // Override the 07:00 occurrence to 07:05 — exercises a
+        // single-digit Devanagari minute end-to-end through fire().
+        let atSevenFive = RoutineOccurrence(
+            id: UUID(), entryId: routine.entry.id,
+            scheduledAt: day(6, 7, 5), state: .pending
+        )
+        harness.routines.entries[routine.entry.id] = routine.entry
+        harness.routines.occurrences = [atSevenFive, routine.occurrence9]
+        let medication = makeMedicationFixture()
+        harness.medications.entries = [medication.entry]
+        harness.medications.reminders = [medication.pending8]
+        let briefing = harness.briefing(locale: ne, now: { self.day(6, 7, 0) })
+
+        await briefing.fire()
+
+        let lines = try XCTUnwrap(harness.queue.enqueued.first).text
+            .components(separatedBy: "\n")
+        XCTAssertTrue(lines[2].contains("बिहान ७ बजेर ५ मिनेट"),
+                      "routine line must speak unpadded minutes: \(lines[2])")
+        XCTAssertTrue(lines[3].contains("बिहान ८ बजे"),
+                      "medication line must speak the on-the-hour form: \(lines[3])")
+        // Time segments only — titles/doses may legitimately carry
+        // ASCII ("Morning walk", "5 mg") and the catalog lead-in ends
+        // with a colon; the SPOKEN time is what must stay clean.
+        let times = [lines[2], lines[3]].flatMap { line in
+            line.split(separator: ",").map { item in
+                String(item.split(separator: "—").last ?? "")
+                    .trimmingCharacters(in: .whitespaces)
+            }
+        }
+        let asciiDigits = CharacterSet(charactersIn: "0123456789")
+        for time in times {
+            XCTAssertNil(time.rangeOfCharacter(from: asciiDigits),
+                         "ASCII digits must never reach the spoken time: \(time)")
+            XCTAssertFalse(time.contains(":"),
+                           "clock colons must never reach the spoken time: \(time)")
+        }
     }
 
     func testAllScheduleSourcesEmptyProducesNothingLine() async {
@@ -463,6 +532,128 @@ final class MorningBriefingTests: XCTestCase {
         XCTAssertEqual(harness.queue.enqueued.first!.text, expected)
     }
 
+    // MARK: - Persistence (briefing persistence task, 2026-09-08)
+
+    func testFirePersistsComposedTextForItsDay() async throws {
+        let harness = harnessWithEverything()
+        let store = MorningBriefingStore(storage: InMemoryEncryptedStorage())
+        let briefing = harness.briefing(briefingStore: store,
+                                        now: { self.day(6, 7, 0) })
+
+        await briefing.fire()
+
+        let stored = try XCTUnwrap(store.load())
+        // The stored text IS the spoken text — a later replay re-speaks
+        // exactly what was said in the morning, never a recomposition.
+        XCTAssertEqual(stored.text, harness.queue.enqueued.first?.text)
+        XCTAssertFalse(stored.text.isEmpty)
+        // Keyed by the calendar day's start + the composition locale.
+        XCTAssertEqual(stored.dayStart,
+                       Calendar.current.startOfDay(for: day(6, 7, 0)))
+        XCTAssertEqual(stored.localeIdentifier, "en-US")
+        // A glanceable one-liner exists for the Home widget capsule.
+        XCTAssertFalse(stored.previewLine.isEmpty)
+    }
+
+    func testSameDaySecondFireIsNoOpAndNeverClobbersStoredText() async throws {
+        let harness = harnessWithEverything()
+        let store = MorningBriefingStore(storage: InMemoryEncryptedStorage())
+        let briefing = harness.briefing(briefingStore: store,
+                                        now: { self.day(6, 7, 0) })
+
+        await briefing.fire()
+        let first = try XCTUnwrap(store.load())
+
+        // Same-day second trigger with a COMPLETELY different schedule:
+        // composition would differ, but the once-per-day budget makes the
+        // trigger a no-op — the stored briefing must survive untouched
+        // (same-day no-op never clobbers).
+        harness.routines.occurrences = []
+        harness.medications.reminders = []
+        harness.medications.entries = []
+        harness.calendar.lines = []
+        harness.weather.summary = nil
+        await briefing.fire()
+
+        XCTAssertEqual(harness.queue.enqueued.count, 1,
+                       "second fire same day must be a no-op")
+        XCTAssertEqual(try XCTUnwrap(store.load()), first)
+        XCTAssertTrue(first.text.contains("Amlodipine"))
+        XCTAssertEqual(harness.bus.emitted.last?.eventType, "briefing_fire_skipped")
+    }
+
+    func testNextDayFireReplacesStoredSlot() async throws {
+        var now = day(6, 7, 0)
+        let harness = harnessWithEverything()
+        let store = MorningBriefingStore(storage: InMemoryEncryptedStorage())
+        let briefing = harness.briefing(briefingStore: store, now: { now })
+
+        await briefing.fire()
+        XCTAssertEqual(store.load()?.dayStart,
+                       Calendar.current.startOfDay(for: day(6, 7, 0)))
+
+        // A fresh day with an empty schedule: the new composition replaces
+        // the old slot — single-slot persistence, no history (the next-day
+        // write IS the pruning).
+        now = day(7, 7, 0)
+        harness.routines.occurrences = []
+        harness.medications.reminders = []
+        harness.medications.entries = []
+        harness.calendar.lines = []
+        harness.weather.summary = nil
+        await briefing.fire()
+
+        XCTAssertEqual(harness.queue.enqueued.count, 2)
+        let stored = try XCTUnwrap(store.load())
+        XCTAssertEqual(stored.dayStart,
+                       Calendar.current.startOfDay(for: day(7, 7, 0)))
+        XCTAssertEqual(stored.text, harness.queue.enqueued.last?.text)
+        XCTAssertFalse(stored.text.contains("Amlodipine"))
+        XCTAssertTrue(stored.text.contains("You have nothing scheduled today"))
+    }
+
+    func testNepaliCompositionPersistsNepaliLocaleAndText() async throws {
+        let harness = harnessWithEverything()
+        let store = MorningBriefingStore(storage: InMemoryEncryptedStorage())
+        let briefing = harness.briefing(locale: ne, briefingStore: store,
+                                        now: { self.day(6, 7, 0) })
+
+        await briefing.fire()
+
+        let stored = try XCTUnwrap(store.load())
+        XCTAssertEqual(stored.localeIdentifier, "ne-NP")
+        XCTAssertEqual(stored.text, harness.queue.enqueued.first?.text)
+        XCTAssertTrue(stored.text.contains("बिहान ७ बजे"),
+                      "Nepali spoken form persisted: \(stored.text)")
+    }
+
+    func testPersistFailureStillSpeaksAndEmitsSanitisedEvent() async throws {
+        let harness = Harness()
+        harness.weather.summary = "Sunny"
+        let store = MorningBriefingStore(storage: BriefingFakes.FailingEncryptedStorage())
+        let briefing = harness.briefing(briefingStore: store,
+                                        now: { self.day(6, 7, 0) })
+
+        await briefing.fire()
+
+        // Persistence is best-effort — a storage failure never silences
+        // the briefing; a PII-free event records the miss. fire() emits
+        // briefing_persist_failed from inside persist() BEFORE the
+        // trailing briefing_fired, so the failure event is never `.last` —
+        // select it by type, not position.
+        XCTAssertEqual(harness.queue.enqueued.count, 1)
+        let event = try XCTUnwrap(
+            harness.bus.emitted.first { $0.eventType == "briefing_persist_failed" }
+        )
+        XCTAssertEqual(event.component, "morning_briefing")
+        XCTAssertEqual(event.metadata, ["state": "storage_error"])
+        for key in event.metadata.keys {
+            XCTAssertTrue(LogSanitiser.allowedKeys.contains(key))
+        }
+        XCTAssertTrue(harness.bus.emitted.contains { $0.eventType == "briefing_fired" },
+                      "the fire itself still reports success alongside the persist miss")
+    }
+
     // MARK: - Date argument
 
     func testDateArgEnglishPinsFullGregorianDate() {
@@ -492,5 +683,37 @@ final class MorningBriefingTests: XCTestCase {
                               "metadata key \(key) is not allowlisted")
             }
         }
+    }
+}
+
+/// In-memory `EncryptedLocalStorage` for the persistence tests — the real
+/// implementation is Keychain-backed and untestable without a device
+/// context (same file-local fake pattern as the storage-store test files).
+private final class InMemoryEncryptedStorage: EncryptedLocalStorage {
+    private var values: [String: Data] = [:]
+    private let encoder = JSONEncoder()
+    private let decoder = JSONDecoder()
+
+    func write<T: Encodable>(key: String, value: T) -> Result<Void, StorageError> {
+        do {
+            values[key] = try encoder.encode(value)
+            return .success(())
+        } catch {
+            return .failure(.encryptedWriteFailed)
+        }
+    }
+
+    func read<T: Decodable>(key: String, type: T.Type) -> Result<T, StorageError> {
+        guard let data = values[key] else { return .failure(.encryptedReadFailed) }
+        do {
+            return .success(try decoder.decode(T.self, from: data))
+        } catch {
+            return .failure(.encryptedReadFailed)
+        }
+    }
+
+    func delete(key: String) -> Result<Void, StorageError> {
+        values.removeValue(forKey: key)
+        return .success(())
     }
 }

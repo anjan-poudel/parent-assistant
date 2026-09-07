@@ -2126,7 +2126,7 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
             [.hour, .minute], from: coordinator.alarmSetRequests[0].time)
         XCTAssertEqual(components.hour, 6)
         XCTAssertEqual(components.minute, 0)
-        XCTAssertTrue(coordinator.genericReplies.contains { $0 == "Alarm set for 6:00 AM" },
+        XCTAssertTrue(coordinator.genericReplies.contains { $0 == "Alarm set for 6 am." },
                       "spoken confirmation embeds the resolved time, got \(coordinator.genericReplies)")
         XCTAssertTrue(bus.emittedEvents.contains {
             $0.component == "alarms_timers" && $0.eventType == "alarm_set"
