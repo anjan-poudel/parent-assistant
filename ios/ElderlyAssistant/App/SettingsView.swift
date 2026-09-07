@@ -16,7 +16,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case appearance, language, calling, places, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, quickApps, privacy, intentLog
+        case appearance, language, calling, places, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, quickApps, privacy, intentLog, toolLog
 
         var id: String {
             switch self {
@@ -34,6 +34,7 @@ struct SettingsView: View {
             case .quickApps: return "quickApps"
             case .privacy: return "privacy"
             case .intentLog: return "intentLog"
+            case .toolLog: return "toolLog"
             }
         }
     }
@@ -92,6 +93,12 @@ struct SettingsView: View {
                         sectionRow(.meds, icon: "pills.fill", titleKey: "settings.meds.title")
                         sectionRow(.privacy, icon: "lock.shield.fill", titleKey: "settings.privacy.title")
                         sectionRow(.intentLog, icon: "checklist", titleKey: "settings.intentLog.title")
+                        // [TOOL-DEBUG-LOG] (2026-09-07) Tool requests —
+                        // the family-facing debug window over every live
+                        // weather/web-search request the on-device stack
+                        // made (see LocalToolLogStore).
+                        sectionRow(.toolLog, icon: "text.magnifyingglass",
+                                   titleKey: "settings.toolLog.title")
                         Text("settings.ai.hiddenHint")
                             .font(.system(size: 14))
                             .foregroundColor(DesignTokens.textSecondary.opacity(0.6))
@@ -122,6 +129,7 @@ struct SettingsView: View {
             case .quickApps: QuickAccessAppsView()
             case .privacy: PrivacySettingsView()
             case .intentLog: IntentLogReviewView()
+            case .toolLog: ToolLogReviewView()
             }
         }
         .sheet(isPresented: $showHiddenAIModels) {

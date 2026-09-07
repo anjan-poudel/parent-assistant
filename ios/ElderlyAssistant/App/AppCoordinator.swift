@@ -557,6 +557,14 @@ final class AppCoordinator: ObservableObject {
     /// tool may ever fire.
     let searchConfigStore: SearchConfigStore
 
+    /// [TOOL-DEBUG-LOG] (2026-09-07) Encrypted debug log of every
+    /// local-tool (weather + web search) request and outcome — the store
+    /// behind Settings → Tool requests (review + family export). Same
+    /// lazy pattern as the intent-layer stores: `storage` is assigned at
+    /// the top of `init`, long before any voice turn can record one, and
+    /// `start()` injects it into the `CommandRouter` it builds.
+    private(set) lazy var localToolLogStore = LocalToolLogStore(storage: storage)
+
     /// Persisted "listen for Hey Sahayak" UI preference — UserDefaults
     /// (not a secret), same shape as `sttModelPreference` /
     /// `voiceEngineStack`. Defaults ON: inert until the key + .ppn exist
@@ -1269,10 +1277,14 @@ final class AppCoordinator: ObservableObject {
             // instance — see LocationFetcher's doc), and URLSession for
             // both transports (each tool's request carries its own
             // timeout; see WeatherTool + the router's search timeout).
+            // [TOOL-DEBUG-LOG] (2026-09-07) The encrypted request log
+            // store — the router records one entry per weather/search
+            // attempt (see CommandRouter.logToolRequest).
             searchConfigStore: searchConfigStore,
             locationFetcherFactory: { LocationFetcher() },
             weatherTransport: URLSession.shared,
-            searchTransport: URLSession.shared
+            searchTransport: URLSession.shared,
+            localToolLogStore: localToolLogStore
         )
         // Start with the fallback STT. Gemini is swapped in below once an
         // API key is configured.

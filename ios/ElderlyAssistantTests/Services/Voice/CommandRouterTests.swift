@@ -900,7 +900,8 @@ final class CommandRouterLocalToolsTests: XCTestCase {
                             searchConfigStore: SearchConfigStore? = nil,
                             locationFetcherFactory: (() -> LocationFetching)? = nil,
                             weatherTransport: LocalToolTransport? = nil,
-                            searchTransport: LocalToolTransport? = nil)
+                            searchTransport: LocalToolTransport? = nil,
+                            localToolLogStore: LocalToolLogStore? = nil)
         -> (CommandRouter, MockObservabilityBus, MockSpeaker) {
         let bus = MockObservabilityBus()
         let speaker = MockSpeaker()
@@ -912,8 +913,17 @@ final class CommandRouterLocalToolsTests: XCTestCase {
                                    locationFetcherFactory: locationFetcherFactory,
                                    weatherTransport: weatherTransport,
                                    searchTransport: searchTransport,
-                                   searchQuotaDefaults: quotaDefaults)
+                                   searchQuotaDefaults: quotaDefaults,
+                                   localToolLogStore: localToolLogStore)
         return (router, bus, speaker)
+    }
+
+    /// [TOOL-DEBUG-LOG] (2026-09-07) A real store over the in-memory
+    /// `EncryptedLocalStorage` double — the router under test records into
+    /// it exactly like production (AppCoordinator injects the same store
+    /// class over the Keychain channel).
+    private func makeLogStore() -> LocalToolLogStore {
+        LocalToolLogStore(storage: GeminiInMemoryStorage())
     }
 
     private func waitForToolDelivery() {
@@ -1488,6 +1498,232 @@ final class CommandRouterLocalToolsTests: XCTestCase {
         })
         XCTAssertFalse(bus.emittedEvents.contains { $0.component == "local_tools" })
         XCTAssertEqual(SearchQuota.readCount(defaults: quotaDefaults), 0)
+    }
+
+    // MARK: - Debug log (tool-debug-log, 2026-09-07): exactly ONE entry
+    // per local-tool attempt, with the right kind/outcome/response
+
+    private func singleEntry(_ logStore: LocalToolLogStore,
+                             file: StaticString = #filePath, line: UInt = #line) -> LocalToolLogEntry? {
+        let entries = logStore.entries()
+        guard entries.count == 1 else {
+            XCTFail("expected exactly ONE logged entry, found \(entries.count)",
+                    file: file, line: line)
+            return nil
+        }
+        return entries.first
+    }
+
+    /// Weather ok end to end: the named-place geocode → forecast happy
+    /// path logs ONE weather entry whose response is the hedged live
+    /// sentence the user heard.
+    func testWeatherOkRecordsExactlyOneEntryWithTheLiveAnswer() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isOnDeviceStack = true
+        coordinator.localeOverride = Locale(identifier: "en-US")
+        let fetcher = StubLocationFetcher(result: .success(
+            LocationFix(latitude: 27.7172, longitude: 85.3240, placeName: "Kathmandu")))
+        let transport = StubLocalToolTransport(
+            data: weatherJSON,
+            geocodingData: Data(#"{"results": [{"name": "Arncliffe", "latitude": -33.9375,"#.utf8)
+                + Data(#" "longitude": 151.1522}]}"#.utf8))
+        let logStore = makeLogStore()
+        let (router, _, _) = makeRouter(coordinator,
+                                        locationFetcherFactory: { fetcher },
+                                        weatherTransport: transport,
+                                        localToolLogStore: logStore)
+
+        _ = router.route(transcript: "is it raining in Arncliffe?")
+        waitForToolDelivery()
+
+        guard let entry = singleEntry(logStore) else { return }
+        XCTAssertEqual(entry.kind, .weather)
+        XCTAssertEqual(entry.query, "is it raining in Arncliffe?",
+                       "the RAW utterance is the logged query — captured before the request")
+        XCTAssertEqual(entry.outcome, "ok")
+        let conditions = WeatherTool.CurrentConditions(temperatureC: 24.3, wmoCode: 0,
+                                                       windKmh: 12.5, humidityPercent: 62)
+        let raw = WeatherTool.reply(for: conditions, placeName: "Arncliffe",
+                                    locale: Locale(identifier: "en"))
+        XCTAssertEqual(entry.response, L10n.fmt("weather.replySource",
+                                                locale: Locale(identifier: "en-US"), raw),
+                       "the response is the hedged live sentence the user heard")
+        XCTAssertNil(entry.statusCode, "the weather tool does not surface an HTTP status")
+        XCTAssertNotNil(entry.durationMs)
+    }
+
+    /// Weather failure (location denied → the static no-data line) logs
+    /// ONE "fail" entry carrying that honest line.
+    func testWeatherFailRecordsExactlyOneEntryWithTheStaticLine() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isOnDeviceStack = true
+        let fetcher = StubLocationFetcher(result: .failure(.notAuthorized))
+        let transport = StubLocalToolTransport(data: weatherJSON)   // must never be used
+        let logStore = makeLogStore()
+        let (router, _, _) = makeRouter(coordinator,
+                                        locationFetcherFactory: { fetcher },
+                                        weatherTransport: transport,
+                                        localToolLogStore: logStore)
+
+        _ = router.route(transcript: "मौसम कस्तो छ?")
+        waitForToolDelivery()
+
+        guard let entry = singleEntry(logStore) else { return }
+        XCTAssertEqual(entry.kind, .weather)
+        XCTAssertEqual(entry.query, "मौसम कस्तो छ?")
+        XCTAssertEqual(entry.outcome, "fail")
+        XCTAssertEqual(entry.response, TopicPreAnswer.reply(for: .weather, locale: ne),
+                       "the response is the honest no-data line the user heard")
+        XCTAssertNil(entry.statusCode)
+        XCTAssertNotNil(entry.durationMs)
+    }
+
+    /// Named place + geocode failure → the live DEVICE reading answers:
+    /// still a live answer, but for the wrong place — the log records the
+    /// delivery as outcome "fallback" (the bus event stays "ok").
+    func testWeatherGeocodeFallbackRecordsOneEntryWithOutcomeFallback() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isOnDeviceStack = true
+        let fetcher = StubLocationFetcher(result: .success(
+            LocationFix(latitude: 27.7172, longitude: 85.3240, placeName: "काठमाडौं")))
+        // geocodingData defaults to an empty payload → the geocode parse
+        // finds no result (200 OK, nothing matched) → device fallback.
+        let transport = StubLocalToolTransport(data: weatherJSON)
+        let logStore = makeLogStore()
+        let (router, _, _) = makeRouter(coordinator,
+                                        locationFetcherFactory: { fetcher },
+                                        weatherTransport: transport,
+                                        localToolLogStore: logStore)
+
+        _ = router.route(transcript: "is it raining in Arncliffe?")
+        waitForToolDelivery()
+
+        guard let entry = singleEntry(logStore) else { return }
+        XCTAssertEqual(entry.kind, .weather)
+        XCTAssertEqual(entry.query, "is it raining in Arncliffe?")
+        XCTAssertEqual(entry.outcome, "fallback",
+                       "a device-location answer to a named-place question is logged as fallback")
+        let conditions = WeatherTool.CurrentConditions(temperatureC: 24.3, wmoCode: 0,
+                                                       windKmh: 12.5, humidityPercent: 62)
+        let raw = WeatherTool.reply(for: conditions, placeName: "काठमाडौं", locale: ne)
+        XCTAssertEqual(entry.response, L10n.fmt("weather.replySource", locale: ne, raw))
+        XCTAssertNotNil(entry.durationMs)
+    }
+
+    /// Search happy path logs ONE "ok" entry with the summary text and
+    /// the 200 the transport returned.
+    func testSearchOkRecordsOneEntryWithTheSummaryAndStatus() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isOnDeviceStack = true
+        let store = SearchConfigStore(storage: GeminiInMemoryStorage())
+        store.saveAPIKey("AIza-key-test")
+        store.saveSearchEngineID("cx-test")
+        let payload = Data("""
+        {"items": [
+            {"title": "France - Wikipedia",
+             "snippet": "France is a country in Western Europe. Its capital is Paris. More here.",
+             "link": "https://en.wikipedia.org/wiki/France"}
+        ]}
+        """.utf8)
+        let transport = StubLocalToolTransport(data: payload)
+        let logStore = makeLogStore()
+        let (router, _, _) = makeRouter(coordinator,
+                                        searchConfigStore: store,
+                                        searchTransport: transport,
+                                        localToolLogStore: logStore)
+
+        _ = router.route(transcript: "what is the capital of France")
+        waitForToolDelivery()
+
+        guard let entry = singleEntry(logStore) else { return }
+        guard let expectedSummary = SearchTool.summaryReply(
+            for: SearchTool.parseSearchJSON(data: payload), locale: ne) else {
+            XCTFail("the test fixture must produce a speakable summary")
+            return
+        }
+        XCTAssertEqual(entry.kind, .search)
+        XCTAssertEqual(entry.query, "what is the capital of France")
+        XCTAssertEqual(entry.outcome, "ok")
+        XCTAssertEqual(entry.response, expectedSummary)
+        XCTAssertEqual(entry.statusCode, 200,
+                       "the HTTP status the transport returned must be recorded")
+        XCTAssertNotNil(entry.durationMs)
+    }
+
+    /// A capped search day logs ONE "cap" entry carrying the cap line —
+    /// no request ever went out.
+    func testSearchCapRecordsOneEntryWithTheCapLine() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isOnDeviceStack = true
+        let store = SearchConfigStore(storage: GeminiInMemoryStorage())
+        store.saveAPIKey("AIza-key-test")
+        store.saveSearchEngineID("cx-test")
+        let transport = StubLocalToolTransport()   // must never be called
+        let logStore = makeLogStore()
+        let (router, _, _) = makeRouter(coordinator,
+                                        searchConfigStore: store,
+                                        searchTransport: transport,
+                                        localToolLogStore: logStore)
+        // Seed today's bucket at the cap (router compares against the
+        // current calendar — seed it the same way).
+        quotaDefaults.set(SearchQuota.dayStamp(for: Date(), calendar: .current),
+                          forKey: SearchQuota.dayKey)
+        quotaDefaults.set(SearchQuota.dailyLimit, forKey: SearchQuota.countKey)
+
+        _ = router.route(transcript: "what is the capital of France")
+        waitForToolDelivery()
+
+        guard let entry = singleEntry(logStore) else { return }
+        XCTAssertEqual(entry.kind, .search)
+        XCTAssertEqual(entry.query, "what is the capital of France")
+        XCTAssertEqual(entry.outcome, "cap")
+        XCTAssertEqual(entry.response, L10n.str("search.capReached", locale: ne))
+        XCTAssertNil(entry.statusCode, "a capped attempt never reached the network")
+        XCTAssertNotNil(entry.durationMs)
+    }
+
+    /// A failed search (transport error) logs ONE "fail" entry carrying
+    /// the honest generic re-prompt.
+    func testSearchFailureRecordsOneEntryWithTheReprompt() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isOnDeviceStack = true
+        let store = SearchConfigStore(storage: GeminiInMemoryStorage())
+        store.saveAPIKey("AIza-key-test")
+        store.saveSearchEngineID("cx-test")
+        let transport = StubLocalToolTransport(data: Data(), error: URLError(.timedOut))
+        let logStore = makeLogStore()
+        let (router, _, _) = makeRouter(coordinator,
+                                        searchConfigStore: store,
+                                        searchTransport: transport,
+                                        localToolLogStore: logStore)
+
+        _ = router.route(transcript: "what is the capital of France")
+        waitForToolDelivery()
+
+        guard let entry = singleEntry(logStore) else { return }
+        XCTAssertEqual(entry.kind, .search)
+        XCTAssertEqual(entry.outcome, "fail")
+        XCTAssertEqual(entry.response, L10n.str("router.reprompt", locale: ne),
+                       "the response is the honest re-prompt the user heard")
+        XCTAssertNil(entry.statusCode, "a thrown transport error has no HTTP status")
+        XCTAssertNotNil(entry.durationMs)
+    }
+
+    /// A tool that never fired logs NOTHING: the log follows the
+    /// `local_tools` event gating exactly — declined utterances are not
+    /// attempts.
+    func testDeclinedSearchAttemptLogsNothing() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isOnDeviceStack = true
+        let logStore = makeLogStore()
+        let (router, _, _) = makeRouter(coordinator,
+                                        localToolLogStore: logStore)   // no SearchConfigStore
+
+        _ = router.route(transcript: "what is the capital of France")
+        waitForToolDelivery()
+
+        XCTAssertTrue(logStore.entries().isEmpty,
+                      "a search the hook declined (no credentials) is not an attempt and logs nothing")
     }
 }
 
