@@ -6862,6 +6862,108 @@
         }
       }
     },
+    "settings.toolLog.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tool requests"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उपकरण अनुरोधहरू"
+          }
+        }
+      }
+    },
+    "toolLog.capNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keeps the latest 200 requests."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पछिल्ला २०० अनुरोधहरू राखिन्छ।"
+          }
+        }
+      }
+    },
+    "toolLog.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No tool requests logged yet."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिलेसम्म कुनै उपकरण अनुरोध लग भएको छैन।"
+          }
+        }
+      }
+    },
+    "toolLog.export": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Export log"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "लग निर्यात गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "toolLog.kind.search": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Web search"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "वेब खोज"
+          }
+        }
+      }
+    },
+    "toolLog.kind.weather": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weather"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मौसम"
+          }
+        }
+      }
+    },
     "settings.language.region": {
       "extractionState": "manual",
       "localizations": {
