@@ -72,6 +72,9 @@ final class AppCoordinator: ObservableObject {
         routineAlarmScheduler.locale = activeLocale
         routineScheduler.locale = activeLocale
         externalCalendar.locale = activeLocale
+        // Voice-OS shell v1: the briefing composes in the app language,
+        // same injection pattern as every other locale-aware service.
+        morningBriefing?.locale = activeLocale
     }
 
     /// First-run onboarding progress (spec §4.2). Persisted per step.
@@ -496,6 +499,20 @@ final class AppCoordinator: ObservableObject {
     /// member saves (or removes) the key.
     private var wakeWordKeyStoreCancellable: AnyCancellable?
     private var speaker: Speaker?
+
+    // Voice-OS shell v1 (composition — built in `start()`, nil until then
+    // like `speaker` itself): the speak queue that now owns all speech,
+    // the speech-source registry, the morning-briefing source, and the
+    // single `UNUserNotificationCenter` delegate facade. `speakQueue` is
+    // retained here so the coordinator stays the composition root; the
+    // facade is retained because the notification center holds its
+    // delegate weakly. `shellCardCancellable` forwards the queue's
+    // announcement cards to the existing outcome-card presentation.
+    private var speakQueue: SpeakQueue?
+    private var speechSourceRegistry: SpeechSourceRegistry?
+    private var morningBriefing: MorningBriefing?
+    private var notificationFacade: NotificationFacade?
+    private var shellCardCancellable: AnyCancellable?
 
     /// Voice-session derivation state (spec §3.3): the last pipeline state
     /// plus how many `speak()` calls are currently in flight. `speaking`
@@ -1249,6 +1266,51 @@ final class AppCoordinator: ObservableObject {
         pluginRegistry.plugins
             .compactMap { $0 as? ApplianceHelperPlugin }
             .forEach { $0.speaker = speaker }
+        // Voice-OS shell v1 — push-speech composition (design §3–§5).
+        // The SpeakQueue now owns the single shared speaker for every
+        // utterance: push sources (notification read-aloud, morning
+        // briefing) enqueue here, and coordinator-level replies enter on
+        // the `.interactive` lane through the `speak(text:)` shim below.
+        // `SpeechNoteForwarder` keeps the wake-word gate and the
+        // voice-session speaking count balanced per utterance — the same
+        // note pair the direct-speak path fired, so nesting/cancellation
+        // behavior is unchanged.
+        let speechNoter = SpeechNoteForwarder(speaker: speaker) { [weak self] in
+            self?.noteSpeakingStarted()
+        } onEnded: { [weak self] in
+            self?.noteSpeakingEnded()
+        }
+        let queue = SpeakQueue(speaker: speechNoter, observability: observabilityBus)
+        let notificationReader = NotificationReader(queue: queue, observability: observabilityBus)
+        let briefing = MorningBriefing(
+            queue: queue,
+            observability: observabilityBus,
+            routineSource: routineScheduler,
+            medicationSource: medicationScheduler,
+            calendarSource: externalCalendar,
+            locale: activeLocale
+        )
+        let registry = SpeechSourceRegistry(observabilityBus: observabilityBus)
+        registry.register(notificationReader)
+        registry.register(briefing)
+        // Single UNUserNotificationCenter delegate (design §2 confirmed
+        // decision — verified no other object in the app owns this slot).
+        let facade = NotificationFacade(handlers: [notificationReader],
+                                         observability: observabilityBus)
+        UNUserNotificationCenter.current().delegate = facade
+        self.speakQueue = queue
+        self.speechSourceRegistry = registry
+        self.notificationFacade = facade
+        self.morningBriefing = briefing
+        // Push-speech cards surface through the EXISTING Home outcome-card
+        // presentation (speech + card, spec §4.6). Interactive replies
+        // carry nil cards and never touch this outcome. The card persists
+        // after speech ends — the queue clears only its own state.
+        shellCardCancellable = queue.$currentCard
+            .compactMap { $0 }
+            .sink { [weak self] card in
+                self?.presentShellCard(card)
+            }
         // v2 pivot: Gemini interpreter. `isAvailable` stays false until an
         // API key is configured (GeminiConfigStore) — CommandRouter treats
         // that exactly like the old "LLM not linked" case: fall through to
@@ -1767,6 +1829,27 @@ final class AppCoordinator: ObservableObject {
     /// Speaks dynamic, already-resolved text (e.g. a call-confirmation
     /// prompt built from a contact's name) — no catalog lookup.
     func speak(text: String) {
+        if let queue = speakQueue {
+            // Voice-OS shell v1: coordinator-level replies enter the
+            // speak queue on the `.interactive` lane — lowest priority,
+            // never preempted once started, announcement carries NO card
+            // (speech only), so the existing outcome-card flow is
+            // untouched. Zero policy change for the utterance itself: the
+            // queue owns the shared speaker and the speech notes fire
+            // around each utterance via `SpeechNoteForwarder`.
+            guard !text.isEmpty else { return }
+            noteAssistantSpoke(text)
+            queue.enqueue(Announcement(
+                id: UUID(),
+                text: text,
+                priority: .interactive,
+                sourceID: "coordinator_reply",
+                card: nil
+            ))
+            return
+        }
+        // Pre-`start()` fallback — verbatim original direct-speak path
+        // (the queue only exists once `start()` has composed it).
         guard let speaker, !text.isEmpty else { return }
         noteAssistantSpoke(text)
         noteSpeakingStarted()
@@ -3773,6 +3856,17 @@ final class AppCoordinator: ObservableObject {
             Task {
                 await calendarSync.reconcileNativeChanges(entries: routineScheduler.entries())
             }
+            // Voice-OS shell v1 — proactive morning briefing (design
+            // §4.4 trigger a): fires on the first app activation inside
+            // the wake window, once per calendar day. Idempotent —
+            // `shouldFireOnActivation` + `fire()` share the same
+            // once-per-day budget as the spoken command, so repeated
+            // activations never double-speak.
+            if let briefing = morningBriefing,
+               briefing.shouldFireOnActivation(now: Date(),
+                                               calendar: Calendar.current) {
+                Task { await briefing.fire() }
+            }
         case .background:
             externalCalendar.submitBackgroundRefresh()
         default:
@@ -4126,7 +4220,73 @@ final class AppCoordinator: ObservableObject {
     }
 }
 
-extension AppCoordinator: VoiceCommandCoordinating {}
+extension AppCoordinator: VoiceCommandCoordinating {
+    /// [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1 — the router's
+    /// "read me my briefing" hook. `fire()` is idempotent per calendar
+    /// day and shares its once-per-day budget with the activation
+    /// trigger, so command + activation can never double-speak.
+    func fireMorningBriefing() {
+        guard let morningBriefing else { return }
+        Task { await morningBriefing.fire() }
+    }
+}
+
+// MARK: - Voice-OS shell v1: push-speech card presentation
+
+extension AppCoordinator {
+    /// Surfaces the speak queue's announcement card through the EXISTING
+    /// Home outcome-card presentation (speech + card, spec §4.6). The
+    /// card IS the content of a push announcement (briefing composition,
+    /// notification read-aloud) — there is no user command behind it —
+    /// so the transcript row is always omitted and the icon/text come
+    /// from the announcement. Cards persist after speech ends: the queue
+    /// clears only its own `currentCard`, never this outcome.
+    fileprivate func presentShellCard(_ card: AnnouncementCard) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.lastOutcome = OutcomeSummary(
+                icon: card.symbolName,
+                text: card.body.isEmpty ? card.title : card.body,
+                transcript: nil,
+                timestamp: Date(),
+                undo: nil
+            )
+        }
+    }
+}
+
+// MARK: - Voice-OS shell v1: speech-note forwarder (SpeakQueue adapter)
+
+/// Adapts the coordinator's per-utterance speech notes (wake-word gate,
+/// voice-session speaking state) onto the `Speaker` instance the
+/// `SpeakQueue` owns, so pushed announcements and interactive replies
+/// keep the same note balance as the direct-speak path. Speech nests and
+/// queue-initiated preemption cancels mid-utterance: the note pair fires
+/// around every single `speak` call, so `speakingCount` always returns
+/// to zero.
+fileprivate final class SpeechNoteForwarder: Speaker {
+    private let inner: Speaker
+    private let onStarted: () -> Void
+    private let onEnded: () -> Void
+
+    init(speaker: Speaker,
+         onStarted: @escaping () -> Void,
+         onEnded: @escaping () -> Void) {
+        self.inner = speaker
+        self.onStarted = onStarted
+        self.onEnded = onEnded
+    }
+
+    func speak(_ text: String, locale: Locale) async {
+        onStarted()
+        await inner.speak(text, locale: locale)
+        onEnded()
+    }
+
+    func cancel() {
+        inner.cancel()
+    }
+}
 
 // MARK: - ConsoleObservabilityBus (routes every event through LogSanitiser)
 

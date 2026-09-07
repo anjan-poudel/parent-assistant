@@ -210,6 +210,14 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// candidates), and the generic medication-flavored confirmation
     /// speech is skipped.
     var isAwaitingNavigationDisambiguation: Bool { get }
+
+    /// [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1: fires the
+    /// proactive morning briefing ("read me my briefing"). The briefing
+    /// speaks itself through the shell's speak queue (once per calendar
+    /// day) and renders its own outcome card — the router adds no speech
+    /// and no card of its own, exactly like a topic pre-answer that has
+    /// already spoken.
+    func fireMorningBriefing()
 }
 
 /// [INTENT-TOOLS] (2026-09-07) Tool-capability default. The default keeps
@@ -232,6 +240,11 @@ extension VoiceCommandCoordinating {
     var isAwaitingNavigationDisambiguation: Bool { false }
     func requestNavigation(to target: DirectionsRoute.PlaceTarget) {}
     func requestNavigationDisambiguation(targets: [DirectionsCandidate]) -> String? { nil }
+    // [MORNING-BRIEFING] (2026-09-07) Inert default — a conformer that
+    // does not opt in (every mock/double across app and test target)
+    // never fires a briefing, so the deterministic ladder stage falls
+    // through to the interpreter/keyword remainder exactly as before.
+    func fireMorningBriefing() {}
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -510,6 +523,21 @@ final class CommandRouter {
             break   // not directions business — continue the ladder
         }
 
+        // [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1: "read me my
+        // briefing" — a deterministic pre-answer stage like the topic
+        // table below: after the safety net + confirmation flow +
+        // directions, before any model. `fireMorningBriefing()` composes
+        // and speaks the briefing through the shell's speak queue (once
+        // per calendar day, its own card) — the router adds NO speech and
+        // NO visible outcome of its own, so this stage ends the turn with
+        // the same `.unrecognised(transcript:)` the topic/calculator
+        // stages return once they have already spoken.
+        if Self.briefingPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
+            coordinator?.fireMorningBriefing()
+            emit(eventType: "morning_briefing_command", outcome: "success")
+            return .unrecognised(transcript: raw)
+        }
+
         // [NO-GIBBERISH] Deterministic TOPIC PRE-ANSWERS (2026-09-07): the
         // most common Q&A topics — weather, time, date, greetings — are
         // answered from a pre-written, honest table (`TopicPreAnswer`)
@@ -659,6 +687,22 @@ final class CommandRouter {
 
         return routeKeywordRemainder(raw)
     }
+
+    /// [MORNING-BRIEFING] (2026-09-07) Imperative phrasings that request
+    /// the proactive morning briefing — English, नेपाली, and romanized
+    /// Nepali, matched against the lowercased transcript like every other
+    /// phrase list. Imperative forms ONLY: a bare "briefing" / "मेरो
+    /// ब्रीफिङ" is never matched here, so a reminder-set or other
+    /// utterance that merely mentions the word can never hijack the
+    /// briefing's once-per-calendar-day budget (the confirmation-flow and
+    /// interpreter stages already ran before this stage, so an answered
+    /// yes/no or a confident command always wins).
+    private static let briefingPhrases = [
+        "read me my briefing", "read my briefing", "tell me my briefing",
+        "मेरो ब्रीफिङ सुनाऊ", "ब्रीफिङ सुनाऊ",
+        "मेरो बिहानको सारांश सुनाऊ", "बिहानको सारांश सुनाऊ",
+        "mero briefing sunau", "bihanko sarsang sunau"
+    ]
 
     // MARK: - Keyword fallback
 
