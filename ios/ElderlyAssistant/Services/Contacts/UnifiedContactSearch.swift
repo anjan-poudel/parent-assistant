@@ -3,10 +3,12 @@ import Foundation
 // MARK: - Unified contact search (Phone leaf, 2026-09-06)
 //
 // One search over BOTH "people I might call" surfaces: the configured
-// family contacts (up to three, relationship-labelled, always reachable
-// through this app's own buttons) and the system address book (see
-// `SystemContactSearch` — the platform sweep; Contacts.app already
-// aggregates the user's own entries AND app-synced records).
+// family contacts (relationship-labelled, always reachable through this
+// app's own buttons — the curated list grew to twelve with the
+// family-and-friends task, 2026-09-07; the count is `FamilyContactStore
+// .maxContacts`, no number is hard-coded here) and the system address
+// book (see `SystemContactSearch` — the platform sweep; Contacts.app
+// already aggregates the user's own entries AND app-synced records).
 //
 // Layering mirrors AddressBookDirectory: the pure union logic — tiered
 // family matching, family-first ranking, matched-only dedupe, row

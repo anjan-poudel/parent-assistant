@@ -311,7 +311,12 @@ private struct PermissionsStep: View {
     }
 }
 
-// MARK: - Step 3: Family contact (skippable — no hard gate)
+// MARK: - Step 3: Family & friends (skippable — no hard gate)
+//
+// (family-and-friends task, 2026-09-07) Comment/step-name refresh: the
+// collected person is now framed as the start of the curated "Family
+// and friends" list (spec §4.4.2), which the Settings editor grows to
+// `FamilyContactStore.maxContacts`.
 
 private struct FamilyContactStep: View {
     @EnvironmentObject var coordinator: AppCoordinator

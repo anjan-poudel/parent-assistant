@@ -1,9 +1,11 @@
 import SwiftUI
+import UIKit
+import PhotosUI
 
 /// Settings hub (spec §4.4): one card per section — Appearance (skinnable
 /// app background, 2026-09-07), Language & region, Gemini AI, Voice
-/// engine, Voice activation, TTS voices, Quick apps, Family & emergency
-/// contacts, Medication schedule, AI मोडेल, Privacy & about.
+/// engine, Voice activation, TTS voices, Quick apps, Family & friends,
+/// Medication schedule, AI मोडेल, Privacy & about.
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     /// Redesign spec §3.3: AI Models is buried behind a long-press on the
@@ -1118,16 +1120,39 @@ struct WakeWordSettingsView: View {
     }
 }
 
-// MARK: - 2. Family & emergency contacts (spec §4.4.2)
+// MARK: - 2. Family & friends — curated contacts (spec §4.4.2)
+//
+// (family-and-friends task, 2026-09-07) The Settings editor for the
+// curated "Family and friends" list — now the primary contact list of
+// the Phone tab, capped at `FamilyContactStore.maxContacts`. Adding and
+// editing share one sheet (`FamilyContactEditorSheet`): photo, then a
+// native-contacts SEARCH that pre-fills the manual fields below (which
+// stay fully editable — contact picking is text prefill, never a
+// CNContactPicker), then the fields, then Save. Every write goes
+// through `AppCoordinator`, which owns the photo store and the record
+// store; this view owns neither.
 
 struct FamilyContactsSettingsView: View {
     @EnvironmentObject var coordinator: AppCoordinator
 
-    @State private var showingAdd = false
-    @State private var name = ""
-    @State private var phone = ""
-    @State private var relationship = ""
-    @State private var messengerHandle = ""
+    /// The open add/edit sheet — nil when closed. Item-driven so a
+    /// swipe-dismiss also clears it (same pattern as CallView's
+    /// handle-capture sheet).
+    @State private var editorTarget: FamilyContactEditorTarget?
+
+    /// What the add/edit sheet is editing: a blank add, or an existing
+    /// contact pre-filled for editing.
+    enum FamilyContactEditorTarget: Identifiable {
+        case add
+        case edit(FamilyContact)
+
+        var id: String {
+            switch self {
+            case .add: return "add"
+            case .edit(let contact): return contact.id.uuidString
+            }
+        }
+    }
 
     var body: some View {
         LeafScreen(titleKey: "settings.family.title") {
@@ -1148,14 +1173,36 @@ struct FamilyContactsSettingsView: View {
                 }
 
                 if coordinator.familyContacts.count < FamilyContactStore.maxContacts {
-                    addForm
+                    addButton
                 }
             }
         }
+        .sheet(item: $editorTarget) { target in
+            FamilyContactEditorSheet(target: target)
+        }
     }
 
+    /// Opens the add sheet (hidden at the cap — nothing to add).
+    private var addButton: some View {
+        Button {
+            editorTarget = .add
+        } label: {
+            Text("settings.family.add")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: DesignTokens.chipHeight)
+                .background(DesignTokens.accent)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// One curated-contact card: photo, name/relationship/phone/handle,
+    /// and the edit + delete controls.
     private func contactRow(_ contact: FamilyContact) -> some View {
         HStack(spacing: 12) {
+            contactPhotoThumb(contact)
             VStack(alignment: .leading, spacing: 4) {
                 Text(contact.name)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
@@ -1174,6 +1221,17 @@ struct FamilyContactsSettingsView: View {
                 }
             }
             Spacer()
+            Button {
+                editorTarget = .edit(contact)
+            } label: {
+                Image(systemName: "pencil")
+                    .font(.system(size: 20))
+                    .foregroundColor(DesignTokens.textSecondary)
+                    .frame(width: DesignTokens.minTapTargetSize,
+                           height: DesignTokens.minTapTargetSize)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("settings.family.edit"))
             Button(role: .destructive) {
                 coordinator.removeFamilyContact(id: contact.id)
             } label: {
@@ -1184,6 +1242,7 @@ struct FamilyContactsSettingsView: View {
                            height: DesignTokens.minTapTargetSize)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text("settings.family.delete"))
         }
         .padding(16)
         .frame(maxWidth: .infinity)
@@ -1191,55 +1250,372 @@ struct FamilyContactsSettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
-    private var addForm: some View {
-        VStack(spacing: 10) {
-            TextField(LocalizedStringKey("onboarding.stepFamily.name"), text: $name)
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .padding(14)
-                .frame(height: 56)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
-            TextField(LocalizedStringKey("onboarding.stepFamily.phone"), text: $phone)
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .keyboardType(.phonePad)
-                .padding(14)
-                .frame(height: 56)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
-            TextField(LocalizedStringKey("onboarding.stepFamily.relationship"), text: $relationship)
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .padding(14)
-                .frame(height: 56)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
-            TextField(LocalizedStringKey("onboarding.stepFamily.messenger"), text: $messengerHandle)
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .keyboardType(.asciiCapable)
-                .autocapitalization(.none)
-                .disableAutocorrection(true)
-                .padding(14)
-                .frame(height: 56)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
-            Text("onboarding.stepFamily.messengerHint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 4)
+    /// The row's 44pt visual: the stored photo when one is on file,
+    /// else the initials avatar. Photos are best-effort — a missing or
+    /// unreadable file reads back as nil and falls through to initials.
+    @ViewBuilder
+    private func contactPhotoThumb(_ contact: FamilyContact) -> some View {
+        let diameter = DesignTokens.iconBadgeDiameter
+        if let photo = coordinator.contactPhoto(for: contact) {
+            Image(uiImage: photo)
+                .resizable()
+                .scaledToFill()
+                .frame(width: diameter, height: diameter)
+                .clipShape(Circle())
+        } else {
+            FaceAvatar(name: contact.name, diameter: diameter)
+        }
+    }
+}
+
+/// The add/edit sheet of the Family & friends screen (family-and-friends
+/// task, 2026-09-07). One form for both duties — blank for `.add`,
+/// pre-filled from the contact for `.edit` — so the two flows can never
+/// drift apart. Top to bottom: the photo (add / change / remove over the
+/// initials avatar), the native-contacts SEARCH that pre-fills the
+/// manual fields below, and those manual fields themselves (always
+/// present — the search is a convenience; entry by hand stays the
+/// fallback), then Save. Save closes the sheet only on success; a
+/// failed store write keeps the draft on screen for one more tap
+/// (nothing is claimed that didn't happen — same rule as CallView's
+/// handle-capture sheet).
+///
+/// Permission handling mirrors CallView's access card: the ask fires at
+/// the point of use behind a plain-language card (the one place the
+/// system prompt may appear), and a denial shows the honest blocked
+/// line with the search hidden — the manual fields below stay fully
+/// usable with or without contacts access.
+private struct FamilyContactEditorSheet: View {
+    @EnvironmentObject var coordinator: AppCoordinator
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+
+    let target: FamilyContactsSettingsView.FamilyContactEditorTarget
+
+    private let directory = AddressBookDirectory()
+
+    // Manual fields (draft state — nothing touches the stores until
+    // Save).
+    @State private var name = ""
+    @State private var phone = ""
+    @State private var relationship = ""
+    @State private var messengerHandle = ""
+
+    // Photo draft state: a just-picked image, whether the user asked to
+    // remove the stored one, and the stored one itself (loaded once on
+    // appear for an edit).
+    @State private var pickedPhoto: UIImage?
+    @State private var removingStoredPhoto = false
+    @State private var storedPhoto: UIImage?
+    @State private var photoPickerItem: PhotosPickerItem?
+
+    // Address-book search state — CallView's shape: access read on
+    // appear, entries fetched on a background task, honest failure card.
+    @State private var searchText = ""
+    /// nil while the authorization state is still being read.
+    @State private var access: ContactsAccess?
+    /// nil = not loaded yet (or load in flight).
+    @State private var entries: [AddressBookEntry]?
+    @State private var loadFailed = false
+
+    private var editingContact: FamilyContact? {
+        if case .edit(let contact) = target { return contact }
+        return nil
+    }
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private var trimmedSearch: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    private var canSave: Bool { !trimmedName.isEmpty }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                header
+                photoSection
+                searchSection
+                manualFields
+                saveButton
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .onAppear {
+            loadDraft()
+            refreshSearchAccess()
+        }
+        .onChange(of: scenePhase) { phase in
+            // Returning from Settings after the access card's
+            // "Open Settings" is the denial → grant path; re-check then.
+            if phase == .active {
+                refreshSearchAccess()
+            }
+        }
+        .onChange(of: photoPickerItem) { item in
+            loadPickedPhoto(item)
+        }
+    }
+
+    // MARK: Sheet chrome
+
+    private var header: some View {
+        HStack(spacing: 12) {
             Button {
-                let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { return }
-                let handle = messengerHandle.trimmingCharacters(in: .whitespacesAndNewlines)
-                coordinator.addFamilyContact(name: trimmed, phone: phone,
-                                             relationship: relationship,
-                                             messengerHandle: handle.isEmpty ? nil : handle)
-                name = ""; phone = ""; relationship = ""; messengerHandle = ""
+                dismiss()
             } label: {
-                Text("settings.family.add")
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                    .frame(width: DesignTokens.minTapTargetSize,
+                           height: DesignTokens.minTapTargetSize)
+                    .background(DesignTokens.card)
+                    .clipShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("common.back"))
+            Text("settings.family.title")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textPrimary)
+            Spacer()
+        }
+    }
+
+    // MARK: Photo (add / change / remove)
+
+    private var photoSection: some View {
+        VStack(spacing: 12) {
+            photoPreview
+            photoControls
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// What the preview shows right now: a just-picked image wins over
+    /// the stored one, and an explicit remove clears both.
+    private var displayedPhoto: UIImage? {
+        if let pickedPhoto { return pickedPhoto }
+        if removingStoredPhoto { return nil }
+        return storedPhoto
+    }
+
+    @ViewBuilder
+    private var photoPreview: some View {
+        if let photo = displayedPhoto {
+            Image(uiImage: photo)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 96, height: 96)
+                .clipShape(Circle())
+        } else {
+            FaceAvatar(name: name, diameter: 96)
+        }
+    }
+
+    /// Add photo (none shown) / Change photo (one shown) over the
+    /// system Photos picker; Remove photo only for a stored photo being
+    /// edited (a fresh pick on an add is simply discarded by closing).
+    private var photoControls: some View {
+        HStack(spacing: 12) {
+            PhotosPicker(selection: $photoPickerItem, matching: .images) {
+                Text(displayedPhoto == nil ? "family.photo.add" : "family.photo.change")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: DesignTokens.chipHeight)
+                    .padding(.horizontal, 18)
+                    .frame(height: DesignTokens.minTapTargetSize)
+                    .background(DesignTokens.accent)
+                    .clipShape(Capsule())
+            }
+            if editingContact != nil, displayedPhoto != nil {
+                Button {
+                    pickedPhoto = nil
+                    removingStoredPhoto = true
+                } label: {
+                    Text("family.photo.remove")
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                        .padding(.horizontal, 18)
+                        .frame(height: DesignTokens.minTapTargetSize)
+                        .background(DesignTokens.background)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func loadPickedPhoto(_ item: PhotosPickerItem?) {
+        guard let item else { return }
+        Task {
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else { return }
+            pickedPhoto = image
+            removingStoredPhoto = false
+        }
+    }
+
+    // MARK: Native-contacts search (above the manual fields)
+
+    @ViewBuilder
+    private var searchSection: some View {
+        VStack(spacing: 10) {
+            switch access {
+            case .allowed:
+                searchField
+                if entries == nil {
+                    if loadFailed {
+                        loadFailedRow
+                    } else {
+                        loadingRow
+                    }
+                } else if !trimmedSearch.isEmpty {
+                    searchResults
+                }
+            case .denied:
+                blockedSearchCard
+            case .notDetermined:
+                askAccessCard
+            case nil:
+                // Authorization still being read — render nothing so the
+                // ask card can never flash before onAppear resolves it.
+                EmptyView()
+            }
+        }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 15))
+                .foregroundColor(DesignTokens.textSecondary)
+            TextField(LocalizedStringKey("family.addSearch.placeholder"), text: $searchText)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+        }
+        .padding(.horizontal, 14)
+        .frame(height: DesignTokens.minTapTargetSize)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+    }
+
+    /// The matched address-book rows, most-recently-called first — the
+    /// same pure search the Phone leaf runs over the same fetched book.
+    /// Tapping a row PREFILLS the manual fields below; the fields stay
+    /// editable, and manual entry remains the always-available path.
+    @ViewBuilder
+    private var searchResults: some View {
+        if let entries {
+            let outcome = SystemContactSearch.search(query: trimmedSearch,
+                                                     in: entries,
+                                                     recency: coordinator.contactCallRecency)
+            if outcome.entries.isEmpty {
+                Text("call.search.noResults")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 4)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(outcome.entries) { entry in
+                        Button {
+                            prefill(entry)
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "person.crop.circle.badge.plus")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(DesignTokens.accent)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.name)
+                                        .font(.system(size: DesignTokens.minBodyPointSize,
+                                                      weight: .semibold))
+                                        .foregroundColor(DesignTokens.textPrimary)
+                                        .lineLimit(1)
+                                    Text(entry.caption)
+                                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                                        .foregroundColor(DesignTokens.textSecondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer(minLength: 8)
+                            }
+                            .padding(.horizontal, 12)
+                            .frame(minHeight: DesignTokens.minTapTargetSize)
+                            .background(DesignTokens.background)
+                            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                if outcome.moreAvailable {
+                    Text("call.search.moreAvailable")
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 4)
+                }
+            }
+        }
+    }
+
+    private var loadingRow: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+            Text("call.search.loading")
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var loadFailedRow: some View {
+        HStack(spacing: 10) {
+            Text("call.search.loadFailed")
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button {
+                loadEntries()
+            } label: {
+                Text("call.search.retry")
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 16)
+                    .frame(height: 40)
+                    .background(DesignTokens.accent)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// The one point-of-use ask — plain-language card first, the system
+    /// prompt only after the user taps Allow (constitution; mirror of
+    /// CallView's access card).
+    private var askAccessCard: some View {
+        VStack(spacing: 12) {
+            Text("family.addSearch.allowTitle")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textPrimary)
+                .multilineTextAlignment(.center)
+            Text("family.addSearch.allowBody")
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+                .multilineTextAlignment(.center)
+            Button {
+                grantAccess()
+            } label: {
+                Text("call.search.allowButton")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .frame(height: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.accent)
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }
@@ -1249,6 +1625,163 @@ struct FamilyContactsSettingsView: View {
         .frame(maxWidth: .infinity)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// Denied/restricted: the honest blocked line with the search
+    /// hidden — only the system Settings screen can lift it, so the
+    /// card points there. Manual entry below never depended on this.
+    private var blockedSearchCard: some View {
+        VStack(spacing: 12) {
+            Text("call.search.deniedTitle")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textPrimary)
+                .multilineTextAlignment(.center)
+            Text("family.addSearch.deniedBody")
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+                .multilineTextAlignment(.center)
+            Button {
+                guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                UIApplication.shared.open(url)
+            } label: {
+                Text("call.search.openSettings")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .frame(height: DesignTokens.minTapTargetSize)
+                    .background(DesignTokens.accent)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    private func refreshSearchAccess() {
+        let status = AddressBookDirectory.access()
+        access = status
+        guard status == .allowed else { return }
+        if entries == nil || loadFailed {
+            loadEntries()
+        }
+    }
+
+    private func grantAccess() {
+        Task {
+            let granted = await directory.requestAccess()
+            access = AddressBookDirectory.access()
+            if granted {
+                loadEntries()
+            }
+        }
+    }
+
+    private func loadEntries() {
+        loadFailed = false
+        Task {
+            do {
+                // A full-book enumerate can take a moment on first
+                // access — never block the main thread for it.
+                let loaded = try await Task.detached(priority: .userInitiated) {
+                    try AddressBookDirectory().allEntries()
+                }.value
+                self.entries = loaded
+            } catch {
+                self.loadFailed = true
+            }
+        }
+    }
+
+    /// Tapping a search result fills the manual fields below. The
+    /// fields stay fully editable; the query clears so the results
+    /// collapse and the filled form is the thing to look at.
+    private func prefill(_ entry: AddressBookEntry) {
+        name = entry.name
+        phone = entry.phone
+        searchText = ""
+    }
+
+    // MARK: Manual fields (always available) + Save
+
+    private var manualFields: some View {
+        VStack(spacing: 10) {
+            field(placeholderKey: "onboarding.stepFamily.name", text: $name)
+            field(placeholderKey: "onboarding.stepFamily.phone", text: $phone)
+                .keyboardType(.phonePad)
+            field(placeholderKey: "onboarding.stepFamily.relationship", text: $relationship)
+            field(placeholderKey: "onboarding.stepFamily.messenger", text: $messengerHandle)
+                .keyboardType(.asciiCapable)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Text("onboarding.stepFamily.messengerHint")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+        }
+    }
+
+    private func field(placeholderKey: String, text: Binding<String>) -> some View {
+        TextField(LocalizedStringKey(placeholderKey), text: text)
+            .font(.system(size: DesignTokens.minBodyPointSize))
+            .padding(14)
+            .frame(height: 56)
+            .background(DesignTokens.background)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+    }
+
+    private var saveButton: some View {
+        Button {
+            save()
+        } label: {
+            Text("onboarding.stepFamily.save")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: DesignTokens.chipHeight)
+                .background(canSave ? DesignTokens.accent
+                                    : DesignTokens.textSecondary.opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSave)
+        .padding(.top, 4)
+    }
+
+    private func loadDraft() {
+        guard let contact = editingContact else { return }
+        name = contact.name
+        phone = contact.phone
+        relationship = contact.relationship
+        messengerHandle = contact.messengerHandle ?? ""
+        // The stored photo, for the preview and the remove control
+        // (photos are best-effort — a missing file simply means none).
+        if contact.photoFilename != nil {
+            storedPhoto = coordinator.contactPhoto(for: contact)
+        }
+    }
+
+    private func save() {
+        let handle = messengerHandle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let messenger = handle.isEmpty ? nil : handle
+        let succeeded: Bool
+        if let contact = editingContact {
+            succeeded = coordinator.updateFamilyContact(
+                id: contact.id, name: trimmedName, phone: phone,
+                relationship: relationship, messengerHandle: messenger,
+                photo: pickedPhoto, removingPhoto: removingStoredPhoto)
+        } else {
+            succeeded = coordinator.addFamilyContact(name: trimmedName, phone: phone,
+                                                     relationship: relationship,
+                                                     messengerHandle: messenger,
+                                                     photo: pickedPhoto)
+        }
+        if succeeded { dismiss() }
+        // A failed store write keeps the draft on screen — Save again to
+        // retry; nothing was claimed that didn't happen.
     }
 }
 
