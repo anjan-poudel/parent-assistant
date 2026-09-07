@@ -62,6 +62,8 @@
 	<string>The camera is used to verify medication intake, and to photograph appliances, remotes, or screens when you ask for help using them. Appliance photos are sent to the assistant's cloud service so it can guide you.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Searching from the phone screen can call anyone in your phone book — including people added by WhatsApp, Messenger and other apps. The app works fully even if you say no.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>The assistant uses your location to tell you the local weather. Nothing else in the app uses it, and you can say no.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>The assistant needs microphone access to listen for your voice commands and wake word. Your voice data never leaves this device.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

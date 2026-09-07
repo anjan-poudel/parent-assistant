@@ -505,6 +505,17 @@ final class AppCoordinator: ObservableObject {
     /// the build-time Info.plist key (`PicovoiceAccessKey`) is absent.
     let wakeWordAccessKeyStore: WakeWordAccessKeyStore
 
+    // MARK: - Local tools (weather + web search, on-device stack)
+
+    /// [LOCAL-TOOLS] (2026-09-07) Google Custom Search credentials
+    /// (API key + engine ID) for the on-device-stack web-search tool —
+    /// the same Keychain `EncryptedLocalStorage` pattern as
+    /// `geminiConfigStore`/`wakeWordAccessKeyStore` above; a family member
+    /// enters them via Settings → Web search. Exposed for that Settings
+    /// screen; `CommandRouter` consults `isConfigured` before the search
+    /// tool may ever fire.
+    let searchConfigStore: SearchConfigStore
+
     /// Persisted "listen for Hey Sahayak" UI preference — UserDefaults
     /// (not a secret), same shape as `sttModelPreference` /
     /// `voiceEngineStack`. Defaults ON: inert until the key + .ppn exist
@@ -771,6 +782,12 @@ final class AppCoordinator: ObservableObject {
         // writes to. makeWakeWordEngine() reads it as the fallback when
         // the build-time Info.plist `PicovoiceAccessKey` is absent.
         self.wakeWordAccessKeyStore = WakeWordAccessKeyStore(storage: storage)
+
+        // [LOCAL-TOOLS] (2026-09-07): Google Custom Search credentials for
+        // the on-device-stack web-search tool (Settings → Web search).
+        // Deliberately created BEFORE the router below — the router must
+        // receive the store (not nil) or the search hook stays dormant.
+        self.searchConfigStore = SearchConfigStore(storage: storage)
 
         // Voice pipeline. Uses NullWakeWordEngine unless the Porcupine SPM
         // package is present AND the Settings toggle is ON AND a valid
@@ -1106,7 +1123,17 @@ final class AppCoordinator: ObservableObject {
             speaker: speaker,
             interpreter: router3,
             pluginRegistry: pluginRegistry,
-            geminiClient: geminiClient
+            geminiClient: geminiClient,
+            // [LOCAL-TOOLS] (2026-09-07) Live weather/search seams for the
+            // on-device stack: the search credential store, a fresh
+            // LocationFetcher per weather question (one request per
+            // instance — see LocationFetcher's doc), and URLSession for
+            // both transports (each tool's request carries its own
+            // timeout; see WeatherTool + the router's search timeout).
+            searchConfigStore: searchConfigStore,
+            locationFetcherFactory: { LocationFetcher() },
+            weatherTransport: URLSession.shared,
+            searchTransport: URLSession.shared
         )
         // Start with the fallback STT. Gemini is swapped in below once an
         // API key is configured.
@@ -1611,6 +1638,15 @@ final class AppCoordinator: ObservableObject {
         (intentRouter?.cloudEnabled ?? false)
             && (intentRouter?.cloudBrain?.isAvailable ?? false)
     }
+
+    /// [LOCAL-TOOLS] (2026-09-07) Local-tools stack gate for
+    /// `CommandRouter`. True only when the voice engine is the ON-DEVICE
+    /// stack — the live weather/search tools fire exclusively there,
+    /// because the Gemini stack answers open-domain questions natively
+    /// (search-grounded interpreter) and the tools would be redundant.
+    /// Mirrors the `voiceEngineStack` toggle directly, so flipping the
+    /// stack in Settings gates the tools with no other wiring.
+    var isOnDeviceStack: Bool { voiceEngineStack == .onDevice }
 
     /// Whether the assistant-brain model is currently arriving (queued /
     /// downloading / verifying) — the one state that turns `.needsSetup`

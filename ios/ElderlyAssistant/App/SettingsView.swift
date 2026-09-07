@@ -14,7 +14,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case appearance, language, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, quickApps, privacy, intentLog
+        case appearance, language, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, quickApps, privacy, intentLog
 
         var id: String {
             switch self {
@@ -26,6 +26,7 @@ struct SettingsView: View {
             case .voiceEngine: return "voiceEngine"
             case .wakeWord: return "wakeWord"
             case .ttsVoices: return "ttsVoices"
+            case .webSearch: return "webSearch"
             case .quickApps: return "quickApps"
             case .privacy: return "privacy"
             case .intentLog: return "intentLog"
@@ -72,6 +73,10 @@ struct SettingsView: View {
                         voiceEngineSectionRow
                         wakeWordSectionRow
                         ttsVoicesSectionRow
+                        // [LOCAL-TOOLS] (2026-09-07) Web search — Google CSE
+                        // credentials for the on-device stack's search tool.
+                        sectionRow(.webSearch, icon: "magnifyingglass.circle.fill",
+                                   titleKey: "searchSettings.title")
                         sectionRow(.quickApps, icon: "square.grid.2x2.fill", titleKey: "settings.quickApps.title")
                         sectionRow(.family, icon: "person.2.fill", titleKey: "settings.family.title")
                         sectionRow(.meds, icon: "pills.fill", titleKey: "settings.meds.title")
@@ -101,6 +106,7 @@ struct SettingsView: View {
             case .voiceEngine: VoiceEngineSettingsView()
             case .wakeWord: WakeWordSettingsView()
             case .ttsVoices: TTSVoicesSettingsView()
+            case .webSearch: SearchSettingsView()
             case .quickApps: QuickAccessAppsView()
             case .privacy: PrivacySettingsView()
             case .intentLog: IntentLogReviewView()
@@ -517,6 +523,131 @@ struct GeminiAPISettingsView: View {
             .frame(minHeight: DesignTokens.minTapTargetSize)
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Web search (local-tools, 2026-09-07)
+
+/// [LOCAL-TOOLS] (2026-09-07) Google Custom Search credentials for the
+/// on-device voice stack's web-search tool. Family-facing (the elderly
+/// primary user is never asked to handle API keys — same framing as the
+/// Gemini key screen): the two SecureFields mirror
+/// `GeminiAPISettingsView`'s field style exactly. Search fires only when
+/// BOTH halves of the pair exist and the voice engine is on-device; the
+/// quota + privacy lines state plainly what the tool does with the
+/// user's words.
+struct SearchSettingsView: View {
+    @EnvironmentObject var coordinator: AppCoordinator
+    @State private var draftAPIKey = ""
+    @State private var draftEngineID = ""
+    @State private var showClearConfirm = false
+
+    var body: some View {
+        LeafScreen(titleKey: "searchSettings.title") {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("searchSettings.explanation")
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+
+                VStack(alignment: .leading, spacing: 14) {
+                    credentialField(labelKey: "searchSettings.apiKey",
+                                    placeholderKey: "searchSettings.apiKey",
+                                    text: $draftAPIKey)
+                    credentialField(labelKey: "searchSettings.engineId",
+                                    placeholderKey: "searchSettings.engineId",
+                                    text: $draftEngineID)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(DesignTokens.card)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+
+                Button {
+                    // Empty drafts leave the stored value untouched —
+                    // clearing is the explicit Remove action below.
+                    let trimmedKey = draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let trimmedID = draftEngineID.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmedKey.isEmpty {
+                        coordinator.searchConfigStore.saveAPIKey(trimmedKey)
+                    }
+                    if !trimmedID.isEmpty {
+                        coordinator.searchConfigStore.saveSearchEngineID(trimmedID)
+                    }
+                    draftAPIKey = ""
+                    draftEngineID = ""
+                } label: {
+                    Text("searchSettings.save")
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: DesignTokens.minTapTargetSize)
+                        .background(draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    && draftEngineID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    ? DesignTokens.textSecondary.opacity(0.4) : DesignTokens.accent)
+                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                }
+                .buttonStyle(.plain)
+                .disabled(draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                          && draftEngineID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if coordinator.searchConfigStore.isConfigured {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(DesignTokens.accent)
+                        Text("searchSettings.statusConnected")
+                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                            .foregroundColor(DesignTokens.textSecondary)
+                        Spacer()
+                        Button(role: .destructive) {
+                            showClearConfirm = true
+                        } label: {
+                            Text("searchSettings.remove")
+                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                }
+
+                Text("searchSettings.quotaNote")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("searchSettings.privacy")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .confirmationDialog("searchSettings.removeConfirm", isPresented: $showClearConfirm) {
+            Button("searchSettings.remove", role: .destructive) {
+                coordinator.searchConfigStore.clear()
+            }
+            Button("common.back", role: .cancel) {}
+        }
+    }
+
+    /// One labeled SecureField card — same visual recipe as the Gemini
+    /// key field (monospaced, min tap height, outlined bubble).
+    private func credentialField(labelKey: LocalizedStringKey,
+                                 placeholderKey: LocalizedStringKey,
+                                 text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(labelKey)
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textSecondary)
+            SecureField(placeholderKey, text: text)
+                .font(.system(size: DesignTokens.minBodyPointSize, design: .monospaced))
+                .padding(14)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
+                        .stroke(DesignTokens.textSecondary.opacity(0.25), lineWidth: 1)
+                )
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+        }
     }
 }
 
