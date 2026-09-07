@@ -1847,6 +1847,40 @@
         }
       }
     },
+    "call.waSyncHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not seeing your WhatsApp people? In WhatsApp go to Settings → Privacy and turn on Sync contacts."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ह्वाट्सएपका सम्पर्कहरू देखिनुभएन? ह्वाट्सएपमा सेटिङ → गोपनीयतामा गएर सम्पर्क सिंक खोल्नुहोस्।"
+          }
+        }
+      }
+    },
+    "call.openWhatsApp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open WhatsApp"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ह्वाट्सएप खोल्नुहोस्"
+          }
+        }
+      }
+    },
     "common.back": {
       "extractionState": "manual",
       "localizations": {

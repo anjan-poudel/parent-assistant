@@ -492,6 +492,16 @@ struct CallView: View {
     }
     private var isSearching: Bool { !trimmedQuery.isEmpty }
 
+    /// WhatsApp present on this phone — the sync hint exists to guide
+    /// INTO WhatsApp, so with the app absent the whole card hides
+    /// (there is nothing to guide to). Probed live on the main thread
+    /// (body evaluation); the `whatsapp` scheme sits in
+    /// LSApplicationQueriesSchemes so the probe is honest.
+    private var whatsAppInstalled: Bool {
+        guard let url = URL(string: "whatsapp://") else { return false }
+        return UIApplication.shared.canOpenURL(url)
+    }
+
     /// Big search pill (≥44pt, body-size text, warm card). Search runs as
     /// the user types — no submit step to fumble.
     private var searchField: some View {
@@ -860,6 +870,14 @@ struct CallView: View {
                 ForEach(coordinator.familyContacts) { contact in
                     ContactTile(contact: contact)
                 }
+                if let entries, entries.count < 5, whatsAppInstalled {
+                    // WhatsApp people only reach the system address book —
+                    // which the search above sweeps — after the user turns
+                    // on WhatsApp's OWN "Sync contacts" device setting. The
+                    // card points at that two-line fix and opens WhatsApp;
+                    // a small book is exactly when the hint matters.
+                    WhatsAppSyncHintCard(openWhatsApp: coordinator.openWhatsAppContacts)
+                }
             }
         }
     }
@@ -926,6 +944,47 @@ private struct AddressBookAccessCard: View {
             guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
             UIApplication.shared.open(url)
         }
+    }
+}
+
+/// WhatsApp contact-sync hint (wa-sync-hint, 2026-09-07): WhatsApp
+/// people only reach the system address book — which the Phone leaf's
+/// search sweeps — once the user enables WhatsApp's OWN "Sync contacts"
+/// device setting (WhatsApp → Settings → Privacy). This app can't flip
+/// that setting, only point at it. Mirrors `AddressBookAccessCard`'s
+/// look (card background, body text via DesignTokens, one accent
+/// button); the button opens WhatsApp, where the fix lives. The card is
+/// shown only while a canOpenURL probe says WhatsApp is installed and
+/// the loaded book is small; the coordinator re-probes at the tap and
+/// announces honestly either way.
+private struct WhatsAppSyncHintCard: View {
+    /// Opens WhatsApp (the coordinator probes and announces).
+    var openWhatsApp: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "person.2.badge.gearshape")
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .foregroundColor(DesignTokens.accent)
+            Text(LocalizedStringKey("call.waSyncHint"))
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .foregroundColor(DesignTokens.textPrimary)
+                .multilineTextAlignment(.center)
+            Button(action: openWhatsApp) {
+                Text(LocalizedStringKey("call.openWhatsApp"))
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .frame(height: DesignTokens.minTapTargetSize)
+                    .background(DesignTokens.accent)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 }
 
