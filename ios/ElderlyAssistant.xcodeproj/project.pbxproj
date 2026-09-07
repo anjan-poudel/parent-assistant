@@ -96,6 +96,7 @@
 		72C5DCF0A0774E359FF6167C /* MemoryProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CA1D94894BBEEB22126873C /* MemoryProbe.swift */; };
 		73913ACE19E1A9C3EEF6FEC3 /* ApplianceManualLibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8077B4180FA50883EDB20F1E /* ApplianceManualLibraryModel.swift */; };
 		75DC469A0C7850223E1E56DB /* CalculatorToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DA4FEBF1B7D336A55E49CE7 /* CalculatorToolTests.swift */; };
+		762FEF6EEA21A878B8A4D8B4 /* FacebookArchiveParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFF7638D92A8EC301338B57A /* FacebookArchiveParser.swift */; };
 		763161FE0570CCACDD200538 /* SherpaTTSEngineSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5DFB692BA73C236DF16E7B0 /* SherpaTTSEngineSmokeTests.swift */; };
 		7721DD8366DF52E918926DA8 /* KeychainEncryptedStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF694F3FBB8E78AF5BBCC74 /* KeychainEncryptedStorage.swift */; };
 		77513354E6D2333576B5A9FA /* OnboardingState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3EB972E8CC8D69D5ABE0BF7 /* OnboardingState.swift */; };
@@ -219,6 +220,7 @@
 		F2545B47080302C2D47C85BB /* WhisperSpeechRecognizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EF74EEC9797CDE01B05BAA0 /* WhisperSpeechRecognizerTests.swift */; };
 		F3B953CB7A04CE42E5CAA5D3 /* RoutineScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57460B428A12FE53D4F1ACEE /* RoutineScheduler.swift */; };
 		F46656314EF3B024F5871089 /* AudioSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54BA14F8D657DC91DFCC22AF /* AudioSessionManager.swift */; };
+		F5B6567562467C3A100334C3 /* FacebookArchiveParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F06203E2B2091AEFC198603 /* FacebookArchiveParserTests.swift */; };
 		F5F45F00A4E7C75F5C12E419 /* VoiceContactSearchRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48272FA061C2AED41E6DED18 /* VoiceContactSearchRoute.swift */; };
 		FAF5990EE46B3F7B950249B2 /* DependencyProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50EFF6165E6175FF1A801198 /* DependencyProtocols.swift */; };
 		FD0C74053396420771C700C1 /* SpeakerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A94328FF3C48D674B487DD12 /* SpeakerTests.swift */; };
@@ -328,6 +330,7 @@
 		5B80BB3C068100E30CFD3B9C /* OnboardingStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingStateTests.swift; sourceTree = "<group>"; };
 		5C27C666598A26EED7203E09 /* IntentLogStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentLogStoreTests.swift; sourceTree = "<group>"; };
 		5CD2AC05E4A8FC9B884539C1 /* AppLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLanguage.swift; sourceTree = "<group>"; };
+		5F06203E2B2091AEFC198603 /* FacebookArchiveParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FacebookArchiveParserTests.swift; sourceTree = "<group>"; };
 		5F1E8CAFF81975F728099576 /* LlamaCommandInterpreterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaCommandInterpreterTests.swift; sourceTree = "<group>"; };
 		5F383092EDDE12BB83A67E16 /* FestivalCalendarServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FestivalCalendarServiceTests.swift; sourceTree = "<group>"; };
 		6049FE3C4BC8944626675C41 /* GeminiCommandInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiCommandInterpreter.swift; sourceTree = "<group>"; };
@@ -390,6 +393,7 @@
 		AA5EF8A3254973EE565E766B /* CommandRouterReplySafetyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRouterReplySafetyTests.swift; sourceTree = "<group>"; };
 		AA7962DC2383BB09B89340F5 /* Speaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Speaker.swift; sourceTree = "<group>"; };
 		AD5B0563FB83838D506EA5E4 /* EscalationEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EscalationEngineTests.swift; sourceTree = "<group>"; };
+		AFF7638D92A8EC301338B57A /* FacebookArchiveParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FacebookArchiveParser.swift; sourceTree = "<group>"; };
 		B10A24847193D89DECCB875F /* AssistantPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantPlugin.swift; sourceTree = "<group>"; };
 		B1EFF324CC36FB7B56F7FA15 /* PiperVoiceSpeakerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiperVoiceSpeakerTests.swift; sourceTree = "<group>"; };
 		B38179627F576D83778149A9 /* QuickAccessAppsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickAccessAppsView.swift; sourceTree = "<group>"; };
@@ -563,6 +567,7 @@
 		5372959602B907EB0CC6082E /* Contacts */ = {
 			isa = PBXGroup;
 			children = (
+				5F06203E2B2091AEFC198603 /* FacebookArchiveParserTests.swift */,
 				8B0009E300F2E5A029239EF5 /* MessengerHandleStoreTests.swift */,
 				DE19D3B8DCDC23B845EB9323 /* SystemContactSearchTests.swift */,
 				D63F2DFCD9600AEF6746584B /* UnifiedContactSearchTests.swift */,
@@ -1023,6 +1028,7 @@
 			children = (
 				9059F5AEB1D33F6E5844364A /* AddressBookDirectory.swift */,
 				94A0C8A422471F7D66CAC5CC /* CallRecencyStore.swift */,
+				AFF7638D92A8EC301338B57A /* FacebookArchiveParser.swift */,
 				409CA4E09DBD00B9FE9E6AE6 /* MessengerHandleStore.swift */,
 				D5D597BE53A1783851BFAEED /* UnifiedContactSearch.swift */,
 			);
@@ -1224,6 +1230,7 @@
 				4BF2988FCED95DD8A8B71BC4 /* DoubleDoseDetector.swift in Sources */,
 				0D70DE412C00001898760AF5 /* ElderlyAssistantApp.swift in Sources */,
 				203223B8756FC96334BC2960 /* EscalationEngine.swift in Sources */,
+				762FEF6EEA21A878B8A4D8B4 /* FacebookArchiveParser.swift in Sources */,
 				D198F3FBC006A1F667C0F4A0 /* FamilyContactStore.swift in Sources */,
 				8CD67C3B34F99F3EC51312F9 /* FamilyNotifier.swift in Sources */,
 				018596E1F52E3ADCC43D9444 /* FestivalCalendarService.swift in Sources */,
@@ -1343,6 +1350,7 @@
 				85B42C13987E77A9592E8572 /* DoubleDoseDetectorTests.swift in Sources */,
 				B21B3DF09B034133EFFFDF1B /* EnergyVADTests.swift in Sources */,
 				EAA4C9A61CDA5778686FDA76 /* EscalationEngineTests.swift in Sources */,
+				F5B6567562467C3A100334C3 /* FacebookArchiveParserTests.swift in Sources */,
 				E1766AE6441AE64DFC6D6DA9 /* FamilyContactStoreTests.swift in Sources */,
 				642A0B735A9C84D2E9E0AB59 /* FestivalCalendarServiceTests.swift in Sources */,
 				CAB99607C19DA4F02CDCEFA6 /* GeminiClientTests.swift in Sources */,

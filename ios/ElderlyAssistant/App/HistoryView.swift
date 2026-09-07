@@ -206,10 +206,18 @@ enum HistoryTimeFormat {
         if interval >= 0, interval < 60 {
             return L10n.str("history.timeNow", locale: locale)
         }
-        if calendar.isDateInToday(timestamp) {
+        // Day buckets are NOW-relative (fix 2026-09-07): the previous
+        // `calendar.isDateInToday/isDateInYesterday` read the WALL
+        // CLOCK, so the buckets silently depended on the run date — the
+        // unit tests (which pin `now`) passed only while the fixture
+        // date happened to be the real today. Bucketing off `now`'s own
+        // day makes the function a pure function of its inputs.
+        let dayStart = calendar.startOfDay(for: now)
+        if timestamp >= dayStart {
             return L10n.str("history.timeToday", locale: locale)
         }
-        if calendar.isDateInYesterday(timestamp) {
+        if let yesterdayStart = calendar.date(byAdding: .day, value: -1, to: dayStart),
+           timestamp >= yesterdayStart {
             return L10n.str("history.timeYesterday", locale: locale)
         }
         // Older rows get a localized short date in the app's language.
