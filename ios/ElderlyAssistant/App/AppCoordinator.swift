@@ -3126,6 +3126,35 @@ final class AppCoordinator: ObservableObject {
         executeNavigation(to: target)
     }
 
+    // MARK: - Touch wrappers for the Directions leaf (directions-screen
+    // task, 2026-09-07)
+
+    /// Navigates to the saved place with `id` — thin named surface for
+    /// the Directions leaf's जाऊ buttons. Delegates straight into the
+    /// shared navigation executor (`requestNavigation`), so map-app
+    /// policy, geocode/open fallbacks, in-app presentation and the
+    /// honest spoken lines all stay owned in exactly one place; a
+    /// missing id resolves honestly (`directions.placeNotFound`) instead
+    /// of dead-ending.
+    func navigateToPlace(id: UUID) {
+        requestNavigation(to: .place(id))
+    }
+
+    /// Navigates to the family contact with `id` — thin named surface
+    /// for the Directions leaf's जाऊ buttons (same single-executor
+    /// rule as `navigateToPlace(id:)`).
+    func navigateToFamilyContact(id: UUID) {
+        requestNavigation(to: .familyContact(id))
+    }
+
+    /// Drives to the default home — thin named surface for the "take me
+    /// home" path every caller reaches for by name. With no `.home`
+    /// place saved the executor speaks the honest `directions.noHome`
+    /// fallback.
+    func navigateHome() {
+        requestNavigation(to: .defaultHome)
+    }
+
     /// The core navigation executor — shared by `requestNavigation` and
     /// the ambiguity walk's yes branch. Resolves the target to a concrete
     /// destination, then launches the map surface the current override

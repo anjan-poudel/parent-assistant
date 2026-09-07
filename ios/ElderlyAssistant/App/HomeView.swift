@@ -9,6 +9,9 @@ enum LeafDestination: Identifiable {
     case call
     case history
     case settings
+    /// Directions (directions-screen task, 2026-09-07): the saved-targets
+    /// map leaf, docked next to Appliance per the task brief.
+    case directions
 
     var id: String {
         switch self {
@@ -18,6 +21,7 @@ enum LeafDestination: Identifiable {
         case .call: return "call"
         case .history: return "history"
         case .settings: return "settings"
+        case .directions: return "directions"
         }
     }
 }
@@ -135,9 +139,11 @@ struct HomeView: View {
             Spacer()
             // The date/greeting area doubles as the calendar's entry
             // point (2026-09-06: calendar lives ON the home screen via
-            // this tap target, NOT as a 5th dock item — the dock stays
-            // at three clean entries per the "keep dock items clean"
-            // direction; settings moved to the top bar 2026-09-06).
+            // this tap target, NOT as a dock item; settings moved to the
+            // top bar the same day). The dock's own item count changed
+            // since — meds, reminders, call, appliance, directions
+            // (2026-09-07) — so no count claim lives in this comment; the
+            // authoritative list is `dock` below.
             NavigationLink(value: LeafDestination.calendar) {
                 // Live clock (greeting-clock fix, 2026-09-07): the shown
                 // time used to freeze at launch because `greetingText`
@@ -426,7 +432,11 @@ struct HomeView: View {
     }
 
     // MARK: - Dock (redesign spec §3.1 — replaces the 2×2 hub grid; Home
-    // is the only screen that shows it)
+    // is the only screen that shows it). Items share width equally
+    // (`frame(maxWidth: .infinity)` per tile) and labels wrap when they
+    // must, so the five tiles — meds, reminders, call, appliance,
+    // directions (directions-screen task, 2026-09-07) — fit one row at
+    // the standard widths the surrounding screens were tuned at.
 
     private var dock: some View {
         HStack(spacing: 2) {
@@ -434,6 +444,7 @@ struct HomeView: View {
             dockItem(.reminders, icon: "clock.fill", tint: .reminders, titleKey: "home.hub.reminders")
             dockCallItem
             dockApplianceItem
+            dockDirectionsItem
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 10)
@@ -490,6 +501,14 @@ struct HomeView: View {
         .buttonStyle(.plain)
     }
 
+    /// Directions (directions-screen task, 2026-09-07) — the map tile
+    /// docked right next to Appliance per the task brief. The map icon
+    /// reads "navigation" against the house/appliance row; it pushes the
+    /// Directions leaf like every other dock tile.
+    private var dockDirectionsItem: some View {
+        dockItem(.directions, icon: "map.fill", tint: .directions, titleKey: "home.hub.directions")
+    }
+
     // MARK: - Leaf routing
 
     @ViewBuilder
@@ -507,6 +526,8 @@ struct HomeView: View {
             HistoryView()
         case .settings:
             SettingsView()
+        case .directions:
+            DirectionsView()
         }
     }
 

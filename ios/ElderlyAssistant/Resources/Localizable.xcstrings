@@ -2017,6 +2017,193 @@
         }
       }
     },
+    "directions.empty.addAccessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a place in Settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सेटिङमा ठाउँ थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.empty.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save your home, hospital and family houses in Settings — then come back and tap Go."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आफ्नो घर, अस्पताल र परिवारका घरहरू सेटिङमा बचत गर्नुहोस् — अनि फर्केर जाऊ थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "directions.goAccessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Let's go to %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ मा जाऔँ"
+          }
+        }
+      }
+    },
+    "directions.goLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जाऊ"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जाऊ"
+          }
+        }
+      }
+    },
+    "directions.search.micFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The mic couldn't hear — please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माइकले सुन्न सकेन — फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "directions.search.micLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search by voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बोलेर खोज्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.search.micListening": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listening — say a place or a person"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्दै छु — ठाउँ वा मान्छेको नाम भन्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.search.micStopLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop listening"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्न रोक्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.search.noResults": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No place or person named \"%@\" was found. Try a different name."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” नामको ठाउँ वा मान्छे भेटिएन। अर्को नाम लेख्नुहोस्।"
+          }
+        }
+      }
+    },
+    "directions.search.placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search places and people"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठाउँ र मान्छे खोज्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Directions"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जाने बाटो"
+          }
+        }
+      }
+    },
     "emergency.noContact": {
       "extractionState": "manual",
       "localizations": {
@@ -3271,6 +3458,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "फोन"
+          }
+        }
+      }
+    },
+    "home.hub.directions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Directions"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बाटो"
           }
         }
       }

@@ -47,7 +47,7 @@ enum DesignTokens {
     /// color family used elsewhere (meds/reminders = accent family, call =
     /// blue, settings = purple, emergency = red).
     enum BadgeTint {
-        case meds, reminders, call, appliance, settings, apps, emergency
+        case meds, reminders, call, appliance, settings, apps, emergency, directions
 
         var background: Color {
             switch self {
@@ -58,6 +58,7 @@ enum DesignTokens {
             case .settings: return Color(red: 0.937, green: 0.918, blue: 0.965)  // #EFEAF6
             case .apps: return Color(red: 0.878, green: 0.941, blue: 0.949)      // #E0F0F2
             case .emergency: return Color.white
+            case .directions: return Color(red: 0.867, green: 0.945, blue: 0.969) // #DDF1F7
             }
         }
         var tint: Color {
@@ -69,6 +70,11 @@ enum DesignTokens {
             case .settings: return DesignTokens.stateUnderstanding
             case .apps: return Color(red: 0.122, green: 0.478, blue: 0.549)      // #1F7A8C
             case .emergency: return Color(red: 0.706, green: 0.251, blue: 0.118) // #B4401E
+            // Directions/maps (2026-09-07): the one dock badge in the
+            // blue-cyan family that reads "navigation" — lighter and
+            // brighter than the call badge's navy so the two never
+            // merge, and far from the map-free teal of the Quick apps.
+            case .directions: return Color(red: 0.106, green: 0.522, blue: 0.639) // #1B85A3
             }
         }
     }
