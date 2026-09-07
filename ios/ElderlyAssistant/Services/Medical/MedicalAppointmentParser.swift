@@ -78,12 +78,15 @@ enum MedicalAppointmentParser {
 
         let doctorOrPlace: String
         var finalPlace: String?
+        // A separately-kept venue gets the same presentation capitalisation
+        // as the label — `normalise` lowercased the whole SMS, so the
+        // source's "Xyz …" must be restored here ("Xyz medical centre").
         if let doctorName, !doctorName.isEmpty {
             doctorOrPlace = capitaliseWords(doctorName)
-            finalPlace = place
+            finalPlace = place.map(Self.capitaliseWords)
         } else if hasDoctorWord(text) {
             doctorOrPlace = isNepali ? "डाक्टर" : "Doctor"
-            finalPlace = place
+            finalPlace = place.map(Self.capitaliseWords)
         } else if let place, !place.isEmpty {
             // Venue-only message ("…appointment tomorrow at 2.30pm at
             // Xyz medical centre"): the venue IS the appointment label.

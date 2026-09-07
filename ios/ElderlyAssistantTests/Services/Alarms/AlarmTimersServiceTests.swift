@@ -37,6 +37,15 @@ private final class RecordingNotificationCenter: LocalNotificationScheduling {
 /// notification shapes, permission denial storing nothing, caps, toggling /
 /// cancelling / expiring / pruning, the FR-025 `scheduleAll` re-arm and
 /// localized notification content.
+///
+/// Main-confined by contract: `AlarmTimersService` mutates its state on the
+/// main thread and `scheduleAll()` / `expireTimer(id:)` DISPATCH to main when
+/// called off it (background task / notification callbacks). XCTest runs
+/// `async` test methods on a background executor, so without `@MainActor`
+/// those sync calls would only enqueue work and the assertions right after
+/// them would race the main-queue pass. Running the class on the main actor
+/// makes every service call execute synchronously, as the UI does.
+@MainActor
 final class AlarmTimersServiceTests: XCTestCase {
 
     private var storage: MockEncryptedLocalStorage!
@@ -112,7 +121,7 @@ final class AlarmTimersServiceTests: XCTestCase {
         XCTAssertEqual(event?.component, "alarms_timers")
         XCTAssertEqual(event?.eventType, "alarm_created")
         XCTAssertEqual(event?.outcome, "success")
-        XCTAssertNotNil(event?.metadata?["id_hash"])
+        XCTAssertNotNil(event?.metadata["id_hash"])
     }
 
     func testAddAlarmFutureTimeStaysSameDay() async {

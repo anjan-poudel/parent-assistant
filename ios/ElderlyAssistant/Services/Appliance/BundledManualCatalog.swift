@@ -133,7 +133,11 @@ enum BundledManualCatalog {
         let directory = imagesFolder
             .appendingPathComponent((path as NSString).deletingLastPathComponent,
                                     isDirectory: true)
-        let stem = (path as NSString).deletingPathExtension
+        // Stem of the FILE NAME only — deletingPathExtension on the full
+        // relative path keeps the directory prefix ("remote/overview"),
+        // which can never equal the filename stems it is compared against.
+        let stem = ((path as NSString).lastPathComponent as NSString)
+            .deletingPathExtension
         let files = (try? FileManager.default.contentsOfDirectory(at: directory,
                                                                   includingPropertiesForKeys: nil)) ?? []
         return files.first { $0.deletingPathExtension().lastPathComponent == stem }

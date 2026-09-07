@@ -40,6 +40,7 @@
 		15BA28E1D49E338A2BDEB177 /* EventKitCalendarGateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8EDD9CA31EBC913DC387D49 /* EventKitCalendarGateway.swift */; };
 		16CDB50A84CA31870D3C4DDC /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = C51E1D3A1B144677E2F3A616 /* Localizable.xcstrings */; };
 		18BEB7D45D5046004C294903 /* IntentCommandCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26F476E23A6729932ACA0823 /* IntentCommandCacheTests.swift */; };
+		19525FB38ED464EFF6ABA14A /* Manuals in Resources */ = {isa = PBXBuildFile; fileRef = 362021F4C31BC4EF6CE8954A /* Manuals */; };
 		1A2FC2D00A0CC98920EDCECF /* ReplySanityGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8701F856AF6C2479D49CF19D /* ReplySanityGate.swift */; };
 		1AE062785099B2A92B49F9ED /* CallLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62FF5D6C4374911BDBFB167D /* CallLinks.swift */; };
 		1E4E2CACAEA900314E8D7026 /* NepaliTimeParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A15958C4A3DCF9FC454627A /* NepaliTimeParser.swift */; };
@@ -368,6 +369,7 @@
 		2F4098459DFF8C5CD563A22B /* ApplianceHelperSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceHelperSession.swift; sourceTree = "<group>"; };
 		3594E79FEA1BABFE0B7C332A /* ApplianceHelperPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceHelperPluginTests.swift; sourceTree = "<group>"; };
 		35DEBB0320FDD95210E5B784 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
+		362021F4C31BC4EF6CE8954A /* Manuals */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Manuals; path = ElderlyAssistant/Resources/Manuals; sourceTree = SOURCE_ROOT; };
 		36D579A260BDE663399BB7BC /* FamilyContactStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyContactStoreTests.swift; sourceTree = "<group>"; };
 		36F83422AC06BB7FB331135D /* InAppNavigationSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InAppNavigationSession.swift; sourceTree = "<group>"; };
 		3AF7478D117F7C991FC99A68 /* EscalationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EscalationEngine.swift; sourceTree = "<group>"; };
@@ -1020,6 +1022,7 @@
 			children = (
 				06E05F28CEB7B79070AFC14D /* AppIcons.xcassets */,
 				C51E1D3A1B144677E2F3A616 /* Localizable.xcstrings */,
+				362021F4C31BC4EF6CE8954A /* Manuals */,
 				76398CBD05D4B8E57B2A58CB /* Models */,
 			);
 			path = Resources;
@@ -1572,6 +1575,7 @@
 			files = (
 				334F939E8B4CCEFC727018A4 /* AppIcons.xcassets in Resources */,
 				16CDB50A84CA31870D3C4DDC /* Localizable.xcstrings in Resources */,
+				19525FB38ED464EFF6ABA14A /* Manuals in Resources */,
 				E4A41DDD8D18E332FADFAAED /* tts in Resources */,
 				FF6D253A37F069880D322578 /* whisper-medium-ne-q5_1.bin in Resources */,
 			);
