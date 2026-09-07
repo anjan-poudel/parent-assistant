@@ -40,6 +40,15 @@ import Foundation
 /// navigation pipeline forward-geocodes it at request time. Optional,
 /// same unversioned-store migration rule: a payload written before the
 /// field existed loads address-less instead of failing the read.
+///
+/// `isEmergencyContact` (family-emergency task, 2026-09-07): marks the
+/// person the Emergency affordance dials FIRST (see
+/// `AppCoordinator.preferredEmergencyContact`). Unlike the optional
+/// fields above it is a NON-optional Bool defaulted false — "not
+/// flagged" is a real value that must survive — so its migration is a
+/// decoder default, not nil: the custom decoder reads a missing key as
+/// false, and a pre-flag payload simply falls back to the old behavior
+/// (first contact wins).
 struct FamilyContact: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String
@@ -55,6 +64,11 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     /// never set one (the contact then cannot be a navigation target).
     var address: String?
 
+    /// Whether the Emergency affordance dials this contact before any
+    /// other (family-emergency task, 2026-09-07). False when unset —
+    /// see `AppCoordinator.preferredEmergencyContact` for the rule.
+    var isEmergencyContact: Bool
+
     /// App the video button opens for this contact. Default `.faceTime`
     /// (the global default) — the only app that truly starts a video
     /// call from a deep link.
@@ -68,7 +82,7 @@ struct FamilyContact: Codable, Identifiable, Equatable {
          messengerHandle: String? = nil,
          preferredVideoApp: CallApp = .faceTime, preferredCallApp: CallApp = .phone,
          photoFilename: String? = nil, nickname: String? = nil,
-         address: String? = nil) {
+         address: String? = nil, isEmergencyContact: Bool = false) {
         self.id = id
         self.name = name
         self.phone = phone
@@ -79,6 +93,7 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         self.photoFilename = photoFilename
         self.nickname = nickname
         self.address = address
+        self.isEmergencyContact = isEmergencyContact
     }
 
     /// Custom decode: contacts persisted BEFORE the preference fields
@@ -105,6 +120,11 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         // Same rule for the address (directions task, 2026-09-07): a
         // payload written before the field existed loads address-less.
         address = (try? container.decodeIfPresent(String.self, forKey: .address)) ?? nil
+        // The emergency flag (family-emergency task, 2026-09-07) is the
+        // one non-optional field: a missing key is not "nil value" but
+        // "not flagged" — false, the same answer a pre-flag payload
+        // would have given by construction.
+        isEmergencyContact = (try? container.decodeIfPresent(Bool.self, forKey: .isEmergencyContact)) ?? false
     }
 
     /// The app a VIDEO button resolves to (task: contact preference →

@@ -66,7 +66,11 @@ struct ApplianceHelperView: View {
             }
         }
         .onAppear {
-            guard !didAutoOpenCamera else { return }
+            // Auto-open belongs to a live capture session only: an ARMED
+            // session (bundled default manuals opened from the library or
+            // Settings, 2026-09-07) is already in .guidance and must not
+            // pop the camera over its step cards.
+            guard !didAutoOpenCamera, session.state == .capturing else { return }
             didAutoOpenCamera = true
             showCamera = true
         }
@@ -305,7 +309,7 @@ struct ApplianceHelperView: View {
             steps: presentation.guidance.steps,
             controls: presentation.visibleControls)
         return ForEach(cards, id: \.number) { card in
-            stepCard(card, image: image)
+            stepCard(card, image: session.bundledStepImages[card.number] ?? image)
         }
     }
 

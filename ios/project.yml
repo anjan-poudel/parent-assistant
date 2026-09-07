@@ -117,6 +117,13 @@ targets:
         # espeak-ng-data/) and avoiding flat-copy filename collisions
         # between the two voices' identical espeak-ng-data contents.
         type: folder
+      # Bundled default instruction manuals — Resources/Manuals/README.md.
+      # Blue folder reference: the whole directory lands in the bundle as
+      # Manuals/, preserving the layout BundledManualCatalog expects
+      # (Manuals/manifest.json + Manuals/images/<app>/... jpgs).
+      - path: ElderlyAssistant/Resources/Manuals
+        buildPhase: resources
+        type: folder
     # Do NOT add an `info:` block here — that would make XcodeGen overwrite
     # ElderlyAssistant/Info.plist on every `./build.sh generate`, wiping the
     # real permission descriptions and BGTaskScheduler identifiers. Instead,

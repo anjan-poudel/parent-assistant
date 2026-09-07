@@ -72,6 +72,7 @@ final class AppCoordinator: ObservableObject {
         routineAlarmScheduler.locale = activeLocale
         routineScheduler.locale = activeLocale
         externalCalendar.locale = activeLocale
+        alarmTimersService.locale = activeLocale
         // Voice-OS shell v1: the briefing composes in the app language,
         // same injection pattern as every other locale-aware service.
         morningBriefing?.locale = activeLocale
@@ -483,6 +484,50 @@ final class AppCoordinator: ObservableObject {
     let placeStore: SavedPlaceStore
     @Published private(set) var savedPlaces: [SavedPlace]
 
+    /// Doctor's appointments (medical task, 2026-09-07) — the Medical
+    /// leaf's list, persisted encrypted under `medical.appointments` by
+    /// `AppointmentStore` (same shape as `familyContactStore` above).
+    /// Loaded once in `init`; every mutation below (Medical leaf add/remove
+    /// and the paste-confirmation flow) refreshes the published list from
+    /// the store, so the leaf and any future voice route read one truth.
+    /// The store also hands every saved appointment to the
+    /// `MedicalAppointmentCalendarWriting` seam — the calendar-2way task's
+    /// EventKit backend replaces the shipped no-op; see
+    /// `calendarWritesEnabled` in the store and the toggle below.
+    let appointmentStore: AppointmentStore
+    @Published private(set) var appointments: [MedicalAppointment]
+
+    /// Whether saved appointments are ALSO written to the native iPhone
+    /// Calendar (medical task, 2026-09-07) — the Medical leaf's toggle
+    /// `medical.calendarToggle`, default ON. A UI preference, not a
+    /// secret — persisted in UserDefaults the same way as `appTheme`.
+    /// didSet persists AND re-syncs the store's `calendarWritesEnabled`
+    /// gate, so flipping the toggle acts immediately (the same
+    /// instant-apply rule as `cloudFallbackEnabled`). The init-time
+    /// restore assigns directly and syncs the gate by hand (house
+    /// pattern — didSet does not fire there).
+    @Published var appointmentsToCalendar: Bool {
+        didSet {
+            UserDefaults.standard.set(appointmentsToCalendar,
+                                      forKey: Self.appointmentsToCalendarKey)
+            appointmentStore.calendarWritesEnabled = appointmentsToCalendar
+        }
+    }
+    private static let appointmentsToCalendarKey = "appointmentsToCalendar"
+
+    /// One-shot honest SMS caption (medical task, 2026-09-07): the
+    /// Medical leaf shows "the iPhone does not let apps read your text
+    /// messages…" once, until the senior (or family) dismisses it — a
+    /// preference, not a secret, persisted like `appTheme`. Dismissal is
+    /// confined to `dismissAppointmentSmsNote`.
+    @Published private(set) var appointmentSmsNoteDismissed: Bool {
+        didSet {
+            UserDefaults.standard.set(appointmentSmsNoteDismissed,
+                                      forKey: Self.appointmentSmsNoteDismissedKey)
+        }
+    }
+    private static let appointmentSmsNoteDismissedKey = "appointmentSmsNoteDismissed.v1"
+
     // Voice
     private let audioEngine: AVAudioEngine
     private let audioSessionManager: AudioSessionManager
@@ -840,6 +885,29 @@ final class AppCoordinator: ObservableObject {
         self.placeStore = placeStore
         self.savedPlaces = placeStore.load()
 
+        // Doctor's appointments (medical task, 2026-09-07) — encrypted
+        // like the contacts above; loaded immediately so the published
+        // list (Medical leaf) starts populated. The store invokes the
+        // `MedicalAppointmentCalendarWriting` seam (calendar-2way) on
+        // every save/remove when the toggle below is on; the shipped
+        // Noop writer means nothing happens until the integrator swaps
+        // in the EventKit backend.
+        let appointmentStore = AppointmentStore(storage: storage)
+        self.appointmentStore = appointmentStore
+        self.appointments = appointmentStore.load()
+
+        // Calendar auto-add toggle (medical task, 2026-09-07) — default
+        // ON when no value was ever stored. This is the property's ONLY
+        // initial assignment, so its didSet does not fire here; the
+        // store's calendar gate is synced by hand (same rule as
+        // `appTheme` above).
+        let appointmentsToCalendarValue =
+            UserDefaults.standard.object(forKey: Self.appointmentsToCalendarKey) as? Bool ?? true
+        self.appointmentsToCalendar = appointmentsToCalendarValue
+        appointmentStore.calendarWritesEnabled = appointmentsToCalendarValue
+        self.appointmentSmsNoteDismissed =
+            UserDefaults.standard.bool(forKey: Self.appointmentSmsNoteDismissedKey)
+
         // Safety-critical service (no LLM dependency)
         self.medicationScheduler = MedicationScheduler(
             storage: storage,
@@ -873,6 +941,35 @@ final class AppCoordinator: ObservableObject {
         // ask.
         let externalCalendar = ExternalCalendarService(observabilityBus: bus)
         self.externalCalendar = externalCalendar
+
+        // Alarms + timers (alarms-timers task, 2026-09-07). One service
+        // behind the voice stage, the Settings leaf and the launch +
+        // BGTask re-queue; locale starts at the scheduler default and is
+        // pushed to the service by `syncServiceLocales()` below (this
+        // runs before the persisted app language is restored).
+        let alarmTimersService = AlarmTimersService(
+            store: AlarmTimersStore(storage: storage),
+            scheduler: AlarmScheduler(
+                notifications: UNNotificationCenterScheduler()
+            ),
+            observabilityBus: bus
+        )
+        self.alarmTimersService = alarmTimersService
+
+        // Foreground notification delegate for alarms/timers. Constructed
+        // and RETAINED here — the center's delegate property is weak, so
+        // the coordinator owns the delegate's lifetime. The app had NO
+        // notification delegate before this feature (medication/routine
+        // banners only ever presented from the OS); this delegate presents
+        // alarm/timer notifications while the app is foregrounded and
+        // reports timer completions up for spoken output — every other
+        // notification keeps its old silent-foreground behavior (see
+        // `AlarmTimerNotificationDelegate`). Construction touches no
+        // permissions; its completion closure is attached at the end of
+        // init because it captures self.
+        let alarmTimerDelegate = AlarmTimerNotificationDelegate()
+        self.alarmTimerNotificationDelegate = alarmTimerDelegate
+        UNUserNotificationCenter.current().delegate = alarmTimerDelegate
 
         // Language — restore the persisted choice, defaulting to the Nepali
         // pilot language (spec §3.2).
@@ -1154,6 +1251,27 @@ final class AppCoordinator: ObservableObject {
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
             }
+
+        // Forward the alarms/timers service's publishes ([ALARMS-TIMERS]
+        // 2026-09-07) — nested ObservableObject, same pattern as the
+        // external-calendar forwarding above: the Settings leaf observes
+        // the coordinator, so a toggle/delete/timer-start must invalidate
+        // it through this sink.
+        alarmTimersCancellable = alarmTimersService.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+
+        // Foreground timer-completion reporting ([ALARMS-TIMERS]
+        // 2026-09-07): the retained delegate reports finished timers up
+        // through this closure — the row is expired and the completion is
+        // SPOKEN while the app is active (a chime the user cannot see is
+        // useless to someone already looking at the phone). Attached here
+        // (not next to the delegate's construction) because the closure
+        // captures self.
+        alarmTimerNotificationDelegate?.onForegroundTimerFinished = { [weak self] timerID in
+            self?.handleForegroundTimerFinished(timerID: timerID)
+        }
     }
 
     func start() {
@@ -1211,6 +1329,10 @@ final class AppCoordinator: ObservableObject {
         medicationScheduler.scheduleAll()
         // Same re-queue for routine reminders (FR-025)
         routineScheduler.scheduleAll()
+        // Same re-queue for alarms + timers ([ALARMS-TIMERS] 2026-09-07 —
+        // idempotent: pending requests replace in place by id, and
+        // expired timer rows are pruned first).
+        alarmTimersService.scheduleAll()
 
         // Festival notifications (BS calendar, 2026-09-06): day-of for
         // every catalog festival + advance N-day reminders for important
@@ -2173,18 +2295,26 @@ final class AppCoordinator: ObservableObject {
     ///
     /// `address` (directions task, 2026-09-07) is the contact's optional
     /// home address for voice navigation — blank text is stored as nil.
+    ///
+    /// `isEmergencyContact` (family-emergency task, 2026-09-07): whether
+    /// the wizard's "Emergency contact" toggle was on — the Emergency
+    /// affordance prefers flagged contacts (see `emergencyContact`).
+    /// Defaulted so the onboarding call site (which has no toggle) is
+    /// unchanged; an add written before the flag simply stores false.
     @discardableResult
     func addFamilyContact(name: String, phone: String, relationship: String,
                           messengerHandle: String? = nil,
                           photo: UIImage? = nil,
                           nickname: String? = nil,
-                          address: String? = nil) -> Bool {
+                          address: String? = nil,
+                          isEmergencyContact: Bool = false) -> Bool {
         let filename = photo.flatMap { contactPhotoStore.save($0) }
         let contact = FamilyContact(name: name, phone: phone, relationship: relationship,
                                     messengerHandle: messengerHandle,
                                     photoFilename: filename,
                                     nickname: nickname,
-                                    address: Self.normalizedOptionalText(address))
+                                    address: Self.normalizedOptionalText(address),
+                                    isEmergencyContact: isEmergencyContact)
         guard familyContactStore.add(contact) else {
             if let filename { contactPhotoStore.delete(named: filename) }
             return false
@@ -2210,18 +2340,29 @@ final class AppCoordinator: ObservableObject {
     /// `nickname` (family-wizard task, 2026-09-07): the wizard's
     /// optional informal name; nil clears a stored one, defaulted so
     /// pre-wizard callers compile unchanged.
+    ///
+    /// `isEmergencyContact` (family-emergency task, 2026-09-07): the
+    /// editor's current "Emergency contact" toggle value — the save
+    /// REPLACES the stored flag, so un-toggling an emergency contact is
+    /// an ordinary edit. The wizard — the only caller — always passes
+    /// it on every save, and an edit loads the stored flag into the
+    /// toggle first, so a flag the user did not touch survives. The
+    /// false default exists only so pre-toggle call sites compile
+    /// unchanged; a caller that omits it means "not flagged".
     @discardableResult
     func updateFamilyContact(id: UUID, name: String, phone: String, relationship: String,
                              messengerHandle: String?,
                              photo: UIImage? = nil, removingPhoto: Bool = false,
                              nickname: String? = nil,
-                             address: String? = nil) -> Bool {
+                             address: String? = nil,
+                             isEmergencyContact: Bool = false) -> Bool {
         guard var contact = familyContacts.first(where: { $0.id == id }) else { return false }
         contact.name = name
         contact.phone = phone
         contact.relationship = relationship
         contact.messengerHandle = messengerHandle
         contact.nickname = nickname
+        contact.isEmergencyContact = isEmergencyContact
         // The editor passes the CURRENT text each save; blank clears the
         // stored address (nil), so "remove the address" is an edit, not a
         // separate affordance (directions task, 2026-09-07).
@@ -2349,13 +2490,30 @@ final class AppCoordinator: ObservableObject {
 
     // MARK: - Emergency (redesign spec §3.1/§3.2 — persistent icon everywhere)
 
-    /// The contact the Emergency affordance calls. Every stored family
-    /// contact is already treated as an emergency target (see
-    /// `emergencyContacts(from:)` above) — there's no separate
-    /// "designate as emergency contact" flag yet, so this is simply the
-    /// first configured contact. Nil when none is configured, which the
-    /// view surfaces honestly instead of pretending an action is available.
-    var emergencyContact: FamilyContact? { familyContacts.first }
+    /// The contact the Emergency affordance calls (family-emergency
+    /// task, 2026-09-07): the first contact flagged
+    /// `isEmergencyContact` — whichever person the family marked with
+    /// the wizard's "Emergency contact" toggle — else the first
+    /// configured contact, the pre-flag behavior kept as the fallback
+    /// so an unflagged list still dials somebody. Nil when none is
+    /// configured, which the view surfaces honestly instead of
+    /// pretending an action is available. The rule itself is the pure
+    /// `preferredEmergencyContact(_:)` below so tests can pin it
+    /// without an instance.
+    var emergencyContact: FamilyContact? {
+        Self.preferredEmergencyContact(familyContacts)
+    }
+
+    /// The emergency-preference rule as a pure function
+    /// (family-emergency task, 2026-09-07): contacts flagged
+    /// `isEmergencyContact` win, in list order (the FIRST flag is THE
+    /// number — the toggle's caption promises "dials this person
+    /// first"); an all-unflagged list falls back to the first contact,
+    /// exactly what `emergencyContact` resolved before the flag
+    /// existed; an empty list resolves nil. Pinned by tests.
+    static func preferredEmergencyContact(_ contacts: [FamilyContact]) -> FamilyContact? {
+        contacts.first(where: \.isEmergencyContact) ?? contacts.first
+    }
 
     /// Posts the same local notification `CommandRouter` already posts for
     /// a voice-triggered emergency, and speaks the ack — reused here so the
@@ -3594,6 +3752,29 @@ final class AppCoordinator: ObservableObject {
         presentPluginView(AnyView(ApplianceHelperView(session: session)))
     }
 
+    /// Opens a bundled default manual from the Settings → Manuals leaf.
+    /// The session is armed already in `.guidance`, so the presented
+    /// sheet renders the manual's step cards immediately and never shows
+    /// the camera-capture state (ApplianceHelperView's auto-open camera is
+    /// gated on `.capturing`). Not gated on `geminiClient.isAvailable` —
+    /// unlike `presentApplianceHelper`, bundled content must work first
+    /// launch, offline, with no key configured.
+    ///
+    /// Returns false when the manual's overview image is unavailable — the
+    /// caller stays on the browse list and shows an honest failure.
+    @MainActor
+    func presentBundledManual(_ manual: BundledManual) -> Bool {
+        let session = ApplianceHelperSession(question: nil,
+                                             locale: activeLocale,
+                                             geminiClient: geminiClient,
+                                             cache: ApplianceCache(storage: storage),
+                                             observabilityBus: observabilityBus,
+                                             speaker: speaker)
+        guard session.presentBundledManual(manual, locale: activeLocale) else { return false }
+        presentPluginView(AnyView(ApplianceHelperView(session: session)))
+        return true
+    }
+
     /// `send_message` (v2 pivot Phase 2, §4.3). Every surface ends with
     /// the user's own tap on Send — that tap IS the `.confirm`-tier
     /// confirmation, exactly as the shipped SMS flow models it:
@@ -3671,7 +3852,8 @@ final class AppCoordinator: ObservableObject {
     var pendingReminders: [ScheduledReminder] { medicationScheduler.pendingReminders }
 
     /// Configured medication entries — read-only view for the Settings
-    /// editor and the Meds leaf.
+    /// editor and the Medical leaf (the renamed Meds leaf, medical task
+    /// 2026-09-07).
     var medicationEntries: [MedicationEntry] { medicationScheduler.medicationEntries() }
 
     func medicationName(for entryId: UUID) -> String {
@@ -3723,6 +3905,45 @@ final class AppCoordinator: ObservableObject {
         calendarSync.syncNow(entries: routineScheduler.entries())
     }
 
+    // MARK: - Doctor's appointments (medical task, 2026-09-07)
+
+    /// Adds an appointment from the Medical leaf's add form or the
+    /// paste-confirmation flow. Blank labels are stored as nil via
+    /// `normalizedOptionalText` (house rule — blank text is not stored);
+    /// the store rejects the write at its cap (50) and returns false.
+    /// Success persists, refreshes the published list (newest first),
+    /// and — when the calendar toggle is on — hands the appointment to
+    /// the `MedicalAppointmentCalendarWriting` seam inside the store.
+    @discardableResult
+    func addAppointment(doctorOrPlace: String, place: String?, date: Date,
+                        note: String?) -> Bool {
+        let trimmed = doctorOrPlace.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let appointment = MedicalAppointment(
+            doctorOrPlace: trimmed,
+            place: Self.normalizedOptionalText(place),
+            date: date,
+            note: Self.normalizedOptionalText(note)
+        )
+        guard appointmentStore.add(appointment) else { return false }
+        self.appointments = appointmentStore.load()
+        return true
+    }
+
+    /// Removes an appointment from the Medical leaf (store-remove; the
+    /// calendar-2way seam mirrors the removal when the toggle is on).
+    func removeAppointment(id: UUID) {
+        appointmentStore.remove(id: id)
+        self.appointments = appointmentStore.load()
+    }
+
+    /// Dismisses the one-shot SMS caption on the Medical leaf; persisted
+    /// so it never nags again (the store keeps the truth; this is a
+    /// preference).
+    func dismissAppointmentSmsNote() {
+        appointmentSmsNoteDismissed = true
+    }
+
     // MARK: - Native Calendar mirroring (v2 design §4.1, 2026-09-06)
 
     /// EventKit mirror of the unified routine schedule — the app remains
@@ -3748,6 +3969,31 @@ final class AppCoordinator: ObservableObject {
     /// Settings card, Reminders leaf and Calendar leaf must refresh the
     /// moment a scan lands (same pattern as `wakeWordKeyStoreCancellable`).
     private var externalCalendarCancellable: AnyCancellable?
+
+    /// Alarms + timers (alarms-timers task, 2026-09-07): owns the
+    /// voice-set alarms and the in-app countdown timers — one service
+    /// behind the router's alarm/timer stage, the Settings leaf, the
+    /// launch + BGTask re-queue (FR-025) and the foreground completion
+    /// speech. Eager (not lazy) because the language sync, the
+    /// objectWillChange forwarding and the delegate closure below must
+    /// reach it from init. See `AlarmScheduler` for the platform-honesty
+    /// contract (iOS does not write to the built-in Clock app — the
+    /// "alarm" is a daily-repeating local notification).
+    private(set) var alarmTimersService: AlarmTimersService
+
+    /// [ALARMS-TIMERS] (2026-09-07) Foreground presentation for
+    /// alarm/timer notifications. RETAINED here — the center's delegate
+    /// property is weak, and before this feature the app had no
+    /// notification delegate at all (medication/routine reminders
+    /// presented via the OS alone). See `AlarmTimerNotificationDelegate`
+    /// for what presents and what stays silent.
+    private var alarmTimerNotificationDelegate: AlarmTimerNotificationDelegate?
+
+    /// Forwards the alarms/timers service's publishes ([ALARMS-TIMERS]
+    /// 2026-09-07): nested ObservableObject — a toggle/delete/timer-start
+    /// alone would not invalidate views observing the coordinator (same
+    /// pattern as `externalCalendarCancellable`).
+    private var alarmTimersCancellable: AnyCancellable?
 
     /// Offline Bikram Sambat + tithi + festival overlay and festival
     /// notification scheduling (2026-09-06 BS calendar feature).
@@ -4094,6 +4340,10 @@ final class AppCoordinator: ObservableObject {
         ) { [weak self] task in
             self?.medicationScheduler.scheduleAll()
             self?.routineScheduler.scheduleAll()
+            // Same re-queue for alarms + timers ([ALARMS-TIMERS]
+            // 2026-09-07): the handler dispatches to main, where it is
+            // idempotent (requests replace in place by id).
+            self?.alarmTimersService.scheduleAll()
             task.setTaskCompleted(success: true)
         }
         // External calendar rescan (calendar-driven task, 2026-09-07):
@@ -4217,6 +4467,64 @@ final class AppCoordinator: ObservableObject {
             isProvisioned: isWakeWordProvisioned,
             realEngineAtLaunch: wakeWordEngineRealAtLaunch
         )
+    }
+}
+
+// MARK: - [ALARMS-TIMERS] Alarms + timers (voice stage + Settings leaf)
+
+extension AppCoordinator {
+
+    /// Settings-leaf access to the service's lists. The leaf observes the
+    /// coordinator; the service's publishes reach it through
+    /// `alarmTimersCancellable` (see the property docs).
+    var alarms: [Alarm] { alarmTimersService.alarms }
+    var activeTimers: [TimerItem] { alarmTimersService.activeTimers }
+
+    /// [ALARMS-TIMERS] (2026-09-07) Voice + UI alarm creation — the
+    /// router's alarm stage and the Settings leaf both land here. The
+    /// notification-permission round-trip happens at point of use inside
+    /// the service; the outcome drives the router's honest spoken line
+    /// (and the leaf's error text).
+    func requestAlarmSet(at time: Date, label: String?) async -> AlarmTimerSetOutcome {
+        await alarmTimersService.addAlarm(at: time, label: label)
+    }
+
+    /// [ALARMS-TIMERS] (2026-09-07) Voice + UI timer start — same
+    /// contract as `requestAlarmSet` for the in-app countdown timers.
+    func requestTimerStart(durationSeconds: Int, label: String?) async -> AlarmTimerSetOutcome {
+        await alarmTimersService.startTimer(durationSeconds: durationSeconds, label: label)
+    }
+
+    /// Settings-leaf mutations (main-confined — the leaf's buttons run on
+    /// main). Toggle re-arms/cancels the pending daily notification;
+    /// remove/cancel persist the removal before cancelling the OS request.
+    func toggleAlarm(id: UUID, enabled: Bool) {
+        alarmTimersService.setAlarmEnabled(id: id, enabled: enabled)
+    }
+
+    func removeAlarm(id: UUID) {
+        alarmTimersService.removeAlarm(id: id)
+    }
+
+    func cancelTimer(id: UUID) {
+        alarmTimersService.cancelTimer(id: id)
+    }
+
+    /// [ALARMS-TIMERS] (2026-09-07) A timer's completion notification
+    /// arrived while the app was foregrounded (the retained
+    /// `AlarmTimerNotificationDelegate` closure — possibly off main): the
+    /// service expires the row (it dispatches to main itself), then the
+    /// completion surfaces as an outcome card and is spoken. The spoken
+    /// line matters: a countdown the user set by voice should end in a
+    /// voice when they are looking at the phone, not just a banner.
+    func handleForegroundTimerFinished(timerID: UUID) {
+        alarmTimersService.expireTimer(id: timerID)
+        let text = L10n.str("timers.finished", locale: activeLocale)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.setOutcome(icon: "timer", text: text, undo: nil)
+            self.speak(text: text)
+        }
     }
 }
 

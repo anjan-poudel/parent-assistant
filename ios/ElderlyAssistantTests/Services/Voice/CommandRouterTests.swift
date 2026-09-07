@@ -502,6 +502,25 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
         return navigationDisambiguationPrompt
     }
 
+    /// [ALARMS-TIMERS] (2026-09-07) Alarm/timer creation — protocol
+    /// requirements with an extension default of .failed; these stored
+    /// vars satisfy them so the stage tests can script every outcome.
+    /// The DEFAULT of .scheduled keeps pre-existing router tests (none of
+    /// which speak an alarm/timer marker) on their historical path.
+    var alarmSetOutcome: AlarmTimerSetOutcome = .scheduled
+    var alarmSetRequests: [(time: Date, label: String?)] = []
+    func requestAlarmSet(at time: Date, label: String?) async -> AlarmTimerSetOutcome {
+        alarmSetRequests.append((time, label))
+        return alarmSetOutcome
+    }
+
+    var timerStartOutcome: AlarmTimerSetOutcome = .scheduled
+    var timerStartRequests: [(durationSeconds: Int, label: String?)] = []
+    func requestTimerStart(durationSeconds: Int, label: String?) async -> AlarmTimerSetOutcome {
+        timerStartRequests.append((durationSeconds, label))
+        return timerStartOutcome
+    }
+
     var pendingRephraseCommand: InterpretedCommand? { rephrasePended?.command }
     private(set) var rephrasePended: (command: InterpretedCommand, sourceTranscript: String?)?
     func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?) {
@@ -2069,5 +2088,223 @@ final class CommandRouterDirectionsTests: XCTestCase {
         XCTAssertTrue(coordinator.assistantSpoken.isEmpty)
         XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "confirmation_no" })
         XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "directions_command" })
+    }
+}
+
+// MARK: - [ALARMS-TIMERS] Alarm + timer voice stage
+
+/// Wiring of the deterministic alarms/timers stage (2026-09-07): parse
+/// happens BEFORE the topic table and interpreter; the coordinator
+/// receives the resolved request; the router speaks the
+/// outcome-dependent line; observability lands under component
+/// "alarms_timers" at resolution.
+final class CommandRouterAlarmTimerTests: XCTestCase {
+
+    private func makeRouter(_ coordinator: MockVoiceCommandCoordinator)
+        -> (CommandRouter, MockObservabilityBus) {
+        let bus = MockObservabilityBus()
+        let router = CommandRouter(coordinator: coordinator,
+                                   observabilityBus: bus,
+                                   speaker: MockSpeaker())
+        return (router, bus)
+    }
+
+    private var en: Locale { Locale(identifier: "en-US") }
+
+    func testEnglishAlarmCommandReachesCoordinatorAndConfirms() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "set an alarm for 6 am")
+        await Task.yield()
+
+        XCTAssertEqual(result, .unrecognised(transcript: "set an alarm for 6 am"))
+        XCTAssertEqual(coordinator.alarmSetRequests.count, 1)
+        XCTAssertEqual(coordinator.alarmSetRequests[0].label, nil)
+        let components = Calendar.current.dateComponents(
+            [.hour, .minute], from: coordinator.alarmSetRequests[0].time)
+        XCTAssertEqual(components.hour, 6)
+        XCTAssertEqual(components.minute, 0)
+        XCTAssertTrue(coordinator.genericReplies.contains { $0 == "Alarm set for 6:00 AM" },
+                      "spoken confirmation embeds the resolved time, got \(coordinator.genericReplies)")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "alarm_set"
+                && $0.outcome == "success"
+        })
+    }
+
+    func testEnglishPeriodAdjustmentEveningAlarm() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "set an alarm for 8 in the evening")
+        await Task.yield()
+
+        XCTAssertEqual(coordinator.alarmSetRequests.count, 1)
+        let components = Calendar.current.dateComponents(
+            [.hour, .minute], from: coordinator.alarmSetRequests[0].time)
+        XCTAssertEqual(components.hour, 20, "8 in the evening must resolve to 8 pm")
+        XCTAssertEqual(components.minute, 0)
+    }
+
+    func testWakeMarkerRoutesAsAlarm() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "बिहान ६ बजे उठाउनुहोस्")
+        await Task.yield()
+
+        XCTAssertEqual(coordinator.alarmSetRequests.count, 1)
+        let components = Calendar.current.dateComponents(
+            [.hour, .minute], from: coordinator.alarmSetRequests[0].time)
+        XCTAssertEqual(components.hour, 6)
+        XCTAssertEqual(components.minute, 0)
+    }
+
+    func testBareWakeInfinitiveIsNotAnAlarmCommand() async {
+        // Golden-corpus guard: "बिहान ६ बजे उठाउनु" is the reminder
+        // corpus's set_reminder utterance — the alarms stage must NOT
+        // steal it (only the honorific do-for-me wake markers are alarm
+        // commands).
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "बिहान ६ बजे उठाउनु")
+        await Task.yield()
+
+        XCTAssertTrue(coordinator.alarmSetRequests.isEmpty)
+        XCTAssertFalse(bus.emittedEvents.contains { $0.component == "alarms_timers" })
+    }
+
+    func testThirdPersonWakeRequestIsNotAnAlarmCommand() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "wake my grandson at 7")
+        await Task.yield()
+
+        XCTAssertTrue(coordinator.alarmSetRequests.isEmpty)
+        XCTAssertFalse(bus.emittedEvents.contains { $0.component == "alarms_timers" })
+    }
+
+    func testAlarmQuestionIsNotSwallowedByTheStage() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "when is my alarm set?")
+        await Task.yield()
+
+        XCTAssertTrue(coordinator.alarmSetRequests.isEmpty)
+        XCTAssertFalse(bus.emittedEvents.contains { $0.component == "alarms_timers" },
+                       "questions fall through the stage unchanged")
+    }
+
+    func testPermissionDeniedSpeaksTheHonestFallback() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.alarmSetOutcome = .permissionDenied
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "set an alarm for 6 am")
+        await Task.yield()
+
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0.hasPrefix("Notifications are off")
+        }, "denial must be spoken honestly, never a false 'alarm set'")
+        XCTAssertFalse(coordinator.genericReplies.contains { $0.contains("Alarm set for") })
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "alarm_set"
+                && $0.outcome == "permission_denied"
+        })
+    }
+
+    func testAtCapacitySpeaksTheDeleteFirstFallback() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.alarmSetOutcome = .atCapacity
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "set an alarm for 6 am")
+        await Task.yield()
+
+        XCTAssertTrue(coordinator.genericReplies.contains { $0.hasPrefix("Too many alarms") })
+    }
+
+    func testNepaliTimerCommandReachesCoordinatorAndConfirms() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "टाइमर ५ मिनेट")
+        await Task.yield()
+
+        XCTAssertEqual(result, .unrecognised(transcript: "टाइमर ५ मिनेट"))
+        XCTAssertEqual(coordinator.timerStartRequests.count, 1)
+        XCTAssertEqual(coordinator.timerStartRequests[0].durationSeconds, 300)
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0.contains("टाइमर सुरु भयो")
+        })
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_started"
+                && $0.outcome == "success"
+        })
+    }
+
+    func testEnglishTimerCommandReachesCoordinator() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "set a timer for 10 minutes")
+        await Task.yield()
+
+        XCTAssertEqual(coordinator.timerStartRequests.count, 1)
+        XCTAssertEqual(coordinator.timerStartRequests[0].durationSeconds, 600)
+        XCTAssertTrue(coordinator.timerStartRequests[0].label == nil)
+        XCTAssertTrue(coordinator.genericReplies.contains { $0 == "Timer started for 10 minutes" })
+    }
+
+    func testCountdownPhraseNeverBecomesAnAlarm() async {
+        // "alarm in 5 minutes" is a countdown (timer semantics) — the
+        // timer parse wins for timer-worded utterances and the countdown
+        // veto keeps the alarm parse off "alarm in N minutes".
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "set an alarm in 5 minutes")
+        await Task.yield()
+
+        XCTAssertTrue(coordinator.alarmSetRequests.isEmpty,
+                      "countdown phrasings must not silently become an alarm")
+        XCTAssertFalse(bus.emittedEvents.contains { $0.component == "alarms_timers" })
+    }
+
+    func testTimerOutOfBoundsFallsThroughTheStage() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "set a timer for 25 hours")
+        await Task.yield()
+
+        XCTAssertTrue(coordinator.timerStartRequests.isEmpty,
+                      "an out-of-range duration must never be confirmed")
+    }
+
+    func testTimerPermissionDeniedSpeaksTheTimerFallback() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.timerStartOutcome = .permissionDenied
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "टाइमर ५ मिनेट")
+        await Task.yield()
+
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0.hasPrefix("Notifications are off")
+        })
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_started"
+                && $0.outcome == "permission_denied"
+        })
     }
 }

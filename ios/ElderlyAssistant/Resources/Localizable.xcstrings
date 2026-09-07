@@ -1304,72 +1304,72 @@
       }
     },
     "calendar.twoWay.caption": {
-        "extractionState": "manual",
-        "localizations": {
-            "en": {
-                "stringUnit": {
-                    "state": "translated",
-                    "value": "On — routine events live in the Sahayak calendar, and edits you make to them in the Calendar app update your routine here."
-                }
-            },
-            "ne": {
-                "stringUnit": {
-                    "state": "translated",
-                    "value": "खोलिएको छ — दिनचर्याका घटनाहरू Sahayak क्यालेन्डरमा रहन्छन्, र क्यालेन्डर एपमा ती घटनाहरूमा गरेका सम्पादनहरूले यहाँको दिनचर्या अपडेट गर्छन्।"
-                }
-            }
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On — routine events live in the Sahayak calendar, and edits you make to them in the Calendar app update your routine here."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खोलिएको छ — दिनचर्याका घटनाहरू Sahayak क्यालेन्डरमा रहन्छन्, र क्यालेन्डर एपमा ती घटनाहरूमा गरेका सम्पादनहरूले यहाँको दिनचर्या अपडेट गर्छन्।"
+          }
         }
+      }
     },
     "calendar.twoWay.denied": {
-        "extractionState": "manual",
-        "localizations": {
-            "en": {
-                "stringUnit": {
-                    "state": "translated",
-                    "value": "Two-way mirroring needs full calendar access, which was not granted — edits made in the Calendar app cannot come back here. You can try again from iOS Settings."
-                }
-            },
-            "ne": {
-                "stringUnit": {
-                    "state": "translated",
-                    "value": "दुवैतिर मिरर गर्न क्यालेन्डरको पूर्ण पहुँच चाहिन्छ, जुन दिइएन — क्यालेन्डर एपमा गरेका सम्पादनहरू यहाँ फर्कन सक्दैनन्। iOS सेटिङबाट फेरि प्रयास गर्न सक्नुहुन्छ।"
-                }
-            }
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Two-way mirroring needs full calendar access, which was not granted — edits made in the Calendar app cannot come back here. You can try again from iOS Settings."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दुवैतिर मिरर गर्न क्यालेन्डरको पूर्ण पहुँच चाहिन्छ, जुन दिइएन — क्यालेन्डर एपमा गरेका सम्पादनहरू यहाँ फर्कन सक्दैनन्। iOS सेटिङबाट फेरि प्रयास गर्न सक्नुहुन्छ।"
+          }
         }
+      }
     },
     "calendar.twoWay.hint": {
-        "extractionState": "manual",
-        "localizations": {
-            "en": {
-                "stringUnit": {
-                    "state": "translated",
-                    "value": "When on, routine events are mirrored to a dedicated Sahayak calendar, and changes you make to those events there (time, deletion) update your routine here. Off by default — full access is asked only when you turn this on."
-                }
-            },
-            "ne": {
-                "stringUnit": {
-                    "state": "translated",
-                    "value": "खोल्दा दिनचर्याका घटनाहरू छुट्टै Sahayak क्यालेन्डरमा मिरर हुन्छन्, र त्यहाँ ती घटनाहरूमा गरेका परिवर्तनहरू (समय, मेटाइ) ले यहाँको दिनचर्या अपडेट गर्छन्। सुरुमा बन्द हुन्छ — पूर्ण पहुँच यो खोल्दा मात्र सोधिन्छ।"
-                }
-            }
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When on, routine events are mirrored to a dedicated Sahayak calendar, and changes you make to those events there (time, deletion) update your routine here. Off by default — full access is asked only when you turn this on."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खोल्दा दिनचर्याका घटनाहरू छुट्टै Sahayak क्यालेन्डरमा मिरर हुन्छन्, र त्यहाँ ती घटनाहरूमा गरेका परिवर्तनहरू (समय, मेटाइ) ले यहाँको दिनचर्या अपडेट गर्छन्। सुरुमा बन्द हुन्छ — पूर्ण पहुँच यो खोल्दा मात्र सोधिन्छ।"
+          }
         }
+      }
     },
     "calendar.twoWay.title": {
-        "extractionState": "manual",
-        "localizations": {
-            "en": {
-                "stringUnit": {
-                    "state": "translated",
-                    "value": "Mirror routine changes both ways"
-                }
-            },
-            "ne": {
-                "stringUnit": {
-                    "state": "translated",
-                    "value": "दिनचर्याका परिवर्तनहरू दुवैतिर मिरर गर्नुहोस्"
-                }
-            }
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mirror routine changes both ways"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दिनचर्याका परिवर्तनहरू दुवैतिर मिरर गर्नुहोस्"
+          }
         }
+      }
     },
     "calendarSync.statusDenied": {
       "extractionState": "manual",
@@ -10887,6 +10887,788 @@
           "stringUnit": {
             "state": "translated",
             "value": "ठाउँ र नक्सा"
+          }
+        }
+      }
+    },
+    "family.emergencyBadge": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Emergency"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आपतकालीन"
+          }
+        }
+      }
+    },
+    "family.emergencyToggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Emergency contact"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आपतकालीन सम्पर्क"
+          }
+        }
+      }
+    },
+    "family.emergencyToggleHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The emergency button dials this person first."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आपतकालीन बटनले सबैभन्दा पहिले यिनलाई फोन गर्छ।"
+          }
+        }
+      }
+    },
+    "family.relationship.doctor": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Doctor / GP"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "डाक्टर"
+          }
+        }
+      }
+    },
+    "common.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "रद्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "common.close": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बन्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "medical.appointments.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add appointment"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भेटघाट थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "medical.appointments.date": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Date"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मिति"
+          }
+        }
+      }
+    },
+    "medical.appointments.doctor": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Doctor or clinic"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "डाक्टर वा क्लिनिक"
+          }
+        }
+      }
+    },
+    "medical.appointments.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No appointments yet"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिलेसम्म कुनै भेटघाट छैन"
+          }
+        }
+      }
+    },
+    "medical.appointments.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Note (optional)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "टिप्पणी (वैकल्पिक)"
+          }
+        }
+      }
+    },
+    "medical.appointments.place": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clinic/place (optional)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्लिनिक/स्थान (वैकल्पिक)"
+          }
+        }
+      }
+    },
+    "medical.appointments.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove appointment"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भेटघाट हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "medical.appointments.time": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "समय"
+          }
+        }
+      }
+    },
+    "medical.appointments.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Doctor's appointments"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "डाक्टरको भेटघाट"
+          }
+        }
+      }
+    },
+    "medical.calendarToggle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add appointments to the iPhone Calendar"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भेटघाट आईफोन क्यालेन्डरमा थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "medical.pasteAppointment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste appointment message"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भेटघाटको सन्देश टाँस्नुहोस्"
+          }
+        }
+      }
+    },
+    "medical.pasteConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add this appointment?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो भेटघाट थप्ने हो?"
+          }
+        }
+      }
+    },
+    "medical.pasteFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not find an appointment in that message."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सन्देशमा भेटघाट भेटिएन।"
+          }
+        }
+      }
+    },
+    "medical.smsNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The iPhone does not let apps read your text messages, so appointment texts can't be added automatically. Add the appointment here, or tell the assistant: “add a doctor appointment”."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आईफोनले एपलाई तपाईंको टेक्स्ट सन्देश पढ्न दिँदैन, त्यसैले भेटघाटका सन्देश आफैं थप्न सकिँदैन। भेटघाट यहाँ थप्नुहोस्, वा सहायकलाई भन्नुहोस्: “डाक्टरको भेटघाट थप्नुहोस्”।"
+          }
+        }
+      }
+    },
+    "settings.alarms.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alarms & timers"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अलार्म र टाइमर"
+          }
+        }
+      }
+    },
+    "alarms.list.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alarms & timers"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अलार्म र टाइमर"
+          }
+        }
+      }
+    },
+    "alarms.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No alarms or timers yet"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिलेसम्म कुनै अलार्म वा टाइमर छैन"
+          }
+        }
+      }
+    },
+    "alarms.new": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New alarm"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नयाँ अलार्म"
+          }
+        }
+      }
+    },
+    "alarms.time": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "समय"
+          }
+        }
+      }
+    },
+    "alarms.save": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add alarm"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अलार्म थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "alarms.delete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete alarm"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अलार्म मेट्नुहोस्"
+          }
+        }
+      }
+    },
+    "alarms.set": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alarm set for %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ का लागि अलार्म सेट भयो।"
+          }
+        }
+      }
+    },
+    "alarms.setFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sorry — I couldn't set that alarm."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस् — त्यो अलार्म सेट गर्न सकिनँ।"
+          }
+        }
+      }
+    },
+    "alarms.capacity": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Too many alarms. Delete one first, then try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "धेरै अलार्म छन्। एउटा मेट्नुहोस्, अनि फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "alarms.permissionDenied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifications are off, so the alarm won't ring. You can turn them on in Settings."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सूचना बन्द छ, त्यसैले अलार्म बज्ने छैन। तपाईं Settings मा गएर खोल्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "alarms.honestyNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alarms ring through this app's own notifications — iPhone doesn't let apps set the built-in Clock's alarms."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अलार्म यस एपकै सूचनाबाट बज्छ — आईफोनले एपहरूलाई आफ्नै Clock एपको अलार्म सेट गर्न दिँदैन।"
+          }
+        }
+      }
+    },
+    "alarms.notification.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alarm"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अलार्म"
+          }
+        }
+      }
+    },
+    "timers.started": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timer started for %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को टाइमर सुरु भयो।"
+          }
+        }
+      }
+    },
+    "timers.finished": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timer finished."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "टाइमर सकियो।"
+          }
+        }
+      }
+    },
+    "timers.cancel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cancel timer"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "टाइमर रद्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "timers.capacity": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Too many timers. Cancel one first, then try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "धेरै टाइमर छन्। एउटा रद्द गर्नुहोस्, अनि फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "timers.permissionDenied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifications are off, so I can't tell you when the timer finishes. You can turn them on in Settings."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सूचना बन्द छ, त्यसैले टाइमर सकिएको म भन्न सक्दिनँ। तपाईं Settings मा गएर खोल्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "timers.setFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sorry — I couldn't start that timer."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस् — त्यो टाइमर सुरु गर्न सकिनँ।"
+          }
+        }
+      }
+    },
+    "appliance.manual.bundled": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default manuals"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पूर्वनिर्धारित म्यानुअलहरू"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.bundledEmpty": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No default manuals available."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पूर्वनिर्धारित म्यानुअल उपलब्ध छैन।"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "settings.manuals.title": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manuals"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्यानुअलहरू"
+          }
+        }
+      },
+      "extractionState": "manual"
+    },
+    "settings.calendar.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पात्रो"
+          }
+        }
+      }
+    },
+    "reminders.upcoming.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Upcoming events"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आउँदै गरेका कार्यक्रम"
+          }
+        }
+      }
+    },
+    "reminders.upcoming.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No upcoming events."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आउँदै गरेका कार्यक्रम छैनन्।"
+          }
+        }
+      }
+    },
+    "history.timeTomorrow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tomorrow"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भोलि"
           }
         }
       }

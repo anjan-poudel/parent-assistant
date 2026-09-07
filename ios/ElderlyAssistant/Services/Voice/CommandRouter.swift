@@ -211,6 +211,28 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// speech is skipped.
     var isAwaitingNavigationDisambiguation: Bool { get }
 
+    /// [ALARMS-TIMERS] (2026-09-07) Requests an ALARM at `time` (already
+    /// the next future occurrence; only its hour/minute-of-day matters —
+    /// the OS alarm is a DAILY-repeating local notification, see
+    /// `AlarmScheduler`; iOS does not let third-party apps write to the
+    /// built-in Clock). ASYNC because notification permission is requested
+    /// at POINT OF USE (the first alarm/timer set asks). The coordinator
+    /// persists + arms and returns the outcome so the router speaks the
+    /// honest line — a success confirmation only once the alarm actually
+    /// rings, the denial fallback when notifications are off. Same
+    /// requirement-with-extension-default pattern as the tool surfaces
+    /// above: the router holds the coordinator as a protocol reference,
+    /// so an extension-only member would bind statically and the
+    /// coordinator's implementation could never be reached.
+    func requestAlarmSet(at time: Date, label: String?) async -> AlarmTimerSetOutcome
+
+    /// [ALARMS-TIMERS] (2026-09-07) Requests an in-app countdown TIMER of
+    /// `durationSeconds` (1…86400; the countdown lives in the app, its
+    /// completion fires a one-shot notification and — while the app is
+    /// foregrounded — a spoken "Timer finished."). Same point-of-use
+    /// permission, persist-then-arm contract and outcome contract as
+    /// `requestAlarmSet`.
+    func requestTimerStart(durationSeconds: Int, label: String?) async -> AlarmTimerSetOutcome
     /// [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1: fires the
     /// proactive morning briefing ("read me my briefing"). The briefing
     /// speaks itself through the shell's speak queue (once per calendar
@@ -240,6 +262,14 @@ extension VoiceCommandCoordinating {
     var isAwaitingNavigationDisambiguation: Bool { false }
     func requestNavigation(to target: DirectionsRoute.PlaceTarget) {}
     func requestNavigationDisambiguation(targets: [DirectionsCandidate]) -> String? { nil }
+    // [ALARMS-TIMERS] (2026-09-07) Alarm/timer defaults — see the
+    // requirement docs above. Inert: a conformer that does not opt in
+    // (mocks/doubles) reports .failed, and the router stage speaks the
+    // honest "couldn't set it" fallback for its utterance. Only a
+    // coordinator that explicitly implements the members (AppCoordinator,
+    // and a scripted mock under test) makes the stage do anything.
+    func requestAlarmSet(at time: Date, label: String?) async -> AlarmTimerSetOutcome { .failed }
+    func requestTimerStart(durationSeconds: Int, label: String?) async -> AlarmTimerSetOutcome { .failed }
     // [MORNING-BRIEFING] (2026-09-07) Inert default — a conformer that
     // does not opt in (every mock/double across app and test target)
     // never fires a briefing, so the deterministic ladder stage falls
@@ -523,6 +553,44 @@ final class CommandRouter {
             break   // not directions business — continue the ladder
         }
 
+        // [ALARMS-TIMERS] (2026-09-07) Deterministic voice ALARMS + TIMERS
+        // stage: "set an alarm for 6 am", "wake me up at 7:30", "बिहान ६
+        // बजे उठाउनुहोस्", "set a timer for 5 minutes", "टाइमर ५ मिनेट".
+        // Marker-gated parsing (`AlarmTimerCommandParser`) — the same
+        // pre-route pattern as the contact-search / directions stages:
+        // no model, no IntentPrompt tokens (the prompt budget is pinned
+        // by IntentPromptTests), so an alarm/timer command can never
+        // depend on interpreter availability or confidence.
+        //
+        // Placement: AFTER the safety net + confirmation flow + contact
+        // search + directions — emergency / med-ack / yes-no / search /
+        // navigation utterances win exactly as before — and BEFORE the
+        // topic table, so a greeting- or weather-prefixed alarm command
+        // is a command, never small talk ("नमस्ते, ५ मिनेटको टाइमर लगाऊ"
+        // must set a timer, not get a greeting). The parser vetoes
+        // questions ("when is my alarm?", "कति बजेको अलार्म?"),
+        // cancellations ("cancel the timer"), third-person wake requests
+        // ("wake my grandson", "छोरालाई उठाउनुहोस्") and countdown
+        // phrasings ("alarm in 5 minutes" — a countdown is a TIMER,
+        // which parses FIRST below). Anything vetoed or unparseable
+        // falls through this stage unchanged.
+        //
+        // The stage only PARSES and hands off: the coordinator owns the
+        // permission round-trip (point-of-use requestAuthorization), the
+        // persistence and the arming, and RETURNS the outcome so this
+        // stage speaks the honest line — the confirmation only once the
+        // item is stored + armed, the denial fallback when notifications
+        // are off.
+        if let timer = AlarmTimerCommandParser.parseTimer(raw) {
+            handleTimerStartCommand(durationSeconds: timer.durationSeconds,
+                                    label: timer.label)
+            return .unrecognised(transcript: raw)
+        }
+        if let alarm = AlarmTimerCommandParser.parseAlarm(raw) {
+            handleAlarmSetCommand(at: alarm.time, label: alarm.label)
+            return .unrecognised(transcript: raw)
+        }
+
         // [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1: "read me my
         // briefing" — a deterministic pre-answer stage like the topic
         // table below: after the safety net + confirmation flow +
@@ -688,6 +756,98 @@ final class CommandRouter {
         return routeKeywordRemainder(raw)
     }
 
+    // MARK: - [ALARMS-TIMERS] Alarm + timer command handlers
+
+    /// Hands an alarm command to the coordinator — ASYNC because the
+    /// notification permission is requested at point of use — then speaks
+    /// the outcome-dependent line: the localized confirmation with the
+    /// resolved time only on `.scheduled`, the honest denial / capacity /
+    /// failure fallback otherwise. `noteGenericReply` is used for the
+    /// dynamic confirmation (the live-caption pill is gone by the time
+    /// the permission round-trip returns, so spoken-only would vanish);
+    /// the fallbacks ride `speakWithVisibleOutcome`. Observability is
+    /// emitted at resolution (component "alarms_timers"), never before.
+    private func handleAlarmSetCommand(at time: Date, label: String?) {
+        guard coordinator != nil else {
+            speakWithVisibleOutcome(key: "alarms.setFailed")
+            return
+        }
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let timeText = formattedTime(
+            Calendar.current.dateComponents([.hour, .minute], from: time),
+            locale: locale
+        )
+        Task { [weak self] in
+            guard let self else { return }
+            let outcome = await self.coordinator?.requestAlarmSet(at: time, label: label)
+                ?? .failed
+            switch outcome {
+            case .scheduled:
+                self.emitAlarmTimers(eventType: "alarm_set", outcome: "success")
+                let text = L10n.fmt("alarms.set", locale: locale, timeText)
+                self.coordinator?.noteGenericReply(text)
+                self.speak(text: text, locale: locale)
+            case .permissionDenied:
+                self.emitAlarmTimers(eventType: "alarm_set", outcome: "permission_denied")
+                self.speakWithVisibleOutcome(key: "alarms.permissionDenied")
+            case .atCapacity:
+                self.emitAlarmTimers(eventType: "alarm_set", outcome: "at_capacity")
+                self.speakWithVisibleOutcome(key: "alarms.capacity")
+            case .failed:
+                self.emitAlarmTimers(eventType: "alarm_set", outcome: "failed")
+                self.speakWithVisibleOutcome(key: "alarms.setFailed")
+            }
+        }
+    }
+
+    /// Same contract as `handleAlarmSetCommand` for countdown timers; the
+    /// confirmation embeds the localized duration ("Timer started for
+    /// 5 minutes.") via `AlarmTimerCommandParser.durationText`.
+    private func handleTimerStartCommand(durationSeconds: Int, label: String?) {
+        guard coordinator != nil else {
+            speakWithVisibleOutcome(key: "timers.setFailed")
+            return
+        }
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        Task { [weak self] in
+            guard let self else { return }
+            let outcome = await self.coordinator?.requestTimerStart(
+                durationSeconds: durationSeconds, label: label
+            ) ?? .failed
+            switch outcome {
+            case .scheduled:
+                self.emitAlarmTimers(eventType: "timer_started", outcome: "success")
+                let durationText = AlarmTimerCommandParser.durationText(
+                    seconds: durationSeconds, locale: locale
+                )
+                let text = L10n.fmt("timers.started", locale: locale, durationText)
+                self.coordinator?.noteGenericReply(text)
+                self.speak(text: text, locale: locale)
+            case .permissionDenied:
+                self.emitAlarmTimers(eventType: "timer_started", outcome: "permission_denied")
+                self.speakWithVisibleOutcome(key: "timers.permissionDenied")
+            case .atCapacity:
+                self.emitAlarmTimers(eventType: "timer_started", outcome: "at_capacity")
+                self.speakWithVisibleOutcome(key: "timers.capacity")
+            case .failed:
+                self.emitAlarmTimers(eventType: "timer_started", outcome: "failed")
+                self.speakWithVisibleOutcome(key: "timers.setFailed")
+            }
+        }
+    }
+
+    /// Observability for the alarms/timers feature — component
+    /// "alarms_timers" (the feature's own bus name, not the router's).
+    private func emitAlarmTimers(eventType: String, outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "alarms_timers",
+            eventType: eventType,
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
     /// [MORNING-BRIEFING] (2026-09-07) Imperative phrasings that request
     /// the proactive morning briefing — English, नेपाली, and romanized
     /// Nepali, matched against the lowercased transcript like every other

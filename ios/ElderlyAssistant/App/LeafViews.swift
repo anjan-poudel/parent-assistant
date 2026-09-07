@@ -60,15 +60,43 @@ struct LeafScreen<Content: View>: View {
     }
 }
 
-// MARK: - Meds (औषधि) — spec §4.3
+// MARK: - Medical (मेडिकल) — spec §4.3 + doctor's appointments
+// (medical task, 2026-09-07)
 
-/// Today's dose list with a big "लिएँ" button per pending dose. Taking a
-/// dose issues the confirmation challenge (FR-D01/FR-D03) and returns to
-/// Home, where the yes/no chips appear.
-struct MedsView: View {
+/// The Medical leaf: today's dose list (renamed-tab content — the old
+/// "Meds" leaf) PLUS the "Doctor's appointments" section.
+///
+/// Taking a dose issues the confirmation challenge (FR-D01/FR-D03) and
+/// returns to Home, where the yes/no chips appear — unchanged behaviour.
+///
+/// The appointments section (2026-09-07) shows the encrypted
+/// `AppointmentStore` list newest-first with per-row removal, a compact
+/// add form (doctor/clinic, optional clinic/place, date, time, optional
+/// note), a one-shot honest SMS caption, the calendar auto-add toggle
+/// (writer gated inside the store), and the "Paste appointment message"
+/// entry that drafts from `MedicalAppointmentParser` and asks for
+/// confirmation before saving.
+struct MedicalView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @EnvironmentObject var session: VoiceSessionStateMachine
     @Environment(\.dismiss) private var dismiss
+
+    // MARK: - Add-form draft state
+
+    @State private var doctor = ""
+    @State private var clinic = ""
+    @State private var note = ""
+    /// Defaults to an hour from now — the parser's no-signal fallback
+    /// rule (see `MedicalAppointmentParser.resolveDate`), so typed and
+    /// pasted appointments agree on the "no time chosen" reading.
+    @State private var appointmentDate =
+        Calendar.current.date(byAdding: .hour, value: 1, to: Date()) ?? Date()
+    /// Parser draft awaiting the confirm alert (paste flow, 2026-09-07).
+    @State private var pasteDraft: MedicalAppointmentParser.ParsedAppointment?
+    @State private var showPasteConfirm = false
+    /// Honest no-parse caption under the paste button; cleared on the
+    /// next paste attempt.
+    @State private var showPasteFailed = false
 
     private var todaysReminders: [ScheduledReminder] {
         coordinator.pendingReminders
@@ -76,19 +104,345 @@ struct MedsView: View {
             .sorted { $0.scheduledAt < $1.scheduledAt }
     }
 
+    private var canAddAppointment: Bool {
+        !doctor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     var body: some View {
         LeafScreen(titleKey: "meds.title") {
-            if todaysReminders.isEmpty {
-                emptyState(key: "meds.empty")
+            VStack(spacing: 12) {
+                if todaysReminders.isEmpty {
+                    emptyState(key: "meds.empty")
+                } else {
+                    VStack(spacing: 12) {
+                        ForEach(todaysReminders) { reminder in
+                            doseRow(reminder)
+                        }
+                    }
+                }
+
+                appointmentSection
+            }
+        }
+        .alert(pasteAlertTitle, isPresented: $showPasteConfirm) {
+            Button(L10n.str("medical.appointments.add", locale: coordinator.activeLocale)) {
+                saveParsedDraft()
+            }
+            Button(L10n.str("common.cancel", locale: coordinator.activeLocale),
+                   role: .cancel) {}
+        } message: {
+            Text(pasteAlertMessage)
+        }
+    }
+
+    // MARK: - Doctor's appointments section (medical task, 2026-09-07)
+
+    private var appointmentSection: some View {
+        VStack(spacing: 12) {
+            sectionHeader(key: "medical.appointments.title")
+
+            if coordinator.appointments.isEmpty {
+                emptyState(key: "medical.appointments.empty")
             } else {
                 VStack(spacing: 12) {
-                    ForEach(todaysReminders) { reminder in
-                        doseRow(reminder)
+                    ForEach(coordinator.appointments) { appointment in
+                        appointmentRow(appointment)
                     }
                 }
             }
+
+            // Honest one-shot caption (2026-09-07): the iPhone does not
+            // let apps read text messages, so appointment SMSs can never
+            // be ingested automatically — shown until dismissed once,
+            // then never again (coordinator-persisted).
+            if !coordinator.appointmentSmsNoteDismissed {
+                smsNoteCard
+            }
+
+            // Calendar auto-add toggle (medical task, 2026-09-07):
+            // default ON; the store's calendarWritesEnabled gate mirrors
+            // this and decides whether the MedicalAppointmentCalendarWriting
+            // seam is invoked at all (the calendar-2way task ships the
+            // EventKit writer).
+            calendarToggleCard
+
+            pasteRow
+
+            addFormCard
         }
     }
+
+    private func appointmentRow(_ appointment: MedicalAppointment) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(appointment.doctorOrPlace)
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                if let place = appointment.place {
+                    Text(place)
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+                Text(appointment.date.formatted(date: .abbreviated, time: .shortened))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+                if let note = appointment.note {
+                    Text(note)
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+            }
+            Spacer()
+            Button(role: .destructive) {
+                coordinator.removeAppointment(id: appointment.id)
+            } label: {
+                Image(systemName: "trash.fill")
+                    .font(.system(size: 22))
+                    .foregroundColor(DesignTokens.stateError)
+                    .frame(width: DesignTokens.minTapTargetSize,
+                           height: DesignTokens.minTapTargetSize)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("medical.appointments.remove"))
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+    }
+
+    /// The smsNote card: what the iPhone can and cannot do with
+    /// appointment texts, plus the manual/voice alternative. Dismissible
+    /// once (see the section comment).
+    private var smsNoteCard: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 18))
+                .foregroundColor(DesignTokens.textSecondary)
+                .padding(.top, 2)
+            Text("medical.smsNote")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                coordinator.dismissAppointmentSmsNote()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundColor(DesignTokens.textSecondary)
+                    .frame(width: DesignTokens.minTapTargetSize,
+                           height: DesignTokens.minTapTargetSize)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("common.close"))
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// Calendar auto-add toggle — mirrors `appointmentsToCalendar` on
+    /// the coordinator, which persists it and re-syncs the store gate.
+    private var calendarToggleCard: some View {
+        Toggle(isOn: Binding(
+            get: { coordinator.appointmentsToCalendar },
+            set: { coordinator.appointmentsToCalendar = $0 }
+        )) {
+            Label("medical.calendarToggle", systemImage: "calendar.badge.plus")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundColor(DesignTokens.textPrimary)
+        }
+        .tint(DesignTokens.accent)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// "Paste appointment message" (2026-09-07): drafts from whatever
+    /// confirmation SMS is on the pasteboard — see `handlePasteTap` for
+    /// the privacy rule — then confirms before saving. Failure shows the
+    /// honest `medical.pasteFailed` caption instead of an alert.
+    private var pasteRow: some View {
+        VStack(spacing: 8) {
+            Button {
+                handlePasteTap()
+            } label: {
+                Label("medical.pasteAppointment", systemImage: "doc.text.fill")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.accent)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: DesignTokens.chipHeight)
+            }
+            .buttonStyle(.plain)
+
+            if showPasteFailed {
+                Text("medical.pasteFailed")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.stateError)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    private var addFormCard: some View {
+        VStack(spacing: 10) {
+            TextField(LocalizedStringKey("medical.appointments.doctor"), text: $doctor)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .padding(14)
+                .frame(height: 56)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            TextField(LocalizedStringKey("medical.appointments.place"), text: $clinic)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .padding(14)
+                .frame(height: 56)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+
+            pickerRow(key: "medical.appointments.date",
+                      components: .date,
+                      selection: $appointmentDate)
+            pickerRow(key: "medical.appointments.time",
+                      components: .hourAndMinute,
+                      selection: $appointmentDate)
+
+            TextField(LocalizedStringKey("medical.appointments.note"), text: $note)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .padding(14)
+                .frame(height: 56)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+
+            Button {
+                addFromForm()
+            } label: {
+                Text("medical.appointments.add")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: DesignTokens.chipHeight)
+                    .background(canAddAppointment ? DesignTokens.accent : DesignTokens.textSecondary.opacity(0.4))
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            }
+            .buttonStyle(.plain)
+            .disabled(!canAddAppointment)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// Date/time picker row in the same shape as the medication
+    /// schedule editor's time row.
+    private func pickerRow(key: String, components: DatePickerComponents,
+                           selection: Binding<Date>) -> some View {
+        HStack(spacing: 12) {
+            Text(LocalizedStringKey(key))
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .foregroundColor(DesignTokens.textPrimary)
+            Spacer()
+            DatePicker("", selection: selection, displayedComponents: components)
+                .labelsHidden()
+                .environment(\.locale, coordinator.appLanguage.locale)
+        }
+        .padding(14)
+        .frame(height: 56)
+        .background(DesignTokens.background)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+    }
+
+    private func addFromForm() {
+        let trimmedDoctor = doctor.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDoctor.isEmpty else { return }
+        let trimmedClinic = clinic.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let added = coordinator.addAppointment(
+            doctorOrPlace: trimmedDoctor,
+            place: trimmedClinic.isEmpty ? nil : trimmedClinic,
+            date: appointmentDate,
+            note: trimmedNote.isEmpty ? nil : trimmedNote)
+        // A failed encrypted-store write keeps the draft on screen —
+        // Add again to retry; nothing was claimed that didn't happen
+        // (same rule as the places editor).
+        if added {
+            doctor = ""
+            clinic = ""
+            note = ""
+            appointmentDate = Calendar.current.date(byAdding: .hour, value: 1,
+                                                    to: Date()) ?? Date()
+        }
+    }
+
+    // MARK: - Paste drafting (medical task, 2026-09-07)
+
+    /// Reads the pasteboard and drafts an appointment from it.
+    ///
+    /// PRIVACY: `UIPasteboard.general.string` is read ONLY here, on the
+    /// user's explicit tap of the paste button — never on appear, focus,
+    /// or scene changes — so the app never snoops whatever the senior
+    /// last copied (a password, a code) without being asked.
+    private func handlePasteTap() {
+        showPasteFailed = false
+        guard let text = UIPasteboard.general.string, !text.isEmpty,
+              let parsed = MedicalAppointmentParser.parse(text) else {
+            // Honest caption — the message held no appointment the
+            // parser could stand behind (see the parser's nil rules).
+            showPasteFailed = true
+            return
+        }
+        pasteDraft = parsed
+        showPasteConfirm = true
+    }
+
+    private func saveParsedDraft() {
+        guard let parsed = pasteDraft else { return }
+        pasteDraft = nil
+        let saved = coordinator.addAppointment(doctorOrPlace: parsed.doctorOrPlace,
+                                               place: parsed.place,
+                                               date: parsed.date,
+                                               note: nil)
+        if !saved {
+            // e.g. the store's 50-entry cap — same honest caption.
+            showPasteFailed = true
+        }
+    }
+
+    private var pasteAlertTitle: String {
+        L10n.str("medical.pasteConfirm", locale: coordinator.activeLocale)
+    }
+
+    /// Doctor, place and date-time on separate lines — the summary the
+    /// senior confirms before anything is saved.
+    private var pasteAlertMessage: String {
+        guard let draft = pasteDraft else { return "" }
+        let locale = coordinator.activeLocale
+        var lines = [draft.doctorOrPlace]
+        if let place = draft.place { lines.append(place) }
+        lines.append(draft.date.formatted(Date.FormatStyle(date: .abbreviated,
+                                                           time: .shortened,
+                                                           locale: locale)))
+        return lines.joined(separator: "\n")
+    }
+
+    private func sectionHeader(key: String) -> some View {
+        Text(LocalizedStringKey(key))
+            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+            .foregroundColor(DesignTokens.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 8)
+    }
+
+    // MARK: - Today's doses (spec §4.3)
 
     private func doseRow(_ reminder: ScheduledReminder) -> some View {
         HStack(spacing: 12) {
@@ -142,8 +496,11 @@ struct MedsView: View {
 /// from `RoutineScheduler`), and items imported from the native
 /// Calendar/Reminders apps (`ExternalCalendarService`, read-only bridge)
 /// — plus a manage list where the family enables/disables the seeded
-/// routine categories. Medication management stays on the Meds leaf /
-/// Settings editor; this screen never mutates medication data.
+/// routine categories. Native Calendar events from the days ahead sit
+/// under an "Upcoming events" section (upcoming-events task, 2026-09-07).
+/// Medication management stays on the Medical leaf
+/// (the renamed Meds leaf, medical task 2026-09-07) / Settings editor;
+/// this screen never mutates medication data.
 struct RemindersView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     /// Bumped after a toggle so the computed lists re-read fresh data —
@@ -195,6 +552,10 @@ struct RemindersView: View {
                         todayRowView(row)
                     }
                 }
+
+                // Native events from the days ahead (upcoming-events
+                // task, 2026-09-07) — see `upcomingEventsSection`.
+                upcomingEventsSection
 
                 if !coordinator.routineEntries.isEmpty {
                     sectionHeader(key: "reminders.routinesSection")
@@ -320,6 +681,131 @@ struct RemindersView: View {
         }
         return days.joined(separator: ", ") + " · " + timesText
     }
+
+    // MARK: - Upcoming native Calendar events (upcoming-events task, 2026-09-07)
+
+    /// The leaf caps the upcoming list at five rows; the "Show more"
+    /// capsule into the Calendar leaf appears only when more events
+    /// exist than fit.
+    private static let upcomingEventsLimit = 5
+
+    /// The next native Calendar-app EVENTS (not Reminders-app items —
+    /// those merge into the today rows like everything else): strictly
+    /// beyond today, soonest first. Today's still-ahead events live in
+    /// the merged list above, so the two sections never show the same
+    /// row twice. Backed by `ExternalCalendarService`'s published scan
+    /// results (launch/foreground/hourly/store-change), which the
+    /// coordinator forwards — the section refreshes when a scan lands.
+    private var upcomingEvents: [ExternalReminder] {
+        let calendar = Calendar.current
+        let tomorrowStart = calendar.date(byAdding: .day, value: 1,
+                                          to: calendar.startOfDay(for: Date()))
+            ?? Date()
+        return coordinator.externalCalendar.reminders
+            .filter { $0.source == .event && $0.startDate >= tomorrowStart }
+            .sorted { $0.startDate < $1.startDate }
+    }
+
+    /// "Upcoming events" — the native events ahead, capped at
+    /// `upcomingEventsLimit` rows. Present only while the import is on
+    /// (off hides the section — the today rows follow the same rule, so
+    /// the screen stays coherent without it); when it IS on, a denied
+    /// or failing import says so instead of pretending nothing is
+    /// ahead.
+    @ViewBuilder
+    private var upcomingEventsSection: some View {
+        if coordinator.externalCalendar.isEnabled {
+            sectionHeader(key: "reminders.upcoming.title")
+            switch coordinator.externalCalendar.status {
+            case .denied:
+                emptyState(key: "externalReminders.statusDenied")
+            case .error:
+                emptyState(key: "externalReminders.statusError")
+            default:
+                upcomingEventsContent
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var upcomingEventsContent: some View {
+        let events = upcomingEvents
+        if events.isEmpty {
+            emptyState(key: "reminders.upcoming.empty")
+        } else {
+            ForEach(events.prefix(Self.upcomingEventsLimit)) { event in
+                upcomingEventRow(event)
+            }
+            if events.count > Self.upcomingEventsLimit {
+                showMoreUpcomingLink
+            }
+        }
+    }
+
+    /// One upcoming native event — title, when, and the calendar it
+    /// lives in. Read-only: no tap action — opening an item in its
+    /// native app is the today rows' gesture, and the Calendar leaf is
+    /// one tap away via the "Show more" capsule.
+    private func upcomingEventRow(_ event: ExternalReminder) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: event.source.systemImage)
+                .font(.system(size: 24))
+                .foregroundColor(DesignTokens.textSecondary)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(event.title)
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Text(upcomingEventTimeText(event))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+                Text(event.calendarName)
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
+            Spacer()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// When the event happens: the relative day via `HistoryTimeFormat`
+    /// (Tomorrow / a localized short date — today's events never reach
+    /// this section), plus the wall-clock time for timed events.
+    /// All-day events ARE their day, so the day label alone is their
+    /// caption.
+    private func upcomingEventTimeText(_ event: ExternalReminder) -> String {
+        let locale = coordinator.activeLocale
+        let day = HistoryTimeFormat.displayString(for: event.startDate,
+                                                  now: Date(),
+                                                  calendar: Calendar.current,
+                                                  locale: locale)
+        if event.isAllDay { return day }
+        let clock = event.startDate.formatted(
+            Date.FormatStyle(date: .omitted, time: .shortened).locale(locale))
+        return "\(day) · \(clock)"
+    }
+
+    /// Capsule into the Calendar leaf when more events are ahead than
+    /// the cap shows (the History leaf's show-more pattern).
+    private var showMoreUpcomingLink: some View {
+        NavigationLink(value: LeafDestination.calendar) {
+            Text("history.showMore")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.accent)
+                .frame(maxWidth: .infinity)
+                .frame(height: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.card)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule().stroke(DesignTokens.accent.opacity(0.35),
+                                     lineWidth: 1.5)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
 }
 
 // MARK: - Call (फोन) — redesign spec §3.2 + system-contacts search (2026-09-06)
