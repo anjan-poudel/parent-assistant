@@ -342,6 +342,18 @@ struct RemindersView: View {
 /// Contacts permission is asked at the point of use behind a
 /// plain-language card — never silently on appear — and the family
 /// tiles below stay fully usable with or without it.
+///
+/// Curated-first layout (2026-09-07): the leaf now LEADS with the
+/// curated Family & friends list — the people the app is configured to
+/// call, each tile wearing the contact's own photo thumbnail when one
+/// is on file — and the whole-phone-book search collapses into the
+/// magnifyingglass on the curated header row. Searching opens the same
+/// search surface as before (field, voice search, access cards, ranked
+/// rows) as an explicit mode; clearing the field to empty, or tapping
+/// the mode's back button, returns to the curated list. The photos come
+/// from the coordinator's `contactPhoto(for:)` contract
+/// (contact-photos task, 2026-09-07): a photo resolves when the
+/// contact has a `photoFilename`, otherwise the initials avatar stays.
 struct CallView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.scenePhase) private var scenePhase
@@ -373,6 +385,16 @@ struct CallView: View {
     /// result was announced (or the ask became moot — user edited away).
     @State private var announcedVoiceSearchID: UUID?
 
+    // Curated-first mode (2026-09-07): the address-book search lives
+    // behind the curated header row's magnifyingglass and is closed by
+    // default — the leaf's primary face is the curated Family & friends
+    // list. `searchMode` is the open state: set by the header icon tap,
+    // set again by a pending voice-command search that carries a query
+    // (consumePendingVoiceRequestIfPresent), and cleared by the search
+    // mode's back button or by clearing the field to empty — both
+    // return to the curated view.
+    @State private var searchMode = false
+
     // Per-row channel handling (channel-chooser task, 2026-09-07).
     /// Bumped after a chooser pick or a saved Messenger handle so the
     /// per-outcome row-state dictionary re-resolves (the coordinator
@@ -390,10 +412,19 @@ struct CallView: View {
         LeafScreen(titleKey: "call.title") {
             VStack(spacing: 12) {
                 launchRow
-                searchArea
-                if isSearching {
-                    resultsArea
+                if searchMode {
+                    // Search is an overlay on the leaf (curated-first
+                    // layout, 2026-09-07): field + permission/loading
+                    // cards up top, ranked rows below once the query is
+                    // non-empty. Exit is the row's back button or
+                    // clearing the field — both flip `searchMode` and
+                    // the curated content below returns.
+                    searchArea
+                    if isSearching {
+                        resultsArea
+                    }
                 } else {
+                    curatedHeaderRow
                     familyArea
                     recentActivitySection
                 }
@@ -423,6 +454,14 @@ struct CallView: View {
             // retirement (trimmedQuery matches, so nothing happens here).
             if let voice = voiceRequest, trimmedQuery != voice.query {
                 announcedVoiceSearchID = voice.id
+            }
+            // Clearing the field ends search mode (curated-first layout,
+            // 2026-09-07): an empty query has no results to render, so
+            // the leaf folds back to the curated list — the same exit the
+            // search mode's back button performs. Guarded by `searchMode`
+            // so a voice prefill (which never clears) cannot trip it.
+            if searchMode && trimmedQuery.isEmpty {
+                searchMode = false
             }
         }
         .onChange(of: scenePhase) { phase in
@@ -590,12 +629,104 @@ struct CallView: View {
         AddressBookLoadFailedCard(retry: loadEntries)
     }
 
+    // MARK: Curated header + search-mode entry/exit (2026-09-07)
+
+    /// The curated list's header row (curated-first layout, 2026-09-07):
+    /// the "Family and friends" section title on the left — the value
+    /// travels on the shared `settings.family.title` key — and the ≥44pt
+    /// magnifyingglass that opens the address-book search on the right.
+    /// This row is the leaf's only door into search; it is shown exactly
+    /// when search mode is closed.
+    private var curatedHeaderRow: some View {
+        HStack(spacing: 12) {
+            Text(LocalizedStringKey("settings.family.title"))
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textPrimary)
+            Spacer(minLength: 8)
+            searchOpenButton
+        }
+    }
+
+    /// The header row's ≥44pt search button (curated-first layout,
+    /// 2026-09-07): a magnifyingglass on the leaf-chrome circle — the
+    /// same card-circle look the top bar's back button wears. The tap
+    /// opens search mode; VoiceOver reads what the tap does, not the
+    /// empty state of the field it reveals.
+    private var searchOpenButton: some View {
+        Button(action: openSearch) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(DesignTokens.accent)
+                .frame(width: DesignTokens.minTapTargetSize,
+                       height: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.card)
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("call.search.openLabel"))
+    }
+
+    /// The leaf's search-mode back control (curated-first layout,
+    /// 2026-09-07): a ≥44pt chevron circle above the field/access cards
+    /// that folds search mode back to the curated list — one tap, even
+    /// when no query exists to clear (e.g. the blocked-permission card,
+    /// where clearing could never fire). Mirrors the leaf chrome's back
+    /// circle so the gesture reads as "one level back" to the list.
+    private var searchExitButton: some View {
+        Button(action: exitSearch) {
+            Image(systemName: "chevron.backward")
+                .font(.system(size: 20, weight: .bold))
+                .foregroundColor(DesignTokens.textPrimary)
+                .frame(width: DesignTokens.minTapTargetSize,
+                       height: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.card)
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("common.back"))
+    }
+
+    /// Opens search mode — the curated header's magnifyingglass.
+    /// Deliberately does NOT autofocus the field: the elder's two entry
+    /// options (type or speak) sit side by side in the pill, and a
+    /// keyboard popping up uninvited would crowd the mic-first path
+    /// (voice-contact-search) before either is chosen.
+    private func openSearch() {
+        searchMode = true
+    }
+
+    /// Folds search mode back to the curated list — the search-mode back
+    /// button. Never leave a listening mic behind (same rule as
+    /// `onDisappear`), drop the field text and any pending voice ask, and
+    /// close the mode; the curated header + list return.
+    private func exitSearch() {
+        if micPhase == .listening {
+            coordinator.cancelSearchPhraseCapture()
+        }
+        micPhase = .idle
+        voiceRequest = nil
+        searchText = ""
+        searchMode = false
+    }
+
     // MARK: Permission / loading states
 
+    /// The OPEN search surface — rendered only in search mode
+    /// (curated-first layout, 2026-09-07). Same content and order as the
+    /// old always-visible search area — field with mic, then the
+    /// permission/loading cards — now led by the ≥44pt back-to-list
+    /// circle. Because the surface only appears when the elder asks for
+    /// search, the access ask fires at that point of use (the header tap
+    /// or a voice search), never on leaf appear.
     @ViewBuilder
     private var searchArea: some View {
+        HStack(spacing: 10) {
+            searchExitButton
+            if access == .allowed {
+                searchField
+            }
+        }
         if access == .allowed {
-            searchField
             micCaption
             if entries == nil {
                 if loadFailed {
@@ -747,6 +878,10 @@ struct CallView: View {
         }
         voiceRequest = AppCoordinator.ContactSearchRequest(query: query)
         searchText = query
+        // A voice-commanded search IS a search: open the search surface
+        // (curated-first layout, 2026-09-07). The query pre-fills the
+        // field, so this never trips the clear-to-empty auto-exit.
+        searchMode = true
         // Entries may still be loading (onChange(of: entries) will call
         // back), but when they are here the results are on screen NOW.
         announceVoiceResultIfReady()
@@ -947,6 +1082,18 @@ struct CallView: View {
                     emptyState(key: "call.search.noResults")
                 }
             } else {
+                // Per-row photo thumbnails, resolved ONCE per search
+                // outcome next to the channel pass below (contact-photos
+                // task, 2026-09-07): only `.family` rows have a photo —
+                // `contactPhoto(for:)` is a curated-contact API, book
+                // rows get nil — and the rows index this result instead
+                // of touching the photo resolver per body evaluation.
+                let photos = outcome.entries.reduce(into: [String: UIImage]()) {
+                    photos, row in
+                    guard case .family(let contact) = row,
+                          let image = coordinator.contactPhoto(for: contact) else { return }
+                    photos[row.id] = image
+                }
                 // Per-row channel state, resolved ONCE per search
                 // outcome (channel-chooser task, 2026-09-07): the
                 // preference store and the captured-handle store are
@@ -962,6 +1109,7 @@ struct CallView: View {
                 VStack(spacing: 12) {
                     ForEach(outcome.entries) { result in
                         UnifiedContactResultRow(result: result,
+                                                photo: photos[result.id],
                                                 channelState: channelStates[result.id]
                                                     ?? rowChannelState(for: result),
                                                 dial: { dialChannel(result) },
@@ -1454,6 +1602,13 @@ private struct RowChannelState {
 /// row never guesses availability or resolves anything itself.
 private struct UnifiedContactResultRow: View {
     let result: UnifiedContactSearch.Result
+    /// The row's leading photo thumbnail (contact-photos task,
+    /// 2026-09-07): ONLY `.family` rows carry one — the leaf resolves
+    /// it once per search outcome from
+    /// `AppCoordinator.contactPhoto(for:)` — book rows pass nil and
+    /// keep the initials avatar. Caller-driven like everything else in
+    /// the row; the row never touches the photo resolver itself.
+    let photo: UIImage?
     /// The leaf-resolved channel truth for this row (see `RowChannelState`).
     let channelState: RowChannelState
     /// Dial the RESOLVED channel (`CallView.dialChannel`) — the circle
@@ -1500,7 +1655,7 @@ private struct UnifiedContactResultRow: View {
     private var dialZone: some View {
         Button(action: dial) {
             HStack(spacing: 14) {
-                FaceAvatar(name: result.name, diameter: 52)
+                avatar
                 VStack(alignment: .leading, spacing: 2) {
                     Text(result.name)
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
@@ -1533,6 +1688,26 @@ private struct UnifiedContactResultRow: View {
         // name when it is FaceTime/WhatsApp/Messenger — VoiceOver must
         // never imply a GSM call that won't happen.
         .accessibilityValue(Text(resolvedChannelValue))
+    }
+
+    /// The row's leading face (contact-photos task, 2026-09-07): the
+    /// family row's photo thumbnail when one resolved (see `photo`),
+    /// else the initials FaceAvatar — same 52pt circle either way, so
+    /// result rows mirror the ContactTile face column. The photo is
+    /// decorative for VoiceOver: the dial button already reads the
+    /// contact's name and channel, so an unlabelled "image" adds noise.
+    @ViewBuilder
+    private var avatar: some View {
+        if let photo {
+            Image(uiImage: photo)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 52, height: 52)
+                .clipShape(Circle())
+                .accessibilityHidden(true)
+        } else {
+            FaceAvatar(name: result.name, diameter: 52)
+        }
     }
 
     /// Value text of the dial button (see above).
@@ -1696,21 +1871,47 @@ private struct UnifiedContactResultRow: View {
     }
 }
 
-/// Face/initial avatar + name, with per-contact VIDEO and AUDIO call
+/// Face/photo avatar + name, with per-contact VIDEO and AUDIO call
 /// buttons — no list picker in between (redesign spec §3.1 "one face,
 /// one tap"; contact-call-buttons task 2026-09-06). Each button opens
 /// the contact's preferred app for that call kind (`FamilyContact`
 /// carries the per-contact defaults; the personalization editor is a
 /// deferred follow-up) through `AppCoordinator.performContactCall`,
 /// which also announces the opened surface aloud.
+///
+/// The leading face (contact-photos task, 2026-09-07) is the contact's
+/// own photo thumbnail when the coordinator resolves one from the
+/// contact's `photoFilename` (`AppCoordinator.contactPhoto(for:)`),
+/// otherwise the initials FaceAvatar — same 52pt circle either way, so
+/// a curated row of tiles keeps a uniform face column.
 struct ContactTile: View {
     let contact: FamilyContact
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.locale) private var locale
 
+    /// The tile's face circle — photo or initials (see the struct doc).
+    /// The photo branch is hidden from VoiceOver: an unlabelled "image"
+    /// read would add nothing — the contact's name sits right beside
+    /// it. The initials fallback keeps its legacy exposure untouched.
+    @ViewBuilder
+    private func avatar(for contact: FamilyContact) -> some View {
+        if let photo = coordinator.contactPhoto(for: contact) {
+            Image(uiImage: photo)
+                .resizable()
+                .scaledToFill()
+                .frame(width: Self.avatarDiameter, height: Self.avatarDiameter)
+                .clipShape(Circle())
+                .accessibilityHidden(true)
+        } else {
+            FaceAvatar(name: contact.name, diameter: Self.avatarDiameter)
+        }
+    }
+
+    private static let avatarDiameter: CGFloat = 52
+
     var body: some View {
         HStack(spacing: 14) {
-            FaceAvatar(name: contact.name, diameter: 52)
+            avatar(for: contact)
             VStack(alignment: .leading, spacing: 2) {
                 Text(contact.name)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))

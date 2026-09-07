@@ -1660,6 +1660,23 @@
         }
       }
     },
+    "call.search.openLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search contacts"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्पर्कहरू खोज्नुहोस्"
+          }
+        }
+      }
+    },
     "call.channel.whatsapp": {
       "extractionState": "manual",
       "localizations": {
@@ -4097,13 +4114,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Family contact"
+            "value": "Family and friends"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "परिवारको सम्पर्क"
+            "value": "परिवार र साथीहरू"
           }
         }
       }
@@ -5808,6 +5825,142 @@
         }
       }
     },
+    "family.addSearch.allowBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow access, search their name, and the fields below fill in by themselves — or just type the details yourself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पहुँच दिनुहोस्, नाम खोज्नुहोस्, तलका क्षेत्र आफै भरिनेछन् — वा आफैं पनि लेख्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "family.addSearch.allowTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find them in your contacts"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंका सम्पर्कहरूमा खोज्नुहोस्"
+          }
+        }
+      }
+    },
+    "family.addSearch.deniedBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Contacts access is off, so the search is hidden. You can still add the details by typing them below."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्पर्कहरूको पहुँच बन्द भएकाले खोज लुकाइएको छ। तल आफैं लेखेर पनि विवरण थप्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "family.addSearch.placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search contacts"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्पर्क खोज्नुहोस्"
+          }
+        }
+      }
+    },
+    "family.photo.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "family.photo.change": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो परिवर्तन"
+          }
+        }
+      }
+    },
+    "family.photo.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "settings.family.edit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्पादन गर्नुहोस्"
+          }
+        }
+      }
+    },
     "settings.family.delete": {
       "extractionState": "manual",
       "localizations": {
@@ -5865,13 +6018,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Family & emergency contacts"
+            "value": "Family and friends"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "परिवारको सम्पर्क"
+            "value": "परिवार र साथीहरू"
           }
         }
       }
