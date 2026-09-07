@@ -235,6 +235,13 @@ final class CommandRouter {
     private let searchTransport: LocalToolTransport?
     private let searchQuotaDefaults: UserDefaults
 
+    /// [TOOL-DEBUG-LOG] (2026-09-07) Encrypted on-device debug log of
+    /// every local-tool (weather/search) request + outcome — the store
+    /// behind Settings → Tool requests. Nil = dormant (pre-existing
+    /// construction sites and legacy tests behave exactly as before);
+    /// `AppCoordinator` injects its store. See `logToolRequest`.
+    private let localToolLogStore: LocalToolLogStore?
+
     init(coordinator: VoiceCommandCoordinating,
          observabilityBus: ObservabilityBus,
          speaker: Speaker? = nil,
@@ -245,7 +252,8 @@ final class CommandRouter {
          locationFetcherFactory: (() -> LocationFetching)? = nil,
          weatherTransport: LocalToolTransport? = nil,
          searchTransport: LocalToolTransport? = nil,
-         searchQuotaDefaults: UserDefaults = .standard) {
+         searchQuotaDefaults: UserDefaults = .standard,
+         localToolLogStore: LocalToolLogStore? = nil) {
         self.coordinator = coordinator
         self.observabilityBus = observabilityBus
         self.speaker = speaker
@@ -257,6 +265,7 @@ final class CommandRouter {
         self.weatherTransport = weatherTransport
         self.searchTransport = searchTransport
         self.searchQuotaDefaults = searchQuotaDefaults
+        self.localToolLogStore = localToolLogStore
     }
 
     @discardableResult
@@ -741,23 +750,41 @@ final class CommandRouter {
         // (possibly multi-second) geocode/location + fetch round-trip.
         speak(key: "weather.checking")
 
+        // [TOOL-DEBUG-LOG] (2026-09-07) Request capture BEFORE the round-
+        // trip: the RAW utterance is the logged query (place extraction
+        // below is the tool's own parsing — the log keeps what the user
+        // actually asked) and the stopwatch starts here so `durationMs`
+        // spans the whole lookup on every completion path.
+        let query = raw
+        let attemptStartedAt = Date()
+
         Task { [weak self] in
             guard let self else { return }
             guard let transport = self.weatherTransport else {
-                await MainActor.run { self.deliverWeatherFallback(locale: locale) }
+                await MainActor.run {
+                    self.deliverWeatherFallback(locale: locale, query: query,
+                                                startedAt: attemptStartedAt)
+                }
                 return
             }
 
             // Step 1 — a named place answers for that place. Any geocode
-            // failure falls through to the device fix below.
-            if let askedPlace = WeatherTool.placeName(in: raw) {
+            // failure falls through to the device fix below. The place is
+            // extracted ONCE up front so the device path below can tell
+            // "answered for a place that was asked but not geocoded"
+            // (log outcome "fallback") apart from "no place was named"
+            // (log outcome "ok") without re-parsing the utterance.
+            let namedPlace = WeatherTool.placeName(in: raw)
+            if let askedPlace = namedPlace {
                 do {
                     let place = try await WeatherTool.fetchGeocode(name: askedPlace,
                                                                    transport: transport)
                     let conditions = try await WeatherTool.fetchCurrent(
                         latitude: place.latitude, longitude: place.longitude, transport: transport)
                     await MainActor.run {
-                        self.deliverLiveWeather(conditions, placeName: place.name, locale: locale)
+                        self.deliverLiveWeather(conditions, placeName: place.name, locale: locale,
+                                                query: query, outcome: "ok",
+                                                startedAt: attemptStartedAt)
                     }
                     return
                 } catch {
@@ -785,7 +812,10 @@ final class CommandRouter {
                 }
             }
             guard case .success(let fix)? = fixResult else {
-                await MainActor.run { self.deliverWeatherFallback(locale: locale) }
+                await MainActor.run {
+                    self.deliverWeatherFallback(locale: locale, query: query,
+                                                startedAt: attemptStartedAt)
+                }
                 return
             }
             do {
@@ -793,10 +823,16 @@ final class CommandRouter {
                                                                     longitude: fix.longitude,
                                                                     transport: transport)
                 await MainActor.run {
-                    self.deliverLiveWeather(conditions, placeName: fix.placeName, locale: locale)
+                    self.deliverLiveWeather(conditions, placeName: fix.placeName, locale: locale,
+                                            query: query,
+                                            outcome: namedPlace == nil ? "ok" : "fallback",
+                                            startedAt: attemptStartedAt)
                 }
             } catch {
-                await MainActor.run { self.deliverWeatherFallback(locale: locale) }
+                await MainActor.run {
+                    self.deliverWeatherFallback(locale: locale, query: query,
+                                                startedAt: attemptStartedAt)
+                }
             }
         }
     }
@@ -812,12 +848,22 @@ final class CommandRouter {
     /// named place and device location alike).
     private func deliverLiveWeather(_ conditions: WeatherTool.CurrentConditions,
                                     placeName: String?,
-                                    locale: Locale) {
+                                    locale: Locale,
+                                    query: String,
+                                    outcome: String,
+                                    startedAt: Date) {
         emitLocalTool(eventType: "weather", outcome: "ok")
         let conditionsText = WeatherTool.reply(for: conditions, placeName: placeName, locale: locale)
         let text = L10n.fmt("weather.replySource", locale: locale, conditionsText)
         coordinator?.noteGenericReply(text)
         speak(text: text, locale: locale)
+        // [TOOL-DEBUG-LOG] (2026-09-07) The bus event stays "ok" on BOTH
+        // live deliveries (a live reading reached the user — the local-
+        // tools tests pin that); the DEBUG LOG's `outcome` is finer: the
+        // caller passes "fallback" when the named place failed to geocode
+        // and the device reading answered in its place.
+        logToolRequest(kind: .weather, query: query, response: text, outcome: outcome,
+                       statusCode: nil, durationMs: Self.elapsedMilliseconds(since: startedAt))
     }
 
     /// The tool's failure delivery — the unchanged deterministic weather
@@ -827,11 +873,15 @@ final class CommandRouter {
     /// is replaced by `local_tools`/`weather`/`fail` so a fallback that
     /// followed a tool attempt is distinguishable from one that never
     /// had live data to try.
-    private func deliverWeatherFallback(locale: Locale) {
+    private func deliverWeatherFallback(locale: Locale, query: String, startedAt: Date) {
         emitLocalTool(eventType: "weather", outcome: "fail")
         let text = TopicPreAnswer.reply(for: .weather, locale: locale)
         coordinator?.noteGenericReply(text)
         speak(text: text, locale: locale)
+        // [TOOL-DEBUG-LOG] (2026-09-07) Failure delivery → one "fail"
+        // entry carrying the honest no-data line the user actually heard.
+        logToolRequest(kind: .weather, query: query, response: text, outcome: "fail",
+                       statusCode: nil, durationMs: Self.elapsedMilliseconds(since: startedAt))
     }
 
     /// [LOCAL-TOOLS] (2026-09-07) The web-search hook — see the
@@ -872,6 +922,15 @@ final class CommandRouter {
               SearchTool.isQuestionShaped(raw) else {
             return false
         }
+        // [TOOL-DEBUG-LOG] (2026-09-07) The hook is taking the turn —
+        // snapshot the request text + stopwatch BEFORE the quota check
+        // and the network round-trip, so the cap path and every delivery
+        // path below record the same original query and an honest
+        // duration. Guard failures above never reach here — a declined
+        // utterance is not a search attempt and logs nothing (matching
+        // the `local_tools` event gating).
+        let query = raw
+        let attemptStartedAt = Date()
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         let quotaDefaults = searchQuotaDefaults
         let remaining = SearchQuota.remaining(
@@ -890,6 +949,9 @@ final class CommandRouter {
             coordinator?.noteGenericReply(capText)
             speakSequentially([capText, L10n.str("router.reprompt", locale: locale)],
                               locale: locale)
+            logToolRequest(kind: .search, query: query, response: capText, outcome: "cap",
+                           statusCode: nil,
+                           durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
             return true
         }
         // Attempt-based accounting: the count ticks at FIRE time (an
@@ -899,7 +961,10 @@ final class CommandRouter {
         Task { [weak self] in
             guard let self else { return }
             guard let transport = self.searchTransport else {
-                await MainActor.run { self.deliverSearchFallback(locale: locale) }
+                await MainActor.run {
+                    self.deliverSearchFallback(locale: locale, query: query,
+                                               startedAt: attemptStartedAt)
+                }
                 return
             }
             var request = URLRequest(url: SearchTool.requestURL(query: raw,
@@ -908,22 +973,37 @@ final class CommandRouter {
             request.timeoutInterval = Self.searchFetchTimeoutSeconds
             do {
                 let (data, response) = try await transport.fetchData(for: request)
-                let httpOK = (response as? HTTPURLResponse)?.statusCode == 200
+                // [TOOL-DEBUG-LOG] (2026-09-07) The status code is captured
+                // here, before the delivery hop — a non-200 that falls
+                // back still records the code it got (nil only when the
+                // transport threw before any HTTP response).
+                let statusCode = (response as? HTTPURLResponse)?.statusCode
+                let httpOK = statusCode == 200
                 let summary = httpOK
                     ? SearchTool.summaryReply(for: SearchTool.parseSearchJSON(data: data),
                                               locale: locale)
                     : nil
                 guard let summary else {
-                    await MainActor.run { self.deliverSearchFallback(locale: locale) }
+                    await MainActor.run {
+                        self.deliverSearchFallback(locale: locale, query: query,
+                                                   startedAt: attemptStartedAt,
+                                                   statusCode: statusCode)
+                    }
                     return
                 }
                 await MainActor.run {
                     self.emitLocalTool(eventType: "search", outcome: "ok")
                     self.coordinator?.noteGenericReply(summary)
                     self.speak(text: summary, locale: locale)
+                    self.logToolRequest(kind: .search, query: query, response: summary,
+                                        outcome: "ok", statusCode: statusCode,
+                                        durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
                 }
             } catch {
-                await MainActor.run { self.deliverSearchFallback(locale: locale) }
+                await MainActor.run {
+                    self.deliverSearchFallback(locale: locale, query: query,
+                                               startedAt: attemptStartedAt)
+                }
             }
         }
         return true
@@ -933,9 +1013,62 @@ final class CommandRouter {
     /// re-prompt the abstention point would have spoken, plus a
     /// `local_tools` `search` `fail` event. Never a fabricated answer,
     /// never a dead end.
-    private func deliverSearchFallback(locale: Locale) {
+    private func deliverSearchFallback(locale: Locale, query: String,
+                                       startedAt: Date, statusCode: Int? = nil) {
         emitLocalTool(eventType: "search", outcome: "fail")
         speak(key: "router.reprompt")
+        // [TOOL-DEBUG-LOG] (2026-09-07) Failure/empty delivery → one
+        // "fail" entry carrying the honest re-prompt line the user heard
+        // (and the HTTP status when a non-200 response caused it).
+        let reprompt = L10n.str("router.reprompt", locale: locale)
+        logToolRequest(kind: .search, query: query, response: reprompt, outcome: "fail",
+                       statusCode: statusCode,
+                       durationMs: Self.elapsedMilliseconds(since: startedAt))
+    }
+
+    // MARK: - [TOOL-DEBUG-LOG] Local-tool request log
+
+    /// [TOOL-DEBUG-LOG] (2026-09-07) One debug-log entry per local-tool
+    /// request (weather or search) — the helper behind every hook point
+    /// in the [LOCAL-TOOLS] section above. `query` was snapshotted
+    /// BEFORE the request went out; this call adds the outcome + what the
+    /// app answered on the completion path:
+    ///
+    ///   · ok — a live answer was delivered: the weather conditions
+    ///     sentence or the search summary (the spoken text),
+    ///   · fallback — weather only: the NAMED place failed to resolve
+    ///     (geocode error/empty) and the live DEVICE reading answered
+    ///     instead — still a live reading, but for the wrong place,
+    ///   · cap — search only: quota exhausted before any request; the cap
+    ///     line is the response,
+    ///   · fail — no live answer: the honest static weather no-data line
+    ///     or the generic search re-prompt was delivered.
+    ///
+    /// Scope note: the Gemini grounding path ([INTENT-TOOLS] — the cloud
+    /// stack's search-grounded interpreter) is deliberately OUT of scope.
+    /// These hooks sit in the LOCAL-tools stages, which only the
+    /// on-device stack reaches; cloud-stack answers never pass through
+    /// them, so nothing from Gemini is logged here.
+    ///
+    /// Privacy (C9): the entry carries raw user text but goes straight to
+    /// the encrypted on-device store — it never reaches the observability
+    /// bus (PII-free by policy) and never a console log. Nil store
+    /// (dormant default) = no-op, exactly the pre-tool behavior.
+    private func logToolRequest(kind: LocalToolLogEntry.Kind, query: String, response: String,
+                                outcome: String, statusCode: Int?, durationMs: Int?) {
+        guard let localToolLogStore else { return }
+        localToolLogStore.record(LocalToolLogEntry(
+            kind: kind, query: query, response: response, outcome: outcome,
+            statusCode: statusCode, durationMs: durationMs
+        ))
+    }
+
+    /// Whole-millisecond wall-clock span between the attempt start
+    /// (snapshotted before the round-trip) and a completion point —
+    /// `durationMs` for the tool log. Clamped at zero so a sub-millisecond
+    /// turn (the cap path) never records a negative duration.
+    private static func elapsedMilliseconds(since start: Date) -> Int {
+        max(0, Int(Date().timeIntervalSince(start) * 1000))
     }
 
     /// Speaks several already-resolved lines as ONE uninterrupted
