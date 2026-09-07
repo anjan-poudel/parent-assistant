@@ -180,13 +180,22 @@ struct HintCarousel: View {
 
 // MARK: - Live caption pill (Home, capturing — spec §3.1, §6)
 
-/// Shows a placeholder while capture/transcription is in progress, then
-/// reveals the REAL transcript with a brief typewriter effect once it
-/// arrives. This is a v1-honest implementation: today's STT is batch-only
-/// (no partial-result stream), so this cannot be true word-by-word live
+/// The capture-stage transcript surface: the "You're saying" label while
+/// the user talks, then the REAL transcript once STT completes. This is a
+/// v1-honest implementation: today's STT is batch-only (no
+/// partial-result stream), so this cannot be true word-by-word live
 /// captioning — see spec §6. It never fabricates interim text.
+///
+/// There is deliberately NO placeholder body under the label (call-UI
+/// fix, 2026-09-07): the pill used to repeat the session state's own
+/// phrase (`state.*.status` — e.g. "Go ahead, I'm listening") in the
+/// transcript slot, which duplicated the identical sentence already
+/// shown on the hero's status line and — sitting under the "You're
+/// saying" header — read as a fake transcript ("You're saying: Go ahead,
+/// I'm listening") until the real words replaced it. The state phrase
+/// lives on the hero's status line; this card holds only the label and
+/// the user's actual words.
 struct LiveCaptionPill: View {
-    let placeholderKey: String
     let transcript: String?
 
     private var readyText: String? {
@@ -214,10 +223,6 @@ struct LiveCaptionPill: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
                     .transition(.opacity)
-            } else {
-                Text(LocalizedStringKey(placeholderKey))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
             }
         }
         .padding(14)

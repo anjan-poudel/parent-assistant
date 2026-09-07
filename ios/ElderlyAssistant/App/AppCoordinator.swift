@@ -1339,7 +1339,22 @@ final class AppCoordinator: ObservableObject {
             guard let self else { return }
             self.speakingCount += 1
             self.wakeWordActivityGate.setSpeaking(true)
-            self.handlePipelineState(self.lastPipelineState)
+            // Promote straight to .speaking when TTS starts during the
+            // busy pre-speech states (call-ui fix, 2026-09-07): the old
+            // path re-ran handlePipelineState(lastPipelineState), whose
+            // .capturingCommand/.processing/.routing cases map back to
+            // .listening/.transcribing/.understanding regardless of
+            // speakingCount — so the hero kept showing the "listening"
+            // visuals after the reply's speech had actually begun, until
+            // the pipeline eventually emitted .idle. All three pre-speech
+            // states legally transition to .speaking (VoiceSessionState
+            // transition table).
+            let preSpeech: Set<VoiceSessionState> = [.listening, .transcribing, .understanding]
+            if preSpeech.contains(self.voiceSession.state) {
+                self.voiceSession.transition(to: .speaking)
+            } else {
+                self.handlePipelineState(self.lastPipelineState)
+            }
         }
     }
 

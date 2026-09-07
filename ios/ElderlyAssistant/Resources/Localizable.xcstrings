@@ -6692,6 +6692,23 @@
         }
       }
     },
+    "state.awaitingConfirmation.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Please confirm"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कृपया पुष्टि गर्नुहोस्"
+          }
+        }
+      }
+    },
     "state.error.audio": {
       "extractionState": "manual",
       "localizations": {
