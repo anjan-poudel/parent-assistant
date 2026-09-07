@@ -15,9 +15,64 @@ the table; completed items are struck through with the landing commit noted.
 | # | Item | Status | Branch / Worktree | Notes |
 |---|------|--------|-------------------|-------|
 | 7 | Query path structured-response contract ([QUERY-FIX]): kill the invariant "माफ गर्नुहोस्" apology for correctly-transcribed questions | landed `7ac8b33` | ~~`fix-query-end-to-end` (`.claude/worktrees/fix-query-end-to-end`)~~ | e2e suite `QueryEndToEndRegressionTests`; train-intent must mirror the canonical contract — see section below |
-| 6 | Intent-model base bake-off (Gemma 3 1B vs Qwen 3 1.7B) | in progress — gemma leg trained + exported + published (models v7, `intent-ne-gemma-q4_k_m.gguf`, catalog `intentGemma1B`); qwen leg retraining on GPU | none (runs on GPU server 192.168.1.117 via `tools/train-intent/`) | Spec: design 2026-09-05 §7/§9.5, ship gates §10; unblocks `ModelCatalog.intentNepali1B` placeholder |
+| 6 | Intent-model base bake-off (Gemma 3 1B vs Qwen 3 1.7B) | eval complete (2026-09-07) — BOTH legs fail the §10 ship gates on the golden corpus; no winner published (data-quality call for the user); gemma v7 artifact stays the only real intent brain | none (runs on GPU server 192.168.1.117 via `tools/train-intent/`) | Spec: design 2026-09-05 §7/§9.5, ship gates §10; gemma 0.882 / qwen 0.706 closed-intent, emergency recall 0.667 both — full numbers + diagnosis in the section below |
 | 4 | ~~Wake word ("Hey Sahayak")~~ | landed `95b7ff7` | ~~`task/wake-word` (`.claude/worktrees/wake-word`)~~ | ~~Brief at `TASK.md` in that worktree~~ |
 | 5 | ~~Gemini cost governance~~ | landed `a50b61c` | ~~`task/cost-governance` (`.claude/worktrees/cost-governance`)~~ | ~~Brief at `TASK.md` in that worktree~~ |
+
+---
+
+## #6 — Intent-model base bake-off (phase-2 eval outcome, 2026-09-07)
+
+Phase 2 ran on the GPU server (`tools/train-intent/`): the Qwen leg was
+re-trained with the context-truncation fix (`max_seq_len` 1024→1536, commit
+2b0ccdc on the server checkout) and both legs were exported to Q4_K_M GGUF
+(gemma `models/intent-ne-gemma-q4_k_m.gguf` 814,261,088 B sha
+58e59847… — already published as models v7; qwen
+`models/intent-ne-qwen-q4_k_m.gguf` 1,107,408,576 B sha
+e4e8b748… — NOT published) and evaluated against the held-out golden
+corpus (`eval/golden_corpus.jsonl`, 20 rows) on the fixed harness
+(`src/eval_golden.py`; earlier `--backend gguf` row-1 crash = llama-cpp
+`n_ctx` 1024 < 1214-token prompt, already fixed in the working copy to
+2048; this phase added an env-controlled thread cap
+`LLAMA_N_THREADS`/`LLAMA_N_THREADS_BATCH` — llama-cpp-python's default
+~cpu-count OpenMP threads thrashed a shared box to ~1 tok/s).
+
+| metric | gate | gemma-q4_k_m | qwen-q4_k_m | gemini baseline |
+|---|---|---|---|---|
+| closed-intent accuracy | ≥ 0.95 | **0.882** FAIL | **0.706** FAIL | 1.000 |
+| contact slot F1 | ≥ 0.90 | 1.000 | 1.000 | 1.000 |
+| time slot F1 | ≥ 0.90 | 0.909 | 0.923 | 1.000 |
+| emergency recall | = 1.00 | **0.667** FAIL | **0.667** FAIL | 1.000 |
+| call/message precision | ≥ 0.97 | 1.000 | 1.000 | 1.000 |
+| Δ closed vs gemini | ≥ −3 pts | −11.8 FAIL | −29.4 FAIL | — |
+| calibration (±10%) | — | 0.9+ bucket 0.89 (16/18); 1 row at conf 0.0 | 0.8+ bucket 0.79 (11/14); 0.3+ 0.67 | 1.00 all |
+
+Per-intent (correct/n): gemma — ack_med 0/1, call 5/5, emergency 2/3,
+guide 1/1, health_query 2/2, music 2/2, none 2/2, query 0/1,
+send_message 1/1, set_reminder 2/2. Qwen — same except guide 0/1,
+health_query 0/2, query 1/1.
+
+**Diagnosis (raw-output probes on the missed rows):** both legs share two
+generation faults — no EOS discipline (most rows run to the 700-token cap;
+gemma stacks multiple JSON objects, qwen appends prose/degrades into
+repetition) and wrong labels on edge intents. Gemma misses the bare
+emergency "मद्दत गर्नुहोस्" (gc-emergency-001 → `none` + "के समस्या छ?" at
+conf 0.9), "औषधि खाएँ" (ack → set_reminder), and the weather query
+(echoes the prompt template, never reaches JSON). Qwen over-collapses onto
+`query` (both health_query rows + guide row → `query`), also ack →
+set_reminder, and misses "म लडेँ, उठ्न सकिन" ONLY because the correct
+`{"action":"emergency"…}` JSON was truncated by repetition before its
+closing brace.
+
+**Decision left to the user (data quality, not code):** neither leg clears
+the gates → NOT published; `ModelCatalog` stays with `intentGemma1B`
+(v7) only, no `intentQwen1B` entry, `intentNepali1B` placeholder
+untouched. Canonical eval rows sit in `tools/train-intent/eval/results.csv`
+on the server. Candidate next steps: fix the data (bare-emergency and
+ack/health/guide rows under-represented or mis-taught in the mixture),
+emergency adversarial near-miss set (§10, not yet in the corpus), then
+retrain; also the on-device latency leg (p50 ≤ 1.0 s) is still open on
+real hardware.
 
 ---
 
