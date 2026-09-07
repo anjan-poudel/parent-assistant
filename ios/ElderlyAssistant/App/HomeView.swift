@@ -42,6 +42,15 @@ struct HomeView: View {
 
     @State private var showWizard = false
     @State private var showHistory = false
+    /// Home notifications drawer (home-redesign, 2026-09-08): the bell's
+    /// sheet is the ONE surface listing every active notification panel
+    /// (see `NotificationsDrawerSheet`).
+    @State private var showNotifications = false
+    /// Drawer row tap → destination leaf: the sheet dismisses first, then
+    /// `handleNotificationsDismissal` pushes the leaf onto Home's
+    /// navigation stack from `onDismiss` — a push from INSIDE the sheet
+    /// would push onto the sheet's own (empty) stack.
+    @State private var pendingNotificationDestination: LeafDestination?
     @State private var outcomeExpanded = true
     /// Programmatic push target for voice-driven contact search
     /// (voice-contact-search, 2026-09-07): the router's keyword pre-route
@@ -63,34 +72,67 @@ struct HomeView: View {
                 // Skinnable background (2026-09-07) — the theme's cream is
                 // today's DesignTokens.background; see `AppTheme`.
                 Color(theme: coordinator.appTheme).ignoresSafeArea()
-                VStack(spacing: 14) {
+                VStack(spacing: 12) {
                     topBar
-                    // The Home-screen widget stack (2026-09-06 widget
-                    // system; render integration restored 2026-09-08 when
-                    // the Today's-briefing widget landed — a later commit
-                    // had reverted the stack to the inline calendar
-                    // strip): ordered, self-hiding glanceable cards
-                    // between the top bar and the Talk hero. Adding a
-                    // widget = conform to `HomeWidget` and register in
-                    // `HomeWidgetRegistry.builtIns` — this view never
-                    // changes. The calendar strip is widget #1 with the
-                    // exact look and tap target it always had.
-                    widgetStack
-                    if !coordinator.onboardingState.pendingSteps.isEmpty {
-                        setupStrip
+                    // The persistent "Today" card (home-redesign
+                    // 2026-09-08): ONE always-designed-in card — date/
+                    // tithi/festival line + the next activity — replacing
+                    // the whole stacked widget row that used to cram this
+                    // area. Everything that was a stackable panel now
+                    // lives behind the bell in the top bar.
+                    todayCard
+                    // The mid section — setup strip (transient onboarding),
+                    // the voice stage, quick access and the outcome area —
+                    // is ONE scroll region (home-redesign 2026-09-08).
+                    // Scroll safety is what keeps the hero and the dock in
+                    // the viewport on small phones: the Talk hero sits
+                    // directly under the Today card (only the transient
+                    // onboarding strip may precede it), so on an iPhone
+                    // SE-sized viewport what overflows is the LOWER part of
+                    // this region — quick access and the outcome area —
+                    // never the hero, never the pinned dock. Nothing
+                    // above the hero except the fixed top bar and the
+                    // Today card, per the redesign's "top area contains
+                    // ONLY topBar + Today card + bell" rule.
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 14) {
+                            if !coordinator.onboardingState.pendingSteps.isEmpty {
+                                setupStrip
+                            }
+                            talkStage
+                            if !coordinator.favoriteApps.isEmpty {
+                                quickAccessRow
+                            }
+                            feedbackArea
+                        }
+                        .padding(.vertical, 4)
                     }
-                    if !coordinator.favoriteApps.isEmpty {
-                        quickAccessRow
-                    }
-                    Spacer(minLength: 0)
-                    talkStage
-                    Spacer(minLength: 0)
-                    feedbackArea
-                    dock
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
-                .padding(.bottom, 12)
+                // The notifications drawer sheet lives on the VStack (a
+                // different view than the history sheet's ZStack) — two
+                // `.sheet` modifiers on the SAME view are unreliable on
+                // early iOS 16 builds, and Home must keep both sheets.
+                .sheet(isPresented: $showNotifications,
+                       onDismiss: handleNotificationsDismissal) {
+                    NotificationsDrawerSheet(registry: widgetRegistry,
+                                             onSelect: presentNotificationDestination)
+                        .environmentObject(coordinator)
+                        .environmentObject(session)
+                        .environment(\.locale, coordinator.appLanguage.locale)
+                }
+            }
+            // Dock pinned to the bottom edge (home-redesign 2026-09-08):
+            // previously the dock was the last child of the fixed VStack,
+            // so any overflow above it (the old widget stack) pushed it
+            // off the viewport on small screens. As a `safeAreaInset` it
+            // always owns the bottom of the screen and the scroll region
+            // above it absorbs overflow instead.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                dock
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 8)
             }
             .navigationBarHidden(true)
             // Value-based navigation (iOS 16 pattern). The previous
@@ -116,14 +158,6 @@ struct HomeView: View {
                     navPath.append(LeafDestination.call)
                 }
             }
-            // Calendar-strip first-render gate (2026-09-08): the strip
-            // widget hides itself until `homeCalendarLine` is non-nil,
-            // but the refresh call used to live INSIDE the widget's view
-            // — a widget that never rendered because the line was nil.
-            // This one-shot container task breaks the deadlock. Cheap:
-            // the refresh no-ops once the line exists (and the value is
-            // not secret — BS date/tithi/festival text).
-            .task { coordinator.refreshHomeCalendarLineIfNeeded() }
             .fullScreenCover(isPresented: $showWizard) {
                 OnboardingWizardView(startingAt: coordinator.onboardingState.firstPendingStep)
                     .environmentObject(coordinator)
@@ -150,13 +184,16 @@ struct HomeView: View {
             // button, so the gear can never be confused with emergency
             // (2026-09-07). Still exactly one entry point, by voice or by
             // touch. Equal-width 44pt containers on both sides keep the
-            // greeting visually centered.
+            // greeting visually centered — the notifications bell joined
+            // the trailing cluster (home-redesign 2026-09-08), so a
+            // balancing invisible 44pt sits beside settings.
             NavigationLink(value: LeafDestination.settings) {
                 IconBadge(systemImage: "gearshape.fill", tint: .settings, diameter: 32)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text(LocalizedStringKey("home.hub.settings")))
             .frame(width: 44, alignment: .leading)
+            Color.clear.frame(width: 44, height: 44)
             Spacer()
             // The date/greeting area doubles as the calendar's entry
             // point (2026-09-06: calendar lives ON the home screen via
@@ -181,27 +218,62 @@ struct HomeView: View {
             }
             .accessibilityLabel(Text("home.hub.calendar"))
             Spacer()
+            // The ONE notifications affordance (home-redesign 2026-09-08):
+            // a bell with the active-panel badge in the top bar — the
+            // "notifications live here" spot every phone has taught, and
+            // the badge count always matches what the drawer lists. Bell
+            // sits between the greeting and emergency, keeping emergency
+            // at the far edge exactly where it always was.
+            NotificationBellButton(count: activeNotificationCount) {
+                showNotifications = true
+            }
             EmergencyIconButton()
                 .frame(width: 44, alignment: .trailing)
         }
         .padding(.top, 8)
     }
 
-    /// The Home widget registry, evaluated on every render — widgets
-    /// self-hide through `isVisible`, so no widget bookkeeping lives in
-    /// this view.
+    /// The Home widget registry (rendering v2, home-redesign 2026-09-08):
+    /// panels now feed the notifications drawer + bell badge instead of a
+    /// stacked card row — evaluated on every render; panels self-hide
+    /// through `makeRow`, so no widget bookkeeping lives in this view.
+    /// The SAME instance feeds the bell and the drawer sheet, so badge
+    /// count and drawer rows can never disagree.
     private let widgetRegistry = HomeWidgetRegistry()
 
-    /// The ordered stack of visible widgets (2026-09-06 widget system;
-    /// render site re-integrated 2026-09-08 — see the comment at the
-    /// `widgetStack` call site above).
-    private var widgetStack: some View {
-        let visible = widgetRegistry.orderedVisibleWidgets(coordinator: coordinator)
-        return VStack(spacing: 10) {
-            ForEach(visible, id: \.widgetID) { widget in
-                widget.makeView(coordinator: coordinator)
-            }
-        }
+    /// The drawer's rows for the current state — what the bell's sheet
+    /// lists.
+    private var notificationRows: [HomeNotificationRow] {
+        widgetRegistry.notificationRows(coordinator: coordinator)
+    }
+
+    /// Bell badge derivation — the count of active notification panels.
+    private var activeNotificationCount: Int { notificationRows.count }
+
+    /// The persistent "Today" card (home-redesign 2026-09-08) — the ONE
+    /// always-designed-in daily-context surface between the top bar and
+    /// the Talk hero. See `TodayCardView`.
+    private var todayCard: some View {
+        TodayCardView()
+    }
+
+    // MARK: - Notifications drawer routing (home-redesign, 2026-09-08)
+
+    /// Row tap in the drawer: remember the leaf, dismiss the sheet — the
+    /// push happens in `handleNotificationsDismissal` once the sheet is
+    /// gone, so the destination never lands beneath the sheet.
+    private func presentNotificationDestination(_ destination: LeafDestination) {
+        pendingNotificationDestination = destination
+        showNotifications = false
+    }
+
+    /// `onDismiss` of the drawer sheet: a row tap that was recorded while
+    /// the sheet was up becomes a push on Home's navigation stack. A
+    /// swipe-dismissal leaves the destination nil and pushes nothing.
+    private func handleNotificationsDismissal() {
+        guard let destination = pendingNotificationDestination else { return }
+        pendingNotificationDestination = nil
+        navPath.append(destination)
     }
 
     /// Slim, dismissible-by-navigation strip (redesign spec §3.1) —

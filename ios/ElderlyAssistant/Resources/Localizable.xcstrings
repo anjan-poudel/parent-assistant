@@ -5366,6 +5366,57 @@
         }
       }
     },
+    "notifications.bell": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifications"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सूचनाहरू"
+          }
+        }
+      }
+    },
+    "notifications.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No notifications right now."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले कुनै सूचना छैन।"
+          }
+        }
+      }
+    },
+    "notifications.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notifications"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सूचनाहरू"
+          }
+        }
+      }
+    },
     "onboarding.next": {
       "extractionState": "manual",
       "localizations": {
@@ -8116,6 +8167,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "उपकरण अनुरोधहरू"
+          }
+        }
+      }
+    },
+    "today.card.noActivities": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing else on today's schedule."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजको तालिकामा अरू केही छैन।"
           }
         }
       }
