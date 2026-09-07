@@ -99,10 +99,19 @@ struct HomeView: View {
                             if !coordinator.onboardingState.pendingSteps.isEmpty {
                                 setupStrip
                             }
-                            talkStage
+                            // Quick access sits ABOVE the Talk stage (its
+                            // original Home row — a launcher, not a
+                            // notification; restored after the redesign
+                            // briefly tucked it below the hero). With the
+                            // Today card + one fixed-height row above the
+                            // hero, the hero can scroll on SE-sized
+                            // viewports only when the onboarding strip is
+                            // also present — the dock stays pinned and the
+                            // hero remains directly reachable.
                             if !coordinator.favoriteApps.isEmpty {
                                 quickAccessRow
                             }
+                            talkStage
                             feedbackArea
                         }
                         .padding(.vertical, 4)
