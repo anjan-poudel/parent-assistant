@@ -2,25 +2,28 @@ import XCTest
 import SwiftUI
 @testable import ElderlyAssistant
 
-/// Registry tests for the rendering v2 contract (home-redesign 2026-09-08):
-/// Home widgets are now NOTIFICATION PANELS whose output is one drawer
-/// row (`HomeNotificationRow`) feeding the notifications sheet AND the
-/// bell badge. The old stacked-card render site is gone — the registry's
-/// contract is "drawer row source + bell-badge source", plus the fixed
-/// layout guarantee that Home's built-in set contains ONLY drawer panels
-/// (the calendar strip / next-reminder content merged into the persistent
-/// Today card, which is fixed chrome, not a widget).
+/// Registry tests for the rendering v2/v3 contract (home-redesign
+/// 2026-09-08): Home widgets are NOTIFICATION PANELS whose output is one
+/// row (`HomeNotificationRow`) feeding the bell badge AND the Updates
+/// leaf's "Notifications" section (v3 — the pushed leaf that replaced the
+/// v2 drawer sheet; the registry contract itself is unchanged by the
+/// swap). The old stacked-card render site is gone — the registry's
+/// contract is "Notifications-section row source + bell-badge source",
+/// plus the fixed-layout guarantee that Home's built-in set contains
+/// ONLY notification panels (the calendar strip / next-reminder content
+/// now lives in the Updates leaf's "Today" section, composed by
+/// `UpdatesComposer` — not a widget, so Home's layout cannot regrow).
 @MainActor
 final class HomeWidgetRegistryTests: XCTestCase {
 
     // MARK: - Row ordering + self-hiding
 
     func testRowsOrderByPriority() {
-        let low = FakeDrawerWidget(id: "low", priority: 30,
+        let low = FakePanelWidget(id: "low", priority: 30,
                                    row: row(id: "low", text: "low"))
-        let high = FakeDrawerWidget(id: "high", priority: 5,
+        let high = FakePanelWidget(id: "high", priority: 5,
                                     row: row(id: "high", text: "high"))
-        let mid = FakeDrawerWidget(id: "mid", priority: 15,
+        let mid = FakePanelWidget(id: "mid", priority: 15,
                                    row: row(id: "mid", text: "mid"))
         let registry = HomeWidgetRegistry(widgets: [low, high, mid])
         XCTAssertEqual(registry.notificationRows(coordinator: stub).map(\.widgetID),
@@ -28,9 +31,9 @@ final class HomeWidgetRegistryTests: XCTestCase {
     }
 
     func testSelfHidingWidgetsProduceNoRows() {
-        let shown = FakeDrawerWidget(id: "shown", priority: 10,
+        let shown = FakePanelWidget(id: "shown", priority: 10,
                                      row: row(id: "shown", text: "shown"))
-        let hidden = FakeDrawerWidget(id: "hidden", priority: 5, row: nil)
+        let hidden = FakePanelWidget(id: "hidden", priority: 5, row: nil)
         let registry = HomeWidgetRegistry(widgets: [shown, hidden])
         XCTAssertEqual(registry.notificationRows(coordinator: stub).map(\.widgetID),
                        ["shown"],
@@ -39,15 +42,16 @@ final class HomeWidgetRegistryTests: XCTestCase {
                        ["shown"])
     }
 
-    // MARK: - Built-in set = the drawer panels (and nothing that would
-    // regrow the Home layout)
+    // MARK: - Built-in set = the Notifications panels (and nothing that
+    // would regrow the Home layout)
 
-    func testBuiltInsAreTheDrawerPanelsOnly() {
+    func testBuiltInsAreTheNotificationsPanelsOnly() {
         // The old registration list had FOUR stacked cards (calendar
-        // strip, briefing, next reminder, meds status). v2 registers only
-        // panels that live in the drawer — calendar strip + next-reminder
-        // content merged into the persistent Today card (fixed chrome,
-        // see TodayCardSource), so Home's fixed layout cannot regrow.
+        // strip, briefing, next reminder, meds status). v2 registered
+        // only panels that live in the notifications surface; v3 kept
+        // exactly that set — calendar strip + next-reminder content is
+        // the Updates leaf's "Today" section (`UpdatesComposer`), fixed
+        // chrome, not widgets, so Home's fixed layout cannot regrow.
         let builtIns = HomeWidgetRegistry.builtIns()
         XCTAssertEqual(builtIns.map(\.widgetID), ["todayBriefing", "medsStatus"])
         XCTAssertEqual(Set(builtIns.map(\.widgetID)).count, builtIns.count)
@@ -119,7 +123,7 @@ final class HomeWidgetRegistryTests: XCTestCase {
                   destinationID: "meds")
     }
 
-    // MARK: - Drawer order for the built-in set
+    // MARK: - Notifications-section order for the built-in set
 
     func testBriefingRowSitsAboveMedsStatus() {
         let registry = HomeWidgetRegistry()
@@ -135,16 +139,17 @@ final class HomeWidgetRegistryTests: XCTestCase {
                           ids.firstIndex(of: "medsStatus")!)
     }
 
-    // MARK: - Bell badge derivation + drawer scale consistency
+    // MARK: - Bell badge derivation + leaf scale consistency
     //
-    // The drawer must look identical and stay usable with 1 item or 10+:
-    // every item is the same `HomeNotificationRow` model rendered by the
-    // same row component in the same ScrollView (view-level identity is
-    // not unit-assertable — the sheet is a single `ForEach` over exactly
-    // these rows). What IS locked here is the model contract: the badge
-    // count is the row count (bell and sheet can never disagree), and a
-    // row's VALUE is bit-identical whether its panel sits alone or among
-    // ten — no row changes because its neighbors do.
+    // The Updates leaf's Notifications section must look identical and
+    // stay usable with 1 item or 10+: every item is the same
+    // `HomeNotificationRow` model rendered by the same row component
+    // (`UpdatesRowButton`) (view-level identity is not unit-assertable —
+    // the section is a single `ForEach` over exactly these rows). What IS
+    // locked here is the model contract: the badge count is the row count
+    // (bell and leaf can never disagree), and a row's VALUE is
+    // bit-identical whether its panel sits alone or among ten — no row
+    // changes because its neighbors do.
 
     func testBadgeCountIsZeroWhenNothingIsActive() {
         let registry = HomeWidgetRegistry()   // briefing + meds panels
@@ -175,20 +180,20 @@ final class HomeWidgetRegistryTests: XCTestCase {
     func testRowValuesAreStableRegardlessOfPanelCount() {
         // The same panel row, composed alone and composed among 10
         // neighbors, must be value-identical.
-        let solo = HomeWidgetRegistry(widgets: [FakeDrawerWidget(
+        let solo = HomeWidgetRegistry(widgets: [FakePanelWidget(
             id: "panel", priority: 10, row: row(id: "panel", text: "Alone"))])
         let crowded = HomeWidgetRegistry(widgets: [
-            FakeDrawerWidget(id: "panel", priority: 10,
+            FakePanelWidget(id: "panel", priority: 10,
                              row: row(id: "panel", text: "Alone")),
-            FakeDrawerWidget(id: "p2", priority: 20, row: row(id: "p2", text: "2")),
-            FakeDrawerWidget(id: "p3", priority: 30, row: row(id: "p3", text: "3")),
-            FakeDrawerWidget(id: "p4", priority: 40, row: row(id: "p4", text: "4")),
-            FakeDrawerWidget(id: "p5", priority: 50, row: row(id: "p5", text: "5")),
-            FakeDrawerWidget(id: "p6", priority: 60, row: row(id: "p6", text: "6")),
-            FakeDrawerWidget(id: "p7", priority: 70, row: row(id: "p7", text: "7")),
-            FakeDrawerWidget(id: "p8", priority: 80, row: row(id: "p8", text: "8")),
-            FakeDrawerWidget(id: "p9", priority: 90, row: row(id: "p9", text: "9")),
-            FakeDrawerWidget(id: "p10", priority: 100, row: row(id: "p10", text: "10"))
+            FakePanelWidget(id: "p2", priority: 20, row: row(id: "p2", text: "2")),
+            FakePanelWidget(id: "p3", priority: 30, row: row(id: "p3", text: "3")),
+            FakePanelWidget(id: "p4", priority: 40, row: row(id: "p4", text: "4")),
+            FakePanelWidget(id: "p5", priority: 50, row: row(id: "p5", text: "5")),
+            FakePanelWidget(id: "p6", priority: 60, row: row(id: "p6", text: "6")),
+            FakePanelWidget(id: "p7", priority: 70, row: row(id: "p7", text: "7")),
+            FakePanelWidget(id: "p8", priority: 80, row: row(id: "p8", text: "8")),
+            FakePanelWidget(id: "p9", priority: 90, row: row(id: "p9", text: "9")),
+            FakePanelWidget(id: "p10", priority: 100, row: row(id: "p10", text: "10"))
         ])
         let soloRows = solo.notificationRows(coordinator: stub)
         let crowdedRows = crowded.notificationRows(coordinator: stub)

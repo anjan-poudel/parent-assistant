@@ -196,7 +196,10 @@ struct HintCarousel: View {
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                 .foregroundColor(DesignTokens.textSecondary)
             Text(LocalizedStringKey(Self.phraseKeys[index]))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                // Static/rotating text under the speak button is caption-
+                // sized (home-redesign v3, 2026-09-08): this rotating
+                // phrase is an idle affordance, not reading matter.
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                 .foregroundColor(DesignTokens.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
@@ -269,7 +272,11 @@ struct LiveCaptionPill: View {
                 // `AppCoordinator.conversationHistory`; this just stops
                 // showing a deliberately-incomplete slice of it.
                 Text(text)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    // Caption-sized transcript (home-redesign v3,
+                    // 2026-09-08) — the spoken words are ephemeral
+                    // under-hero text; the full exchange lives in the
+                    // Updates leaf's Activity log.
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
                     .transition(.opacity)
             }
@@ -341,11 +348,15 @@ struct OutcomeCardView: View {
                                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                                 .foregroundColor(DesignTokens.textSecondary)
                             Text(heard)
-                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                                // Caption-sized outcome rows (home-redesign
+                                // v3, 2026-09-08): the assistant already
+                                // SPOKE this text — the visual channel is a
+                                // confirmation glance, not a read.
+                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                                 .foregroundColor(DesignTokens.textPrimary)
                         case .assistant(let response):
                             Text(response)
-                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                                 .foregroundColor(DesignTokens.textPrimary)
                         }
                     }

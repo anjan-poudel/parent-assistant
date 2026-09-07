@@ -8171,23 +8171,6 @@
         }
       }
     },
-    "today.card.noActivities": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Nothing else on today's schedule."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "आजको तालिकामा अरू केही छैन।"
-          }
-        }
-      }
-    },
     "toolLog.capNote": {
       "extractionState": "manual",
       "localizations": {
@@ -11839,6 +11822,74 @@
           "stringUnit": {
             "state": "translated",
             "value": "भोलि"
+          }
+        }
+      }
+    },
+    "updates.activity.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No recent activity."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हालै कुनै गतिविधि छैन।"
+          }
+        }
+      }
+    },
+    "updates.section.activity": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Activity"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गतिविधि"
+          }
+        }
+      }
+    },
+    "updates.section.today": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आज"
+          }
+        }
+      }
+    },
+    "updates.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Updates"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अपडेटहरू"
           }
         }
       }
