@@ -1122,13 +1122,15 @@ struct WakeWordSettingsView: View {
 
 // MARK: - 2. Family & friends — curated contacts (spec §4.4.2)
 //
-// (family-and-friends task, 2026-09-07) The Settings editor for the
-// curated "Family and friends" list — now the primary contact list of
-// the Phone tab, capped at `FamilyContactStore.maxContacts`. Adding and
-// editing share one sheet (`FamilyContactEditorSheet`): photo, then a
-// native-contacts SEARCH that pre-fills the manual fields below (which
-// stay fully editable — contact picking is text prefill, never a
-// CNContactPicker), then the fields, then Save. Every write goes
+// (family-wizard task, 2026-09-07) The Settings editor for the curated
+// "Family and friends" list — the primary contact list of the Phone
+// tab, capped at `FamilyContactStore.maxContacts`. Adding and editing
+// share one five-step wizard (`FamilyContactWizardSheet`): search
+// first, then a fixed relationship dropdown, then optional photo,
+// messenger handle and nickname — manual name/number entry appears on
+// step 1 only when the search found nobody. An edit opens on the
+// relationship step with everything pre-filled and may step back to
+// re-search. The row list below is unchanged. Every write goes
 // through `AppCoordinator`, which owns the photo store and the record
 // store; this view owns neither.
 
@@ -1178,7 +1180,7 @@ struct FamilyContactsSettingsView: View {
             }
         }
         .sheet(item: $editorTarget) { target in
-            FamilyContactEditorSheet(target: target)
+            FamilyContactWizardSheet(target: target)
         }
     }
 
@@ -1268,38 +1270,82 @@ struct FamilyContactsSettingsView: View {
     }
 }
 
-/// The add/edit sheet of the Family & friends screen (family-and-friends
-/// task, 2026-09-07). One form for both duties — blank for `.add`,
-/// pre-filled from the contact for `.edit` — so the two flows can never
-/// drift apart. Top to bottom: the photo (add / change / remove over the
-/// initials avatar), the native-contacts SEARCH that pre-fills the
-/// manual fields below, and those manual fields themselves (always
-/// present — the search is a convenience; entry by hand stays the
-/// fallback), then Save. Save closes the sheet only on success; a
-/// failed store write keeps the draft on screen for one more tap
-/// (nothing is claimed that didn't happen — same rule as CallView's
-/// handle-capture sheet).
+/// The add/edit wizard of the Family & friends screen (family-wizard
+/// task, 2026-09-07). One shared five-step flow for both duties —
+/// "search first, then a step wizard; manual entry only when the
+/// search finds nobody":
+///   1. Find the contact — the native-contacts search SELECTS a person
+///      (its result prefills the name + number fields, which appear for
+///      confirmation); a prominent "Add manually" action reveals those
+///      name + number fields on THIS step. Next needs BOTH.
+///   2. Relationship — a MANDATORY dropdown over a fixed localized list
+///      (see `RelationshipOption`). The stored value is the chosen
+///      option's label; editing recognizes it again by exact label or
+///      by its `ContactResolver` anchor (see
+///      `preselectedOption(for:)`).
+///   3. Photo — OPTIONAL (add / change / remove over the initials
+///      avatar).
+///   4. Messenger handle — OPTIONAL (with the `messenger.handleHints.*`
+///      where-to-look lines from the call leaf's capture sheet).
+///   5. Nickname — OPTIONAL. Save lives here, enabled only when the
+///      mandatory name + number + relationship contract holds.
+/// An `.edit` target opens at Step 2 with every field pre-filled and
+/// stays free to step back into the search. Save closes the sheet only
+/// on success; a failed store write keeps the draft on screen for one
+/// more tap (nothing is claimed that didn't happen — same rule as
+/// CallView's handle-capture sheet).
 ///
 /// Permission handling mirrors CallView's access card: the ask fires at
 /// the point of use behind a plain-language card (the one place the
 /// system prompt may appear), and a denial shows the honest blocked
-/// line with the search hidden — the manual fields below stay fully
+/// line with the search hidden — the manual-entry path stays fully
 /// usable with or without contacts access.
-private struct FamilyContactEditorSheet: View {
+private struct FamilyContactWizardSheet: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
 
     let target: FamilyContactsSettingsView.FamilyContactEditorTarget
 
-    private let directory = AddressBookDirectory()
+    /// The wizard's five steps, in order; `position` is the 1-based
+    /// "Step N of 5" the indicator prints.
+    private enum Step: Int, CaseIterable {
+        case find, relationship, photo, messenger, nickname
+        var position: Int { rawValue + 1 }
+    }
 
-    // Manual fields (draft state — nothing touches the stores until
-    // Save).
+    /// The relationship dropdown's FIXED options (family-wizard task,
+    /// 2026-09-07). The `rawValue`s reuse the vocabulary concept of
+    /// `ContactResolver.relationshipAnchors` — the anchor words voice
+    /// matching normalizes stored relationships onto — so the picker's
+    /// data stays resolver-shaped while only its presentation is
+    /// localized (`family.relationship.*`). The case order is the
+    /// user-specified list. `friend` is the one option the resolver
+    /// table does not know; that is fine — it simply has no anchor to
+    /// compare on edit (see `preselectedOption(for:)`), so
+    /// cross-locale edits of a friend need one fresh pick.
+    private enum RelationshipOption: String, CaseIterable, Identifiable {
+        case daughter, son, mother, father, sister, brother, husband,
+             wife, grandmother, grandfather, friend
+
+        var id: String { rawValue }
+        /// The `family.relationship.*` localization key for this option.
+        var labelKey: String { "family.relationship.\(rawValue)" }
+        /// The anchor word this option's labels normalize onto — nil
+        /// for `friend`, which the resolver vocabulary lacks.
+        var anchorWord: String? { rawValue == "friend" ? nil : rawValue }
+    }
+
+    // Wizard position. An add opens at the search; an edit opens on the
+    // relationship step with data pre-filled (see `init`).
+    @State private var step: Step = .find
+
+    // Draft state — nothing touches the stores until Save.
     @State private var name = ""
     @State private var phone = ""
-    @State private var relationship = ""
+    @State private var relationshipOption: RelationshipOption?
     @State private var messengerHandle = ""
+    @State private var nickname = ""
 
     // Photo draft state: a just-picked image, whether the user asked to
     // remove the stored one, and the stored one itself (loaded once on
@@ -1318,6 +1364,25 @@ private struct FamilyContactEditorSheet: View {
     @State private var entries: [AddressBookEntry]?
     @State private var loadFailed = false
 
+    /// Step 1 keeps the manual name/number fields hidden until the
+    /// search has actually found somebody (a tap reveals them
+    /// pre-filled for confirmation) or the user asked for manual entry.
+    /// The flag LATCHES: once the fields are on screen, clearing them
+    /// must never make the form vanish from under the user.
+    @State private var showManualEntry = false
+
+    private let directory = AddressBookDirectory()
+
+    init(target: FamilyContactsSettingsView.FamilyContactEditorTarget) {
+        self.target = target
+        // An edit opens on the relationship step (data pre-filled by
+        // `loadDraft`); "Back" from there reaches the search, so
+        // re-searching stays one step away.
+        if case .edit = target {
+            _step = State(initialValue: .relationship)
+        }
+    }
+
     private var editingContact: FamilyContact? {
         if case .edit(let contact) = target { return contact }
         return nil
@@ -1326,19 +1391,43 @@ private struct FamilyContactEditorSheet: View {
     private var trimmedName: String {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    private var trimmedSearch: String {
-        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var trimmedPhone: String {
+        phone.trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    private var canSave: Bool { !trimmedName.isEmpty }
+
+    /// Step 1's mandatory content: a name AND a number — from a search
+    /// result or typed by hand; neither alone proceeds.
+    private var hasNameAndPhone: Bool {
+        !trimmedName.isEmpty && !trimmedPhone.isEmpty
+    }
+
+    /// Next is disabled until the current step's mandatory content is
+    /// satisfied: Step 1 needs name + number, Step 2 needs a picked
+    /// relationship. Photo and messenger are optional by design; the
+    /// last step saves instead of continuing.
+    private var canContinue: Bool {
+        switch step {
+        case .find: return hasNameAndPhone
+        case .relationship: return relationshipOption != nil
+        case .photo, .messenger: return true
+        case .nickname: return false
+        }
+    }
+
+    /// The save contract — the same mandatory trio the whole flow
+    /// enforces: a name, a number, and a relationship. Save on the last
+    /// step is dead without all three.
+    private var canSave: Bool {
+        hasNameAndPhone && relationshipOption != nil
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
-                photoSection
-                searchSection
-                manualFields
-                saveButton
+                progressRow
+                stepContent
+                footerButtons
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1383,81 +1472,106 @@ private struct FamilyContactEditorSheet: View {
         }
     }
 
-    // MARK: Photo (add / change / remove)
-
-    private var photoSection: some View {
-        VStack(spacing: 12) {
-            photoPreview
-            photoControls
+    /// The step indicator: five small dots for at-a-glance position and
+    /// the explicit localized "Step 2 of 5" line. The dots are
+    /// decorative — hidden from VoiceOver, which reads the text.
+    private var progressRow: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 6) {
+                ForEach(Step.allCases, id: \.rawValue) { s in
+                    Circle()
+                        .fill(s.rawValue <= step.rawValue
+                            ? DesignTokens.accent
+                            : DesignTokens.textSecondary.opacity(0.25))
+                        .frame(width: 10, height: 10)
+                }
+            }
+            .accessibilityHidden(true)
+            Text(L10n.fmt("family.step.indicator",
+                          locale: coordinator.activeLocale, step.position))
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .foregroundColor(DesignTokens.textSecondary)
+            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity)
     }
 
-    /// What the preview shows right now: a just-picked image wins over
-    /// the stored one, and an explicit remove clears both.
-    private var displayedPhoto: UIImage? {
-        if let pickedPhoto { return pickedPhoto }
-        if removingStoredPhoto { return nil }
-        return storedPhoto
-    }
+    // MARK: Step dispatch
 
     @ViewBuilder
-    private var photoPreview: some View {
-        if let photo = displayedPhoto {
-            Image(uiImage: photo)
-                .resizable()
-                .scaledToFill()
-                .frame(width: 96, height: 96)
-                .clipShape(Circle())
-        } else {
-            FaceAvatar(name: name, diameter: 96)
+    private var stepContent: some View {
+        switch step {
+        case .find: findStep
+        case .relationship: relationshipStep
+        case .photo: photoStep
+        case .messenger: messengerStep
+        case .nickname: nicknameStep
         }
     }
 
-    /// Add photo (none shown) / Change photo (one shown) over the
-    /// system Photos picker; Remove photo only for a stored photo being
-    /// edited (a fresh pick on an add is simply discarded by closing).
-    private var photoControls: some View {
-        HStack(spacing: 12) {
-            PhotosPicker(selection: $photoPickerItem, matching: .images) {
-                Text(displayedPhoto == nil ? "family.photo.add" : "family.photo.change")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 18)
-                    .frame(height: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(Capsule())
-            }
-            if editingContact != nil, displayedPhoto != nil {
-                Button {
-                    pickedPhoto = nil
-                    removingStoredPhoto = true
-                } label: {
-                    Text("family.photo.remove")
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundColor(DesignTokens.textPrimary)
-                        .padding(.horizontal, 18)
-                        .frame(height: DesignTokens.minTapTargetSize)
-                        .background(DesignTokens.background)
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
+    /// One step's section heading. Step 2 is the exception: its key
+    /// labels the dropdown itself while nothing is chosen, so it
+    /// renders no separate heading.
+    private func stepTitle(_ key: String) -> some View {
+        Text(LocalizedStringKey(key))
+            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+            .foregroundColor(DesignTokens.textPrimary)
+    }
+
+    // MARK: Step 1 — find the contact
+
+    private var findStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            stepTitle("family.step.find")
+            searchSection
+            if showManualEntry {
+                manualEntryFields
+            } else {
+                addManuallyButton
             }
         }
-        .frame(maxWidth: .infinity)
     }
 
-    private func loadPickedPhoto(_ item: PhotosPickerItem?) {
-        guard let item else { return }
-        Task {
-            guard let data = try? await item.loadTransferable(type: Data.self),
-                  let image = UIImage(data: data) else { return }
-            pickedPhoto = image
-            removingStoredPhoto = false
+    /// The prominent "search found nobody" escape hatch — it reveals
+    /// the manual name + number fields ON this step. Entry by hand is
+    /// the always-available fallback, contacts access or not.
+    private var addManuallyButton: some View {
+        Button {
+            showManualEntry = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "person.crop.circle.badge.plus")
+                    .font(.system(size: 17, weight: .bold))
+                Text(LocalizedStringKey("family.addManually"))
+            }
+            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+            .foregroundColor(DesignTokens.textPrimary)
+            .padding(.horizontal, 18)
+            .frame(maxWidth: .infinity)
+            .frame(height: DesignTokens.minTapTargetSize)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var manualEntryFields: some View {
+        VStack(spacing: 10) {
+            field(placeholderKey: "onboarding.stepFamily.name", text: $name)
+            field(placeholderKey: "onboarding.stepFamily.phone", text: $phone)
+                .keyboardType(.phonePad)
         }
     }
 
-    // MARK: Native-contacts search (above the manual fields)
+    private func field(placeholderKey: String, text: Binding<String>) -> some View {
+        TextField(LocalizedStringKey(placeholderKey), text: text)
+            .font(.system(size: DesignTokens.minBodyPointSize))
+            .padding(14)
+            .frame(height: 56)
+            .background(DesignTokens.background)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+    }
+
+    // MARK: Step 1 — the native-contacts search
 
     @ViewBuilder
     private var searchSection: some View {
@@ -1500,10 +1614,13 @@ private struct FamilyContactEditorSheet: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
     }
 
+    private var trimmedSearch: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// The matched address-book rows, most-recently-called first — the
     /// same pure search the Phone leaf runs over the same fetched book.
-    /// Tapping a row PREFILLS the manual fields below; the fields stay
-    /// editable, and manual entry remains the always-available path.
+    /// Tapping a row SELECTS the person (see `prefill`).
     @ViewBuilder
     private var searchResults: some View {
         if let entries {
@@ -1556,6 +1673,17 @@ private struct FamilyContactEditorSheet: View {
                 }
             }
         }
+    }
+
+    /// A tapped result SELECTS the person: the name + number prefill
+    /// the manual fields (which appear for confirmation — the fields
+    /// stay editable), and the query clears so the results collapse
+    /// and the chosen person is what is on screen.
+    private func prefill(_ entry: AddressBookEntry) {
+        name = entry.name
+        phone = entry.phone
+        showManualEntry = true
+        searchText = ""
     }
 
     private var loadingRow: some View {
@@ -1629,7 +1757,8 @@ private struct FamilyContactEditorSheet: View {
 
     /// Denied/restricted: the honest blocked line with the search
     /// hidden — only the system Settings screen can lift it, so the
-    /// card points there. Manual entry below never depended on this.
+    /// card points there. The "Add manually" path below never depended
+    /// on contacts access.
     private var blockedSearchCard: some View {
         VStack(spacing: 12) {
             Text("call.search.deniedTitle")
@@ -1695,68 +1824,259 @@ private struct FamilyContactEditorSheet: View {
         }
     }
 
-    /// Tapping a search result fills the manual fields below. The
-    /// fields stay fully editable; the query clears so the results
-    /// collapse and the filled form is the thing to look at.
-    private func prefill(_ entry: AddressBookEntry) {
-        name = entry.name
-        phone = entry.phone
-        searchText = ""
+    // MARK: Step 2 — relationship (mandatory dropdown)
+
+    private var relationshipStep: some View {
+        Menu {
+            ForEach(RelationshipOption.allCases) { option in
+                Button {
+                    relationshipOption = option
+                } label: {
+                    HStack(spacing: 10) {
+                        Text(L10n.str(option.labelKey,
+                                      locale: coordinator.activeLocale))
+                            .foregroundColor(DesignTokens.textPrimary)
+                        Spacer(minLength: 8)
+                        if relationshipOption == option {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(DesignTokens.accent)
+                        }
+                    }
+                }
+            }
+        } label: {
+            relationshipMenuLabel
+        }
     }
 
-    // MARK: Manual fields (always available) + Save
+    /// The closed dropdown row: the chosen relationship when there is
+    /// one, else the step's key as the gray prompt — a mandatory pick
+    /// from the fixed list is exactly what this step is.
+    private var relationshipMenuLabel: some View {
+        HStack(spacing: 8) {
+            if let relationshipOption {
+                Text(L10n.str(relationshipOption.labelKey,
+                              locale: coordinator.activeLocale))
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+            } else {
+                Text(LocalizedStringKey("family.step.relationship"))
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(DesignTokens.textSecondary)
+        }
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+    }
 
-    private var manualFields: some View {
-        VStack(spacing: 10) {
-            field(placeholderKey: "onboarding.stepFamily.name", text: $name)
-            field(placeholderKey: "onboarding.stepFamily.phone", text: $phone)
-                .keyboardType(.phonePad)
-            field(placeholderKey: "onboarding.stepFamily.relationship", text: $relationship)
+    // MARK: Step 3 — photo (optional)
+
+    private var photoStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            stepTitle("family.step.photo")
+            photoPreview
+                .frame(maxWidth: .infinity)
+            photoControls
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// What the preview shows right now: a just-picked image wins over
+    /// the stored one, and an explicit remove clears both.
+    private var displayedPhoto: UIImage? {
+        if let pickedPhoto { return pickedPhoto }
+        if removingStoredPhoto { return nil }
+        return storedPhoto
+    }
+
+    @ViewBuilder
+    private var photoPreview: some View {
+        if let photo = displayedPhoto {
+            Image(uiImage: photo)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 96, height: 96)
+                .clipShape(Circle())
+        } else {
+            FaceAvatar(name: name, diameter: 96)
+        }
+    }
+
+    /// Add photo (none shown) / Change photo (one shown) over the
+    /// system Photos picker; Remove photo only for a stored photo being
+    /// edited (a fresh pick on an add is simply discarded by closing).
+    private var photoControls: some View {
+        HStack(spacing: 12) {
+            PhotosPicker(selection: $photoPickerItem, matching: .images) {
+                Text(displayedPhoto == nil ? "family.photo.add" : "family.photo.change")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 18)
+                    .frame(height: DesignTokens.minTapTargetSize)
+                    .background(DesignTokens.accent)
+                    .clipShape(Capsule())
+            }
+            if editingContact != nil, displayedPhoto != nil {
+                Button {
+                    pickedPhoto = nil
+                    removingStoredPhoto = true
+                } label: {
+                    Text("family.photo.remove")
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                        .padding(.horizontal, 18)
+                        .frame(height: DesignTokens.minTapTargetSize)
+                        .background(DesignTokens.background)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func loadPickedPhoto(_ item: PhotosPickerItem?) {
+        guard let item else { return }
+        Task {
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else { return }
+            pickedPhoto = image
+            removingStoredPhoto = false
+        }
+    }
+
+    // MARK: Step 4 — messenger handle (optional)
+
+    private var messengerStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            stepTitle("family.step.messenger")
             field(placeholderKey: "onboarding.stepFamily.messenger", text: $messengerHandle)
                 .keyboardType(.asciiCapable)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-            Text("onboarding.stepFamily.messengerHint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 4)
+            handleHints
         }
     }
 
-    private func field(placeholderKey: String, text: Binding<String>) -> some View {
-        TextField(LocalizedStringKey(placeholderKey), text: text)
-            .font(.system(size: DesignTokens.minBodyPointSize))
-            .padding(14)
-            .frame(height: 56)
-            .background(DesignTokens.background)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+    /// The "where to look" lines — the same numbered hints the call
+    /// leaf's handle-capture sheet shows (`messenger.handleHints.*`),
+    /// so every surface agrees on what a Messenger handle is.
+    private var handleHints: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.str("messenger.handleHints.title",
+                          locale: coordinator.activeLocale))
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .foregroundColor(DesignTokens.textSecondary)
+            ForEach(1...3, id: \.self) { index in
+                HStack(alignment: .top, spacing: 10) {
+                    Text("\(index)")
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 22, height: 22)
+                        .background(DesignTokens.accent)
+                        .clipShape(Circle())
+                    Text(L10n.str("messenger.handleHints.line\(index)",
+                                  locale: coordinator.activeLocale))
+                        .font(.system(size: DesignTokens.minBodyPointSize))
+                        .foregroundColor(DesignTokens.textPrimary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(.horizontal, 4)
     }
 
-    private var saveButton: some View {
-        Button {
-            save()
-        } label: {
-            Text("onboarding.stepFamily.save")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .frame(height: DesignTokens.chipHeight)
-                .background(canSave ? DesignTokens.accent
-                                    : DesignTokens.textSecondary.opacity(0.5))
+    // MARK: Step 5 — nickname (optional) + save
+
+    private var nicknameStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            stepTitle("family.step.nickname")
+            TextField("", text: $nickname)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .padding(14)
+                .frame(height: 56)
+                .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
         }
-        .buttonStyle(.plain)
-        .disabled(!canSave)
+    }
+
+    // MARK: Footer — Back / Next (Save on the last step)
+
+    private var footerButtons: some View {
+        HStack(spacing: 12) {
+            Button {
+                step = Step(rawValue: step.rawValue - 1) ?? .find
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 15, weight: .bold))
+                    Text(LocalizedStringKey("common.back"))
+                }
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textPrimary)
+                .padding(.horizontal, 18)
+                .frame(height: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.card)
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(step == .find)
+            .opacity(step == .find ? 0.4 : 1)
+
+            Spacer()
+
+            primaryButton(titleKey: step == .nickname ? "onboarding.stepFamily.save"
+                                                      : "family.step.next",
+                          isEnabled: step == .nickname ? canSave : canContinue) {
+                if step == .nickname {
+                    save()
+                } else {
+                    step = Step(rawValue: step.rawValue + 1) ?? .nickname
+                }
+            }
+        }
         .padding(.top, 4)
     }
+
+    private func primaryButton(titleKey: String, isEnabled: Bool,
+                               action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(LocalizedStringKey(titleKey))
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 22)
+                .frame(height: DesignTokens.minTapTargetSize)
+                .background(isEnabled ? DesignTokens.accent
+                                      : DesignTokens.textSecondary.opacity(0.5))
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+    }
+
+    // MARK: Draft loading + save
 
     private func loadDraft() {
         guard let contact = editingContact else { return }
         name = contact.name
         phone = contact.phone
-        relationship = contact.relationship
         messengerHandle = contact.messengerHandle ?? ""
+        nickname = contact.nickname ?? ""
+        // Pre-select the stored relationship when it is one of the fixed
+        // options (see `preselectedOption(for:)`). A legacy free-text
+        // value that is none of them stays unselected — the step is
+        // mandatory, so the user picks from the fixed list on the way
+        // through (and the save then replaces the old text).
+        relationshipOption = preselectedOption(for: contact.relationship)
+        // Stepping back into the search must show the pre-filled fields.
+        showManualEntry = true
         // The stored photo, for the preview and the remove control
         // (photos are best-effort — a missing file simply means none).
         if contact.photoFilename != nil {
@@ -1764,24 +2084,60 @@ private struct FamilyContactEditorSheet: View {
         }
     }
 
+    /// Maps a stored relationship string onto the dropdown, so an edit
+    /// opens with the person's relationship already chosen. Two ways a
+    /// stored value can match, mirroring how `ContactResolver` matches
+    /// (the anchors are the shared vocabulary):
+    ///   1. exactly — the option's label in the ACTIVE locale (the form
+    ///      this wizard's own saves write);
+    ///   2. by anchor — a label written in the OTHER locale, or a
+    ///      legacy free-text spelling ("दिदी" for sister, "dad" for
+    ///      father), normalizes onto the same anchor word as one of the
+    ///      option labels. `friend` has no anchor (see
+    ///      `RelationshipOption`), so only rule 1 can select it — a
+    ///      friend saved in the other locale needs one fresh pick.
+    private func preselectedOption(for stored: String) -> RelationshipOption? {
+        let locale = coordinator.activeLocale
+        if let exact = RelationshipOption.allCases.first(where: {
+            L10n.str($0.labelKey, locale: locale) == stored
+        }) {
+            return exact
+        }
+        guard let storedAnchor = ContactResolver.relationshipAnchor(
+            in: NepaliTextNormalizer.normalize(stored)) else { return nil }
+        return RelationshipOption.allCases.first { $0.anchorWord == storedAnchor }
+    }
+
     private func save() {
-        let handle = messengerHandle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let messenger = handle.isEmpty ? nil : handle
+        let messenger = trimmedOrNil(messengerHandle)
+        let nick = trimmedOrNil(nickname)
+        // The stored relationship is the chosen option's label in the
+        // active locale — the display word the picker showed, which is
+        // what the free-text field before it used to store.
+        let relationshipText = relationshipOption.map {
+            L10n.str($0.labelKey, locale: coordinator.activeLocale)
+        } ?? ""
         let succeeded: Bool
         if let contact = editingContact {
             succeeded = coordinator.updateFamilyContact(
                 id: contact.id, name: trimmedName, phone: phone,
-                relationship: relationship, messengerHandle: messenger,
-                photo: pickedPhoto, removingPhoto: removingStoredPhoto)
+                relationship: relationshipText, messengerHandle: messenger,
+                photo: pickedPhoto, removingPhoto: removingStoredPhoto,
+                nickname: nick)
         } else {
-            succeeded = coordinator.addFamilyContact(name: trimmedName, phone: phone,
-                                                     relationship: relationship,
-                                                     messengerHandle: messenger,
-                                                     photo: pickedPhoto)
+            succeeded = coordinator.addFamilyContact(
+                name: trimmedName, phone: phone,
+                relationship: relationshipText, messengerHandle: messenger,
+                photo: pickedPhoto, nickname: nick)
         }
         if succeeded { dismiss() }
         // A failed store write keeps the draft on screen — Save again to
         // retry; nothing was claimed that didn't happen.
+    }
+
+    private func trimmedOrNil(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 

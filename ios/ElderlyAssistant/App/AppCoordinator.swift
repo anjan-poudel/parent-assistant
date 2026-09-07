@@ -1898,14 +1898,20 @@ final class AppCoordinator: ObservableObject {
     /// on the contact — and if the store rejects the contact (list full)
     /// the just-written file is deleted again, so a failed add never
     /// orphans a photo on disk.
+    ///
+    /// `nickname` (family-wizard task, 2026-09-07): the optional
+    /// informal name from the wizard's last step; defaulted so the
+    /// onboarding call site (which never collects one) is unchanged.
     @discardableResult
     func addFamilyContact(name: String, phone: String, relationship: String,
                           messengerHandle: String? = nil,
-                          photo: UIImage? = nil) -> Bool {
+                          photo: UIImage? = nil,
+                          nickname: String? = nil) -> Bool {
         let filename = photo.flatMap { contactPhotoStore.save($0) }
         let contact = FamilyContact(name: name, phone: phone, relationship: relationship,
                                     messengerHandle: messengerHandle,
-                                    photoFilename: filename)
+                                    photoFilename: filename,
+                                    nickname: nickname)
         guard familyContactStore.add(contact) else {
             if let filename { contactPhotoStore.delete(named: filename) }
             return false
@@ -1919,23 +1925,29 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Field edit of a curated contact (family-and-friends task,
-    /// 2026-09-07 — the Settings editor's add/edit sheet). The photo
-    /// arguments express the editor's three intents exactly: `photo`
-    /// non-nil REPLACES the stored photo, `removingPhoto` clears it, and
-    /// both nil keeps whatever is on file. The record save is the
-    /// commit point — a written replacement file is deleted again when
-    /// the store write fails, and the old photo file is only deleted
-    /// after the new record is safely persisted, so a failed edit never
-    /// loses the photo the contact already had.
+    /// 2026-09-07 — the Settings editor's five-step add/edit wizard).
+    /// The photo arguments express the wizard's three intents exactly:
+    /// `photo` non-nil REPLACES the stored photo, `removingPhoto` clears
+    /// it, and both nil keeps whatever is on file. The record save is
+    /// the commit point — a written replacement file is deleted again
+    /// when the store write fails, and the old photo file is only
+    /// deleted after the new record is safely persisted, so a failed
+    /// edit never loses the photo the contact already had.
+    ///
+    /// `nickname` (family-wizard task, 2026-09-07): the wizard's
+    /// optional informal name; nil clears a stored one, defaulted so
+    /// pre-wizard callers compile unchanged.
     @discardableResult
     func updateFamilyContact(id: UUID, name: String, phone: String, relationship: String,
                              messengerHandle: String?,
-                             photo: UIImage? = nil, removingPhoto: Bool = false) -> Bool {
+                             photo: UIImage? = nil, removingPhoto: Bool = false,
+                             nickname: String? = nil) -> Bool {
         guard var contact = familyContacts.first(where: { $0.id == id }) else { return false }
         contact.name = name
         contact.phone = phone
         contact.relationship = relationship
         contact.messengerHandle = messengerHandle
+        contact.nickname = nickname
 
         let oldFilename = contact.photoFilename
         var newFilename = oldFilename

@@ -28,6 +28,11 @@ import Foundation
 /// deleted or corrupt), so it is optional and the custom decoder reads a
 /// missing key as nil — the unversioned store's one migration pattern
 /// (an optional field IS its migration).
+///
+/// `nickname` (family-wizard task, 2026-09-07): the informal name the
+/// family calls the person — the wizard's optional final step. Same
+/// optional-field contract as the handle and the photo: the custom
+/// decoder reads a missing key as nil.
 struct FamilyContact: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String
@@ -37,6 +42,8 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     /// ContactPhotoStore filename of the contact's thumbnail, nil when
     /// no photo is on file.
     var photoFilename: String?
+    /// The informal name the family uses, nil when none is set.
+    var nickname: String?
 
     /// App the video button opens for this contact. Default `.faceTime`
     /// (the global default) — the only app that truly starts a video
@@ -50,7 +57,7 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     init(id: UUID = UUID(), name: String, phone: String, relationship: String,
          messengerHandle: String? = nil,
          preferredVideoApp: CallApp = .faceTime, preferredCallApp: CallApp = .phone,
-         photoFilename: String? = nil) {
+         photoFilename: String? = nil, nickname: String? = nil) {
         self.id = id
         self.name = name
         self.phone = phone
@@ -59,6 +66,7 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         self.preferredVideoApp = preferredVideoApp
         self.preferredCallApp = preferredCallApp
         self.photoFilename = photoFilename
+        self.nickname = nickname
     }
 
     /// Custom decode: contacts persisted BEFORE the preference fields
@@ -80,6 +88,8 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         // Same missing-key rule for the photo: a payload written before
         // the field existed loads photo-less instead of failing the read.
         photoFilename = (try? container.decodeIfPresent(String.self, forKey: .photoFilename)) ?? nil
+        // And for the nickname: a pre-field payload loads without one.
+        nickname = (try? container.decodeIfPresent(String.self, forKey: .nickname)) ?? nil
     }
 
     /// The app a VIDEO button resolves to (task: contact preference →
