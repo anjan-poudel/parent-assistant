@@ -137,19 +137,20 @@ struct MedsView: View {
 
 // MARK: - Reminders (सम्झना) — spec §4.3 + v2 pivot Phase 1
 
-/// Today's reminders from BOTH reminder systems — medication doses
-/// (`MedicationScheduler`) and routine occurrences (walk, exercise,
-/// meals, … from `RoutineScheduler`) — plus a manage list where the
-/// family enables/disables the seeded routine categories. Medication
-/// management stays on the Meds leaf / Settings editor; this screen
-/// never mutates medication data.
+/// Today's reminders from ALL THREE reminder systems — medication doses
+/// (`MedicationScheduler`), routine occurrences (walk, exercise, meals, …
+/// from `RoutineScheduler`), and items imported from the native
+/// Calendar/Reminders apps (`ExternalCalendarService`, read-only bridge)
+/// — plus a manage list where the family enables/disables the seeded
+/// routine categories. Medication management stays on the Meds leaf /
+/// Settings editor; this screen never mutates medication data.
 struct RemindersView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     /// Bumped after a toggle so the computed lists re-read fresh data —
     /// the coordinator exposes reminders as computed vars, not @Published.
     @State private var entriesVersion = 0
 
-    /// One row per today's reminder, both systems, sorted by time.
+    /// One row per today's reminder, all three systems, sorted by time.
     private var todayRows: [TodayRow] {
         _ = entriesVersion
         // One store read for the whole list, not two per row.
@@ -158,20 +159,29 @@ struct RemindersView: View {
         )
         let meds = coordinator.pendingReminders
             .filter { Calendar.current.isDateInToday($0.scheduledAt) }
-            .map { TodayRow(id: $0.id, scheduledAt: $0.scheduledAt,
+            .map { TodayRow(id: $0.id.uuidString, scheduledAt: $0.scheduledAt,
                             title: coordinator.medicationName(for: $0.medicationEntryId),
                             systemImage: RoutineCategory.medication.systemImage,
-                            isDimmed: false) }
+                            isDimmed: false, external: nil) }
         let routines = coordinator.todaysRoutineOccurrences.map { occurrence in
             let entry = entriesById[occurrence.entryId]
-            return TodayRow(id: occurrence.id, scheduledAt: occurrence.scheduledAt,
+            return TodayRow(id: occurrence.id.uuidString, scheduledAt: occurrence.scheduledAt,
                             title: entry?.displayTitle(locale: coordinator.activeLocale)
                                 ?? L10n.str("routine.category.custom", locale: coordinator.activeLocale),
                             systemImage: entry?.category.systemImage
                                 ?? RoutineCategory.custom.systemImage,
-                            isDimmed: occurrence.state != .pending)
+                            isDimmed: occurrence.state != .pending, external: nil)
         }
-        return (meds + routines).sorted { $0.scheduledAt < $1.scheduledAt }
+        // Imported native items (2026-09-07): timed ones are always still
+        // ahead (already-started events are dropped at scan time), so
+        // never dimmed — but their badge reads secondary, "from outside
+        // the app". Tapping opens the native Calendar/Reminders app.
+        let externals = coordinator.externalRemindersToday.map { item in
+            TodayRow(id: item.id, scheduledAt: item.startDate, title: item.title,
+                     systemImage: item.source.systemImage, isDimmed: false,
+                     external: item)
+        }
+        return (meds + routines + externals).sorted { $0.scheduledAt < $1.scheduledAt }
     }
 
     var body: some View {
@@ -197,13 +207,17 @@ struct RemindersView: View {
     }
 
     private struct TodayRow: Identifiable {
-        let id: UUID
+        let id: String
         let scheduledAt: Date
         let title: String
         let systemImage: String
         /// Past/expired occurrences stay visible but de-emphasised — the
         /// elder still sees "walk was at 5:30" as context for the day.
         let isDimmed: Bool
+        /// nil for medication/routine rows. External rows (2026-09-07)
+        /// carry the imported native item itself so a tap can open it in
+        /// its own app — the read-only bridge's only gesture.
+        let external: ExternalReminder?
     }
 
     private func sectionHeader(key: String) -> some View {
@@ -218,14 +232,21 @@ struct RemindersView: View {
         HStack(spacing: 12) {
             Image(systemName: row.systemImage)
                 .font(.system(size: 24))
-                .foregroundColor(row.isDimmed ? DesignTokens.textSecondary : DesignTokens.accent)
+                .foregroundColor(row.isDimmed || row.external != nil
+                                 ? DesignTokens.textSecondary : DesignTokens.accent)
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.title)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(row.isDimmed ? DesignTokens.textSecondary : DesignTokens.textPrimary)
-                Text(row.scheduledAt.formatted(date: .omitted, time: .shortened))
+                Text(rowCaption(row))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
+                // Which native calendar/reminder list the item came from.
+                if let external = row.external {
+                    Text(external.calendarName)
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
             }
             Spacer()
         }
@@ -233,6 +254,24 @@ struct RemindersView: View {
         .frame(maxWidth: .infinity)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .contentShape(Rectangle())
+        // External rows open their item in the native app (read-only
+        // bridge); medication/routine rows stay non-interactive.
+        .onTapGesture {
+            if let external = row.external {
+                coordinator.openExternalReminder(external)
+            }
+        }
+        .accessibilityAddTraits(row.external != nil ? .isButton : [])
+    }
+
+    /// All-day external items caption "All day"; everything else the
+    /// wall-clock time.
+    private func rowCaption(_ row: TodayRow) -> String {
+        if let external = row.external, external.isAllDay {
+            return L10n.str("externalReminders.allDay", locale: coordinator.activeLocale)
+        }
+        return row.scheduledAt.formatted(date: .omitted, time: .shortened)
     }
 
     private func routineManageRow(_ entry: RoutineEntry) -> some View {
@@ -1224,12 +1263,6 @@ struct ContactTile: View {
 struct CalendarView: View {
     @EnvironmentObject var coordinator: AppCoordinator
 
-    private var todaysReminders: [ScheduledReminder] {
-        coordinator.pendingReminders
-            .filter { Calendar.current.isDateInToday($0.scheduledAt) }
-            .sorted { $0.scheduledAt < $1.scheduledAt }
-    }
-
     var body: some View {
         LeafScreen(titleKey: "calendar.title") {
             VStack(spacing: 12) {
@@ -1342,33 +1375,91 @@ struct CalendarView: View {
                         BikramSambat.devanagariDigits(days))
     }
 
+    /// One schedule card, all three reminder systems (2026-09-07 fix:
+    /// this section used to list medication alone — the app now
+    /// schedules three systems and all of them belong in "today's
+    /// schedule"). Medication rows are unchanged; routine rows include
+    /// only `.pending` occurrences (the reminders leaf keeps the dimmed
+    /// history); external rows carry the calendar/checklist badge.
+    private var scheduleRows: [ScheduleRow] {
+        let entriesById = Dictionary(
+            uniqueKeysWithValues: coordinator.routineEntries.map { ($0.id, $0) }
+        )
+        let meds = coordinator.pendingReminders
+            .filter { Calendar.current.isDateInToday($0.scheduledAt) }
+            .map { ScheduleRow(id: $0.id.uuidString, scheduledAt: $0.scheduledAt,
+                               title: coordinator.medicationName(for: $0.medicationEntryId),
+                               systemImage: "clock.fill", isAllDay: false,
+                               calendarName: nil) }
+        let routines = coordinator.todaysRoutineOccurrences
+            .filter { $0.state == .pending }
+            .compactMap { occurrence -> ScheduleRow? in
+                guard let entry = entriesById[occurrence.entryId] else { return nil }
+                return ScheduleRow(id: occurrence.id.uuidString,
+                                   scheduledAt: occurrence.scheduledAt,
+                                   title: entry.displayTitle(locale: coordinator.activeLocale),
+                                   systemImage: entry.category.systemImage,
+                                   isAllDay: false, calendarName: nil)
+            }
+        let externals = coordinator.externalRemindersToday.map { item in
+            ScheduleRow(id: item.id, scheduledAt: item.startDate, title: item.title,
+                        systemImage: item.source.systemImage, isAllDay: item.isAllDay,
+                        calendarName: item.calendarName)
+        }
+        return (meds + routines + externals).sorted { $0.scheduledAt < $1.scheduledAt }
+    }
+
     @ViewBuilder
     private var scheduleSection: some View {
-        if !todaysReminders.isEmpty {
+        if !scheduleRows.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 Text("calendar.todaySchedule")
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                     .foregroundColor(DesignTokens.textSecondary)
-                ForEach(todaysReminders) { reminder in
-                    HStack(spacing: 12) {
-                        IconBadge(systemImage: "clock.fill", tint: .reminders)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(coordinator.medicationName(for: reminder.medicationEntryId))
-                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                                .foregroundColor(DesignTokens.textPrimary)
-                            Text(reminder.scheduledAt.formatted(date: .omitted, time: .shortened))
-                                .font(.system(size: DesignTokens.minCaptionPointSize))
-                                .foregroundColor(DesignTokens.textSecondary)
-                        }
-                        Spacer()
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity)
-                    .background(DesignTokens.card)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                ForEach(scheduleRows) { row in
+                    scheduleRowView(row)
                 }
             }
         }
+    }
+
+    private func scheduleRowView(_ row: ScheduleRow) -> some View {
+        HStack(spacing: 12) {
+            IconBadge(systemImage: row.systemImage, tint: .reminders)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.title)
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Text(row.isAllDay
+                     ? L10n.str("externalReminders.allDay", locale: coordinator.activeLocale)
+                     : row.scheduledAt.formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+                if let calendarName = row.calendarName {
+                    Text(calendarName)
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+            }
+            Spacer()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    private struct ScheduleRow: Identifiable {
+        let id: String
+        let scheduledAt: Date
+        let title: String
+        let systemImage: String
+        /// All-day external items caption "All day" instead of a clock
+        /// time (their schedule is their date, not an hour).
+        let isAllDay: Bool
+        /// Only external rows carry one — the native calendar the item
+        /// came from, shown as a second caption line.
+        let calendarName: String?
     }
 }
 

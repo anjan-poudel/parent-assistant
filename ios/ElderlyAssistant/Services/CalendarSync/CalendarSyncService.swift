@@ -42,12 +42,47 @@ final class CalendarSyncService: NSObject {
     }
     private static let enabledDefaultsKey = "calendarSync.enabled"
 
-    @Published private(set) var status: SyncStatus = .notRequested
+    /// Access state is persisted (restored in init) so a relaunch can
+    /// truthfully re-mirror without re-prompting — and the Settings
+    /// card shows the real state, not a first-launch guess.
+    private static let statusDefaultsKey = "calendarSync.status"
+
+    /// The status' storage form — `.error(message)` is persisted as
+    /// "error" (the message is diagnostics for the session, not
+    /// something a relaunch needs).
+    private static func storageKey(for status: SyncStatus) -> String {
+        switch status {
+        case .notRequested: return "notRequested"
+        case .enabled: return "enabled"
+        case .denied: return "denied"
+        case .error: return "error"
+        }
+    }
+
+    static func restoredStatus(fromStored raw: String?) -> SyncStatus {
+        switch raw {
+        case "enabled": return .enabled
+        case "denied": return .denied
+        case "error": return .error("")
+        default: return .notRequested
+        }
+    }
+
+    /// Persisted so the state survives relaunches (2026-09-07 status-
+    /// persistence fix): every transition writes through here.
+    @Published private(set) var status: SyncStatus {
+        didSet {
+            UserDefaults.standard.set(Self.storageKey(for: status),
+                                      forKey: Self.statusDefaultsKey)
+        }
+    }
 
     init(eventWriter: EventWriting = EKEventWriter(),
          observabilityBus: ObservabilityBus) {
         self.eventWriter = eventWriter
         self.observabilityBus = observabilityBus
+        self.status = Self.restoredStatus(fromStored:
+            UserDefaults.standard.string(forKey: Self.statusDefaultsKey))
         super.init()
     }
 
@@ -94,7 +129,11 @@ final class CalendarSyncService: NSObject {
              metadata: ["state": "removed=\(removed) added=\(added)"])
     }
 
-    private static let mirrorTag = "com.elderlyassistant.mirrored-routine"
+    /// Notes fragment identifying OUR mirrored events — also read by
+    /// `ExternalCalendarService.mapEvents`, which must never import its
+    /// own mirror back (double-notify). Internal, not private, exactly
+    /// so the scanner's mapping rules can consult it.
+    static let mirrorTag = "com.elderlyassistant.mirrored-routine"
 
     private func emit(_ type: String, outcome: String, metadata: [String: String] = [:]) {
         observabilityBus.emit(ObservabilityEvent(
