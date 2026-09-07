@@ -402,34 +402,47 @@ final class CommandRouter {
         // block can never be shadowed by a topic answer.
         if let topic = TopicPreAnswer.match(transcript: raw),
            !Self.sensitiveCallPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
-            // [INTENT-TOOLS] (2026-09-07) Weather yields to a LIVE-WEB-
-            // capable interpreter: with Google-Search grounding on the
-            // cloud path, "भोलि काठमाडौंमा पानी पर्छ?" deserves a real
-            // grounded forecast, not the no-data pre-answer. The
-            // coordinator's `canAnswerLiveQuestionsFromWeb` (default
-            // false) is derived from the exact chain state the router's
-            // own escalation guard checks (cloud enabled AND cloud brain
-            // available), so a forecast question under the on-device
-            // stack — or with the cloud brain down — still gets the
-            // honest deterministic answer. Time/date/greeting topics are
-            // unchanged: they are local facts, not web lookups, and stay
-            // deterministic on every stack.
+            // [WEATHER-ROUTING] (2026-09-07) Weather routing matrix —
+            // which stack answers a WEATHER question:
+            //
+            //   · Gemini stack with the cloud brain live
+            //     (`canAnswerLiveQuestionsFromWeb` — cloud enabled AND
+            //     cloud brain available, mirroring the router's own
+            //     escalation guard): the topic is NOT intercepted here —
+            //     the weather question falls through to the
+            //     search-grounded interpreter below, which answers from
+            //     live web data. Intercepting with a dead answer would be
+            //     wrong on the one stack that CAN answer.
+            //   · On-device stack (`isOnDeviceStack`): the live
+            //     `WeatherTool` path (`fireLocalWeatherLookup`) — a named
+            //     place in the question is geocoded and answered for that
+            //     place, otherwise the current device location is used;
+            //     every live reply is hedged as forecast data
+            //     (`weather.replySource`).
+            //   · Neither (no key, cloud brain down/downloading, or any
+            //     other stack): the honest static
+            //     `topic.weather.unavailable` line below — never a
+            //     fabricated forecast.
+            //
+            // Time/date/greeting topics are unchanged: local facts, not
+            // web lookups, deterministic on every stack. The whole table
+            // runs BEFORE the interpreter/search stages, so a weather
+            // question can never reach the generic web-search fallback
+            // (Arncliffe report: stale snippet spoken as fact).
             let liveWeb = coordinator?.canAnswerLiveQuestionsFromWeb ?? false
             if topic == .weather && liveWeb {
                 // Fall through to the interpreter below.
             } else if topic == .weather && (coordinator?.isOnDeviceStack ?? false) {
                 // [LOCAL-TOOLS] (2026-09-07) On the ON-DEVICE stack a
                 // weather question deserves the live open-meteo reading,
-                // not the deterministic "unavailable" line: announce the
-                // lookup, fetch CURRENT LOCATION (point-of-use permission),
-                // fetch the forecast, speak the real conditions. Any
-                // failure (denied location, no fix, timeout, transport,
-                // malformed payload) falls back to the EXISTING static
-                // `topic.weather.unavailable` answer below — via
-                // `fireLocalWeatherLookup`'s failure path — never a
-                // fabricated number. The Gemini stack never reaches here
-                // (liveWeb already yielded to its grounded interpreter).
-                fireLocalWeatherLookup()
+                // not the deterministic "unavailable" line (see
+                // `fireLocalWeatherLookup` for the named-place /
+                // device-location flow). Any failure falls back to the
+                // EXISTING static `topic.weather.unavailable` answer —
+                // never a fabricated number, never a web snippet. The
+                // Gemini stack never reaches here (liveWeb already
+                // yielded to its grounded interpreter).
+                fireLocalWeatherLookup(transcript: raw)
                 return .unrecognised(transcript: raw)
             } else {
                 let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
@@ -697,29 +710,69 @@ final class CommandRouter {
 
     /// [LOCAL-TOOLS] (2026-09-07) On-device live-weather path — called
     /// from the topic pre-answer stage when `.weather` matched and the
-    /// stack is on-device (see the branch comment there). Announces
-    /// "weather.checking", then asynchronously: current location
-    /// (point-of-use permission) → open-meteo forecast → localized reply
-    /// carded + spoken. Every failure mode (no fetcher factory, location
-    /// denied/unavailable/timed out, transport failure, malformed
-    /// payload) delivers the EXISTING static `topic.weather.unavailable`
-    /// answer with a `local_tools` `weather` `fail` event — the
-    /// deterministic no-data line is unchanged, and a wrong or fabricated
-    /// temperature is impossible.
-    private func fireLocalWeatherLookup() {
+    /// stack is on-device (see the routing matrix there). Announces
+    /// "weather.checking", then answers the question that was ASKED:
+    ///
+    ///   1. A named place in the utterance ("is it raining in Arncliffe",
+    ///      "काठमाडौंको मौसम कस्तो छ?") is geocoded through open-meteo's
+    ///      free geocoding API (same transport seam as the forecast) and
+    ///      the forecast is read for THAT point. [WEATHER-ROUTING]
+    ///      (2026-09-07) This is the direct fix for the Arncliffe
+    ///      report: a question about a place must answer for that place,
+    ///      never for wherever the device happens to be.
+    ///   2. Any geocode failure (transport error, nothing found,
+    ///      malformed payload) falls back to the DEVICE location
+    ///      (point-of-use permission) — an honest answer about the
+    ///      device's place beats silence.
+    ///   3. No named place → device location directly.
+    ///
+    /// Every remaining failure (no transport, no fetcher factory,
+    /// location denied/unavailable/timed out, forecast transport failure,
+    /// malformed forecast payload) delivers the EXISTING static
+    /// `topic.weather.unavailable` answer with a `local_tools` `weather`
+    /// `fail` event — the deterministic no-data line is unchanged, and a
+    /// wrong or fabricated temperature is impossible. Live replies are
+    /// carded + spoken wrapped in the `weather.replySource` hedge (see
+    /// `deliverLiveWeather`) — forecast data is never presented as
+    /// unmediated ground truth.
+    private func fireLocalWeatherLookup(transcript raw: String) {
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         // Announce first — the user hears the lookup start before the
-        // (possibly multi-second) location + fetch round-trip.
+        // (possibly multi-second) geocode/location + fetch round-trip.
         speak(key: "weather.checking")
 
         Task { [weak self] in
             guard let self else { return }
-            // Create + start the fetcher on the main actor:
-            // CLLocationManager delivers delegate callbacks on the runloop
-            // of the thread that created it, so it must be born on main.
-            // (MainActor.run's body is synchronous, so the request is
-            // started from an inner @MainActor task and its exactly-once
-            // completion is bridged back through a continuation.)
+            guard let transport = self.weatherTransport else {
+                await MainActor.run { self.deliverWeatherFallback(locale: locale) }
+                return
+            }
+
+            // Step 1 — a named place answers for that place. Any geocode
+            // failure falls through to the device fix below.
+            if let askedPlace = WeatherTool.placeName(in: raw) {
+                do {
+                    let place = try await WeatherTool.fetchGeocode(name: askedPlace,
+                                                                   transport: transport)
+                    let conditions = try await WeatherTool.fetchCurrent(
+                        latitude: place.latitude, longitude: place.longitude, transport: transport)
+                    await MainActor.run {
+                        self.deliverLiveWeather(conditions, placeName: place.name, locale: locale)
+                    }
+                    return
+                } catch {
+                    // Fall through — an honest answer about the device's
+                    // place beats silence.
+                }
+            }
+
+            // Step 2 — device location. Create + start the fetcher on the
+            // main actor: CLLocationManager delivers delegate callbacks
+            // on the runloop of the thread that created it, so it must be
+            // born on main. (MainActor.run's body is synchronous, so the
+            // request is started from an inner @MainActor task and its
+            // exactly-once completion is bridged back through a
+            // continuation.)
             let fixResult: Result<LocationFix, LocationFetchFailure>? = await withCheckedContinuation { continuation in
                 Task { @MainActor in
                     guard let fetcher = self.locationFetcherFactory?() else {
@@ -735,24 +788,36 @@ final class CommandRouter {
                 await MainActor.run { self.deliverWeatherFallback(locale: locale) }
                 return
             }
-            guard let transport = self.weatherTransport else {
-                await MainActor.run { self.deliverWeatherFallback(locale: locale) }
-                return
-            }
             do {
                 let conditions = try await WeatherTool.fetchCurrent(latitude: fix.latitude,
                                                                     longitude: fix.longitude,
                                                                     transport: transport)
-                let text = WeatherTool.reply(for: conditions, placeName: fix.placeName, locale: locale)
                 await MainActor.run {
-                    self.emitLocalTool(eventType: "weather", outcome: "ok")
-                    self.coordinator?.noteGenericReply(text)
-                    self.speak(text: text, locale: locale)
+                    self.deliverLiveWeather(conditions, placeName: fix.placeName, locale: locale)
                 }
             } catch {
                 await MainActor.run { self.deliverWeatherFallback(locale: locale) }
             }
         }
+    }
+
+    /// [WEATHER-ROUTING] (2026-09-07) Live-conditions delivery — the
+    /// single point where a real open-meteo reading reaches the user:
+    /// the localized conditions sentence (`WeatherTool.reply`) is WRAPPED
+    /// in the `weather.replySource` hedge ("According to the weather
+    /// service, …") so a live reading is presented as forecast data,
+    /// never as unmediated ground truth. The bare sentence stays the
+    /// tool's own contract (WeatherToolTests pin it directly); the router
+    /// applies the hedge here, once, for every delivery path (geocoded
+    /// named place and device location alike).
+    private func deliverLiveWeather(_ conditions: WeatherTool.CurrentConditions,
+                                    placeName: String?,
+                                    locale: Locale) {
+        emitLocalTool(eventType: "weather", outcome: "ok")
+        let conditionsText = WeatherTool.reply(for: conditions, placeName: placeName, locale: locale)
+        let text = L10n.fmt("weather.replySource", locale: locale, conditionsText)
+        coordinator?.noteGenericReply(text)
+        speak(text: text, locale: locale)
     }
 
     /// The tool's failure delivery — the unchanged deterministic weather
@@ -776,16 +841,30 @@ final class CommandRouter {
     /// the caller speaks the re-prompt as before.
     ///
     /// Firing contract (all must hold):
-    ///  1. On-device stack (Gemini answers natively — never here).
-    ///  2. `SearchConfigStore.isConfigured` — search is family opt-in.
-    ///  3. `SearchTool.isQuestionShaped` — statements and noise never
+    ///  1. Deterministic-topic veto below (defense in depth).
+    ///  2. On-device stack (Gemini answers natively — never here).
+    ///  3. `SearchConfigStore.isConfigured` — search is family opt-in.
+    ///  4. `SearchTool.isQuestionShaped` — statements and noise never
     ///     leave the device.
-    ///  4. Quota remains — otherwise the cap line + the generic re-prompt
+    ///  5. Quota remains — otherwise the cap line + the generic re-prompt
     ///     are spoken instead (the user hears WHY nothing was searched).
     ///
     /// The utterance never produced an intent/topic/tool by construction:
     /// this hook runs only at the routeKeywordRemainder abstention point.
     private func fireWebSearchIfDue(_ raw: String) -> Bool {
+        // [WEATHER-ROUTING] (2026-09-07) Deterministic-topic veto: a
+        // weather question must NEVER be answered from a web snippet
+        // (Arncliffe report — a stale snippet spoken as fact). The topic
+        // pre-answer stage above already intercepts every matched
+        // utterance before the interpreter, so a topic utterance cannot
+        // reach this hook TODAY — the veto is defense in depth against
+        // future reordering of the routing ladder, and it costs one
+        // cheap table match per abstention. Any matched topic (weather,
+        // time, date, greeting) is vetoed: all of them have a
+        // deterministic answer upstream that search must never bypass.
+        guard TopicPreAnswer.match(transcript: raw) == nil else {
+            return false
+        }
         guard coordinator?.isOnDeviceStack == true,
               let config = searchConfigStore, config.isConfigured,
               let apiKey = config.apiKey,

@@ -398,7 +398,12 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
     /// re-prompt); true arms the live weather/search tools.
     var isOnDeviceStack = false
 
-    var activeLocale: Locale { Locale(identifier: "ne-NP") }
+    /// [WEATHER-ROUTING] (2026-09-07) Locale override — the default stays
+    /// ne-NP (every existing test's expectations); tests that pin an
+    /// English spoken sentence (e.g. the `weather.replySource` hedge)
+    /// set this to an English locale.
+    var localeOverride: Locale?
+    var activeLocale: Locale { localeOverride ?? Locale(identifier: "ne-NP") }
 
     func recordTranscript(_ text: String) {
         recordedTranscripts.append(text)
@@ -768,6 +773,35 @@ final class CommandRouterIntentToolsTests: XCTestCase {
         XCTAssertEqual(coordinator.genericReplies, ["भोलि काठमाडौंमा हल्का पानी पर्ने सम्भावना छ।"])
     }
 
+    func testArncliffeWeatherFlowsToLiveWebInterpreterWithoutTheStaticLine() async {
+        // The original bug report on the Gemini-with-key stack: live-web
+        // capability is on, so the static "can't look up weather" no-data
+        // line must NOT intercept — the grounded cloud interpreter answers
+        // for Arncliffe instead. [WEATHER-ROUTING] (2026-09-07)
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.canAnswerLiveQuestionsFromWeb = true
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .query, entryId: nil, contact: nil, time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil, pluginAction: nil, pluginEntities: nil,
+            confidence: 0.9, reply: "It is dry in Arncliffe right now, with no rain expected."
+        )
+        let (router, bus) = makeRouter(coordinator, interpreter: interpreter)
+
+        _ = router.route(transcript: "what's the weather like in Arncliffe?")
+        await Task.yield()
+
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "topic_pre_answer" },
+                       "with live-web on, the no-data pre-answer must NOT fire for Arncliffe")
+        XCTAssertEqual(interpreter.interpretCallCount, 1,
+                       "the grounded cloud interpreter answers the place-specific forecast")
+        XCTAssertEqual(coordinator.genericReplies,
+                       ["It is dry in Arncliffe right now, with no rain expected."])
+        XCTAssertFalse(bus.emittedEvents.contains {
+            $0.component == "local_tools" && $0.eventType == "weather"
+        }, "no local weather tool may run on the Gemini stack")
+    }
+
     func testTimeAndDateStayDeterministicEvenWithLiveWebOn() {
         // Time/date are LOCAL FACTS, not web lookups — the live-web
         // capability yields ONLY the weather topic.
@@ -795,16 +829,21 @@ final class CommandRouterIntentToolsTests: XCTestCase {
 /// Wiring of the two [LOCAL-TOOLS] stages, both ON-DEVICE-stack only:
 ///
 ///  - WEATHER: a weather-topic utterance on the on-device stack announces
-///    "weather.checking", fetches CURRENT LOCATION (point-of-use,
-///    one-request-per-instance `LocationFetching` factory), fetches the
-///    open-meteo forecast over the `LocalToolTransport` seam, and cards +
-///    speaks the real localized reply with a `local_tools`/`weather`/`ok`
-///    event. ANY failure (location denied, no fix, transport error,
-///    malformed payload) delivers the EXISTING static
-///    `topic.weather.unavailable` line with a `weather`/`fail` event —
-///    never a fabricated number, and never the `topic_pre_answer` event
-///    (a fallback that followed a tool attempt is distinguishable).
-///    Off-stack, the static pre-answer stands unchanged.
+///    "weather.checking" and answers for the place that was ASKED: a
+///    named place in the utterance is geocoded through open-meteo's
+///    geocoding seam (same `LocalToolTransport`) and the forecast is read
+///    for THAT point — the Arncliffe fix ([WEATHER-ROUTING] 2026-09-07);
+///    a geocode failure, or an utterance naming no place, reads the
+///    forecast for the DEVICE location (point-of-use,
+///    one-request-per-instance `LocationFetching` factory). Every live
+///    reading is carded + spoken WRAPPED in the `weather.replySource`
+///    attribution hedge with a `local_tools`/`weather`/`ok` event. ANY
+///    failure (location denied, no fix, transport error, malformed
+///    payload) delivers the EXISTING static `topic.weather.unavailable`
+///    line with a `weather`/`fail` event — never a fabricated number, and
+///    never the `topic_pre_answer` event (a fallback that followed a tool
+///    attempt is distinguishable). Off-stack, the static pre-answer
+///    stands unchanged.
 ///
 ///  - SEARCH: fires ONLY at the post-interpreter abstention point when
 ///    the utterance is question-shaped AND a credential pair is
@@ -812,7 +851,8 @@ final class CommandRouterIntentToolsTests: XCTestCase {
 ///    re-prompt (one uninterrupted sequence), failures/empty results fall
 ///    back to the generic re-prompt with a `search`/`fail` event, and the
 ///    tool NEVER runs for utterances an intent, topic, or tool already
-///    answered.
+///    answered — topic-matched utterances carry an additional in-hook veto
+///    as defense in depth ([WEATHER-ROUTING] 2026-09-07).
 final class CommandRouterLocalToolsTests: XCTestCase {
 
     private let ne = Locale(identifier: "ne-NP")
@@ -865,40 +905,65 @@ final class CommandRouterLocalToolsTests: XCTestCase {
             + Data(#" "wind_speed_10m": 12.5, "relative_humidity_2m": 62}}"#.utf8)
     }
 
-    // MARK: - Weather: happy path
+    // MARK: - Weather: named place → geocoded live reading
 
-    func testOnDeviceWeatherQuestionFetchesLocationAndSpeaksRealConditions() {
+    /// The Arncliffe fix end to end: "is it raining in Arncliffe?" on the
+    /// on-device stack geocodes ARNCLIFFE (never the device location),
+    /// fetches the forecast for that point, and the reply names the
+    /// geocoded place — hedged by the `weather.replySource` attribution
+    /// line. The device location seam is never consulted.
+    func testOnDeviceWeatherQuestionWithNamedPlaceGeocodesAndSpeaksThatPlacesConditions() {
         let coordinator = MockVoiceCommandCoordinator()
         coordinator.isOnDeviceStack = true
+        coordinator.localeOverride = Locale(identifier: "en-US")
+        // A location fix exists but must NEVER be requested — the named
+        // place answers for itself.
         let fetcher = StubLocationFetcher(result: .success(
-            LocationFix(latitude: 27.7172, longitude: 85.3240, placeName: "काठमाडौं")))
-        let transport = StubLocalToolTransport(data: weatherJSON)
+            LocationFix(latitude: 27.7172, longitude: 85.3240, placeName: "Kathmandu")))
+        let transport = StubLocalToolTransport(
+            data: weatherJSON,
+            geocodingData: Data(#"{"results": [{"name": "Arncliffe", "latitude": -33.9375,"#.utf8)
+                + Data(#" "longitude": 151.1522}]}"#.utf8))
         let (router, bus, speaker) = makeRouter(coordinator,
                                                 locationFetcherFactory: { fetcher },
                                                 weatherTransport: transport)
 
-        let result = router.route(transcript: "भोलि काठमाडौंमा पानी पर्छ?")
+        let result = router.route(transcript: "is it raining in Arncliffe?")
         waitForToolDelivery()
 
-        XCTAssertEqual(result, .unrecognised(transcript: "भोलि काठमाडौंमा पानी पर्छ?"))
-        // One location request, served through the transport seam to the
-        // real open-meteo endpoint shape.
-        XCTAssertEqual(fetcher.requestCount, 1)
-        XCTAssertEqual(transport.capturedRequests.count, 1)
-        let components = URLComponents(url: transport.capturedRequests[0].url!,
-                                       resolvingAgainstBaseURL: false)
-        XCTAssertEqual(components?.host, "api.open-meteo.com")
-        // The announced lookup first, then the carded + spoken reply.
-        let expectedReply = WeatherTool.reply(
-            for: WeatherTool.CurrentConditions(temperatureC: 24.3, wmoCode: 0,
-                                               windKmh: 12.5, humidityPercent: 62),
-            placeName: "काठमाडौं", locale: ne)
+        XCTAssertEqual(result, .unrecognised(transcript: "is it raining in Arncliffe?"))
+        // Two round-trips: geocode for the spoken name, then the forecast
+        // at the GEOCODED coordinates.
+        XCTAssertEqual(transport.capturedRequests.count, 2)
+        let geocode = URLComponents(url: transport.capturedRequests[0].url!,
+                                    resolvingAgainstBaseURL: false)
+        XCTAssertEqual(geocode?.host, "geocoding-api.open-meteo.com")
+        XCTAssertEqual(geocode?.queryItems?.first { $0.name == "name" }?.value, "arncliffe")
+        XCTAssertEqual(geocode?.queryItems?.first { $0.name == "count" }?.value, "1")
+        let forecast = URLComponents(url: transport.capturedRequests[1].url!,
+                                     resolvingAgainstBaseURL: false)
+        XCTAssertEqual(forecast?.host, "api.open-meteo.com")
+        XCTAssertEqual(forecast?.queryItems?.first { $0.name == "latitude" }?.value, "-33.9375")
+        XCTAssertEqual(forecast?.queryItems?.first { $0.name == "longitude" }?.value, "151.1522")
+        XCTAssertEqual(fetcher.requestCount, 0,
+                       "a named-place answer must never prompt for the device location")
+        // Spoken: the checking announcement, then the hedged live reply
+        // naming the GEOCODED place (Arncliffe, not the device's place).
+        let conditions = WeatherTool.CurrentConditions(temperatureC: 24.3, wmoCode: 0,
+                                                       windKmh: 12.5, humidityPercent: 62)
+        let raw = WeatherTool.reply(for: conditions, placeName: "Arncliffe", locale: Locale(identifier: "en"))
+        let expected = L10n.fmt("weather.replySource",
+                                locale: Locale(identifier: "en-US"), raw)
+        XCTAssertEqual(raw, "It's 24°C and clear in Arncliffe.")
+        XCTAssertEqual(expected,
+                       "According to the weather service, It's 24°C and clear in Arncliffe.")
         XCTAssertEqual(coordinator.assistantSpoken,
-                       [L10n.str("weather.checking", locale: ne), expectedReply])
-        XCTAssertEqual(coordinator.genericReplies, [expectedReply],
-                       "the live reading must land on the outcome card")
+                       [L10n.str("weather.checking", locale: Locale(identifier: "en-US")), expected])
+        XCTAssertEqual(coordinator.genericReplies, [expected],
+                       "the hedged live reading must land on the outcome card")
         XCTAssertEqual(Set(speaker.utterances.map(\.text)),
-                       Set([L10n.str("weather.checking", locale: ne), expectedReply]))
+                       Set([L10n.str("weather.checking", locale: Locale(identifier: "en-US")),
+                            expected]))
         XCTAssertTrue(bus.emittedEvents.contains {
             $0.component == "local_tools" && $0.eventType == "weather" && $0.outcome == "ok"
         })
@@ -906,7 +971,47 @@ final class CommandRouterLocalToolsTests: XCTestCase {
                        "a live answer must not also emit the no-data pre-answer event")
     }
 
-    func testOnDeviceWeatherQuestionWithoutPlaceNameStillSpeaksAReply() {
+    /// Nepali named place through the same pipeline: the locative
+    /// "काठमाडौंमा" is geocoded (Devanagari name on the wire, decoded by
+    /// the seam) and the device location stays untouched.
+    func testOnDeviceNepaliWeatherQuestionWithNamedPlaceGeocodesThatPlace() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isOnDeviceStack = true
+        let fetcher = StubLocationFetcher(result: .success(
+            LocationFix(latitude: 27.7172, longitude: 85.3240, placeName: nil)))
+        let transport = StubLocalToolTransport(
+            data: weatherJSON,
+            geocodingData: Data(#"{"results": [{"name": "Kathmandu", "latitude": 27.7172,"#.utf8)
+                + Data(#" "longitude": 85.324}]}"#.utf8))
+        let (router, bus, _) = makeRouter(coordinator,
+                                          locationFetcherFactory: { fetcher },
+                                          weatherTransport: transport)
+
+        _ = router.route(transcript: "भोलि काठमाडौंमा पानी पर्छ?")
+        waitForToolDelivery()
+
+        XCTAssertEqual(transport.capturedRequests.count, 2)
+        let geocode = URLComponents(url: transport.capturedRequests[0].url!,
+                                    resolvingAgainstBaseURL: false)
+        XCTAssertEqual(geocode?.host, "geocoding-api.open-meteo.com")
+        XCTAssertEqual(geocode?.queryItems?.first { $0.name == "name" }?.value, "काठमाडौं")
+        XCTAssertEqual(fetcher.requestCount, 0)
+        // The reply names the GEOCODED (English) place under Nepali.
+        let conditions = WeatherTool.CurrentConditions(temperatureC: 24.3, wmoCode: 0,
+                                                       windKmh: 12.5, humidityPercent: 62)
+        let raw = WeatherTool.reply(for: conditions, placeName: "Kathmandu", locale: ne)
+        let expected = L10n.fmt("weather.replySource", locale: ne, raw)
+        XCTAssertEqual(coordinator.genericReplies, [expected])
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "weather" && $0.outcome == "ok"
+        })
+    }
+
+    // MARK: - Weather: no place name → device location
+
+    /// A weather question that names NO place reads the forecast for the
+    /// DEVICE location (point-of-use permission) — no geocode round-trip.
+    func testOnDeviceWeatherQuestionWithoutPlaceNameUsesDeviceLocation() {
         let coordinator = MockVoiceCommandCoordinator()
         coordinator.isOnDeviceStack = true
         // Simulator-style: fix without a reverse-geocoded place name.
@@ -917,17 +1022,92 @@ final class CommandRouterLocalToolsTests: XCTestCase {
                                           locationFetcherFactory: { fetcher },
                                           weatherTransport: transport)
 
-        _ = router.route(transcript: "भोलि काठमाडौंमा पानी पर्छ?")
+        _ = router.route(transcript: "मौसम कस्तो छ?")
         waitForToolDelivery()
 
-        let expectedReply = WeatherTool.reply(
-            for: WeatherTool.CurrentConditions(temperatureC: 24.3, wmoCode: 0,
-                                               windKmh: 12.5, humidityPercent: 62),
-            placeName: nil, locale: ne)
-        XCTAssertEqual(coordinator.genericReplies, [expectedReply])
+        XCTAssertEqual(fetcher.requestCount, 1)
+        XCTAssertEqual(transport.capturedRequests.count, 1,
+                       "no place was named — only the device forecast round-trip")
+        let components = URLComponents(url: transport.capturedRequests[0].url!,
+                                       resolvingAgainstBaseURL: false)
+        XCTAssertEqual(components?.host, "api.open-meteo.com")
+        XCTAssertEqual(components?.queryItems?.first { $0.name == "latitude" }?.value, "27.7172")
+        // The announced lookup first, then the hedged carded + spoken
+        // reply without a place clause.
+        let conditions = WeatherTool.CurrentConditions(temperatureC: 24.3, wmoCode: 0,
+                                                       windKmh: 12.5, humidityPercent: 62)
+        let raw = WeatherTool.reply(for: conditions, placeName: nil, locale: ne)
+        let expected = L10n.fmt("weather.replySource", locale: ne, raw)
+        XCTAssertEqual(coordinator.assistantSpoken,
+                       [L10n.str("weather.checking", locale: ne), expected])
+        XCTAssertEqual(coordinator.genericReplies, [expected])
         XCTAssertTrue(bus.emittedEvents.contains {
-            $0.eventType == "weather" && $0.outcome == "ok"
+            $0.component == "local_tools" && $0.eventType == "weather" && $0.outcome == "ok"
         })
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "topic_pre_answer" })
+    }
+
+    // MARK: - Weather: named place + geocode failure → device location
+
+    /// A spoken place the geocoder cannot resolve must not end the turn:
+    /// the router falls back to the DEVICE location and answers honestly
+    /// for where the device is.
+    func testNamedPlaceGeocodeFailureFallsBackToDeviceLocation() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isOnDeviceStack = true
+        let fetcher = StubLocationFetcher(result: .success(
+            LocationFix(latitude: 27.7172, longitude: 85.3240, placeName: "काठमाडौं")))
+        // geocodingData defaults to an empty payload → the geocode parse
+        // finds no result (200 OK, nothing matched).
+        let transport = StubLocalToolTransport(data: weatherJSON)
+        let (router, bus, _) = makeRouter(coordinator,
+                                          locationFetcherFactory: { fetcher },
+                                          weatherTransport: transport)
+
+        _ = router.route(transcript: "is it raining in Arncliffe?")
+        waitForToolDelivery()
+
+        XCTAssertEqual(transport.capturedRequests.count, 2,
+                       "geocode attempt + device-location forecast")
+        XCTAssertEqual(URLComponents(url: transport.capturedRequests[0].url!,
+                                     resolvingAgainstBaseURL: false)?.host,
+                       "geocoding-api.open-meteo.com")
+        XCTAssertEqual(URLComponents(url: transport.capturedRequests[1].url!,
+                                     resolvingAgainstBaseURL: false)?.host,
+                       "api.open-meteo.com")
+        XCTAssertEqual(fetcher.requestCount, 1,
+                       "an unresolvable place must fall back to the device fix")
+        let conditions = WeatherTool.CurrentConditions(temperatureC: 24.3, wmoCode: 0,
+                                                       windKmh: 12.5, humidityPercent: 62)
+        let raw = WeatherTool.reply(for: conditions, placeName: "काठमाडौं", locale: ne)
+        let expected = L10n.fmt("weather.replySource", locale: ne, raw)
+        XCTAssertEqual(coordinator.genericReplies, [expected])
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "local_tools" && $0.eventType == "weather" && $0.outcome == "ok"
+        })
+    }
+
+    /// The geocode HTTP round-trip itself failing (non-200) falls back
+    /// the same way — a transport error is a geocode failure.
+    func testNamedPlaceGeocodeHTTPFailureFallsBackToDeviceLocation() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isOnDeviceStack = true
+        let fetcher = StubLocationFetcher(result: .success(
+            LocationFix(latitude: 27.7172, longitude: 85.3240, placeName: "काठमाडौं")))
+        let transport = StubLocalToolTransport(data: weatherJSON, geocodingStatusCode: 503)
+        let (router, bus, _) = makeRouter(coordinator,
+                                          locationFetcherFactory: { fetcher },
+                                          weatherTransport: transport)
+
+        _ = router.route(transcript: "काठमाडौंको मौसम कस्तो छ?")
+        waitForToolDelivery()
+
+        XCTAssertEqual(fetcher.requestCount, 1)
+        XCTAssertEqual(coordinator.genericReplies.count, 1)
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "local_tools" && $0.eventType == "weather" && $0.outcome == "ok"
+        })
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "weather" && $0.outcome == "fail" })
     }
 
     // MARK: - Weather: failure → the EXISTING static no-data line
@@ -941,7 +1121,9 @@ final class CommandRouterLocalToolsTests: XCTestCase {
                                           locationFetcherFactory: { fetcher },
                                           weatherTransport: transport)
 
-        _ = router.route(transcript: "भोलि काठमाडौंमा पानी पर्छ?")
+        // No place is named — the turn goes straight to the device fix
+        // and dies on the denied permission.
+        _ = router.route(transcript: "मौसम कस्तो छ?")
         waitForToolDelivery()
 
         let expected = TopicPreAnswer.reply(for: .weather, locale: ne)
@@ -967,11 +1149,14 @@ final class CommandRouterLocalToolsTests: XCTestCase {
                                           locationFetcherFactory: { fetcher },
                                           weatherTransport: transport)
 
-        _ = router.route(transcript: "भोलि काठमाडौंमा पानी पर्छ?")
+        // No place named — the single forecast round-trip fails.
+        _ = router.route(transcript: "मौसम कस्तो छ?")
         waitForToolDelivery()
 
         let expected = TopicPreAnswer.reply(for: .weather, locale: ne)
         XCTAssertEqual(coordinator.genericReplies, [expected])
+        XCTAssertEqual(transport.capturedRequests.count, 1,
+                       "only the forecast round-trip — no geocode without a named place")
         XCTAssertTrue(bus.emittedEvents.contains {
             $0.component == "local_tools" && $0.eventType == "weather" && $0.outcome == "fail"
         })
@@ -1001,6 +1186,46 @@ final class CommandRouterLocalToolsTests: XCTestCase {
                 && $0.metadata["topic"] == TopicPreAnswer.Topic.weather.rawValue
         })
         XCTAssertFalse(bus.emittedEvents.contains { $0.component == "local_tools" })
+    }
+
+    // MARK: - Weather: never falls through to web search
+
+    func testWeatherQuestionNeverReachesTheSearchHookEvenWithCredentialsConfigured() {
+        // The Arncliffe failure mode, end to end: search credentials ARE
+        // configured and the utterance IS question-shaped — yet a weather
+        // topic must be answered by the weather path alone. The topic
+        // intercept runs before the search hook, and the in-hook topic
+        // veto makes the boundary airtight ([WEATHER-ROUTING] 2026-09-07):
+        // no search round-trip, no quota tick, no search event.
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isOnDeviceStack = true
+        let store = SearchConfigStore(storage: GeminiInMemoryStorage())
+        store.saveAPIKey("AIza-key-test")
+        store.saveSearchEngineID("cx-test")
+        let fetcher = StubLocationFetcher(result: .success(
+            LocationFix(latitude: 27.7172, longitude: 85.3240, placeName: nil)))
+        let weatherTransport = StubLocalToolTransport(data: weatherJSON)
+        let searchTransport = StubLocalToolTransport()   // must never be called
+        let (router, bus, _) = makeRouter(coordinator,
+                                          locationFetcherFactory: { fetcher },
+                                          weatherTransport: weatherTransport,
+                                          searchTransport: searchTransport)
+
+        _ = router.route(transcript: "is it raining in Arncliffe?")
+        waitForToolDelivery()
+
+        // The weather path ran (geocode attempt + forecast round-trips).
+        XCTAssertEqual(weatherTransport.capturedRequests.count, 2)
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "local_tools" && $0.eventType == "weather" && $0.outcome == "ok"
+        })
+        XCTAssertTrue(searchTransport.capturedRequests.isEmpty,
+                      "weather talk must never reach the search transport")
+        XCTAssertEqual(SearchQuota.readCount(defaults: quotaDefaults), 0,
+                       "the search quota must stay untouched")
+        XCTAssertFalse(bus.emittedEvents.contains {
+            $0.component == "local_tools" && $0.eventType == "search"
+        })
     }
 
     // MARK: - Search: happy path
@@ -1263,25 +1488,41 @@ private final class StubLocationFetcher: LocationFetching {
 /// [LOCAL-TOOLS] (2026-09-07) `LocalToolTransport` double — records every
 /// request it is handed and answers with scripted data/status/error. No
 /// network: the router's fetch seam is exercised end to end through it.
+///
+/// [WEATHER-ROUTING] (2026-09-07) A named-place weather turn performs TWO
+/// round-trips (geocode, then forecast), so the stub answers per host:
+/// requests to `geocoding-api.open-meteo.com` get `geocodingData`/
+/// `geocodingStatusCode`; everything else gets `data`/`statusCode`. The
+/// geocoding defaults (empty payload, 200) make the geocode parse fail —
+/// preserving the pre-geocode behavior for tests that do not script one
+/// (the router then falls back to the device location).
 private final class StubLocalToolTransport: LocalToolTransport {
     private(set) var capturedRequests: [URLRequest] = []
     private let data: Data
     private let statusCode: Int
     private let error: Error?
+    private let geocodingData: Data
+    private let geocodingStatusCode: Int
 
-    init(data: Data = Data(), statusCode: Int = 200, error: Error? = nil) {
+    init(data: Data = Data(), statusCode: Int = 200, error: Error? = nil,
+         geocodingData: Data = Data(), geocodingStatusCode: Int = 200) {
         self.data = data
         self.statusCode = statusCode
         self.error = error
+        self.geocodingData = geocodingData
+        self.geocodingStatusCode = geocodingStatusCode
     }
 
     func fetchData(for request: URLRequest) async throws -> (Data, URLResponse) {
         capturedRequests.append(request)
         if let error { throw error }
+        let isGeocoding = request.url?.host == "geocoding-api.open-meteo.com"
+        let payload = isGeocoding ? geocodingData : data
+        let code = isGeocoding ? geocodingStatusCode : statusCode
         let response = HTTPURLResponse(url: request.url ?? URL(string: "https://stub.local")!,
-                                       statusCode: statusCode,
+                                       statusCode: code,
                                        httpVersion: nil,
                                        headerFields: nil)!
-        return (data, response)
+        return (payload, response)
     }
 }
