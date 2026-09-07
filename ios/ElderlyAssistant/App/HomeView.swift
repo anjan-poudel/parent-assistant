@@ -575,7 +575,12 @@ struct TalkButton: View {
                         .fill(heroFill)
                         .frame(width: DesignTokens.talkButtonDiameter,
                                height: DesignTokens.talkButtonDiameter)
-                        .shadow(color: visuals.tint.opacity(0.35), radius: 10, y: 4)
+                        // Flat-color heroes (speaking blue, transcribing,
+                        // understanding) cast a slightly heavier shadow
+                        // than the amber-gradient glow so they lift off the
+                        // warm background; idle/listening's amber stays at
+                        // 0.35 (2026-09-07 listening-vs-speaking fix).
+                        .shadow(color: visuals.tint.opacity(visuals.usesAmberHero ? 0.35 : 0.45), radius: 10, y: 4)
                         .overlay(
                             VStack(spacing: 6) {
                                 Image(systemName: visuals.icon)
