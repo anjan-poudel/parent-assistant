@@ -95,10 +95,11 @@ targets:
       # app bundle and every Text("key") renders as the raw key.
       - path: ElderlyAssistant/Resources/Localizable.xcstrings
         buildPhase: resources
-      # Official brand glyphs for the quick-access app catalog (CC0
-      # simple-icons vectors converted to single-page PDFs, 2026-09-07).
-      # `Resources` is excluded from the source glob above, so the asset
-      # catalog must be declared like every other bundled resource.
+      # Official multicolor logos for the quick-access app catalog
+      # (Wikimedia Commons PNGs, 2026-09-07 — sources in the catalog's
+      # README.md). `Resources` is excluded from the source glob above, so
+      # the asset catalog must be declared like every other bundled
+      # resource.
       - path: ElderlyAssistant/Resources/AppIcons.xcassets
         buildPhase: resources
       # Bundled medium Nepali model — installed into the ModelStore on

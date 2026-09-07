@@ -19,26 +19,6 @@ extension Color {
 /// Every piece here is wired to real `AppCoordinator` state — none of it
 /// is placeholder/mock data.
 
-// MARK: - Hex color (catalog brand-glyph tints)
-
-extension Color {
-    /// Opaque color from a 6-digit "RRGGBB" hex string — the view-layer
-    /// resolution of `AppLauncher.App.glyphTintHex` (AppLauncher is
-    /// Foundation-only and cannot carry a SwiftUI `Color`). Malformed
-    /// input degrades to opaque black — the untinted single-color look —
-    /// and never traps; the catalog pins every hex to 6 digits.
-    init(hex: String) {
-        let cleaned = hex.trimmingCharacters(in: .whitespacesAndNewlines)
-        var rgb: UInt64 = 0
-        if cleaned.count == 6, let parsed = UInt64(cleaned, radix: 16) {
-            rgb = parsed
-        }
-        self.init(red: Double((rgb >> 16) & 0xFF) / 255.0,
-                  green: Double((rgb >> 8) & 0xFF) / 255.0,
-                  blue: Double(rgb & 0xFF) / 255.0)
-    }
-}
-
 // MARK: - Icon badge (replaces bare gray SF Symbols — spec §2)
 
 struct IconBadge: View {
@@ -60,18 +40,16 @@ struct IconBadge: View {
 
 // MARK: - Face avatar (initials — spec §3.1/§3.2, replaces generic phone icons)
 
-/// The OFFICIAL brand glyph of a quick-access catalog app on a white
-/// circle (AppIcons.xcassets, CC0 simple-icons vectors, 2026-09-07), or
-/// the SF Symbol stand-in badge when the catalog carries no clean-licensed
-/// glyph (Apple built-ins use SF Symbols as their official glyphs; IMO's
-/// was removed from simple-icons over trademark concerns). The CC0
-/// vectors are single-color paths, so they render as template images
-/// tinted with the app's official brand color (`glyphTintHex` resolved
-/// via `Color(hex:)`) — without the tint every glyph would come out
-/// black (2026-09-07). Every tile is the same white circle with the
-/// glyph at the same 0.6-of-diameter inset, whatever the glyph's natural
-/// density, so the row reads uniform like iPhone drawer tiles. Hidden
-/// from VoiceOver — the surrounding tile/row reads the app name.
+/// The OFFICIAL multicolor logo of a quick-access catalog app on a white
+/// circle (AppIcons.xcassets — Wikimedia Commons PNGs, 2026-09-07, see
+/// the catalog's README for sources), drawn as-is with its own colors, or
+/// the SF Symbol stand-in badge when the catalog carries no official logo
+/// (Apple built-ins use SF Symbols as their official glyphs; IMO's was
+/// removed from simple-icons over trademark concerns and Commons hosts
+/// none). Every tile is the same white circle with the logo at the same
+/// 0.6-of-diameter inset, whatever the logo's natural aspect, so the row
+/// reads uniform like iPhone drawer tiles. Hidden from VoiceOver — the
+/// surrounding tile/row reads the app name.
 struct AppGlyph: View {
     let app: AppLauncher.App
     let diameter: CGFloat
@@ -80,10 +58,8 @@ struct AppGlyph: View {
         Group {
             if let imageName = app.imageName {
                 Image(imageName)
-                    .renderingMode(.template)
                     .resizable()
                     .scaledToFit()
-                    .foregroundColor(app.glyphTintHex.map(Color.init(hex:)) ?? .black)
                     .frame(width: diameter * 0.6, height: diameter * 0.6)
                     .frame(width: diameter, height: diameter)
                     .background(Color.white)
