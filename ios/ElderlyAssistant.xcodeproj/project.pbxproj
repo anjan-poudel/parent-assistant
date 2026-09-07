@@ -47,6 +47,7 @@
 		1AE062785099B2A92B49F9ED /* CallLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62FF5D6C4374911BDBFB167D /* CallLinks.swift */; };
 		1B4E735DE44360EB3F856433 /* MorningBriefingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 481EF12D06A4A2D5A504BAE4 /* MorningBriefingStore.swift */; };
 		1E4E2CACAEA900314E8D7026 /* NepaliTimeParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A15958C4A3DCF9FC454627A /* NepaliTimeParser.swift */; };
+		1EB14603AC8A6322B0E86F50 /* TodayCardCompositionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 298A80CA29A2DF023627F55E /* TodayCardCompositionTests.swift */; };
 		201D8D3A988E3A219871778B /* DevanagariNumerals.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CDCFC2BBD9A005B886D05DE /* DevanagariNumerals.swift */; };
 		203223B8756FC96334BC2960 /* EscalationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AF7478D117F7C991FC99A68 /* EscalationEngine.swift */; };
 		2040D02E968EEF836F8BE2A4 /* ModelCatalogSTTNamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14F80A5E07B68026EBAE4654 /* ModelCatalogSTTNamingTests.swift */; };
@@ -59,6 +60,7 @@
 		2AC2B667F13294A64020FAA7 /* HomeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 015F0565B242BD849F659D78 /* HomeWidget.swift */; };
 		2B3A648C4F5037E764CBF100 /* SpeakQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 675C9C0F0CE04315DB7E4104 /* SpeakQueueTests.swift */; };
 		2B8044C3F425E9E412E2B9B4 /* CallingSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1E438064692860ADDE36682 /* CallingSettingsView.swift */; };
+		2DA3B3309FE25452A418D166 /* HomeWidgetTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 051DE4C93951C66DB67FC211 /* HomeWidgetTestSupport.swift */; };
 		2F9406DF91D139C7FD79EA21 /* DirectionsScreenListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CB44E2C5CE96DF8ED515C53 /* DirectionsScreenListTests.swift */; };
 		2FA47D5B9C9DA6275043A088 /* ApplianceLabelLocalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0111F751B4131E4D8A9FB49 /* ApplianceLabelLocalizerTests.swift */; };
 		2FBA03DFDCB85B2049B798F3 /* OnboardingWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C862F89CFC9B521BAD91DBCF /* OnboardingWizardView.swift */; };
@@ -69,6 +71,7 @@
 		334F939E8B4CCEFC727018A4 /* AppIcons.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 06E05F28CEB7B79070AFC14D /* AppIcons.xcassets */; };
 		36126C14FF50D0FDE355FC76 /* VoiceSessionStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E07CFBA211DF9E699627A4 /* VoiceSessionStateMachineTests.swift */; };
 		374B71D860A11E30E7D738B4 /* DirectionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F48EAEA944BE15E675173256 /* DirectionsView.swift */; };
+		3893686855F13DED894AA1BB /* NotificationsDrawer.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF3743A651380549DDE65BF0 /* NotificationsDrawer.swift */; };
 		38EA930604B28AB2BF63DF05 /* WakeWordEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFE0B77607ED7DA0553D6F0 /* WakeWordEngine.swift */; };
 		39F0DBE85A418FEFC103B2E7 /* LocalBrainChainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C9FD745CF7B00B908EC011D /* LocalBrainChainTests.swift */; };
 		3ADB4A7E4AD571AE1F92BEC0 /* InAppNavigationSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA32A5EBA667F71F5A20570 /* InAppNavigationSessionTests.swift */; };
@@ -294,6 +297,7 @@
 		F46656314EF3B024F5871089 /* AudioSessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54BA14F8D657DC91DFCC22AF /* AudioSessionManager.swift */; };
 		F5667293263F3664F7E6BAC4 /* ExternalCalendarServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59D8463A0D3314A2C9CE1E72 /* ExternalCalendarServiceTests.swift */; };
 		F5B6567562467C3A100334C3 /* FacebookArchiveParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F06203E2B2091AEFC198603 /* FacebookArchiveParserTests.swift */; };
+		F5E0085F0EE36DC896A2F7B5 /* TodayCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 487D1419D7F4B2411C5D0AE7 /* TodayCardView.swift */; };
 		F5F45F00A4E7C75F5C12E419 /* VoiceContactSearchRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48272FA061C2AED41E6DED18 /* VoiceContactSearchRoute.swift */; };
 		F7C0DC7D97D42F9BA667CFAF /* AlarmTimersServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64434D83C703F46957997EA8 /* AlarmTimersServiceTests.swift */; };
 		F806FC4A13EA91D39F9E8A54 /* SherpaKWSWakeWordEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A40C7536D29F558009CF964 /* SherpaKWSWakeWordEngine.swift */; };
@@ -332,6 +336,7 @@
 		015F0565B242BD849F659D78 /* HomeWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeWidget.swift; sourceTree = "<group>"; };
 		030DDED1BA852B1A12ABABBE /* AppCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCoordinator.swift; sourceTree = "<group>"; };
 		050315DE680CE94C0C4594A5 /* ElderlyAssistantApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElderlyAssistantApp.swift; sourceTree = "<group>"; };
+		051DE4C93951C66DB67FC211 /* HomeWidgetTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeWidgetTestSupport.swift; sourceTree = "<group>"; };
 		052B6B70ABA9E8996556A298 /* BundledManualCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledManualCatalog.swift; sourceTree = "<group>"; };
 		06E05F28CEB7B79070AFC14D /* AppIcons.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = AppIcons.xcassets; sourceTree = "<group>"; };
 		0776B7C899783B35B84D499A /* MedicationScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationScheduler.swift; sourceTree = "<group>"; };
@@ -373,6 +378,7 @@
 		26F476E23A6729932ACA0823 /* IntentCommandCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentCommandCacheTests.swift; sourceTree = "<group>"; };
 		287E2BEA7446EE83E2CAE611 /* NativeCalendarScanning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeCalendarScanning.swift; sourceTree = "<group>"; };
 		28997FBC34D35BCC21640600 /* AppActivityLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppActivityLog.swift; sourceTree = "<group>"; };
+		298A80CA29A2DF023627F55E /* TodayCardCompositionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayCardCompositionTests.swift; sourceTree = "<group>"; };
 		2A0EA61C3EB71FA3AE684ECA /* InterpreterAvailabilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterpreterAvailabilityTests.swift; sourceTree = "<group>"; };
 		2A782C524BB8A94784F7C94C /* AppearanceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsView.swift; sourceTree = "<group>"; };
 		2A7DB532BF6505FE842CF0B1 /* RoutinePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinePlugin.swift; sourceTree = "<group>"; };
@@ -409,6 +415,7 @@
 		4800CA5CAC428D8A53E39BC5 /* ApplianceZoomGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceZoomGeometry.swift; sourceTree = "<group>"; };
 		481EF12D06A4A2D5A504BAE4 /* MorningBriefingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MorningBriefingStore.swift; sourceTree = "<group>"; };
 		48272FA061C2AED41E6DED18 /* VoiceContactSearchRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceContactSearchRoute.swift; sourceTree = "<group>"; };
+		487D1419D7F4B2411C5D0AE7 /* TodayCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayCardView.swift; sourceTree = "<group>"; };
 		48BB64EE85BB9E421079F36B /* ToolLogReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolLogReviewView.swift; sourceTree = "<group>"; };
 		49030B031DC2E69213E22B09 /* ChannelPreferenceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelPreferenceStore.swift; sourceTree = "<group>"; };
 		4C9FD745CF7B00B908EC011D /* LocalBrainChainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalBrainChainTests.swift; sourceTree = "<group>"; };
@@ -568,6 +575,7 @@
 		C9DE83031D29493925CC65D5 /* TopicPreAnswerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopicPreAnswerTests.swift; sourceTree = "<group>"; };
 		CB448CA95E79375B692A12F8 /* NepaliFestival.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliFestival.swift; sourceTree = "<group>"; };
 		CCD6AEC6B90A955BDDECBB02 /* WakeWordConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeWordConfig.swift; sourceTree = "<group>"; };
+		CF3743A651380549DDE65BF0 /* NotificationsDrawer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsDrawer.swift; sourceTree = "<group>"; };
 		CF539F81F76209D893CF81A8 /* GeminiConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiConfigStore.swift; sourceTree = "<group>"; };
 		D1354A62876AEB6F0C54AA10 /* kws */ = {isa = PBXFileReference; lastKnownFileType = folder; name = kws; path = ElderlyAssistant/Resources/Models/kws; sourceTree = SOURCE_ROOT; };
 		D14B6E81C221A233E013C46F /* MessageComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageComposeView.swift; sourceTree = "<group>"; };
@@ -666,6 +674,8 @@
 			children = (
 				E0C190FFF74560789B8CFAE1 /* BuiltInWidgets.swift */,
 				015F0565B242BD849F659D78 /* HomeWidget.swift */,
+				CF3743A651380549DDE65BF0 /* NotificationsDrawer.swift */,
+				487D1419D7F4B2411C5D0AE7 /* TodayCardView.swift */,
 			);
 			path = Widgets;
 			sourceTree = "<group>";
@@ -886,6 +896,8 @@
 			isa = PBXGroup;
 			children = (
 				C5B442DD3C17D8D2B675CA50 /* HomeWidgetRegistryTests.swift */,
+				051DE4C93951C66DB67FC211 /* HomeWidgetTestSupport.swift */,
+				298A80CA29A2DF023627F55E /* TodayCardCompositionTests.swift */,
 			);
 			path = Widgets;
 			sourceTree = "<group>";
@@ -1646,6 +1658,7 @@
 				1E4E2CACAEA900314E8D7026 /* NepaliTimeParser.swift in Sources */,
 				832475F2D98C3F665C961223 /* NotificationFacade.swift in Sources */,
 				0D78E2E8D49D7B2B4FB475E8 /* NotificationReader.swift in Sources */,
+				3893686855F13DED894AA1BB /* NotificationsDrawer.swift in Sources */,
 				77513354E6D2333576B5A9FA /* OnboardingState.swift in Sources */,
 				2FBA03DFDCB85B2049B798F3 /* OnboardingWizardView.swift in Sources */,
 				B82C18E493D6249A16752637 /* PhotoVerifier.swift in Sources */,
@@ -1674,6 +1687,7 @@
 				5D81FBD14362148284553655 /* SpokenTime.swift in Sources */,
 				B2B08B4BF2C6CE1A5FFD90A0 /* SwitchableCommandInterpreter.swift in Sources */,
 				AA0C98432913C4C0A766B461 /* TithiCalculator.swift in Sources */,
+				F5E0085F0EE36DC896A2F7B5 /* TodayCardView.swift in Sources */,
 				AA29DEFEF2BE3F8742D43C6F /* ToolLogReviewView.swift in Sources */,
 				7F9F778F7D94A381111A8842 /* TopicPreAnswer.swift in Sources */,
 				02543E15FCD856AFA17311CC /* TranscriptSanityGuard.swift in Sources */,
@@ -1763,6 +1777,7 @@
 				92C94484258C17CA63F0576B /* GuidePluginDispatchTests.swift in Sources */,
 				A0738A663D5C642F45779B52 /* HistoryTimeFormatTests.swift in Sources */,
 				5AAEF9B2582961977F8DEDEA /* HomeWidgetRegistryTests.swift in Sources */,
+				2DA3B3309FE25452A418D166 /* HomeWidgetTestSupport.swift in Sources */,
 				3ADB4A7E4AD571AE1F92BEC0 /* InAppNavigationSessionTests.swift in Sources */,
 				51D666B0798FC7244E328326 /* InputSanitiserTests.swift in Sources */,
 				18BEB7D45D5046004C294903 /* IntentCommandCacheTests.swift in Sources */,
@@ -1820,6 +1835,7 @@
 				1895B170092814FFF1FFDF9A /* TTSVoiceCatalogTests.swift in Sources */,
 				B7C570291146098E83BFFD43 /* TTSVoiceInstallTests.swift in Sources */,
 				E7B12E9B962D7CEF115B22CA /* TithiCalculatorTests.swift in Sources */,
+				1EB14603AC8A6322B0E86F50 /* TodayCardCompositionTests.swift in Sources */,
 				6AC8C04319364E32FF6881AB /* TopicPreAnswerTests.swift in Sources */,
 				B32BE0328D7BA52A2E4C4C5D /* TranscriptSanityGuardTests.swift in Sources */,
 				79D4B1953306ACC3F360A315 /* UnifiedContactSearchTests.swift in Sources */,
