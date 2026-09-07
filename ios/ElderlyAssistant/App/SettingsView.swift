@@ -3237,6 +3237,17 @@ struct PrivacySettingsView: View {
 struct TTSVoicesSettingsView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.locale) private var locale
+
+    /// Voice being applied — awaits the confirmation dialog, never the
+    /// live voice (research §6: confirm-before-apply, previews must not
+    /// switch the live voice).
+    @State private var applyCandidate: ResponseVoice?
+    /// The voice confirmed on THIS screen visit (so the checkmark moves
+    /// immediately); the persisted store is the source of truth.
+    @State private var justApplied: ResponseVoice?
+    /// A voice whose install-from-bundle failed at apply time.
+    @State private var installFailure: ModelID?
 
     enum VoiceStatus {
         case installed   // in the ModelStore, ready to speak
@@ -3253,6 +3264,37 @@ struct TTSVoicesSettingsView: View {
             return .bundled
         }
         return .missing
+    }
+
+    /// The sample sentence every Listen/apply-proof speaks. ALWAYS the
+    /// Nepali sentence — the voices being auditioned are Nepali voices —
+    /// and the same Devanagari sentence is shown on screen next to it
+    /// (research §6: never audio-only).
+    private var sampleText: String {
+        L10n.str("settings.voices.sampleGreeting", locale: Locale(identifier: "ne-NP"))
+    }
+
+    /// Current effective voice: the persisted choice, or the locale
+    /// default (google-medium speaker 0) before any pick.
+    private var currentVoice: ResponseVoice {
+        justApplied ?? ResponseVoiceSelection.persisted()
+            ?? ResponseVoice(voiceID: ModelCatalog.piperNepali, speakerID: 0)
+    }
+
+    /// Pickable options in display order: google's default speaker (the
+    /// voice the app shipped with), the new chitwan voice, then google's
+    /// other verified speakers 1-17 under their own header (same voice
+    /// directory, zero download — verified present in the int8 export,
+    /// see ResponseVoiceSelection; each is previewable before use).
+    private var pickerOptions: [ResponseVoice] {
+        [ResponseVoice(voiceID: ModelCatalog.piperNepali, speakerID: 0),
+         ResponseVoice(voiceID: ModelCatalog.piperNepaliChitwan, speakerID: 0)]
+    }
+
+    private var alternateGoogleSpeakers: [ResponseVoice] {
+        ResponseVoice.speakerIDs(for: ModelCatalog.piperNepali).dropFirst().map {
+            ResponseVoice(voiceID: ModelCatalog.piperNepali, speakerID: $0)
+        }
     }
 
     var body: some View {
@@ -3285,9 +3327,59 @@ struct TTSVoicesSettingsView: View {
 
                 ScrollView {
                     VStack(spacing: 12) {
-                        ForEach(ModelCatalog.entries(kind: .tts)) { entry in
-                            voiceRow(entry)
+                        // Picker intro + the sentence every preview speaks,
+                        // shown in the same script (research §6).
+                        Text("settings.voices.chooseTitle")
+                            .font(.system(size: DesignTokens.minBodyPointSize,
+                                          weight: .semibold))
+                            .foregroundColor(DesignTokens.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                        VStack(spacing: 6) {
+                            Text("settings.voices.sampleNote")
+                                .font(.system(size: DesignTokens.minCaptionPointSize,
+                                              weight: .semibold))
+                                .foregroundColor(DesignTokens.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(sampleText)
+                                .font(.system(size: DesignTokens.minBodyPointSize))
+                                .foregroundColor(DesignTokens.textPrimary)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
                         }
+                        .padding(14)
+                        .background(DesignTokens.card)
+                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+
+                        ForEach(pickerOptions) { voice in
+                            voiceOptionCard(voice)
+                        }
+
+                        // Google-medium's other verified speakers (1-17).
+                        if status(of: ModelCatalog.piperNepali) != .missing
+                            && !alternateGoogleSpeakers.isEmpty {
+                            VStack(spacing: 4) {
+                                Text("settings.voices.moreGoogleSpeakers")
+                                    .font(.system(size: DesignTokens.minBodyPointSize,
+                                                  weight: .semibold))
+                                    .foregroundColor(DesignTokens.textPrimary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text("settings.voices.speakerNote")
+                                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                                    .foregroundColor(DesignTokens.textSecondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.horizontal, 4)
+                            .padding(.top, 8)
+                            ForEach(alternateGoogleSpeakers) { voice in
+                                voiceOptionCard(voice)
+                            }
+                        }
+
+                        // The English reply voice stays a status-only row —
+                        // voice personalisation P0 covers Nepali voices.
+                        voiceRow(ModelCatalog.entry(for: ModelCatalog.piperEnglishUS)!)
+
                         Button {
                             coordinator.speak(text: L10n.str("settings.voices.sampleGreeting",
                                                              locale: coordinator.activeLocale))
@@ -3311,6 +3403,15 @@ struct TTSVoicesSettingsView: View {
                         }
                         .buttonStyle(.plain)
 
+                        if let voiceID = installFailure,
+                           let entry = ModelCatalog.entry(for: voiceID) {
+                            Text(L10n.fmt("settings.voices.installFailed", locale: locale,
+                                          entry.displayName))
+                                .font(.system(size: DesignTokens.minCaptionPointSize))
+                                .foregroundColor(DesignTokens.stateError)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 4)
+                        }
                         if ModelCatalog.entries(kind: .tts).contains(where: {
                             Self.status(for: $0, modelStore: coordinator.modelStore) == .missing
                         }) {
@@ -3327,12 +3428,164 @@ struct TTSVoicesSettingsView: View {
             }
         }
         .navigationBarHidden(true)
+        .confirmationDialog(
+            Text("settings.voices.confirmTitle"),
+            isPresented: Binding(
+                get: { applyCandidate != nil },
+                set: { if !$0 { applyCandidate = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("settings.voices.confirmApply") {
+                if let voice = applyCandidate {
+                    apply(voice)
+                }
+                applyCandidate = nil
+            }
+            Button("common.cancel", role: .cancel) {
+                applyCandidate = nil
+            }
+        } message: {
+            if let voice = applyCandidate {
+                Text(L10n.fmt("settings.voices.confirmMessage", locale: locale,
+                              optionName(voice)))
+            }
+        }
     }
 
+    // MARK: - Option cards
+
+    private func status(of voiceID: ModelID) -> VoiceStatus {
+        guard let entry = ModelCatalog.entry(for: voiceID) else { return .missing }
+        return Self.status(for: entry, modelStore: coordinator.modelStore)
+    }
+
+    private func optionName(_ voice: ResponseVoice) -> String {
+        if voice.voiceID == ModelCatalog.piperNepaliChitwan {
+            return L10n.str("settings.voices.chitwan", locale: locale)
+        }
+        if voice.speakerID == 0 {
+            return L10n.str("settings.voices.google", locale: locale)
+        }
+        return L10n.fmt("settings.voices.googleSpeaker", locale: locale, voice.displayNumber)
+    }
+
+    /// Auditions a voice WITHOUT switching the live one: registers a
+    /// one-shot audition request for the sample sentence, then speaks the
+    /// sample through the normal queue. The speaker consumes the request
+    /// only for that exact utterance (ResponseVoiceSelection), so nothing
+    /// else can pick the voice up.
+    private func audition(_ voice: ResponseVoice) {
+        installFailure = nil
+        ResponseVoiceSelection.requestAudition(of: voice, for: sampleText)
+        coordinator.speak(text: sampleText)
+    }
+
+    /// Confirm-before-apply: persist the choice, install the voice from
+    /// the bundle first if needed (the honest "not downloaded yet" state
+    /// — a bundled voice installs here, a truly missing one can't and
+    /// shows its red status instead), then speak the sample sentence as
+    /// the audible proof, in the newly applied voice.
+    private func apply(_ voice: ResponseVoice) {
+        installFailure = nil
+        if coordinator.modelStore.ttsVoiceDirectory(for: voice.voiceID) == nil,
+           coordinator.modelStore.installBundledTTSVoice(for: voice.voiceID) == nil {
+            installFailure = voice.voiceID
+            return
+        }
+        guard ResponseVoiceSelection.apply(voice) else { return }
+        justApplied = voice
+        ResponseVoiceSelection.requestAudition(of: voice, for: sampleText)
+        coordinator.speak(text: sampleText)
+    }
+
+    private func voiceOptionCard(_ voice: ResponseVoice) -> some View {
+        let voiceStatus = status(of: voice.voiceID)
+        let canSpeak = voiceStatus != .missing
+        let isCurrent = voice == currentVoice
+        let (statusKey, statusColor): (LocalizedStringKey, Color) = {
+            switch voiceStatus {
+            case .installed: return ("settings.voices.statusInstalled", DesignTokens.accent)
+            case .bundled:   return ("settings.voices.statusBundled", DesignTokens.accent)
+            case .missing:   return ("settings.voices.statusMissing", DesignTokens.stateError)
+            }
+        }()
+        return VStack(spacing: 12) {
+            HStack(spacing: 14) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 26))
+                    .foregroundColor(DesignTokens.accent)
+                    .frame(width: 40)
+                Text(optionName(voice))
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Spacer()
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 8, height: 8)
+                    Text(statusKey)
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+            }
+            HStack(spacing: 12) {
+                Button {
+                    audition(voice)
+                } label: {
+                    Label(L10n.str("settings.voices.listenButton", locale: locale),
+                          systemImage: "play.circle")
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                        .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+                        .background(DesignTokens.textSecondary.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSpeak)
+                .accessibilityHint(Text(L10n.str("settings.voices.listenHint", locale: locale)))
+
+                if isCurrent {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 22))
+                        Text("settings.voices.currentVoice")
+                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    }
+                    .foregroundColor(DesignTokens.accent)
+                    .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+                } else {
+                    Button {
+                        applyCandidate = voice
+                    } label: {
+                        Label(L10n.str("settings.voices.useButton", locale: locale),
+                              systemImage: "checkmark.circle")
+                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+                            .background(DesignTokens.accent)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSpeak)
+                    .accessibilityHint(Text(L10n.str("settings.voices.useHint", locale: locale)))
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .opacity(canSpeak ? 1 : 0.55)
+    }
+
+    /// Status-only row for the English reply voice (not user-selectable
+    /// in P0 — the picker covers the Nepali voices above).
     private func voiceRow(_ entry: ModelCatalogEntry) -> some View {
         let status = Self.status(for: entry, modelStore: coordinator.modelStore)
-        let nameKey = entry.id == ModelCatalog.piperNepali
-            ? "settings.voices.nepali" : "settings.voices.english"
+        let nameKey = entry.id == ModelCatalog.piperEnglishUS
+            ? "settings.voices.english" : "settings.voices.nepali"
         let (statusKey, statusColor): (LocalizedStringKey, Color) = {
             switch status {
             case .installed: return ("settings.voices.statusInstalled", DesignTokens.accent)

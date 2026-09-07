@@ -198,6 +198,29 @@ final class AppCoordinator: ObservableObject {
     }
     private static let cloudFallbackKey = "cloudFallbackEnabled"
 
+    /// Voice Processing I/O A/B gate (voice-personalisation P0, slice C,
+    /// 2026-09-08): when ON, the audio session activates with the VPIO
+    /// preset (`.voiceChat` mode + `setVoiceProcessingEnabled(true)` on
+    /// the engine's input node — AEC + built-in noise suppression below
+    /// the tap, phone-call-tuned). Default OFF: today's `.measurement`
+    /// behavior stays byte-identical. The persisted source of truth lives
+    /// on `AudioSessionManager` (its `voiceProcessingEnabled`, under
+    /// UserDefaults "voiceProcessingEnabled"); this published mirror is
+    /// the composition-root seam a Settings row / remote-config A/B flips.
+    /// didSet pushes the new value to the manager (which persists it) AND
+    /// re-applies the preset — the session re-activates under the new
+    /// configuration immediately (see `applyVoiceProcessingPresetChange`).
+    /// The init-time restore assigns the mirror directly (house pattern —
+    /// didSet does not fire there) after the manager composed above has
+    /// already read the persisted value.
+    @Published var voiceProcessingEnabled: Bool {
+        didSet {
+            guard voiceProcessingEnabled != oldValue else { return }
+            audioSessionManager.voiceProcessingEnabled = voiceProcessingEnabled
+            applyVoiceProcessingPresetChange()
+        }
+    }
+
     /// Which cloud provider an opted-in on-device escalation may reach
     /// (cloud-fallback task, 2026-09-07). Provider-ready for a future
     /// Settings dropdown: today only `.gemini` exists, but the choice is
@@ -1077,7 +1100,11 @@ final class AppCoordinator: ObservableObject {
         // enablement steps. The launch outcome is recorded so Settings →
         // "Voice activation" can report an honest status.
         self.audioEngine = AVAudioEngine()
-        self.audioSessionManager = AudioSessionManager(observabilityBus: bus)
+        // The manager shares THIS engine (not its own): the VPIO node
+        // flag must land on the instance the pipeline installs its tap
+        // on (voice-personalisation P0, slice C).
+        self.audioSessionManager = AudioSessionManager(observabilityBus: bus,
+                                                       audioEngine: audioEngine)
         let wakeWordLaunch = Self.makeWakeWordEngine(accessKeyStore: wakeWordAccessKeyStore)
         self.wakeWordEngine = wakeWordLaunch.engine
         self.wakeWordEngineRealAtLaunch = wakeWordLaunch.isReal
@@ -1183,6 +1210,15 @@ final class AppCoordinator: ObservableObject {
         self.cloudFallbackEnabled = UserDefaults.standard.bool(forKey: Self.cloudFallbackKey)
         self.cloudProvider = UserDefaults.standard.string(forKey: Self.cloudProviderKey)
             .flatMap(CloudProvider.init(rawValue:)) ?? .gemini
+
+        // Restore the persisted Voice Processing I/O preset mirror
+        // (voice-personalisation P0, slice C — default OFF, the A/B
+        // gate). The manager composed above already read the persisted
+        // value in its own init; this is the mirror's ONLY initial
+        // assignment, so its didSet does not fire here (same rule as
+        // `voiceEngineStack` above) — the pipeline's own start applies
+        // the restored preset at launch.
+        self.voiceProcessingEnabled = audioSessionManager.voiceProcessingEnabled
 
         // Restore the persisted quick-access favourites (quick-access-apps
         // task, 2026-09-06). Pure prune — dedupe, drop ids naming no
@@ -1614,6 +1650,14 @@ final class AppCoordinator: ObservableObject {
             voiceSession.transition(to: speakingCount > 0 ? .speaking : .idle)
             cancelVoiceWatchdog()
             cancelVoiceStartWatchdog()
+            // Voice Processing I/O preset A/B (P0, slice C): a flip that
+            // landed mid-turn applies now the pipeline has settled back
+            // to idle — and only once no reply is playing (every speech
+            // end re-runs this case via `noteSpeakingEnded`).
+            if pendingVoiceProcessingPresetChange, speakingCount == 0 {
+                pendingVoiceProcessingPresetChange = false
+                applyVoiceProcessingPresetChange()
+            }
         case .capturingCommand:
             // A fresh capture supersedes any post-reset notice: the
             // status line must speak for the LIVE cycle, not the last
@@ -1834,6 +1878,13 @@ final class AppCoordinator: ObservableObject {
     /// capture completes; false when the pipeline was already stopped.
     private var voiceWasSuspendedForSearchCapture = false
     private var searchPhraseCaptureActive = false
+
+    /// A Voice Processing I/O preset flip (P0, slice C) that landed while
+    /// the pipeline was busy (mid-capture, mid-reply, mid-recycle) and
+    /// must apply once it next settles to `.idle` — see
+    /// `applyVoiceProcessingPresetChange` and the `.idle` case of
+    /// `handlePipelineState`.
+    private var pendingVoiceProcessingPresetChange = false
 
     private lazy var searchPhraseCapture = SearchPhraseCapture(
         audioSession: audioSessionManager,
@@ -2115,6 +2166,37 @@ final class AppCoordinator: ObservableObject {
             DispatchQueue.main.async { [weak self] in
                 self?.updateActiveSTTName()
             }
+        }
+    }
+
+    /// Re-applies the audio-session preset after `voiceProcessingEnabled`
+    /// changed (voice-personalisation P0, slice C). A preset change needs
+    /// the engine stopped — the manager's VPIO node call refuses a
+    /// running engine — and the ONLY restart path that owns the
+    /// session + engine lifecycle together is the pipeline recycle, so a
+    /// flip recycles the always-on pipeline through its canonical
+    /// stop/start core (`recycleVoicePipeline`, same one the cycle
+    /// watchdog and Talk-button reset use). The recycle's start
+    /// re-activates the session, and `AudioSessionManager.activate`
+    /// applies the preset the flag now requests; failures surface
+    /// through the recycle's own state mapping. Timing:
+    ///  - pipeline settled idle, nobody speaking → recycle immediately;
+    ///  - mid-turn (capture/reply/recycle) → defer via
+    ///    `pendingVoiceProcessingPresetChange`, applied when the pipeline
+    ///    next reports `.idle` (the manager flag is already set, so any
+    ///    activation in between — e.g. a search-phrase capture's resume —
+    ///    already uses the new preset);
+    ///  - a search-phrase capture holds the engine → leave it alone; its
+    ///    own resume activation picks up the new preset.
+    private func applyVoiceProcessingPresetChange() {
+        guard started else { return }
+        guard !searchPhraseCaptureActive else { return }
+        guard let voicePipeline, voicePipeline.state != .stopped else { return }
+        if voicePipeline.state == .idle && speakingCount == 0 {
+            pendingVoiceProcessingPresetChange = false
+            recycleVoicePipeline { _ in }
+        } else {
+            pendingVoiceProcessingPresetChange = true
         }
     }
 

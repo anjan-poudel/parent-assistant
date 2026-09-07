@@ -121,10 +121,24 @@ protocol TTSEngine {
     /// Synthesizes `text` and returns the URL of a WAV file the caller
     /// owns (and should delete after playback). `speed` < 1.0 slows
     /// speech down (elderly-friendly default lives in PiperVoiceSpeaker).
-    func synthesize(_ text: String, voiceDirectory: URL, speed: Float) throws -> URL
+    ///
+    /// `speakerID` selects among a multi-speaker voice's speakers (the
+    /// bundled ne_NP-google-medium-int8 exposes sids 0-17 — verified in
+    /// the shipped export, see ResponseVoiceSelection). Single-speaker
+    /// voices ignore it: sherpa only feeds the sid tensor to models that
+    /// expose a "sid" input.
+    func synthesize(_ text: String, voiceDirectory: URL, speed: Float,
+                    speakerID: Int) throws -> URL
 
     /// Stops any in-flight synthesis as soon as possible.
     func cancelSynthesis()
+}
+
+extension TTSEngine {
+    /// Convenience for single-speaker voices and pre-picker call sites.
+    func synthesize(_ text: String, voiceDirectory: URL, speed: Float) throws -> URL {
+        try synthesize(text, voiceDirectory: voiceDirectory, speed: speed, speakerID: 0)
+    }
 }
 
 enum TTSEngineError: Error {
@@ -145,10 +159,11 @@ final class SherpaTTSEngine: TTSEngine {
     private var engines: [URL: SherpaOnnxOfflineTtsWrapper] = [:]
     private let engineQueue = DispatchQueue(label: "tts.sherpa.engine", qos: .userInitiated)
 
-    func synthesize(_ text: String, voiceDirectory: URL, speed: Float) throws -> URL {
+    func synthesize(_ text: String, voiceDirectory: URL, speed: Float,
+                    speakerID: Int = 0) throws -> URL {
         try engineQueue.sync {
             let tts = try engine(for: voiceDirectory)
-            let audio = tts.generate(text: text, sid: 0, speed: speed)
+            let audio = tts.generate(text: text, sid: speakerID, speed: speed)
             guard audio.n > 0 else { throw TTSEngineError.synthesisFailed }
             let out = URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent("tts-\(UUID().uuidString).wav")
@@ -195,7 +210,8 @@ final class SherpaTTSEngine: TTSEngine {
 /// PiperVoiceSpeaker falls back to system speech. Keeps the app
 /// compilable in minimal configurations.
 final class SherpaTTSEngine: TTSEngine {
-    func synthesize(_ text: String, voiceDirectory: URL, speed: Float) throws -> URL {
+    func synthesize(_ text: String, voiceDirectory: URL, speed: Float,
+                    speakerID: Int = 0) throws -> URL {
         throw TTSEngineError.engineInitFailed(voiceDirectory)
     }
     func cancelSynthesis() {}
@@ -209,6 +225,12 @@ final class SherpaTTSEngine: TTSEngine {
 /// plays the WAV with AVAudioPlayer. Any failure — voice not installed,
 /// engine error, decode failure — falls back to `SystemSpeechSpeaker`, so
 /// the user-facing behavior can never regress below today's system TTS.
+///
+/// Voice personalisation (P0, slice B): Nepali utterances resolve
+/// through the persisted `ResponseVoiceSelection` (chosen voice +
+/// speaker id) and one-shot audition requests — see `resolveVoiceSpec`.
+/// Untouched until the user picks: no selection, or the default
+/// google-medium speaker 0, is byte-identical to the pre-picker path.
 final class PiperVoiceSpeaker: NSObject, Speaker {
     private let fallback: SystemSpeechSpeaker
     private let silenceFallback: Speaker
@@ -258,33 +280,85 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         return ModelCatalog.piperEnglishUS
     }
 
+    // MARK: - Voice/speaker resolution (voice personalisation, slice B)
+
+    /// One utterance's resolved voice: the voice directory + speaker id +
+    /// the locale used for fallback choice and events.
+    ///
+    /// Resolution order (see `resolveVoiceSpec`): a matching one-shot
+    /// audition request (Settings preview / post-apply proof sentence),
+    /// then the persisted user choice for Nepali utterances, then the
+    /// locale default above. No selection or the default choice = the
+    /// exact pre-picker behavior.
+    private struct VoiceSpec {
+        var voiceID: ModelID
+        var speakerID: Int
+        /// Locale the utterance is treated as (auditions force ne-NP —
+        /// the picker previews Nepali voices with the Nepali sample even
+        /// when the Settings UI language is English).
+        var locale: Locale
+        /// True when the spec came from a consumed audition request.
+        var usedAudition: Bool
+    }
+
+    private func resolveVoiceSpec(for text: String, locale: Locale) -> VoiceSpec {
+        // 1) One-shot audition (preview): the speaker consumes it ONLY
+        //    for the exact sample utterance, so a preview can never leak
+        //    into unrelated replies and the live voice is never switched
+        //    by a preview (research §6 confirm-before-apply).
+        if let audition = ResponseVoiceSelection.consumeAudition(matchingText: text) {
+            return VoiceSpec(voiceID: audition.voiceID,
+                             speakerID: audition.speakerID,
+                             locale: Locale(identifier: "ne-NP"),
+                             usedAudition: true)
+        }
+        // 2) Persisted user choice — Nepali utterances only; the English
+        //    reply voice is not user-selectable (P0 scope). Stored values
+        //    are sanitised against the catalog on read.
+        if locale.languageCode?.hasPrefix("ne") == true,
+           let chosen = ResponseVoiceSelection.persisted(),
+           !ResponseVoiceSelection.isDefault(chosen) {
+            return VoiceSpec(voiceID: chosen.voiceID, speakerID: chosen.speakerID,
+                             locale: locale, usedAudition: false)
+        }
+        // 3) Locale default — unchanged pre-picker behavior.
+        return VoiceSpec(voiceID: Self.voiceID(for: locale), speakerID: 0,
+                         locale: locale, usedAudition: false)
+    }
+
     func speak(_ text: String, locale: Locale) async {
         cancel()
         cancelled = false
-        let voiceID = Self.voiceID(for: locale)
-        guard let voiceDir = modelStore.ttsVoiceDirectory(for: voiceID)
-                ?? modelStore.installBundledTTSVoice(for: voiceID, bundle: bundle) else {
-            emit("tts_voice_missing_fallback", locale: locale)
-            await fallbackSpeaker(for: locale).speak(text, locale: locale)
+        let spec = resolveVoiceSpec(for: text, locale: locale)
+        if spec.usedAudition || spec.speakerID != 0
+            || spec.voiceID != Self.voiceID(for: spec.locale) {
+            emit("tts_voice_" + (spec.usedAudition ? "audition" : "selected"),
+                 locale: spec.locale, voice: spec)
+        }
+        guard let voiceDir = modelStore.ttsVoiceDirectory(for: spec.voiceID)
+                ?? modelStore.installBundledTTSVoice(for: spec.voiceID, bundle: bundle) else {
+            emit("tts_voice_missing_fallback", locale: spec.locale)
+            await fallbackSpeaker(for: spec.locale).speak(text, locale: spec.locale)
             return
         }
 
         let task = Task.detached(priority: .userInitiated) { [engine] () -> URL? in
             try? engine.synthesize(text, voiceDirectory: voiceDir,
-                                   speed: Self.defaultSpeed)
+                                   speed: Self.defaultSpeed,
+                                   speakerID: spec.speakerID)
         }
         generationTask = task
         let wav = await task.value
         guard let wav, !cancelled else {
             if wav == nil && !cancelled {
-                emit("tts_synthesis_failed_fallback", locale: locale)
-                await fallbackSpeaker(for: locale).speak(text, locale: locale)
+                emit("tts_synthesis_failed_fallback", locale: spec.locale)
+                await fallbackSpeaker(for: spec.locale).speak(text, locale: spec.locale)
             }
             return
         }
         defer { try? FileManager.default.removeItem(at: wav) }
-        emit("speak", locale: locale)
-        await play(wav, text: text, locale: locale)
+        emit("speak", locale: spec.locale)
+        await play(wav, text: text, locale: spec.locale)
     }
 
     func cancel() {
@@ -335,6 +409,21 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
             outcome: "info",
             errorCode: nil,
             metadata: ["state": locale.identifier]
+        ))
+    }
+
+    /// Voice-usage event (voice personalisation, slice B): records WHICH
+    /// voice+speaker an utterance used when it differs from the locale
+    /// default. PII-free — catalog voice ids and speaker numbers only.
+    private func emit(_ eventType: String, locale: Locale, voice: VoiceSpec) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "speaker",
+            eventType: eventType,
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: ["state": "\(voice.voiceID.rawValue)#\(voice.speakerID)",
+                       "locale": locale.identifier]
         ))
     }
 }
