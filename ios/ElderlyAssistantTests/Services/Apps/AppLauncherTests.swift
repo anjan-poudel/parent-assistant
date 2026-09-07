@@ -30,42 +30,26 @@ final class AppLauncherTests: XCTestCase {
         XCTAssertEqual(Set(AppLauncher.catalog.map(\.systemImage)).count, 18)
     }
 
-    func testOfficialBrandGlyphsCoverEveryThirdPartyAppExceptIMO() {
-        // Official glyphs (CC0 simple-icons, 2026-09-07) for every
-        // third-party app EXCEPT imo — simple-icons removed IMO's glyph
-        // over trademark concerns, and the catalog must not pretend a
-        // stand-in is official. Apple built-ins keep SF Symbols (their
-        // official glyphs) with nil imageName.
+    func testOfficialBrandLogosCoverEveryThirdPartyAppExceptIMO() {
+        // Official multicolor logos (Wikimedia Commons PNGs, 2026-09-07 —
+        // see AppIcons.xcassets/README.md for sources) for every
+        // third-party app EXCEPT imo — simple-icons removed IMO's logo
+        // over trademark concerns and Commons hosts none, so the catalog
+        // must not pretend a stand-in is official. Apple built-ins keep
+        // SF Symbols (their official glyphs) with nil imageName.
         let builtInIDs = ["phone", "messages", "facetime", "mail", "calendar", "maps"]
         let thirdParty = AppLauncher.catalog.filter { !builtInIDs.contains($0.id) }
-        let withGlyph = thirdParty.filter { $0.imageName != nil }
-        XCTAssertEqual(withGlyph.map(\.id),
+        let withLogo = thirdParty.filter { $0.imageName != nil }
+        XCTAssertEqual(withLogo.map(\.id),
                        ["whatsapp", "messenger", "facebook", "instagram", "youtube",
                         "gmail", "googlemaps", "chrome", "zoom", "telegram", "viber"])
         XCTAssertNil(AppLauncher.app(for: "imo")?.imageName)
-        // Glyph asset names are unique and namespaced.
+        // Logo asset names are unique and namespaced.
         let names = thirdParty.compactMap(\.imageName)
         XCTAssertEqual(Set(names).count, names.count)
         XCTAssertTrue(names.allSatisfy { $0.hasPrefix("appIcon.") })
         // Built-ins: SF Symbols ARE the official Apple glyphs.
         XCTAssertTrue(AppLauncher.catalog.prefix(6).allSatisfy { $0.imageName == nil })
-
-        // Every glyph carries its official brand tint as a 6-digit
-        // "RRGGBB" hex — the CC0 vectors are single-color paths that
-        // render BLACK without a tint, which is the "all icons the same
-        // color" complaint this closes. Glyph and tint travel together:
-        // among third-party apps only imo (no glyph) has none, and
-        // built-ins (SF Symbols, no glyph) have none either. (2026-09-07)
-        for app in withGlyph {
-            let tint = app.glyphTintHex
-            XCTAssertNotNil(tint, "\(app.id) must carry an official brand tint")
-            XCTAssertEqual(tint?.count, 6, "\(app.id) tint must be 6 digits")
-            XCTAssertTrue(tint?.allSatisfy(\.isHexDigit) ?? false,
-                          "\(app.id) tint \(tint ?? "nil") must be pure hex")
-        }
-        XCTAssertEqual(thirdParty.filter { $0.glyphTintHex == nil }.map(\.id), ["imo"])
-        XCTAssertTrue(AppLauncher.catalog.prefix(6).allSatisfy { $0.glyphTintHex == nil })
-        XCTAssertNil(AppLauncher.app(for: "imo")?.glyphTintHex)
     }
 
     func testCatalogStartsWithAppleBuiltInsInHomeScreenOrder() {

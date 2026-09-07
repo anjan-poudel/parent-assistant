@@ -259,10 +259,10 @@ struct HomeView: View {
         .buttonStyle(.plain)
     }
 
-    /// The app's OFFICIAL brand glyph on a white circle when the catalog
-    /// carries one (AppIcons.xcassets, CC0 simple-icons vectors), else
-    /// the SF Symbol stand-in badge — Apple built-ins and IMO (no
-    /// clean-licensed glyph) keep the stand-in.
+    /// The app's OFFICIAL multicolor logo on a white circle when the
+    /// catalog carries one (AppIcons.xcassets — Wikimedia Commons PNGs),
+    /// else the SF Symbol stand-in badge — Apple built-ins and IMO (no
+    /// official logo) keep the stand-in.
     private func appGlyph(_ app: AppLauncher.App, diameter: CGFloat) -> some View {
         AppGlyph(app: app, diameter: diameter)
     }
