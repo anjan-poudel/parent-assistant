@@ -6488,6 +6488,74 @@
         }
       }
     },
+    "cloudFallback.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask Gemini when I can't answer"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मैले जवाफ दिन नसके जेमिनीलाई सोध्ने"
+          }
+        }
+      }
+    },
+    "cloudFallback.on": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Questions the local brain can't answer go to Gemini."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "स्थानीय दिमागले नसक्ने प्रश्न जेमिनीमा जान्छ।"
+          }
+        }
+      }
+    },
+    "cloudFallback.off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only the on-device brain answers."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यन्त्रमै भएको दिमागले मात्र जवाफ दिन्छ।"
+          }
+        }
+      }
+    },
+    "cloudFallback.requiresKey": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs a Gemini API key in Settings → Gemini AI."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सेटिङ → जेमिनी AI मा API कुञ्जी चाहिन्छ।"
+          }
+        }
+      }
+    },
     "settings.voices.english": {
       "extractionState": "manual",
       "localizations": {

@@ -635,8 +635,68 @@ struct VoiceEngineSettingsView: View {
                         ? "settings.voiceEngine.onDevice.ready"
                         : "settings.voiceEngine.onDevice.notReady"
                 )
+
+                // Cloud fallback (cloud-fallback task, 2026-09-07): an
+                // OPT-IN escalation for the ON-DEVICE stack — when the
+                // local chain cannot answer a question, it may go to the
+                // cloud brain. The card exists only under the on-device
+                // selection: its captions ("Only the on-device brain
+                // answers" …) would lie on the Gemini stack, where the
+                // cloud answers by design and this flag is ignored. OFF
+                // by default; the toggle's didSet re-applies the stack
+                // instantly — no restart (see
+                // `AppCoordinator.applyVoiceEngineStack`). A future
+                // provider picker ("ask via …") hooks onto
+                // `coordinator.cloudProvider` here — today only Gemini
+                // exists, so the caption keys off the Gemini key's
+                // presence exactly like the Gemini AI row above.
+                if coordinator.voiceEngineStack == .onDevice {
+                    cloudFallbackCard
+                }
             }
         }
+    }
+
+    /// The on/off card for on-device cloud escalation — the Wake Word
+    /// toggle card's visual language (a Toggle over an honest caption).
+    /// Three caption states: ON with a live Gemini key (what happens),
+    /// ON without one (stateError, points at Settings → Gemini AI —
+    /// mirroring how the Gemini row shows a missing key), OFF.
+    private var cloudFallbackCard: some View {
+        let fallbackOn = coordinator.cloudFallbackEnabled
+        let keyConfigured = coordinator.geminiConfigStore.isConfigured
+        let captionKey: LocalizedStringKey
+        let captionColor: Color
+        switch (fallbackOn, keyConfigured) {
+        case (true, false):
+            captionKey = "cloudFallback.requiresKey"
+            captionColor = DesignTokens.stateError
+        case (true, true):
+            captionKey = "cloudFallback.on"
+            captionColor = DesignTokens.textSecondary
+        case (false, _):
+            captionKey = "cloudFallback.off"
+            captionColor = DesignTokens.textSecondary
+        }
+        return VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: Binding(
+                get: { coordinator.cloudFallbackEnabled },
+                set: { coordinator.cloudFallbackEnabled = $0 }
+            )) {
+                Text("cloudFallback.title")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            Text(captionKey)
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(captionColor)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
     private func stackRow(_ stack: VoiceEngineStack, titleKey: String, subtitleKey: String) -> some View {
