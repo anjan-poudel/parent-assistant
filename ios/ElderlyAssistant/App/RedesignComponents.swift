@@ -1,6 +1,19 @@
 import SwiftUI
 import UIKit
 
+extension Color {
+    /// The `Color` for an `AppTheme`'s background (skinnable home,
+    /// 2026-09-07) — the single view-layer bridge from the palette's
+    /// Foundation-only RGB tuple. Screen backgrounds read
+    /// `Color(theme: coordinator.appTheme)` so the whole app re-skins on
+    /// one change; swatches (Appearance settings) use it too.
+    init(theme: AppTheme) {
+        self.init(red: theme.background.red,
+                  green: theme.background.green,
+                  blue: theme.background.blue)
+    }
+}
+
 /// Shared visual components introduced by the 2026-09-03 UI redesign
 /// (docs/superpowers/specs/2026-09-03-ui-visual-redesign-design.md).
 /// Every piece here is wired to real `AppCoordinator` state — none of it
@@ -473,7 +486,7 @@ struct ConversationHistorySheet: View {
             }
             .padding(20)
         }
-        .background(DesignTokens.background.ignoresSafeArea())
+        .background(Color(theme: coordinator.appTheme).ignoresSafeArea())
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }

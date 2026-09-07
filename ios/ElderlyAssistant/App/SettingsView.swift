@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// Settings (spec §4.4): five sections — Language & region, Family &
-/// emergency contacts, Medication schedule, AI मोडेल, Privacy & about.
+/// Settings hub (spec §4.4): one card per section — Appearance (skinnable
+/// app background, 2026-09-07), Language & region, Gemini AI, Voice
+/// engine, Voice activation, TTS voices, Quick apps, Family & emergency
+/// contacts, Medication schedule, AI मोडेल, Privacy & about.
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     /// Redesign spec §3.3: AI Models is buried behind a long-press on the
@@ -12,10 +14,11 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case language, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, quickApps, privacy, intentLog
+        case appearance, language, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, quickApps, privacy, intentLog
 
         var id: String {
             switch self {
+            case .appearance: return "appearance"
             case .language: return "language"
             case .family: return "family"
             case .meds: return "meds"
@@ -32,7 +35,7 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-            DesignTokens.background.ignoresSafeArea()
+            Color(theme: coordinator.appTheme).ignoresSafeArea()
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
                     Button(action: { dismiss() }) {
@@ -60,6 +63,10 @@ struct SettingsView: View {
 
                 ScrollView {
                     VStack(spacing: 12) {
+                        // Skinnable app background (2026-09-07) — warm
+                        // presets today; a photo-picker background is a
+                        // noted future option.
+                        sectionRow(.appearance, icon: "paintpalette.fill", titleKey: "settings.appearance.title")
                         sectionRow(.language, icon: "globe", titleKey: "settings.language.title")
                         geminiSectionRow
                         voiceEngineSectionRow
@@ -86,6 +93,7 @@ struct SettingsView: View {
         // isPresented + derived-binding form is fragile on iOS 16.
         .navigationDestination(for: SettingsSection.self) { section in
             switch section {
+            case .appearance: AppearanceSettingsView()
             case .language: LanguageSettingsView()
             case .family: FamilyContactsSettingsView()
             case .meds: MedicationScheduleSettingsView()
@@ -1620,7 +1628,10 @@ struct TTSVoicesSettingsView: View {
 
     var body: some View {
         ZStack {
-            DesignTokens.background.ignoresSafeArea()
+            // LeafScreen-style chrome, own background (skinnable home,
+            // 2026-09-07): this screen predates LeafScreen and keeps its
+            // full-screen layout, so the theme reads here directly.
+            Color(theme: coordinator.appTheme).ignoresSafeArea()
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
                     Button(action: { dismiss() }) {

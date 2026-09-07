@@ -95,6 +95,19 @@ final class AppCoordinator: ObservableObject {
     }
     private static let sttPreferenceKey = "sttModelPreference"
 
+    /// The app-wide background theme (skinnable home, 2026-09-07) — a UI
+    /// preference, not a secret, persisted in UserDefaults the same way as
+    /// `sttModelPreference`. Every screen draws its background from this
+    /// through the `Color(theme:)` helper, so one change re-skins the
+    /// whole app at once. didSet persists; the init-time restore assigns
+    /// directly (house pattern — didSet does not fire there).
+    @Published var appTheme: AppTheme {
+        didSet {
+            UserDefaults.standard.set(appTheme.rawValue, forKey: Self.themeKey)
+        }
+    }
+    private static let themeKey = "appTheme"
+
     /// Which brain model the local LLaMA interpreter runs (Settings →
     /// "AI मोडेल" → Assistant brain, 2026-09-06). nil = the default
     /// (`defaultBrainModelID`). Persisted in UserDefaults the same way
@@ -675,6 +688,14 @@ final class AppCoordinator: ObservableObject {
         // Language — restore the persisted choice, defaulting to the Nepali
         // pilot language (spec §3.2).
         self.appLanguage = AppLanguage.persisted()
+
+        // Theme — restore the persisted background theme (skinnable home,
+        // 2026-09-07). Unknown/missing raw values fall back to `.cream`
+        // (`AppTheme(rawOrDefault:)`). This is the property's ONLY initial
+        // assignment, so its didSet does not fire here — nothing needs to
+        // react to the restored value (same rule as `voiceEngineStack`).
+        self.appTheme = AppTheme(rawOrDefault:
+            UserDefaults.standard.string(forKey: Self.themeKey))
 
         // Model store + download service. First-run UI drives downloads
         // via `modelDownloadService`; the coordinator watches state changes

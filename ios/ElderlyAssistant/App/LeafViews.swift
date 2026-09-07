@@ -12,6 +12,10 @@ import Speech
 /// conversational voice chrome.
 struct LeafScreen<Content: View>: View {
     @Environment(\.dismiss) private var dismiss
+    /// Background theme (skinnable home, 2026-09-07): this is the shared
+    /// chrome nearly every full-screen leaf draws its background through,
+    /// so the theme reads HERE once instead of in every leaf.
+    @EnvironmentObject var coordinator: AppCoordinator
     let titleKey: String
     let content: Content
 
@@ -22,7 +26,7 @@ struct LeafScreen<Content: View>: View {
 
     var body: some View {
         ZStack {
-            DesignTokens.background.ignoresSafeArea()
+            Color(theme: coordinator.appTheme).ignoresSafeArea()
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
                     Button(action: { dismiss() }) {
