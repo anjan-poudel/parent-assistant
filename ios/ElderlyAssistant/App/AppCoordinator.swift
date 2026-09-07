@@ -140,6 +140,42 @@ final class AppCoordinator: ObservableObject {
     }
     private static let voiceEngineStackKey = "voiceEngineStack"
 
+    /// Whether the ON-DEVICE stack may escalate questions its local
+    /// chain cannot answer (an abstention / mid-band drop) to the cloud
+    /// brain (cloud-fallback task, 2026-09-07) — a second, OPT-IN layer
+    /// on top of `voiceEngineStack`. OFF by default: the old "strictly
+    /// on-device" contract survives until the household switches this
+    /// on, and even then escalation happens ONLY while the Gemini
+    /// interpreter is actually available (see
+    /// `CloudProvider.cloudFallbackEngages`) — the .gemini stack's
+    /// hybrid behavior is untouched and ignores this flag. A UI
+    /// preference, not a secret — persisted in UserDefaults the same
+    /// way as `voiceEngineStack`. didSet persists AND re-applies the
+    /// stack, so flipping the toggle in Settings acts immediately (the
+    /// same instant-apply rule as the engine toggle itself).
+    @Published var cloudFallbackEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(cloudFallbackEnabled, forKey: Self.cloudFallbackKey)
+            applyVoiceEngineStack()
+        }
+    }
+    private static let cloudFallbackKey = "cloudFallbackEnabled"
+
+    /// Which cloud provider an opted-in on-device escalation may reach
+    /// (cloud-fallback task, 2026-09-07). Provider-ready for a future
+    /// Settings dropdown: today only `.gemini` exists, but the choice is
+    /// persisted as a raw-value string under "cloudProvider" so a later
+    /// provider needs no migration. A UI preference, not a secret.
+    /// didSet persists only — the provider takes effect the next time
+    /// `applyVoiceEngineStack()` runs (nothing needs a live switch until
+    /// a second provider exists to switch between).
+    @Published var cloudProvider: CloudProvider {
+        didSet {
+            UserDefaults.standard.set(cloudProvider.rawValue, forKey: Self.cloudProviderKey)
+        }
+    }
+    private static let cloudProviderKey = "cloudProvider"
+
     /// The user's favourite apps for the Home quick-access row
     /// (quick-access-apps task, 2026-09-06), in stored order.
     /// `private(set)`: mutation is confined to `addFavoriteApp` /
@@ -597,8 +633,10 @@ final class AppCoordinator: ObservableObject {
 
     /// Whether `start()` should kick the assistant-brain model's one-time
     /// download: the model isn't cached AND no live cloud brain exists.
-    /// The on-device stack always needs the local model (a configured
-    /// Gemini key stays out of its chain — `cloudEnabled` is false), and
+    /// The on-device stack always needs the local model (this decision
+    /// runs BEFORE `applyVoiceEngineStack()` applies any cloud-fallback
+    /// opt-in, so the router is still strict here — `cloudEnabled` is
+    /// false for the on-device stack regardless of the opt-in), and
     /// the Gemini stack needs it too while no key is configured, which is
     /// exactly the shape of the reported bug (correct transcript, apology
     /// reply, nothing listening). Pure static so the decision is
@@ -837,6 +875,16 @@ final class AppCoordinator: ObservableObject {
         // fire here.
         self.voiceEngineStack = UserDefaults.standard.string(forKey: Self.voiceEngineStackKey)
             .flatMap(VoiceEngineStack.init(rawValue:)) ?? .gemini
+
+        // Restore the persisted cloud-fallback opt-in (default OFF — the
+        // strictly-on-device contract) and its provider (default Gemini).
+        // These are the properties' ONLY initial assignments, so their
+        // didSets do not fire here (same rule as `voiceEngineStack`
+        // above); `applyVoiceEngineStack()` — which runs once in the
+        // startup callback — applies the restored opt-in for real.
+        self.cloudFallbackEnabled = UserDefaults.standard.bool(forKey: Self.cloudFallbackKey)
+        self.cloudProvider = UserDefaults.standard.string(forKey: Self.cloudProviderKey)
+            .flatMap(CloudProvider.init(rawValue:)) ?? .gemini
 
         // Restore the persisted quick-access favourites (quick-access-apps
         // task, 2026-09-06). Pure prune — dedupe, drop ids naming no
@@ -1454,8 +1502,43 @@ final class AppCoordinator: ObservableObject {
             intentRouter?.cloudEnabled = true
             trySwapToGemini()
         case .onDevice:
-            // Strictly on-device: no cloud brain even if a key exists.
-            intentRouter?.cloudEnabled = false
+            // Strictly on-device STT + local brain — with an OPT-IN
+            // cloud escalation (cloud-fallback task, 2026-09-07): the
+            // "Ask Gemini when I can't answer" Settings toggle
+            // intentionally reverses the old rule that the on-device
+            // stack keeps a configured Gemini key out of the chain — by
+            // explicit user opt-in only (constitution-consistent:
+            // opt-in, disclosed in the Settings leaf). Escalation is
+            // provider-shaped for the future dropdown: which cloud brain
+            // may receive an abstained question is `cloudProvider`'s
+            // job — new providers plug in as new cases here, each gated
+            // on its own interpreter's availability. The STT recognizer
+            // is NEVER swapped in this branch — a Gemini recognizer
+            // stays a `.gemini`-stack privilege (`trySwapToGemini()`
+            // guards on the stack).
+            switch cloudProvider {
+            case .gemini:
+                // Gemini is the only provider today. Availability =
+                // `geminiCommandInterpreter.isAvailable` — the same
+                // gate `IntentRouter` applies to its cloud layer.
+                let fallbackEngages = CloudProvider.cloudFallbackEngages(
+                    enabled: cloudFallbackEnabled,
+                    geminiAvailable: geminiCommandInterpreter?.isAvailable ?? false
+                )
+                intentRouter?.cloudEnabled = fallbackEngages
+                // Observability: report the on-device chain's cloud
+                // state each time it applies, so a dashboard can tell an
+                // opted-in escalation from a strictly-local run (C9 —
+                // no utterance content, provider id only).
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "cloud_fallback",
+                    eventType: "state",
+                    durationMs: nil,
+                    outcome: fallbackEngages ? "enabled" : "disabled",
+                    errorCode: nil,
+                    metadata: ["provider": cloudProvider.rawValue]
+                ))
+            }
             // Whisper if its model is actually cached and the runtime is
             // linked; else the SFSpeechRecognizer fallback rather than
             // silently doing nothing (spec §7: no dead-end states).
@@ -1500,9 +1583,10 @@ final class AppCoordinator: ObservableObject {
     /// disagree: the local chain (preferred intent GGUF / LLaMA stand-in)
     /// counts when `isAvailable`; the cloud brain counts only when
     /// `cloudEnabled` (the on-device stack keeps a configured Gemini key
-    /// out of the chain — same guard as `IntentRouter`'s escalation).
-    /// The model-download state supplies the distinction between the two
-    /// honest no-brain messages (downloading vs setup needed).
+    /// out of the chain unless the household opted into cloud fallback —
+    /// same guard as `IntentRouter`'s escalation). The model-download
+    /// state supplies the distinction between the two honest no-brain
+    /// messages (downloading vs setup needed).
     var brainReadiness: BrainReadiness {
         BrainReadiness.resolve(
             localBrainAvailable: intentRouter?.localBrain?.isAvailable ?? false,
@@ -1519,9 +1603,10 @@ final class AppCoordinator: ObservableObject {
     /// cloud brain available), so the router's weather yield can never
     /// disagree with what the chain would do next: on the on-device stack
     /// a configured Gemini key stays out of the chain (`cloudEnabled` is
-    /// false) and this is false → the deterministic weather pre-answer
-    /// stands; on the Gemini stack with the key configured this is true →
-    /// weather questions fall through to the search-grounded interpreter.
+    /// false, absent the cloud-fallback opt-in) and this is false → the
+    /// deterministic weather pre-answer stands; on the Gemini stack with
+    /// the key configured this is true → weather questions fall through
+    /// to the search-grounded interpreter.
     var canAnswerLiveQuestionsFromWeb: Bool {
         (intentRouter?.cloudEnabled ?? false)
             && (intentRouter?.cloudBrain?.isAvailable ?? false)
