@@ -89,4 +89,66 @@ final class VoiceSessionStateMachineTests: XCTestCase {
         }
         wait(for: [lateCheck], timeout: 3.0)
     }
+
+    // MARK: - Talk-crash regression anchors (TALK-CRASH-FIX, 2026-09-07)
+
+    /// The two DEBUG assertion crashes behind "the app crashes when I tap
+    /// the Talk button while it's listening" were ILLEGAL transitions
+    /// this machine's own table rejects. Pinning the rejections the fix
+    /// guarantees never get attempted:
+    ///
+    ///  (a) `.stopped → .understanding` — a stale capture completion
+    ///      (settled by the recycle's cancel()) used to run the
+    ///      pipeline's post-capture tail (`state = .routing` →
+    ///      `.understanding`) against the session `recoverVoiceCycle()`
+    ///      had just left `.stopped`. The pipeline's capture-generation
+    ///      guard now drops stale tails before they reach this mapping.
+    ///
+    ///  (b) `.stopped → .speaking` — the re-prompt used to be spoken
+    ///      BEFORE the recycle's restart completed, so when the restart
+    ///      landed `.idle` the session (still `.stopped`) was asked to go
+    ///      `.speaking` via `speakingCount > 0`. recoverVoiceCycle now
+    ///      defers the speech to the restart completion (`.stopped →
+    ///      .idle → .speaking`, all legal).
+    @MainActor
+    func testStoppedRejectsTheTwoCrashTransitions() {
+        XCTAssertFalse(VoiceSessionState.stopped.canTransition(to: .understanding),
+                       "a stale capture tail must never drive .stopped → .understanding")
+        XCTAssertFalse(VoiceSessionState.stopped.canTransition(to: .speaking),
+                       "the re-prompt must never speak while the session is .stopped")
+    }
+
+    /// The reset path needs NO new transition-table semantics: holding
+    /// the Talk button mid-capture recycles the pipeline, which travels
+    /// existing legal transitions (busy → .stopped on stop, .stopped →
+    /// .idle on restart). A tap after the reset still re-prompts through
+    /// the legal .idle → .speaking async-reply transition.
+    @MainActor
+    func testResetPathIsFullyLegalWithoutNewTransitions() {
+        let machine = VoiceSessionStateMachine()
+        machine.transition(to: .idle)
+        machine.transition(to: .listening)   // user holds the Talk button mid-capture
+        machine.transition(to: .stopped)     // recycle: pipeline stop()
+        XCTAssertEqual(machine.state, .stopped)
+        machine.transition(to: .idle)        // recycle: restart lands
+        XCTAssertEqual(machine.state, .idle)
+        XCTAssertTrue(VoiceSessionState.idle.canTransition(to: .speaking))
+        XCTAssertEqual(machine.state, .idle)
+    }
+
+    /// `supportsTalkReset` — the hold-to-reset offer set: the stuck /
+    /// active cycle plus the dead states get the reset; `.speaking` and
+    /// `.awaitingConfirmation` keep plain tap semantics.
+    @MainActor
+    func testTalkResetIsOfferedExactlyFromTheResetStates() {
+        let offered: [VoiceSessionState] = [.idle, .listening, .transcribing,
+                                            .understanding, .error, .stopped]
+        for state in offered {
+            XCTAssertTrue(state.supportsTalkReset, "\(state) should offer the hold-to-reset")
+        }
+        for state in [VoiceSessionState.speaking, .awaitingConfirmation] {
+            XCTAssertFalse(state.supportsTalkReset,
+                           "\(state) must NOT offer the hold-to-reset")
+        }
+    }
 }

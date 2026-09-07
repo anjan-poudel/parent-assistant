@@ -1303,6 +1303,74 @@
         }
       }
     },
+    "calendar.twoWay.caption": {
+        "extractionState": "manual",
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "On — routine events live in the Sahayak calendar, and edits you make to them in the Calendar app update your routine here."
+                }
+            },
+            "ne": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "खोलिएको छ — दिनचर्याका घटनाहरू Sahayak क्यालेन्डरमा रहन्छन्, र क्यालेन्डर एपमा ती घटनाहरूमा गरेका सम्पादनहरूले यहाँको दिनचर्या अपडेट गर्छन्।"
+                }
+            }
+        }
+    },
+    "calendar.twoWay.denied": {
+        "extractionState": "manual",
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Two-way mirroring needs full calendar access, which was not granted — edits made in the Calendar app cannot come back here. You can try again from iOS Settings."
+                }
+            },
+            "ne": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "दुवैतिर मिरर गर्न क्यालेन्डरको पूर्ण पहुँच चाहिन्छ, जुन दिइएन — क्यालेन्डर एपमा गरेका सम्पादनहरू यहाँ फर्कन सक्दैनन्। iOS सेटिङबाट फेरि प्रयास गर्न सक्नुहुन्छ।"
+                }
+            }
+        }
+    },
+    "calendar.twoWay.hint": {
+        "extractionState": "manual",
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "When on, routine events are mirrored to a dedicated Sahayak calendar, and changes you make to those events there (time, deletion) update your routine here. Off by default — full access is asked only when you turn this on."
+                }
+            },
+            "ne": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "खोल्दा दिनचर्याका घटनाहरू छुट्टै Sahayak क्यालेन्डरमा मिरर हुन्छन्, र त्यहाँ ती घटनाहरूमा गरेका परिवर्तनहरू (समय, मेटाइ) ले यहाँको दिनचर्या अपडेट गर्छन्। सुरुमा बन्द हुन्छ — पूर्ण पहुँच यो खोल्दा मात्र सोधिन्छ।"
+                }
+            }
+        }
+    },
+    "calendar.twoWay.title": {
+        "extractionState": "manual",
+        "localizations": {
+            "en": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "Mirror routine changes both ways"
+                }
+            },
+            "ne": {
+                "stringUnit": {
+                    "state": "translated",
+                    "value": "दिनचर्याका परिवर्तनहरू दुवैतिर मिरर गर्नुहोस्"
+                }
+            }
+        }
+    },
     "calendarSync.statusDenied": {
       "extractionState": "manual",
       "localizations": {
@@ -2204,6 +2272,193 @@
         }
       }
     },
+    "directions.empty.addAccessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add a place in Settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सेटिङमा ठाउँ थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.empty.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save your home, hospital and family houses in Settings — then come back and tap Go."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आफ्नो घर, अस्पताल र परिवारका घरहरू सेटिङमा बचत गर्नुहोस् — अनि फर्केर जाऊ थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "directions.goAccessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Let's go to %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ मा जाऔँ"
+          }
+        }
+      }
+    },
+    "directions.goLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जाऊ"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जाऊ"
+          }
+        }
+      }
+    },
+    "directions.search.micFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The mic couldn't hear — please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माइकले सुन्न सकेन — फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "directions.search.micLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search by voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बोलेर खोज्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.search.micListening": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listening — say a place or a person"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्दै छु — ठाउँ वा मान्छेको नाम भन्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.search.micStopLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop listening"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्न रोक्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.search.noResults": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No place or person named \"%@\" was found. Try a different name."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@” नामको ठाउँ वा मान्छे भेटिएन। अर्को नाम लेख्नुहोस्।"
+          }
+        }
+      }
+    },
+    "directions.search.placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Search places and people"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठाउँ र मान्छे खोज्नुहोस्"
+          }
+        }
+      }
+    },
+    "directions.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Directions"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जाने बाटो"
+          }
+        }
+      }
+    },
     "emergency.noContact": {
       "extractionState": "manual",
       "localizations": {
@@ -3088,6 +3343,23 @@
         }
       }
     },
+    "history.openPhone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Phone app"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोन एप खोल्नुहोस्"
+          }
+        }
+      }
+    },
     "history.messageLabel": {
       "extractionState": "manual",
       "localizations": {
@@ -3186,6 +3458,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "हालसालैको गतिविधि"
+          }
+        }
+      }
+    },
+    "history.unanswered": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unanswered call"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नउठाएको कल"
           }
         }
       }
@@ -3458,6 +3747,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "फोन"
+          }
+        }
+      }
+    },
+    "home.hub.directions": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Directions"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बाटो"
           }
         }
       }
@@ -9153,6 +9459,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "माफ गर्नुहोस्, म अहिले मौसम हेर्न सक्दिनँ। मौसमको जानकारी चाँडै उपलब्ध हुनेछ।"
+          }
+        }
+      }
+    },
+    "voice.resetA11y": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Double-tap to talk, or press and hold to reset voice activation."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बोल्न दुई पटक थिच्नुहोस्, वा आवाज रिसेट गर्न थिचिराख्नुहोस्।"
+          }
+        }
+      }
+    },
+    "voice.resetDone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice reset. I'm ready."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज रिसेट भयो। म तयार छु।"
+          }
+        }
+      }
+    },
+    "voice.resetHold": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Keep holding to reset voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज रिसेट गर्न थिचिराख्नुहोस्"
           }
         }
       }

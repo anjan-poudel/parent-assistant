@@ -331,29 +331,38 @@ final class AppCoordinator: ObservableObject {
     private lazy var chatHistoryStore = ChatHistoryStore(storage: storage)
 
     // MARK: - Assistant activity history + live-call detection
-    // (call-history task, 2026-09-06)
+    // (call-history task, 2026-09-06; unanswered-call capture,
+    // missed-calls task, 2026-09-07)
 
     /// Encrypted, bounded (100-entry) log of what THIS app itself
     /// called/messaged — the Recent activity leaf's source of truth.
     /// Never the system call log, never other apps' messages (iOS
-    /// platform wall). Lazy like `chatHistoryStore`: `storage` is
-    /// assigned at the top of `init`, long before any call/message path
-    /// can record. Main-queue confined by contract.
+    /// platform wall). The ONE exception is the anonymous unanswered-call
+    /// row (missed-calls task, 2026-09-07): a presence-only fact the
+    /// live-call observer saw — a call ended without ever connecting —
+    /// recorded with no name and no number, never the identity the
+    /// system call log would carry (iOS does not expose it). Lazy like
+    /// `chatHistoryStore`: `storage` is assigned at the top of `init`,
+    /// long before any call/message path can record. Main-queue confined
+    /// by contract.
     private(set) lazy var activityLog = AppActivityLog(storage: storage)
 
     /// Published window over `activityLog`, newest first — the leaf's
     /// read side. Mirrors the `conversationHistory` window pattern:
     /// the store stays the source of truth and `recordActivity` refreshes
     /// this window after every write, so a row recorded while the leaf is
-    /// open (a re-initiated call/message) appears without a re-push.
+    /// open (a re-initiated call/message, or a call that just went
+    /// unanswered) appears without a re-push.
     @Published private(set) var recentActivity: [AppActivityEntry] = []
 
     /// True while a call is connected (CXCallObserver via
     /// `liveCallDetector`). Identity-free BY PLATFORM DESIGN: iOS masks
     /// calls that involve other apps — no handle, number, or identity is
     /// ever delivered, so this flag says "a call is in progress" and the
-    /// app never learns (or claims) whose. Nothing from the observer is
-    /// read for storage or logged.
+    /// app never learns (or claims) whose. The observer's ONLY other
+    /// output is the unanswered event (missed-calls task, 2026-09-07),
+    /// recorded by `recordUnansweredCall` — one anonymous "ended without
+    /// connecting" row, still no identity or number.
     @Published private(set) var liveCallActive = false
 
     /// Edge-triggered detector; armed (constructed) in `start()`. Lazy
@@ -516,6 +525,22 @@ final class AppCoordinator: ObservableObject {
     /// the session stuck in `.stopped` with no outcome. The watchdog
     /// surfaces that as an error with a truthful caption.
     private var voiceStartWatchdog: DispatchWorkItem?
+
+    /// Transient localized notice shown on the Talk button's status line
+    /// after a long-press reset (TALK-CRASH-FIX, 2026-09-07) — e.g.
+    /// "Voice reset. I'm ready." Cleared after `voiceResetNoticeSeconds`
+    /// and whenever a NEW capture begins (handlePipelineState
+    /// .capturingCommand), so a live cycle never shares its line with
+    /// stale feedback.
+    @Published private(set) var voiceResetNotice: String?
+    /// Token-guards the auto-clear: only the timer issued by the LATEST
+    /// show may clear — a repeat reset inside the window must not have
+    /// its fresh notice wiped by the previous notice's timer.
+    private var voiceResetNoticeToken = 0
+    /// Seconds the post-reset notice stays on the status line — long
+    /// enough for a slow read, short enough not to linger into the next
+    /// turn.
+    private static let voiceResetNoticeSeconds: TimeInterval = 4
 
     /// `start()` is idempotent — the onboarding wizard and Home both call
     /// it (spec §4.2: wizard runs before voice engages).
@@ -1204,6 +1229,24 @@ final class AppCoordinator: ObservableObject {
             calendarSync.syncNow(entries: routineScheduler.entries())
         }
 
+        // Two-way mirroring (calendar-driven task, 2026-09-07): the
+        // coordinator relays native edits — family changes made in the
+        // Calendar app on Sahayak mirror events — back into
+        // RoutineScheduler's mutators, so persistence, re-arming and
+        // the mirror re-sync stay on the one mutation path. The
+        // Sahayak calendar id (restored from the link store) is
+        // excluded from the read-only import: those events ARE the
+        // routine, whose alarms fire in-app already.
+        calendarSync.entriesProvider = { [weak self] in
+            self?.routineScheduler.entries() ?? []
+        }
+        calendarSync.onNativeChanges = { [weak self] mutations in
+            self?.applyNativeCalendarMutations(mutations)
+        }
+        if let sahayakIdentifier = calendarSync.sahayakCalendarIdentifier {
+            externalCalendar.excludedCalendarIdentifiers.insert(sahayakIdentifier)
+        }
+
         // Voice pipeline is built lazily here so the CommandRouter can hold a
         // weak ref back to this fully-initialised coordinator.
         let systemSpeaker = SystemSpeechSpeaker(observabilityBus: observabilityBus)
@@ -1422,6 +1465,10 @@ final class AppCoordinator: ObservableObject {
             cancelVoiceWatchdog()
             cancelVoiceStartWatchdog()
         case .capturingCommand:
+            // A fresh capture supersedes any post-reset notice: the
+            // status line must speak for the LIVE cycle, not the last
+            // reset (TALK-CRASH-FIX, 2026-09-07).
+            clearVoiceResetNotice()
             // Redesign spec §3.1/§6: the live-caption pill must not show
             // the PREVIOUS utterance's transcript while a new one is being
             // captured — clear BOTH transcript buffers at the start of
@@ -1497,13 +1544,26 @@ final class AppCoordinator: ObservableObject {
         voiceWatchdog = nil
     }
 
-    /// Stops and restarts the voice pipeline — the recovery path for a
-    /// wedged talk cycle. Also the manual escape hatch: the Talk button
-    /// calls this when tapped mid-cycle. Spoken re-prompt included so the
-    /// user knows the assistant is listening again.
-    func recoverVoiceCycle() {
+    /// Stops and restarts the voice pipeline — the ONE recovery core for
+    /// a wedged or cancelled talk cycle. Every recycle path runs through
+    /// here: the "stuck in listening" watchdog, the Talk-button tap
+    /// escape hatch (`recoverVoiceCycle`) and the Talk-button long-press
+    /// reset (`resetVoiceActivation`). One teardown sequence means one
+    /// set of cancel-safe semantics to reason about (a `stop()` during an
+    /// in-flight capture bumps the pipeline's capture generation, so the
+    /// cancelled capture's stale completion tails are dropped instead of
+    /// being run against the stopped session — TALK-CRASH-FIX,
+    /// 2026-09-07).
+    ///
+    /// Speaks nothing itself; the caller supplies the follow-up on the
+    /// restart completion (re-prompt on tap, status notice on long-press
+    /// reset). Called from main (button/watchdog paths); the start
+    /// completion arrives on main.
+    private func recycleVoicePipeline(
+        onRestart completion: @escaping (Result<Void, Error>) -> Void
+    ) {
         cancelVoiceWatchdog()
-        print("[AppCoordinator] recovering voice cycle — recycling pipeline")
+        print("[AppCoordinator] recycling voice pipeline")
         voicePipeline?.stop()
         armVoiceStartWatchdog()
         voicePipeline?.start { [weak self] result in
@@ -1515,8 +1575,77 @@ final class AppCoordinator: ObservableObject {
                 self.voiceError = "\(err)"
                 self.voiceState = .error("\(err)")
             }
+            completion(result)
         }
-        speak(key: "router.reprompt")
+    }
+
+    /// Tap escape hatch + watchdog recovery: recycle the pipeline, and —
+    /// once the restart has actually landed (`.idle`) — speak the
+    /// re-prompt so the user knows the assistant is listening again.
+    ///
+    /// 2026-09-07 (TALK-CRASH-FIX): the re-prompt used to be spoken
+    /// BEFORE the restart completed. `speak()` then ran while the session
+    /// was still `.stopped`; when the restart delivered `.idle`,
+    /// `handlePipelineState` mapped it through `speakingCount > 0` to
+    /// `.speaking` — a `.stopped → .speaking` transition the state
+    /// machine rejects (DEBUG assertionFailure crash; the second half of
+    /// the Talk-button crash). Deferring the speech to the restart
+    /// completion keeps the session on the table's legal path:
+    /// `.stopped → .idle → .speaking`.
+    func recoverVoiceCycle() {
+        cancelVoiceWatchdog()
+        print("[AppCoordinator] recovering voice cycle — recycling pipeline")
+        recycleVoicePipeline { [weak self] result in
+            guard let self, case .success = result else { return }
+            self.speak(key: "router.reprompt")
+        }
+    }
+
+    /// Long-press reset of the Talk button (TALK-CRASH-FIX, 2026-09-07):
+    /// the "give up and go home" path. Holding the hero ~2 s cancels the
+    /// current talk cycle (or re-primes a dead/errored pipeline) through
+    /// the SAME `recycleVoicePipeline` core as a tap — but a reset must
+    /// not talk AT the user (it usually follows a wedged cycle they are
+    /// trying to silence), so instead of a spoken re-prompt it shows the
+    /// transient `voiceResetNotice` on the button's status line. The hero
+    /// itself passes through the recycle's brief `.stopped` ("Voice off")
+    /// flip before the restarted pipeline lands `.idle` — the honest
+    /// "reset happened" visual.
+    ///
+    /// Offered from `.idle`, `.listening`, `.transcribing`,
+    /// `.understanding`, `.error` and `.stopped` — see
+    /// `VoiceSessionState.supportsTalkReset`. The Home view gates the
+    /// gesture on that property too; the guard here is the
+    /// coordinator-side backstop (`.speaking` / `.awaitingConfirmation`
+    /// keep their plain tap semantics).
+    func resetVoiceActivation() {
+        guard voiceSession.state.supportsTalkReset else { return }
+        print("[AppCoordinator] talk long-press reset — recycling pipeline to idle")
+        recycleVoicePipeline { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.showVoiceResetNotice()
+            case .failure(let err):
+                self.voiceError = "\(err)"
+                self.voiceState = .error("\(err)")
+            }
+        }
+    }
+
+    private func showVoiceResetNotice() {
+        voiceResetNoticeToken += 1
+        let token = voiceResetNoticeToken
+        voiceResetNotice = L10n.str("voice.resetDone", locale: activeLocale)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.voiceResetNoticeSeconds) { [weak self] in
+            guard let self, self.voiceResetNoticeToken == token else { return }
+            self.voiceResetNotice = nil
+        }
+    }
+
+    private func clearVoiceResetNotice() {
+        voiceResetNoticeToken += 1
+        voiceResetNotice = nil
     }
 
     // MARK: - Pipeline start watchdog
@@ -2969,23 +3098,48 @@ final class AppCoordinator: ObservableObject {
     /// that actually opened a surface — never with a failure branch:
     /// recording an open that didn't happen would lie about what the
     /// assistant did (the same honesty rule `contactNumberUsed` holds
-    /// to). Called on the main queue only.
+    /// to). `timestamp` defaults to now and is overridden only by the
+    /// unanswered-call path, which records the moment the live-call
+    /// observer reported the call's end (missed-calls task, 2026-09-07).
+    /// Called on the main queue only.
     private func recordActivity(kind: AppActivityEntry.Kind,
                                 channel: AppActivityEntry.Channel,
                                 contactName: String,
                                 phone: String = "",
                                 messengerHandle: String? = nil,
-                                body: String? = nil) {
+                                body: String? = nil,
+                                timestamp: Date = Date()) {
         // Message text is stored only when it is non-blank (a pre-filled
         // draft is content; an empty compose sheet is not).
         let trimmed = body?.trimmingCharacters(in: .whitespacesAndNewlines)
         let storedBody = trimmed.flatMap { $0.isEmpty ? nil : $0 }
-        activityLog.append(AppActivityEntry(kind: kind, channel: channel,
+        activityLog.append(AppActivityEntry(timestamp: timestamp,
+                                            kind: kind, channel: channel,
                                             contactName: contactName,
                                             phone: phone,
                                             messengerHandle: messengerHandle,
                                             body: storedBody))
         refreshRecentActivity()
+    }
+
+    /// Records one ANONYMOUS unanswered call — the coordinator side of
+    /// the live-call detector's `onUnanswered` (missed-calls task,
+    /// 2026-09-07). Fired when CXCallObserver reported a call that ended
+    /// without ever connecting: a missed or declined incoming call, or
+    /// an attempted outgoing call nobody picked up. iOS masks calls that
+    /// involve other apps so completely that these are
+    /// indistinguishable — this row claims only the shared fact, "a call
+    /// ended unanswered". `contactName` and `phone` are EMPTY ON
+    /// PURPOSE: the caller's identity AND number are masked by iOS —
+    /// there is no name to store, no number to look up or dial, and no
+    /// address-book match is possible — and the UI renders the localized
+    /// "Unanswered call" label (`history.unanswered`) instead of a
+    /// stored locale string. The row's action opens the Phone app
+    /// (`PhoneAppOpener`), where the caller's identity genuinely lives
+    /// (its Recents tab, one tap from the dialer).
+    private func recordUnansweredCall(at timestamp: Date) {
+        recordActivity(kind: .call, channel: .unanswered,
+                       contactName: "", phone: "", timestamp: timestamp)
     }
 
     /// Refreshes the published window from the store (see
@@ -2995,14 +3149,25 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Builds the live-call detector. Instance method (not a closure over
-    /// `self` in the lazy declaration) so the onChange closure can hold
-    /// `self` weakly without capture-list gymnastics in a lazy
-    /// initializer. Main queue by contract — CXCallStateProvider's
-    /// delegate is `.main`, and `liveCallActive` is main-queue confined.
+    /// `self` in the lazy declaration) so the closures can hold `self`
+    /// weakly without capture-list gymnastics in a lazy initializer.
+    /// Main queue by contract — CXCallStateProvider's delegate is
+    /// `.main`, and `liveCallActive`/`recentActivity` are main-queue
+    /// confined.
     private func makeLiveCallDetector() -> LiveCallDetector {
-        let detector = LiveCallDetector(provider: CXCallStateProvider()) { [weak self] active in
-            DispatchQueue.main.async { self?.liveCallActive = active }
-        }
+        let detector = LiveCallDetector(
+            provider: CXCallStateProvider(),
+            onChange: { [weak self] active in
+                DispatchQueue.main.async { self?.liveCallActive = active }
+            },
+            onUnanswered: { [weak self] timestamp in
+                // Record the anonymous unanswered row (missed-calls task,
+                // 2026-09-07). Same main-hop rule as onChange: the store
+                // is main-queue confined, whatever queue the provider
+                // fired on.
+                DispatchQueue.main.async { self?.recordUnansweredCall(at: timestamp) }
+            }
+        )
         // Initial state: a call already connected at launch must show on
         // the leaf immediately (the detector does not fire onChange for
         // its initial snapshot — that is exactly what this read is for).
@@ -3209,6 +3374,35 @@ final class AppCoordinator: ObservableObject {
         executeNavigation(to: target)
     }
 
+    // MARK: - Touch wrappers for the Directions leaf (directions-screen
+    // task, 2026-09-07)
+
+    /// Navigates to the saved place with `id` — thin named surface for
+    /// the Directions leaf's जाऊ buttons. Delegates straight into the
+    /// shared navigation executor (`requestNavigation`), so map-app
+    /// policy, geocode/open fallbacks, in-app presentation and the
+    /// honest spoken lines all stay owned in exactly one place; a
+    /// missing id resolves honestly (`directions.placeNotFound`) instead
+    /// of dead-ending.
+    func navigateToPlace(id: UUID) {
+        requestNavigation(to: .place(id))
+    }
+
+    /// Navigates to the family contact with `id` — thin named surface
+    /// for the Directions leaf's जाऊ buttons (same single-executor
+    /// rule as `navigateToPlace(id:)`).
+    func navigateToFamilyContact(id: UUID) {
+        requestNavigation(to: .familyContact(id))
+    }
+
+    /// Drives to the default home — thin named surface for the "take me
+    /// home" path every caller reaches for by name. With no `.home`
+    /// place saved the executor speaks the honest `directions.noHome`
+    /// fallback.
+    func navigateHome() {
+        requestNavigation(to: .defaultHome)
+    }
+
     /// The core navigation executor — shared by `requestNavigation` and
     /// the ambiguity walk's yes branch. Resolves the target to a concrete
     /// destination, then launches the map surface the current override
@@ -3290,6 +3484,13 @@ final class AppCoordinator: ObservableObject {
     /// address text well) and Google Maps gets the same documented
     /// fallback form.
     private func openExternalNavigation(app: NavigationMapApp, name: String, address: String) {
+        // The Google surface's `hl` deep-link ask carries the app's active
+        // language — "ne" under Nepali, "en" under English — resolved from
+        // the same locale every user-facing string uses, once per launch.
+        // Apple Maps' scheme exposes no language parameter (its UI follows
+        // the device and Maps' own settings — nothing to send, and none is
+        // invented), so this code feeds the Google builders only.
+        let mapsUILanguageCode = activeLocale.languageCode ?? appLanguage.rawValue
         let geocoder = NavigationGeocoder()
         geocoder.geocode(address: address) { [weak self] result in
             guard let self else { return }
@@ -3299,12 +3500,14 @@ final class AppCoordinator: ObservableObject {
                 self.emitDirections(eventType: "geocode", outcome: "ok")
                 url = MapsLinks.directionsURL(for: app,
                                               latitude: destination.latitude,
-                                              longitude: destination.longitude)
+                                              longitude: destination.longitude,
+                                              uiLanguageCode: mapsUILanguageCode)
             case .failure:
                 self.emitDirections(eventType: "geocode", outcome: "fallback_address")
                 url = app == .appleMaps
                     ? MapsLinks.appleMapsDirectionsURL(address: address)
-                    : MapsLinks.googleMapsDirectionsURL(address: address)
+                    : MapsLinks.googleMapsDirectionsURL(address: address,
+                                                        uiLanguageCode: mapsUILanguageCode)
             }
             guard let url else {
                 // No URL at all (both builders refused the input) — say
@@ -3559,6 +3762,59 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    // MARK: - Two-way calendar mirroring (calendar-driven task, 2026-09-07)
+
+    /// Settings toggle handler for two-way mirroring (default OFF):
+    /// ON ensures the mirror is on first, requests FULL calendar
+    /// access at point of use (read access is what lets native edits
+    /// reconcile back), then mirrors the schedule into the dedicated
+    /// "Sahayak" calendar; OFF removes the Sahayak events (the legacy
+    /// mode-switch wipe) and falls back to the one-way default-calendar
+    /// mirror. The Sahayak id feeds the import's calendar-id exclusion
+    /// in every direction.
+    func setCalendarTwoWayEnabled(_ enabled: Bool) async {
+        if enabled {
+            if !calendarSync.isEnabled {
+                calendarSync.isEnabled = true
+                await calendarSync.enableAndSync(entries: routineScheduler.entries())
+            }
+            await calendarSync.enableTwoWayAndSync(entries: routineScheduler.entries())
+        } else {
+            calendarSync.disableTwoWayAndSyncIfMirrorEnabled(entries: routineScheduler.entries())
+        }
+        if let sahayakIdentifier = calendarSync.sahayakCalendarIdentifier {
+            externalCalendar.excludedCalendarIdentifiers.insert(sahayakIdentifier)
+        }
+    }
+
+    /// Applies native-calendar edits to the app's routine schedule —
+    /// the `onNativeChanges` relay. Runs off any gesture (the family
+    /// edits in another app; the store-change notification delivers it
+    /// here), so the republish below is what refreshes views.
+    private func applyNativeCalendarMutations(
+        _ mutations: [CalendarSyncService.RoutineCalendarMutation]) {
+        for mutation in mutations {
+            switch mutation {
+            case .dropSlot(let entryId, let hour, let minute):
+                routineScheduler.dropSlot(entryId: entryId, hour: hour, minute: minute)
+            case .retimeSlot(let entryId, let fromHour, let fromMinute,
+                             let toHour, let toMinute):
+                routineScheduler.retimeSlot(entryId: entryId, fromHour: fromHour,
+                                            fromMinute: fromMinute,
+                                            toHour: toHour, toMinute: toMinute)
+            case .setRecurrence(let entryId, let frequency, let weekdays):
+                routineScheduler.updateRecurrence(entryId: entryId,
+                                                  frequency: frequency,
+                                                  weekdays: weekdays)
+            case .disableEntry(let entryId):
+                routineScheduler.setEnabled(entryId, enabled: false)
+            }
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
+        }
+    }
+
     // MARK: - Read-only external Calendar/Reminders surface (2026-09-07)
 
     /// Settings toggle handler for the native-item import: ON asks for
@@ -3588,7 +3844,8 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Scene-phase reactions wired from `ContentView`: foreground
-    /// rescans (family edits in the native apps land immediately),
+    /// rescans (family edits in the native apps land immediately —
+    /// the import's scan AND the two-way mirror's reconciliation),
     /// background submits the hourly BGAppRefresh that keeps scans
     /// coming while the app isn't running.
     func handleScenePhase(_ phase: ScenePhase) {
@@ -3596,6 +3853,9 @@ final class AppCoordinator: ObservableObject {
         switch phase {
         case .active:
             Task { await externalCalendar.startIfEnabled() }
+            Task {
+                await calendarSync.reconcileNativeChanges(entries: routineScheduler.entries())
+            }
             // Voice-OS shell v1 — proactive morning briefing (design
             // §4.4 trigger a): fires on the first app activation inside
             // the wake window, once per calendar day. Idempotent —

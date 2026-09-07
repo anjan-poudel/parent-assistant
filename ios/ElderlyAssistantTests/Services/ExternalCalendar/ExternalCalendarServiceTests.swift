@@ -45,7 +45,12 @@ final class ExternalCalendarServiceTests: XCTestCase {
             lastFetchStart = start
             lastFetchEnd = end
             if fetchEventsShouldThrow { throw ScannerFault.fetchFailed }
-            return events
+            // Mirrors EKEventStore's predicate semantics: only events
+            // whose START falls inside the window are returned. Without
+            // this the fake would hide the 2026-09-07 regression — a
+            // window opening at the scan instant silently drops every
+            // event that started earlier today.
+            return events.filter { $0.startDate >= start && $0.startDate < end }
         }
 
         func fetchDueReminders() async throws -> [ScannedReminder] {
@@ -110,10 +115,12 @@ final class ExternalCalendarServiceTests: XCTestCase {
 
     private func scannedEvent(id: String, at date: Date, isAllDay: Bool = false,
                               declined: Bool = false, notes: String? = nil,
-                              hasAlarms: Bool = false) -> ScannedEvent {
+                              hasAlarms: Bool = false,
+                              calendarIdentifier: String? = nil) -> ScannedEvent {
         ScannedEvent(nativeIdentifier: id, title: "Event \(id)", notes: notes,
                      startDate: date, isAllDay: isAllDay, isDeclined: declined,
-                     hasAlarms: hasAlarms, calendarName: "Family")
+                     hasAlarms: hasAlarms, calendarIdentifier: calendarIdentifier,
+                     calendarName: "Family")
     }
 
     private func scannedReminder(id: String, at date: Date?, isAllDay: Bool = false,
@@ -199,10 +206,15 @@ final class ExternalCalendarServiceTests: XCTestCase {
         XCTAssertEqual(service.reminders.count, 3)
         XCTAssertEqual(service.reminders.map(\.source).sorted { $0.rawValue < $1.rawValue },
                        [.event, .event, .reminder])
-        // Horizon fetch is now…+7 days.
-        XCTAssertEqual(scannerRef.lastFetchStart, fakeNow)
+        // Horizon fetch: START OF DAY (00:00) … +8 full days. The window
+        // must open at 00:00, not at the scan instant — the predicate
+        // only returns events whose start falls inside the window, so a
+        // now()-anchored window would hide the all-day event above (and
+        // every event that started earlier today). Regression pinned
+        // 2026-09-07.
+        XCTAssertEqual(scannerRef.lastFetchStart, startOfToday)
         XCTAssertEqual(scannerRef.lastFetchEnd,
-                       fakeNow.addingTimeInterval(TimeInterval(7 * 86_400)))
+                       startOfToday.addingTimeInterval(TimeInterval(8 * 86_400)))
         XCTAssertEqual(scannerRef.fetchRemindersCalls, 1)
         // Armed: the two timed-future items (all-day 08:00 has passed at
         // the 10:00 clock).
@@ -258,6 +270,54 @@ final class ExternalCalendarServiceTests: XCTestCase {
         XCTAssertTrue(bus.emittedEvents.contains {
             $0.eventType == "external_scan" && $0.outcome == "failure"
         })
+    }
+
+    // MARK: - Fetch window regression (2026-09-07)
+
+    func testMorningScanSeesAlldayAndEarlierTodayEvents() async {
+        // Regression pin: the fetch window used to open AT THE SCAN
+        // INSTANT (10:00). EKEventStore's predicate only returns events
+        // whose start falls inside the window, so today's all-day event
+        // (start 00:00) and a 09:00 event were silently never fetched —
+        // the family calendar looked empty every morning. The window
+        // must open at 00:00; the mapper then still drops the timed
+        // event already under way, but at least it gets to SEE it.
+        let scanner = FakeCalendarScanner(remindersGranted: false)
+        scanner.events = [
+            scannedEvent(id: "allday", at: time(0), isAllDay: true),
+            scannedEvent(id: "morning", at: time(9)),
+            scannedEvent(id: "later", at: time(11))
+        ]
+        let (service, scannerRef, _, _) = makeService(scanner: scanner)
+        await service.enable()
+
+        XCTAssertEqual(scannerRef.lastFetchStart, startOfToday,
+                       "the fetch window opens at 00:00, never at the scan instant")
+        XCTAssertEqual(scannerRef.lastFetchEnd,
+                       startOfToday.addingTimeInterval(TimeInterval(8 * 86_400)))
+        XCTAssertEqual(service.reminders.map(\.title).sorted(),
+                       ["Event allday", "Event later"].sorted(),
+                       "all-day + future-timed survive; the already-started 09:00 event drops at mapping")
+    }
+
+    // MARK: - Calendar exclusion (2026-09-07 two-way)
+
+    func testExcludedCalendarsVanishBeforeMappingTagOrNoTag() async {
+        let scanner = FakeCalendarScanner(remindersGranted: false)
+        scanner.events = [
+            scannedEvent(id: "family", at: time(11)),
+            scannedEvent(id: "tagged-mirror", at: time(12),
+                         notes: CalendarSyncService.mirrorTag,
+                         calendarIdentifier: "sahayak-1"),
+            scannedEvent(id: "untagged", at: time(13), calendarIdentifier: "sahayak-1")
+        ]
+        let (service, _, _, _) = makeService(scanner: scanner)
+        service.excludedCalendarIdentifiers = ["sahayak-1"]
+        await service.enable()
+
+        XCTAssertEqual(service.reminders.map(\.title), ["Event family"],
+                       "the whole Sahayak calendar is dropped before mapping — belt to the mirror-tag braces")
+        XCTAssertEqual(service.reminders.map(\.calendarName), ["Family"])
     }
 
     // MARK: - Disable / scoped cancels

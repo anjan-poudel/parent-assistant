@@ -43,6 +43,27 @@ enum VoiceSessionState: Equatable {
             return [.idle, .error].contains(newState)
         }
     }
+
+    /// States in which holding the Talk button offers the "reset voice
+    /// activation" path (TALK-CRASH-FIX, 2026-09-07). `.listening` /
+    /// `.transcribing` / `.understanding` are the stuck-or-active cycle
+    /// the user escapes; `.idle`, `.error` and `.stopped` make the reset
+    /// a harmless re-prime of a dead pipeline. NOT offered in `.speaking`
+    /// (the assistant is replying — a long hold there would swallow the
+    /// tap that today stops the reply and recycles; the button must keep
+    /// its plain tap semantics) nor `.awaitingConfirmation` (the yes/no
+    /// challenge owns the dialog; the button is disabled there anyway).
+    /// Pure state policy — no transition-table changes needed, because
+    /// the reset itself travels existing legal transitions (busy → .stopped
+    /// → .idle → [.speaking]).
+    var supportsTalkReset: Bool {
+        switch self {
+        case .idle, .listening, .transcribing, .understanding, .error, .stopped:
+            return true
+        case .speaking, .awaitingConfirmation:
+            return false
+        }
+    }
 }
 
 /// Owns the single `@Published` session state. Mutations are confined to

@@ -9,6 +9,9 @@ enum LeafDestination: Identifiable {
     case call
     case history
     case settings
+    /// Directions (directions-screen task, 2026-09-07): the saved-targets
+    /// map leaf, docked next to Appliance per the task brief.
+    case directions
 
     var id: String {
         switch self {
@@ -18,6 +21,7 @@ enum LeafDestination: Identifiable {
         case .call: return "call"
         case .history: return "history"
         case .settings: return "settings"
+        case .directions: return "directions"
         }
     }
 }
@@ -135,9 +139,11 @@ struct HomeView: View {
             Spacer()
             // The date/greeting area doubles as the calendar's entry
             // point (2026-09-06: calendar lives ON the home screen via
-            // this tap target, NOT as a 5th dock item — the dock stays
-            // at three clean entries per the "keep dock items clean"
-            // direction; settings moved to the top bar 2026-09-06).
+            // this tap target, NOT as a dock item; settings moved to the
+            // top bar the same day). The dock's own item count changed
+            // since — meds, reminders, call, appliance, directions
+            // (2026-09-07) — so no count claim lives in this comment; the
+            // authoritative list is `dock` below.
             NavigationLink(value: LeafDestination.calendar) {
                 // Live clock (greeting-clock fix, 2026-09-07): the shown
                 // time used to freeze at launch because `greetingText`
@@ -298,6 +304,15 @@ struct HomeView: View {
     /// diverge.
     private var stageVisuals: TalkStageVisuals { session.state.talkVisuals }
 
+    /// Status-line override fed to the hero: the failure-specific error
+    /// caption while erroring, else the transient post-reset notice
+    /// (TALK-CRASH-FIX, 2026-09-07). The error caption wins over the
+    /// notice — a failed restart is the more urgent surface.
+    private var talkStatusLineOverride: String? {
+        if stageVisuals.isError { return errorStatusText }
+        return coordinator.voiceResetNotice
+    }
+
     private var talkStage: some View {
         Group {
             if stageVisuals.isConfirmation {
@@ -305,24 +320,26 @@ struct HomeView: View {
             } else {
                 VStack(spacing: 18) {
                     TalkButton(session: session,
-                               statusOverride: stageVisuals.isError ? errorStatusText : nil) {
-                        switch session.state {
-                        case .idle:
-                            coordinator.simulateWakeWordDetection()
-                        case .listening, .transcribing, .understanding, .speaking:
-                            // Manual escape hatch: tapping mid-cycle cancels
-                            // and recycles the pipeline (the watchdog does
-                            // the same automatically after 15s).
-                            coordinator.recoverVoiceCycle()
-                        case .error, .stopped:
-                            // Boot-time start failed (mic denied, speech
-                            // denied, no audio input) — tapping retries
-                            // the pipeline start instead of staying dead.
-                            coordinator.recoverVoiceCycle()
-                        case .awaitingConfirmation:
-                            break
-                        }
-                    }
+                               onTap: {
+                                   switch session.state {
+                                   case .idle:
+                                       coordinator.simulateWakeWordDetection()
+                                   case .listening, .transcribing, .understanding, .speaking:
+                                       // Manual escape hatch: tapping mid-cycle cancels
+                                       // and recycles the pipeline (the watchdog does
+                                       // the same automatically after 15s).
+                                       coordinator.recoverVoiceCycle()
+                                   case .error, .stopped:
+                                       // Boot-time start failed (mic denied, speech
+                                       // denied, no audio input) — tapping retries
+                                       // the pipeline start instead of staying dead.
+                                       coordinator.recoverVoiceCycle()
+                                   case .awaitingConfirmation:
+                                       break
+                                   }
+                               },
+                               statusOverride: talkStatusLineOverride,
+                               onLongPressReset: coordinator.resetVoiceActivation)
                     if stageVisuals.showsHintCarousel {
                         HintCarousel()
                     }
@@ -426,7 +443,11 @@ struct HomeView: View {
     }
 
     // MARK: - Dock (redesign spec §3.1 — replaces the 2×2 hub grid; Home
-    // is the only screen that shows it)
+    // is the only screen that shows it). Items share width equally
+    // (`frame(maxWidth: .infinity)` per tile) and labels wrap when they
+    // must, so the five tiles — meds, reminders, call, appliance,
+    // directions (directions-screen task, 2026-09-07) — fit one row at
+    // the standard widths the surrounding screens were tuned at.
 
     private var dock: some View {
         HStack(spacing: 2) {
@@ -434,6 +455,7 @@ struct HomeView: View {
             dockItem(.reminders, icon: "clock.fill", tint: .reminders, titleKey: "home.hub.reminders")
             dockCallItem
             dockApplianceItem
+            dockDirectionsItem
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 10)
@@ -490,6 +512,14 @@ struct HomeView: View {
         .buttonStyle(.plain)
     }
 
+    /// Directions (directions-screen task, 2026-09-07) — the map tile
+    /// docked right next to Appliance per the task brief. The map icon
+    /// reads "navigation" against the house/appliance row; it pushes the
+    /// Directions leaf like every other dock tile.
+    private var dockDirectionsItem: some View {
+        dockItem(.directions, icon: "map.fill", tint: .directions, titleKey: "home.hub.directions")
+    }
+
     // MARK: - Leaf routing
 
     @ViewBuilder
@@ -507,6 +537,8 @@ struct HomeView: View {
             HistoryView()
         case .settings:
             SettingsView()
+        case .directions:
+            DirectionsView()
         }
     }
 
@@ -545,10 +577,29 @@ struct TalkButton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let onTap: () -> Void
     /// Replaces the state-bound status line when set (used for the
-    /// error state's failure-specific caption).
+    /// error state's failure-specific caption and the post-reset notice).
     var statusOverride: String? = nil
+    /// Long-press reset (TALK-CRASH-FIX, 2026-09-07): holding the hero
+    /// for `DesignTokens.talkResetHoldSeconds` cancels the talk cycle /
+    /// re-primes a dead pipeline through the coordinator's reset path.
+    /// Provided only for reset-eligible states (see
+    /// `VoiceSessionState.supportsTalkReset`) — where it is nil the hero
+    /// stays a plain tap target, and a long hold there still fires the
+    /// tap on release exactly as it did before this feature.
+    var onLongPressReset: (() -> Void)? = nil
 
     @State private var breathe = false
+    /// True while a hold that CAN reset is underway (touch down, past the
+    /// gesture's tracking start) — drives the hold hint + progress ring.
+    @State private var isPressingForReset = false
+    /// Ring fill 0...1, animated linearly so it completes exactly when the
+    /// reset fires (nil while not pressing).
+    @State private var holdProgress: Double?
+    /// Backstop against the tap action ALSO firing on release after a
+    /// successful hold: SwiftUI's long-press gesture normally wins the
+    /// arena and cancels the button's own press, but this guard makes the
+    /// "no double action" promise independent of gesture arbitration.
+    @State private var suppressTapAfterReset = false
 
     /// Single visual mapping for the hero (call-UI fix, 2026-09-07):
     /// icon, fill, halo, labels and motion all come from
@@ -560,14 +611,33 @@ struct TalkButton: View {
 
     private var isBreathing: Bool { visuals.pulses && !reduceMotion }
 
+    /// The hold-to-reset affordance is live (reset-eligible state AND a
+    /// reset action was provided). The Home stage always supplies the
+    /// action, so this effectively means `supportsTalkReset` — kept
+    /// separate so a future reuse of TalkButton without a reset stays a
+    /// plain tap target.
+    private var resetHoldable: Bool {
+        onLongPressReset != nil && session.state.supportsTalkReset
+    }
+
     var body: some View {
         VStack(spacing: 12) {
-            Button(action: onTap) {
+            Button(action: {
+                // The reset backstop (see `suppressTapAfterReset`): after
+                // a completed hold the release must not ALSO run the tap
+                // action. Quick taps and sub-threshold holds never set the
+                // flag and are unaffected.
+                guard !suppressTapAfterReset else { return }
+                onTap()
+            }) {
                 ZStack {
-                    if isBreathing {
+                    // While a reset hold is underway the breathing rings
+                    // stand down (the arc below is the motion that
+                    // matters); they return on release.
+                    if isBreathing && !isPressingForReset {
                         breathingRings
                     }
-                    if visuals.showsHalo {
+                    if visuals.showsHalo && !isPressingForReset {
                         // Steady state-color halo through every mid-cycle
                         // state (listening → transcribing → understanding
                         // → speaking). The ring used to drop out for
@@ -602,6 +672,9 @@ struct TalkButton: View {
                             }
                             .foregroundColor(.white)
                         )
+                    if isPressingForReset {
+                        resetProgressRing
+                    }
                 }
             }
             .buttonStyle(.plain)
@@ -611,8 +684,30 @@ struct TalkButton: View {
             // the failed boot-time pipeline start.
             .disabled(session.state == .awaitingConfirmation)
             .accessibilityLabel(Text(session.state.buttonText(locale: locale)))
+            // The hold-to-reset gesture + VoiceOver hint exist ONLY in
+            // reset-eligible states. An always-attached long press would
+            // swallow the tap on holds ≥ `talkResetHoldSeconds` in
+            // .speaking too — changing the "hold to stop the reply" tap
+            // that users rely on today (TALK-CRASH-FIX, 2026-09-07).
+            .if(resetHoldable, ResetHoldAffordance(
+                holdSeconds: DesignTokens.talkResetHoldSeconds,
+                // 40pt finger travel before the hold is abandoned — far
+                // more forgiving than the 10pt default for unsteady
+                // hands, well inside the hero + halo's 160pt footprint.
+                maxDistance: 40,
+                accessibilityHint: L10n.str("voice.resetA11y", locale: locale),
+                onReset: {
+                    // Re-check at fire time: the session may have moved
+                    // since the hold began (e.g. a router utterance
+                    // flipped it to .speaking mid-hold).
+                    guard session.state.supportsTalkReset else { return }
+                    suppressTapAfterReset = true
+                    onLongPressReset?()
+                },
+                onPressingChanged: handleHoldPressing(_:)
+            ))
 
-            Text(statusOverride ?? session.state.statusText(locale: locale))
+            Text(statusTextLine)
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .medium))
                 .foregroundColor(DesignTokens.textSecondary)
                 .multilineTextAlignment(.center)
@@ -622,6 +717,63 @@ struct TalkButton: View {
             withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
                 breathe = true
             }
+        }
+    }
+
+    /// Status line under the hero: the live hold hint while a reset
+    /// press is underway, else the caller's override (error caption /
+    /// post-reset notice), else the state's own status text. The hold
+    /// hint wins over everything — while the finger is down the line
+    /// must say what the press will DO (TALK-CRASH-FIX, 2026-09-07).
+    private var statusTextLine: String {
+        if isPressingForReset {
+            return L10n.str("voice.resetHold", locale: locale)
+        }
+        return statusOverride ?? session.state.statusText(locale: locale)
+    }
+
+    /// Long-press tracking (called on main): arms the hold hint + ring
+    /// while the finger is down, clears everything on release, and
+    /// re-arms the tap action for the next touch. Guarded on
+    /// `resetHoldable` — the gesture is only attached in eligible states,
+    /// but the guard keeps the state coherent if a state change races
+    /// the callbacks.
+    private func handleHoldPressing(_ pressing: Bool) {
+        guard resetHoldable else { return }
+        if pressing {
+            isPressingForReset = true
+            suppressTapAfterReset = false
+            holdProgress = 0
+            guard !reduceMotion else { return }
+            withAnimation(.linear(duration: DesignTokens.talkResetHoldSeconds)) {
+                holdProgress = 1
+            }
+        } else {
+            isPressingForReset = false
+            holdProgress = nil
+            suppressTapAfterReset = false
+        }
+    }
+
+    /// The hold-to-reset arc (TALK-CRASH-FIX, 2026-09-07): a white
+    /// progress ring just outside the hero rim, filling over
+    /// `talkResetHoldSeconds` so it completes at the moment the reset
+    /// fires. Skipped under `accessibilityReduceMotion` — the hero's
+    /// color flip into the stopped pass-through is the feedback there,
+    /// and the hold hint still appears on the status line.
+    @ViewBuilder
+    private var resetProgressRing: some View {
+        if !reduceMotion {
+            ZStack {
+                Circle()
+                    .stroke(Color.white.opacity(0.3), lineWidth: 6)
+                Circle()
+                    .trim(from: 0, to: min(holdProgress ?? 0, 1))
+                    .stroke(Color.white, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: DesignTokens.talkButtonDiameter + 16,
+                   height: DesignTokens.talkButtonDiameter + 16)
         }
     }
 
@@ -652,6 +804,46 @@ struct TalkButton: View {
                 .stroke(DesignTokens.talkGlowEnd.opacity(breathe ? 0.02 : 0.22), lineWidth: 2)
                 .frame(width: breathe ? DesignTokens.talkButtonDiameter + 130 : DesignTokens.talkButtonDiameter + 40,
                        height: breathe ? DesignTokens.talkButtonDiameter + 130 : DesignTokens.talkButtonDiameter + 40)
+        }
+    }
+}
+
+// MARK: - Hold-to-reset affordance (TALK-CRASH-FIX, 2026-09-07)
+
+/// Attaches the Talk hero's hold-to-reset long press AND its VoiceOver
+/// hint in one modifier so the two can be applied conditionally (see the
+/// `.if` at the call site). Conditional attachment matters: in
+/// non-reset states (.speaking, .awaitingConfirmation) the hero must
+/// stay a plain tap target — an always-attached long press would swallow
+/// the tap on holds ≥ `talkResetHoldSeconds` there, changing the
+/// "hold to stop the reply" behavior users rely on today.
+private struct ResetHoldAffordance: ViewModifier {
+    let holdSeconds: TimeInterval
+    let maxDistance: CGFloat
+    let accessibilityHint: String
+    let onReset: () -> Void
+    let onPressingChanged: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .accessibilityHint(Text(accessibilityHint))
+            .onLongPressGesture(minimumDuration: holdSeconds,
+                                maximumDistance: maxDistance,
+                                perform: onReset,
+                                onPressingChanged: onPressingChanged)
+    }
+}
+
+/// Conditional-modifier helper: applies `modifier` only while `condition`
+/// holds. Used by the hero's reset affordance, which exists only in
+/// reset-eligible states. File-private — no other file sees it.
+private extension View {
+    @ViewBuilder
+    func `if`<M: ViewModifier>(_ condition: Bool, _ modifier: M) -> some View {
+        if condition {
+            self.modifier(modifier)
+        } else {
+            self
         }
     }
 }

@@ -86,6 +86,27 @@ final class AppActivityLogTests: XCTestCase {
         XCTAssertEqual(AppActivityLog.maxEntries, 100)
     }
 
+    // MARK: - Anonymous unanswered rows (missed-calls task, 2026-09-07)
+
+    /// The unanswered-call row round-trips through the store like any
+    /// other row — channel `.unanswered`, kind `.call`, EMPTY
+    /// `contactName` and EMPTY `phone` — proving the row stores no
+    /// identity (iOS masks the caller's name AND number; the UI renders
+    /// the localized "Unanswered call" label instead of a stored name).
+    func testUnansweredRowRoundTripStaysAnonymous() {
+        let storage = StubEncryptedStorage()
+        let log = AppActivityLog(storage: storage)
+        log.append(AppActivityEntry(kind: .call, channel: .unanswered,
+                                    contactName: "", phone: ""))
+
+        let relaunch = AppActivityLog(storage: storage)
+        let row = relaunch.entries().first
+        XCTAssertEqual(row?.channel, .unanswered)
+        XCTAssertEqual(row?.kind, .call)
+        XCTAssertEqual(row?.contactName, "")
+        XCTAssertEqual(row?.phone, "")
+    }
+
     // MARK: - Corrupt / missing data tolerance
 
     /// Missing key on first launch → empty history, and the first append

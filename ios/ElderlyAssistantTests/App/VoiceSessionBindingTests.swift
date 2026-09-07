@@ -39,4 +39,21 @@ final class VoiceSessionBindingTests: XCTestCase {
             }
         }
     }
+
+    /// Hold-to-reset strings resolve in both shipped languages
+    /// (TALK-CRASH-FIX, 2026-09-07) — exact-value asserts, so a
+    /// wrong-language or stale-value regression (English showing while
+    /// the app is in Nepali, or vice versa) fails loudly.
+    func testTalkResetStringsResolveInBothLanguages() {
+        let en = Locale(identifier: "en-US")
+        let ne = Locale(identifier: "ne-NP")
+        XCTAssertEqual(L10n.str("voice.resetDone", locale: en), "Voice reset. I'm ready.")
+        XCTAssertEqual(L10n.str("voice.resetDone", locale: ne), "आवाज रिसेट भयो। म तयार छु।")
+        XCTAssertEqual(L10n.str("voice.resetHold", locale: en), "Keep holding to reset voice")
+        XCTAssertEqual(L10n.str("voice.resetHold", locale: ne), "आवाज रिसेट गर्न थिचिराख्नुहोस्")
+        XCTAssertEqual(L10n.str("voice.resetA11y", locale: en),
+                       "Double-tap to talk, or press and hold to reset voice activation.")
+        XCTAssertEqual(L10n.str("voice.resetA11y", locale: ne),
+                       "बोल्न दुई पटक थिच्नुहोस्, वा आवाज रिसेट गर्न थिचिराख्नुहोस्।")
+    }
 }
