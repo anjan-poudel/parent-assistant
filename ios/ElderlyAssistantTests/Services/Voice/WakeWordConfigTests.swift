@@ -150,7 +150,11 @@ final class WakeWordConfigTests: XCTestCase {
             build: { _, _ in
                 buildCalls += 1
                 return WakeWordTestEngine()
-            })
+            },
+            // No sherpa model (this pins the LEGACY Porcupine chain — the
+            // default candidate would consult the test host's bundle and
+            // make the test depend on whether fetch-kws-model.sh has run).
+            sherpaCandidate: { nil })
         XCTAssertNil(engine)
         XCTAssertEqual(buildCalls, 0)
     }
@@ -164,7 +168,9 @@ final class WakeWordConfigTests: XCTestCase {
             build: { _, _ in
                 buildCalls += 1
                 return WakeWordTestEngine()
-            })
+            },
+            // Legacy-chain pin — see the sibling test's comment.
+            sherpaCandidate: { nil })
         XCTAssertNil(engine)
         XCTAssertEqual(buildCalls, 0)
     }
@@ -178,7 +184,9 @@ final class WakeWordConfigTests: XCTestCase {
             build: { _, _ in
                 buildCalls += 1
                 return WakeWordTestEngine()
-            })
+            },
+            // Legacy-chain pin — see the sibling test's comment.
+            sherpaCandidate: { nil })
         XCTAssertNil(engine)
         XCTAssertEqual(buildCalls, 0)
     }
@@ -188,17 +196,22 @@ final class WakeWordConfigTests: XCTestCase {
             toggleEnabled: true,
             accessKey: "a-key",
             keywordPath: "/a/ppn",
-            build: { _, _ in nil })
+            build: { _, _ in nil },
+            // Legacy-chain pin — see the sibling test's comment.
+            sherpaCandidate: { nil })
         XCTAssertNil(engine, "a throwing Porcupine init must fall back to Null")
     }
 
     func testSelectionReturnsBuilderEngineWhenEverythingPresent() {
+        // The PORCUPINE chain, pinned without a sherpa model — the sherpa-
+        // first ordering is covered in SherpaKWSWakeWordEngineTests.
         let real = WakeWordTestEngine()
         let engine = WakeWordEngineSelection.make(
             toggleEnabled: true,
             accessKey: "a-key",
             keywordPath: "/a/ppn",
-            build: { _, _ in real })
+            build: { _, _ in real },
+            sherpaCandidate: { nil })
         XCTAssertTrue(engine === real,
                       "the real engine must pass through untouched")
     }
@@ -212,7 +225,9 @@ final class WakeWordConfigTests: XCTestCase {
             build: { key, path in
                 received = (key, path)
                 return WakeWordTestEngine()
-            })
+            },
+            // Legacy-chain pin — see the sibling test's comment.
+            sherpaCandidate: { nil })
         XCTAssertEqual(received?.accessKey, "a-key")
         XCTAssertEqual(received?.path, "/a/ppn")
     }

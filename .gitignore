@@ -39,6 +39,11 @@ android/local.properties
 # tarballs are ~45 MB; not committed, same convention as the .bin models)
 ios/ElderlyAssistant/Resources/Models/tts/
 
+# Bundled wake-word KWS model — fetched via tools/fetch-kws-model.sh
+# (~17.6 MB tarball; not committed — see .ppn above for the artifact it
+# replaces)
+ios/ElderlyAssistant/Resources/Models/kws/
+
 # Local secrets
 .env
 .env.*

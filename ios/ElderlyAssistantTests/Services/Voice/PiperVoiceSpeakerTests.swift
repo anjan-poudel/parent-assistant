@@ -8,12 +8,13 @@ final class PiperVoiceSpeakerTests: XCTestCase {
     /// every call. Lets the speaker tests run without sherpa-onnx or the
     /// ~40 MB voice dirs.
     final class FakeTTSEngine: TTSEngine {
-        var calls: [(text: String, dir: URL, speed: Float)] = []
+        var calls: [(text: String, dir: URL, speed: Float, speakerID: Int)] = []
         var fail = false
         var secondsOfAudio: AVAudioFrameCount = 2_205   // 0.1 s @ 22.05 kHz
 
-        func synthesize(_ text: String, voiceDirectory dir: URL, speed: Float) throws -> URL {
-            calls.append((text, dir, speed))
+        func synthesize(_ text: String, voiceDirectory dir: URL, speed: Float,
+                        speakerID: Int = 0) throws -> URL {
+            calls.append((text, dir, speed, speakerID))
             if fail { throw TTSEngineError.synthesisFailed }
             let url = URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent("fake-tts-\(UUID().uuidString).wav")
@@ -130,6 +131,8 @@ final class PiperVoiceSpeakerTests: XCTestCase {
         XCTAssertTrue(call.dir.path.contains("ne_NP-google-medium-int8"))
         XCTAssertEqual(call.speed, PiperVoiceSpeaker.defaultSpeed,
                        "elderly-friendly pace must be applied")
+        XCTAssertEqual(call.speakerID, 0,
+                       "no voice selected — the default google-medium speaker 0 must be used")
         XCTAssertTrue(bus.emittedEvents.map(\.eventType).contains("speak"))
     }
 

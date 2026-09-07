@@ -95,6 +95,14 @@ targets:
       # app bundle and every Text("key") renders as the raw key.
       - path: ElderlyAssistant/Resources/Localizable.xcstrings
         buildPhase: resources
+      # Bundled dialect-ID centroid table (voice-personalisation P0 slice D).
+      # SEED-CENTROIDS placeholder — regenerate from field corpora with
+      # tools/generate-seed-dialect-centroids.py (schema + loader:
+      # Services/Voice/DialectIdentifier.swift). Same single-file pattern
+      # as Localizable.xcstrings: without this entry the table never lands
+      # in the app bundle and DialectCentroidTable.bundled() finds nothing.
+      - path: ElderlyAssistant/Resources/DialectCentroids.json
+        buildPhase: resources
       # Official multicolor logos for the quick-access app catalog
       # (Wikimedia Commons PNGs, 2026-09-07 — sources in the catalog's
       # README.md). `Resources` is excluded from the source glob above, so
@@ -116,6 +124,19 @@ targets:
         # as tts/, preserving the sherpa layout (model + tokens +
         # espeak-ng-data/) and avoiding flat-copy filename collisions
         # between the two voices' identical espeak-ng-data contents.
+        type: folder
+      # Bundled wake-word KWS model (sherpa-layout dirs: encoder/decoder/
+      # joiner-*.int8.onnx + tokens.txt + keywords.txt), loaded straight
+      # from the bundle or installed into the ModelStore by
+      # SherpaKWSWakeWordEngine. Gitignored — fetch with
+      # tools/fetch-kws-model.sh before building (the P0 wake-word swap;
+      # see docs/voice-personalisation-p0-plan.md slice A).
+      - path: ElderlyAssistant/Resources/Models/kws
+        buildPhase: resources
+        # Blue folder reference (same rationale as tts/): the whole
+        # directory lands in the bundle as kws/ — the layout both
+        # SherpaKWSModelFile.bundledDirectory and the ModelStore kws
+        # install expect.
         type: folder
       # Bundled default instruction manuals — Resources/Manuals/README.md.
       # Blue folder reference: the whole directory lands in the bundle as

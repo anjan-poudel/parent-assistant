@@ -11,15 +11,18 @@ import Foundation
 /// reference it, so the whole decision table is unit-testable without the
 /// SPM package linked.
 ///
-/// Activation flow for a family member (full steps in
-/// docs/wake-word-setup.md): create a Picovoice Console account, train the
-/// "Hey Sahayak" keyword (English phonemes — see the caveat in that doc),
-/// drop the iOS `.ppn` into ios/ElderlyAssistant/Resources/, add the
-/// Porcupine SPM package in project.yml, and paste the access key either
-/// into Settings (EncryptedLocalStorage, below) or the build-time
-/// Info.plist key. Until ALL of that exists, `NullWakeWordEngine` remains
-/// the honest default and the app behaves exactly as it did before this
-/// feature — Talk button and debug "Simulate wake word" path untouched.
+/// Selection, 2026-09-08 (voice-personalisation P0, slice A): the Porcupine
+/// free tier ended 2026-06-30, so the sherpa-onnx keyword spotter is now
+/// the FIRST real engine candidate — `SherpaKWSWakeWordEngine.attempt()` is
+/// invoked once the toggle is ON, and needs neither access key nor `.ppn`
+/// (a bundled model directory + runtime `keywords.txt` carry the keyword;
+/// tools/fetch-kws-model.sh fetches both). It wins whenever a model is
+/// installed. Only when it declines (no model in this build) does the
+/// Porcupine chain below decide as it always has — `WakeWordStatus` is
+/// derived from that same reality, so nothing here changed for it. The
+/// Porcupine flow itself is legacy: trained `.ppn` dropped into
+/// ios/ElderlyAssistant/Resources/ + access key in Settings/Info.plist —
+/// still supported, never preferred.
 
 // MARK: - Persisted "listen for Hey Sahayak" toggle
 
@@ -132,29 +135,48 @@ enum WakeWordModelFile {
 
 // MARK: - Pure engine-selection decision
 
-/// Decides between the real Porcupine engine and the Null fallback.
+/// Decides between the sherpa-onnx KWS engine, the legacy Porcupine
+/// engine, and the Null fallback.
 /// 2026-09-06: factored OUT of `AppCoordinator.makeWakeWordEngine()` — and
 /// out of the `#if canImport(Porcupine)` guard — so the whole decision
 /// table is unit-testable without the Porcupine package linked. The real
 /// engine's construction arrives as the `build` closure, which the app
 /// target only supplies inside its existing compile guard.
+/// 2026-09-08 (P0 slice A): sherpa-onnx KWS candidate added in FRONT of the
+/// Porcupine chain (see file header). The `sherpaCandidate` closure is a
+/// trailing default so every existing call site and test keeps compiling
+/// unchanged — with no KWS model bundled the default attempt returns nil
+/// and the Porcupine/Null chain below decides exactly as before.
 enum WakeWordEngineSelection {
     /// Returns the real engine when EVERY precondition holds:
-    ///  1. the persisted Settings toggle is ON — OFF means the Null engine
-    ///     even when a key + .ppn are both present (master switch);
-    ///  2. an access key exists;
-    ///  3. the keyword file exists in the bundle;
-    ///  4. `build` succeeds (Porcupine init can throw on a bad key).
+    ///  0. the persisted Settings toggle is ON — OFF means the Null engine
+    ///     even when a key + .ppn or a sherpa model are present (master
+    ///     switch);
+    ///  1. a sherpa-onnx KWS model directory is installed — then the
+    ///     sherpa engine is used: no access key, no `.ppn` (the keyword
+    ///     lives in the model's runtime keywords.txt);
+    ///  2. otherwise an access key exists (Porcupine);
+    ///  3. otherwise the keyword `.ppn` exists in the bundle (Porcupine);
+    ///  4. otherwise `build` succeeds (Porcupine init can throw on a bad
+    ///     key).
     /// Any failure returns nil and the caller falls back to
     /// `NullWakeWordEngine` — the honest default until real artifacts
-    /// exist. `build` is NOT invoked when the toggle is off or an artifact
-    /// is missing (Porcupine init is not free).
+    /// exist. `build` is NOT invoked when the toggle is off, a sherpa
+    /// model is live, or an artifact is missing (Porcupine init is not
+    /// free; the sherpa spotter is loaded by its own attempt closure).
     static func make(toggleEnabled: Bool,
                      accessKey: String?,
                      keywordPath: String?,
-                     build: (_ accessKey: String, _ keywordPath: String) -> WakeWordEngine?) -> WakeWordEngine? {
-        guard toggleEnabled,
-              let accessKey = WakeWordAccessKeyStore.normalized(accessKey),
+                     build: (_ accessKey: String, _ keywordPath: String) -> WakeWordEngine?,
+                     sherpaCandidate: () -> WakeWordEngine? = { SherpaKWSWakeWordEngine.attempt() }) -> WakeWordEngine? {
+        // Master switch first — both engines must honor it.
+        guard toggleEnabled else { return nil }
+        // sherpa-first: present model ⇒ prefer it over legacy Porcupine.
+        if let sherpaEngine = sherpaCandidate() {
+            return sherpaEngine
+        }
+        // Legacy Porcupine chain, byte-for-byte as before.
+        guard let accessKey = WakeWordAccessKeyStore.normalized(accessKey),
               let keywordPath = WakeWordAccessKeyStore.normalized(keywordPath) else {
             return nil
         }
