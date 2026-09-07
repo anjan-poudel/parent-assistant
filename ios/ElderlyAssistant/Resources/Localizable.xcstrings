@@ -3241,6 +3241,23 @@
         }
       }
     },
+    "model.name.intent-ne-gemma-q4km": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Assistant brain — Gemma 1B (Nepali)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायक दिमाग मोडेल — Gemma १B (नेपाली)"
+          }
+        }
+      }
+    },
     "model.name.piper-ne-female-v1": {
       "extractionState": "manual",
       "localizations": {
