@@ -28,6 +28,13 @@ import Foundation
 /// deleted or corrupt), so it is optional and the custom decoder reads a
 /// missing key as nil — the unversioned store's one migration pattern
 /// (an optional field IS its migration).
+///
+/// `address` (directions task, 2026-09-07): the contact's home address,
+/// so voice navigation can drive to a relative ("मैयाको घर लैजाऊ").
+/// Free-form text — whatever the user typed in the family editor; the
+/// navigation pipeline forward-geocodes it at request time. Optional,
+/// same unversioned-store migration rule: a payload written before the
+/// field existed loads address-less instead of failing the read.
 struct FamilyContact: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String
@@ -37,6 +44,9 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     /// ContactPhotoStore filename of the contact's thumbnail, nil when
     /// no photo is on file.
     var photoFilename: String?
+    /// Free-form home address for voice navigation, nil when the user
+    /// never set one (the contact then cannot be a navigation target).
+    var address: String?
 
     /// App the video button opens for this contact. Default `.faceTime`
     /// (the global default) — the only app that truly starts a video
@@ -50,7 +60,7 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     init(id: UUID = UUID(), name: String, phone: String, relationship: String,
          messengerHandle: String? = nil,
          preferredVideoApp: CallApp = .faceTime, preferredCallApp: CallApp = .phone,
-         photoFilename: String? = nil) {
+         photoFilename: String? = nil, address: String? = nil) {
         self.id = id
         self.name = name
         self.phone = phone
@@ -59,6 +69,7 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         self.preferredVideoApp = preferredVideoApp
         self.preferredCallApp = preferredCallApp
         self.photoFilename = photoFilename
+        self.address = address
     }
 
     /// Custom decode: contacts persisted BEFORE the preference fields
@@ -80,6 +91,9 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         // Same missing-key rule for the photo: a payload written before
         // the field existed loads photo-less instead of failing the read.
         photoFilename = (try? container.decodeIfPresent(String.self, forKey: .photoFilename)) ?? nil
+        // Same rule for the address (directions task, 2026-09-07): a
+        // payload written before the field existed loads address-less.
+        address = (try? container.decodeIfPresent(String.self, forKey: .address)) ?? nil
     }
 
     /// The app a VIDEO button resolves to (task: contact preference →

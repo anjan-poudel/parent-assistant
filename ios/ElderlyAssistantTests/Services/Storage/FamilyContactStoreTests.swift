@@ -77,13 +77,38 @@ final class FamilyContactStoreTests: XCTestCase {
                        "1E9A8B7C-2D3E-4F5A-6B7C-8D9E0F1A2B3C.jpg")
     }
 
+    func testAddressRoundTrips() {
+        // (directions task, 2026-09-07) The free-form home address makes
+        // a relative a voice-navigation target ("मैयाको घर लैजाऊ"); nil
+        // when the user never set one.
+        let store = FamilyContactStore(storage: InMemoryEncryptedStorage())
+        let contact = FamilyContact(name: "मैया", phone: "9812345678",
+                                    relationship: "दिदी",
+                                    address: "बूढानीलकण्ठ, काठमाडौं ९")
+        XCTAssertTrue(store.add(contact))
+
+        let loaded = store.load()
+        XCTAssertEqual(loaded.first?.address, "बूढानीलकण्ठ, काठमाडौं ९")
+    }
+
+    func testContactWithoutAddressLoadsNil() {
+        let store = FamilyContactStore(storage: InMemoryEncryptedStorage())
+        let contact = FamilyContact(name: "राम", phone: "9812345678",
+                                    relationship: "छोरा")
+        XCTAssertTrue(store.add(contact))
+
+        XCTAssertNil(store.load().first?.address,
+                     "no address typed means nil — the navigation candidate list excludes the contact")
+    }
+
     func testLegacyPayloadWithoutOptionalFieldsDecodesAsNil() {
         // Payloads written before the optional fields existed (the
         // unversioned store's only "migration" is each field being
         // optional) must still load — written here through a legacy-shaped
-        // struct that provably lacks both `messengerHandle` AND
-        // `photoFilename` (the family-and-friends task, 2026-09-07, added
-        // the photo name after the handle).
+        // struct that provably lacks `messengerHandle`, `photoFilename`
+        // AND `address` (the family-and-friends task added the handle,
+        // then the photo name; the directions task, 2026-09-07, added the
+        // address after both).
         let storage = InMemoryEncryptedStorage()
         let legacy = LegacyFamilyContact(id: UUID(), name: "राम",
                                          phone: "9812345678", relationship: "छोरा")
@@ -99,6 +124,8 @@ final class FamilyContactStoreTests: XCTestCase {
                      "a pre-field payload decodes with a nil handle, not a failure")
         XCTAssertNil(loaded.first?.photoFilename,
                      "a pre-photo-field payload decodes photo-less, not a failure")
+        XCTAssertNil(loaded.first?.address,
+                     "a pre-address payload decodes address-less, not a failure")
     }
 }
 

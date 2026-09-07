@@ -124,6 +124,23 @@ final class AppCoordinator: ObservableObject {
     }
     private static let defaultCallAppKey = "defaultCallApp"
 
+    /// Which map surface voice navigation opens (directions task,
+    /// 2026-09-07) — Settings → Places. `.auto` (the default) opens
+    /// Google Maps when installed, else Apple Maps, else the in-app map;
+    /// the override expresses PREFERENCE, never a promise — the open
+    /// decision re-derives installed-ness at request time via
+    /// `NavigationMapPolicy` (a deleted Google Maps falls through, it
+    /// never dead-ends). A UI preference, not a secret — persisted in
+    /// UserDefaults the same way as `appTheme`. didSet persists; the
+    /// init-time restore assigns directly (house pattern — didSet does
+    /// not fire there).
+    @Published var navigationMapApp: NavigationMapApp {
+        didSet {
+            UserDefaults.standard.set(navigationMapApp.rawValue, forKey: Self.navigationMapAppKey)
+        }
+    }
+    private static let navigationMapAppKey = "navigationMapApp"
+
     /// Which brain model the local LLaMA interpreter runs (Settings →
     /// "AI मोडेल" → Assistant brain, 2026-09-06). nil = the default
     /// (`defaultBrainModelID`). Persisted in UserDefaults the same way
@@ -446,6 +463,14 @@ final class AppCoordinator: ObservableObject {
     let familyContactStore: FamilyContactStore
     @Published private(set) var familyContacts: [FamilyContact]
 
+    /// Saved places for voice navigation (directions task, 2026-09-07) —
+    /// see `SavedPlaceStore` for the cap and the default-home rules.
+    /// Loaded once in `init`; every mutation below (Settings editor)
+    /// refreshes the published list from the store, so views and the
+    /// router's navigation-candidate list read the same truth.
+    let placeStore: SavedPlaceStore
+    @Published private(set) var savedPlaces: [SavedPlace]
+
     // Voice
     private let audioEngine: AVAudioEngine
     private let audioSessionManager: AudioSessionManager
@@ -756,6 +781,15 @@ final class AppCoordinator: ObservableObject {
             apnsProvider: APNsProvider()
         )
 
+        // Saved navigation places (directions task, 2026-09-07) —
+        // encrypted like the contacts above; loaded immediately so the
+        // published list (Settings editor) and the router's candidate
+        // list start populated. The store self-heals legacy payloads on
+        // this read (hard default-home invariant).
+        let placeStore = SavedPlaceStore(storage: storage)
+        self.placeStore = placeStore
+        self.savedPlaces = placeStore.load()
+
         // Safety-critical service (no LLM dependency)
         self.medicationScheduler = MedicationScheduler(
             storage: storage,
@@ -811,6 +845,16 @@ final class AppCoordinator: ObservableObject {
         self.defaultCallApp = UserDefaults.standard
             .string(forKey: Self.defaultCallAppKey)
             .flatMap(CallApp.init(rawValue:)) ?? .phone
+
+        // Default map surface (directions task, 2026-09-07) — restore
+        // the persisted map-app override; missing/unknown raw values fall
+        // back to `.auto`, the preference that opens whatever is actually
+        // installed at request time. This is the property's ONLY initial
+        // assignment, so its didSet does not fire here (same rule as
+        // `appTheme` above) — nothing reacts to the restored value.
+        self.navigationMapApp = UserDefaults.standard
+            .string(forKey: Self.navigationMapAppKey)
+            .flatMap(NavigationMapApp.init(rawValue:)) ?? .auto
 
         // Model store + download service. First-run UI drives downloads
         // via `modelDownloadService`; the coordinator watches state changes
@@ -1898,14 +1942,18 @@ final class AppCoordinator: ObservableObject {
     /// on the contact — and if the store rejects the contact (list full)
     /// the just-written file is deleted again, so a failed add never
     /// orphans a photo on disk.
+    /// `address` (directions task, 2026-09-07) is the contact's optional
+    /// home address for voice navigation — blank text is stored as nil.
     @discardableResult
     func addFamilyContact(name: String, phone: String, relationship: String,
                           messengerHandle: String? = nil,
-                          photo: UIImage? = nil) -> Bool {
+                          photo: UIImage? = nil,
+                          address: String? = nil) -> Bool {
         let filename = photo.flatMap { contactPhotoStore.save($0) }
         let contact = FamilyContact(name: name, phone: phone, relationship: relationship,
                                     messengerHandle: messengerHandle,
-                                    photoFilename: filename)
+                                    photoFilename: filename,
+                                    address: Self.normalizedOptionalText(address))
         guard familyContactStore.add(contact) else {
             if let filename { contactPhotoStore.delete(named: filename) }
             return false
@@ -1930,12 +1978,17 @@ final class AppCoordinator: ObservableObject {
     @discardableResult
     func updateFamilyContact(id: UUID, name: String, phone: String, relationship: String,
                              messengerHandle: String?,
-                             photo: UIImage? = nil, removingPhoto: Bool = false) -> Bool {
+                             photo: UIImage? = nil, removingPhoto: Bool = false,
+                             address: String? = nil) -> Bool {
         guard var contact = familyContacts.first(where: { $0.id == id }) else { return false }
         contact.name = name
         contact.phone = phone
         contact.relationship = relationship
         contact.messengerHandle = messengerHandle
+        // The editor passes the CURRENT text each save; blank clears the
+        // stored address (nil), so "remove the address" is an edit, not a
+        // separate affordance (directions task, 2026-09-07).
+        contact.address = Self.normalizedOptionalText(address)
 
         let oldFilename = contact.photoFilename
         var newFilename = oldFilename
@@ -1994,6 +2047,67 @@ final class AppCoordinator: ObservableObject {
             self.familyContacts = self.familyContactStore.load()
             self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts))
         }
+    }
+
+    // MARK: - Saved places (directions task, 2026-09-07)
+
+    /// Blank-or-whitespace optional text (an editor field the user left
+    /// empty) is stored as nil — shared by the contact-address and
+    /// saved-place writes so "no address" is always `nil`, never `""`.
+    private static func normalizedOptionalText(_ text: String?) -> String? {
+        guard let text else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// Adds a saved place (Settings → Places editor). The store enforces
+    /// the cap and the default-home rules (first `.home` auto-promotes);
+    /// on success the published list refreshes from the store so views
+    /// and the router's candidate list see the same truth. UI-thread
+    /// callers only (Settings), so the published mutation stays on main.
+    @discardableResult
+    func addPlace(name: String, address: String, category: SavedPlace.Category,
+                  isDefaultHome: Bool) -> Bool {
+        let normalized = Self.normalizedOptionalText(address) ?? ""
+        let place = SavedPlace(name: name, address: normalized,
+                               category: category, isDefaultHome: isDefaultHome)
+        guard placeStore.add(place) else { return false }
+        savedPlaces = placeStore.load()
+        return true
+    }
+
+    /// Field edit of a saved place (the Settings editor's save). The
+    /// default-home toggle wins exactly like the store's rule: a `.home`
+    /// saved with the flag set becomes THE default, and a demoted save
+    /// of the current default auto-promotes the next `.home`.
+    @discardableResult
+    func updatePlace(id: UUID, name: String, address: String, category: SavedPlace.Category,
+                     isDefaultHome: Bool) -> Bool {
+        guard savedPlaces.contains(where: { $0.id == id }) else { return false }
+        let normalized = Self.normalizedOptionalText(address) ?? ""
+        let place = SavedPlace(id: id, name: name, address: normalized,
+                               category: category, isDefaultHome: isDefaultHome)
+        guard placeStore.update(place) else { return false }
+        savedPlaces = placeStore.load()
+        return true
+    }
+
+    /// Removes a saved place. Removing the current default auto-promotes
+    /// the first remaining `.home` (store rule); an important-place-only
+    /// list simply has no default, and the router speaks the honest
+    /// `directions.noHome` line until one is saved.
+    func removePlace(id: UUID) {
+        placeStore.remove(id: id)
+        savedPlaces = placeStore.load()
+    }
+
+    /// Makes the `.home` place with `id` THE default home ("take me
+    /// home" target). Returns false when no such `.home` place exists.
+    @discardableResult
+    func setDefaultHomePlace(id: UUID) -> Bool {
+        guard placeStore.setDefaultHome(id: id) else { return false }
+        savedPlaces = placeStore.load()
+        return true
     }
 
     // MARK: - Emergency (redesign spec §3.1/§3.2 — persistent icon everywhere)
@@ -2913,6 +3027,242 @@ final class AppCoordinator: ObservableObject {
         return request
     }
 
+    // MARK: - Voice-driven navigation (directions task, 2026-09-07)
+
+    /// A navigation session awaiting sheet presentation — ContentView
+    /// renders it, same pattern as `pendingPluginPresentation`. The
+    /// session is created FRESH per request (its fetcher/geocoder/
+    /// calculator seams are all one-request-per-instance) and is
+    /// `@MainActor`-isolated, so it is born inside the main-queue hop
+    /// below.
+    struct NavigationPresentation: Identifiable {
+        let id = UUID()
+        let session: InAppNavigationSession
+    }
+    @Published var pendingNavigationPresentation: NavigationPresentation?
+
+    /// The ambiguity walk's remaining candidates, top-scored first
+    /// (`DirectionsRoute` already sorted them). While non-empty, the
+    /// router treats the next transcript as the yes/no answer — see
+    /// `handleConfirmationResponse`'s navigation branch. Mutually
+    /// exclusive with the other pending confirmations by construction
+    /// (the directions stage only runs while nothing else is pending).
+    private var pendingNavigationWalk: [DirectionsCandidate] = []
+
+    /// `VoiceCommandCoordinating.navigationCandidates` — every saved
+    /// place and every family contact that carries a NON-EMPTY address
+    /// (blank text was stored as nil by `normalizedOptionalText`; the
+    /// decider re-filters defensively anyway). Address-less entries are
+    /// deliberately absent: the pipeline never promises a route it
+    /// cannot draw.
+    var navigationCandidates: [DirectionsCandidate] {
+        var candidates: [DirectionsCandidate] = []
+        for place in savedPlaces where !place.address.isEmpty {
+            candidates.append(DirectionsCandidate(id: place.id, source: .savedPlace,
+                                                  name: place.name, address: place.address,
+                                                  relationship: nil))
+        }
+        for contact in familyContacts {
+            guard let address = contact.address, !address.isEmpty else { continue }
+            candidates.append(DirectionsCandidate(id: contact.id, source: .familyContact,
+                                                  name: contact.name, address: address,
+                                                  relationship: contact.relationship))
+        }
+        return candidates
+    }
+
+    /// `VoiceCommandCoordinating.isAwaitingNavigationDisambiguation`.
+    var isAwaitingNavigationDisambiguation: Bool { !pendingNavigationWalk.isEmpty }
+
+    /// `VoiceCommandCoordinating.requestNavigationDisambiguation` — pends
+    /// the walk and returns the FIRST candidate's localized yes/no
+    /// question for the router to speak. Subsequent candidates are asked
+    /// by `handleConfirmationResponse` as the walk proceeds; an exhausted
+    /// walk speaks the honest `directions.cancelled` line.
+    func requestNavigationDisambiguation(targets: [DirectionsCandidate]) -> String? {
+        guard let first = targets.first else { return nil }
+        pendingNavigationWalk = targets
+        DispatchQueue.main.async { [weak self] in
+            self?.voiceSession.transition(to: .awaitingConfirmation)
+        }
+        return navigationQuestion(for: first)
+    }
+
+    /// The yes/no question the ambiguity walk asks for one candidate —
+    /// shape matches the call-confirmation prompts ("के … लैजाने?") and
+    /// ends with the answer hint so the elder knows yes/no is expected.
+    private func navigationQuestion(for candidate: DirectionsCandidate) -> String {
+        L10n.fmt("directions.disambiguateAsk", locale: activeLocale, candidate.name)
+    }
+
+    /// `VoiceCommandCoordinating.requestNavigation` — a resolved
+    /// navigation request (router already decided; nothing is pended).
+    func requestNavigation(to target: DirectionsRoute.PlaceTarget) {
+        executeNavigation(to: target)
+    }
+
+    /// The core navigation executor — shared by `requestNavigation` and
+    /// the ambiguity walk's yes branch. Resolves the target to a concrete
+    /// destination, then launches the map surface the current override
+    /// + installed-ness picks. Every resolution failure speaks an honest
+    /// visible line — never a silent no-op.
+    private func executeNavigation(to target: DirectionsRoute.PlaceTarget) {
+        let destination: (name: String, address: String)
+        switch target {
+        case .defaultHome:
+            guard let home = placeStore.defaultHome else {
+                emitDirections(eventType: "command", outcome: "no_home")
+                replyHonestly(key: "directions.noHome")
+                return
+            }
+            destination = (home.name, home.address)
+        case .place(let id):
+            guard let place = savedPlaces.first(where: { $0.id == id }) else {
+                emitDirections(eventType: "command", outcome: "place_missing")
+                replyHonestly(key: "directions.placeNotFound")
+                return
+            }
+            destination = (place.name, place.address)
+        case .familyContact(let id):
+            guard let contact = familyContacts.first(where: { $0.id == id }) else {
+                emitDirections(eventType: "command", outcome: "place_missing")
+                replyHonestly(key: "directions.placeNotFound")
+                return
+            }
+            destination = (contact.name, contact.address ?? "")
+        }
+        guard !destination.address.isEmpty else {
+            // A candidate with an empty address can only have raced a
+            // concurrent edit — resolve honestly, never dead-end.
+            emitDirections(eventType: "command", outcome: "place_missing")
+            replyHonestly(key: "directions.placeNotFound")
+            return
+        }
+        launchNavigation(name: destination.name, address: destination.address)
+    }
+
+    /// Picks the map surface and opens it. The probe-based resolve never
+    /// returns a surface that cannot open: `.auto`/override falls
+    /// through Google → Apple → the in-app map, and `.inApp` needs no
+    /// external app at all — so the walk always terminates somewhere
+    /// real.
+    private func launchNavigation(name: String, address: String) {
+        let locale = activeLocale
+        let resolved = NavigationMapPolicy.resolve(
+            override: navigationMapApp,
+            googleMapsInstalled: canOpenURLOnMain(MapsLinks.googleMapsProbeURL),
+            appleMapsInstalled: canOpenURLOnMain(MapsLinks.appleMapsProbeURL)
+        )
+        switch resolved {
+        case .googleMaps:
+            emitDirections(eventType: "launch", outcome: "googleMaps")
+            setOutcome(icon: "map.fill",
+                       text: L10n.fmt("directions.outcome.opening", locale: locale, name))
+            speak(text: L10n.fmt("directions.openingGoogleMaps", locale: locale, name))
+            openExternalNavigation(app: .googleMaps, name: name, address: address)
+        case .appleMaps:
+            emitDirections(eventType: "launch", outcome: "appleMaps")
+            setOutcome(icon: "map.fill",
+                       text: L10n.fmt("directions.outcome.opening", locale: locale, name))
+            speak(text: L10n.fmt("directions.openingAppleMaps", locale: locale, name))
+            openExternalNavigation(app: .appleMaps, name: name, address: address)
+        case .inApp:
+            emitDirections(eventType: "launch", outcome: "inApp")
+            speak(text: L10n.fmt("directions.openingInApp", locale: locale, name))
+            presentInAppNavigation(name: name, address: address)
+        case .auto:
+            return   // resolve never returns .auto — it always falls through
+        }
+    }
+
+    /// External map app: forward-geocode the address to coordinates
+    /// FIRST (both map apps take a coordinate `daddr` reliably), then
+    /// open the coordinate URL. Geocode failure is an honest degradation,
+    /// never a dead end: Apple Maps opens the address STRING (it resolves
+    /// address text well) and Google Maps gets the same documented
+    /// fallback form.
+    private func openExternalNavigation(app: NavigationMapApp, name: String, address: String) {
+        let geocoder = NavigationGeocoder()
+        geocoder.geocode(address: address) { [weak self] result in
+            guard let self else { return }
+            let url: URL?
+            switch result {
+            case .success(let destination):
+                self.emitDirections(eventType: "geocode", outcome: "ok")
+                url = MapsLinks.directionsURL(for: app,
+                                              latitude: destination.latitude,
+                                              longitude: destination.longitude)
+            case .failure:
+                self.emitDirections(eventType: "geocode", outcome: "fallback_address")
+                url = app == .appleMaps
+                    ? MapsLinks.appleMapsDirectionsURL(address: address)
+                    : MapsLinks.googleMapsDirectionsURL(address: address)
+            }
+            guard let url else {
+                // No URL at all (both builders refused the input) — say
+                // so honestly; the in-app map is the standing fallback.
+                self.emitDirections(eventType: "open", outcome: "map_missing")
+                self.replyHonestly(key: "directions.mapMissing")
+                return
+            }
+            // The geocoder delivers on the main queue — the probe was
+            // already done; this open is the same main-bound UIApplication
+            // hop the call/message flows use.
+            DispatchQueue.main.async {
+                UIApplication.shared.open(url)
+            }
+        }
+    }
+
+    /// The in-app MapKit fallback sheet (static route — no live
+    /// re-routing, plan constraint). A fresh `LocationFetcher` +
+    /// `NavigationGeocoder` + `MapKitDirectionsCalculator` are born with
+    /// the session (all one-request-per-instance), the app's speaker is
+    /// handed over for the spoken steps, and ContentView's sheet renders
+    /// the session. Created on the main actor: `CLLocationManager` must
+    /// be born on the main thread (delegate runloop rule).
+    private func presentInAppNavigation(name: String, address: String) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let session = InAppNavigationSession(
+                destinationName: name,
+                destinationAddress: address,
+                locationFetcher: LocationFetcher(),
+                geocoder: NavigationGeocoder(),
+                directionsCalculator: MapKitDirectionsCalculator(),
+                speaker: self.speaker ?? NullSpeaker(),
+                locale: self.activeLocale
+            )
+            self.pendingNavigationPresentation = NavigationPresentation(session: session)
+        }
+    }
+
+    /// Honest visible fallback lines (noHome / placeNotFound /
+    /// mapMissing / cancelled): carded AND spoken, same dual-channel
+    /// delivery the router's `speakWithVisibleOutcome` uses — the
+    /// live-caption pill is gone by the time these land.
+    private func replyHonestly(key: String) {
+        let text = L10n.str(key, locale: activeLocale)
+        guard !text.isEmpty else { return }
+        noteGenericReply(text)
+        speak(text: text)
+    }
+
+    /// `directions` observability events — every navigation outcome that
+    /// matters is observable; no metadata keys are attached, so nothing
+    /// user-identifying (names, addresses, coordinates) ever reaches the
+    /// bus (constitution C9).
+    private func emitDirections(eventType: String, outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "directions",
+            eventType: eventType,
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+
     /// Design §4 "Show Me" button path: a dock tile presents the
     /// appliance camera surface directly with no question attached —
     /// skipping the LLM round trip entirely (the tap IS the intent, so
@@ -3229,6 +3579,36 @@ final class AppCoordinator: ObservableObject {
     /// reflecting reality. The session machine returns to idle (and its
     /// timeout timer is cancelled — C12).
     func handleConfirmationResponse(_ response: ConfirmationResponse) {
+        // Navigation ambiguity walk (directions task, 2026-09-07) — an
+        // additive flow like the call branch below: checked first and
+        // returned early so the medication path is completely untouched.
+        // Yes → execute the TOP candidate (never guess a place — the
+        // decider only pends when it cannot pick); no → ask the next
+        // candidate, or speak the honest cancelled line when the walk is
+        // exhausted. The voice session stays `.awaitingConfirmation`
+        // while candidates remain, and returns to idle when the walk
+        // resolves.
+        if !pendingNavigationWalk.isEmpty {
+            let answered = pendingNavigationWalk.removeFirst()
+            switch response {
+            case .yes:
+                pendingNavigationWalk = []
+                executeNavigation(to: answered.target)
+            case .no:
+                if let next = pendingNavigationWalk.first {
+                    speak(text: navigationQuestion(for: next))
+                } else {
+                    emitDirections(eventType: "command", outcome: "cancelled")
+                    replyHonestly(key: "directions.cancelled")
+                }
+            }
+            if pendingNavigationWalk.isEmpty {
+                DispatchQueue.main.async { [weak self] in
+                    self?.voiceSession.transition(to: .idle)
+                }
+            }
+            return
+        }
         // Call confirmations are a separate, additive flow (2026-09-05) —
         // checked first and returned early so the medication path below
         // is completely untouched (safety-critical, 100%-covered code;
@@ -3268,8 +3648,12 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Whether a confirmation follow-up is currently expected.
+    /// [DIRECTIONS] (2026-09-07) The navigation ambiguity walk pends the
+    /// same way — while candidates remain, the router's yes/no parsing
+    /// stays in force.
     var isAwaitingConfirmation: Bool {
         pendingConfirmationEntryId != nil || pendingCallAction != nil || pendingRephrase != nil
+            || !pendingNavigationWalk.isEmpty
     }
 
     /// Used by `CommandRouter` to identify what "I took my medication" refers
