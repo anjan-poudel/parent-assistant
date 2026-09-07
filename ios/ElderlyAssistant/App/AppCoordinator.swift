@@ -109,6 +109,21 @@ final class AppCoordinator: ObservableObject {
     }
     private static let themeKey = "appTheme"
 
+    /// The app an ADDRESS-BOOK row's call button opens when the row has no
+    /// per-contact channel pick saved — per-row picks live in
+    /// `channelPreferenceStore`, and a row without one resolves here
+    /// (Phone-tab redesign, 2026-09-07). The Settings → Calling screen's
+    /// picker binds this. A UI preference, not a secret — persisted in
+    /// UserDefaults the same way as `appTheme`. didSet persists; the
+    /// init-time restore assigns directly (house pattern — didSet does
+    /// not fire there).
+    @Published var defaultCallApp: CallApp {
+        didSet {
+            UserDefaults.standard.set(defaultCallApp.rawValue, forKey: Self.defaultCallAppKey)
+        }
+    }
+    private static let defaultCallAppKey = "defaultCallApp"
+
     /// Which brain model the local LLaMA interpreter runs (Settings →
     /// "AI मोडेल" → Assistant brain, 2026-09-06). nil = the default
     /// (`defaultBrainModelID`). Persisted in UserDefaults the same way
@@ -603,6 +618,17 @@ final class AppCoordinator: ObservableObject {
     /// handles live on `FamilyContact`, not here.)
     private(set) lazy var messengerHandleStore = MessengerHandleStore(storage: storage)
 
+    /// Per-contact calling-channel preferences for ADDRESS-BOOK people,
+    /// keyed by normalized phone (Phone-tab redesign, 2026-09-07) — the
+    /// row's channel chooser persists the user's pick here, and rows
+    /// without an entry resolve to the global `defaultCallApp`. Lazy
+    /// like `messengerHandleStore`: `storage` is assigned at the top of
+    /// `init`, long before any row can query or write a preference. UI
+    /// code goes through the `storedChannelPreference` /
+    /// `setChannelPreference` helpers in this class, never this store
+    /// directly.
+    private(set) lazy var channelPreferenceStore = ChannelPreferenceStore(storage: storage)
+
     /// The plugin registry backing `.plugin` intent dispatch and plugin
     /// prompt composition (design doc 2026-09-05).
     private(set) var pluginRegistry: PluginRegistry!
@@ -661,6 +687,24 @@ final class AppCoordinator: ObservableObject {
                                                  cloudBrainAvailable: Bool) -> Bool {
         guard !modelCached else { return false }
         return !(cloudEnabled && cloudBrainAvailable)
+    }
+
+    /// Resolves which channel an ADDRESS-BOOK row's call button opens
+    /// (Phone-tab redesign, 2026-09-07): the row's explicit per-contact
+    /// pick wins, else the global default (`defaultCallApp`). One hard
+    /// rule on top of the fallback chain — never resolve to a channel
+    /// the row cannot open: a `.messenger` result needs an on-file
+    /// handle (Messenger addresses people by username, not number), so
+    /// without one the result drops to `.phone` rather than dead-ending
+    /// the tap. Pure static so the whole matrix is unit-testable without
+    /// an AppCoordinator instance (same seam as
+    /// `shouldAutoDownloadAssistantBrain`).
+    static func resolvedCallChannel(explicit: CallApp?,
+                                    defaultApp: CallApp,
+                                    messengerHandleAvailable: Bool) -> CallApp {
+        let resolved = explicit ?? defaultApp
+        if resolved == .messenger && !messengerHandleAvailable { return .phone }
+        return resolved
     }
 
     /// Compile-time: is the vendored LLM.swift runtime linked into THIS
@@ -757,6 +801,16 @@ final class AppCoordinator: ObservableObject {
         // react to the restored value (same rule as `voiceEngineStack`).
         self.appTheme = AppTheme(rawOrDefault:
             UserDefaults.standard.string(forKey: Self.themeKey))
+
+        // Default call channel (Phone-tab redesign, 2026-09-07) — restore
+        // the persisted default call app; missing/unknown raw values fall
+        // back to `.phone`, the zero-assumption channel that works for
+        // every row. This is the property's ONLY initial assignment, so
+        // its didSet does not fire here (same rule as `appTheme` above) —
+        // nothing needs to react to the restored value.
+        self.defaultCallApp = UserDefaults.standard
+            .string(forKey: Self.defaultCallAppKey)
+            .flatMap(CallApp.init(rawValue:)) ?? .phone
 
         // Model store + download service. First-run UI drives downloads
         // via `modelDownloadService`; the coordinator watches state changes
@@ -2487,15 +2541,46 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    /// The Messenger handle the app captured earlier for a book-row
-    /// contact — `MessengerHandleStore`, keyed by the normalized phone
-    /// (messenger-gate, 2026-09-07: the capture prompt is gone, so this
-    /// READS handles saved before the revert; nothing writes the store
-    /// anymore). The Phone leaf's messenger pill and tap resolve it for
-    /// book rows whose record itself carries no Facebook linkage. Nil
-    /// when none was ever saved.
+    /// The Messenger handle the app captured for a book-row contact —
+    /// `MessengerHandleStore`, keyed by the normalized phone (messenger-
+    /// gate, 2026-09-07: the old capture prompt is gone; the Phone-tab
+    /// redesign's add-handle sheet writes again via
+    /// `storeMessengerHandle`). The Phone leaf's messenger pill and tap
+    /// resolve it for book rows whose record itself carries no Facebook
+    /// linkage. Nil when none was ever saved.
     func storedMessengerHandle(forNormalizedPhone normalized: String) -> String? {
         messengerHandleStore.handle(forNormalizedPhone: normalized)
+    }
+
+    /// Saves the Messenger handle a book-row contact's add-handle sheet
+    /// captured (Phone-tab redesign, 2026-09-07). RE-ADDED: messenger-
+    /// gate removed this when it deleted the old capture prompt; the
+    /// redesign's sheet brings the write side back — a saved handle is
+    /// what keeps the row's messenger pill and opens the real thread.
+    /// The caller has already validated the username; this just persists
+    /// via the encrypted `MessengerHandleStore` and returns whether the
+    /// write landed.
+    @discardableResult
+    func storeMessengerHandle(_ handle: String, forNormalizedPhone normalized: String) -> Bool {
+        messengerHandleStore.set(handle: handle, forNormalizedPhone: normalized)
+    }
+
+    /// The per-contact calling channel the Phone-tab row's channel
+    /// chooser saved for an ADDRESS-BOOK row (Phone-tab redesign,
+    /// 2026-09-07) — nil when the user never picked one (or the stored
+    /// value is corrupt), in which case the row resolves to the global
+    /// `defaultCallApp` via `resolvedCallChannel`.
+    func storedChannelPreference(forNormalizedPhone normalized: String) -> CallApp? {
+        channelPreferenceStore.preference(forNormalizedPhone: normalized)
+    }
+
+    /// Persists the row's channel-chooser pick for an ADDRESS-BOOK row
+    /// (Phone-tab redesign, 2026-09-07). Returns whether the encrypted
+    /// write landed — the chooser can surface a failed write honestly
+    /// instead of silently showing a pick that won't survive relaunch.
+    @discardableResult
+    func setChannelPreference(_ app: CallApp, forNormalizedPhone normalized: String) -> Bool {
+        channelPreferenceStore.set(app, forNormalizedPhone: normalized)
     }
 
     /// Messenger thread for a SYSTEM-address-book search row — the

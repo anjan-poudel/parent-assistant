@@ -13,8 +13,9 @@ import Foundation
 /// on. The capture prompt is GONE (messenger-gate, 2026-09-07 — the
 /// pill shows only for rows with a handle), but the handles recorded
 /// before the revert still live here, and the Phone leaf resolves them
-/// so a saved handle keeps its pill and its thread. Nothing writes the
-/// store anymore.
+/// so a saved handle keeps its pill and its thread. Writes resumed with
+/// the Phone-tab redesign (2026-09-07): the row's add-handle sheet
+/// stores through `AppCoordinator.storeMessengerHandle`.
 ///
 /// Stored encrypted (`EncryptedLocalStorage`, Keychain — constitution
 /// §Security): usernames are personal linkage data, not a UI preference.

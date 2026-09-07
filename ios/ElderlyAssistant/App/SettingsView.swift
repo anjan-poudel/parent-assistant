@@ -14,12 +14,13 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case appearance, language, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, quickApps, privacy, intentLog
+        case appearance, language, calling, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, quickApps, privacy, intentLog
 
         var id: String {
             switch self {
             case .appearance: return "appearance"
             case .language: return "language"
+            case .calling: return "calling"
             case .family: return "family"
             case .meds: return "meds"
             case .geminiAI: return "geminiAI"
@@ -69,6 +70,9 @@ struct SettingsView: View {
                         // noted future option.
                         sectionRow(.appearance, icon: "paintpalette.fill", titleKey: "settings.appearance.title")
                         sectionRow(.language, icon: "globe", titleKey: "settings.language.title")
+                        // Default app for ADDRESS-BOOK call buttons
+                        // (Phone-tab redesign, 2026-09-07).
+                        sectionRow(.calling, icon: "phone.badge.plus", titleKey: "settings.calling.title")
                         geminiSectionRow
                         voiceEngineSectionRow
                         wakeWordSectionRow
@@ -100,6 +104,7 @@ struct SettingsView: View {
             switch section {
             case .appearance: AppearanceSettingsView()
             case .language: LanguageSettingsView()
+            case .calling: CallingSettingsView()
             case .family: FamilyContactsSettingsView()
             case .meds: MedicationScheduleSettingsView()
             case .geminiAI: GeminiAPISettingsView()

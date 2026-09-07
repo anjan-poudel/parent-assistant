@@ -1813,6 +1813,125 @@
         }
       }
     },
+    "calling.defaultApp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Default calling app"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पूर्वनिर्धारित कल एप"
+          }
+        }
+      }
+    },
+    "calling.defaultCaption": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This becomes the default call button; Messenger needs a per-contact handle."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो पूर्वनिर्धारित कल बटन बन्छ; मेसेन्जरका लागि सम्पर्कमा नाम चाहिन्छ।"
+          }
+        }
+      }
+    },
+    "messenger.handleHints.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Where to find their Messenger username"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उहाँको मेसेन्जर नाम कहाँ भेटिन्छ"
+          }
+        }
+      }
+    },
+    "messenger.handleHints.line1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In Messenger, open the person's profile."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेसेन्जरमा उहाँको प्रोफाइल खोल्नुहोस्।"
+          }
+        }
+      }
+    },
+    "messenger.handleHints.line2": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Their username is below their name."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नामको तल उहाँको मेसेन्जर नाम हुन्छ।"
+          }
+        }
+      }
+    },
+    "messenger.handleHints.line3": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ask them directly if you're not sure."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "थाहा नभए उहाँलाई नै सोध्नुहोस्।"
+          }
+        }
+      }
+    },
+    "settings.calling.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calling"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कलिङ"
+          }
+        }
+      }
+    },
     "call.title": {
       "extractionState": "manual",
       "localizations": {
