@@ -334,13 +334,6 @@ struct CallView: View {
     /// result was announced (or the ask became moot — user edited away).
     @State private var announcedVoiceSearchID: UUID?
 
-    // Messenger username capture (deep-link fix, 2026-09-07): Messenger
-    // has no phone-number thread link, so a row without a handle asks
-    // once for the person's username, stores it, and opens the thread.
-    @State private var showHandlePrompt = false
-    @State private var handleText = ""
-    @State private var pendingHandleResult: UnifiedContactSearch.Result?
-
     var body: some View {
         LeafScreen(titleKey: "call.title") {
             VStack(spacing: 12) {
@@ -397,28 +390,6 @@ struct CallView: View {
                 coordinator.cancelSearchPhraseCapture()
             }
             micPhase = .idle
-        }
-        .alert(L10n.fmt("messenger.handlePrompt.title",
-                        locale: coordinator.appLanguage.locale,
-                        pendingHandleResult?.name ?? ""),
-               isPresented: $showHandlePrompt) {
-            TextField(L10n.str("messenger.handlePrompt.placeholder",
-                               locale: coordinator.appLanguage.locale),
-                      text: $handleText)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-            Button(L10n.str("messenger.handlePrompt.save",
-                            locale: coordinator.appLanguage.locale)) {
-                saveCapturedHandle()
-            }
-            Button(L10n.str("messenger.handlePrompt.cancel",
-                            locale: coordinator.appLanguage.locale),
-                   role: .cancel) {
-                pendingHandleResult = nil
-            }
-        } message: {
-            Text(L10n.str("messenger.handlePrompt.body",
-                          locale: coordinator.appLanguage.locale))
         }
     }
 
@@ -784,45 +755,46 @@ struct CallView: View {
         coordinator.performSystemContactWhatsApp(name: result.name, phone: result.phone)
     }
 
-    /// The row's Messenger pill. Resolution order (2026-09-07):
-    /// address-book-derived handle → family-captured stored handle
-    /// (`MessengerHandleStore`, keyed by normalized phone) → capture
-    /// prompt. Messenger has NO phone-number thread link, so a row
-    /// without a handle prompts once for the username; from then on
-    /// the pill opens the person's real thread, where the audio/video
-    /// buttons sit.
+    /// The row's Messenger pill tap (messenger-gate, 2026-09-07): opens
+    /// the person's REAL thread for the resolved handle — the row's own
+    /// (family-configured, or book-derived from the record's Facebook
+    /// linkage) or one captured earlier for a book row. Messenger has no
+    /// phone-number thread link, so a bare-phone row never shows the
+    /// pill and no phone-based chat attempt exists anymore; the
+    /// empty-handle line below is defensive (stale state only) and
+    /// speaks the honest no-handle line. No recency entry (a channel
+    /// open is not a dial).
     private func messenger(_ result: UnifiedContactSearch.Result) {
-        let normalized = ContactNumberKey.normalized(result.phone)
-        let stored = normalized.isEmpty
-            ? nil
-            : coordinator.storedMessengerHandle(forNormalizedPhone: normalized)
-        if let handle = result.messengerHandle ?? stored, !handle.isEmpty {
-            coordinator.performSystemContactMessenger(name: result.name, handle: handle)
-        } else if normalized.isEmpty {
-            // Defensive: no phone and no handle means nothing can ever
-            // be linked — the honest no-handle line, never a dead tap.
+        guard let handle = resolvedMessengerHandle(for: result) else {
             coordinator.performSystemContactMessenger(name: result.name, handle: "")
-        } else {
-            pendingHandleResult = result
-            handleText = ""
-            showHandlePrompt = true
+            return
         }
+        coordinator.performSystemContactMessenger(name: result.name, handle: handle)
     }
 
-    /// Save action of the username-capture prompt: normalize, persist,
-    /// and open the thread — or, for an unusable entry, speak the
-    /// honest no-handle line (the user can re-tap and try again).
-    private func saveCapturedHandle() {
-        guard let result = pendingHandleResult else { return }
-        let normalized = ContactNumberKey.normalized(result.phone)
-        let handle = CallLinks.messengerHandle(handleText)
-        if !handle.isEmpty, !normalized.isEmpty {
-            coordinator.storeMessengerHandle(handle, forNormalizedPhone: normalized)
-            coordinator.performSystemContactMessenger(name: result.name, handle: handle)
-        } else {
-            coordinator.performSystemContactMessenger(name: result.name, handle: "")
+    /// The usable Messenger handle that earns a row its pill and opens
+    /// its thread (messenger-gate, 2026-09-07). Resolution order: the
+    /// row's OWN handle when the search layer's availability says it is
+    /// real (`Result.messengerAvailable` — family rows: the configured
+    /// handle in Messenger's username alphabet; book rows: the derived
+    /// Facebook-linkage handle); else — BOOK rows only — a handle the
+    /// app captured earlier into `MessengerHandleStore` (keyed by the
+    /// normalized phone, validated against Messenger's username alphabet
+    /// so a corrupt entry can never earn a pill). Family rows keep the
+    /// pure handle-normalization gate and never consult the store. Nil
+    /// means the row shows no Messenger pill — a bare phone number is
+    /// never a Messenger identity.
+    private func resolvedMessengerHandle(for result: UnifiedContactSearch.Result) -> String? {
+        if let own = result.messengerHandle, result.messengerAvailable {
+            return own
         }
-        pendingHandleResult = nil
+        guard case .addressBook(let entry) = result,
+              !entry.normalized.isEmpty,
+              let stored = coordinator.storedMessengerHandle(forNormalizedPhone: entry.normalized) else {
+            return nil
+        }
+        let usable = CallLinks.messengerHandle(stored)
+        return usable.isEmpty ? nil : usable
     }
 
     // MARK: Result / family areas
@@ -851,12 +823,23 @@ struct CallView: View {
                     emptyState(key: "call.search.noResults")
                 }
             } else {
+                // Messenger-pill handles, resolved ONCE per search
+                // outcome (messenger-gate, 2026-09-07): the store is
+                // Keychain-backed, so the captured-handle lookups run
+                // here — one pass over the matched rows — and the rows
+                // below only index the result.
+                let resolvedMessengerHandles = Dictionary(
+                    uniqueKeysWithValues: outcome.entries.map {
+                        ($0.id, resolvedMessengerHandle(for: $0))
+                    }
+                )
                 VStack(spacing: 12) {
                     ForEach(outcome.entries) { result in
                         UnifiedContactResultRow(result: result,
                                                 dial: { dial(result) },
                                                 whatsApp: { whatsApp(result) },
-                                                messenger: { messenger(result) })
+                                                messenger: { messenger(result) },
+                                                resolvedMessengerHandle: resolvedMessengerHandles[result.id] ?? nil)
                     }
                 }
             }
@@ -1041,14 +1024,24 @@ private struct AddressBookLoadFailedCard: View {
 /// for elderly hands, the phone circle mirroring the ContactTile audio
 /// affordance as a visual cue. VoiceOver reads it as one "Call <name>"
 /// button whose value is the caption. Below the dial zone, one pill per
-/// chat app the person is actually reachable on opens that app's thread
-/// instead of the dialer (channel availability decided by the search,
-/// not guessed here).
+/// chat app the row has a real link for opens that app's thread instead
+/// of the dialer. Availability is decided by the caller, never guessed
+/// here: WhatsApp by the search layer, Messenger by the search layer's
+/// handle availability PLUS the leaf-resolved captured handle (a bare
+/// phone number earns no Messenger pill — messenger-gate, 2026-09-07).
 private struct UnifiedContactResultRow: View {
     let result: UnifiedContactSearch.Result
     let dial: () -> Void
     let whatsApp: () -> Void
     let messenger: () -> Void
+    /// The usable Messenger handle resolved by the leaf for this row
+    /// (`CallView.resolvedMessengerHandle(for:)`): the row's own handle
+    /// (family-configured, or book-derived from the record's Facebook
+    /// linkage) or one the app captured earlier for a book row. Non-nil
+    /// shows the Messenger pill; nil means no handle is on file — the
+    /// row never decides reachability itself, and a bare phone number
+    /// never earns a Messenger pill.
+    let resolvedMessengerHandle: String?
     @Environment(\.locale) private var locale
 
     /// Channel brand colors — kept here, not in DesignTokens: they are
@@ -1066,7 +1059,7 @@ private struct UnifiedContactResultRow: View {
     var body: some View {
         VStack(spacing: 10) {
             dialZone
-            if result.whatsAppAvailable || result.messengerAvailable {
+            if result.whatsAppAvailable || resolvedMessengerHandle != nil {
                 channelPills
             }
         }
@@ -1143,7 +1136,7 @@ private struct UnifiedContactResultRow: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text(L10n.fmt("call.channel.whatsappLabel", locale: locale, result.name)))
             }
-            if result.messengerAvailable {
+            if resolvedMessengerHandle != nil {
                 Button(action: messenger) {
                     Text(L10n.str("call.channel.messenger", locale: locale))
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))

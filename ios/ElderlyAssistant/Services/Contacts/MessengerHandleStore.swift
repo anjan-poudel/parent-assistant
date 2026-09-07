@@ -8,8 +8,13 @@ import Foundation
 /// thread deep link — `m.me/<username>` is Meta's only official form and
 /// `fb-messenger://user-thread/…` is keyed to Facebook ids. A tap that
 /// only has a phone number can never reliably open the person's thread,
-/// so the row's Messenger pill asks once for the username and stores it
-/// here. From then on the tap opens the real thread.
+/// so a one-time username-capture prompt asked for the person's handle
+/// and stored it here, and the pill opened the real thread from then
+/// on. The capture prompt is GONE (messenger-gate, 2026-09-07 — the
+/// pill shows only for rows with a handle), but the handles recorded
+/// before the revert still live here, and the Phone leaf resolves them
+/// so a saved handle keeps its pill and its thread. Nothing writes the
+/// store anymore.
 ///
 /// Stored encrypted (`EncryptedLocalStorage`, Keychain — constitution
 /// §Security): usernames are personal linkage data, not a UI preference.
