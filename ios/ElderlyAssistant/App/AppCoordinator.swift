@@ -548,8 +548,11 @@ final class AppCoordinator: ObservableObject {
 
     /// Per-contact Messenger handles for ADDRESS-BOOK people, keyed by
     /// normalized phone (Messenger deep-link fix, 2026-09-07) — Messenger
-    /// has NO phone-number thread link, so the row's pill captures the
-    /// username once and opens the real thread from then on.
+    /// has NO phone-number thread link, so a captured handle is what
+    /// opens a book row's real thread. The capture prompt is gone
+    /// (messenger-gate, 2026-09-07); `storedMessengerHandle` still READS
+    /// this so a previously captured handle keeps its pill. (Family
+    /// handles live on `FamilyContact`, not here.)
     private(set) lazy var messengerHandleStore = MessengerHandleStore(storage: storage)
 
     /// The plugin registry backing `.plugin` intent dispatch and plugin
@@ -2322,28 +2325,26 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    /// Messenger thread for a SYSTEM-address-book search row — the
-    /// messenger analogue of `performSystemContactWhatsApp`, keyed on
-    /// the person's Messenger handle (a row shows the pill only when one
-    /// is on file). Same tap model and disclosures as `performContactCall`'s
-    /// messenger case: the thread opens in-app when Messenger is
-    /// installed, as the m.me web chat in Safari when it is not, and a
-    /// missing handle opens nothing and says so. No recency entry.
-    /// Stored Messenger handle for a book-row contact, if the family has
-    /// captured one (see `performSystemContactMessenger`'s callers). Nil
+    /// The Messenger handle the app captured earlier for a book-row
+    /// contact — `MessengerHandleStore`, keyed by the normalized phone
+    /// (messenger-gate, 2026-09-07: the capture prompt is gone, so this
+    /// READS handles saved before the revert; nothing writes the store
+    /// anymore). The Phone leaf's messenger pill and tap resolve it for
+    /// book rows whose record itself carries no Facebook linkage. Nil
     /// when none was ever saved.
     func storedMessengerHandle(forNormalizedPhone normalized: String) -> String? {
         messengerHandleStore.handle(forNormalizedPhone: normalized)
     }
 
-    /// Saves the captured Messenger handle for a book-row contact. The
-    /// caller has already shown the capture prompt; this just persists
-    /// and returns whether the write landed.
-    @discardableResult
-    func storeMessengerHandle(_ handle: String, forNormalizedPhone normalized: String) -> Bool {
-        messengerHandleStore.set(handle: handle, forNormalizedPhone: normalized)
-    }
-
+    /// Messenger thread for a SYSTEM-address-book search row — the
+    /// messenger analogue of `performSystemContactWhatsApp`, keyed on
+    /// the person's Messenger handle (a row shows the pill only when a
+    /// usable handle is on file — the row's own, or one the app
+    /// captured earlier; see `storedMessengerHandle`). Same tap model
+    /// and disclosures as `performContactCall`'s messenger case: the
+    /// thread opens in-app when Messenger is installed, as the m.me web
+    /// chat in Safari when it is not, and a missing handle opens nothing
+    /// and says so. No recency entry.
     func performSystemContactMessenger(name: String, handle: String) {
         let locale = activeLocale
         switch callLinks.openMessengerThread(handle: handle) {
@@ -2369,41 +2370,6 @@ final class AppCoordinator: ObservableObject {
             // Handle missing or unusable — nothing opened; say what
             // happened (same line `performContactCall` speaks for an
             // unusable messenger handle), never teach from a failure.
-            setOutcome(icon: "exclamationmark.triangle.fill",
-                       text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
-            speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
-            noteSearchChannelTap(outcome: "messenger:invalidHandle")
-        }
-    }
-
-    /// Messenger CHAT attempt for a search row by PHONE — the common
-    /// case: Messenger matches contacts by number server-side and
-    /// writes no linkage back into most address-book cards, so no
-    /// handle can be derived; the phone-based chat is the only honest
-    /// surface iOS lets the app open for them. Same chain as the family
-    /// messenger tile (`performContactCall`'s .messenger case):
-    /// `fb-messenger://` when installed, else the `m.me/<digits>` web
-    /// chat — which resolves exactly when the number is
-    /// Messenger-registered, and is disclosed as the web fallback when
-    /// it isn't. No recency entry (a chat open is not a call).
-    func performSystemContactMessengerChat(name: String, phone: String) {
-        let locale = activeLocale
-        switch callLinks.openMessengerChat(phone: phone) {
-        case .openedApp:
-            setOutcome(icon: "message.fill",
-                       text: L10n.fmt("home.outcome.messengerOpened", locale: locale, name))
-            speak(text: L10n.fmt("call.announce.messenger", locale: locale, name))
-            noteSearchChannelTap(outcome: "messenger:openedApp")
-        case .openedWebChat:
-            // Messenger absent — the m.me chat opened in Safari instead;
-            // the same web-fallback disclosure the family path speaks.
-            setOutcome(icon: "message.fill",
-                       text: L10n.fmt("home.outcome.messengerOpened", locale: locale, name))
-            speak(text: L10n.fmt("call.announce.messengerWebFallback", locale: locale, name))
-            noteSearchChannelTap(outcome: "messenger:openedWebChat")
-        case .invalidHandle:
-            // The number normalized to nothing dialable — defensive (the
-            // search layer filters such rows), never a silent dead tap.
             setOutcome(icon: "exclamationmark.triangle.fill",
                        text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
             speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))

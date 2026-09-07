@@ -101,32 +101,33 @@ enum UnifiedContactSearch {
             !ContactNumberKey.normalized(phone).isEmpty
         }
 
-        /// Whether a Messenger chat surface can be opened for this row.
-        /// Family rows: the stored handle must normalize to Messenger's
-        /// username alphabet (see `CallLinks.messengerHandle` — "सीता"
-        /// is NOT a usable handle, and no handle means no link).
+        /// Whether a Messenger chat surface can be opened for this row
+        /// (2026-09-07, user direction — phone-based badging reverted).
+        /// The pill means "a handle exists for a real thread link",
+        /// never "this person is on Messenger" and never "this row has
+        /// a phone": Messenger has no phone-number thread link
+        /// (`m.me/<username>` is Meta's only official form), so the
+        /// phone-based chat attempt is GONE for book rows — a bare
+        /// number is not a Messenger identity and earns no pill.
         ///
-        /// Book rows (2026-09-06, field fix): true whenever the row has
-        /// a dialable phone — the SAME availability semantics as the
-        /// WhatsApp pill. Reality check: Messenger matches contacts by
-        /// phone number server-side and writes NO linkage back into
-        /// most address-book cards (only the user's own card usually
-        /// carries one), so handle-derived-only badging left real
-        /// Messenger contacts pill-less. The phone-based chat is the
-        /// only honest surface iOS lets the app open for them
-        /// (`fb-messenger://` when installed, else the `m.me/<digits>`
-        /// web chat — which resolves exactly when the number is
-        /// Messenger-registered, and is disclosed as a web fallback
-        /// when it isn't). Availability is still never presence: the
-        /// pill says "a Messenger chat attempt can be made", never
-        /// "this person is on Messenger".
+        /// Family rows keep the existing handle-normalization gate: the
+        /// configured handle must be usable in Messenger's username
+        /// alphabet (see `CallLinks.messengerHandle` — "सीता" is NOT a
+        /// usable handle, and no handle means no link).
+        ///
+        /// Book rows: the handle derived at fetch time from the record's
+        /// Facebook/Messenger linkage (`AddressBookEntry.messengerHandle`
+        /// — pre-normalized, nil when the record carries none). A handle
+        /// the app captured earlier for a book row lives in
+        /// `MessengerHandleStore` (keyed by normalized phone); the UI
+        /// layer resolves that on top of this pure search (see
+        /// CallView's messenger pill resolution).
         var messengerAvailable: Bool {
             switch self {
             case .family(let contact):
                 return !CallLinks.messengerHandle(contact.messengerHandle ?? "").isEmpty
             case .addressBook(let entry):
-                return !ContactNumberKey.normalized(entry.phone).isEmpty
-                    || entry.messengerHandle != nil
+                return entry.messengerHandle != nil
             }
         }
     }

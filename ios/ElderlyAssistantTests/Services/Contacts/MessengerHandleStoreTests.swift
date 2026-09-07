@@ -1,9 +1,10 @@
 import XCTest
 @testable import ElderlyAssistant
 
-/// Per-contact Messenger handle capture (deep-link fix, 2026-09-07):
-/// Messenger has no phone-number thread link, so the row's pill stores
-/// the person's username once and opens the real thread from then on.
+/// Per-contact Messenger handles recorded by the one-time username
+/// capture (deep-link fix, 2026-09-07) and retained after the capture
+/// prompt was removed (messenger-gate, 2026-09-07) so saved handles
+/// keep opening the person's real thread.
 final class MessengerHandleStoreTests: XCTestCase {
 
     func testRoundTripsHandleAcrossInstances() {
