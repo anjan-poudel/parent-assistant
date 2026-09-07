@@ -64,9 +64,30 @@ cd ios
 # Build IPA for manual install
 ./build.sh ipa
 
-# Run unit tests
+# Fast unit tests only (minutes on the warm DerivedData — no UI tests)
+./build.sh test:unit
+
+# UI tests only
+./build.sh test:ui
+
+# Full gate: unit + UI tests (use for merges/nightly — slowest)
 ./build.sh test
+
+# Impact-aware: only suites whose source areas changed since the last green
+# run, plus the always-on safety net (MedicationSchedulerTests,
+# VoiceSessionStateMachineTests, DesignTokensTests). Falls back to the full
+# unit gate when the mapping is ambiguous or >40% of suites are affected.
+./build.sh test:impact
+
+# Rare: full gate from scratch after wiping the warm test DerivedData
+./build.sh test-clean
 ```
+
+Builds and test runs reuse a warm DerivedData (`ios/build/DerivedData` for
+builds, `ios/build/DerivedDataTests` for tests) — no clean, so repeat runs are
+incremental. UI runs stay serial by default; set `IOS_TEST_CLONES=2` (or
+more) to run the UI suite over parallel simulator clones. See
+`./build.sh help` for all modes and environment variables.
 
 ---
 
@@ -154,12 +175,35 @@ The medication scheduler is a safety-critical service that runs independently of
 ### Run automated tests
 
 ```bash
-# iOS
+# iOS — unit tests only for a fast local check:
+cd ios && ./build.sh test:unit
+
+# iOS — full gate (unit + UI tests):
 cd ios && ./build.sh test
+
+# iOS — impact-aware (only suites touched by your edits + safety net):
+cd ios && ./build.sh test:impact
 
 # Android
 cd android && ./build.sh test
 ```
+
+The iOS test cycle is incremental: `build.sh test*` reuses the warm
+`ios/build/DerivedDataTests` (no clean), so a repeat `test:unit` takes
+minutes rather than the ~20 min cold package compile of a fresh directory.
+For a clean-slate run use `./build.sh test-clean`. UI suites run serially by
+default; `IOS_TEST_CLONES=N ./build.sh test` parallelizes over N simulator
+clones on machines with spare capacity.
+
+`test:impact` diffs the tree against the last recorded green baseline
+(`ios/build/.last-tested-sha`, written after every full-coverage green run)
+and maps changed source areas to their mirrored test areas
+(`ElderlyAssistantTests/Services/<Area>/` ↔
+`ElderlyAssistant/Services/<Area>/`), always including the safety net
+(MedicationSchedulerTests, VoiceSessionStateMachineTests,
+DesignTokensTests). Mapping runs test files' own suites; unmappable paths
+(Resources, project.yml, areas without tests) or >40% affected suites fall
+back to the full unit gate.
 
 ---
 
