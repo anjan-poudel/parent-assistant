@@ -21,8 +21,11 @@ enum VoiceSessionState: Equatable {
     func canTransition(to newState: VoiceSessionState) -> Bool {
         switch self {
         case .idle:
-            // .speaking is reachable from idle: async replies (LLM) and
-            // re-prompts arrive AFTER the pipeline has returned to idle.
+            // .speaking is reachable from idle AND stopped — the shared
+            // rationale: async replies (LLM) and re-prompts arrive AFTER
+            // the pipeline has returned to idle, and push speech (morning
+            // briefing, notification read-aloud) may start BEFORE the
+            // pipeline has been primed, while the session is idle/stopped.
             return [.listening, .speaking, .awaitingConfirmation, .error,
                     .stopped].contains(newState)
         case .listening, .transcribing, .understanding, .speaking:
@@ -38,9 +41,18 @@ enum VoiceSessionState: Equatable {
         case .error:
             return [.idle, .stopped].contains(newState)
         case .stopped:
-            // .error is reachable from stopped: pipeline start failures land
-            // here (e.g. audio session / mic-permission errors at boot).
-            return [.idle, .error].contains(newState)
+            // .speaking is reachable from stopped, mirroring .idle above:
+            // push speech — the launch morning briefing (fires before the
+            // pipeline starts: log order briefing_fired →
+            // pipeline_started), notification read-alouds — can begin
+            // while the session is stopped, before the pipeline has been
+            // primed. The round trip closes: .speaking → .stopped is
+            // legal from the busy states above, and a speaking-ended
+            // fallback through handlePipelineState lands .idle/.stopped
+            // legally once the pipeline reports. .error is also reachable
+            // from stopped: pipeline start failures land here (e.g. audio
+            // session / mic-permission errors at boot).
+            return [.idle, .speaking, .error].contains(newState)
         }
     }
 
