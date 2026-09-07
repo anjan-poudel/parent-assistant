@@ -101,22 +101,51 @@ final class MapsLinksTests: XCTestCase {
         XCTAssertEqual(url?.absoluteString, "maps://?daddr=27.717200,85.324000")
     }
 
-    func testGoogleMapsCoordinateURLCarriesDrivingMode() {
+    func testGoogleMapsCoordinateURLCarriesDrivingModeAndLanguageAsk() {
         let url = MapsLinks.googleMapsDirectionsURL(latitude: 27.7172,
-                                                    longitude: 85.3240)
+                                                    longitude: 85.3240,
+                                                    uiLanguageCode: "ne")
         XCTAssertEqual(url?.absoluteString,
-                       "comgooglemaps://?daddr=27.717200,85.324000&directionsmode=driving")
+                       "comgooglemaps://?daddr=27.717200,85.324000&directionsmode=driving&hl=ne&navigation=1")
+    }
+
+    func testGoogleMapsCoordinateURLHonorsPassedUILanguage() {
+        // The `hl` ask is the caller's code, never a hardcoded "ne" — an
+        // English session must ask for "en".
+        let url = MapsLinks.googleMapsDirectionsURL(latitude: 27.7172,
+                                                    longitude: 85.3240,
+                                                    uiLanguageCode: "en")
+        XCTAssertEqual(url?.absoluteString,
+                       "comgooglemaps://?daddr=27.717200,85.324000&directionsmode=driving&hl=en&navigation=1")
     }
 
     func testDirectionsURLDispatchesByResolvedApp() {
-        XCTAssertEqual(MapsLinks.directionsURL(for: .googleMaps, latitude: 1, longitude: 2)?.scheme,
+        XCTAssertEqual(MapsLinks.directionsURL(for: .googleMaps, latitude: 1, longitude: 2,
+                                               uiLanguageCode: "ne")?.scheme,
                        "comgooglemaps")
-        XCTAssertEqual(MapsLinks.directionsURL(for: .appleMaps, latitude: 1, longitude: 2)?.scheme,
+        XCTAssertEqual(MapsLinks.directionsURL(for: .appleMaps, latitude: 1, longitude: 2,
+                                               uiLanguageCode: "ne")?.scheme,
                        "maps")
-        XCTAssertNil(MapsLinks.directionsURL(for: .auto, latitude: 1, longitude: 2),
+        XCTAssertNil(MapsLinks.directionsURL(for: .auto, latitude: 1, longitude: 2,
+                                             uiLanguageCode: "ne"),
                      ".auto is never a resolved surface — no URL")
-        XCTAssertNil(MapsLinks.directionsURL(for: .inApp, latitude: 1, longitude: 2),
+        XCTAssertNil(MapsLinks.directionsURL(for: .inApp, latitude: 1, longitude: 2,
+                                             uiLanguageCode: "ne"),
                      ".inApp presents the in-app sheet — no external URL")
+    }
+
+    func testDirectionsURLCarriesLanguageToGoogleOnly() {
+        // The coordinator's plumbing funnels the same uiLanguageCode into
+        // the dispatch: Google Maps receives the `hl` ask, Apple Maps does
+        // not (its scheme has no language parameter — none is invented).
+        XCTAssertEqual(MapsLinks.directionsURL(for: .googleMaps,
+                                               latitude: 27.7172, longitude: 85.3240,
+                                               uiLanguageCode: "ne")?.absoluteString,
+                       "comgooglemaps://?daddr=27.717200,85.324000&directionsmode=driving&hl=ne&navigation=1")
+        XCTAssertEqual(MapsLinks.directionsURL(for: .appleMaps,
+                                               latitude: 27.7172, longitude: 85.3240,
+                                               uiLanguageCode: "en")?.absoluteString,
+                       "maps://?daddr=27.717200,85.324000")
     }
 
     // MARK: - Address-string fallbacks
@@ -131,17 +160,29 @@ final class MapsLinksTests: XCTestCase {
         // verbatim (a raw UTF-8 query would be an invalid URL).
         XCTAssertTrue(absolute!.contains("%E0%A4%AC%E0%A5%82%E0%A4%A2%E0%A4%BE"))
         XCTAssertFalse(absolute!.contains("बूढानीलकण्ठ"))
+        // Apple's scheme takes no language — no invented hl/navigation asks.
+        XCTAssertFalse(absolute!.contains("hl"))
+        XCTAssertFalse(absolute!.contains("navigation"))
     }
 
-    func testGoogleMapsAddressFallbackCarriesDrivingMode() {
-        let url = MapsLinks.googleMapsDirectionsURL(address: "ठमेल")
+    func testGoogleMapsAddressFallbackCarriesDrivingModeAndLanguageAsk() {
+        let url = MapsLinks.googleMapsDirectionsURL(address: "ठमेल",
+                                                    uiLanguageCode: "ne")
         XCTAssertEqual(url?.absoluteString,
-                       "comgooglemaps://?daddr=%E0%A4%A0%E0%A4%AE%E0%A5%87%E0%A4%B2&directionsmode=driving")
+                       "comgooglemaps://?daddr=%E0%A4%A0%E0%A4%AE%E0%A5%87%E0%A4%B2&directionsmode=driving&hl=ne&navigation=1")
+    }
+
+    func testGoogleMapsAddressFallbackHonorsPassedUILanguage() {
+        let url = MapsLinks.googleMapsDirectionsURL(address: "ठमेल",
+                                                    uiLanguageCode: "en")
+        XCTAssertEqual(url?.absoluteString,
+                       "comgooglemaps://?daddr=%E0%A4%A0%E0%A4%AE%E0%A5%87%E0%A4%B2&directionsmode=driving&hl=en&navigation=1")
     }
 
     func testBlankAddressYieldsNoFallbackURL() {
         XCTAssertNil(MapsLinks.appleMapsDirectionsURL(address: "   "))
-        XCTAssertNil(MapsLinks.googleMapsDirectionsURL(address: ""))
+        XCTAssertNil(MapsLinks.googleMapsDirectionsURL(address: "",
+                                                       uiLanguageCode: "ne"))
     }
 
     func testDaddrValueUsesSixDecimalPrecision() {
