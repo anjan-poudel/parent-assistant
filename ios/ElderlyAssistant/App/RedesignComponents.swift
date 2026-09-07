@@ -98,6 +98,14 @@ struct FaceAvatar: View {
 // voice-triggered calling — redesign spec §3.2, trial voice wiring)
 
 enum PhoneDialer {
+    /// Deliberately `tel://` WITH slashes (tel-scheme fix, 2026-09-07):
+    /// the slashed form only misbehaves for an EMPTY number — iOS shows
+    /// a dead Open/Cancel sheet instead of the dialer. This URL always
+    /// carries real digits (the guard below returns nil when the phone
+    /// normalizes to none), and WITH a number the slashed form dials
+    /// correctly. The numberless case lives in
+    /// `AppLauncher.App.rootURL`, which special-cases `tel:`/`sms:`
+    /// without slashes for the quick-access tiles.
     static func url(for phone: String) -> URL? {
         let digits = phone.filter { $0.isNumber || $0 == "+" }
         guard !digits.isEmpty else { return nil }
