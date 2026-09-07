@@ -156,15 +156,31 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// — the extension default would then shadow `AppCoordinator`'s
     /// opt-in and the weather yield could never fire in production.
     var canAnswerLiveQuestionsFromWeb: Bool { get }
+
+    /// [LOCAL-TOOLS] (2026-09-07) Local-tools stack surface. True only when
+    /// the coordinator's voice engine is the ON-DEVICE stack
+    /// (`VoiceEngineStack == .onDevice`). The router fires the live
+    /// weather/search tools only on that stack: the Gemini cloud stack
+    /// answers open-domain questions natively (grounded search), so the
+    /// local tools would be redundant — and gated off — there. Same
+    /// requirement-with-extension-default pattern as
+    /// `canAnswerLiveQuestionsFromWeb` (see above for why a requirement is
+    /// mandatory when the router holds the coordinator as a protocol
+    /// reference).
+    var isOnDeviceStack: Bool { get }
 }
 
 /// [INTENT-TOOLS] (2026-09-07) Tool-capability default. The default keeps
 /// every conformer that does not explicitly opt in (all mocks/doubles
 /// across the app and the test target) on the fully deterministic path —
 /// only a coordinator that explicitly returns true yields weather to the
-/// live-web interpreter.
+/// live-web interpreter. [LOCAL-TOOLS] (2026-09-07) `isOnDeviceStack` rides
+/// the same pattern: the default false leaves every existing conformer on
+/// its exact pre-tool behavior; only `AppCoordinator` (and a scripted mock
+/// under test) opt in.
 extension VoiceCommandCoordinating {
     var canAnswerLiveQuestionsFromWeb: Bool { false }
+    var isOnDeviceStack: Bool { false }
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -204,18 +220,43 @@ final class CommandRouter {
     private let pluginRegistry: PluginRegistry?
     private let geminiClient: GeminiClient?
 
+    // [LOCAL-TOOLS] (2026-09-07) Local-tool seams. Every one defaults to
+    // dormant, so pre-existing router construction sites (AppCoordinator
+    // aside) and every existing router test keep compiling and behaving
+    // exactly as before: nil search config / transports / fetcher factory
+    // means the tools can never fire.
+    private let searchConfigStore: SearchConfigStore?
+    /// Location seam for the weather tool — a FACTORY, because
+    /// `LocationFetcher` is strictly one request per instance (its
+    /// delegate + self-retention live exactly one request). The router
+    /// asks the factory for a fresh fetcher per weather question.
+    private let locationFetcherFactory: (() -> LocationFetching)?
+    private let weatherTransport: LocalToolTransport?
+    private let searchTransport: LocalToolTransport?
+    private let searchQuotaDefaults: UserDefaults
+
     init(coordinator: VoiceCommandCoordinating,
          observabilityBus: ObservabilityBus,
          speaker: Speaker? = nil,
          interpreter: CommandInterpreter = NullCommandInterpreter(),
          pluginRegistry: PluginRegistry? = nil,
-         geminiClient: GeminiClient? = nil) {
+         geminiClient: GeminiClient? = nil,
+         searchConfigStore: SearchConfigStore? = nil,
+         locationFetcherFactory: (() -> LocationFetching)? = nil,
+         weatherTransport: LocalToolTransport? = nil,
+         searchTransport: LocalToolTransport? = nil,
+         searchQuotaDefaults: UserDefaults = .standard) {
         self.coordinator = coordinator
         self.observabilityBus = observabilityBus
         self.speaker = speaker
         self.interpreter = interpreter
         self.pluginRegistry = pluginRegistry
         self.geminiClient = geminiClient
+        self.searchConfigStore = searchConfigStore
+        self.locationFetcherFactory = locationFetcherFactory
+        self.weatherTransport = weatherTransport
+        self.searchTransport = searchTransport
+        self.searchQuotaDefaults = searchQuotaDefaults
     }
 
     @discardableResult
@@ -376,6 +417,20 @@ final class CommandRouter {
             let liveWeb = coordinator?.canAnswerLiveQuestionsFromWeb ?? false
             if topic == .weather && liveWeb {
                 // Fall through to the interpreter below.
+            } else if topic == .weather && (coordinator?.isOnDeviceStack ?? false) {
+                // [LOCAL-TOOLS] (2026-09-07) On the ON-DEVICE stack a
+                // weather question deserves the live open-meteo reading,
+                // not the deterministic "unavailable" line: announce the
+                // lookup, fetch CURRENT LOCATION (point-of-use permission),
+                // fetch the forecast, speak the real conditions. Any
+                // failure (denied location, no fix, timeout, transport,
+                // malformed payload) falls back to the EXISTING static
+                // `topic.weather.unavailable` answer below — via
+                // `fireLocalWeatherLookup`'s failure path — never a
+                // fabricated number. The Gemini stack never reaches here
+                // (liveWeb already yielded to its grounded interpreter).
+                fireLocalWeatherLookup()
+                return .unrecognised(transcript: raw)
             } else {
                 let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
                 let text = TopicPreAnswer.reply(for: topic, locale: locale, now: clock())
@@ -610,13 +665,237 @@ final class CommandRouter {
         // hearing assistance.
         switch coordinator?.brainReadiness ?? .available {
         case .available:
-            speak(key: "router.reprompt")
+            // [LOCAL-TOOLS] (2026-09-07) Web-search hook: this is the
+            // post-interpreter ABSTENTION point (an interpreter listened
+            // and did not understand — or did not exist), and the generic
+            // re-prompt below is what an abstained utterance normally
+            // gets. When the utterance is question-shaped AND a search
+            // credential pair is configured, the search tool answers
+            // instead — the generic re-prompt remains the fallback for
+            // everything the tool declines (not question-shaped, not
+            // configured, quota-capped, failed or empty results). The
+            // `fireWebSearchIfDue` cap path itself ends by speaking the
+            // generic re-prompt, so a capped day sounds exactly as
+            // honest as an unanswered one.
+            if !fireWebSearchIfDue(raw) {
+                speak(key: "router.reprompt")
+            }
         case .downloadingBrain:
             speakWithVisibleOutcome(key: "router.brainDownloading")
         case .needsSetup:
             speakWithVisibleOutcome(key: "router.brainNeedsSetup")
         }
         return .unrecognised(transcript: raw)
+    }
+
+    // MARK: - [LOCAL-TOOLS] Live weather + web search (on-device stack)
+
+    /// Timeout for the search-tool round-trip — same budget as
+    /// `WeatherTool.fetchTimeoutSeconds` (the router builds the search
+    /// request itself; only the weather tool owns its URLRequest).
+    private static let searchFetchTimeoutSeconds: TimeInterval = 8
+
+    /// [LOCAL-TOOLS] (2026-09-07) On-device live-weather path — called
+    /// from the topic pre-answer stage when `.weather` matched and the
+    /// stack is on-device (see the branch comment there). Announces
+    /// "weather.checking", then asynchronously: current location
+    /// (point-of-use permission) → open-meteo forecast → localized reply
+    /// carded + spoken. Every failure mode (no fetcher factory, location
+    /// denied/unavailable/timed out, transport failure, malformed
+    /// payload) delivers the EXISTING static `topic.weather.unavailable`
+    /// answer with a `local_tools` `weather` `fail` event — the
+    /// deterministic no-data line is unchanged, and a wrong or fabricated
+    /// temperature is impossible.
+    private func fireLocalWeatherLookup() {
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        // Announce first — the user hears the lookup start before the
+        // (possibly multi-second) location + fetch round-trip.
+        speak(key: "weather.checking")
+
+        Task { [weak self] in
+            guard let self else { return }
+            // Create + start the fetcher on the main actor:
+            // CLLocationManager delivers delegate callbacks on the runloop
+            // of the thread that created it, so it must be born on main.
+            // (MainActor.run's body is synchronous, so the request is
+            // started from an inner @MainActor task and its exactly-once
+            // completion is bridged back through a continuation.)
+            let fixResult: Result<LocationFix, LocationFetchFailure>? = await withCheckedContinuation { continuation in
+                Task { @MainActor in
+                    guard let fetcher = self.locationFetcherFactory?() else {
+                        continuation.resume(returning: nil)
+                        return
+                    }
+                    fetcher.requestCurrentLocation { result in
+                        continuation.resume(returning: result)
+                    }
+                }
+            }
+            guard case .success(let fix)? = fixResult else {
+                await MainActor.run { self.deliverWeatherFallback(locale: locale) }
+                return
+            }
+            guard let transport = self.weatherTransport else {
+                await MainActor.run { self.deliverWeatherFallback(locale: locale) }
+                return
+            }
+            do {
+                let conditions = try await WeatherTool.fetchCurrent(latitude: fix.latitude,
+                                                                    longitude: fix.longitude,
+                                                                    transport: transport)
+                let text = WeatherTool.reply(for: conditions, placeName: fix.placeName, locale: locale)
+                await MainActor.run {
+                    self.emitLocalTool(eventType: "weather", outcome: "ok")
+                    self.coordinator?.noteGenericReply(text)
+                    self.speak(text: text, locale: locale)
+                }
+            } catch {
+                await MainActor.run { self.deliverWeatherFallback(locale: locale) }
+            }
+        }
+    }
+
+    /// The tool's failure delivery — the unchanged deterministic weather
+    /// answer. Mirrors the pre-tool static block exactly (same text via
+    /// `TopicPreAnswer.reply(for: .weather)`, same carding + speak path);
+    /// the observability event differs deliberately: `topic_pre_answer`
+    /// is replaced by `local_tools`/`weather`/`fail` so a fallback that
+    /// followed a tool attempt is distinguishable from one that never
+    /// had live data to try.
+    private func deliverWeatherFallback(locale: Locale) {
+        emitLocalTool(eventType: "weather", outcome: "fail")
+        let text = TopicPreAnswer.reply(for: .weather, locale: locale)
+        coordinator?.noteGenericReply(text)
+        speak(text: text, locale: locale)
+    }
+
+    /// [LOCAL-TOOLS] (2026-09-07) The web-search hook — see the
+    /// `.available` call site. Returns true when the hook TOOK the turn
+    /// (announced something — the caller must NOT speak the generic
+    /// re-prompt); false when the utterance is not search business and
+    /// the caller speaks the re-prompt as before.
+    ///
+    /// Firing contract (all must hold):
+    ///  1. On-device stack (Gemini answers natively — never here).
+    ///  2. `SearchConfigStore.isConfigured` — search is family opt-in.
+    ///  3. `SearchTool.isQuestionShaped` — statements and noise never
+    ///     leave the device.
+    ///  4. Quota remains — otherwise the cap line + the generic re-prompt
+    ///     are spoken instead (the user hears WHY nothing was searched).
+    ///
+    /// The utterance never produced an intent/topic/tool by construction:
+    /// this hook runs only at the routeKeywordRemainder abstention point.
+    private func fireWebSearchIfDue(_ raw: String) -> Bool {
+        guard coordinator?.isOnDeviceStack == true,
+              let config = searchConfigStore, config.isConfigured,
+              let apiKey = config.apiKey,
+              let searchEngineID = config.searchEngineID,
+              SearchTool.isQuestionShaped(raw) else {
+            return false
+        }
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let quotaDefaults = searchQuotaDefaults
+        let remaining = SearchQuota.remaining(
+            today: Date(),
+            count: SearchQuota.readCount(defaults: quotaDefaults),
+            limit: SearchQuota.dailyLimit,
+            defaults: quotaDefaults
+        )
+        guard remaining > 0 else {
+            // Cap path: the cap notice is VISIBLE (the live-caption pill
+            // is long gone by now) and both lines are spoken as one
+            // uninterrupted sequence — the generic re-prompt follows the
+            // reason, exactly as an unanswered day would sound.
+            emitLocalTool(eventType: "search", outcome: "cap")
+            let capText = L10n.str("search.capReached", locale: locale)
+            coordinator?.noteGenericReply(capText)
+            speakSequentially([capText, L10n.str("router.reprompt", locale: locale)],
+                              locale: locale)
+            return true
+        }
+        // Attempt-based accounting: the count ticks at FIRE time (an
+        // honest "we tried N times today"), before the network round-trip.
+        speak(key: "search.looking")
+        _ = SearchQuota.increment(defaults: quotaDefaults)
+        Task { [weak self] in
+            guard let self else { return }
+            guard let transport = self.searchTransport else {
+                await MainActor.run { self.deliverSearchFallback(locale: locale) }
+                return
+            }
+            var request = URLRequest(url: SearchTool.requestURL(query: raw,
+                                                                apiKey: apiKey,
+                                                                searchEngineId: searchEngineID))
+            request.timeoutInterval = Self.searchFetchTimeoutSeconds
+            do {
+                let (data, response) = try await transport.fetchData(for: request)
+                let httpOK = (response as? HTTPURLResponse)?.statusCode == 200
+                let summary = httpOK
+                    ? SearchTool.summaryReply(for: SearchTool.parseSearchJSON(data: data),
+                                              locale: locale)
+                    : nil
+                guard let summary else {
+                    await MainActor.run { self.deliverSearchFallback(locale: locale) }
+                    return
+                }
+                await MainActor.run {
+                    self.emitLocalTool(eventType: "search", outcome: "ok")
+                    self.coordinator?.noteGenericReply(summary)
+                    self.speak(text: summary, locale: locale)
+                }
+            } catch {
+                await MainActor.run { self.deliverSearchFallback(locale: locale) }
+            }
+        }
+        return true
+    }
+
+    /// Failure/empty delivery for the search tool — the SAME generic
+    /// re-prompt the abstention point would have spoken, plus a
+    /// `local_tools` `search` `fail` event. Never a fabricated answer,
+    /// never a dead end.
+    private func deliverSearchFallback(locale: Locale) {
+        emitLocalTool(eventType: "search", outcome: "fail")
+        speak(key: "router.reprompt")
+    }
+
+    /// Speaks several already-resolved lines as ONE uninterrupted
+    /// sequence. The speaker cancels in-flight speech at the start of
+    /// each `speak(_:)` call, so naive back-to-back `speak(key:)` calls
+    /// would cut each other off — multi-line outcomes (the search cap
+    /// notice followed by the re-prompt) must await each line inside a
+    /// single task. Carding: each line is transcripted
+    /// (`noteAssistantSpoke`); the caller cards the outcome itself
+    /// (`noteGenericReply`) before calling, when a visible card is due.
+    private func speakSequentially(_ lines: [String], locale: Locale) {
+        guard let speaker, !lines.isEmpty else { return }
+        for line in lines {
+            coordinator?.noteAssistantSpoke(line)
+        }
+        coordinator?.noteSpeakingStarted()
+        Task {
+            for line in lines {
+                await speaker.speak(line, locale: locale)
+            }
+            coordinator?.noteSpeakingEnded()
+        }
+    }
+
+    /// [LOCAL-TOOLS] (2026-09-07) `local_tools` observability events —
+    /// one per local-tool turn. Component `local_tools`, eventType
+    /// `weather`/`search`, outcome `ok`/`cap`/`fail` (weather has no cap:
+    /// it is rate-limited by the user's own asking, and open-meteo needs
+    /// no key). No metadata keys are attached, so nothing user-identifying
+    /// (the query, the coordinates) ever reaches the bus.
+    private func emitLocalTool(eventType: String, outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "local_tools",
+            eventType: eventType,
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]
+        ))
     }
 
     // MARK: - LLM dispatch

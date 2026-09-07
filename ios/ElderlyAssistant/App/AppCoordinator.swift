@@ -140,6 +140,42 @@ final class AppCoordinator: ObservableObject {
     }
     private static let voiceEngineStackKey = "voiceEngineStack"
 
+    /// Whether the ON-DEVICE stack may escalate questions its local
+    /// chain cannot answer (an abstention / mid-band drop) to the cloud
+    /// brain (cloud-fallback task, 2026-09-07) — a second, OPT-IN layer
+    /// on top of `voiceEngineStack`. OFF by default: the old "strictly
+    /// on-device" contract survives until the household switches this
+    /// on, and even then escalation happens ONLY while the Gemini
+    /// interpreter is actually available (see
+    /// `CloudProvider.cloudFallbackEngages`) — the .gemini stack's
+    /// hybrid behavior is untouched and ignores this flag. A UI
+    /// preference, not a secret — persisted in UserDefaults the same
+    /// way as `voiceEngineStack`. didSet persists AND re-applies the
+    /// stack, so flipping the toggle in Settings acts immediately (the
+    /// same instant-apply rule as the engine toggle itself).
+    @Published var cloudFallbackEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(cloudFallbackEnabled, forKey: Self.cloudFallbackKey)
+            applyVoiceEngineStack()
+        }
+    }
+    private static let cloudFallbackKey = "cloudFallbackEnabled"
+
+    /// Which cloud provider an opted-in on-device escalation may reach
+    /// (cloud-fallback task, 2026-09-07). Provider-ready for a future
+    /// Settings dropdown: today only `.gemini` exists, but the choice is
+    /// persisted as a raw-value string under "cloudProvider" so a later
+    /// provider needs no migration. A UI preference, not a secret.
+    /// didSet persists only — the provider takes effect the next time
+    /// `applyVoiceEngineStack()` runs (nothing needs a live switch until
+    /// a second provider exists to switch between).
+    @Published var cloudProvider: CloudProvider {
+        didSet {
+            UserDefaults.standard.set(cloudProvider.rawValue, forKey: Self.cloudProviderKey)
+        }
+    }
+    private static let cloudProviderKey = "cloudProvider"
+
     /// The user's favourite apps for the Home quick-access row
     /// (quick-access-apps task, 2026-09-06), in stored order.
     /// `private(set)`: mutation is confined to `addFavoriteApp` /
@@ -469,6 +505,17 @@ final class AppCoordinator: ObservableObject {
     /// the build-time Info.plist key (`PicovoiceAccessKey`) is absent.
     let wakeWordAccessKeyStore: WakeWordAccessKeyStore
 
+    // MARK: - Local tools (weather + web search, on-device stack)
+
+    /// [LOCAL-TOOLS] (2026-09-07) Google Custom Search credentials
+    /// (API key + engine ID) for the on-device-stack web-search tool —
+    /// the same Keychain `EncryptedLocalStorage` pattern as
+    /// `geminiConfigStore`/`wakeWordAccessKeyStore` above; a family member
+    /// enters them via Settings → Web search. Exposed for that Settings
+    /// screen; `CommandRouter` consults `isConfigured` before the search
+    /// tool may ever fire.
+    let searchConfigStore: SearchConfigStore
+
     /// Persisted "listen for Hey Sahayak" UI preference — UserDefaults
     /// (not a secret), same shape as `sttModelPreference` /
     /// `voiceEngineStack`. Defaults ON: inert until the key + .ppn exist
@@ -548,8 +595,11 @@ final class AppCoordinator: ObservableObject {
 
     /// Per-contact Messenger handles for ADDRESS-BOOK people, keyed by
     /// normalized phone (Messenger deep-link fix, 2026-09-07) — Messenger
-    /// has NO phone-number thread link, so the row's pill captures the
-    /// username once and opens the real thread from then on.
+    /// has NO phone-number thread link, so a captured handle is what
+    /// opens a book row's real thread. The capture prompt is gone
+    /// (messenger-gate, 2026-09-07); `storedMessengerHandle` still READS
+    /// this so a previously captured handle keeps its pill. (Family
+    /// handles live on `FamilyContact`, not here.)
     private(set) lazy var messengerHandleStore = MessengerHandleStore(storage: storage)
 
     /// The plugin registry backing `.plugin` intent dispatch and plugin
@@ -594,8 +644,10 @@ final class AppCoordinator: ObservableObject {
 
     /// Whether `start()` should kick the assistant-brain model's one-time
     /// download: the model isn't cached AND no live cloud brain exists.
-    /// The on-device stack always needs the local model (a configured
-    /// Gemini key stays out of its chain — `cloudEnabled` is false), and
+    /// The on-device stack always needs the local model (this decision
+    /// runs BEFORE `applyVoiceEngineStack()` applies any cloud-fallback
+    /// opt-in, so the router is still strict here — `cloudEnabled` is
+    /// false for the on-device stack regardless of the opt-in), and
     /// the Gemini stack needs it too while no key is configured, which is
     /// exactly the shape of the reported bug (correct transcript, apology
     /// reply, nothing listening). Pure static so the decision is
@@ -731,6 +783,12 @@ final class AppCoordinator: ObservableObject {
         // the build-time Info.plist `PicovoiceAccessKey` is absent.
         self.wakeWordAccessKeyStore = WakeWordAccessKeyStore(storage: storage)
 
+        // [LOCAL-TOOLS] (2026-09-07): Google Custom Search credentials for
+        // the on-device-stack web-search tool (Settings → Web search).
+        // Deliberately created BEFORE the router below — the router must
+        // receive the store (not nil) or the search hook stays dormant.
+        self.searchConfigStore = SearchConfigStore(storage: storage)
+
         // Voice pipeline. Uses NullWakeWordEngine unless the Porcupine SPM
         // package is present AND the Settings toggle is ON AND a valid
         // access key / .ppn file are found — see Services/Voice/
@@ -834,6 +892,16 @@ final class AppCoordinator: ObservableObject {
         // fire here.
         self.voiceEngineStack = UserDefaults.standard.string(forKey: Self.voiceEngineStackKey)
             .flatMap(VoiceEngineStack.init(rawValue:)) ?? .gemini
+
+        // Restore the persisted cloud-fallback opt-in (default OFF — the
+        // strictly-on-device contract) and its provider (default Gemini).
+        // These are the properties' ONLY initial assignments, so their
+        // didSets do not fire here (same rule as `voiceEngineStack`
+        // above); `applyVoiceEngineStack()` — which runs once in the
+        // startup callback — applies the restored opt-in for real.
+        self.cloudFallbackEnabled = UserDefaults.standard.bool(forKey: Self.cloudFallbackKey)
+        self.cloudProvider = UserDefaults.standard.string(forKey: Self.cloudProviderKey)
+            .flatMap(CloudProvider.init(rawValue:)) ?? .gemini
 
         // Restore the persisted quick-access favourites (quick-access-apps
         // task, 2026-09-06). Pure prune — dedupe, drop ids naming no
@@ -1055,7 +1123,17 @@ final class AppCoordinator: ObservableObject {
             speaker: speaker,
             interpreter: router3,
             pluginRegistry: pluginRegistry,
-            geminiClient: geminiClient
+            geminiClient: geminiClient,
+            // [LOCAL-TOOLS] (2026-09-07) Live weather/search seams for the
+            // on-device stack: the search credential store, a fresh
+            // LocationFetcher per weather question (one request per
+            // instance — see LocationFetcher's doc), and URLSession for
+            // both transports (each tool's request carries its own
+            // timeout; see WeatherTool + the router's search timeout).
+            searchConfigStore: searchConfigStore,
+            locationFetcherFactory: { LocationFetcher() },
+            weatherTransport: URLSession.shared,
+            searchTransport: URLSession.shared
         )
         // Start with the fallback STT. Gemini is swapped in below once an
         // API key is configured.
@@ -1451,8 +1529,43 @@ final class AppCoordinator: ObservableObject {
             intentRouter?.cloudEnabled = true
             trySwapToGemini()
         case .onDevice:
-            // Strictly on-device: no cloud brain even if a key exists.
-            intentRouter?.cloudEnabled = false
+            // Strictly on-device STT + local brain — with an OPT-IN
+            // cloud escalation (cloud-fallback task, 2026-09-07): the
+            // "Ask Gemini when I can't answer" Settings toggle
+            // intentionally reverses the old rule that the on-device
+            // stack keeps a configured Gemini key out of the chain — by
+            // explicit user opt-in only (constitution-consistent:
+            // opt-in, disclosed in the Settings leaf). Escalation is
+            // provider-shaped for the future dropdown: which cloud brain
+            // may receive an abstained question is `cloudProvider`'s
+            // job — new providers plug in as new cases here, each gated
+            // on its own interpreter's availability. The STT recognizer
+            // is NEVER swapped in this branch — a Gemini recognizer
+            // stays a `.gemini`-stack privilege (`trySwapToGemini()`
+            // guards on the stack).
+            switch cloudProvider {
+            case .gemini:
+                // Gemini is the only provider today. Availability =
+                // `geminiCommandInterpreter.isAvailable` — the same
+                // gate `IntentRouter` applies to its cloud layer.
+                let fallbackEngages = CloudProvider.cloudFallbackEngages(
+                    enabled: cloudFallbackEnabled,
+                    geminiAvailable: geminiCommandInterpreter?.isAvailable ?? false
+                )
+                intentRouter?.cloudEnabled = fallbackEngages
+                // Observability: report the on-device chain's cloud
+                // state each time it applies, so a dashboard can tell an
+                // opted-in escalation from a strictly-local run (C9 —
+                // no utterance content, provider id only).
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "cloud_fallback",
+                    eventType: "state",
+                    durationMs: nil,
+                    outcome: fallbackEngages ? "enabled" : "disabled",
+                    errorCode: nil,
+                    metadata: ["provider": cloudProvider.rawValue]
+                ))
+            }
             // Whisper if its model is actually cached and the runtime is
             // linked; else the SFSpeechRecognizer fallback rather than
             // silently doing nothing (spec §7: no dead-end states).
@@ -1497,9 +1610,10 @@ final class AppCoordinator: ObservableObject {
     /// disagree: the local chain (preferred intent GGUF / LLaMA stand-in)
     /// counts when `isAvailable`; the cloud brain counts only when
     /// `cloudEnabled` (the on-device stack keeps a configured Gemini key
-    /// out of the chain — same guard as `IntentRouter`'s escalation).
-    /// The model-download state supplies the distinction between the two
-    /// honest no-brain messages (downloading vs setup needed).
+    /// out of the chain unless the household opted into cloud fallback —
+    /// same guard as `IntentRouter`'s escalation). The model-download
+    /// state supplies the distinction between the two honest no-brain
+    /// messages (downloading vs setup needed).
     var brainReadiness: BrainReadiness {
         BrainReadiness.resolve(
             localBrainAvailable: intentRouter?.localBrain?.isAvailable ?? false,
@@ -1516,13 +1630,23 @@ final class AppCoordinator: ObservableObject {
     /// cloud brain available), so the router's weather yield can never
     /// disagree with what the chain would do next: on the on-device stack
     /// a configured Gemini key stays out of the chain (`cloudEnabled` is
-    /// false) and this is false → the deterministic weather pre-answer
-    /// stands; on the Gemini stack with the key configured this is true →
-    /// weather questions fall through to the search-grounded interpreter.
+    /// false, absent the cloud-fallback opt-in) and this is false → the
+    /// deterministic weather pre-answer stands; on the Gemini stack with
+    /// the key configured this is true → weather questions fall through
+    /// to the search-grounded interpreter.
     var canAnswerLiveQuestionsFromWeb: Bool {
         (intentRouter?.cloudEnabled ?? false)
             && (intentRouter?.cloudBrain?.isAvailable ?? false)
     }
+
+    /// [LOCAL-TOOLS] (2026-09-07) Local-tools stack gate for
+    /// `CommandRouter`. True only when the voice engine is the ON-DEVICE
+    /// stack — the live weather/search tools fire exclusively there,
+    /// because the Gemini stack answers open-domain questions natively
+    /// (search-grounded interpreter) and the tools would be redundant.
+    /// Mirrors the `voiceEngineStack` toggle directly, so flipping the
+    /// stack in Settings gates the tools with no other wiring.
+    var isOnDeviceStack: Bool { voiceEngineStack == .onDevice }
 
     /// Whether the assistant-brain model is currently arriving (queued /
     /// downloading / verifying) — the one state that turns `.needsSetup`
@@ -2322,28 +2446,26 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    /// Messenger thread for a SYSTEM-address-book search row — the
-    /// messenger analogue of `performSystemContactWhatsApp`, keyed on
-    /// the person's Messenger handle (a row shows the pill only when one
-    /// is on file). Same tap model and disclosures as `performContactCall`'s
-    /// messenger case: the thread opens in-app when Messenger is
-    /// installed, as the m.me web chat in Safari when it is not, and a
-    /// missing handle opens nothing and says so. No recency entry.
-    /// Stored Messenger handle for a book-row contact, if the family has
-    /// captured one (see `performSystemContactMessenger`'s callers). Nil
+    /// The Messenger handle the app captured earlier for a book-row
+    /// contact — `MessengerHandleStore`, keyed by the normalized phone
+    /// (messenger-gate, 2026-09-07: the capture prompt is gone, so this
+    /// READS handles saved before the revert; nothing writes the store
+    /// anymore). The Phone leaf's messenger pill and tap resolve it for
+    /// book rows whose record itself carries no Facebook linkage. Nil
     /// when none was ever saved.
     func storedMessengerHandle(forNormalizedPhone normalized: String) -> String? {
         messengerHandleStore.handle(forNormalizedPhone: normalized)
     }
 
-    /// Saves the captured Messenger handle for a book-row contact. The
-    /// caller has already shown the capture prompt; this just persists
-    /// and returns whether the write landed.
-    @discardableResult
-    func storeMessengerHandle(_ handle: String, forNormalizedPhone normalized: String) -> Bool {
-        messengerHandleStore.set(handle: handle, forNormalizedPhone: normalized)
-    }
-
+    /// Messenger thread for a SYSTEM-address-book search row — the
+    /// messenger analogue of `performSystemContactWhatsApp`, keyed on
+    /// the person's Messenger handle (a row shows the pill only when a
+    /// usable handle is on file — the row's own, or one the app
+    /// captured earlier; see `storedMessengerHandle`). Same tap model
+    /// and disclosures as `performContactCall`'s messenger case: the
+    /// thread opens in-app when Messenger is installed, as the m.me web
+    /// chat in Safari when it is not, and a missing handle opens nothing
+    /// and says so. No recency entry.
     func performSystemContactMessenger(name: String, handle: String) {
         let locale = activeLocale
         switch callLinks.openMessengerThread(handle: handle) {
@@ -2369,41 +2491,6 @@ final class AppCoordinator: ObservableObject {
             // Handle missing or unusable — nothing opened; say what
             // happened (same line `performContactCall` speaks for an
             // unusable messenger handle), never teach from a failure.
-            setOutcome(icon: "exclamationmark.triangle.fill",
-                       text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
-            speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
-            noteSearchChannelTap(outcome: "messenger:invalidHandle")
-        }
-    }
-
-    /// Messenger CHAT attempt for a search row by PHONE — the common
-    /// case: Messenger matches contacts by number server-side and
-    /// writes no linkage back into most address-book cards, so no
-    /// handle can be derived; the phone-based chat is the only honest
-    /// surface iOS lets the app open for them. Same chain as the family
-    /// messenger tile (`performContactCall`'s .messenger case):
-    /// `fb-messenger://` when installed, else the `m.me/<digits>` web
-    /// chat — which resolves exactly when the number is
-    /// Messenger-registered, and is disclosed as the web fallback when
-    /// it isn't. No recency entry (a chat open is not a call).
-    func performSystemContactMessengerChat(name: String, phone: String) {
-        let locale = activeLocale
-        switch callLinks.openMessengerChat(phone: phone) {
-        case .openedApp:
-            setOutcome(icon: "message.fill",
-                       text: L10n.fmt("home.outcome.messengerOpened", locale: locale, name))
-            speak(text: L10n.fmt("call.announce.messenger", locale: locale, name))
-            noteSearchChannelTap(outcome: "messenger:openedApp")
-        case .openedWebChat:
-            // Messenger absent — the m.me chat opened in Safari instead;
-            // the same web-fallback disclosure the family path speaks.
-            setOutcome(icon: "message.fill",
-                       text: L10n.fmt("home.outcome.messengerOpened", locale: locale, name))
-            speak(text: L10n.fmt("call.announce.messengerWebFallback", locale: locale, name))
-            noteSearchChannelTap(outcome: "messenger:openedWebChat")
-        case .invalidHandle:
-            // The number normalized to nothing dialable — defensive (the
-            // search layer filters such rows), never a silent dead tap.
             setOutcome(icon: "exclamationmark.triangle.fill",
                        text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
             speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
