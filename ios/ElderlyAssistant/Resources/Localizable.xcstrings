@@ -9106,6 +9106,23 @@
         }
       }
     },
+    "weather.replySource": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "According to the weather service, %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मौसम सेवा अनुसार, %@।"
+          }
+        }
+      }
+    },
     "weather.condition.clear": {
       "extractionState": "manual",
       "localizations": {
@@ -9452,13 +9469,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Search queries are sent to Google; weather sends only your coordinates to open-meteo."
+            "value": "Search queries are sent to Google; weather sends your location, or the place you name, to open-meteo."
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "खोज प्रश्नहरू गुगलमा पठाइन्छ; मौसमका लागि निर्देशांक मात्र open-meteo मा जान्छ।"
+            "value": "खोज प्रश्नहरू गुगलमा पठाइन्छ; मौसमले तपाईंको स्थान वा तपाईंले भन्नुभएको ठाउँ open-meteo मा पठाउँछ।"
           }
         }
       }

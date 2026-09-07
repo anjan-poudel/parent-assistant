@@ -164,4 +164,123 @@ final class WeatherToolTests: XCTestCase {
         XCTAssertEqual(WeatherTool.reply(for: conditions, placeName: "   ", locale: en),
                        "It's 20°C and thunderstorm.")
     }
+
+    // MARK: - Named-place extraction (weather-routing, 2026-09-07)
+
+    func testPlaceNameExtractsAfterEnglishWeatherPrepositions() {
+        XCTAssertEqual(WeatherTool.placeName(in: "is it raining in Arncliffe"), "arncliffe")
+        XCTAssertEqual(WeatherTool.placeName(in: "What's the weather like in Arncliffe today?"),
+                       "arncliffe")
+        XCTAssertEqual(WeatherTool.placeName(in: "check the weather in Kathmandu please"),
+                       "kathmandu")
+        XCTAssertEqual(WeatherTool.placeName(in: "what is the forecast for Pokhara tomorrow"),
+                       "pokhara")
+        XCTAssertEqual(WeatherTool.placeName(in: "will it snow in Canberra this week"),
+                       "canberra")
+        XCTAssertEqual(WeatherTool.placeName(in: "what is the temperature in Tokyo right now"),
+                       "tokyo")
+    }
+
+    func testPlaceNameExtractsCompoundPlaceNames() {
+        // Up to three tokens — "new york", "arncliffe australia".
+        XCTAssertEqual(WeatherTool.placeName(in: "what is the weather in New York"), "new york")
+        XCTAssertEqual(WeatherTool.placeName(in: "is it raining in Arncliffe, Australia?"),
+                       "arncliffe australia")
+    }
+
+    func testPlaceNameReturnsNilWhenNoNamedPlace() {
+        XCTAssertNil(WeatherTool.placeName(in: "what is the weather like"))
+        XCTAssertNil(WeatherTool.placeName(in: "how hot is it today"))
+        XCTAssertNil(WeatherTool.placeName(in: "is it raining outside"))
+        XCTAssertNil(WeatherTool.placeName(in: "is it cold in here"))
+        XCTAssertNil(WeatherTool.placeName(in: "weather like for tomorrow"))
+        XCTAssertNil(WeatherTool.placeName(in: "मौसम कस्तो छ?"))
+        XCTAssertNil(WeatherTool.placeName(in: "   "))
+        XCTAssertNil(WeatherTool.placeName(in: ""))
+    }
+
+    func testPlaceNameExtractsNepaliGenitivePlace() {
+        // "काठमाडौंको मौसम कस्तो छ?" — the token before मौसम, minus को.
+        XCTAssertEqual(WeatherTool.placeName(in: "काठमाडौंको मौसम कस्तो छ?"), "काठमाडौं")
+    }
+
+    func testPlaceNameExtractsNepaliLocativePlace() {
+        // X-मा with a bare weather word elsewhere in the utterance.
+        XCTAssertEqual(WeatherTool.placeName(in: "भोलि काठमाडौंमा पानी पर्छ कि?"), "काठमाडौं")
+        XCTAssertEqual(WeatherTool.placeName(in: "काठमाडौंमा मौसम कस्तो छ?"), "काठमाडौं")
+    }
+
+    func testPlaceNameNepaliTimeWordsAreNotPlaces() {
+        // "आजको/भोलिको मौसम" = today's/tomorrow's weather — not a place.
+        XCTAssertNil(WeatherTool.placeName(in: "आजको मौसम कस्तो छ?"))
+        XCTAssertNil(WeatherTool.placeName(in: "भोलिको मौसम कस्तो होला?"))
+        // "घरमा" (at home) is not a geocodable place either.
+        XCTAssertNil(WeatherTool.placeName(in: "घरमा पानी पर्छ कि?"))
+    }
+
+    func testPlaceNameDoesNotConfuseWeatherWordsForPlaces() {
+        // A मा-suffixed weather word is the topic, not a place.
+        XCTAssertNil(WeatherTool.placeName(in: "मौसममा के भयो?"))
+    }
+
+    // MARK: - Geocoding seams (weather-routing, 2026-09-07)
+
+    func testGeocodingURLTargetsOpenMeteoSearchWithExactQueryItems() {
+        let url = WeatherTool.geocodingURL(name: "Arncliffe")
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+
+        XCTAssertEqual(components?.scheme, "https")
+        XCTAssertEqual(components?.host, "geocoding-api.open-meteo.com")
+        XCTAssertEqual(components?.path, "/v1/search")
+        XCTAssertEqual(components?.queryItems, [
+            URLQueryItem(name: "name", value: "Arncliffe"),
+            URLQueryItem(name: "count", value: "1"),
+            URLQueryItem(name: "language", value: "en"),
+            URLQueryItem(name: "format", value: "json")
+        ])
+    }
+
+    func testGeocodingURLPercentEncodesDevanagariName() {
+        let url = WeatherTool.geocodingURL(name: "काठमाडौं")
+
+        // The wire URL carries the name percent-encoded — no raw
+        // Devanagari bytes on the wire…
+        XCTAssertFalse(url.absoluteString.contains("काठमाडौं"))
+        XCTAssertTrue(url.absoluteString.contains("name="))
+        // …and URLComponents still decodes the exact original name.
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        XCTAssertEqual(components?.queryItems?.first { $0.name == "name" }?.value,
+                       "काठमाडौं")
+    }
+
+    func testParseGeocodingHappyPathDecodesTopHit() {
+        let data = Data("""
+        {"results": [
+            {"id": 1, "name": "Arncliffe", "latitude": -33.9375, "longitude": 151.1522,
+             "country": "Australia", "admin1": "New South Wales"}
+        ]}
+        """.utf8)
+
+        XCTAssertEqual(WeatherTool.parseGeocodingJSON(data: data),
+                       WeatherTool.GeocodedPlace(latitude: -33.9375, longitude: 151.1522,
+                                                 name: "Arncliffe"))
+    }
+
+    func testParseGeocodingReturnsNilWhenNothingMatchedOrMalformed() {
+        // 200 OK but zero hits — indistinguishable from failure by design.
+        XCTAssertNil(WeatherTool.parseGeocodingJSON(data: Data(#"{"results": []}"#.utf8)))
+        // No results key at all.
+        XCTAssertNil(WeatherTool.parseGeocodingJSON(data: Data(#"{"generationtime_ms": 0.5}"#.utf8)))
+        // Top hit missing coordinates or name.
+        XCTAssertNil(WeatherTool.parseGeocodingJSON(data:
+            Data(#"{"results": [{"name": "Nowhere"}]}"#.utf8)))
+        XCTAssertNil(WeatherTool.parseGeocodingJSON(data:
+            Data(#"{"results": [{"latitude": 1.0, "longitude": 2.0}]}"#.utf8)))
+        // Blank name.
+        XCTAssertNil(WeatherTool.parseGeocodingJSON(data:
+            Data(#"{"results": [{"name": "  ", "latitude": 1.0, "longitude": 2.0}]}"#.utf8)))
+        // Non-JSON / empty.
+        XCTAssertNil(WeatherTool.parseGeocodingJSON(data: Data("not json".utf8)))
+        XCTAssertNil(WeatherTool.parseGeocodingJSON(data: Data()))
+    }
 }

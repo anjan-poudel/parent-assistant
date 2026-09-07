@@ -38,6 +38,58 @@ final class TopicPreAnswerTests: XCTestCase {
         XCTAssertNil(TopicPreAnswer.match(transcript: "मौसमी फल किन्ने हो"))
     }
 
+    // MARK: - Weather vocabulary breadth (weather-routing, 2026-09-07)
+
+    /// Regression for the Arncliffe report: weather questions phrased
+    /// with hot/cold/snow/storm/…-words must land on `.weather`, never
+    /// fall through to the question-shaped web-search fallback.
+    func testWeatherVocabularyExpandedEnglish() {
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "is it raining in Arncliffe?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "will it rain later?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "how hot is it today?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "is it cold outside?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "what is the temperature now?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "any storm coming tonight?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "will it snow in Canberra?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "is it snowing on the mountain?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "is it humid in the valley?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "how windy is it?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "is it cloudy this evening?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "what's the forecast for tomorrow?"), .weather)
+    }
+
+    func testWeatherVocabularyExpandedNepali() {
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "पानी परिरहेको छ?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "काठमाडौंमा पानी पर्छ कि?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "आज कति गर्मी छ?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "जाडो छ कि?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "चिसो भयो"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "तापक्रम कति छ?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "हिउँ पर्छ कि?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "आँधी आउँदै छ?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "घाम लागेको छ?"), .weather)
+    }
+
+    /// The flip side of the wider vocabulary: the short English words
+    /// must keep whole-token discipline — "rain" inside "brain"/"train"/
+    /// "grain", "hot" inside "hotel", "cold" inside "coldwater" must not
+    /// fire the weather topic.
+    func testWeatherTokensNeverMatchInsideLongerEnglishWords() {
+        XCTAssertNil(TopicPreAnswer.match(transcript: "is there a brain in the jar?"))
+        XCTAssertNil(TopicPreAnswer.match(transcript: "the train is late"))
+        XCTAssertNil(TopicPreAnswer.match(transcript: "pass the grain"))
+        XCTAssertNil(TopicPreAnswer.match(transcript: "book a hotel for me"))
+        XCTAssertNil(TopicPreAnswer.match(transcript: "is coldwater creek nearby?"))
+        XCTAssertNil(TopicPreAnswer.match(transcript: "snowflake fell"))
+    }
+
+    func testGreetingCompoundStillResolvesToWeatherWithNewVocabulary() {
+        // Greeting prefix + a NEW-vocabulary weather question — weather
+        // still wins (match order unchanged).
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "नमस्ते, आज कति गर्मी छ?"), .weather)
+        XCTAssertEqual(TopicPreAnswer.match(transcript: "hi, is it snowing there?"), .weather)
+    }
+
     // MARK: - Time matching
 
     func testTimeNepali() {
