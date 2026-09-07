@@ -1748,6 +1748,79 @@ final class AppCoordinator: ObservableObject {
         ))
     }
 
+    // MARK: - Phone-leaf contact-list launches (contact-leaf-launch task,
+    // 2026-09-07)
+
+    /// Opens WhatsApp's own chat list — the Phone leaf's "WhatsApp
+    /// contacts" button (contact-leaf-launch task, 2026-09-07). The app
+    /// has no API to render a WhatsApp contact list in-process, so one
+    /// tap hands the elder INTO WhatsApp: its scheme root IS the chat
+    /// list. Same dual-channel honesty as `performAppLaunch` — probe
+    /// `canOpenURL` first, and when WhatsApp is gone say so aloud with a
+    /// failure outcome, never a silent dead tap.
+    func openWhatsAppContacts() {
+        let locale = activeLocale
+        let name = L10n.str("app.name.whatsapp", locale: locale)
+        // Scheme root is a compile-time constant — the unwrap can never
+        // trap (same rationale as `AppLauncher.App.rootURL`).
+        let url = URL(string: "whatsapp://")!
+        guard canOpenURLOnMain(url) else {
+            let text = L10n.fmt("apps.announce.notInstalled", locale: locale, name)
+            setOutcome(icon: "exclamationmark.triangle.fill", text: text)
+            speak(text: text)
+            emitContactLeafLaunch(outcome: "whatsapp:notInstalled")
+            return
+        }
+        DispatchQueue.main.async { UIApplication.shared.open(url) }
+        let text = L10n.fmt("apps.announce.opened", locale: locale, name)
+        setOutcome(icon: "bubble.left.and.bubble.right.fill", text: text)
+        speak(text: text)
+        emitContactLeafLaunch(outcome: "whatsapp:opened")
+    }
+
+    /// Messenger analogue of `openWhatsAppContacts` — `fb-messenger://`
+    /// (its scheme root) opens Messenger's people list. Same
+    /// probe-first, announce-honestly, never-silent-dead-tap contract.
+    func openMessengerContacts() {
+        let locale = activeLocale
+        let name = L10n.str("app.name.messenger", locale: locale)
+        // Scheme root is a compile-time constant — the unwrap can never
+        // trap (same rationale as `AppLauncher.App.rootURL`).
+        let url = URL(string: "fb-messenger://")!
+        guard canOpenURLOnMain(url) else {
+            let text = L10n.fmt("apps.announce.notInstalled", locale: locale, name)
+            setOutcome(icon: "exclamationmark.triangle.fill", text: text)
+            speak(text: text)
+            emitContactLeafLaunch(outcome: "messenger:notInstalled")
+            return
+        }
+        DispatchQueue.main.async { UIApplication.shared.open(url) }
+        let text = L10n.fmt("apps.announce.opened", locale: locale, name)
+        setOutcome(icon: "paperplane.fill", text: text)
+        speak(text: text)
+        emitContactLeafLaunch(outcome: "messenger:opened")
+    }
+
+    /// `UIApplication.shared.canOpenURL` is main-thread bound — hop to
+    /// main when a caller runs off it (the same shape as
+    /// `SystemCallLinkOpener`). View taps arrive on main already; this
+    /// covers any other caller.
+    private func canOpenURLOnMain(_ url: URL) -> Bool {
+        if Thread.isMainThread { return UIApplication.shared.canOpenURL(url) }
+        return DispatchQueue.main.sync { UIApplication.shared.canOpenURL(url) }
+    }
+
+    private func emitContactLeafLaunch(outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "contact_leaf_launch",
+            eventType: "tap",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]  // app id only — no contact identifiers (C9)
+        ))
+    }
+
     // MARK: - Voice-triggered call & message (trial wiring)
     //
     // Deliberately scoped to the LLM-interpreted path only —

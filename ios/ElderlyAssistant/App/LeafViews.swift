@@ -341,6 +341,7 @@ struct CallView: View {
         LeafScreen(titleKey: "call.title") {
             VStack(spacing: 12) {
                 historyRow
+                launchRow
                 searchArea
                 if isSearching {
                     resultsArea
@@ -437,6 +438,52 @@ struct CallView: View {
             .background(DesignTokens.card)
             .clipShape(Capsule())
         }
+        .buttonStyle(.plain)
+    }
+
+    /// WhatsApp/Messenger expose no API to render their contact lists in
+    /// this app, so the Phone leaf takes the elder INTO each app's own
+    /// list in one tap (contact-leaf-launch task, 2026-09-07):
+    /// `whatsapp://` opens WhatsApp's chat list, `fb-messenger://` opens
+    /// Messenger's people list. Reachable with or without contacts
+    /// permission — opening another app needs none. The coordinator
+    /// openers probe first and announce an absent app aloud (never a
+    /// silent dead tap), mirroring the quick-access honesty rules.
+    private var launchRow: some View {
+        HStack(spacing: 10) {
+            contactListButton(titleKey: "call.openWhatsAppContacts",
+                              systemImage: "bubble.left.and.bubble.right.fill") {
+                coordinator.openWhatsAppContacts()
+            }
+            contactListButton(titleKey: "call.openMessengerContacts",
+                              systemImage: "paperplane.fill") {
+                coordinator.openMessengerContacts()
+            }
+        }
+    }
+
+    /// One half-width capsule of `launchRow` — mirrors the `historyRow`
+    /// capsule (horizontal 16 padding, card background, Capsule clip,
+    /// caption-size semibold label over a ≥44pt target), stretched with
+    /// `.frame(maxWidth: .infinity)` so the two share the row.
+    private func contactListButton(titleKey: String, systemImage: String,
+                                   action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(DesignTokens.accent)
+                Text(LocalizedStringKey(titleKey))
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .background(DesignTokens.card)
+            .clipShape(Capsule())
+        }
+        .frame(maxWidth: .infinity)
         .buttonStyle(.plain)
     }
 

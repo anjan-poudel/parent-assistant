@@ -7644,6 +7644,40 @@
         }
       }
     },
+    "call.openMessengerContacts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Messenger contacts"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेसेन्जर सम्पर्कहरू"
+          }
+        }
+      }
+    },
+    "call.openWhatsAppContacts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "WhatsApp contacts"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ह्वाट्सएप सम्पर्कहरू"
+          }
+        }
+      }
+    },
     "history.callbackLabel": {
       "extractionState": "manual",
       "localizations": {
