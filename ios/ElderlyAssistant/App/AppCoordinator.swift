@@ -559,6 +559,22 @@ final class AppCoordinator: ObservableObject {
     private var notificationFacade: NotificationFacade?
     private var shellCardCancellable: AnyCancellable?
 
+    /// The morning briefing's day slot (briefing persistence task,
+    /// 2026-09-08) — the same encrypted store instance `MorningBriefing`
+    /// writes on `fire()`. Loaded once in `init` so the published
+    /// `todayBriefing` (the Home widget + briefing leaf's source of
+    /// truth) starts populated on relaunch, and re-read on every app
+    /// activation + after every fire so presence tracks the store.
+    private let morningBriefingStore: MorningBriefingStore
+    /// Today's stored briefing (briefing persistence task, 2026-09-08) —
+    /// non-nil only while a briefing was composed for the CURRENT
+    /// calendar day. Mutations are main-confined through
+    /// `refreshTodayBriefing()` (called on the main actor in
+    /// `handleScenePhase`, and via `MainActor.run` after async fires).
+    /// Drives the Today's-briefing Home widget presence and the briefing
+    /// leaf; the leaf's "Speak again" replays this stored text.
+    @Published private(set) var todayBriefing: StoredBriefing?
+
     /// Voice-session derivation state (spec §3.3): the last pipeline state
     /// plus how many `speak()` calls are currently in flight. `speaking`
     /// is derived, not a pipeline state.
@@ -895,6 +911,17 @@ final class AppCoordinator: ObservableObject {
         let appointmentStore = AppointmentStore(storage: storage)
         self.appointmentStore = appointmentStore
         self.appointments = appointmentStore.load()
+
+        // Morning-briefing day slot (briefing persistence task,
+        // 2026-09-08) — encrypted like the stores above (the composed
+        // text embeds medication names and event titles). Loaded here so
+        // a relaunch mid-day still shows the day's stored briefing on
+        // Home; `MorningBriefing.fire()` writes through the same
+        // instance (passed in `start()`), and every activation + fire
+        // completion re-reads it into the published `todayBriefing`.
+        let briefingStore = MorningBriefingStore(storage: storage)
+        self.morningBriefingStore = briefingStore
+        self.todayBriefing = briefingStore.todaysBriefing(now: Date())
 
         // Calendar auto-add toggle (medical task, 2026-09-07) — default
         // ON when no value was ever stored. This is the property's ONLY
@@ -1410,6 +1437,7 @@ final class AppCoordinator: ObservableObject {
             routineSource: routineScheduler,
             medicationSource: medicationScheduler,
             calendarSource: externalCalendar,
+            briefingStore: morningBriefingStore,
             locale: activeLocale
         )
         let registry = SpeechSourceRegistry(observabilityBus: observabilityBus)
@@ -4121,6 +4149,9 @@ final class AppCoordinator: ObservableObject {
             // the wake window, once per calendar day. Idempotent —
             // `shouldFireOnActivation` + `fire()` share the same
             // once-per-day budget as the spoken command, so repeated
+            // activations never double-speak. After the fire completes,
+            // the stored slot is re-read into `todayBriefing` (a same-day
+            // no-op leaves the earlier composition untouched).
             // activations never double-speak.
             //
             // Launch ordering (STOPPED-SPEAKING-FIX, 2026-09-08): this
@@ -4135,13 +4166,35 @@ final class AppCoordinator: ObservableObject {
             if let briefing = morningBriefing,
                briefing.shouldFireOnActivation(now: Date(),
                                                calendar: Calendar.current) {
-                Task { await briefing.fire() }
+                Task {
+                    await briefing.fire()
+                    await MainActor.run { self.refreshTodayBriefing() }
+                }
             }
+            // Unconditional re-read of the day slot on every activation
+            // (briefing persistence task, 2026-09-08): cheap, keeps the
+            // Home widget presence + briefing leaf truthful even when no
+            // fire ran, and any refresh racing the task above is
+            // superseded by the task's post-fire read.
+            refreshTodayBriefing()
         case .background:
             externalCalendar.submitBackgroundRefresh()
         default:
             break
         }
+    }
+
+    // MARK: - Today's briefing slot (briefing persistence task, 2026-09-08)
+
+    /// Re-reads the encrypted day slot into the published `todayBriefing`.
+    /// Main-confined: called synchronously from `init` / `handleScenePhase`
+    /// (SwiftUI main thread) and from `MainActor.run` after async fires —
+    /// the only two places the store's contents can change (a fire writes
+    /// the day's slot) or staleness could matter (midnight rollover, where
+    /// the stale slot stops matching the new day and the Home widget hides
+    /// itself until tomorrow's composition).
+    private func refreshTodayBriefing() {
+        todayBriefing = morningBriefingStore.todaysBriefing(now: Date())
     }
 
     // MARK: - Routine reminder surface (v2 pivot Phase 1)
@@ -4168,15 +4221,16 @@ final class AppCoordinator: ObservableObject {
 
     /// Today's medication reminders as localized "name — time" lines for
     /// the routine plugin's `routine.query` answer — one spoken list
-    /// spanning both reminder systems.
+    /// spanning both reminder systems. Spoken-form times (spoken-time
+    /// task, 2026-09-08): these lines are read aloud, so they share the
+    /// `SpokenTime` helper; UI display formatting is untouched.
     private func todayMedicationSummaryLines() -> [String] {
         medicationScheduler.pendingReminders
             .filter { Calendar.current.isDateInToday($0.scheduledAt) }
             .sorted { $0.scheduledAt < $1.scheduledAt }
             .map { reminder in
                 let name = medicationName(for: reminder.medicationEntryId)
-                let time = reminder.scheduledAt.formatted(
-                    Date.FormatStyle(date: .omitted, time: .shortened).locale(activeLocale))
+                let time = SpokenTime.string(from: reminder.scheduledAt, locale: activeLocale)
                 return "\(name) — \(time)"
             }
     }
@@ -4559,7 +4613,13 @@ extension AppCoordinator: VoiceCommandCoordinating {
     /// trigger, so command + activation can never double-speak.
     func fireMorningBriefing() {
         guard let morningBriefing else { return }
-        Task { await morningBriefing.fire() }
+        Task {
+            await morningBriefing.fire()
+            // Briefing persistence task, 2026-09-08: surface the composed
+            // day slot on Home right away (a same-day no-op re-reads the
+            // earlier composition — never clobbers it).
+            await MainActor.run { self.refreshTodayBriefing() }
+        }
     }
 }
 

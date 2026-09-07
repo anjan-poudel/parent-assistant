@@ -338,14 +338,16 @@ final class ExternalCalendarService: ObservableObject {
     /// three reminder systems. Timed items whose moment already passed
     /// are left out (their reminder has gone by); all-day items stay
     /// relevant all day.
+    /// Times use the shared SPOKEN form (spoken-time task, 2026-09-08):
+    /// `.shortened` clock text made the Nepali TTS read "१७:००" as
+    /// digits; UI display formatting is untouched.
     func todaysSpokenLines(locale: Locale) -> [String] {
         let currentTime = now()
         return todaysItems()
             .filter { $0.isAllDay || $0.startDate > currentTime }
             .map { item in
                 if item.isAllDay { return item.title }
-                let time = item.startDate.formatted(
-                    Date.FormatStyle(date: .omitted, time: .shortened).locale(locale))
+                let time = SpokenTime.string(from: item.startDate, locale: locale)
                 return "\(item.title) — \(time)"
             }
     }

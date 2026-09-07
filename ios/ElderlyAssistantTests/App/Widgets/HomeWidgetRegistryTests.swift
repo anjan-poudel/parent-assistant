@@ -29,6 +29,40 @@ final class HomeWidgetRegistryTests: XCTestCase {
         let priorities = builtIns.map(\.priority)
         XCTAssertEqual(priorities, priorities.sorted(),
                        "builtIns must be registered in priority order — the registry's sort is a safety net, not the ordering mechanism")
+        XCTAssertTrue(builtIns.contains { $0.widgetID == "todayBriefing" },
+                      "Today's-briefing widget must be registered among the built-ins")
+    }
+
+    // MARK: - Today's briefing widget (briefing persistence task, 2026-09-08)
+
+    func testTodayBriefingWidgetHiddenWhenNoBriefingStoredForToday() {
+        let widget = TodayBriefingWidget()
+        let stub = StubWidgetDataSource()   // todayBriefing == nil
+        XCTAssertFalse(widget.isVisible(coordinator: stub),
+                       "no stored briefing for the current day → no widget (no-mockups rule)")
+    }
+
+    func testTodayBriefingWidgetVisibleWhenBriefingExistsForToday() {
+        let widget = TodayBriefingWidget()
+        let stub = StubWidgetDataSource()
+        stub.todayBriefing = StoredBriefing(
+            dayStart: Date(),
+            localeIdentifier: "en-US",
+            text: "Good morning\nToday is Sunday, September 6, 2026\n"
+                + "Your routines today: Morning walk — 7 am"
+        )
+        XCTAssertTrue(widget.isVisible(coordinator: stub))
+    }
+
+    func testTodayBriefingWidgetSitsBetweenCalendarStripAndNextReminder() {
+        // Priority 15 (calendar strip 10, next reminder 20) — the day's
+        // content preview belongs above the "next dose" capsule.
+        let registry = HomeWidgetRegistry()
+        let order = registry.widgets.map(\.widgetID)
+        XCTAssertLessThan(order.firstIndex(of: "calendarStrip")!,
+                          order.firstIndex(of: "todayBriefing")!)
+        XCTAssertLessThan(order.firstIndex(of: "todayBriefing")!,
+                          order.firstIndex(of: "nextReminder")!)
     }
 
     // MARK: - Doubles
@@ -54,6 +88,7 @@ final class HomeWidgetRegistryTests: XCTestCase {
         var homeCalendarLine: String? = nil
         var activeLocale = Locale(identifier: "ne-NP")
         var pendingReminders: [ScheduledReminder] = []
+        var todayBriefing: StoredBriefing? = nil
         func refreshHomeCalendarLineIfNeeded() {}
         func medicationName(for entryId: UUID) -> String { "" }
     }

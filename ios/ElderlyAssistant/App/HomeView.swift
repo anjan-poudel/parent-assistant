@@ -12,6 +12,10 @@ enum LeafDestination: Identifiable {
     /// Directions (directions-screen task, 2026-09-07): the saved-targets
     /// map leaf, docked next to Appliance per the task brief.
     case directions
+    /// Today's stored morning briefing (briefing persistence task,
+    /// 2026-09-08): reached from the Today's-briefing Home widget — the
+    /// briefing is persistent for the day and this leaf is its viewer.
+    case briefing
 
     var id: String {
         switch self {
@@ -22,6 +26,7 @@ enum LeafDestination: Identifiable {
         case .history: return "history"
         case .settings: return "settings"
         case .directions: return "directions"
+        case .briefing: return "briefing"
         }
     }
 }
@@ -60,9 +65,17 @@ struct HomeView: View {
                 Color(theme: coordinator.appTheme).ignoresSafeArea()
                 VStack(spacing: 14) {
                     topBar
-                    if let line = coordinator.homeCalendarLine {
-                        calendarStrip(line)
-                    }
+                    // The Home-screen widget stack (2026-09-06 widget
+                    // system; render integration restored 2026-09-08 when
+                    // the Today's-briefing widget landed — a later commit
+                    // had reverted the stack to the inline calendar
+                    // strip): ordered, self-hiding glanceable cards
+                    // between the top bar and the Talk hero. Adding a
+                    // widget = conform to `HomeWidget` and register in
+                    // `HomeWidgetRegistry.builtIns` — this view never
+                    // changes. The calendar strip is widget #1 with the
+                    // exact look and tap target it always had.
+                    widgetStack
                     if !coordinator.onboardingState.pendingSteps.isEmpty {
                         setupStrip
                     }
@@ -103,6 +116,14 @@ struct HomeView: View {
                     navPath.append(LeafDestination.call)
                 }
             }
+            // Calendar-strip first-render gate (2026-09-08): the strip
+            // widget hides itself until `homeCalendarLine` is non-nil,
+            // but the refresh call used to live INSIDE the widget's view
+            // — a widget that never rendered because the line was nil.
+            // This one-shot container task breaks the deadlock. Cheap:
+            // the refresh no-ops once the line exists (and the value is
+            // not secret — BS date/tithi/festival text).
+            .task { coordinator.refreshHomeCalendarLineIfNeeded() }
             .fullScreenCover(isPresented: $showWizard) {
                 OnboardingWizardView(startingAt: coordinator.onboardingState.firstPendingStep)
                     .environmentObject(coordinator)
@@ -166,32 +187,21 @@ struct HomeView: View {
         .padding(.top, 8)
     }
 
-    /// Slim strip showing today's Nepali (Bikram Sambat) and Hindu
-    /// calendar dates (2026-09-06) — displayed directly on Home per
-    /// product direction, tappable into the full calendar leaf.
-    /// Deliberately a self-contained little view: when the main-screen
-    /// widget system lands, this becomes its first widget.
-    private func calendarStrip(_ line: String) -> some View {
-        NavigationLink(value: LeafDestination.calendar) {
-            HStack(spacing: 8) {
-                Image(systemName: "calendar")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(DesignTokens.accent)
-                Text(line)
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                Spacer(minLength: 0)
+    /// The Home widget registry, evaluated on every render — widgets
+    /// self-hide through `isVisible`, so no widget bookkeeping lives in
+    /// this view.
+    private let widgetRegistry = HomeWidgetRegistry()
+
+    /// The ordered stack of visible widgets (2026-09-06 widget system;
+    /// render site re-integrated 2026-09-08 — see the comment at the
+    /// `widgetStack` call site above).
+    private var widgetStack: some View {
+        let visible = widgetRegistry.orderedVisibleWidgets(coordinator: coordinator)
+        return VStack(spacing: 10) {
+            ForEach(visible, id: \.widgetID) { widget in
+                widget.makeView(coordinator: coordinator)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(Capsule())
         }
-        .buttonStyle(.plain)
-        .task { coordinator.refreshHomeCalendarLineIfNeeded() }
     }
 
     /// Slim, dismissible-by-navigation strip (redesign spec §3.1) —
@@ -540,6 +550,8 @@ struct HomeView: View {
             SettingsView()
         case .directions:
             DirectionsView()
+        case .briefing:
+            BriefingView()
         }
     }
 

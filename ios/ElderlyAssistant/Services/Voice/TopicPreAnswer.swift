@@ -176,14 +176,12 @@ enum TopicPreAnswer {
 
     // MARK: - Replies
 
-    /// Day-period of `hour` (0–23) for the spoken time.
+    /// Day-period of `hour` (0–23) for the spoken time. Delegates to
+    /// `SpokenTime.periodKey` — the single speech period table shared by
+    /// this answer and every scheduled-time line (spoken-time task,
+    /// 2026-09-08), so the two can never drift apart.
     private static func periodKey(hour: Int) -> String {
-        switch hour {
-        case 5..<12: return "topic.time.period.morning"
-        case 12..<16: return "topic.time.period.afternoon"
-        case 16..<20: return "topic.time.period.evening"
-        default: return "topic.time.period.night"   // 20:00–4:59
-        }
+        SpokenTime.periodKey(hour: hour)
     }
 
     private static func timeReply(now: Date, timeZone: TimeZone, locale: Locale) -> String {
@@ -196,16 +194,24 @@ enum TopicPreAnswer {
         let period = L10n.str(periodKey(hour: hour), locale: locale)
         let isNepali = locale.language.languageCode?.identifier == "ne"
 
-        let hourText = isNepali ? devanagari(String(hour12)) : String(hour12)
+        // Digits: Devanagari for Nepali. Minutes are UNPADDED in Nepali —
+        // same convention as `SpokenTime.nepali` ("बजेर ५ मिनेट", never
+        // "बजेर ०५ मिनेट") and produced by the SAME shared digit converter
+        // (`BikramSambat.devanagariDigits`), so the pre-answer and every
+        // scheduled-time line render numerals identically. English keeps
+        // zero-padded minutes ("It's 2:05…") to match `SpokenTime.english`
+        // — English TTS reads the colon form naturally.
+        let hourText = isNepali
+            ? BikramSambat.devanagariDigits(hour12)
+            : String(hour12)
         let minuteText = isNepali
-            ? devanagari(String(format: "%02d", minute))
+            ? BikramSambat.devanagariDigits(minute)
             : String(format: "%02d", minute)
         if minute == 0 {
             // ne: "अहिले बिहान ९ बजेको छ।"  en: "It's 9 in the morning."
             return L10n.fmt("topic.time.nowOnHour", locale: locale, hourText, period)
         }
-        // ne: "अहिले बिहान ९ बजेर ३० मिनेट भयो।"
-        // en: "It's 9:30 in the morning."
+        // ne: "अहिले बिहान ९ बजेर ५ मिनेट भयो।"  en: "It's 9:30 in the morning."
         return L10n.fmt("topic.time.nowWithMinutes", locale: locale,
                         hourText, minuteText, period)
     }
@@ -228,11 +234,5 @@ enum TopicPreAnswer {
         formatter.dateStyle = .full
         formatter.timeStyle = .none
         return L10n.fmt("topic.date.now", locale: locale, formatter.string(from: now))
-    }
-
-    /// Western ASCII digits → Devanagari numerals ("09" → "०९").
-    private static func devanagari(_ value: String) -> String {
-        let digits = Array("०१२३४५६७८९")
-        return String(value.map { digits[Int(String($0))!] })
     }
 }

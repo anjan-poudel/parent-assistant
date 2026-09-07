@@ -963,6 +963,57 @@
         }
       }
     },
+    "briefing.view.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No briefing for today yet."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजको बिहानको सारांश अझै छैन।"
+          }
+        }
+      }
+    },
+    "briefing.view.speakAgain": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Speak again"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फेरि सुन्नुहोस्"
+          }
+        }
+      }
+    },
+    "briefing.view.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today’s briefing"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजको बिहानको सारांश"
+          }
+        }
+      }
+    },
     "briefing.weather": {
       "extractionState": "manual",
       "localizations": {
@@ -993,6 +1044,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "यो मोडमा मौसमको जानकारी उपलब्ध छैन।"
+          }
+        }
+      }
+    },
+    "briefing.widget.summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today’s briefing: %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजको बिहानको सारांश: %@"
           }
         }
       }
@@ -5786,7 +5854,7 @@
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ %@ बजे राखियो"
+            "value": "%@ %@ राखियो"
           }
         }
       }
@@ -5803,7 +5871,7 @@
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ हरेक %@ %@ बजे राखियो"
+            "value": "%@ हरेक %@ %@ राखियो"
           }
         }
       }
@@ -11703,6 +11771,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "भोलि"
+          }
+        }
+      }
+    },
+    "widgets.medsStatus": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ of %2$@ doses taken today"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आज %2$@ मध्ये %1$@ खुराक लिइयो"
+          }
+        }
+      }
+    },
+    "widgets.nextReminder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Next: %1$@ at %2$@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अर्को: %1$@ — %2$@"
           }
         }
       }

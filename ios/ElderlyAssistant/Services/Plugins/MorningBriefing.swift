@@ -77,6 +77,16 @@ extension ExternalCalendarService: BriefingCalendarSource {}
 /// user-facing speech and a card — it NEVER appears in log metadata,
 /// event names, or transcript-adjacent fields.
 ///
+/// Persistence (briefing persistence task, 2026-09-08): when a
+/// `MorningBriefingStore` is injected, each fire that composes stores the
+/// exact spoken text + its day (start-of-day key) + the composition
+/// locale, encrypted (`EncryptedLocalStorage` — medication names are in
+/// the text). Single-slot: the next day's fire replaces the previous
+/// entry. Same-day triggers are no-ops and never clobber. The stored
+/// text powers the Home "Today's briefing" widget and leaf; replaying it
+/// re-speaks the STORED text through the interactive lane and never
+/// touches the once-per-day fire budget.
+///
 /// Safety: medication announcements themselves stay scheduler/`.safety`
 /// lane (design §4.2 hard rule). This source only *summarises the day's
 /// schedule* in the `.briefing` lane and never re-alerts for missed doses.
@@ -124,6 +134,14 @@ final class MorningBriefing: SpeechSource {
     private let calendarSource: BriefingCalendarSource
     private let weatherSource: BriefingWeatherSource?
 
+    /// Optional single-slot persistence for the day's composition
+    /// (briefing persistence task, 2026-09-08): when set, `fire()` stores
+    /// the composed text + its day so the user can view / re-hear today's
+    /// briefing later from Home. nil keeps the source purely in-memory
+    /// (the pre-persistence behavior, used by tests that don't assert
+    /// storage).
+    private let briefingStore: MorningBriefingStore?
+
     /// Injectable clock — tests pin "now" so day boundaries, the date
     /// line and the once-per-day rule are deterministic. Production
     /// passes `Date.init` (same convention as `RoutineScheduler`).
@@ -150,6 +168,7 @@ final class MorningBriefing: SpeechSource {
         medicationSource: BriefingMedicationSource,
         calendarSource: BriefingCalendarSource,
         weatherSource: BriefingWeatherSource? = nil,
+        briefingStore: MorningBriefingStore? = nil,
         locale: Locale = Locale(identifier: "en"),
         now: @escaping () -> Date = Date.init,
         calendar: Calendar = .current
@@ -160,6 +179,7 @@ final class MorningBriefing: SpeechSource {
         self.medicationSource = medicationSource
         self.calendarSource = calendarSource
         self.weatherSource = weatherSource
+        self.briefingStore = briefingStore
         self.locale = locale
         self.now = now
         self.calendar = calendar
@@ -208,7 +228,26 @@ final class MorningBriefing: SpeechSource {
         )
         queue.enqueue(announcement)
         firedDayStarts.insert(dayStart)
+        persist(StoredBriefing(
+            dayStart: dayStart,
+            localeIdentifier: locale.identifier,
+            text: text
+        ))
         emit("briefing_fired", metadata: [:])
+    }
+
+    /// Stores the composition in the day slot (briefing persistence
+    /// task, 2026-09-08). Runs only on a fire that actually composed —
+    /// the once-per-day guard above means a same-day second trigger is a
+    /// no-op and can never clobber the stored text. Replaces whatever
+    /// was stored (the previous day's entry — the slot is single-slot,
+    /// "persistent for the day"). Storage failure never silences the
+    /// briefing: the text is already enqueued above; a PII-free event
+    /// records the miss.
+    private func persist(_ briefing: StoredBriefing) {
+        guard let store = briefingStore, !store.save(briefing) else { return }
+        emit("briefing_persist_failed",
+             metadata: ["state": "storage_error"])
     }
 
     // MARK: - Composition
@@ -288,8 +327,12 @@ final class MorningBriefing: SpeechSource {
             }
     }
 
+    /// Spoken-form schedule times (spoken-time task, 2026-09-08): the
+    /// old `.shortened` clock formatting made the Nepali locale's TTS
+    /// read "१३:००" as digits ("thirteen hundred"). All speech-bound
+    /// lines share `SpokenTime`; on-screen UI keeps `Date.FormatStyle`.
     private func timeText(_ date: Date, locale: Locale) -> String {
-        date.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(locale))
+        SpokenTime.string(from: date, locale: locale, calendar: calendar)
     }
 
     // MARK: - Date line
