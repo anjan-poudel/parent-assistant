@@ -308,8 +308,7 @@ final class MorningBriefingTests: XCTestCase {
         XCTAssertEqual(announcement.priority, .briefing)
         XCTAssertEqual(announcement.sourceID, "morning_briefing")
         XCTAssertEqual(announcement.text,
-                       "Good morning\n" +
-                       "Today is Sunday, September 6, 2026\n" +
+                       "Good morning, Today is Sunday, September 6, 2026\n" +
                        "Your routines today: Morning walk — 7 am, Morning walk — 9 am\n" +
                        "Your medications today: Amlodipine — 5 mg — 8 am\n" +
                        "Your events today: Doctor — 10:30 AM, Lunch with Maya — 12:00 PM\n" +
@@ -344,14 +343,14 @@ final class MorningBriefingTests: XCTestCase {
 
         let announcement = try XCTUnwrap(harness.queue.enqueued.first)
         let lines = announcement.text.components(separatedBy: "\n")
-        XCTAssertEqual(lines.count, 6, "greeting, date, routines, medications, calendar, weather")
-        // Nepali date line carries the BS argument (weekday + BS date).
-        XCTAssertTrue(lines[1].contains("आइतबार"), "unexpected: \(lines[1])")
-        XCTAssertTrue(lines[1].contains("भदौ २१, २०८३"), "unexpected: \(lines[1])")
+        XCTAssertEqual(lines.count, 5, "greeting+date, routines, medications, calendar, weather")
+        // The greeting line carries the BS argument (weekday + BS date).
+        XCTAssertTrue(lines[0].contains("आइतबार"), "unexpected: \(lines[0])")
+        XCTAssertTrue(lines[0].contains("भदौ २१, २०८३"), "unexpected: \(lines[0])")
         // Verbatim user data passes through untranslated.
-        XCTAssertTrue(lines[2].contains("Morning walk"))
-        XCTAssertTrue(lines[3].contains("Amlodipine"))
-        XCTAssertTrue(lines[5].contains("Sunny and 22 degrees"))
+        XCTAssertTrue(lines[1].contains("Morning walk"))
+        XCTAssertTrue(lines[2].contains("Amlodipine"))
+        XCTAssertTrue(lines[4].contains("Sunny and 22 degrees"))
     }
 
     /// Spoken-text audit (2026-09-08): every briefing line that embeds a
@@ -380,14 +379,14 @@ final class MorningBriefingTests: XCTestCase {
 
         let lines = try XCTUnwrap(harness.queue.enqueued.first).text
             .components(separatedBy: "\n")
-        XCTAssertTrue(lines[2].contains("बिहान ७ बजेर ५ मिनेट"),
-                      "routine line must speak unpadded minutes: \(lines[2])")
-        XCTAssertTrue(lines[3].contains("बिहान ८ बजे"),
-                      "medication line must speak the on-the-hour form: \(lines[3])")
+        XCTAssertTrue(lines[1].contains("बिहान ७ बजेर ५ मिनेट"),
+                      "routine line must speak unpadded minutes: \(lines[1])")
+        XCTAssertTrue(lines[2].contains("बिहान ८ बजे"),
+                      "medication line must speak the on-the-hour form: \(lines[2])")
         // Time segments only — titles/doses may legitimately carry
         // ASCII ("Morning walk", "5 mg") and the catalog lead-in ends
         // with a colon; the SPOKEN time is what must stay clean.
-        let times = [lines[2], lines[3]].flatMap { line in
+        let times = [lines[1], lines[2]].flatMap { line in
             line.split(separator: ",").map { item in
                 String(item.split(separator: "—").last ?? "")
                     .trimmingCharacters(in: .whitespaces)
@@ -411,8 +410,7 @@ final class MorningBriefingTests: XCTestCase {
 
         let text = harness.queue.enqueued.first!.text
         XCTAssertEqual(text,
-                       "Good morning\n" +
-                       "Today is Sunday, September 6, 2026\n" +
+                       "Good morning, Today is Sunday, September 6, 2026\n" +
                        "You have nothing scheduled today\n" +
                        "Weather is not available in this mode")
     }
@@ -429,9 +427,9 @@ final class MorningBriefingTests: XCTestCase {
         await briefing.fire()
 
         let lines = harness.queue.enqueued.first!.text.components(separatedBy: "\n")
-        XCTAssertEqual(lines.count, 6)
-        XCTAssertEqual(lines[3], L10n.str("briefing.empty.medications", locale: en))
-        XCTAssertFalse(lines[3].isEmpty)
+        XCTAssertEqual(lines.count, 5)
+        XCTAssertEqual(lines[2], L10n.str("briefing.empty.medications", locale: en))
+        XCTAssertFalse(lines[2].isEmpty)
         // The empty line must NOT claim a fabricated medication.
         XCTAssertFalse(lines[3].contains("Amlodipine"))
     }

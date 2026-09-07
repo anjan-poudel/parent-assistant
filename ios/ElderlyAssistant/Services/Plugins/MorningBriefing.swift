@@ -253,14 +253,16 @@ final class MorningBriefing: SpeechSource {
     // MARK: - Composition
 
     /// The briefing's spoken lines, in pinned order:
-    /// greeting → date → routines → medications → calendar events → weather.
-    /// Deterministic for identical inputs: sources are queried in a fixed
-    /// order and every list is sorted by schedule time before rendering.
+    /// greeting + date (one line) → routines → medications → calendar
+    /// events → weather. Deterministic for identical inputs: sources are
+    /// queried in a fixed order and every list is sorted by schedule time
+    /// before rendering.
     func composeLines(locale: Locale, now: Date) -> [String] {
         var lines: [String] = []
-        lines.append(L10n.str("briefing.greeting", locale: locale))
-        lines.append(L10n.fmt("briefing.date", locale: locale,
-                              Self.dateArg(for: now, locale: locale, calendar: calendar)))
+        let greeting = L10n.str("briefing.greeting", locale: locale)
+        let date = L10n.fmt("briefing.date", locale: locale,
+                            Self.dateArg(for: now, locale: locale, calendar: calendar))
+        lines.append("\(greeting), \(date)")
 
         let routines = routineLines(now: now, locale: locale)
         let medications = medicationLines(now: now, locale: locale)
