@@ -441,8 +441,8 @@ final class AppCoordinator: ObservableObject {
     /// initialised, so the closure can't be captured at registration time.
     private let routinePlugin: RoutinePlugin
 
-    /// Family contacts (spec §4.4.2) — persisted encrypted, feeds the
-    /// notifier whenever the list changes.
+    /// The curated "Family and friends" list (spec §4.4.2) — persisted
+    /// encrypted, feeds the notifier whenever the list changes.
     let familyContactStore: FamilyContactStore
     @Published private(set) var familyContacts: [FamilyContact]
 
@@ -1862,7 +1862,7 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    // MARK: - Family contacts (spec §4.4.2)
+    // MARK: - Family & friends — curated contacts (spec §4.4.2)
 
     /// Maps stored family contacts onto the notifier's contact type.
     /// Device tokens stay unprovisioned until the broker relay exists
@@ -1879,12 +1879,98 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// Photo thumbnails for curated contacts (family-and-friends task,
+    /// 2026-09-07). Lazy like the intent-layer stores: nothing touches
+    /// Application Support paths before launch completes. Photos are
+    /// best-effort visuals — the store is non-throwing, and every call
+    /// site below tolerates a nil filename.
+    lazy var contactPhotoStore = ContactPhotoStore()
+
+    /// The stored thumbnail for a curated contact, or nil when none is
+    /// on file (or the file vanished) — the single lookup every row
+    /// renders through, so the Photo-tab UI needs nothing but a contact.
+    func contactPhoto(for contact: FamilyContact) -> UIImage? {
+        contactPhotoStore.load(named: contact.photoFilename)
+    }
+
+    /// Adds a curated contact (spec §4.4.2). `photo`, when given, is
+    /// persisted to `ContactPhotoStore` FIRST and its file name stored
+    /// on the contact — and if the store rejects the contact (list full)
+    /// the just-written file is deleted again, so a failed add never
+    /// orphans a photo on disk.
     @discardableResult
     func addFamilyContact(name: String, phone: String, relationship: String,
-                          messengerHandle: String? = nil) -> Bool {
+                          messengerHandle: String? = nil,
+                          photo: UIImage? = nil) -> Bool {
+        let filename = photo.flatMap { contactPhotoStore.save($0) }
         let contact = FamilyContact(name: name, phone: phone, relationship: relationship,
-                                    messengerHandle: messengerHandle)
-        guard familyContactStore.add(contact) else { return false }
+                                    messengerHandle: messengerHandle,
+                                    photoFilename: filename)
+        guard familyContactStore.add(contact) else {
+            if let filename { contactPhotoStore.delete(named: filename) }
+            return false
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.familyContacts = self.familyContactStore.load()
+            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts))
+        }
+        return true
+    }
+
+    /// Field edit of a curated contact (family-and-friends task,
+    /// 2026-09-07 — the Settings editor's add/edit sheet). The photo
+    /// arguments express the editor's three intents exactly: `photo`
+    /// non-nil REPLACES the stored photo, `removingPhoto` clears it, and
+    /// both nil keeps whatever is on file. The record save is the
+    /// commit point — a written replacement file is deleted again when
+    /// the store write fails, and the old photo file is only deleted
+    /// after the new record is safely persisted, so a failed edit never
+    /// loses the photo the contact already had.
+    @discardableResult
+    func updateFamilyContact(id: UUID, name: String, phone: String, relationship: String,
+                             messengerHandle: String?,
+                             photo: UIImage? = nil, removingPhoto: Bool = false) -> Bool {
+        guard var contact = familyContacts.first(where: { $0.id == id }) else { return false }
+        contact.name = name
+        contact.phone = phone
+        contact.relationship = relationship
+        contact.messengerHandle = messengerHandle
+
+        let oldFilename = contact.photoFilename
+        var newFilename = oldFilename
+        if removingPhoto {
+            newFilename = nil
+        } else if let photo {
+            // A failed thumbnail write KEEPS the photo the contact
+            // already had — a pick that couldn't be stored is a failed
+            // replacement, never a removal. (Only a first add with no
+            // old photo proceeds photo-less.)
+            if let saved = contactPhotoStore.save(photo) {
+                newFilename = saved
+            }
+        }
+
+        var all = familyContactStore.load()
+        guard let index = all.firstIndex(where: { $0.id == id }) else {
+            if let newFilename, newFilename != oldFilename {
+                contactPhotoStore.delete(named: newFilename)
+            }
+            return false
+        }
+        contact.photoFilename = newFilename
+        all[index] = contact
+        guard familyContactStore.save(all) else {
+            if let newFilename, newFilename != oldFilename {
+                contactPhotoStore.delete(named: newFilename)
+            }
+            return false
+        }
+        // The new record is safely on disk — the replaced/removed old
+        // file can go now.
+        if let oldFilename, oldFilename != newFilename {
+            contactPhotoStore.delete(named: oldFilename)
+        }
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.familyContacts = self.familyContactStore.load()
@@ -1894,7 +1980,13 @@ final class AppCoordinator: ObservableObject {
     }
 
     func removeFamilyContact(id: UUID) {
+        // The photo file is deleted with its contact — a removed person's
+        // thumbnail must not linger on disk.
+        let removed = familyContacts.first { $0.id == id }
         familyContactStore.remove(id: id)
+        if let filename = removed?.photoFilename {
+            contactPhotoStore.delete(named: filename)
+        }
         callMethodPreferences.removeAll(for: id)
         confirmedMethodHistory.removeAll(for: id)
         DispatchQueue.main.async { [weak self] in
