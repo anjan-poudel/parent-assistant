@@ -4528,7 +4528,6 @@ extension AppCoordinator {
     }
 }
 
-extension AppCoordinator: VoiceCommandCoordinating {}
 extension AppCoordinator: VoiceCommandCoordinating {
     /// [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1 — the router's
     /// "read me my briefing" hook. `fire()` is idempotent per calendar
