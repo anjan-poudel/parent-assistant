@@ -577,7 +577,7 @@ struct TalkButton: View {
                         .fill(heroFill)
                         .frame(width: DesignTokens.talkButtonDiameter,
                                height: DesignTokens.talkButtonDiameter)
-                        // Flat-color heroes (speaking blue, transcribing,
+                        // Flat-color heroes (speaking green, transcribing,
                         // understanding) cast a slightly heavier shadow
                         // than the amber-gradient glow so they lift off the
                         // warm background; idle/listening's amber stays at
@@ -753,7 +753,7 @@ struct TalkStageVisuals {
     /// SF Symbol inside the hero (state icons — spec §3.3).
     let icon: String
     /// Hero tint: flat fill, shadow and halo color (the DesignTokens
-    /// state palette — listening amber, speaking call-blue, etc.).
+    /// state palette — listening amber, speaking green, etc.).
     let tint: Color
     /// Big caption inside the hero (`state.*.button` keys).
     let captionKey: String
