@@ -463,6 +463,7 @@ enum HistoryRowOrderer {
 /// transcript the way a bare `.reversed()` did.
 struct ConversationHistorySheet: View {
     @ObservedObject var coordinator: AppCoordinator
+    @Environment(\.dismiss) private var dismiss
 
     /// Older-than-the-window pages already fetched via "Show more",
     /// display order (each page newest-first). Drawn below the live
@@ -502,9 +503,27 @@ struct ConversationHistorySheet: View {
                     .frame(width: 36, height: 4)
                     .frame(maxWidth: .infinity)
                     .padding(.top, 8)
-                Text("home.conversation.title")
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                // Title row with an explicit ✕ (2026-09-08 back/close
+                // audit): the sheet's drag indicator is hidden and a
+                // swipe-down is the only dismissal otherwise — an elder
+                // must never be stranded on the history sheet.
+                HStack(alignment: .center, spacing: 12) {
+                    Text("home.conversation.title")
+                        .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                        .foregroundColor(DesignTokens.textPrimary)
+                    Spacer(minLength: 0)
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundColor(DesignTokens.textSecondary)
+                            .accessibilityLabel(Text("common.close"))
+                    }
+                    .buttonStyle(.plain)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
+                }
                 if visibleRows.isEmpty {
                     Text("home.conversation.empty")
                         .font(.system(size: DesignTokens.minBodyPointSize))

@@ -2771,6 +2771,7 @@ struct MedicationScheduleSettingsView: View {
                            height: DesignTokens.minTapTargetSize)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text("settings.meds.delete"))
         }
         .padding(16)
         .frame(maxWidth: .infinity)
@@ -3110,6 +3111,7 @@ private struct ModelManagementRow: View {
                                    height: DesignTokens.minTapTargetSize)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(Text("model.delete"))
                 }
             }
             statusLine

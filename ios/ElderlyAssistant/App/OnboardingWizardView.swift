@@ -58,6 +58,7 @@ struct OnboardingWizardView: View {
                     .background(DesignTokens.card)
                     .clipShape(Circle())
             }
+            .accessibilityLabel(Text("common.back"))
             Spacer()
             Button(action: skipCurrentStep) {
                 Text("onboarding.skip")
