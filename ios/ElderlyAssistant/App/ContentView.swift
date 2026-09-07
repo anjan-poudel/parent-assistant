@@ -5,6 +5,7 @@ import SwiftUI
 /// has been run through (spec §4.2 — the wizard runs before voice engages).
 struct ContentView: View {
     @EnvironmentObject var coordinator: AppCoordinator
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -18,6 +19,12 @@ struct ContentView: View {
             if coordinator.onboardingState.hasSeenOnboarding {
                 coordinator.start()
             }
+        }
+        // External calendar import stays fresh: foreground rescans
+        // (native-app edits land immediately), background queues the
+        // hourly BGAppRefresh (calendar-driven task, 2026-09-07).
+        .onChange(of: scenePhase) { phase in
+            coordinator.handleScenePhase(phase)
         }
         // send_message trial wiring (AppCoordinator.composeMessage): the
         // native SMS compose sheet, presented app-wide so it can surface

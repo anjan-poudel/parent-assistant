@@ -71,6 +71,7 @@ final class AppCoordinator: ObservableObject {
         familyNotifier.locale = activeLocale
         routineAlarmScheduler.locale = activeLocale
         routineScheduler.locale = activeLocale
+        externalCalendar.locale = activeLocale
     }
 
     /// First-run onboarding progress (spec §4.2). Persisted per step.
@@ -737,6 +738,14 @@ final class AppCoordinator: ObservableObject {
         self.routineScheduler = routineScheduler
         self.routinePlugin = RoutinePlugin(scheduler: routineScheduler)
 
+        // Read-only native Calendar/Reminders integration (2026-09-07).
+        // Created here (right after the bus exists) so the language
+        // sync below reaches it; no permissions are touched by
+        // construction — enablement is a Settings toggle + point-of-use
+        // ask.
+        let externalCalendar = ExternalCalendarService(observabilityBus: bus)
+        self.externalCalendar = externalCalendar
+
         // Language — restore the persisted choice, defaulting to the Nepali
         // pilot language (spec §3.2).
         self.appLanguage = AppLanguage.persisted()
@@ -977,6 +986,26 @@ final class AppCoordinator: ObservableObject {
         routinePlugin.medicationSummaryProvider = { [weak self] in
             self?.todayMedicationSummaryLines() ?? []
         }
+        // Same fold for imported native Calendar/Reminders items — one
+        // spoken list spanning all three reminder systems.
+        routinePlugin.externalSummaryProvider = { [weak self] in
+            self?.externalCalendar.todaysSpokenLines(locale: self?.activeLocale
+                                                     ?? Locale(identifier: "en")) ?? []
+        }
+        // Mirror staleness seam (calendar-driven task, 2026-09-07): every
+        // routine mutation re-mirrors the schedule — one seam covering
+        // the voice path (RoutinePlugin.handleSet → addEntry) and the
+        // Reminders leaf toggles alike.
+        routineScheduler.onScheduleChanged = { [weak self] in
+            self?.calendarSync.syncNow(entries: self?.routineScheduler.entries() ?? [])
+        }
+        // Forward the external calendar service's publishes (Settings
+        // status/lead, scan results reaching the Reminders + Calendar
+        // leaves) — nested ObservableObject, see the property docs.
+        externalCalendarCancellable = externalCalendar.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
     }
 
     func start() {
@@ -1039,6 +1068,18 @@ final class AppCoordinator: ObservableObject {
         // every catalog festival + advance N-day reminders for important
         // ones (default 2, Settings-configurable). Idempotent rebuild.
         festivalCalendar.scheduleAll()
+
+        // Read-only native Calendar/Reminders integration (2026-09-07):
+        // launch-time refresh — NO prompts (startIfEnabled only scans
+        // when the family already enabled + granted access), then the
+        // hourly BGAppRefresh keeps it current while backgrounded.
+        Task { await externalCalendar.startIfEnabled() }
+        // Mirror staleness fix: re-mirror at launch when enabled (the
+        // restored status survives relaunches now), so the family's
+        // calendar view of the routine is current from a fresh start.
+        if calendarSync.isEnabled {
+            calendarSync.syncNow(entries: routineScheduler.entries())
+        }
 
         // Voice pipeline is built lazily here so the CommandRouter can hold a
         // weak ref back to this fully-initialised coordinator.
@@ -2855,6 +2896,21 @@ final class AppCoordinator: ObservableObject {
     /// was dropped in favor of it).
     private(set) lazy var calendarSync = CalendarSyncService(observabilityBus: observabilityBus)
 
+    /// Read-only native Calendar/Reminders integration (2026-09-07): the
+    /// REVERSE direction of `calendarSync` — native events/reminders
+    /// import as in-app reminders with notifications, and rows open the
+    /// native app (never written back). Eager (not lazy) because the
+    /// objectWillChange forwarding below must observe it from init;
+    /// constructing it touches no permissions.
+    private(set) var externalCalendar: ExternalCalendarService
+
+    /// Forwards the external calendar service's publishes (2026-09-07):
+    /// it is a nested ObservableObject, so a scan/status/lead change
+    /// alone would not invalidate views observing the coordinator — the
+    /// Settings card, Reminders leaf and Calendar leaf must refresh the
+    /// moment a scan lands (same pattern as `wakeWordKeyStoreCancellable`).
+    private var externalCalendarCancellable: AnyCancellable?
+
     /// Offline Bikram Sambat + tithi + festival overlay and festival
     /// notification scheduling (2026-09-06 BS calendar feature).
     private(set) lazy var festivalCalendar = FestivalCalendarService(observabilityBus: observabilityBus)
@@ -2865,6 +2921,50 @@ final class AppCoordinator: ObservableObject {
         calendarSync.isEnabled = enabled
         if enabled {
             await calendarSync.enableAndSync(entries: routineScheduler.entries())
+        }
+    }
+
+    // MARK: - Read-only external Calendar/Reminders surface (2026-09-07)
+
+    /// Settings toggle handler for the native-item import: ON asks for
+    /// calendar + reminders access at point of use and scans; OFF
+    /// cancels every notification this feature armed (scoped — the
+    /// medication/routine alarms on the same center are untouched).
+    func setExternalCalendarEnabled(_ enabled: Bool) async {
+        if enabled {
+            await externalCalendar.enable()
+        } else {
+            await externalCalendar.disable()
+        }
+    }
+
+    /// Today's imported native items (events + due reminders, oldest
+    /// first) — merged into the Reminders leaf's today list and the
+    /// Calendar leaf's schedule section.
+    var externalRemindersToday: [ExternalReminder] {
+        externalCalendar.todaysItems()
+    }
+
+    /// Tap on an external row — read-only integration: opens the item's
+    /// native app (Calendar `calshow:` / Reminders `x-apple-reminderkit://`),
+    /// best-effort behind canOpenURL.
+    func openExternalReminder(_ item: ExternalReminder) {
+        externalCalendar.open(item)
+    }
+
+    /// Scene-phase reactions wired from `ContentView`: foreground
+    /// rescans (family edits in the native apps land immediately),
+    /// background submits the hourly BGAppRefresh that keeps scans
+    /// coming while the app isn't running.
+    func handleScenePhase(_ phase: ScenePhase) {
+        guard started else { return }   // start() already refreshes
+        switch phase {
+        case .active:
+            Task { await externalCalendar.startIfEnabled() }
+        case .background:
+            externalCalendar.submitBackgroundRefresh()
+        default:
+            break
         }
     }
 
@@ -3055,6 +3155,24 @@ final class AppCoordinator: ObservableObject {
             self?.medicationScheduler.scheduleAll()
             self?.routineScheduler.scheduleAll()
             task.setTaskCompleted(success: true)
+        }
+        // External calendar rescan (calendar-driven task, 2026-09-07):
+        // the handler IS a rescan pass — same idempotent scan as the
+        // foreground refresh, so the native Calendar/Reminders changes
+        // a family member made while the app sat backgrounded land
+        // within the hourly cadence.
+        BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: ExternalCalendarService.backgroundTaskIdentifier,
+            using: nil
+        ) { [weak self] task in
+            guard let self else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            Task {
+                await self.externalCalendar.rescan()
+                task.setTaskCompleted(success: true)
+            }
         }
     }
 

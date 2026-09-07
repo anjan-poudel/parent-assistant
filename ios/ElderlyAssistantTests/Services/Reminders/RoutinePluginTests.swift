@@ -203,6 +203,35 @@ final class RoutinePluginTests: XCTestCase {
                       "the user's ONE reminder list spans both systems, got: \(text)")
     }
 
+    func testQueryFoldsInExternalCalendarSummary() async {
+        plugin.externalSummaryProvider = { ["Doctor — 2:00 PM"] }
+
+        let result = await plugin.handle(command("routine.query"),
+                                         context: makeContext())
+
+        guard case .spoken(let text) = result else {
+            XCTFail("expected .spoken, got \(result)")
+            return
+        }
+        XCTAssertTrue(text.contains("Doctor"),
+                      "native Calendar/Reminders items belong to the one spoken list, got: \(text)")
+    }
+
+    func testQueryWithOnlyExternalItemsStillAnswers() async {
+        plugin.externalSummaryProvider = { ["बिरुवालाई पानी दिने"] }
+
+        let result = await plugin.handle(command("routine.query"),
+                                         context: makeContext())
+
+        guard case .spoken(let text) = result else {
+            XCTFail("expected .spoken, got \(result)")
+            return
+        }
+        XCTAssertNotEqual(text, L10n.str("plugin.routine.noneToday",
+                                         locale: Locale(identifier: "ne")))
+        XCTAssertTrue(text.contains("बिरुवालाई पानी दिने"))
+    }
+
     func testUnknownActionFails() async {
         let result = await plugin.handle(command("routine.bogus"),
                                          context: makeContext())
