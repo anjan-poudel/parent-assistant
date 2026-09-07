@@ -8,14 +8,19 @@ import SwiftUI
 /// doubles stand in for the narrow `HomeWidgetDataSource` slice Home
 /// actually reads.
 
-/// In-memory `HomeWidgetDataSource` — every property settable, every
-/// coordinator side effect a no-op.
+/// In-memory `UpdatesDataProviding` — every property settable, every
+/// coordinator side effect a no-op. Conforms to the UPDATES slice
+/// (home-redesign v3, 2026-09-08), so it drives both the Home registry
+/// tests and the Updates-leaf composer tests.
 @MainActor
-final class StubHomeWidgetDataSource: HomeWidgetDataSource {
+final class StubHomeWidgetDataSource: UpdatesDataProviding {
     var homeCalendarLine: String? = nil
     var activeLocale = Locale(identifier: "ne-NP")
     var pendingReminders: [ScheduledReminder] = []
     var todayBriefing: StoredBriefing? = nil
+    /// The live conversation window the Updates leaf's Activity section
+    /// logs (oldest → newest, as the coordinator publishes it).
+    var conversationHistory: [ChatHistoryStore.Exchange] = []
     /// Stub backing for `medicationName(for:)` (the coordinator resolves
     /// entry IDs against the medication store).
     var medicationNames: [UUID: String] = [:]
@@ -29,7 +34,7 @@ final class StubHomeWidgetDataSource: HomeWidgetDataSource {
 /// A widget whose row is decided at construction — lets a test drive the
 /// registry with any mix of visible/self-hiding panels.
 @MainActor
-final class FakeDrawerWidget: HomeWidget {
+final class FakePanelWidget: HomeWidget {
     let widgetID: String
     let priority: Int
     private let row: HomeNotificationRow?

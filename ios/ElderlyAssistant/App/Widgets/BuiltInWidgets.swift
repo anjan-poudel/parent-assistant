@@ -3,11 +3,11 @@ import SwiftUI
 // MARK: - Today's briefing panel (briefing persistence task, 2026-09-08;
 // home-redesign 2026-09-08: capsule → drawer row)
 
-/// "Today's briefing" panel in the Home notifications drawer: the morning
-/// briefing is persistent for its calendar day (stored encrypted when
-/// `fire()` composed it), and this row is the way back to it — tap opens
-/// the briefing leaf where the full stored text lives with its "Speak
-/// again" button.
+/// "Today's briefing" panel in the Updates leaf's Notifications section:
+/// the morning briefing is persistent for its calendar day (stored
+/// encrypted when `fire()` composed it), and this row is the way back to
+/// it — tap pushes the briefing leaf where the full stored text lives
+/// with its "Speak again" button.
 ///
 /// Appears ONLY while a briefing exists for the CURRENT calendar day
 /// (the coordinator's `todayBriefing`): before the day's first
@@ -36,7 +36,8 @@ final class TodayBriefingWidget: HomeWidget {
 // MARK: - Meds status panel
 
 /// "X of Y doses taken today" — the day's adherence at a glance, as a
-/// drawer row. Hidden when today has no scheduled doses at all.
+/// Notifications-section row in the Updates leaf. Hidden when today has
+/// no scheduled doses at all.
 final class MedsStatusWidget: HomeWidget {
     let widgetID = "medsStatus"
     let priority = 20
