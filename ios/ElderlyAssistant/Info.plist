@@ -61,7 +61,7 @@
 	<key>NSCalendarsUsageDescription</key>
 	<string>Your daily routine (medicines, exercise, meals) is mirrored to the Calendar app so your family can see it too. The app works fully even if you say no.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>Events you keep in the Calendar app (doctor visits, family plans) can be read so they appear here with a reminder. Nothing is ever written to your calendar. The app works fully even if you say no.</string>
+	<string>Events you keep in the Calendar app (doctor visits, family plans) can be read so they appear here with a reminder, and your routine can be mirrored to a dedicated Sahayak calendar. With two-way mirroring switched on (off by default), changes you make to those mirrored events in the Calendar app update your routine here too. The app works fully even if you say no.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>Reminders you keep in the Reminders app can be read so they appear here with a reminder. Nothing is ever written to them. The app works fully even if you say no.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>

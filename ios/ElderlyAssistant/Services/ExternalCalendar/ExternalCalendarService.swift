@@ -3,6 +3,7 @@ import Combine
 import CryptoKit
 import BackgroundTasks
 import UIKit
+import EventKit
 
 /// Read-only bridge from the native Calendar/Reminders apps into this
 /// app (v2-pivot §4.1 + user decisions 2026-09-07): events from ALL
@@ -18,12 +19,17 @@ import UIKit
 /// already started).
 ///
 /// Rescan cadence: launch + foreground (`AppCoordinator.start` /
-/// `handleScenePhase(.active)`), plus the hourly BGAppRefresh task
-/// `com.elderlyassistant.calendar.scan`. Every pass is idempotent:
-/// stable identifiers (`external_` + SHA-256 of the native item) let
+/// `handleScenePhase(.active)`), the hourly BGAppRefresh task
+/// `com.elderlyassistant.calendar.scan`, and — while enabled — every
+/// `.EKEventStoreChanged` notification, so an edit the family makes in
+/// the native Calendar/Reminders apps lands within a moment instead of
+/// waiting for the next cadence beat. Every pass is idempotent: stable
+/// identifiers (`external_` + SHA-256 of the native item) let
 /// same-identifier re-adds replace in place, and cancels are scoped to
 /// identifiers this service armed — never `removeAllPendingNotificationRequests`
-/// (medication alarms share the center).
+/// (medication alarms share the center). Whole calendars can be
+/// excluded by identifier (`excludedCalendarIdentifiers` — the app's
+/// own two-way "Sahayak" calendar, 2026-09-07).
 final class ExternalCalendarService: ObservableObject {
 
     // MARK: - Tunables & identity
@@ -31,8 +37,14 @@ final class ExternalCalendarService: ObservableObject {
     static let backgroundTaskIdentifier = "com.elderlyassistant.calendar.scan"
     /// BGAppRefresh earliest-begin — hourly is the plan's cadence.
     static let backgroundRefreshMinimumLead: TimeInterval = 60 * 60
-    /// Scan horizon: events now → +7 days (family plans rarely reach
-    /// further; far-future events re-scan into view as they approach).
+    /// Scan horizon: events from the START OF TODAY through
+    /// +scanHorizonDays full days ahead. The window must open at 00:00
+    /// — EKEventStore's event predicate only returns events whose
+    /// start falls inside the window, so a window opening at the scan
+    /// instant would hide everything that started earlier today
+    /// (all-day events, start 00:00, above all — precisely the days the
+    /// family calendar runs on). Calendar-driven regression fix,
+    /// 2026-09-07. Far-future events re-scan into view as they approach.
     static let scanHorizonDays = 7
     /// Hard cap of armed notifications per pass. UN keeps 64 pending
     /// per app; 48 leaves headroom for the medication and routine
@@ -72,6 +84,16 @@ final class ExternalCalendarService: ObservableObject {
     /// Locale notification titles resolve against. `AppCoordinator`
     /// keeps it in sync with the app language (`syncServiceLocales`).
     var locale: Locale = Locale(identifier: "en")
+
+    /// Native calendars whose events this service must never import —
+    /// calendar-driven task, 2026-09-07: the app's own two-way
+    /// "Sahayak" calendar mirrors the routine, whose alarms fire
+    /// in-app already; importing its events would double-notify. The
+    /// mirror-tag notes check in `mapEvents` is the braces (it covers
+    /// both mirror forms); this identifier set is the belt that keeps
+    /// mirror events out even if their notes ever change. Coordinated
+    /// by `AppCoordinator` from `CalendarSyncService`'s Sahayak id.
+    var excludedCalendarIdentifiers: Set<String> = []
 
     // MARK: - Persisted state (UserDefaults — UI preferences, not secrets)
 
@@ -114,6 +136,18 @@ final class ExternalCalendarService: ObservableObject {
     /// the ONLY identifiers a scoped cancel may touch.
     private var armedIdentifiers: Set<String> = []
 
+    /// `.EKEventStoreChanged` observer token (armed while enabled) —
+    /// keeps import fresh without waiting for the next foreground or
+    /// BGTask beat.
+    private var storeChangeObserver: NSObjectProtocol?
+
+    /// Coalescing flag: store-change notifications arrive in bursts
+    /// (an edit session commits several times), and a scan already
+    /// under way has seen the latest commit or will on the next
+    /// notification — one pass per burst is enough. Touched only on
+    /// the main queue (observer queue + the async reset below).
+    private var isScanning = false
+
     init(
         scanner: NativeCalendarScanning = EKCalendarScanner(),
         alarmScheduler: ExternalAlarmScheduling = UNExternalReminderScheduler(),
@@ -146,6 +180,7 @@ final class ExternalCalendarService: ObservableObject {
     /// `AppCoordinator.start` and the `.active` scene phase.
     func startIfEnabled() async {
         guard isEnabled else { return }
+        startObservingNativeChanges()
         await rescan()
     }
 
@@ -154,6 +189,7 @@ final class ExternalCalendarService: ObservableObject {
     /// the existing answer without prompting, so toggling again is safe.
     func enable() async {
         isEnabled = true
+        startObservingNativeChanges()
         let eventsGranted = await scanner.requestEventAccess()
         let remindersGranted = await scanner.requestReminderAccess()
         await updateStatus(eventsGranted: eventsGranted, remindersGranted: remindersGranted)
@@ -168,6 +204,7 @@ final class ExternalCalendarService: ObservableObject {
     /// the published list.
     func disable() async {
         isEnabled = false
+        stopObservingNativeChanges()
         let stale = Array(armedIdentifiers)
         armedIdentifiers.removeAll()
         await MainActor.run {
@@ -181,10 +218,13 @@ final class ExternalCalendarService: ObservableObject {
              metadata: ["cancelled": "\(stale.count)"])
     }
 
-    /// Full scan pass: events now…+7 days + due reminders, mapped and
-    /// published on main, previous armed notifications cancelled
-    /// (scoped) and re-armed. Idempotent — this IS the BGTask handler
-    /// body as well as the foreground refresh.
+    /// Full scan pass: events from start-of-day today through +7 full
+    /// days (see `scanHorizonDays` — the window MUST open at 00:00 or
+    /// today's already-started events never reach the mapper) + due
+    /// reminders, mapped and published on main, previous armed
+    /// notifications cancelled (scoped) and re-armed. Idempotent —
+    /// this IS the BGTask handler body as well as the foreground
+    /// refresh and the store-change observer's pass.
     func rescan() async {
         guard isEnabled else { return }
         submitRefreshRequest()
@@ -196,11 +236,23 @@ final class ExternalCalendarService: ObservableObject {
         var fetchFailed = false
         if eventsGranted {
             do {
+                // Calendar-driven regression fix (2026-09-07): the
+                // fetch window opens at the START OF THE SCAN DAY, not
+                // at the scan instant — EKEventStore's predicate only
+                // returns events whose start lies inside the window, so
+                // a now()-anchored window hid every event that started
+                // earlier today (all-day events above all). The mapper
+                // still drops timed events already under way — it must
+                // simply get the chance to SEE them first.
+                let calendar = Calendar.current
+                let windowStart = calendar.startOfDay(for: start)
                 let scanned = try await scanner.fetchEvents(
-                    from: start,
-                    to: start.addingTimeInterval(TimeInterval(Self.scanHorizonDays) * 86_400)
+                    from: windowStart,
+                    to: windowStart.addingTimeInterval(
+                        TimeInterval(Self.scanHorizonDays + 1) * 86_400)
                 )
-                mapped.append(contentsOf: Self.mapEvents(scanned, now: start))
+                mapped.append(contentsOf: Self.mapEvents(importable(from: scanned),
+                                                         now: start))
             } catch {
                 fetchFailed = true
             }
@@ -224,6 +276,36 @@ final class ExternalCalendarService: ObservableObject {
     /// stays alive).
     func submitBackgroundRefresh() {
         submitRefreshRequest()
+    }
+
+    // MARK: - Native store-change observation (import freshness)
+
+    /// Arms the `.EKEventStoreChanged` observer — edits the family
+    /// makes in the native Calendar/Reminders apps (and the app's own
+    /// calendar writes, mirror events excluded by tag/calendar) refresh
+    /// the import immediately instead of waiting for the next
+    /// foreground or BGTask beat. Idempotent; `disable()` removes it.
+    /// Never a write path — rescans only read, so there is no
+    /// self-triggering loop.
+    func startObservingNativeChanges() {
+        guard storeChangeObserver == nil else { return }
+        storeChangeObserver = NotificationCenter.default.addObserver(
+            forName: .EKEventStoreChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            guard let self, self.isEnabled, !self.isScanning else { return }
+            self.isScanning = true
+            Task { [weak self] in
+                guard let self else { return }
+                await self.rescan()
+                await MainActor.run { self.isScanning = false }
+            }
+        }
+    }
+
+    func stopObservingNativeChanges() {
+        guard let storeChangeObserver else { return }
+        NotificationCenter.default.removeObserver(storeChangeObserver)
+        self.storeChangeObserver = nil
     }
 
     /// The actual BGAppRefresh submission. Errors are swallowed on
@@ -373,6 +455,18 @@ final class ExternalCalendarService: ObservableObject {
     }
 
     // MARK: - Private
+
+    /// Drops scanned events from excluded native calendars before the
+    /// mapper sees them (2026-09-07 two-way: the app's own Sahayak
+    /// calendar). Events without a calendar identifier (legacy test
+    /// doubles) pass through — exclusion is keyed on identity we have.
+    private func importable(from scanned: [ScannedEvent]) -> [ScannedEvent] {
+        guard !excludedCalendarIdentifiers.isEmpty else { return scanned }
+        return scanned.filter { event in
+            guard let calendarIdentifier = event.calendarIdentifier else { return true }
+            return !excludedCalendarIdentifiers.contains(calendarIdentifier)
+        }
+    }
 
     /// Re-reads both stores' authorization truth, persists the honest
     /// derived status (enabled / partial / denied), and returns what is

@@ -270,6 +270,104 @@ final class RoutineSchedulerTests: XCTestCase {
         XCTAssertEqual(fires, 1)
     }
 
+    // MARK: - Native-edit mutators (calendar-driven task, 2026-09-07)
+
+    func testRetimeSlotPersistsRearmsAndFiresTheSeam() {
+        let entry = makeEntry(hour: 11)
+        scheduler.addEntry(entry)
+        let oldIds = Set(alarm.scheduled.keys)
+        XCTAssertEqual(oldIds.count, 2, "today + tomorrow at 11:00")
+        var fires = 0
+        scheduler.onScheduleChanged = { fires += 1 }
+
+        let retimed = scheduler.retimeSlot(entryId: entry.id, fromHour: 11,
+                                           fromMinute: 0, toHour: 14, toMinute: 0)
+
+        XCTAssertTrue(retimed)
+        XCTAssertEqual(scheduler.entries().first?.scheduleTimes,
+                       [DateComponents(hour: 14, minute: 0)])
+        XCTAssertEqual(RoutineStore(storage: storage).loadEntries().first?.scheduleTimes,
+                       [DateComponents(hour: 14, minute: 0)], "durable across store instances")
+        XCTAssertEqual(Set(alarm.cancelled), oldIds,
+                       "the 11:00 occurrences are cancelled (identity is time-keyed)")
+        XCTAssertEqual(alarm.scheduled.count, 2)
+        XCTAssertTrue(alarm.scheduled.values.allSatisfy {
+            Calendar.current.component(.hour, from: $0.at) == 14
+        })
+        XCTAssertEqual(fires, 1)
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "entry_retimed" })
+    }
+
+    func testRetimeSlotIsANoOpWhenFromTimeIsGone() {
+        let entry = makeEntry(hour: 11)
+        scheduler.addEntry(entry)
+        let scheduleBefore = scheduler.entries().first?.scheduleTimes
+        var fires = 0
+        scheduler.onScheduleChanged = { fires += 1 }
+
+        let retimed = scheduler.retimeSlot(entryId: entry.id, fromHour: 9,
+                                           fromMinute: 0, toHour: 14, toMinute: 0)
+
+        XCTAssertFalse(retimed, "a from-time that no slot has changes nothing")
+        XCTAssertEqual(scheduler.entries().first?.scheduleTimes, scheduleBefore)
+        XCTAssertEqual(fires, 0)
+    }
+
+    func testDropSlotRemovesExactlyThatTime() {
+        let entry = RoutineEntry(category: .walk,
+                                 scheduleTimes: [DateComponents(hour: 11, minute: 0),
+                                                 DateComponents(hour: 16, minute: 0)],
+                                 isEnabled: true)
+        scheduler.addEntry(entry)
+        XCTAssertEqual(alarm.scheduled.count, 4, "two slots × two days")
+        var fires = 0
+        scheduler.onScheduleChanged = { fires += 1 }
+
+        let dropped = scheduler.dropSlot(entryId: entry.id, hour: 11, minute: 0)
+
+        XCTAssertTrue(dropped)
+        XCTAssertEqual(scheduler.entries().first?.scheduleTimes,
+                       [DateComponents(hour: 16, minute: 0)])
+        XCTAssertEqual(alarm.scheduled.count, 2, "only the 16:00 occurrences remain armed")
+        XCTAssertEqual(alarm.cancelled.count, 2, "the 11:00 pair is cancelled")
+        XCTAssertEqual(fires, 1)
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "slot_dropped" })
+    }
+
+    func testDropSlotRefusesToEmptyTheList() {
+        let entry = makeEntry(hour: 11)
+        scheduler.addEntry(entry)
+
+        let dropped = scheduler.dropSlot(entryId: entry.id, hour: 11, minute: 0)
+
+        XCTAssertFalse(dropped,
+                       "an entry whose last slot goes is DISABLED by the planner, never emptied here")
+        XCTAssertEqual(scheduler.entries().first?.scheduleTimes,
+                       [DateComponents(hour: 11, minute: 0)])
+        XCTAssertEqual(alarm.scheduled.count, 2, "nothing re-armed, nothing cancelled")
+    }
+
+    func testUpdateRecurrenceStoresWeeklyDaysSortedAndDailyClearsThem() {
+        let entry = makeEntry(hour: 11)
+        scheduler.addEntry(entry)
+        var fires = 0
+        scheduler.onScheduleChanged = { fires += 1 }
+
+        XCTAssertTrue(scheduler.updateRecurrence(entryId: entry.id, frequency: .weekly,
+                                                 weekdays: [5, 2]))
+        let weekly = scheduler.entries().first
+        XCTAssertEqual(weekly?.frequency, .weekly)
+        XCTAssertEqual(weekly?.weekdays, [2, 5], "stored sorted — comparison-normalized everywhere")
+
+        XCTAssertTrue(scheduler.updateRecurrence(entryId: entry.id, frequency: .daily,
+                                                 weekdays: []))
+        let daily = scheduler.entries().first
+        XCTAssertEqual(daily?.frequency, .daily)
+        XCTAssertTrue(daily?.weekdays.isEmpty ?? false)
+        XCTAssertEqual(fires, 2)
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "entry_recurrence_updated" })
+    }
+
     // MARK: - Today's list
 
     func testTodaysOccurrencesFiltersAndSorts() {

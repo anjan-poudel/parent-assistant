@@ -1212,6 +1212,24 @@ final class AppCoordinator: ObservableObject {
             calendarSync.syncNow(entries: routineScheduler.entries())
         }
 
+        // Two-way mirroring (calendar-driven task, 2026-09-07): the
+        // coordinator relays native edits — family changes made in the
+        // Calendar app on Sahayak mirror events — back into
+        // RoutineScheduler's mutators, so persistence, re-arming and
+        // the mirror re-sync stay on the one mutation path. The
+        // Sahayak calendar id (restored from the link store) is
+        // excluded from the read-only import: those events ARE the
+        // routine, whose alarms fire in-app already.
+        calendarSync.entriesProvider = { [weak self] in
+            self?.routineScheduler.entries() ?? []
+        }
+        calendarSync.onNativeChanges = { [weak self] mutations in
+            self?.applyNativeCalendarMutations(mutations)
+        }
+        if let sahayakIdentifier = calendarSync.sahayakCalendarIdentifier {
+            externalCalendar.excludedCalendarIdentifiers.insert(sahayakIdentifier)
+        }
+
         // Voice pipeline is built lazily here so the CommandRouter can hold a
         // weak ref back to this fully-initialised coordinator.
         let systemSpeaker = SystemSpeechSpeaker(observabilityBus: observabilityBus)
@@ -3652,6 +3670,59 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    // MARK: - Two-way calendar mirroring (calendar-driven task, 2026-09-07)
+
+    /// Settings toggle handler for two-way mirroring (default OFF):
+    /// ON ensures the mirror is on first, requests FULL calendar
+    /// access at point of use (read access is what lets native edits
+    /// reconcile back), then mirrors the schedule into the dedicated
+    /// "Sahayak" calendar; OFF removes the Sahayak events (the legacy
+    /// mode-switch wipe) and falls back to the one-way default-calendar
+    /// mirror. The Sahayak id feeds the import's calendar-id exclusion
+    /// in every direction.
+    func setCalendarTwoWayEnabled(_ enabled: Bool) async {
+        if enabled {
+            if !calendarSync.isEnabled {
+                calendarSync.isEnabled = true
+                await calendarSync.enableAndSync(entries: routineScheduler.entries())
+            }
+            await calendarSync.enableTwoWayAndSync(entries: routineScheduler.entries())
+        } else {
+            calendarSync.disableTwoWayAndSyncIfMirrorEnabled(entries: routineScheduler.entries())
+        }
+        if let sahayakIdentifier = calendarSync.sahayakCalendarIdentifier {
+            externalCalendar.excludedCalendarIdentifiers.insert(sahayakIdentifier)
+        }
+    }
+
+    /// Applies native-calendar edits to the app's routine schedule —
+    /// the `onNativeChanges` relay. Runs off any gesture (the family
+    /// edits in another app; the store-change notification delivers it
+    /// here), so the republish below is what refreshes views.
+    private func applyNativeCalendarMutations(
+        _ mutations: [CalendarSyncService.RoutineCalendarMutation]) {
+        for mutation in mutations {
+            switch mutation {
+            case .dropSlot(let entryId, let hour, let minute):
+                routineScheduler.dropSlot(entryId: entryId, hour: hour, minute: minute)
+            case .retimeSlot(let entryId, let fromHour, let fromMinute,
+                             let toHour, let toMinute):
+                routineScheduler.retimeSlot(entryId: entryId, fromHour: fromHour,
+                                            fromMinute: fromMinute,
+                                            toHour: toHour, toMinute: toMinute)
+            case .setRecurrence(let entryId, let frequency, let weekdays):
+                routineScheduler.updateRecurrence(entryId: entryId,
+                                                  frequency: frequency,
+                                                  weekdays: weekdays)
+            case .disableEntry(let entryId):
+                routineScheduler.setEnabled(entryId, enabled: false)
+            }
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
+        }
+    }
+
     // MARK: - Read-only external Calendar/Reminders surface (2026-09-07)
 
     /// Settings toggle handler for the native-item import: ON asks for
@@ -3681,7 +3752,8 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Scene-phase reactions wired from `ContentView`: foreground
-    /// rescans (family edits in the native apps land immediately),
+    /// rescans (family edits in the native apps land immediately —
+    /// the import's scan AND the two-way mirror's reconciliation),
     /// background submits the hourly BGAppRefresh that keeps scans
     /// coming while the app isn't running.
     func handleScenePhase(_ phase: ScenePhase) {
@@ -3689,6 +3761,9 @@ final class AppCoordinator: ObservableObject {
         switch phase {
         case .active:
             Task { await externalCalendar.startIfEnabled() }
+            Task {
+                await calendarSync.reconcileNativeChanges(entries: routineScheduler.entries())
+            }
         case .background:
             externalCalendar.submitBackgroundRefresh()
         default:
