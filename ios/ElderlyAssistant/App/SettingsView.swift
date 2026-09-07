@@ -16,7 +16,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case appearance, language, calling, places, family, meds, calendar, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, quickApps, privacy, intentLog, toolLog
+        case appearance, language, calling, places, family, meds, manuals, calendar, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, quickApps, privacy, intentLog, toolLog
 
         var id: String {
             switch self {
@@ -26,6 +26,7 @@ struct SettingsView: View {
             case .places: return "places"
             case .family: return "family"
             case .meds: return "meds"
+            case .manuals: return "manuals"
             case .calendar: return "calendar"
             case .alarms: return "alarms"
             case .geminiAI: return "geminiAI"
@@ -93,6 +94,10 @@ struct SettingsView: View {
                         sectionRow(.quickApps, icon: "square.grid.2x2.fill", titleKey: "settings.quickApps.title")
                         sectionRow(.family, icon: "person.2.fill", titleKey: "settings.family.title")
                         sectionRow(.meds, icon: "pills.fill", titleKey: "settings.meds.title")
+                        // Bundled default manuals (2026-09-07) — camera-
+                        // free, Gemini-free "how do I use this" guides.
+                        sectionRow(.manuals, icon: "book.closed.fill",
+                                   titleKey: "settings.manuals.title")
                         // Native calendar bridge (calendar-settings task,
                         // 2026-09-07): the mirror/two-way/import cards left
                         // the meds leaf — this row is their hub entry.
@@ -133,6 +138,7 @@ struct SettingsView: View {
             case .places: PlacesSettingsView()
             case .family: FamilyContactsSettingsView()
             case .meds: MedicationScheduleSettingsView()
+            case .manuals: DefaultManualsBrowseView()
             // Calendar settings (calendar-settings task, 2026-09-07) —
             // the mirror/two-way/import cards that used to crowd the
             // Medication schedule leaf.
@@ -2765,6 +2771,7 @@ struct MedicationScheduleSettingsView: View {
                            height: DesignTokens.minTapTargetSize)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text("settings.meds.delete"))
         }
         .padding(16)
         .frame(maxWidth: .infinity)
@@ -3104,6 +3111,7 @@ private struct ModelManagementRow: View {
                                    height: DesignTokens.minTapTargetSize)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(Text("model.delete"))
                 }
             }
             statusLine

@@ -4788,6 +4788,23 @@
         }
       }
     },
+    "model.delete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete model"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मोडेल मेट्नुहोस्"
+          }
+        }
+      }
+    },
     "model.download": {
       "extractionState": "manual",
       "localizations": {
@@ -8235,6 +8252,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "औषधि थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.meds.delete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete medication"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "औषधि मेट्नुहोस्"
           }
         }
       }

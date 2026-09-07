@@ -1738,10 +1738,14 @@ final class AppCoordinator: ObservableObject {
     /// was still `.stopped`; when the restart delivered `.idle`,
     /// `handlePipelineState` mapped it through `speakingCount > 0` to
     /// `.speaking` — a `.stopped → .speaking` transition the state
-    /// machine rejects (DEBUG assertionFailure crash; the second half of
-    /// the Talk-button crash). Deferring the speech to the restart
-    /// completion keeps the session on the table's legal path:
-    /// `.stopped → .idle → .speaking`.
+    /// machine then rejected (DEBUG assertionFailure crash; the second
+    /// half of the Talk-button crash). Deferring the speech to the
+    /// restart completion still orders the re-prompt AFTER the recycle
+    /// has landed (`.stopped → .idle → .speaking`). The table has
+    /// admitted `.stopped → .speaking` since STOPPED-SPEAKING-FIX
+    /// (2026-09-08) — push speech such as the launch morning briefing
+    /// may start before the pipeline is primed — but deferral stays: the
+    /// user hears "I'm listening again" only once the assistant is.
     func recoverVoiceCycle() {
         cancelVoiceWatchdog()
         print("[AppCoordinator] recovering voice cycle — recycling pipeline")
@@ -1940,6 +1944,16 @@ final class AppCoordinator: ObservableObject {
             // the pipeline eventually emitted .idle. All three pre-speech
             // states legally transition to .speaking (VoiceSessionState
             // transition table).
+            //
+            // Else-branch push speech (STOPPED-SPEAKING-FIX, 2026-09-08):
+            // when the utterance starts from a NON pre-speech state — the
+            // session still `.stopped`, because push speech (launch
+            // briefing, read-aloud) beat the pipeline's start — the
+            // handlePipelineState re-run below promotes through
+            // `speakingCount > 0` to `.speaking`. `.stopped → .speaking`
+            // is legal by table (mirrors `.idle`), so no DEBUG trap; the
+            // round trip closes on noteSpeakingEnded once the pipeline
+            // reports.
             let preSpeech: Set<VoiceSessionState> = [.listening, .transcribing, .understanding]
             if preSpeech.contains(self.voiceSession.state) {
                 self.voiceSession.transition(to: .speaking)
@@ -4138,6 +4152,17 @@ final class AppCoordinator: ObservableObject {
             // activations never double-speak. After the fire completes,
             // the stored slot is re-read into `todayBriefing` (a same-day
             // no-op leaves the earlier composition untouched).
+            // activations never double-speak.
+            //
+            // Launch ordering (STOPPED-SPEAKING-FIX, 2026-09-08): this
+            // fire is deliberately NOT serialized behind the voice
+            // pipeline's start — the briefing Task can beat pipeline
+            // start (observed log order briefing_fired →
+            // pipeline_started) and speak while the session is still
+            // `.stopped`. That is legal by design: the session table
+            // admits `.stopped → .speaking` for push speech that starts
+            // before the pipeline is primed, so start() needs no
+            // reordering.
             if let briefing = morningBriefing,
                briefing.shouldFireOnActivation(now: Date(),
                                                calendar: Calendar.current) {
