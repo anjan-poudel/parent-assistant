@@ -2,6 +2,29 @@
 
 Date: 2026-09-07 · Status: proposal (decisions recorded, v1 spec in `2026-09-07-voice-os-shell-v1-design.md`)
 
+## 0. Product identity — seniorOS
+
+The product's name and ethos is **seniorOS** — an AI-powered operating system for
+seniors and parents. The ethos governs every feature and slice:
+
+- **The parent's device IS the OS.** The app is not a utility inside iOS; it is the
+  voice-driven control plane of the phone: kernel (speech, routing, safety) +
+  userland (plugins) + caregiver as remote administrator.
+- **Voice is the primary interface; touch is the fallback.** Every capability must
+  answer "can the parent do this by speaking, in their own language?"
+- **The system always tells the truth.** No fabricated success, no silent failures —
+  the honest-outcome discipline already enforced by the plugin architecture.
+- **Caregivers administer, parents live.** The caregiver app manages
+  configuration/plugins/alerts; the parent's experience stays locked-down and simple.
+- **Language-first.** Nepali-class language support is the differentiator; features
+  ship localised in en + ne together, never English-first with translation later.
+
+Naming note: the voice persona keeps its existing wake word ("Hey Sahayak"); the
+*product* identity is seniorOS. A branding sweep (display name, onboarding copy,
+About screen, docs) is a named task in the Caregiver app slice. Marketing honesty
+(critique §2.1) still applies: seniorOS is the ambition; public claims stay
+demonstrable and measurable until the release gates pass.
+
 ## 1. Product direction (user-stated)
 
 The app evolves from an AI assistant into a **voice-driven personal operating system** for

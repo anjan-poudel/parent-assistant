@@ -810,6 +810,193 @@
         }
       }
     },
+    "briefing.calendar": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your events today: %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजका कार्यक्रमहरू: %@"
+          }
+        }
+      }
+    },
+    "briefing.date": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Today is %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आज %@ हो"
+          }
+        }
+      }
+    },
+    "briefing.empty.calendar": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No events scheduled today"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आज कुनै कार्यक्रम छैन।"
+          }
+        }
+      }
+    },
+    "briefing.empty.medications": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No medications scheduled today"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आज कुनै औषधि तालिका छैन।"
+          }
+        }
+      }
+    },
+    "briefing.empty.routines": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No routines scheduled today"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आज कुनै दिनचर्या तालिका छैन।"
+          }
+        }
+      }
+    },
+    "briefing.greeting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Good morning"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "शुभ प्रभात"
+          }
+        }
+      }
+    },
+    "briefing.medications": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your medications today: %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजका औषधिहरू: %@"
+          }
+        }
+      }
+    },
+    "briefing.nothing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You have nothing scheduled today"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आज तपाईंको केही पनि तालिका छैन।"
+          }
+        }
+      }
+    },
+    "briefing.routines": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your routines today: %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजका दिनचर्याहरू: %@"
+          }
+        }
+      }
+    },
+    "briefing.weather": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The weather today: %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आजको मौसम: %@"
+          }
+        }
+      }
+    },
+    "briefing.weather.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weather is not available in this mode"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो मोडमा मौसमको जानकारी उपलब्ध छैन।"
+          }
+        }
+      }
+    },
     "calculator.error.divByZero": {
       "extractionState": "manual",
       "localizations": {
@@ -4750,6 +4937,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "पुष्टि गर्ने केही छैन"
+          }
+        }
+      }
+    },
+    "notification.read.medication": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Medicine time: %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको %@ खाने समय भयो।"
+          }
+        }
+      }
+    },
+    "notification.read.summary": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You have %d new notifications"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंलाई %d वटा नयाँ सूचना आएका छन्।"
           }
         }
       }
