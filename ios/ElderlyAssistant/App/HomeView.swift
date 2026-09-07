@@ -280,14 +280,24 @@ struct HomeView: View {
 
     // MARK: - Talk stage (redesign spec §3.1)
 
+    /// The stage's visuals all derive from ONE mapping
+    /// (`VoiceSessionState.talkVisuals`, call-UI fix 2026-09-07): which
+    /// stage shows (hero vs confirmation chips), the hint carousel and
+    /// the error detail branch on the mapping's flags — never on raw
+    /// state equality. A session-state flip therefore re-renders every
+    /// stage element from the same table in the same transaction,
+    /// instead of each view re-deriving its own conditions that could
+    /// diverge.
+    private var stageVisuals: TalkStageVisuals { session.state.talkVisuals }
+
     private var talkStage: some View {
         Group {
-            if session.state == .awaitingConfirmation {
-                ConfirmationChips(statusKey: "state.awaitingConfirmation.status")
+            if stageVisuals.isConfirmation {
+                ConfirmationChips(titleKey: stageVisuals.captionKey)
             } else {
                 VStack(spacing: 18) {
                     TalkButton(session: session,
-                               statusOverride: session.state == .error ? errorStatusText : nil) {
+                               statusOverride: stageVisuals.isError ? errorStatusText : nil) {
                         switch session.state {
                         case .idle:
                             coordinator.simulateWakeWordDetection()
@@ -305,10 +315,10 @@ struct HomeView: View {
                             break
                         }
                     }
-                    if session.state == .idle {
+                    if stageVisuals.showsHintCarousel {
                         HintCarousel()
                     }
-                    if session.state == .error,
+                    if stageVisuals.isError,
                        coordinator.voiceErrorKind == .permission {
                         openSettingsButton
                     }
@@ -357,8 +367,20 @@ struct HomeView: View {
     private var feedbackArea: some View {
         switch session.state {
         case .listening, .transcribing, .understanding:
-            LiveCaptionPill(placeholderKey: capturePlaceholderKey,
-                            transcript: coordinator.livePartialTranscript ?? coordinator.lastTranscript)
+            // The pill is a transcript surface — its header ("You're
+            // saying") plus the real words once STT lands. The capture
+            // stage's own phrase lives on the hero's status line; the
+            // pill used to repeat that same sentence inside the
+            // transcript slot, framed by the header as if it were the
+            // user's words ("You're saying: Go ahead, I'm listening")
+            // until the real transcript replaced it (call-UI fix,
+            // 2026-09-07).
+            LiveCaptionPill(transcript: coordinator.livePartialTranscript ?? coordinator.lastTranscript)
+        case .awaitingConfirmation:
+            // The confirmation chips in `talkStage` ARE the feedback — an
+            // earlier turn's outcome card underneath the yes/no question
+            // read as a stray second card (call-UI fix, 2026-09-07).
+            EmptyView()
         default:
             if let outcome = coordinator.lastOutcome {
                 OutcomeCardView(outcome: outcome, expanded: outcomeExpanded) {
@@ -393,14 +415,6 @@ struct HomeView: View {
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
-    }
-
-    private var capturePlaceholderKey: String {
-        switch session.state {
-        case .transcribing: return "state.transcribing.status"
-        case .understanding: return "state.understanding.status"
-        default: return "state.listening.status"
-        }
     }
 
     // MARK: - Dock (redesign spec §3.1 — replaces the 2×2 hub grid; Home
@@ -528,18 +542,32 @@ struct TalkButton: View {
 
     @State private var breathe = false
 
-    private var isGlowing: Bool { session.state == .idle || session.state == .listening }
+    /// Single visual mapping for the hero (call-UI fix, 2026-09-07):
+    /// icon, fill, halo, labels and motion all come from
+    /// `VoiceSessionState.talkVisuals` — one switch over `session.state`
+    /// — so the button can never render one state's color with another
+    /// state's icon or label, and every element flips in the same
+    /// transaction the state publishes.
+    private var visuals: TalkStageVisuals { session.state.talkVisuals }
+
+    private var isBreathing: Bool { visuals.pulses && !reduceMotion }
 
     var body: some View {
         VStack(spacing: 12) {
             Button(action: onTap) {
                 ZStack {
-                    if isGlowing && !reduceMotion {
+                    if isBreathing {
                         breathingRings
                     }
-                    if session.state == .listening || session.state == .speaking {
+                    if visuals.showsHalo {
+                        // Steady state-color halo through every mid-cycle
+                        // state (listening → transcribing → understanding
+                        // → speaking). The ring used to drop out for
+                        // transcribing/understanding and pop back at
+                        // speaking — the hero visibly "shrank" mid-turn
+                        // (call-UI fix, 2026-09-07).
                         Circle()
-                            .stroke(session.state.color.opacity(0.28), lineWidth: 10)
+                            .stroke(visuals.tint.opacity(0.28), lineWidth: 10)
                             .frame(width: DesignTokens.talkButtonDiameter + 28,
                                    height: DesignTokens.talkButtonDiameter + 28)
                     }
@@ -547,10 +575,10 @@ struct TalkButton: View {
                         .fill(heroFill)
                         .frame(width: DesignTokens.talkButtonDiameter,
                                height: DesignTokens.talkButtonDiameter)
-                        .shadow(color: session.state.color.opacity(0.35), radius: 10, y: 4)
+                        .shadow(color: visuals.tint.opacity(0.35), radius: 10, y: 4)
                         .overlay(
                             VStack(spacing: 6) {
-                                Image(systemName: session.state.icon)
+                                Image(systemName: visuals.icon)
                                     .font(.system(size: 32))
                                 Text(session.state.buttonText(locale: locale))
                                     .font(.system(size: 20, weight: .bold))
@@ -588,7 +616,7 @@ struct TalkButton: View {
     /// "listening/live"); other states keep the existing semantic color so
     /// error/speaking/etc. stay legible against their own state color.
     private var heroFill: AnyShapeStyle {
-        guard isGlowing else { return AnyShapeStyle(session.state.color) }
+        guard visuals.usesAmberHero else { return AnyShapeStyle(visuals.tint) }
         return AnyShapeStyle(
             RadialGradient(colors: [DesignTokens.talkGlowStart, DesignTokens.talkGlowEnd],
                            center: UnitPoint(x: 0.35, y: 0.3),
@@ -625,9 +653,17 @@ struct TalkButton: View {
 /// (already spoken via `CommandRouter.speak(text:)`, which already stores
 /// it in `lastAssistantReply`) is shown here so the user can SEE what
 /// they're confirming, not just hear it — no new pipeline data needed.
+///
+/// `titleKey` heads the card. The head used to be the medication status
+/// line ("Did you take your medicine?") for EVERY challenge kind
+/// (call-UI fix, 2026-09-07): call and rephrase confirmations rendered
+/// that meds question above their own prompt, and the medication flow
+/// asked the question twice — once in the title and again in the spoken
+/// prompt row below. The title is now the neutral "Please confirm"
+/// frame; the kind-specific question always comes from the prompt row.
 struct ConfirmationChips: View {
     @EnvironmentObject var coordinator: AppCoordinator
-    let statusKey: String
+    let titleKey: String
 
     var body: some View {
         VStack(spacing: 16) {
@@ -636,7 +672,7 @@ struct ConfirmationChips: View {
                     Image(systemName: "questionmark.circle.fill")
                         .font(.system(size: 24))
                         .foregroundColor(DesignTokens.stateUnderstanding)
-                    Text(LocalizedStringKey(statusKey))
+                    Text(LocalizedStringKey(titleKey))
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                         .foregroundColor(DesignTokens.textSecondary)
                 }
@@ -691,69 +727,156 @@ struct ConfirmationChips: View {
     }
 }
 
-// MARK: - State bindings (spec §3.3 table)
+// MARK: - State bindings — ONE visual table (spec §3.3; call-UI fix
+// 2026-09-07)
+
+/// The Home talk stage's per-state look, computed in a single switch over
+/// `VoiceSessionState` — the ONE source of truth for every visual on the
+/// stage. Hero icon, in-hero caption, under-hero status line, tint, the
+/// amber "live" fill, the halo/pulse motion, and the auxiliary stage
+/// pieces (hint carousel, confirmation chips, error detail) are all
+/// decided here. Previously the views re-derived these with their own
+/// ad-hoc conditions (`isGlowing`, the halo's `== .listening ||
+/// == .speaking`, `capturePlaceholderKey`) — duplicate mappings that
+/// could diverge and did: transcribing/understanding rendered with no
+/// glow and no halo while speaking kept its ring, and each view had to
+/// be edited in lockstep to keep a state's look consistent. Nothing
+/// below branches on state equality; views read this table only.
+struct TalkStageVisuals {
+    /// SF Symbol inside the hero (state icons — spec §3.3).
+    let icon: String
+    /// Hero tint: flat fill, shadow and halo color (the DesignTokens
+    /// state palette — listening amber, speaking call-blue, etc.).
+    let tint: Color
+    /// Big caption inside the hero (`state.*.button` keys).
+    let captionKey: String
+    /// Small status line under the hero (`state.*.status` keys). For
+    /// `.awaitingConfirmation` it is the chips card's title instead.
+    let statusKey: String
+    /// Amber radial-gradient hero ("listening/live", redesign spec §2) —
+    /// idle and listening only.
+    let usesAmberHero: Bool
+    /// Breathing rings animate around the hero — idle + listening. All
+    /// other hero states are motionless by design (redesign spec §2:
+    /// the rate and presence of motion itself communicates state).
+    let pulses: Bool
+    /// Steady state-color halo ring around the hero — every mid-cycle
+    /// state (listening, transcribing, understanding, speaking) keeps
+    /// one, so the ring never visibly drops out mid-turn.
+    let showsHalo: Bool
+    /// The hint carousel shows under the hero (idle only).
+    let showsHintCarousel: Bool
+    /// The stage is the yes/no chips card, not the hero.
+    let isConfirmation: Bool
+    /// The error state's kind-specific status caption applies.
+    let isError: Bool
+}
 
 extension VoiceSessionState {
+    /// State → talk-stage visuals. The single mapping every talk-stage
+    /// view reads (call-UI fix, 2026-09-07); updating a state's look
+    /// means editing this one switch, never scattered view conditions.
+    var talkVisuals: TalkStageVisuals {
+        switch self {
+        case .idle:
+            return TalkStageVisuals(icon: "mic.fill",
+                                    tint: DesignTokens.stateIdle,
+                                    captionKey: "state.idle.button",
+                                    statusKey: "state.idle.status",
+                                    usesAmberHero: true,
+                                    pulses: true,
+                                    showsHalo: false,
+                                    showsHintCarousel: true,
+                                    isConfirmation: false,
+                                    isError: false)
+        case .listening:
+            return TalkStageVisuals(icon: "ear.fill",
+                                    tint: DesignTokens.stateListening,
+                                    captionKey: "state.listening.button",
+                                    statusKey: "state.listening.status",
+                                    usesAmberHero: true,
+                                    pulses: true,
+                                    showsHalo: true,
+                                    showsHintCarousel: false,
+                                    isConfirmation: false,
+                                    isError: false)
+        case .transcribing:
+            return TalkStageVisuals(icon: "pencil",
+                                    tint: DesignTokens.stateTranscribing,
+                                    captionKey: "state.transcribing.button",
+                                    statusKey: "state.transcribing.status",
+                                    usesAmberHero: false,
+                                    pulses: false,
+                                    showsHalo: true,
+                                    showsHintCarousel: false,
+                                    isConfirmation: false,
+                                    isError: false)
+        case .understanding:
+            return TalkStageVisuals(icon: "brain.head.profile",
+                                    tint: DesignTokens.stateUnderstanding,
+                                    captionKey: "state.understanding.button",
+                                    statusKey: "state.understanding.status",
+                                    usesAmberHero: false,
+                                    pulses: false,
+                                    showsHalo: true,
+                                    showsHintCarousel: false,
+                                    isConfirmation: false,
+                                    isError: false)
+        case .speaking:
+            return TalkStageVisuals(icon: "speaker.wave.2.fill",
+                                    tint: DesignTokens.stateSpeaking,
+                                    captionKey: "state.speaking.button",
+                                    statusKey: "state.speaking.status",
+                                    usesAmberHero: false,
+                                    pulses: false,
+                                    showsHalo: true,
+                                    showsHintCarousel: false,
+                                    isConfirmation: false,
+                                    isError: false)
+        case .awaitingConfirmation:
+            return TalkStageVisuals(icon: "questionmark",
+                                    tint: DesignTokens.stateUnderstanding,
+                                    captionKey: "state.awaitingConfirmation.title",
+                                    statusKey: "state.awaitingConfirmation.title",
+                                    usesAmberHero: false,
+                                    pulses: false,
+                                    showsHalo: false,
+                                    showsHintCarousel: false,
+                                    isConfirmation: true,
+                                    isError: false)
+        case .error:
+            return TalkStageVisuals(icon: "exclamationmark",
+                                    tint: DesignTokens.stateError,
+                                    captionKey: "state.error.button",
+                                    statusKey: "state.error.status",
+                                    usesAmberHero: false,
+                                    pulses: false,
+                                    showsHalo: false,
+                                    showsHintCarousel: false,
+                                    isConfirmation: false,
+                                    isError: true)
+        case .stopped:
+            return TalkStageVisuals(icon: "mic.slash.fill",
+                                    tint: DesignTokens.stateStopped,
+                                    captionKey: "state.stopped.button",
+                                    statusKey: "state.stopped.status",
+                                    usesAmberHero: false,
+                                    pulses: false,
+                                    showsHalo: false,
+                                    showsHintCarousel: false,
+                                    isConfirmation: false,
+                                    isError: false)
+        }
+    }
+
     /// Localized button label, resolved against the injected environment
     /// locale (spec §3.2 — the app language, not the system locale).
     func buttonText(locale: Locale) -> String {
-        L10n.str(buttonKey, locale: locale)
+        L10n.str(talkVisuals.captionKey, locale: locale)
     }
 
     /// Localized status line, same resolution as `buttonText(locale:)`.
     func statusText(locale: Locale) -> String {
-        L10n.str(statusKey, locale: locale)
-    }
-
-    private var buttonKey: String {
-        switch self {
-        case .idle: return "state.idle.button"
-        case .listening: return "state.listening.button"
-        case .transcribing: return "state.transcribing.button"
-        case .understanding: return "state.understanding.button"
-        case .speaking: return "state.speaking.button"
-        case .awaitingConfirmation: return "state.awaitingConfirmation.status"
-        case .error: return "state.error.button"
-        case .stopped: return "state.stopped.button"
-        }
-    }
-
-    private var statusKey: String {
-        switch self {
-        case .idle: return "state.idle.status"
-        case .listening: return "state.listening.status"
-        case .transcribing: return "state.transcribing.status"
-        case .understanding: return "state.understanding.status"
-        case .speaking: return "state.speaking.status"
-        case .awaitingConfirmation: return "state.awaitingConfirmation.status"
-        case .error: return "state.error.status"
-        case .stopped: return "state.stopped.status"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .idle: return DesignTokens.stateIdle
-        case .speaking: return DesignTokens.stateSpeaking
-        case .listening: return DesignTokens.stateListening
-        case .transcribing: return DesignTokens.stateTranscribing
-        case .understanding: return DesignTokens.stateUnderstanding
-        case .awaitingConfirmation: return DesignTokens.stateUnderstanding
-        case .error: return DesignTokens.stateError
-        case .stopped: return DesignTokens.stateStopped
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .idle: return "mic.fill"
-        case .listening: return "ear.fill"
-        case .transcribing: return "pencil"
-        case .understanding: return "brain.head.profile"
-        case .speaking: return "speaker.wave.2.fill"
-        case .awaitingConfirmation: return "questionmark"
-        case .error: return "exclamationmark"
-        case .stopped: return "mic.slash.fill"
-        }
+        L10n.str(talkVisuals.statusKey, locale: locale)
     }
 }
