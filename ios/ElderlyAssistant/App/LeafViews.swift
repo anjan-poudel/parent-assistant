@@ -373,16 +373,29 @@ struct CallView: View {
     /// result was announced (or the ask became moot — user edited away).
     @State private var announcedVoiceSearchID: UUID?
 
+    // Per-row channel handling (channel-chooser task, 2026-09-07).
+    /// Bumped after a chooser pick or a saved Messenger handle so the
+    /// per-outcome row-state dictionary re-resolves (the coordinator
+    /// stores are plain reads, not @Published — same bump pattern as
+    /// RemindersView's `entriesVersion`).
+    @State private var channelStateVersion = 0
+    /// The result row the Messenger-handle sheet is editing (nil =
+    /// closed). The sheet is item-driven so a swipe-dismiss also clears
+    /// it.
+    @State private var handleCaptureTarget: UnifiedContactSearch.Result?
+    /// The sheet's draft username, bound to its TextField.
+    @State private var handleText = ""
+
     var body: some View {
         LeafScreen(titleKey: "call.title") {
             VStack(spacing: 12) {
-                historyRow
                 launchRow
                 searchArea
                 if isSearching {
                     resultsArea
                 } else {
                     familyArea
+                    recentActivitySection
                 }
             }
         }
@@ -430,29 +443,14 @@ struct CallView: View {
             }
             micPhase = .idle
         }
-    }
-
-    /// Entry point to the Recent activity leaf (call-history task,
-    /// 2026-09-06) — the assistant's OWN calls and messages, so it is
-    /// reachable with or without contacts permission (history needs
-    /// none) and lives one row above the search that does.
-    private var historyRow: some View {
-        NavigationLink(value: LeafDestination.history) {
-            HStack(spacing: 8) {
-                Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(DesignTokens.accent)
-                Text(LocalizedStringKey("call.historyRow"))
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 16)
-            .frame(minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.card)
-            .clipShape(Capsule())
+        // Messenger-handle capture (channel-chooser task, 2026-09-07):
+        // item-driven sheet for the row the add-handle button opened.
+        // `handleText` is reset when a sheet opens (see
+        // `presentHandleCapture`) — never when it dismisses, so a draft
+        // survives an accidental swipe and comes back on re-open.
+        .sheet(item: $handleCaptureTarget) { target in
+            handleCaptureSheet(for: target)
         }
-        .buttonStyle(.plain)
     }
 
     /// WhatsApp/Messenger expose no API to render their contact lists in
@@ -476,10 +474,12 @@ struct CallView: View {
         }
     }
 
-    /// One half-width capsule of `launchRow` — mirrors the `historyRow`
-    /// capsule (horizontal 16 padding, card background, Capsule clip,
-    /// caption-size semibold label over a ≥44pt target), stretched with
-    /// `.frame(maxWidth: .infinity)` so the two share the row.
+    /// One half-width capsule of `launchRow` (horizontal 16 padding,
+    /// card background, Capsule clip, caption-size semibold label over a
+    /// ≥44pt target), stretched with `.frame(maxWidth: .infinity)` so
+    /// the two share the row. The old top history capsule left the leaf
+    /// (Phone review, 2026-09-07) — recent activity now sits at the
+    /// bottom; the launch capsules keep this look.
     private func contactListButton(titleKey: String, systemImage: String,
                                    action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -794,46 +794,131 @@ struct CallView: View {
         coordinator.performSystemContactWhatsApp(name: result.name, phone: result.phone)
     }
 
-    /// The row's Messenger pill tap (messenger-gate, 2026-09-07): opens
-    /// the person's REAL thread for the resolved handle — the row's own
-    /// (family-configured, or book-derived from the record's Facebook
-    /// linkage) or one captured earlier for a book row. Messenger has no
-    /// phone-number thread link, so a bare-phone row never shows the
-    /// pill and no phone-based chat attempt exists anymore; the
-    /// empty-handle line below is defensive (stale state only) and
-    /// speaks the honest no-handle line. No recency entry (a channel
-    /// open is not a dial).
-    private func messenger(_ result: UnifiedContactSearch.Result) {
-        guard let handle = resolvedMessengerHandle(for: result) else {
-            coordinator.performSystemContactMessenger(name: result.name, handle: "")
-            return
+    /// Primary-circle dial of a search row (channel-chooser task,
+    /// 2026-09-07): the tap opens the row's RESOLVED channel —
+    /// `rowChannelState` — over the stored per-contact preference, the
+    /// app-wide default channel, and Messenger-handle availability. The
+    /// circle and the tap always agree because both read the same state.
+    ///
+    /// FaceTime resolves to an AUDIO call (`video: false` — the row
+    /// circle is a call surface, and FaceTime-audio is its dialable
+    /// form; the icon mapping below still wears video.fill per the Phone
+    /// review). Messenger opens the person's real thread by the resolved
+    /// handle. Each surface goes through the same coordinator method the
+    /// family tiles dial with, so every open — and every honest
+    /// fallback — is announced exactly as it is. GSM keeps the local
+    /// recency bump the old dial gave it.
+    private func dialChannel(_ result: UnifiedContactSearch.Result) {
+        switch rowChannelState(for: result).resolvedChannel {
+        case .phone:
+            dial(result)
+        case .faceTime:
+            coordinator.performFaceTimeCall(name: result.name, phone: result.phone, video: false)
+        case .whatsApp:
+            whatsApp(result)
+        case .messenger:
+            guard let handle = resolvedMessengerHandle(for: result) else {
+                // Stale state only — resolution forces a handle-less row
+                // to phone, so a resolved-messenger row always has a
+                // handle; if one somehow vanished, say so honestly.
+                let locale = coordinator.activeLocale
+                coordinator.speak(text: L10n.fmt("router.call.messengerNoHandle",
+                                                 locale: locale, result.name))
+                return
+            }
+            coordinator.performSystemContactMessenger(name: result.name, handle: handle)
         }
-        coordinator.performSystemContactMessenger(name: result.name, handle: handle)
     }
 
-    /// The usable Messenger handle that earns a row its pill and opens
-    /// its thread (messenger-gate, 2026-09-07). Resolution order: the
-    /// row's OWN handle when the search layer's availability says it is
-    /// real (`Result.messengerAvailable` — family rows: the configured
-    /// handle in Messenger's username alphabet; book rows: the derived
-    /// Facebook-linkage handle); else — BOOK rows only — a handle the
-    /// app captured earlier into `MessengerHandleStore` (keyed by the
-    /// normalized phone, validated against Messenger's username alphabet
-    /// so a corrupt entry can never earn a pill). Family rows keep the
-    /// pure handle-normalization gate and never consult the store. Nil
-    /// means the row shows no Messenger pill — a bare phone number is
-    /// never a Messenger identity.
+    /// The chooser's "make this the row's channel" action (channel-
+    /// chooser task, 2026-09-07): remembers the picked app as the row's
+    /// stored per-contact preference. Picking only stores — the row's
+    /// circle then reflects and dials the new channel. Bumping
+    /// `channelStateVersion` re-resolves the per-outcome states so the
+    /// circle and the menu's checkmark move together.
+    private func chooseChannel(_ app: CallApp, for result: UnifiedContactSearch.Result) {
+        let storeKey = ContactNumberKey.normalized(result.phone)
+        guard !storeKey.isEmpty else { return }
+        coordinator.setChannelPreference(app, forNormalizedPhone: storeKey)
+        channelStateVersion += 1
+    }
+
+    /// One result row's channel truth for the CURRENT outcome
+    /// (channel-chooser task, 2026-09-07): stored preference, resolved
+    /// dial channel, handle availability, and the store key they live
+    /// under. Computed once per outcome in the results area — never per
+    /// row body evaluation — and re-computed there after a chooser pick
+    /// or a saved handle (the `channelStateVersion` bump above).
+    private func rowChannelState(for result: UnifiedContactSearch.Result) -> RowChannelState {
+        _ = channelStateVersion
+        let storeKey = ContactNumberKey.normalized(result.phone)
+        let storedPreference = storeKey.isEmpty
+            ? nil
+            : coordinator.storedChannelPreference(forNormalizedPhone: storeKey)
+        let hasHandle = resolvedMessengerHandle(for: result) != nil
+        let resolvedChannel = AppCoordinator.resolvedCallChannel(
+            explicit: storedPreference,
+            defaultApp: coordinator.defaultCallApp,
+            messengerHandleAvailable: hasHandle)
+        return RowChannelState(storedPreference: storedPreference,
+                               resolvedChannel: resolvedChannel,
+                               hasHandle: hasHandle,
+                               storeKey: storeKey)
+    }
+
+    /// The usable Messenger handle behind a row's messenger channel —
+    /// what earns the row its paperplane and opens its thread
+    /// (messenger-gate 2026-09-07, extended by the channel-chooser task
+    /// 2026-09-07). Resolution order: the row's OWN handle when the
+    /// search layer's availability says it is real
+    /// (`Result.messengerAvailable` — family rows: the configured handle
+    /// in Messenger's username alphabet; book rows: the derived
+    /// Facebook-linkage handle); else a handle the app captured earlier
+    /// into `MessengerHandleStore` (keyed by the normalized phone,
+    /// validated against Messenger's username alphabet so a corrupt
+    /// entry can never earn a paperplane). The store fallback now
+    /// applies to ANY row kind whose number normalizes to digits —
+    /// handle-less family rows can earn a handle through the row's
+    /// add-handle sheet, which writes that same store. Nil means no
+    /// Messenger identity exists for the row — a bare phone number is
+    /// never one.
     private func resolvedMessengerHandle(for result: UnifiedContactSearch.Result) -> String? {
-        if let own = result.messengerHandle, result.messengerAvailable {
+        if result.messengerAvailable, let own = result.messengerHandle, !own.isEmpty {
             return own
         }
-        guard case .addressBook(let entry) = result,
-              !entry.normalized.isEmpty,
-              let stored = coordinator.storedMessengerHandle(forNormalizedPhone: entry.normalized) else {
+        let storeKey = ContactNumberKey.normalized(result.phone)
+        guard !storeKey.isEmpty,
+              let stored = coordinator.storedMessengerHandle(forNormalizedPhone: storeKey) else {
             return nil
         }
         let usable = CallLinks.messengerHandle(stored)
         return usable.isEmpty ? nil : usable
+    }
+
+    /// Opens the Messenger-handle capture sheet for a handle-less row
+    /// (channel-chooser task, 2026-09-07) — the row's `addHandle` action
+    /// (person.crop.circle.badge.plus). Draft text always starts clean.
+    private func presentHandleCapture(for result: UnifiedContactSearch.Result) {
+        handleText = ""
+        handleCaptureTarget = result
+    }
+
+    /// Save action of the handle-capture sheet: normalize the typed
+    /// username, persist it against the row's normalized phone, and
+    /// refresh the row state so the Messenger option and paperplane come
+    /// alive. A store failure leaves the sheet open with the draft
+    /// intact — Save can simply be retried; nothing is claimed that
+    /// didn't happen.
+    private func saveCapturedHandle() {
+        guard let target = handleCaptureTarget else { return }
+        let handle = CallLinks.messengerHandle(handleText)
+        let storeKey = ContactNumberKey.normalized(target.phone)
+        guard !handle.isEmpty, !storeKey.isEmpty else { return }
+        if coordinator.storeMessengerHandle(handle, forNormalizedPhone: storeKey) {
+            channelStateVersion += 1
+            handleCaptureTarget = nil
+            handleText = ""
+        }
     }
 
     // MARK: Result / family areas
@@ -862,23 +947,29 @@ struct CallView: View {
                     emptyState(key: "call.search.noResults")
                 }
             } else {
-                // Messenger-pill handles, resolved ONCE per search
-                // outcome (messenger-gate, 2026-09-07): the store is
-                // Keychain-backed, so the captured-handle lookups run
-                // here — one pass over the matched rows — and the rows
-                // below only index the result.
-                let resolvedMessengerHandles = Dictionary(
+                // Per-row channel state, resolved ONCE per search
+                // outcome (channel-chooser task, 2026-09-07): the
+                // preference store and the captured-handle store are
+                // Keychain-backed, so those lookups run here — one pass
+                // over the matched rows — and the rows below only index
+                // the result. A chooser pick or a saved handle bumps
+                // `channelStateVersion`, which re-runs this pass.
+                let channelStates = Dictionary(
                     uniqueKeysWithValues: outcome.entries.map {
-                        ($0.id, resolvedMessengerHandle(for: $0))
+                        ($0.id, rowChannelState(for: $0))
                     }
                 )
                 VStack(spacing: 12) {
                     ForEach(outcome.entries) { result in
                         UnifiedContactResultRow(result: result,
-                                                dial: { dial(result) },
+                                                channelState: channelStates[result.id]
+                                                    ?? rowChannelState(for: result),
+                                                dial: { dialChannel(result) },
                                                 whatsApp: { whatsApp(result) },
-                                                messenger: { messenger(result) },
-                                                resolvedMessengerHandle: resolvedMessengerHandles[result.id] ?? nil)
+                                                chooseChannel: { app in
+                                                    chooseChannel(app, for: result)
+                                                },
+                                                addHandle: { presentHandleCapture(for: result) })
                     }
                 }
             }
@@ -906,6 +997,268 @@ struct CallView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Recent activity at the bottom (Phone review, 2026-09-07)
+
+    /// How many of the newest activity entries the Phone screen shows
+    /// before it points at the full Recent activity leaf.
+    private static let recentActivityLimit = 5
+
+    /// "Recent activity" at the BOTTOM of the not-searching content,
+    /// below the family tiles (Phone review, 2026-09-07): the newest of
+    /// the assistant's OWN calls and messages — the same store, rows,
+    /// and tap-to-redial semantics as the Recent activity leaf (so this
+    /// section needs no contacts permission either). Empty → the whole
+    /// section hides (no dead header). When the log outgrows the cap, a
+    /// "Show more" capsule pushes the full History leaf — its old top
+    /// capsule entry left this screen with the review.
+    @ViewBuilder
+    private var recentActivitySection: some View {
+        let activity = coordinator.recentActivity
+        if !activity.isEmpty {
+            let shown = Array(activity.prefix(Self.recentActivityLimit))
+            VStack(alignment: .leading, spacing: 12) {
+                Text(LocalizedStringKey("history.title"))
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                    .foregroundColor(DesignTokens.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 8)
+                ForEach(shown) { entry in
+                    recentActivityRow(entry)
+                }
+                if activity.count > Self.recentActivityLimit {
+                    NavigationLink(value: LeafDestination.history) {
+                        Text(LocalizedStringKey("history.showMore"))
+                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                            .foregroundColor(DesignTokens.accent)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: DesignTokens.minTapTargetSize)
+                            .background(DesignTokens.card)
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule().stroke(DesignTokens.accent.opacity(0.35),
+                                                 lineWidth: 1.5)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    /// One Recent activity row — the History leaf's row (channel icon
+    /// badge, name, time caption) plus a trailing ≥44pt call-again
+    /// circle (Phone review, 2026-09-07). The WHOLE row is the button —
+    /// the same trust model as every other dial surface here — and
+    /// re-initiates the recorded channel exactly like the leaf's rows
+    /// do. The trailing circle is a visual affordance inside that
+    /// button, hidden from VoiceOver so the row reads once (label
+    /// below).
+    private func recentActivityRow(_ entry: AppActivityEntry) -> some View {
+        Button {
+            initiateRecentActivity(entry)
+        } label: {
+            HStack(spacing: 12) {
+                IconBadge(systemImage: recentChannelIcon(for: entry.channel),
+                          tint: recentChannelTint(for: entry.channel),
+                          diameter: 40)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(entry.contactName)
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                        .lineLimit(1)
+                    Text(recentActivityTimeText(entry))
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "phone.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: DesignTokens.minTapTargetSize,
+                           height: DesignTokens.minTapTargetSize)
+                    .background(DesignTokens.accent)
+                    .clipShape(Circle())
+                    .accessibilityHidden(true)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(recentActivityRowLabel(entry)))
+    }
+
+    /// Screen-reader label of the row above — HistoryView's split: call
+    /// rows say "call <name> back", message rows say "message <name>"
+    /// (history.callbackLabel / history.messageLabel), so one gesture
+    /// reads the row's action.
+    private func recentActivityRowLabel(_ entry: AppActivityEntry) -> String {
+        let locale = coordinator.activeLocale
+        if entry.kind == .call {
+            return L10n.fmt("history.callbackLabel", locale: locale, entry.contactName)
+        }
+        return L10n.fmt("history.messageLabel", locale: locale, entry.contactName)
+    }
+
+    /// The row's time caption — the leaf's bucketing ("Just now" /
+    /// "Today" / "Yesterday" / short date) via `HistoryTimeFormat` with
+    /// the same pinned `now`/calendar/locale inputs HistoryView uses.
+    private func recentActivityTimeText(_ entry: AppActivityEntry) -> String {
+        HistoryTimeFormat.displayString(for: entry.timestamp,
+                                        now: Date(),
+                                        calendar: Calendar.current,
+                                        locale: coordinator.activeLocale)
+    }
+
+    /// HistoryView's channel symbols, replicated as a small private
+    /// helper per the Phone review ("reuse HistoryView's icon mapping"):
+    /// phone.fill for phone AND FaceTime audio (an audio call surface is
+    /// a phone surface), video.fill for FaceTime video, the WhatsApp
+    /// bubble, the Messenger paperplane, message.fill for SMS. Keep in
+    /// step with `HistoryView.icon(for:)`.
+    private func recentChannelIcon(for channel: AppActivityEntry.Channel) -> String {
+        switch channel {
+        case .phone, .faceTimeAudio: return "phone.fill"
+        case .faceTimeVideo: return "video.fill"
+        case .whatsapp: return "bubble.left.and.bubble.right.fill"
+        case .messenger: return "paperplane.fill"
+        case .sms: return "message.fill"
+        }
+    }
+
+    /// Badge tint mirror of `HistoryView.tint(for:)` — keep in step.
+    private func recentChannelTint(for channel: AppActivityEntry.Channel) -> DesignTokens.BadgeTint {
+        switch channel {
+        case .phone, .faceTimeVideo, .faceTimeAudio: return .call
+        case .whatsapp, .messenger, .sms: return .reminders
+        }
+    }
+
+    /// Tap-to-redial of a Recent activity row — the recorded channel
+    /// re-opened EXACTLY as the History leaf re-opens it (mirror of
+    /// `HistoryView.initiate(_:)`; keep in step): phone rows dial, SMS
+    /// rows re-present the compose sheet, and rows whose stored identity
+    /// (number for phone/WhatsApp, handle for Messenger) normalized to
+    /// nothing speak the honest line instead of a silent dead tap.
+    private func initiateRecentActivity(_ entry: AppActivityEntry) {
+        let name = entry.contactName
+        let phone = entry.phone
+        switch entry.channel {
+        case .phone:
+            guard !phone.isEmpty else {
+                honestDeadRecentActivity(entry)
+                return
+            }
+            coordinator.performSystemContactCall(name: name, phone: phone)
+        case .faceTimeVideo:
+            coordinator.performFaceTimeCall(name: name, phone: phone, video: true)
+        case .faceTimeAudio:
+            coordinator.performFaceTimeCall(name: name, phone: phone, video: false)
+        case .whatsapp:
+            guard !phone.isEmpty else {
+                honestDeadRecentActivity(entry)
+                return
+            }
+            coordinator.performSystemContactWhatsApp(name: name, phone: phone)
+        case .messenger:
+            guard let handle = entry.messengerHandle, !handle.isEmpty else {
+                // The handle left the row (or was never there — an old
+                // voice-path attempt) — say so instead of a silent dead
+                // tap; Messenger rows can only be re-opened by handle.
+                let locale = coordinator.activeLocale
+                coordinator.speak(text: L10n.fmt("router.call.messengerNoHandle",
+                                                 locale: locale, name))
+                return
+            }
+            coordinator.performSystemContactMessenger(name: name, handle: handle)
+        case .sms:
+            coordinator.presentMessageDraft(phone: phone, name: name, body: "")
+        }
+    }
+
+    /// Honest dead-row line — mirror of `HistoryView.honestDeadRow`: a
+    /// number that normalized to nothing dialable must never produce a
+    /// silent dead tap (defensive — records never store one, but a
+    /// corrupt/hand-edited payload is possible).
+    private func honestDeadRecentActivity(_ entry: AppActivityEntry) {
+        let locale = coordinator.activeLocale
+        coordinator.speak(text: L10n.fmt("call.announce.noPhoneNumber",
+                                         locale: locale, entry.contactName))
+    }
+
+    /// The Messenger-handle capture sheet (channel-chooser task,
+    /// 2026-09-07): the ask ("Enter <name>'s Messenger username"), the
+    /// three "where to look" hint lines, the username field, and ≥44pt
+    /// Save/Cancel. Save stays disabled while the field holds no usable
+    /// username (or the row has no number to key the store on) —
+    /// nothing is stored, nothing claimed.
+    private func handleCaptureSheet(for result: UnifiedContactSearch.Result) -> some View {
+        let locale = coordinator.activeLocale
+        let storeKey = ContactNumberKey.normalized(result.phone)
+        let canSave = !CallLinks.messengerHandle(handleText).isEmpty && !storeKey.isEmpty
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text(L10n.fmt("messenger.handlePrompt.title", locale: locale, result.name))
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Text(L10n.str("messenger.handleHints.title", locale: locale))
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textSecondary)
+                ForEach(1...3, id: \.self) { index in
+                    HStack(alignment: .top, spacing: 10) {
+                        Text("\(index)")
+                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(width: 22, height: 22)
+                            .background(DesignTokens.accent)
+                            .clipShape(Circle())
+                        Text(L10n.str("messenger.handleHints.line\(index)", locale: locale))
+                            .font(.system(size: DesignTokens.minBodyPointSize))
+                            .foregroundColor(DesignTokens.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                TextField(L10n.str("messenger.handlePrompt.placeholder", locale: locale),
+                          text: $handleText)
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
+                    .background(DesignTokens.background)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                HStack(spacing: 10) {
+                    Button(L10n.str("messenger.handlePrompt.cancel", locale: locale)) {
+                        handleCaptureTarget = nil
+                        handleText = ""
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 20)
+                    .frame(height: DesignTokens.minTapTargetSize)
+                    .background(DesignTokens.background)
+                    .clipShape(Capsule())
+                    Spacer()
+                    Button(L10n.str("messenger.handlePrompt.save", locale: locale)) {
+                        saveCapturedHandle()
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSave)
+                    .padding(.horizontal, 20)
+                    .frame(height: DesignTokens.minTapTargetSize)
+                    .foregroundColor(.white)
+                    .background(canSave ? DesignTokens.accent : DesignTokens.textSecondary.opacity(0.5))
+                    .clipShape(Capsule())
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.hidden)
     }
 }
 
@@ -1056,31 +1409,64 @@ private struct AddressBookLoadFailedCard: View {
     }
 }
 
+/// One search row's channel truth, resolved ONCE per outcome by CallView
+/// (channel-chooser task, 2026-09-07) and handed to the row — the row
+/// never touches the stores itself, and row bodies never re-read
+/// Keychain-backed state per frame.
+private struct RowChannelState {
+    /// The row's stored per-contact channel preference (nil = none — the
+    /// app-wide default decides then).
+    let storedPreference: CallApp?
+    /// The channel the primary circle shows and dials —
+    /// `AppCoordinator.resolvedCallChannel` over (explicit preference,
+    /// app default, Messenger-handle availability).
+    let resolvedChannel: CallApp
+    /// Whether a usable Messenger handle is on file for this row (its
+    /// own linkage or one captured into the store) — enables the
+    /// Messenger chooser option and a Messenger resolution.
+    let hasHandle: Bool
+    /// The normalized-phone key preferences and handles are stored
+    /// under. Empty when the row's number has no dialable digits (a
+    /// family contact may be configured loosely) — then nothing can be
+    /// stored for the row, and the add-handle button is hidden.
+    let storeKey: String
+}
+
 /// One unified search result — a family member or a system address-book
 /// row (family rows wear a small accent "Family" chip so the two read
-/// differently). The WHOLE dial zone — avatar, name/caption, phone
-/// circle — is a single button: a target comfortably larger than 44pt
-/// for elderly hands, the phone circle mirroring the ContactTile audio
-/// affordance as a visual cue. VoiceOver reads it as one "Call <name>"
-/// button whose value is the caption. Below the dial zone, one pill per
-/// chat app the row has a real link for opens that app's thread instead
-/// of the dialer. Availability is decided by the caller, never guessed
-/// here: WhatsApp by the search layer, Messenger by the search layer's
-/// handle availability PLUS the leaf-resolved captured handle (a bare
-/// phone number earns no Messenger pill — messenger-gate, 2026-09-07).
+/// differently). Redesigned for the Phone review (channel-chooser task,
+/// 2026-09-07): the WHOLE dial zone — avatar, name/caption, channel
+/// circle — is a single button (a target comfortably larger than 44pt
+/// for elderly hands) whose circle reflects the row's RESOLVED channel
+/// and whose tap dials through that channel, not always GSM. VoiceOver
+/// reads it as one "Call <name>" button whose value names the channel
+/// when it isn't the dialer.
+///
+/// Under the dial zone sit the row's channel controls: the WhatsApp pill
+/// is kept EXACTLY as before (the official phone-number chat form — the
+/// review said the chooser does not replace it); the Messenger pill from
+/// messenger-gate is superseded by the chooser (Messenger-by-handle now
+/// lives in the per-row channel state). A trailing ellipsis Menu picks
+/// the row's channel (Mobile / FaceTime / WhatsApp / Messenger, current
+/// one checkmarked; Messenger disabled while the row has no handle), and
+/// a handle-less row also wears a person.badge.plus button that opens
+/// the leaf's add-handle sheet. All of it is driven by the caller — the
+/// row never guesses availability or resolves anything itself.
 private struct UnifiedContactResultRow: View {
     let result: UnifiedContactSearch.Result
+    /// The leaf-resolved channel truth for this row (see `RowChannelState`).
+    let channelState: RowChannelState
+    /// Dial the RESOLVED channel (`CallView.dialChannel`) — the circle
+    /// and the whole dial zone tap this.
     let dial: () -> Void
+    /// Open the WhatsApp chat surface (`CallView.whatsApp`) — the kept
+    /// pill's action.
     let whatsApp: () -> Void
-    let messenger: () -> Void
-    /// The usable Messenger handle resolved by the leaf for this row
-    /// (`CallView.resolvedMessengerHandle(for:)`): the row's own handle
-    /// (family-configured, or book-derived from the record's Facebook
-    /// linkage) or one the app captured earlier for a book row. Non-nil
-    /// shows the Messenger pill; nil means no handle is on file — the
-    /// row never decides reachability itself, and a bare phone number
-    /// never earns a Messenger pill.
-    let resolvedMessengerHandle: String?
+    /// Store a chooser pick as the row's channel preference
+    /// (`CallView.chooseChannel`).
+    let chooseChannel: (CallApp) -> Void
+    /// Open the Messenger-handle capture sheet (`CallView.presentHandleCapture`).
+    let addHandle: () -> Void
     @Environment(\.locale) private var locale
 
     /// Channel brand colors — kept here, not in DesignTokens: they are
@@ -1098,9 +1484,7 @@ private struct UnifiedContactResultRow: View {
     var body: some View {
         VStack(spacing: 10) {
             dialZone
-            if result.whatsAppAvailable || resolvedMessengerHandle != nil {
-                channelPills
-            }
+            channelControls
         }
         .padding(16)
         .frame(maxWidth: .infinity)
@@ -1109,8 +1493,10 @@ private struct UnifiedContactResultRow: View {
         .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
     }
 
-    /// The wide dial button — tapping anywhere on the face/number zone
-    /// places the GSM call.
+    /// The wide dial button — tapping anywhere on the face/name zone
+    /// (or its trailing channel circle) opens the row's RESOLVED
+    /// channel. The circle is the ContactTile-style visual cue for what
+    /// will open: white glyph on the channel's own color, ≥44pt.
     private var dialZone: some View {
         Button(action: dial) {
             HStack(spacing: 14) {
@@ -1131,17 +1517,30 @@ private struct UnifiedContactResultRow: View {
                     }
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "phone.fill")
+                Image(systemName: Self.icon(for: channelState.resolvedChannel))
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.white)
                     .frame(width: DesignTokens.minTapTargetSize, height: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
+                    .background(Self.circleColor(for: channelState.resolvedChannel))
                     .clipShape(Circle())
+                    .accessibilityHidden(true)
             }
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(L10n.fmt("call.callButtonLabel", locale: locale, result.name)))
-        .accessibilityValue(Text(result.caption))
+        // The value names what the tap actually opens: the number
+        // caption when the channel is the dialer, the app's localized
+        // name when it is FaceTime/WhatsApp/Messenger — VoiceOver must
+        // never imply a GSM call that won't happen.
+        .accessibilityValue(Text(resolvedChannelValue))
+    }
+
+    /// Value text of the dial button (see above).
+    private var resolvedChannelValue: String {
+        if channelState.resolvedChannel == .phone {
+            return result.caption
+        }
+        return L10n.str(Self.appNameKey(for: channelState.resolvedChannel), locale: locale)
     }
 
     /// Small accent-tinted "Family" capsule prepended to the caption.
@@ -1158,38 +1557,142 @@ private struct UnifiedContactResultRow: View {
             .accessibilityHidden(true)
     }
 
-    /// One ≥44pt capsule per reachable chat app — every surface a row
-    /// offers is thumb-size, white text on the app's own brand color.
-    private var channelPills: some View {
-        HStack(spacing: 10) {
+    /// Bottom strip of the card: the kept WhatsApp pill (leading, when
+    /// the row's number can build one) and the trailing ≥44pt channel
+    /// controls — the add-handle button on handle-less rows, then the
+    /// channel chooser.
+    private var channelControls: some View {
+        HStack(spacing: 8) {
             if result.whatsAppAvailable {
-                Button(action: whatsApp) {
-                    Text(L10n.str("call.channel.whatsapp", locale: locale))
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: DesignTokens.minTapTargetSize)
-                        .background(Self.whatsAppGreen)
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text(L10n.fmt("call.channel.whatsappLabel", locale: locale, result.name)))
+                whatsAppPill
             }
-            if resolvedMessengerHandle != nil {
-                Button(action: messenger) {
-                    Text(L10n.str("call.channel.messenger", locale: locale))
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: DesignTokens.minTapTargetSize)
-                        .background(Self.messengerBlue)
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text(L10n.fmt("call.channel.messengerLabel", locale: locale, result.name)))
+            Spacer(minLength: 0)
+            if !channelState.hasHandle, !channelState.storeKey.isEmpty {
+                addHandleButton
+            }
+            channelChooser
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// The WhatsApp pill, byte-for-byte the messenger-gate row's: white
+    /// text on WhatsApp green, ≥44pt — the official phone-number chat
+    /// surface, which the Phone review said the chooser does not replace.
+    private var whatsAppPill: some View {
+        Button(action: whatsApp) {
+            Text(L10n.str("call.channel.whatsapp", locale: locale))
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 14)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(Self.whatsAppGreen)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(L10n.fmt("call.channel.whatsappLabel", locale: locale, result.name)))
+    }
+
+    /// The channel chooser (Phone review, 2026-09-07): an
+    /// ellipsis.circle ≥44pt button opening a Menu of the four call
+    /// channels — Mobile, FaceTime, WhatsApp, Messenger — labeled with
+    /// the apps' localized names (`app.name.*`, which ARE their
+    /// accessibility labels), the resolved channel checkmarked, and
+    /// Messenger disabled (dimmed; VoiceOver hears "dimmed" plus the
+    /// body-line hint) while the row has no handle. Picking only stores
+    /// the preference — the row's circle moves, the dial follows.
+    private var channelChooser: some View {
+        Menu {
+            channelOption(.phone)
+            channelOption(.faceTime)
+            channelOption(.whatsApp)
+            Button {
+                chooseChannel(.messenger)
+            } label: {
+                Text(L10n.str(Self.appNameKey(for: .messenger), locale: locale))
+            }
+            .disabled(!channelState.hasHandle)
+            .accessibilityHint(Text(L10n.str("messenger.handlePrompt.body", locale: locale)))
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(DesignTokens.textSecondary)
+                .frame(width: DesignTokens.minTapTargetSize, height: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.background)
+                .clipShape(Circle())
+        }
+        .accessibilityLabel(Text(L10n.str(Self.appNameKey(for: channelState.resolvedChannel),
+                                           locale: locale)))
+    }
+
+    /// One enabled chooser option — the channel's app-name text, with a
+    /// checkmark when it is the row's resolved channel.
+    @ViewBuilder
+    private func channelOption(_ app: CallApp) -> some View {
+        Button {
+            chooseChannel(app)
+        } label: {
+            if app == channelState.resolvedChannel {
+                Label(L10n.str(Self.appNameKey(for: app), locale: locale),
+                      systemImage: "checkmark")
+            } else {
+                Text(L10n.str(Self.appNameKey(for: app), locale: locale))
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Add-handle affordance (Phone review, 2026-09-07): on rows with no
+    /// Messenger handle, a person.badge.plus ≥44pt button next to the
+    /// chooser that opens the leaf's capture sheet — the hints live
+    /// there. Its label is the sheet's own ask ("Enter <name>'s
+    /// Messenger username"), so VoiceOver already says what the button
+    /// is for.
+    private var addHandleButton: some View {
+        Button(action: addHandle) {
+            Image(systemName: "person.crop.circle.badge.plus")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(DesignTokens.accent)
+                .frame(width: DesignTokens.minTapTargetSize, height: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.background)
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(L10n.fmt("messenger.handlePrompt.title", locale: locale, result.name)))
+    }
+
+    /// Resolved-channel glyph — the review's mapping: phone.fill for the
+    /// dialer, video.fill for FaceTime, the WhatsApp bubble, the
+    /// Messenger paperplane.
+    private static func icon(for app: CallApp) -> String {
+        switch app {
+        case .phone: return "phone.fill"
+        case .faceTime: return "video.fill"
+        case .whatsApp: return "bubble.left.and.bubble.right.fill"
+        case .messenger: return "paperplane.fill"
+        }
+    }
+
+    /// The circle's fill — accent for the dialer, the FaceTime call
+    /// blue, and each chat app's own brand color so the glyph reads like
+    /// the app it opens.
+    private static func circleColor(for app: CallApp) -> Color {
+        switch app {
+        case .phone: return DesignTokens.accent
+        case .faceTime: return DesignTokens.BadgeTint.call.tint
+        case .whatsApp: return whatsAppGreen
+        case .messenger: return messengerBlue
+        }
+    }
+
+    /// The localized app-name key for a channel (`app.name.phone` /
+    /// `.facetime` / `.whatsapp` / `.messenger`) — chooser option labels
+    /// and the dial button's channel value both read these.
+    private static func appNameKey(for app: CallApp) -> String {
+        switch app {
+        case .phone: return "app.name.phone"
+        case .faceTime: return "app.name.facetime"
+        case .whatsApp: return "app.name.whatsapp"
+        case .messenger: return "app.name.messenger"
+        }
     }
 }
 
