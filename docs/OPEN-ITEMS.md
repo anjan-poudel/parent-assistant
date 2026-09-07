@@ -15,7 +15,7 @@ the table; completed items are struck through with the landing commit noted.
 | # | Item | Status | Branch / Worktree | Notes |
 |---|------|--------|-------------------|-------|
 | 7 | Query path structured-response contract ([QUERY-FIX]): kill the invariant "माफ गर्नुहोस्" apology for correctly-transcribed questions | landed `7ac8b33` | ~~`fix-query-end-to-end` (`.claude/worktrees/fix-query-end-to-end`)~~ | e2e suite `QueryEndToEndRegressionTests`; train-intent must mirror the canonical contract — see section below |
-| 6 | Intent-model base bake-off (Gemma 3 1B vs Qwen 3 1.7B) | eval complete (2026-09-07) — phase-3 [EVAL-DEGENERATION] re-eval: no-EOS generation degeneration fixed in the harness; qwen now passes the §10 emergency hard gate (recall 1.000) and closed-intent 0.706 → 0.765, but BOTH legs still fail closed-intent accuracy (0.882 / 0.765 < 0.95); no winner published (data-quality call for the user) | none (runs on GPU server 192.168.1.117 via `tools/train-intent/`) | Spec: design 2026-09-05 §7/§9.5, ship gates §10; before/after table + remaining failure clusters in the section below |
+| 6 | Intent-model base bake-off (Gemma 3 1B vs Qwen 3 1.7B) | **round-2 retrain ARMED (2026-09-07)** — EOS-in-training fix + spec 60/25/15 mix (achieved exactly) + ack_med/bare-emergency edge rows (commit `e150223` + this docs row); `queue_bakeoff.sh` waiting on the GPU (STT owner's whisper v5 fine-tune holds the 3090); when it frees: dataset rebuild → gemma → qwen, then export + §10 eval via the fixed harness | none (runs on GPU server 192.168.1.117 via `tools/train-intent/`) | Spec: design 2026-09-05 §7/§9.5, ship gates §10; round-1 outcome + failure clusters + round-2 prep details in the section below |
 | 4 | ~~Wake word ("Hey Sahayak")~~ | landed `95b7ff7` | ~~`task/wake-word` (`.claude/worktrees/wake-word`)~~ | ~~Brief at `TASK.md` in that worktree~~ |
 | 5 | ~~Gemini cost governance~~ | landed `a50b61c` | ~~`task/cost-governance` (`.claude/worktrees/cost-governance`)~~ | ~~Brief at `TASK.md` in that worktree~~ |
 
@@ -106,6 +106,59 @@ data (bare-emergency and ack/health/guide rows under-represented or
 mis-taught in the mixture); emergency adversarial near-miss set (§10,
 not yet in the corpus); then retrain + re-export + re-eval. On-device
 latency leg (p50 ≤ 1.0 s) still open on real hardware.
+
+### Round-2 retrain — ARMED 2026-09-07 (commit `e150223`)
+
+Training-side fixes for the round-1 root causes, landed server-side and
+synced to master byte-identical:
+
+1. **EOS in training** (`src/train_qlora.py`): `to_text` now appends the
+   base model's OWN eos token after the JSON label — gemma `<eos>` (id 1),
+   qwen `<|im_end|>` (id 151645; qwen3's eos is NOT `<|endoftext|>`).
+   Injected per leg at train time (train.jsonl is shared between bases);
+   a guard asserts the eos text round-trips to exactly the tokenizer's
+   eos id. Verified: longest row + eos = 1,329 tokens < 1,536 cap.
+2. **Mixture 60/25/15** (`src/build_dataset.py`, achieved EXACTLY):
+   round-1 deduped all sources against one lossy skeleton key (matras
+   stripped) — noised rows mostly vanished as "dups" → 86/14 corpus.
+   Now three register buckets (stt_noised / clean_devanagari =
+   devanagari + elder_fragmented / romanized_codeswitched) deduped
+   inside with a matra-preserving key; the noised supply anchors the
+   total. Final: 2,827 rows = 1,696 stt_noised (60.0%) + 707 clean
+   devanagari (25.0%) + 424 rom/cs (15.0%); train 2,686 / valid 141.
+3. **Edge rows** (`data/edge_cases.jsonl`, server-only, 57 rows, always
+   kept): ack_med positives + refusals (the whole teacher corpus has
+   ZERO ack_med rows — seeds never defined the intent), bare/short
+   emergency pleas incl. English "help", plea+pain vs calm-pain
+   boundary pairs, a few guides. Golden corpus untouched (leak guard
+   refused 12 rows as usual).
+
+**Data-supply findings that shaped round 2 (flagged for the STT owner):**
+noised.jsonl holds 29,304 rows but only **2,458 distinct utterances** —
+the whisper-medium noise run collapses hard (≈12 copies per text), and
+**703 distinct texts carry contradictory labels** (two different parents
+transcribed identically) — all dropped rather than taught an arbitrary
+label. The noised pool is therefore ~6× smaller than its row count
+implies and caps the whole corpus at ~2.8k rows (~250 steps ×3 epochs —
+short; if round-2 is under-trained, regenerate noised with whisper v5 +
+more variants, which also enlarges the 60% axis). teacher.jsonl is
+call-heavy (5.9k of 14.7k) and 4 rows carry schema-invalid actions
+(dropped); ack_med must be added to `seeds/intents.yaml` before the
+next gen_teacher run.
+
+**Armed chain:** `queue_bakeoff.sh` (pid live on server, launched
+23:54:32) — waits on the GPU (whisper v5 fine-tune, PID 3235731,
+untouched), rebuilds the dataset deterministically, then trains
+gemma → qwen (fresh: round-1 checkpoints parked in
+`checkpoints/_round1_artifacts/` so no resume contamination), each leg
+behind its own gpu_free gate. Logs on the server:
+`logs/bakeoff_chain_20260907_235432.log`, `logs/train_{gemma,qwen}_*.log`.
+**Next (when the GPU frees):** train → `queue_export.sh` (writes
+`models/intent-ne-{gemma,qwen}-q4_k_m.gguf` — round-1 gemma v7 artifact
+will be overwritten; version-bump care needed before any publish) →
+`eval_golden.py` round-2 eval with the fixed harness. NOTE: local master
+`config.yaml` still says `max_seq_len: 1024` (server lineage fixed it to
+1536, commit `2b0ccdc`) — sync it when this branch lands.
 
 ---
 
