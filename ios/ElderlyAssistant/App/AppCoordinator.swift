@@ -3401,6 +3401,13 @@ final class AppCoordinator: ObservableObject {
     /// address text well) and Google Maps gets the same documented
     /// fallback form.
     private func openExternalNavigation(app: NavigationMapApp, name: String, address: String) {
+        // The Google surface's `hl` deep-link ask carries the app's active
+        // language — "ne" under Nepali, "en" under English — resolved from
+        // the same locale every user-facing string uses, once per launch.
+        // Apple Maps' scheme exposes no language parameter (its UI follows
+        // the device and Maps' own settings — nothing to send, and none is
+        // invented), so this code feeds the Google builders only.
+        let mapsUILanguageCode = activeLocale.languageCode ?? appLanguage.rawValue
         let geocoder = NavigationGeocoder()
         geocoder.geocode(address: address) { [weak self] result in
             guard let self else { return }
@@ -3410,12 +3417,14 @@ final class AppCoordinator: ObservableObject {
                 self.emitDirections(eventType: "geocode", outcome: "ok")
                 url = MapsLinks.directionsURL(for: app,
                                               latitude: destination.latitude,
-                                              longitude: destination.longitude)
+                                              longitude: destination.longitude,
+                                              uiLanguageCode: mapsUILanguageCode)
             case .failure:
                 self.emitDirections(eventType: "geocode", outcome: "fallback_address")
                 url = app == .appleMaps
                     ? MapsLinks.appleMapsDirectionsURL(address: address)
-                    : MapsLinks.googleMapsDirectionsURL(address: address)
+                    : MapsLinks.googleMapsDirectionsURL(address: address,
+                                                        uiLanguageCode: mapsUILanguageCode)
             }
             guard let url else {
                 // No URL at all (both builders refused the input) — say

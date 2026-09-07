@@ -67,12 +67,18 @@ enum NavigationMapPolicy {
 /// Scheme facts this type encodes:
 ///  - `maps://?daddr=<lat>,<lng>` — Apple Maps directions to a
 ///    coordinate. Accepts a percent-encoded address string too, used
-///    only as the geocode-failure fallback.
-///  - `comgooglemaps://?daddr=…&directionsmode=driving` — Google Maps
-///    directions. Google's `daddr` is UNRELIABLE with a bare address
-///    string (it sometimes fails to resolve one), so the pipeline
-///    forward-geocodes to coordinates FIRST and only degrades to the
-///    address-string form when geocoding fails (plan risk note).
+///    only as the geocode-failure fallback. Apple's scheme exposes NO
+///    language parameter (its UI follows the device language and voice
+///    guidance follows the user's own Maps/Siri settings) — so there is
+///    no `hl`-style equivalent to send here, and none is invented.
+///  - `comgooglemaps://?daddr=…&directionsmode=driving&hl=<code>&
+///    navigation=1` — Google Maps directions. Google's `daddr` is
+///    UNRELIABLE with a bare address string (it sometimes fails to
+///    resolve one), so the pipeline forward-geocodes to coordinates
+///    FIRST and only degrades to the address-string form when geocoding
+///    fails (plan risk note). `hl` + `navigation` are deep-link asks —
+///    what they request and their honest limits are documented on the
+///    Google builders below.
 ///  - Both schemes are declared in LSApplicationQueriesSchemes, so
 ///    `canOpenURL` on their ROOT URLs is the honest installed check used
 ///    by `NavigationMapPolicy` at request time.
@@ -95,6 +101,12 @@ final class MapsLinks {
     static let googleMapsProbeURL = URL(string: "comgooglemaps://")!
 
     // MARK: - Apple Maps
+
+    /// Apple's `maps://` scheme has NO language parameter: the Maps app
+    /// renders its UI in the device language and reads turn-by-turn in
+    /// the user's own Maps/Siri settings. There is no `hl`-style
+    /// equivalent to send — the app does not invent one (maps-language
+    /// deep link honesty note), so these builders take no language.
 
     /// `maps://?daddr=<lat>,<lng>` — directions to a coordinate.
     static func appleMapsDirectionsURL(latitude: Double, longitude: Double) -> URL? {
@@ -121,25 +133,45 @@ final class MapsLinks {
 
     // MARK: - Google Maps
 
-    /// `comgooglemaps://?daddr=<lat>,<lng>&directionsmode=driving` —
-    /// driving directions to a coordinate (the PRIMARY form: coordinate
-    /// daddr is the reliable one for Google).
-    static func googleMapsDirectionsURL(latitude: Double, longitude: Double) -> URL? {
+    /// `comgooglemaps://?daddr=<lat>,<lng>&directionsmode=driving&hl=<code>&
+    /// navigation=1` — driving directions to a coordinate (the PRIMARY
+    /// form: coordinate daddr is the reliable one for Google), carrying
+    /// the two deep-link asks the directions flow makes:
+    ///
+    ///  - `hl=<uiLanguageCode>` asks Google Maps to render its UI in the
+    ///    app's active language ("ne" under Nepali, "en" under English;
+    ///    resolved from the app locale by the coordinator). HONESTY NOTE:
+    ///    `hl` selects Google Maps' DISPLAY language — menus, place info,
+    ///    search. The voice that reads turn-by-turn instructions is
+    ///    Google Maps' OWN in-app setting; a deep link can request it,
+    ///    never force it. Whether `hl` is honored at all is likewise
+    ///    Google Maps' discretion (its UI language can also be changed
+    ///    inside the app afterward).
+    ///  - `navigation=1` asks Maps to AUTO-START turn-by-turn navigation
+    ///    instead of landing on the route preview. Best-effort: it is the
+    ///    documented auto-start ask, but Google Maps decides whether —
+    ///    and in which version — it complies.
+    static func googleMapsDirectionsURL(latitude: Double, longitude: Double,
+                                        uiLanguageCode: String) -> URL? {
         var components = URLComponents()
         components.scheme = "comgooglemaps"
         components.host = ""   // empty host renders "comgooglemaps://"
         components.queryItems = [
             URLQueryItem(name: "daddr", value: daddrValue(latitude: latitude, longitude: longitude)),
-            URLQueryItem(name: "directionsmode", value: "driving")
+            URLQueryItem(name: "directionsmode", value: "driving"),
+            URLQueryItem(name: "hl", value: uiLanguageCode),
+            URLQueryItem(name: "navigation", value: "1")
         ]
         return components.url
     }
 
     /// `comgooglemaps://?daddr=<percent-encoded address>&directionsmode=
-    /// driving` — address-string form, used ONLY when forward geocoding
-    /// failed (Google's address-only daddr is unreliable; coordinates
-    /// first, plan risk note).
-    static func googleMapsDirectionsURL(address: String) -> URL? {
+    /// driving&hl=<code>&navigation=1` — address-string form, used ONLY
+    /// when forward geocoding failed (Google's address-only daddr is
+    /// unreliable; coordinates first, plan risk note). Same `hl` +
+    /// `navigation=1` asks as the coordinate form above.
+    static func googleMapsDirectionsURL(address: String,
+                                        uiLanguageCode: String) -> URL? {
         let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         var components = URLComponents()
@@ -147,18 +179,26 @@ final class MapsLinks {
         components.host = ""   // empty host renders "comgooglemaps://"
         components.queryItems = [
             URLQueryItem(name: "daddr", value: trimmed),
-            URLQueryItem(name: "directionsmode", value: "driving")
+            URLQueryItem(name: "directionsmode", value: "driving"),
+            URLQueryItem(name: "hl", value: uiLanguageCode),
+            URLQueryItem(name: "navigation", value: "1")
         ]
         return components.url
     }
 
     /// The directions URL the resolved map app opens — nil for `.auto`
     /// (never passed a resolved policy) and `.inApp` (no external URL).
+    /// `uiLanguageCode` feeds the Google surface's `hl` deep-link ask
+    /// only; Apple Maps' scheme has no language parameter (Apple maps
+    /// follow device/Maps-settings language — nothing to send, and none
+    /// is invented), so the value is ignored for `.appleMaps`.
     static func directionsURL(for app: NavigationMapApp,
-                              latitude: Double, longitude: Double) -> URL? {
+                              latitude: Double, longitude: Double,
+                              uiLanguageCode: String) -> URL? {
         switch app {
         case .googleMaps:
-            return googleMapsDirectionsURL(latitude: latitude, longitude: longitude)
+            return googleMapsDirectionsURL(latitude: latitude, longitude: longitude,
+                                           uiLanguageCode: uiLanguageCode)
         case .appleMaps:
             return appleMapsDirectionsURL(latitude: latitude, longitude: longitude)
         case .auto, .inApp:
