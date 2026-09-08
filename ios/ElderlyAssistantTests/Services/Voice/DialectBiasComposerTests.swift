@@ -5,13 +5,24 @@ import XCTest
 /// docs/research-sections/accent-adaptation.md §6 P0.3) composed on top of
 /// the P0 slice-D dialect ID: plan states (active / disabled / default-label
 /// fallback / no-material), prompt composition order and budgets, term
-/// sanitation + dedupe, lexicon + table corruption honesty, token merge,
-/// the two recognizer seams (WhisperKit token application, whisper.cpp
-/// prompt C-string), settings persistence, and shipped-artifact honesty.
-/// All pure/injected — no model runtime is loaded.
+/// sanitation + dedupe + the [SCRIPT-REGRESSION] Devanagari-script gate
+/// (roman-script terms are dropped from the prompt — full gate unit tests
+/// live in ScriptConsistencyGateTests), lexicon + table corruption honesty,
+/// token merge, the two recognizer seams (WhisperKit token application,
+/// whisper.cpp prompt C-string), settings persistence, and shipped-artifact
+/// honesty. All pure/injected — no model runtime is loaded.
 final class DialectBiasComposerTests: XCTestCase {
 
     // MARK: - Fixtures
+
+    /// Latin 0-9 → Nepali digits ०-९ (U+0966–U+096F), for building
+    /// distinct all-Devanagari test terms.
+    private static let nepaliDigits = ["०", "१", "२", "३", "४",
+                                       "५", "६", "७", "८", "९"]
+
+    private func nepaliNumber(_ value: Int) -> String {
+        String(value).map { Self.nepaliDigits[$0.wholeNumberValue ?? 0] }.joined()
+    }
 
     private func makeTable(promptTokenIds: [String: [Int]] = [:],
                            corrupt: Bool = false) -> DialectCentroidTable {
@@ -109,20 +120,22 @@ final class DialectBiasComposerTests: XCTestCase {
 
     func testActiveComposesDocumentedOrder() {
         // Doc P0.3 order: contact names, medication names, app names,
-        // known dialect words, then the dialect tag line.
+        // known dialect words, then the dialect tag line. Profile terms
+        // are Devanagari-script here — the [SCRIPT-REGRESSION] gate
+        // drops roman-script ones (covered in ScriptConsistencyGateTests).
         let plan = DialectBiasComposer.plan(
             label: .doteli,
             table: makeTable(),
             lexicon: makeLexicon(),
-            profile: makeProfile(contacts: ["Sita", "Ram Bahadur"],
-                                 medications: ["Metformin"],
-                                 apps: ["WhatsApp"]),
+            profile: makeProfile(contacts: ["सीता", "राम बहादुर"],
+                                 medications: ["मेटफर्मिन"],
+                                 apps: ["व्हाट्सएप"]),
             enabled: true)
         XCTAssertEqual(plan.state, .active)
         XCTAssertEqual(plan.label, .doteli)
         XCTAssertEqual(
             plan.promptText,
-            "Sita Ram Bahadur Metformin WhatsApp भया रह्याको "
+            "सीता राम बहादुर मेटफर्मिन व्हाट्सएप भया रह्याको "
                 + "डोटेली भाषा, सुदूरपश्चिम नेपाल")
         XCTAssertEqual(plan.lexiconPhraseCount, 2)
         XCTAssertEqual(plan.contactCount, 2)
@@ -145,9 +158,11 @@ final class DialectBiasComposerTests: XCTestCase {
     // MARK: - Term sanitation + budgets
 
     func testTermsAreTrimmedAndCollapsed() {
+        // Devanagari terms — roman ones would be dropped by the
+        // [SCRIPT-REGRESSION] gate (covered in ScriptConsistencyGateTests).
         let terms = DialectBiasComposer.sanitizedTerms(
-            ["  Sita   Kumari ", "Ram\nBahadur", "   ", ""], maxCount: 10)
-        XCTAssertEqual(terms, ["Sita Kumari", "Ram Bahadur"])
+            ["  सीता   कुमारी ", "राम\nबहादुर", "   ", ""], maxCount: 10)
+        XCTAssertEqual(terms, ["सीता कुमारी", "राम बहादुर"])
     }
 
     func testTermLengthCapped() {
@@ -157,9 +172,11 @@ final class DialectBiasComposerTests: XCTestCase {
     }
 
     func testPerCategoryCaps() {
-        let contacts = (0..<100).map { "contact\($0)" }
-        let medications = (0..<50).map { "med\($0)" }
-        let apps = (0..<30).map { "app\($0)" }
+        // Terms are Devanagari — roman ones would be dropped by the
+        // [SCRIPT-REGRESSION] gate and the caps would never fire.
+        let contacts = (0..<100).map { "सम्पर्क" + nepaliNumber($0) }
+        let medications = (0..<50).map { "औषधि" + nepaliNumber($0) }
+        let apps = (0..<30).map { "अनुप्रयोग" + nepaliNumber($0) }
         let plan = DialectBiasComposer.plan(
             label: .eastern,
             table: makeTable(),
@@ -175,26 +192,29 @@ final class DialectBiasComposerTests: XCTestCase {
     }
 
     func testCaseInsensitiveDedupePreservesFirstOccurrence() {
-        // "Sita" the contact and "sita" the medication are the same term —
-        // one prompt slot, first spelling wins. Cross-category.
+        // "सीता" the contact and "सीता" the medication are the same term —
+        // one prompt slot, first spelling wins. Cross-category. (The
+        // original Latin-cased "Sita"/"sita" fixture is gone: the
+        // [SCRIPT-REGRESSION] gate drops roman-script terms.)
         let plan = DialectBiasComposer.plan(
             label: .eastern,
             table: makeTable(),
             lexicon: makeLexicon(),
-            profile: makeProfile(contacts: ["Sita"], medications: ["sita", "SITA"]),
+            profile: makeProfile(contacts: ["सीता"], medications: ["सीता", "सीता"]),
             enabled: true)
         XCTAssertEqual(plan.contactCount, 1)
         XCTAssertEqual(plan.medicationCount, 2, "counts are per-category, pre-dedupe")
         XCTAssertEqual(plan.promptText,
-                       "Sita गइछ भइछ पूर्वेली नेपाली बोली")
+                       "सीता गइछ भइछ पूर्वेली नेपाली बोली")
     }
 
     func testPromptTextCharacterBudgetAtWordBoundary() {
-        // 20 capped-in terms of 40 chars + spaces ≈ 819 chars — well over
-        // the 600-char budget, so the boundary truncation must fire.
+        // 20 capped-in terms of ~30 Devanagari chars + spaces ≈ 660 chars —
+        // over the 600-char budget, so the boundary truncation must fire.
+        // Terms are Devanagari (roman ones would be dropped by the
+        // [SCRIPT-REGRESSION] gate and never reach the budget).
         let contacts = (0..<60).map { index -> String in
-            "contactnumber\(String(format: "%02d", index))"
-                + String(repeating: "x", count: 25)
+            "शब्द" + String(repeating: "क", count: 25) + nepaliNumber(index)
         }
         let plan = DialectBiasComposer.plan(label: .eastern,
                                             table: makeTable(),
@@ -247,14 +267,16 @@ final class DialectBiasComposerTests: XCTestCase {
 
     func testCorruptLexiconDegradesToProfileTermsOnly() {
         // Structural corruption must never bias; profile terms are the
-        // trustworthy remainder.
+        // trustworthy remainder. (Devanagari contact — a roman one would
+        // be dropped by the [SCRIPT-REGRESSION] gate and the plan would
+        // honestly report noMaterial.)
         let plan = DialectBiasComposer.plan(label: .doteli,
                                             table: makeTable(),
                                             lexicon: makeLexicon(corrupt: true),
-                                            profile: makeProfile(contacts: ["Sita"]),
+                                            profile: makeProfile(contacts: ["सीता"]),
                                             enabled: true)
         XCTAssertEqual(plan.state, .active)
-        XCTAssertEqual(plan.promptText, "Sita")
+        XCTAssertEqual(plan.promptText, "सीता")
         XCTAssertEqual(plan.lexiconPhraseCount, 0)
     }
 
@@ -262,10 +284,10 @@ final class DialectBiasComposerTests: XCTestCase {
         let plan = DialectBiasComposer.plan(label: .doteli,
                                             table: makeTable(),
                                             lexicon: nil,
-                                            profile: makeProfile(contacts: ["Sita"]),
+                                            profile: makeProfile(contacts: ["सीता"]),
                                             enabled: true)
         XCTAssertEqual(plan.state, .active)
-        XCTAssertEqual(plan.promptText, "Sita")
+        XCTAssertEqual(plan.promptText, "सीता")
         XCTAssertEqual(plan.lexiconPhraseCount, 0)
     }
 
@@ -317,6 +339,8 @@ final class DialectBiasComposerTests: XCTestCase {
     // MARK: - WhisperKit recognizer seam (static, no model)
 
     func testPromptTokensTokenizesAndMergesForActivePlan() {
+        // "Sita" in the profile is roman — the [SCRIPT-REGRESSION] gate
+        // drops it, so the plan carries lexicon material only.
         let plan = DialectBiasComposer.plan(
             label: .doteli,
             table: makeTable(promptTokenIds: ["doteli": [500]]),
@@ -343,9 +367,10 @@ final class DialectBiasComposerTests: XCTestCase {
                                                        tokenizer: tokenizer) {
         case .applied(let tokens):
             XCTAssertEqual(tokens.first, 500, "calibrated ids lead")
-            // 1 calibrated + 7 distinct words (Sita, भया, रह्याको,
-            // डोटेली, भाषा,, सुदूरपश्चिम, नेपाल) = 8, all unique.
-            XCTAssertEqual(tokens.count, 8)
+            // 1 calibrated + 6 distinct words (भया, रह्याको, डोटेली,
+            // भाषा,, सुदूरपश्चिम, नेपाल — the roman "Sita" is gone) = 7,
+            // all unique.
+            XCTAssertEqual(tokens.count, 7)
             XCTAssertEqual(Set(tokens).count, tokens.count)
         case .notApplied(let reason):
             XCTFail("expected applied, got \(reason)")
@@ -421,14 +446,16 @@ final class DialectBiasComposerTests: XCTestCase {
     // MARK: - Resolver + shipped artifacts
 
     func testResolverWithInjectablesMatchesPlan() {
+        // Devanagari contact — a roman one would be dropped by the
+        // [SCRIPT-REGRESSION] gate.
         let resolved = DialectBiasResolver.resolve(
-            profile: makeProfile(contacts: ["Sita"]),
+            profile: makeProfile(contacts: ["सीता"]),
             table: makeTable(),
             lexicon: makeLexicon(),
             enabled: true,
             label: .doteli)
         XCTAssertEqual(resolved.state, .active)
-        XCTAssertEqual(resolved.promptText, "Sita भया रह्याको डोटेली भाषा, सुदूरपश्चिम नेपाल")
+        XCTAssertEqual(resolved.promptText, "सीता भया रह्याको डोटेली भाषा, सुदूरपश्चिम नेपाल")
     }
 
     func testBundledSeedLexiconIsStructurallyValidAndHonest() throws {
@@ -478,12 +505,12 @@ final class DialectBiasComposerTests: XCTestCase {
         let plan = DialectBiasComposer.plan(label: .doteli,
                                             table: table,
                                             lexicon: lexicon,
-                                            profile: makeProfile(contacts: ["Sita"]),
+                                            profile: makeProfile(contacts: ["सीता"]),
                                             enabled: true)
         XCTAssertEqual(plan.state, .active)
         XCTAssertTrue(plan.calibratedTokenIds.isEmpty,
                       "seed table must not invent lexical bias")
-        XCTAssertTrue(plan.promptText?.contains("Sita") == true)
+        XCTAssertTrue(plan.promptText?.contains("सीता") == true)
         XCTAssertTrue(plan.promptText?.contains("डोटेली") == true)
     }
 }
