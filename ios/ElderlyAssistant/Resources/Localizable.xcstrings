@@ -11503,6 +11503,91 @@
         }
       }
     },
+    "alarms.off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Alarm for %@ is turned off."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ को अलार्म बन्द भयो।"
+          }
+        }
+      }
+    },
+    "alarms.offFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sorry — I couldn't turn off the alarm."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस् — अलार्म बन्द गर्न सकिनँ।"
+          }
+        }
+      }
+    },
+    "alarms.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You don't have any alarms set."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको कुनै अलार्म छैन।"
+          }
+        }
+      }
+    },
+    "alarms.snoozed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Snoozed until %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ सम्म स्नुज भयो।"
+          }
+        }
+      }
+    },
+    "alarms.snoozeFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sorry — I couldn't snooze the alarm."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस् — अलार्म स्नुज गर्न सकिनँ।"
+          }
+        }
+      }
+    },
     "timers.started": {
       "extractionState": "manual",
       "localizations": {

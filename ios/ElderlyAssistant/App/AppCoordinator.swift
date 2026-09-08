@@ -4592,6 +4592,29 @@ extension AppCoordinator {
         await alarmTimersService.startTimer(durationSeconds: durationSeconds, label: label)
     }
 
+    /// [ALARMS-TIMERS] (2026-09-08) Voice alarm OFF — resolves the most
+    /// recently rung enabled alarm and disables it (persist off, cancel
+    /// the pending daily + any snooze). Synchronous; the router speaks
+    /// the returned outcome. A nil target (no enabled alarms) reports
+    /// `.noAlarm` so the router speaks the honest "no alarms" line.
+    func requestAlarmOff() -> AlarmOffOutcome {
+        guard let target = alarmTimersService.mostRecentlyRungEnabledAlarm() else {
+            return .noAlarm
+        }
+        return alarmTimersService.disableAlarm(id: target.id)
+    }
+
+    /// [ALARMS-TIMERS] (2026-09-08) Voice SNOOZE — arms the one-shot
+    /// re-wake notification for the most recently rung enabled alarm
+    /// without touching its daily repeat. Same synchronous,
+    /// outcome-returning contract as `requestAlarmOff`.
+    func requestAlarmSnooze(minutes: Int) -> AlarmSnoozeOutcome {
+        guard let target = alarmTimersService.mostRecentlyRungEnabledAlarm() else {
+            return .noAlarm
+        }
+        return alarmTimersService.snoozeAlarm(id: target.id, minutes: minutes)
+    }
+
     /// Settings-leaf mutations (main-confined — the leaf's buttons run on
     /// main). Toggle re-arms/cancels the pending daily notification;
     /// remove/cancel persist the removal before cancelling the OS request.
