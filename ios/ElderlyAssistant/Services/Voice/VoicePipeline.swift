@@ -56,6 +56,13 @@ final class VoicePipeline {
     private let wakeWordGate: WakeWordActivityGate?
     private var speechRecognizer: SpeechRecognizerProtocol
     private var vad: VoiceActivityDetector?
+    /// [NOISE-FILTER] Denoising stage applied to the capture stream only
+    /// (P1 front-end — docs/research-sections/noise-filter.md). Nil (or a
+    /// null stage) by default: byte-identical legacy behavior. The idle
+    /// wake-word path is deliberately NOT processed in this phase — the
+    /// doc gates wake-on-enhanced-stream behind a wake-FRR measurement
+    /// (open question 7), and the VPIO session preset is untouched.
+    private var noiseSuppressor: NoiseSuppressor?
     private let router: CommandRouter
     private let observabilityBus: ObservabilityBus
 
@@ -148,6 +155,7 @@ final class VoicePipeline {
          wakeWordGate: WakeWordActivityGate? = nil,
          speechRecognizer: SpeechRecognizerProtocol,
          voiceActivityDetector: VoiceActivityDetector? = nil,
+         noiseSuppressor: NoiseSuppressor? = nil,
          router: CommandRouter,
          observabilityBus: ObservabilityBus) {
         self.audioSession = audioSession
@@ -156,6 +164,7 @@ final class VoicePipeline {
         self.wakeWordGate = wakeWordGate
         self.speechRecognizer = speechRecognizer
         self.vad = voiceActivityDetector
+        self.noiseSuppressor = noiseSuppressor
         self.router = router
         self.observabilityBus = observabilityBus
 
@@ -215,6 +224,18 @@ final class VoicePipeline {
         vad = newVAD
         wireVADCallbacks()
         emit("vad_hot_swap", outcome: "success")
+    }
+
+    /// [NOISE-FILTER] Hot-swap the denoising stage (mirrors
+    /// `setVoiceActivityDetector`). Nil = the capture path is
+    /// byte-identical to the pre-stage behavior. Safe mid-session: the
+    /// stage's streaming state starts cold (warmup passthrough), and the
+    /// capture bookends re-arm on the next wake.
+    func setNoiseSuppressor(_ newSuppressor: NoiseSuppressor?) {
+        noiseSuppressor = newSuppressor
+        newSuppressor?.setMode(state == .idle ? .idleListening : .capturing)
+        emit("noise_suppressor_hot_swap", outcome: "success",
+             metadata: ["engine": newSuppressor?.name ?? "off"])
     }
 
     func start(completion: @escaping (Result<Void, Error>) -> Void) {
@@ -359,20 +380,91 @@ final class VoicePipeline {
         }
     }
 
-    private func feedCapture(pcm samples: [Int16], buffer: AVAudioPCMBuffer) {
+    // MARK: - Noise filter (P1 front-end)
+
+    /// [NOISE-FILTER] Internal seam (same doctrine as the
+    /// `AudioSessionControlling` test seam — the wiring must be testable
+    /// without the mic tap). The denoising step of the capture fan-out:
+    /// stage applied ONCE, before the STT push and the VAD slice. No
+    /// stage (nil) = identity.
+    func enhanceCaptureSamples(_ samples: [Int16]) -> [Int16] {
+        guard let suppressor = noiseSuppressor else { return samples }
+        let processed = suppressor.process(samples)
+        if !processed.isEmpty || samples.isEmpty {
+            return processed
+        }
+        // Contract violation guard: a stage that returns nothing for a
+        // non-empty chunk would silently starve the capture — fall back
+        // to raw and say so, never corrupt the stream.
+        emit("noise_suppressor_starved", outcome: "fallback",
+             metadata: ["engine": suppressor.name])
+        return samples
+    }
+
+    /// [NOISE-FILTER] Internal seam: capture bookend — mode, streaming
+    /// reset, telemetry window. The stage KEEPS its learned noise
+    /// estimate across captures (room calibration — EnergyVAD's contract
+    /// for its own noiseFloor).
+    func beginNoiseFilterCapture() {
+        noiseSuppressor?.setMode(.capturing)
+        noiseSuppressor?.reset()
+        noiseSuppressor?.captureStarted()
+    }
+
+    /// [NOISE-FILTER] Internal seam: capture bookend — close the
+    /// per-utterance telemetry window, return the stage to the idle
+    /// preset. Idempotent inside the stage (a duplicate end from a
+    /// cancelled capture emits nothing).
+    func endNoiseFilterCapture() {
+        noiseSuppressor?.captureEnded()
+        noiseSuppressor?.setMode(.idleListening)
+    }
+
+    /// [NOISE-FILTER] Internal for the seam tests (no audio hardware
+    /// involved — pure fan-out over caller-supplied PCM).
+    func feedCapture(pcm samples: [Int16], buffer: AVAudioPCMBuffer) {
+        // [NOISE-FILTER] The denoising stage — applied ONCE here, after
+        // the 48→16 kHz conversion and before the fan-out, so the STT
+        // push and the endpointing VAD consume the identical enhanced
+        // stream (the doc's single-choke-point design). No stage (nil) =
+        // byte-identical legacy path. The stage is a STREAMING filter:
+        // per-call output length may vary by up to its latency (its
+        // doc), so the STT buffer is rebuilt from the enhanced samples
+        // instead of mutating the converter's buffer.
+        let enhanced = enhanceCaptureSamples(samples)
         // Push to STT — the STT is in push mode when a VAD is present.
         if !speechRecognizer.ownsAudioCapture {
-            speechRecognizer.feed(buffer)
+            if noiseSuppressor != nil {
+                speechRecognizer.feed(Self.makeInt16Buffer(from: enhanced,
+                                                           format: buffer.format))
+            } else {
+                speechRecognizer.feed(buffer)
+            }
         }
         // Push to VAD — chunks of its expected frame length.
         guard let vad = vad else { return }
-        pcmBuffer.append(contentsOf: samples)
+        pcmBuffer.append(contentsOf: enhanced)
         let frameLength = vad.frameLength
         while pcmBuffer.count >= frameLength {
             let frame = Array(pcmBuffer.prefix(frameLength))
             pcmBuffer.removeFirst(frameLength)
             vad.process(frame)
         }
+    }
+
+    /// Builds a fresh 16 kHz int16 mono buffer holding `samples` — used
+    /// for the STT push when the noise stage's output length differs
+    /// from the converter's chunk length (streaming stage contract).
+    /// Internal for the seam tests (no audio hardware involved).
+    static func makeInt16Buffer(from samples: [Int16],
+                                format: AVAudioFormat) -> AVAudioPCMBuffer {
+        let buffer = AVAudioPCMBuffer(pcmFormat: format,
+                                      frameCapacity: AVAudioFrameCount(max(samples.count, 1)))!
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { src in
+            buffer.int16ChannelData?.pointee.update(from: src.baseAddress!, count: src.count)
+        }
+        return buffer
     }
 
     // MARK: - Wake handling
@@ -396,6 +488,9 @@ final class VoicePipeline {
         state = .capturingCommand
         pcmBuffer.removeAll()
         silenceCounter = 0
+        // [NOISE-FILTER] Capture bookend (start) — see
+        // `beginNoiseFilterCapture` for the contract.
+        beginNoiseFilterCapture()
         emit("wake_word_detected", outcome: "success")
 
         if speechRecognizer.ownsAudioCapture {
@@ -466,6 +561,9 @@ final class VoicePipeline {
             // newer capture owns the tail.
             guard self.captureGeneration == generation else { return }
             self.vad?.stop()
+            // [NOISE-FILTER] Capture bookend (end) — see
+            // `endNoiseFilterCapture` for the contract.
+            self.endNoiseFilterCapture()
             // [REST-DIP-FIX] Requirement 3 — `.processing` (the session's
             // writing/transcribing state) must precede `.routing` for
             // EVERY live capture, not just wedge-forced ones: `.processing`
@@ -571,14 +669,16 @@ final class VoicePipeline {
 
     // MARK: - Observability
 
-    private func emit(_ eventType: String, outcome: String, errorCode: String? = nil) {
+    private func emit(_ eventType: String, outcome: String,
+                      errorCode: String? = nil,
+                      metadata: [String: String] = [:]) {
         observabilityBus.emit(ObservabilityEvent(
             component: "voice_pipeline",
             eventType: eventType,
             durationMs: nil,
             outcome: outcome,
             errorCode: errorCode,
-            metadata: [:]
+            metadata: metadata
         ))
     }
 }

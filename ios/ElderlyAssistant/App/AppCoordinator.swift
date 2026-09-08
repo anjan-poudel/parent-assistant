@@ -99,6 +99,7 @@ final class AppCoordinator: ObservableObject {
         }
     }
     private static let sttPreferenceKey = "sttModelPreference"
+    private static let noiseFilterEnabledKey = "noiseFilterEnabled"
 
     /// The app-wide background theme (skinnable home, 2026-09-07) — a UI
     /// preference, not a secret, persisted in UserDefaults the same way as
@@ -218,6 +219,26 @@ final class AppCoordinator: ObservableObject {
             guard voiceProcessingEnabled != oldValue else { return }
             audioSessionManager.voiceProcessingEnabled = voiceProcessingEnabled
             applyVoiceProcessingPresetChange()
+        }
+    }
+
+    /// Spectral-gate noise filter A/B gate ([NOISE-FILTER] P1 front-end,
+    /// 2026-09-08). ON = the voice pipeline's CAPTURE stream runs through
+    /// `SpectralGateDenoiser` — the model-free classic DSP spectral gate
+    /// (conservative stationary-noise suppression; NOT DeepFilterNet3 —
+    /// that needs model artifacts, P1 step 2 — see the gap note in
+    /// SpectralGateDenoiser). The VPIO session preset is untouched by
+    /// this toggle (independent A/B arms). Default OFF: the capture path
+    /// is byte-identical to today's. Unlike the VPIO preset, this stage
+    /// hot-swaps WITHOUT a pipeline recycle (`setNoiseSuppressor`).
+    /// Persisted under UserDefaults "noiseFilterEnabled" (a UI
+    /// preference, not a secret — house pattern).
+    @Published var noiseFilterEnabled: Bool {
+        didSet {
+            guard noiseFilterEnabled != oldValue else { return }
+            UserDefaults.standard.set(noiseFilterEnabled,
+                                      forKey: Self.noiseFilterEnabledKey)
+            applyNoiseFilterChange()
         }
     }
 
@@ -1204,6 +1225,13 @@ final class AppCoordinator: ObservableObject {
         // the restored preset at launch.
         self.voiceProcessingEnabled = audioSessionManager.voiceProcessingEnabled
 
+        // Restore the persisted noise-filter A/B mirror ([NOISE-FILTER]
+        // P1 front-end — default OFF). This is the mirror's ONLY initial
+        // assignment (didSet does not fire here); the restored stage is
+        // attached to the pipeline at its construction below.
+        self.noiseFilterEnabled =
+            UserDefaults.standard.bool(forKey: Self.noiseFilterEnabledKey)
+
         // Restore the persisted quick-access favourites (quick-access-apps
         // task, 2026-09-06). Pure prune — dedupe, drop ids naming no
         // catalog app, cap at 8 — with NO scheme probes at launch, so no
@@ -1561,6 +1589,9 @@ final class AppCoordinator: ObservableObject {
             router: router,
             observabilityBus: observabilityBus
         )
+        // [NOISE-FILTER] Attach the restored A/B stage (nil when OFF —
+        // the hot-swap seam emits the honest engine name either way).
+        voicePipeline?.setNoiseSuppressor(makeNoiseSuppressor())
         voiceStateCancellable = voicePipeline.$state
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
@@ -2170,6 +2201,24 @@ final class AppCoordinator: ObservableObject {
         } else {
             pendingVoiceProcessingPresetChange = true
         }
+    }
+
+    /// [NOISE-FILTER] Builds the denoising stage the A/B toggle selects:
+    /// nil (legacy capture path) when OFF, the spectral-gate denoiser
+    /// when ON. A DeepFilterNet3-class suppressor (P1 step 2 — model
+    /// artifacts + ModelStore delivery) would slot in here once it lands.
+    private func makeNoiseSuppressor() -> NoiseSuppressor? {
+        guard noiseFilterEnabled else { return nil }
+        return SpectralGateDenoiser(observabilityBus: observabilityBus)
+    }
+
+    /// [NOISE-FILTER] Applies the A/B toggle immediately: the stage is a
+    /// pipeline-level injection with its own hot-swap seam, so unlike the
+    /// VPIO preset this needs NO pipeline recycle — a mid-session flip
+    /// takes effect on the very next capture (the stage's streaming
+    /// state starts cold, warmup passthrough included).
+    private func applyNoiseFilterChange() {
+        voicePipeline?.setNoiseSuppressor(makeNoiseSuppressor())
     }
 
     /// Whether the on-device stack (Whisper STT + LLaMA interpreter) is
