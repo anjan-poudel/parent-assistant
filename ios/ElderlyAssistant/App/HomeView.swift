@@ -89,10 +89,12 @@ struct HomeView: View {
                     // Everything BELOW the hero — the transient setup
                     // nudge (only while onboarding steps remain) and the
                     // live-caption/outcome text — is ONE scroll region.
-                    // This region between the hero and the pinned dock is
-                    // the only part of Home that ever clips: on an
-                    // iPhone SE-sized viewport the lower content scrolls
-                    // while the hero and the dock never leave the screen.
+                    // This region between the hero and the pinned bottom
+                    // cluster (history chip + dock, see the safeAreaInset
+                    // below) is the only part of Home that ever clips: on
+                    // an iPhone SE-sized viewport the lower content
+                    // scrolls while the hero, chip and dock never leave
+                    // the screen.
                     ScrollView(showsIndicators: false) {
                         VStack(spacing: 12) {
                             if !coordinator.onboardingState.pendingSteps.isEmpty {
@@ -114,9 +116,18 @@ struct HomeView: View {
             // always owns the bottom of the screen and the scroll region
             // above it absorbs overflow instead.
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                dock
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 8)
+                // Fixed bottom cluster (visual-polish 2026-09-08): the
+                // history chip rides ABOVE the dock, 6pt off its top edge,
+                // both pinned — the scroll region between the hero and
+                // this cluster is the only part of Home that clips.
+                VStack(spacing: 6) {
+                    if showsPinnedHistoryChip {
+                        historyChip
+                    }
+                    dock
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
             }
             .navigationBarHidden(true)
             // Value-based navigation (iOS 16 pattern). The previous
@@ -249,8 +260,10 @@ struct HomeView: View {
                 Image(systemName: "exclamationmark.circle.fill")
                     .font(.system(size: 14))
                     .foregroundColor(DesignTokens.accent)
+                // Short static catalog microcopy (visual-polish 2026-09-08):
+                // warm rounded, matching the sibling historyChip capsule.
                 Text(remainingText)
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
                 Spacer()
                 Image(systemName: "chevron.right")
@@ -277,7 +290,7 @@ struct HomeView: View {
     private var quickAccessRow: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("home.quickAccess.caption")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
                 .foregroundColor(DesignTokens.textSecondary)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
@@ -364,11 +377,12 @@ struct HomeView: View {
             if stageVisuals.isConfirmation {
                 ConfirmationChips(titleKey: stageVisuals.captionKey)
             } else {
-                // Tight spacing keeps the hint carousel visually attached
-                // to the button (2026-09-08: it read as disconnected at
-                // the old 18pt gap — the hints describe the button right
-                // below them, so they must sit just under it).
-                VStack(spacing: 6) {
+                // The stage reads as ONE unit: hero, its status line and
+                // the hint carousel each sit ≤4pt apart (visual-polish
+                // 2026-09-08 — at the old gaps the texts floated loose
+                // below the button; the hints describe the button right
+                // below them, so they must hug it).
+                VStack(spacing: 4) {
                     TalkButton(session: session,
                                onTap: {
                                    switch session.state {
@@ -424,7 +438,7 @@ struct HomeView: View {
             }
         } label: {
             Label("state.error.openSettings", systemImage: "gear")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                 .foregroundColor(DesignTokens.accent)
                 .padding(.horizontal, 16)
                 .frame(height: DesignTokens.minTapTargetSize)
@@ -467,11 +481,26 @@ struct HomeView: View {
                     guard !Task.isCancelled else { return }
                     withAnimation(.easeInOut) { outcomeExpanded = false }
                 }
-            } else if !coordinator.conversationHistory.isEmpty {
-                // No outcome yet this session, but there is history —
-                // still offer the on-demand sheet rather than nothing.
-                historyChip
             }
+        }
+    }
+
+    /// Pinned history affordance (visual-polish 2026-09-08): the chip
+    /// moved OUT of the scroll region to sit between it and the dock —
+    /// "closer to the dock menus" — so older conversations stay one
+    /// fixed tap away regardless of scroll position. Visibility mirrors
+    /// the chip's old in-scroll rule exactly: shown while there is
+    /// history to open, no fresh outcome card is already offering the
+    /// sheet, and the stage is not mid-capture (the live pill owns the
+    /// moment). Tapping opens the same history sheet as before.
+    private var showsPinnedHistoryChip: Bool {
+        guard coordinator.lastOutcome == nil,
+              !coordinator.conversationHistory.isEmpty else { return false }
+        switch session.state {
+        case .idle, .speaking, .error, .stopped:
+            return true
+        case .listening, .transcribing, .understanding, .awaitingConfirmation:
+            return false
         }
     }
 
@@ -479,9 +508,9 @@ struct HomeView: View {
         Button { showHistory = true } label: {
             HStack(spacing: 6) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(DesignTokens.warmFont(size: 11, weight: .bold))
                 Text("home.conversation.title")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
             }
             .foregroundColor(DesignTokens.textSecondary)
             .padding(.horizontal, 14)
@@ -680,7 +709,10 @@ struct TalkButton: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        // 4pt — the status line HUGS the hero circle so button + caption
+        // read as one unit (visual-polish 2026-09-08; the stage VStack
+        // keeps its own ≤4pt below this line to the hint carousel).
+        VStack(spacing: 4) {
             Button(action: {
                 // The reset backstop (see `suppressTapAfterReset`): after
                 // a completed hold the release must not ALSO run the tap
@@ -708,22 +740,23 @@ struct TalkButton: View {
                             .frame(width: DesignTokens.talkButtonDiameter + 28,
                                    height: DesignTokens.talkButtonDiameter + 28)
                     }
+                    // Traffic-light hero (visual-polish 2026-09-08): a
+                    // SOLID state-color disc — flat fills read calmer and
+                    // clearer than the old radial amber "diya" glow, and
+                    // white glyphs hold ≥4.5:1 on every state color (unit
+                    // tested). The breathing rings + halo + shadow carry
+                    // the "alive" light in the state's own color family.
                     Circle()
-                        .fill(heroFill)
+                        .fill(visuals.tint)
                         .frame(width: DesignTokens.talkButtonDiameter,
                                height: DesignTokens.talkButtonDiameter)
-                        // Flat-color heroes (speaking green, transcribing,
-                        // understanding) cast a slightly heavier shadow
-                        // than the amber-gradient glow so they lift off the
-                        // warm background; idle/listening's amber stays at
-                        // 0.35 (2026-09-07 listening-vs-speaking fix).
-                        .shadow(color: visuals.tint.opacity(visuals.usesAmberHero ? 0.35 : 0.45), radius: 10, y: 4)
+                        .shadow(color: visuals.tint.opacity(0.4), radius: 10, y: 4)
                         .overlay(
                             VStack(spacing: 6) {
                                 Image(systemName: visuals.icon)
                                     .font(.system(size: 32))
                                 Text(session.state.buttonText(locale: locale))
-                                    .font(.system(size: 20, weight: .bold))
+                                    .font(DesignTokens.warmFont(size: 20, weight: .bold))
                                     .multilineTextAlignment(.center)
                                     .lineLimit(2)
                                     .minimumScaleFactor(0.7)
@@ -766,8 +799,11 @@ struct TalkButton: View {
                 onPressingChanged: handleHoldPressing(_:)
             ))
 
+            // Warm rounded status line ("I'm ready", hold hint, error
+            // captions) — short human-facing microcopy (visual-polish
+            // 2026-09-08).
             Text(statusTextLine)
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .medium))
+                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .medium))
                 .foregroundColor(DesignTokens.textSecondary)
                 .multilineTextAlignment(.center)
         }
@@ -836,31 +872,21 @@ struct TalkButton: View {
         }
     }
 
-    /// Amber gradient only while idle/listening (redesign spec §2 —
-    /// "listening/live"); other states keep the existing semantic color so
-    /// error/speaking/etc. stay legible against their own state color.
-    private var heroFill: AnyShapeStyle {
-        guard visuals.usesAmberHero else { return AnyShapeStyle(visuals.tint) }
-        return AnyShapeStyle(
-            RadialGradient(colors: [DesignTokens.talkGlowStart, DesignTokens.talkGlowEnd],
-                           center: UnitPoint(x: 0.35, y: 0.3),
-                           startRadius: 4,
-                           endRadius: DesignTokens.talkButtonDiameter * 0.7)
-        )
-    }
-
     /// Two concentric rings that breathe outward and fade — the
-    /// "signature" motion element (redesign spec §2). Respects
+    /// "signature" motion element (redesign spec §2). The rings breathe
+    /// in the ACTIVE state's color (visual-polish 2026-09-08): blue
+    /// rings at rest, amber while listening — the light follows the
+    /// traffic-light family, never a fixed amber. Respects
     /// `accessibilityReduceMotion` (checked by the caller before this is
     /// even placed in the view tree).
     private var breathingRings: some View {
         ZStack {
             Circle()
-                .stroke(DesignTokens.talkGlowEnd.opacity(breathe ? 0.05 : 0.35), lineWidth: 2)
+                .stroke(visuals.tint.opacity(breathe ? 0.05 : 0.35), lineWidth: 2)
                 .frame(width: breathe ? DesignTokens.talkButtonDiameter + 90 : DesignTokens.talkButtonDiameter + 20,
                        height: breathe ? DesignTokens.talkButtonDiameter + 90 : DesignTokens.talkButtonDiameter + 20)
             Circle()
-                .stroke(DesignTokens.talkGlowEnd.opacity(breathe ? 0.02 : 0.22), lineWidth: 2)
+                .stroke(visuals.tint.opacity(breathe ? 0.02 : 0.22), lineWidth: 2)
                 .frame(width: breathe ? DesignTokens.talkButtonDiameter + 130 : DesignTokens.talkButtonDiameter + 40,
                        height: breathe ? DesignTokens.talkButtonDiameter + 130 : DesignTokens.talkButtonDiameter + 40)
         }
@@ -937,7 +963,7 @@ struct ConfirmationChips: View {
                         .font(.system(size: 24))
                         .foregroundColor(DesignTokens.stateUnderstanding)
                     Text(LocalizedStringKey(titleKey))
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
                         .foregroundColor(DesignTokens.textSecondary)
                 }
                 if let prompt = coordinator.lastAssistantReply, !prompt.isEmpty {
@@ -976,7 +1002,7 @@ struct ConfirmationChips: View {
             }
         } label: {
             Text(LocalizedStringKey(key))
-                .font(.system(size: 24, weight: .bold))
+                .font(DesignTokens.warmFont(size: 24, weight: .bold))
                 .foregroundColor(isYes ? DesignTokens.accent : DesignTokens.textSecondary)
                 .frame(maxWidth: .infinity)
                 .frame(height: DesignTokens.chipHeight)
@@ -997,29 +1023,31 @@ struct ConfirmationChips: View {
 /// The Home talk stage's per-state look, computed in a single switch over
 /// `VoiceSessionState` — the ONE source of truth for every visual on the
 /// stage. Hero icon, in-hero caption, under-hero status line, tint, the
-/// amber "live" fill, the halo/pulse motion, and the auxiliary stage
-/// pieces (hint carousel, confirmation chips, error detail) are all
-/// decided here. Previously the views re-derived these with their own
-/// ad-hoc conditions (`isGlowing`, the halo's `== .listening ||
-/// == .speaking`, `capturePlaceholderKey`) — duplicate mappings that
-/// could diverge and did: transcribing/understanding rendered with no
-/// glow and no halo while speaking kept its ring, and each view had to
-/// be edited in lockstep to keep a state's look consistent. Nothing
-/// below branches on state equality; views read this table only.
+/// flat traffic-light fill, the halo/pulse motion, and the auxiliary
+/// stage pieces (hint carousel, confirmation chips, error detail) are all
+/// decided here. Since visual-polish 2026-09-08 the hero is a SOLID
+/// state-tint disc (traffic-light fills — see `DesignTokens`) and every
+/// glow element (halo, breathing rings, shadow, carousel dots) derives
+/// from the same `tint`, so the light follows the active state family.
+/// Previously the views re-derived these with their own ad-hoc conditions
+/// (`isGlowing`, the halo's `== .listening || == .speaking`,
+/// `capturePlaceholderKey`) — duplicate mappings that could diverge and
+/// did: transcribing/understanding rendered with no glow and no halo
+/// while speaking kept its ring, and each view had to be edited in
+/// lockstep to keep a state's look consistent. Nothing below branches on
+/// state equality; views read this table only.
 struct TalkStageVisuals {
     /// SF Symbol inside the hero (state icons — spec §3.3).
     let icon: String
-    /// Hero tint: flat fill, shadow and halo color (the DesignTokens
-    /// state palette — listening amber, speaking green, etc.).
+    /// Hero tint: flat fill, shadow, halo and glow color (the
+    /// DesignTokens traffic-light state palette — rest blue, wait amber,
+    /// go green, stop red).
     let tint: Color
     /// Big caption inside the hero (`state.*.button` keys).
     let captionKey: String
     /// Small status line under the hero (`state.*.status` keys). For
     /// `.awaitingConfirmation` it is the chips card's title instead.
     let statusKey: String
-    /// Amber radial-gradient hero ("listening/live", redesign spec §2) —
-    /// idle and listening only.
-    let usesAmberHero: Bool
     /// Breathing rings animate around the hero — idle + listening. All
     /// other hero states are motionless by design (redesign spec §2:
     /// the rate and presence of motion itself communicates state).
@@ -1047,7 +1075,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateIdle,
                                     captionKey: "state.idle.button",
                                     statusKey: "state.idle.status",
-                                    usesAmberHero: true,
                                     pulses: true,
                                     showsHalo: false,
                                     showsHintCarousel: true,
@@ -1058,7 +1085,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateListening,
                                     captionKey: "state.listening.button",
                                     statusKey: "state.listening.status",
-                                    usesAmberHero: true,
                                     pulses: true,
                                     showsHalo: true,
                                     showsHintCarousel: false,
@@ -1069,7 +1095,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateTranscribing,
                                     captionKey: "state.transcribing.button",
                                     statusKey: "state.transcribing.status",
-                                    usesAmberHero: false,
                                     pulses: false,
                                     showsHalo: true,
                                     showsHintCarousel: false,
@@ -1080,7 +1105,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateUnderstanding,
                                     captionKey: "state.understanding.button",
                                     statusKey: "state.understanding.status",
-                                    usesAmberHero: false,
                                     pulses: false,
                                     showsHalo: true,
                                     showsHintCarousel: false,
@@ -1091,7 +1115,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateSpeaking,
                                     captionKey: "state.speaking.button",
                                     statusKey: "state.speaking.status",
-                                    usesAmberHero: false,
                                     pulses: false,
                                     showsHalo: true,
                                     showsHintCarousel: false,
@@ -1102,7 +1125,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateUnderstanding,
                                     captionKey: "state.awaitingConfirmation.title",
                                     statusKey: "state.awaitingConfirmation.title",
-                                    usesAmberHero: false,
                                     pulses: false,
                                     showsHalo: false,
                                     showsHintCarousel: false,
@@ -1113,7 +1135,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateError,
                                     captionKey: "state.error.button",
                                     statusKey: "state.error.status",
-                                    usesAmberHero: false,
                                     pulses: false,
                                     showsHalo: false,
                                     showsHintCarousel: false,
@@ -1124,7 +1145,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateStopped,
                                     captionKey: "state.stopped.button",
                                     statusKey: "state.stopped.status",
-                                    usesAmberHero: false,
                                     pulses: false,
                                     showsHalo: false,
                                     showsHintCarousel: false,

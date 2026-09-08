@@ -83,7 +83,7 @@ struct FaceAvatar: View {
 
     var body: some View {
         Circle()
-            .fill(LinearGradient(colors: [DesignTokens.talkGlowStart, DesignTokens.talkGlowEnd],
+            .fill(LinearGradient(colors: [DesignTokens.warmGlowStart, DesignTokens.warmGlowEnd],
                                   startPoint: .topLeading, endPoint: .bottomTrailing))
             .frame(width: diameter, height: diameter)
             .overlay(
@@ -191,15 +191,19 @@ struct HintCarousel: View {
     @State private var index = 0
 
     var body: some View {
+        // Warm rounded catalog microcopy + a page-dot in the REST state's
+        // blue (visual-polish 2026-09-08: the carousel only shows under
+        // the idle hero, so its accent follows the hero's blue instead of
+        // the old fixed amber glow).
         VStack(spacing: 6) {
             Text("home.hint.label")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
                 .foregroundColor(DesignTokens.textSecondary)
             Text(LocalizedStringKey(Self.phraseKeys[index]))
                 // Static/rotating text under the speak button is caption-
                 // sized (home-redesign v3, 2026-09-08): this rotating
                 // phrase is an idle affordance, not reading matter.
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                 .foregroundColor(DesignTokens.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
@@ -211,7 +215,7 @@ struct HintCarousel: View {
             HStack(spacing: 4) {
                 ForEach(Self.phraseKeys.indices, id: \.self) { i in
                     Circle()
-                        .fill(i == index ? DesignTokens.talkGlowEnd : DesignTokens.textSecondary.opacity(0.3))
+                        .fill(i == index ? DesignTokens.stateIdle : DesignTokens.textSecondary.opacity(0.3))
                         .frame(width: 5, height: 5)
                 }
             }
@@ -257,8 +261,11 @@ struct LiveCaptionPill: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            // Header is short catalog microcopy → warm rounded; the
+            // transcript BELOW stays regular (it is the user's own
+            // dynamic speech — visual-polish 2026-09-08).
             Text("home.liveCaption.label")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
                 .foregroundColor(DesignTokens.textSecondary)
             if let text = readyText {
                 // Full text, immediately — NOT a per-character typewriter.

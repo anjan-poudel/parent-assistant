@@ -11,7 +11,7 @@ import UIKit
 /// Guidance layout: instead of one crammed overlay on the full photo, each
 /// step is its own card — the instruction text up top, then a CROPPED,
 /// zoomed close-up of the relevant section with the button circled (a
-/// `talkGlowEnd` ring, white under-stroke, step badge) and the button's
+/// `warmGlowEnd` ring, white under-stroke, step badge) and the button's
 /// label beneath it (augmented into the ACTIVE locale's language when the
 /// localizer knows the label). Close-ups are pinch-zoomed up to 4×
 /// (double-tap resets to 1×).
@@ -487,11 +487,11 @@ private struct ZoomableStepImage: View {
                 .frame(width: (radius + 3) * 2, height: (radius + 3) * 2)
                 .position(ringCenter)
             Circle()
-                .stroke(DesignTokens.talkGlowEnd, lineWidth: 4.5)
+                .stroke(DesignTokens.warmGlowEnd, lineWidth: 4.5)
                 .frame(width: radius * 2, height: radius * 2)
                 .position(ringCenter)
             ZStack {
-                Circle().fill(DesignTokens.talkGlowEnd)
+                Circle().fill(DesignTokens.warmGlowEnd)
                 Text(badgeText)
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                     .foregroundColor(.white)
