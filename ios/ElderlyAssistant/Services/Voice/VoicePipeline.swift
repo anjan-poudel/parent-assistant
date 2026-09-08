@@ -110,6 +110,38 @@ final class VoicePipeline {
     /// processing queue.
     private var captureGeneration = 0
 
+    // MARK: - Deferred return to idle (REST-DIP-FIX, 2026-09-08)
+
+    /// [REST-DIP-FIX] Safety ceiling for the deferred return to idle.
+    /// When the recognition completion routes a transcript whose reply is
+    /// still outstanding (the router's async LLM interpreter round-trip —
+    /// see `CommandRouter.isTurnReplyPending`), the pipeline holds
+    /// `.routing` (the session shows "understanding") instead of dropping
+    /// to `.idle` — the reported rest dip between "understanding" and the
+    /// same turn's reply. The hold ends when the router resolves the
+    /// token (`onTurnReplyResolved` → `releaseIdleHold`); this timeout is
+    /// the fallback for a turn that never resolves, and it falls back to
+    /// TODAY's behavior (return to idle / wake listening resumes).
+    ///
+    /// The value MUST exceed the longest legitimate same-turn reply
+    /// latency — the interpreter chain's own bounded round-trip (the
+    /// local leg's timeout, then GeminiClient's 25 s HTTP timeout on
+    /// escalation, all of which guarantee the interpret completion
+    /// eventually fires and clears the token) — so it never fires while a
+    /// reply is genuinely on its way. It sits deliberately below the 40 s
+    /// voice watchdog (AppCoordinator.voiceWatchdogSeconds — the
+    /// coupled-numbers family: capture timeout, wedge guard, Gemini
+    /// HTTP timeout, voice watchdog — re-checked together whenever one
+    /// changes).
+    private static let turnPendingSafetySeconds: TimeInterval = 35
+
+    /// Armed while a route's async reply is outstanding: the pipeline
+    /// holds `.routing` instead of calling `resumeWakeListening()`. The
+    /// generation is the CAPTURE the hold belongs to — `stop()` disarms
+    /// (see `stop()`), and a stale release (a superseded turn's
+    /// completion) can never resume a newer capture's hold.
+    private var idleHold: (generation: Int, safetyWork: DispatchWorkItem)?
+
     init(audioSession: AudioSessionManager,
          audioEngine: AVAudioEngine,
          wakeWordEngine: WakeWordEngine,
@@ -129,6 +161,14 @@ final class VoicePipeline {
 
         self.wakeWordEngine.onDetection = { [weak self] in
             self?.handleWakeDetected()
+        }
+        // [REST-DIP-FIX] Release hook for the deferred return to idle: the
+        // router fires it when the turn's async reply dispatch finishes
+        // (after the reply speech was committed). The router's completion
+        // can land on ANY queue (LLaMA/Gemini/URLSession), so the handler
+        // hops to main before touching pipeline state.
+        router.onTurnReplyResolved = { [weak self] in
+            self?.handleTurnReplyResolved()
         }
         wireVADCallbacks()
     }
@@ -211,6 +251,15 @@ final class VoicePipeline {
         // synchronously) must not run the post-capture tail against a
         // stopped pipeline — see `captureGeneration` (TALK-CRASH-FIX).
         captureGeneration += 1
+        // [REST-DIP-FIX] Disarm any deferred return to idle: the hold
+        // belongs to the cancelled turn. (Its generation is already stale
+        // after the bump above, but cancelling the safety work and
+        // clearing the slot now also lets a NEW capture's hold arm — the
+        // arming guard requires an empty slot.)
+        if let hold = idleHold {
+            hold.safetyWork.cancel()
+            idleHold = nil
+        }
         wakeWordEngine.stop()
         vad?.stop()
         speechRecognizer.cancel()
@@ -417,6 +466,21 @@ final class VoicePipeline {
             // newer capture owns the tail.
             guard self.captureGeneration == generation else { return }
             self.vad?.stop()
+            // [REST-DIP-FIX] Requirement 3 — `.processing` (the session's
+            // writing/transcribing state) must precede `.routing` for
+            // EVERY live capture, not just wedge-forced ones: `.processing`
+            // is otherwise only set by the 18 s "stuck in listening"
+            // wedge, so on the normal VAD path (and instant STT
+            // completions) a live capture still in `.capturingCommand`
+            // here would jump straight to `.routing` and the session
+            // would skip the writing state entirely. The completion and
+            // the wedge are both main-confined so they cannot race — this
+            // guard simply covers the completion-won case: if the wedge
+            // already flipped `.processing`, leave it; a stale/stopped
+            // completion never reaches here (generation guard above).
+            if self.state == .capturingCommand {
+                self.state = .processing
+            }
             self.state = .routing
             switch result {
             case .success(let transcript):
@@ -427,8 +491,67 @@ final class VoicePipeline {
                 let msg = "STT: \(err)"
                 DispatchQueue.main.async { self.onSTTError?(msg) }
             }
-            self.resumeWakeListening()
+            if self.router.isTurnReplyPending {
+                // The route handed the turn to an async dispatch whose
+                // reply speech is still outstanding (the LLM interpreter
+                // round-trip). Defer the return to idle — the session
+                // stays on "understanding" (state `.routing`) until the
+                // reply is committed or the safety timeout falls back to
+                // today's behavior — instead of dropping to rest for the
+                // beat before the reply starts (the reported rest dip).
+                self.holdIdleForTurnReply(generation: generation)
+            } else {
+                self.resumeWakeListening()
+            }
         }
+    }
+
+    // MARK: - Deferred return to idle (REST-DIP-FIX, 2026-09-08)
+
+    /// Holds the pipeline on `.routing` (the session's "understanding")
+    /// instead of returning to idle: the turn's async reply is still
+    /// outstanding (`router.isTurnReplyPending`, checked right after
+    /// `route()` returned). Wake listening stays off while held — the
+    /// session is visibly busy — and the escape hatches still work: the
+    /// Talk-button tap mid-cycle runs `stop()` (which disarms the hold),
+    /// and the safety timeout below restores today's behavior for a turn
+    /// that never resolves.
+    private func holdIdleForTurnReply(generation: Int) {
+        guard idleHold == nil else { return }
+        let safetyWork = DispatchWorkItem { [weak self] in
+            // Safety fallback: the turn never resolved (a reply path that
+            // neither spoke nor cleared the token) — fall back to today's
+            // behavior and return to idle / resume wake listening.
+            self?.releaseIdleHold()
+        }
+        idleHold = (generation, safetyWork)
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.turnPendingSafetySeconds,
+            execute: safetyWork)
+    }
+
+    /// Main-queue entry point for the router's resolution notification
+    /// (its interpret completion can land on any queue — LLaMA / Gemini /
+    /// URLSession workers).
+    private func handleTurnReplyResolved() {
+        DispatchQueue.main.async { [weak self] in
+            self?.releaseIdleHold()
+        }
+    }
+
+    /// Ends the deferred return to idle. When the hold is still armed for
+    /// the CURRENT capture, resumes wake listening (the reply's
+    /// speech-start hop was already enqueued by the router before it
+    /// resolved the token, so the session maps to `.speaking`, never to
+    /// rest). Idempotent; a stale hold (superseded capture — generation
+    /// mismatch, or `stop()` already disarmed) is cleared without
+    /// resuming.
+    private func releaseIdleHold() {
+        guard let hold = idleHold else { return }
+        idleHold = nil
+        hold.safetyWork.cancel()
+        guard hold.generation == captureGeneration else { return }
+        resumeWakeListening()
     }
 
     private func resumeWakeListening() {
