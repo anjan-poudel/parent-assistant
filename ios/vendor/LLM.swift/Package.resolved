@@ -1,23 +1,61 @@
 {
-  "pins" : [
-    {
-      "identity" : "swift-syntax",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-syntax.git",
-      "state" : {
-        "revision" : "fd6373fad9cf3b3bc4e3c06d92f0cfd60007fa8e",
-        "version" : "602.0.0-prerelease-2025-06-26"
+  "object": {
+    "pins": [
+      {
+        "package": "onnxruntime-libs",
+        "repositoryURL": "https://github.com/csukuangfj/onnxruntime-libs",
+        "state": {
+          "branch": null,
+          "revision": "5cc3d2e84d9eade2562cf29a93fa3a520a75ca57",
+          "version": "1.28.1"
+        }
+      },
+      {
+        "package": "sherpa-onnx",
+        "repositoryURL": "https://github.com/k2-fsa/sherpa-onnx",
+        "state": {
+          "branch": null,
+          "revision": "917bed95c8e5c7c18aa4d69fea42e9ef8ef0a60e",
+          "version": "1.13.7"
+        }
+      },
+      {
+        "package": "swift-argument-parser",
+        "repositoryURL": "https://github.com/apple/swift-argument-parser.git",
+        "state": {
+          "branch": null,
+          "revision": "6a52f3251125d74daf04fcbd5e6f08a75d074382",
+          "version": "1.8.2"
+        }
+      },
+      {
+        "package": "swift-syntax",
+        "repositoryURL": "https://github.com/apple/swift-syntax.git",
+        "state": {
+          "branch": null,
+          "revision": "fd6373fad9cf3b3bc4e3c06d92f0cfd60007fa8e",
+          "version": "602.0.0-prerelease-2025-06-26"
+        }
+      },
+      {
+        "package": "argmax-oss-swift",
+        "repositoryURL": "https://github.com/argmaxinc/WhisperKit.git",
+        "state": {
+          "branch": "main",
+          "revision": "ea872ffd35705aa757f33033500b9b0d40bd38df",
+          "version": null
+        }
+      },
+      {
+        "package": "ZIPFoundation",
+        "repositoryURL": "https://github.com/weichsel/ZIPFoundation",
+        "state": {
+          "branch": null,
+          "revision": "22787ffb59de99e5dc1fbfe80b19c97a904ad48d",
+          "version": "0.9.20"
+        }
       }
-    },
-    {
-      "identity" : "swift-testing",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-testing.git",
-      "state" : {
-        "branch" : "main",
-        "revision" : "e245c544f463f9f1c09f0d801c3c8153cfa76ebc"
-      }
-    }
-  ],
-  "version" : 2
+    ]
+  },
+  "version": 1
 }
