@@ -364,7 +364,11 @@ struct HomeView: View {
             if stageVisuals.isConfirmation {
                 ConfirmationChips(titleKey: stageVisuals.captionKey)
             } else {
-                VStack(spacing: 18) {
+                // Tight spacing keeps the hint carousel visually attached
+                // to the button (2026-09-08: it read as disconnected at
+                // the old 18pt gap — the hints describe the button right
+                // below them, so they must sit just under it).
+                VStack(spacing: 6) {
                     TalkButton(session: session,
                                onTap: {
                                    switch session.state {
