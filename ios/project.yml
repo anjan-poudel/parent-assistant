@@ -7,7 +7,7 @@
 # ElderlyAssistant.xcodeproj/project.pbxproj by hand — regenerate it from
 # this file so history stays legible.
 
-name: ElderlyAssistant
+name: seniOS
 options:
   bundleIdPrefix: com.elderlyassistant
   deploymentTarget:
