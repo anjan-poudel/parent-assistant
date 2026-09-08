@@ -9667,363 +9667,363 @@
         }
       }
     },
-        "wakeWord.active.detail": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "Say “Hey Sahayak”, pause briefly, then speak your command — for example: “Hey Sahayak, remind me to take medicine at 8.”"
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "“हे सहायक” भन्नुहोस्, छोटो रोकिनुहोस्, अनि आफ्नो आदेश बोल्नुहोस् — उदाहरण: “हे सहायक, मलाई ८ बजे औषधि खान सम्झाउनुहोस्।”"
-                    }
-                }
-            }
+    "wakeWord.active.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Say “Hey Sahayak”, pause briefly, then speak your command — for example: “Hey Sahayak, remind me to take medicine at 8.”"
+          }
         },
-        "wakeWord.active.title": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "Listening is on"
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "सुन्ने सुविधा सक्रिय छ"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“हे सहायक” भन्नुहोस्, छोटो रोकिनुहोस्, अनि आफ्नो आदेश बोल्नुहोस् — उदाहरण: “हे सहायक, मलाई ८ बजे औषधि खान सम्झाउनुहोस्।”"
+          }
+        }
+      }
+    },
+    "wakeWord.active.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listening is on"
+          }
         },
-        "wakeWord.batteryNote": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "While this is on, the microphone listens all the time, which uses a little more battery. Switch it off here any time."
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "यो अन हुँदा माइक्रोफोनले सधैं सुनिरहन्छ, जसले अलि बढी ब्याट्री खपत गर्छ। जतिबेला पनि यहाँबाट बन्द गर्न सकिन्छ।"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्ने सुविधा सक्रिय छ"
+          }
+        }
+      }
+    },
+    "wakeWord.batteryNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "While this is on, the microphone listens all the time, which uses a little more battery. Switch it off here any time."
+          }
         },
-        "wakeWord.explanation": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "With the wake word on, Sahayak listens for “Hey Sahayak” and then takes your command by itself — no button press."
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "वेक वर्ड अन हुँदा, सहायकले “हे सहायक” सुन्छ र त्यसपछि आफैं तपाईंको आदेश लिन्छ — बटन थिच्नु पर्दैन।"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो अन हुँदा माइक्रोफोनले सधैं सुनिरहन्छ, जसले अलि बढी ब्याट्री खपत गर्छ। जतिबेला पनि यहाँबाट बन्द गर्न सकिन्छ।"
+          }
+        }
+      }
+    },
+    "wakeWord.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "With the wake word on, Sahayak listens for “Hey Sahayak” and then takes your command by itself — no button press."
+          }
         },
-        "wakeWord.modelBundled": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "The listening model comes with the app — nothing else to set up."
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "सुन्ने मोडेल एपसँगै रहन्छ — अरू केही सेटअप गर्नुपर्दैन।"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "वेक वर्ड अन हुँदा, सहायकले “हे सहायक” सुन्छ र त्यसपछि आफैं तपाईंको आदेश लिन्छ — बटन थिच्नु पर्दैन।"
+          }
+        }
+      }
+    },
+    "wakeWord.modelBundled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The listening model comes with the app — nothing else to set up."
+          }
         },
-        "wakeWord.needsSetup.detail": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "Listening is switched on, but something the wake word needs is missing — it is listed below. Once a family member fixes it, listening starts on the next launch."
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "सुन्ने स्विच अन गरिएको छ, तर वेक वर्डका लागि चाहिने केही कुरा छैन — के छैन भन्ने तल दिइएको छ। परिवारको कसैले मिलाएपछि, अर्को पटक एप खोल्दा सुन्ने सुविधा सुरु हुन्छ।"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्ने मोडेल एपसँगै रहन्छ — अरू केही सेटअप गर्नुपर्दैन।"
+          }
+        }
+      }
+    },
+    "wakeWord.needsSetup.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listening is switched on, but something the wake word needs is missing — it is listed below. Once a family member fixes it, listening starts on the next launch."
+          }
         },
-        "wakeWord.needsSetup.title": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "The wake word isn't ready yet"
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "वेक वर्ड अझै तयार भएको छैन"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्ने स्विच अन गरिएको छ, तर वेक वर्डका लागि चाहिने केही कुरा छैन — के छैन भन्ने तल दिइएको छ। परिवारको कसैले मिलाएपछि, अर्को पटक एप खोल्दा सुन्ने सुविधा सुरु हुन्छ।"
+          }
+        }
+      }
+    },
+    "wakeWord.needsSetup.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The wake word isn't ready yet"
+          }
         },
-        "wakeWord.off.detail": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "The app is not listening for “Hey Sahayak” right now. Turn the switch on above to listen again."
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "एपले अहिले “हे सहायक” सुनिरहेको छैन। फेरि सुन्नका लागि माथिको स्विच अन गर्नुहोस्।"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "वेक वर्ड अझै तयार भएको छैन"
+          }
+        }
+      }
+    },
+    "wakeWord.off.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The app is not listening for “Hey Sahayak” right now. Turn the switch on above to listen again."
+          }
         },
-        "wakeWord.off.title": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "Listening is off"
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "सुन्ने सुविधा बन्द छ"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "एपले अहिले “हे सहायक” सुनिरहेको छैन। फेरि सुन्नका लागि माथिको स्विच अन गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "wakeWord.off.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listening is off"
+          }
         },
-        "wakeWord.phrase": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "Say “ये कान्छी” (yeah kanchhi) to wake Sahayak."
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "सहायकलाई ब्युँझाउन “ये कान्छी” भन्नुहोस्।"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्ने सुविधा बन्द छ"
+          }
+        }
+      }
+    },
+    "wakeWord.phrase": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Say “ये कान्छी” (yeah kanchhi) to wake Sahayak."
+          }
         },
-        "wakeWord.restart.detail": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "Everything is set up. The listener starts when the app opens, so close the app fully and open it again."
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "सबै तयार छ। सुन्ने सुविधा एप खुल्दा सुरु हुन्छ, त्यसैले एप पूरै बन्द गरेर फेरि खोल्नुहोस्।"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायकलाई ब्युँझाउन “ये कान्छी” भन्नुहोस्।"
+          }
+        }
+      }
+    },
+    "wakeWord.restart.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Everything is set up. The listener starts when the app opens, so close the app fully and open it again."
+          }
         },
-        "wakeWord.restart.title": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "Restart to start listening"
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "सुन्न सुरु गर्न एप पुनः सुरु गर्नुहोस्"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सबै तयार छ। सुन्ने सुविधा एप खुल्दा सुरु हुन्छ, त्यसैले एप पूरै बन्द गरेर फेरि खोल्नुहोस्।"
+          }
+        }
+      }
+    },
+    "wakeWord.restart.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restart to start listening"
+          }
         },
-        "wakeWord.setupNeedsModel": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "The “Hey Sahayak” listening model is not part of this build. A family member needs to add it and build the app again (tools/fetch-kws-model.sh fetches it)."
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "“हे सहायक” सुन्ने मोडेल यो संस्करणको हिस्सा होइन। परिवारको कसैले यसलाई थपेर एप फेरि बनाउनुपर्छ (tools/fetch-kws-model.sh ले डाउनलोड गर्छ)।"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्न सुरु गर्न एप पुनः सुरु गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "wakeWord.setupNeedsModel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The “Hey Sahayak” listening model is not part of this build. A family member needs to add it and build the app again (tools/fetch-kws-model.sh fetches it)."
+          }
         },
-        "wakeWord.setupNeedsRuntime": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "The listening engine (sherpa-onnx) is not part of this build. A family member needs to enable it and build the app again — step-by-step instructions are in the project."
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "सुन्ने इन्जिन (sherpa-onnx) यो संस्करणको हिस्सा होइन। परिवारको कसैले यसलाई जोडेर एप फेरि बनाउनुपर्छ — चरणबद्ध निर्देशन परियोजनामा छन्।"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“हे सहायक” सुन्ने मोडेल यो संस्करणको हिस्सा होइन। परिवारको कसैले यसलाई थपेर एप फेरि बनाउनुपर्छ (tools/fetch-kws-model.sh ले डाउनलोड गर्छ)।"
+          }
+        }
+      }
+    },
+    "wakeWord.setupNeedsRuntime": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The listening engine (sherpa-onnx) is not part of this build. A family member needs to enable it and build the app again — step-by-step instructions are in the project."
+          }
         },
-        "wakeWord.status.active": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "Active"
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "सक्रिय"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुन्ने इन्जिन (sherpa-onnx) यो संस्करणको हिस्सा होइन। परिवारको कसैले यसलाई जोडेर एप फेरि बनाउनुपर्छ — चरणबद्ध निर्देशन परियोजनामा छन्।"
+          }
+        }
+      }
+    },
+    "wakeWord.status.active": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active"
+          }
         },
-        "wakeWord.status.needsSetup": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "Setup needed"
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "सेटअप चाहिन्छ"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सक्रिय"
+          }
+        }
+      }
+    },
+    "wakeWord.status.needsSetup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Setup needed"
+          }
         },
-        "wakeWord.status.off": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "Off"
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "बन्द"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सेटअप चाहिन्छ"
+          }
+        }
+      }
+    },
+    "wakeWord.status.off": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Off"
+          }
         },
-        "wakeWord.status.restartToActivate": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "Restart to activate"
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "पुनः सुरु गर्दा सक्रिय हुन्छ"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बन्द"
+          }
+        }
+      }
+    },
+    "wakeWord.status.restartToActivate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restart to activate"
+          }
         },
-        "wakeWord.talkStillWorks": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "The Talk button on the home screen still works exactly as before — it doesn't depend on the wake word."
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "होम स्क्रिनको टक बटन पहिले जस्तै काम गर्छ — यो वेक वर्डमा भर पर्दैन।"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पुनः सुरु गर्दा सक्रिय हुन्छ"
+          }
+        }
+      }
+    },
+    "wakeWord.talkStillWorks": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Talk button on the home screen still works exactly as before — it doesn't depend on the wake word."
+          }
         },
-        "wakeWord.title": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "Voice activation"
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "आवाज सक्रियता"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "होम स्क्रिनको टक बटन पहिले जस्तै काम गर्छ — यो वेक वर्डमा भर पर्दैन।"
+          }
+        }
+      }
+    },
+    "wakeWord.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice activation"
+          }
         },
-        "wakeWord.toggleLabel": {
-            "extractionState": "manual",
-            "localizations": {
-                "en": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "Listen for “Hey Sahayak”"
-                    }
-                },
-                "ne": {
-                    "stringUnit": {
-                        "state": "translated",
-                        "value": "“हे सहायक” सुन्नुहोस्"
-                    }
-                }
-            }
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज सक्रियता"
+          }
+        }
+      }
+    },
+    "wakeWord.toggleLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Listen for “Hey Sahayak”"
+          }
         },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“हे सहायक” सुन्नुहोस्"
+          }
+        }
+      }
+    },
     "weather.checking": {
       "extractionState": "manual",
       "localizations": {
@@ -12451,6 +12451,669 @@
           "stringUnit": {
             "state": "translated",
             "value": "युट्युब"
+          }
+        }
+      }
+    },
+    "news.checking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Let me check the news."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म समाचार ल्याउँदैछु।"
+          }
+        }
+      }
+    },
+    "news.alreadyFetching": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I'm still fetching the news. One moment."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म अझै समाचार ल्याउँदै छु। एकछिन पर्खनुहोस्।"
+          }
+        }
+      }
+    },
+    "news.sourceLine": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "From %@:"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ बाट:"
+          }
+        }
+      }
+    },
+    "news.sourceFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ could not be reached."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ बाट समाचार लिन सकिएन।"
+          }
+        }
+      }
+    },
+    "news.sourceEmpty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing new from %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ बाट नयाँ समाचार छैन।"
+          }
+        }
+      }
+    },
+    "news.allFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I couldn't fetch the news right now. Please try again later."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले समाचार लिन सकिएन। कृपया पछि फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "news.allEmpty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "There is nothing new from your news sources right now."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले समाचार स्रोतहरूबाट नयाँ समाचार छैन।"
+          }
+        }
+      }
+    },
+    "news.cardTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "News"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "समाचार"
+          }
+        }
+      }
+    },
+    "home.hub.feeds": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feeds"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फिड"
+          }
+        }
+      }
+    },
+    "feeds.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feeds"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फिड"
+          }
+        }
+      }
+    },
+    "feeds.count": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld items"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld वटा सामग्री"
+          }
+        }
+      }
+    },
+    "feeds.refresh": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Check for new items"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नयाँ सामग्री जाँच्नुहोस्"
+          }
+        }
+      }
+    },
+    "feeds.loading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading your feed…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको फिड लोड हुँदैछ…"
+          }
+        }
+      }
+    },
+    "feeds.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing here yet. Add feed sources or topics in Settings → Feeds, then check again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले केही छैन। सेटिङ → फिडमा स्रोत वा विषय थपेर फेरि जाँच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "feeds.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The feed could not be loaded. Check the connection and try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फिड लोड गर्न सकिएन। इन्टरनेट जाँचेर फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "feeds.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try again"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फेरि प्रयास गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "feeds.partialFailure": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some sources could not be reached: %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "केही स्रोतहरू खुल्न सकेनन्: %@"
+          }
+        }
+      }
+    },
+    "feeds.readAloud": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read aloud"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पढेर सुनाउनुहोस्"
+          }
+        }
+      }
+    },
+    "feeds.play": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "चलाउनुहोस्"
+          }
+        }
+      }
+    },
+    "feeds.playingTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Now playing"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले बज्दैछ"
+          }
+        }
+      }
+    },
+    "feeds.close": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Close"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बन्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.feeds.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feeds"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फिड"
+          }
+        }
+      }
+    },
+    "settings.feeds.sourcesSection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feed sources"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फिड स्रोतहरू"
+          }
+        }
+      }
+    },
+    "settings.feeds.sourcesHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These sources fill your Feed screen. Curated defaults are included — remove any you do not want."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यी स्रोतहरूले तपाईंको फिड स्क्रिन भर्छन्। सुरुका स्रोतहरू पहिल्यै छन् — नचाहेको हटाउन सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "settings.feeds.sourcesEmpty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No sources. Add a feed address below."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कुनै स्रोत छैन। तल फिड ठेगाना थप्नुहोस्।"
+          }
+        }
+      }
+    },
+    "settings.feeds.sourcePlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Feed address (https://…)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फिड ठेगाना (https://…)"
+          }
+        }
+      }
+    },
+    "settings.feeds.addSource": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add source"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "स्रोत थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.feeds.addSourceFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That is not a valid feed address."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यो मान्य फिड ठेगाना होइन।"
+          }
+        }
+      }
+    },
+    "settings.feeds.removeSource": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove source"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "स्रोत हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "settings.feeds.defaultTag": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "default"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुरुको"
+          }
+        }
+      }
+    },
+    "settings.feeds.topicsSection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Topics"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "विषयहरू"
+          }
+        }
+      }
+    },
+    "settings.feeds.topicsHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only items whose title or summary mentions a topic appear. Leave empty to see everything."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "शीर्षक वा सारांशमा विषय उल्लेख भएका सामग्री मात्र देखिन्छन्। सबै हेर्न खाली राख्नुहोस्।"
+          }
+        }
+      }
+    },
+    "settings.feeds.topicsEmpty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No topics — everything is shown."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कुनै विषय छैन — सबै देखिन्छ।"
+          }
+        }
+      }
+    },
+    "settings.feeds.topicPlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Topic, e.g. health"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "विषय, जस्तै स्वास्थ्य"
+          }
+        }
+      }
+    },
+    "settings.feeds.addTopic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add topic"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "विषय थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.feeds.removeTopic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove topic"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "विषय हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "settings.feeds.newsSection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "News sources"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "समाचार स्रोतहरू"
+          }
+        }
+      }
+    },
+    "settings.feeds.newsManage": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Manage news sources"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "समाचार स्रोत व्यवस्थापन गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.feeds.newsPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "News source management arrives with the News update."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "समाचार स्रोत व्यवस्थापन न्युज अपडेटसँगै आउनेछ।"
           }
         }
       }

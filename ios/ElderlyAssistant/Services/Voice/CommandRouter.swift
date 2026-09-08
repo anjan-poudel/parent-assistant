@@ -261,6 +261,14 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// and no card of its own, exactly like a topic pre-answer that has
     /// already spoken.
     func fireMorningBriefing()
+
+    /// [NEWS-READER] (2026-09-08) Voice-OS news digest ("read me the
+    /// news"). The `NewsReader` announces its localized "checking" line,
+    /// fetches every effective source and then speaks the composed digest
+    /// itself through the shell's speak queue, with its own outcome card
+    /// — the router adds no speech and no card of its own, exactly like
+    /// the briefing stage. On-demand: no once-per-wake-window budget.
+    func fireNewsReader()
 }
 
 /// [INTENT-TOOLS] (2026-09-07) Tool-capability default. The default keeps
@@ -304,6 +312,11 @@ extension VoiceCommandCoordinating {
     // never fires a briefing, so the deterministic ladder stage falls
     // through to the interpreter/keyword remainder exactly as before.
     func fireMorningBriefing() {}
+    // [NEWS-READER] (2026-09-08) Inert default — a conformer that does
+    // not opt in (every mock/double across app and test target) never
+    // fires a news digest, so the deterministic ladder stage falls
+    // through to the interpreter/keyword remainder exactly as before.
+    func fireNewsReader() {}
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -712,6 +725,41 @@ final class CommandRouter {
             return .unrecognised(transcript: raw)
         }
 
+        // [NEWS-READER] (2026-09-08) Voice-OS news digest: "read me the
+        // news" / "what's the news" / "समाचार सुनाऊ" / "खबर सुनाऊ" — a
+        // deterministic pre-answer stage like the briefing stage above:
+        // after the safety net + confirmation flow + contact search +
+        // directions + alarms/timers + briefing, before any model. No
+        // interpreter involvement, no IntentPrompt tokens (the prompt
+        // budget is pinned by IntentPromptTests) — the digest can never
+        // depend on interpreter availability or confidence, and can never
+        // be misclassified into a topic answer.
+        //
+        // Placement: AFTER the briefing stage (a briefing utterance can
+        // never be swallowed by the news stage) and BEFORE the topic
+        // table (a greeting-prefixed news request — "नमस्ते, खबर सुनाऊ" —
+        // is a digest, never small talk).
+        //
+        // Vetoes (same discipline as the briefing phrase list):
+        //  - full-phrase containment only — the bare word "news" /
+        //    "समाचार" is never matched, so an utterance that merely
+        //    mentions news ("news from my son about school") can never
+        //    hijack the stage;
+        //  - imperative/question FORMS only ("सुनाऊ", "read me", "what's")
+        //    — a noun phrase ("today's news", "समाचार") never matches.
+        //
+        // The stage only DECIDES and hands off: the coordinator owns the
+        // reader (`fireNewsReader()`), and the reader owns every spoken
+        // line — the checking announcement, the digest, and the honest
+        // failure lines — with its own outcome card, so this stage ends
+        // the turn with the same `.unrecognised(transcript:)` the
+        // topic/calculator stages return once they have already spoken.
+        if Self.newsPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
+            coordinator?.fireNewsReader()
+            emit(eventType: "news_reader_command", outcome: "success")
+            return .unrecognised(transcript: raw)
+        }
+
         // [YOUTUBE] (2026-09-08) Deterministic voice YOUTUBE stage:
         // "play bhajan on youtube", "youtube news", "search youtube for
         // old songs", "युट्युबमा गीत चलाऊ", "युट्युबमा रामायण खोज".
@@ -1066,6 +1114,21 @@ final class CommandRouter {
         "मेरो ब्रीफिङ सुनाऊ", "ब्रीफिङ सुनाऊ",
         "मेरो बिहानको सारांश सुनाऊ", "बिहानको सारांश सुनाऊ",
         "mero briefing sunau", "bihanko sarsang sunau"
+    ]
+
+    /// [NEWS-READER] (2026-09-08) Request phrasings for the news digest —
+    /// English, नेपाली, and romanized Nepali, matched against the
+    /// lowercased transcript like every other phrase list. Full phrases
+    /// only (see the stage's veto notes): the bare word "news" /
+    /// "समाचार" is deliberately absent, so a mention can never fire the
+    /// digest. STT spacing varies, so all spellings ship: "what's" /
+    /// "whats" / "what is".
+    private static let newsPhrases = [
+        "read me the news", "read the news", "tell me the news",
+        "what's the news", "whats the news", "what is the news",
+        "समाचार सुनाऊ", "समाचार सुनाउनुहोस्", "समाचार पढ",
+        "खबर सुनाऊ", "खबर सुनाउनुहोस्", "खबर पढ",
+        "samachar sunau", "samachar sunaunuhos", "khabar sunau"
     ]
 
     // MARK: - Keyword fallback
