@@ -22,6 +22,9 @@ enum LeafDestination: Identifiable {
     /// bar's bell opens — Notifications + Today + Activity sections in
     /// one vertical scroll (see `UpdatesScreen`).
     case updates
+    /// The mixed content feed (feed-agent task, 2026-09-08) — docked
+    /// last so the five pre-existing tiles keep their positions.
+    case feed
 
     var id: String {
         switch self {
@@ -34,6 +37,7 @@ enum LeafDestination: Identifiable {
         case .directions: return "directions"
         case .briefing: return "briefing"
         case .updates: return "updates"
+        case .feed: return "feed"
         }
     }
 }
@@ -536,6 +540,7 @@ struct HomeView: View {
             dockCallItem
             dockApplianceItem
             dockDirectionsItem
+            dockItem(.feed, icon: "rectangle.stack.fill", tint: .feeds, titleKey: "home.hub.feeds")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 10)
@@ -627,6 +632,9 @@ struct HomeView: View {
             // badge reads is handed in, so the leaf's Notifications
             // section and the badge can never disagree.
             UpdatesScreen(registry: widgetRegistry)
+        case .feed:
+            // The Feed leaf (feed-agent task, 2026-09-08).
+            FeedsView()
         }
     }
 
