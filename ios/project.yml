@@ -157,9 +157,14 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"  # iPhone only
         SWIFT_OBJC_BRIDGING_HEADER: ""
+<<<<<<< HEAD
         # The app ships no home-screen icon yet; AppIcons.xcassets holds
         # ONLY brand glyphs, and actool refuses a catalog without an
         # "AppIcon" set unless the requirement is explicitly blanked.
+=======
+        # Home-screen icon: AppIcon.appiconset (cropped from the user's
+        # supplied artwork, 2026-09-08).
+>>>>>>> origin/master
         ASSETCATALOG_COMPILER_APPICON_NAME: "AppIcon"
     dependencies:
       - package: SwiftWhisper
