@@ -53,8 +53,8 @@ set -euo pipefail
 #   IOS_TEST_CLONES        N>0: -parallel-testing-worker-count N for UI runs.
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="ElderlyAssistant"
-SCHEME="${APP_NAME}"
+APP_NAME="seniOS"
+SCHEME="ElderlyAssistant"
 BUILD_DIR="${PROJECT_DIR}/build"
 DERIVED_DATA="${IOS_DERIVED_DATA:-${BUILD_DIR}/DerivedData}"
 TEST_DERIVED_DATA="${IOS_TEST_DERIVED_DATA:-${BUILD_DIR}/DerivedDataTests}"
