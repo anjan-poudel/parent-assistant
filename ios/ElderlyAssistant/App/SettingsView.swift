@@ -16,7 +16,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case appearance, language, calling, places, family, meds, manuals, calendar, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, quickApps, privacy, intentLog, toolLog
+        case appearance, language, calling, places, family, meds, manuals, calendar, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, youtube, quickApps, privacy, intentLog, toolLog
 
         var id: String {
             switch self {
@@ -34,6 +34,7 @@ struct SettingsView: View {
             case .wakeWord: return "wakeWord"
             case .ttsVoices: return "ttsVoices"
             case .webSearch: return "webSearch"
+            case .youtube: return "youtube"
             case .quickApps: return "quickApps"
             case .privacy: return "privacy"
             case .intentLog: return "intentLog"
@@ -91,6 +92,11 @@ struct SettingsView: View {
                         // credentials for the on-device stack's search tool.
                         sectionRow(.webSearch, icon: "magnifyingglass.circle.fill",
                                    titleKey: "searchSettings.title")
+                        // [YOUTUBE] (2026-09-08) YouTube — the optional Data
+                        // API key behind "play X on youtube" (without it the
+                        // voice command opens YouTube search directly).
+                        sectionRow(.youtube, icon: "play.rectangle.fill",
+                                   titleKey: "youtubeSettings.title")
                         sectionRow(.quickApps, icon: "square.grid.2x2.fill", titleKey: "settings.quickApps.title")
                         sectionRow(.family, icon: "person.2.fill", titleKey: "settings.family.title")
                         sectionRow(.meds, icon: "pills.fill", titleKey: "settings.meds.title")
@@ -149,6 +155,7 @@ struct SettingsView: View {
             case .wakeWord: WakeWordSettingsView()
             case .ttsVoices: TTSVoicesSettingsView()
             case .webSearch: SearchSettingsView()
+            case .youtube: YouTubeSettingsView()
             case .quickApps: QuickAccessAppsView()
             case .privacy: PrivacySettingsView()
             case .intentLog: IntentLogReviewView()
@@ -670,6 +677,119 @@ struct SearchSettingsView: View {
     }
 
     /// One labeled SecureField card — same visual recipe as the Gemini
+    /// key field (monospaced, min tap height, outlined bubble).
+    private func credentialField(labelKey: LocalizedStringKey,
+                                 placeholderKey: LocalizedStringKey,
+                                 text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(labelKey)
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textSecondary)
+            SecureField(placeholderKey, text: text)
+                .font(.system(size: DesignTokens.minBodyPointSize, design: .monospaced))
+                .padding(14)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
+                        .stroke(DesignTokens.textSecondary.opacity(0.25), lineWidth: 1)
+                )
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+        }
+    }
+}
+
+// MARK: - YouTube (youtube-plugin, 2026-09-08)
+
+/// [YOUTUBE] (2026-09-08) The optional YouTube Data API v3 key behind
+/// the voice YouTube feature's "play the top result" path. Family-facing
+/// (the elderly primary user is never asked to handle API keys — same
+/// framing as the search/Gemini key screens): one SecureField mirroring
+/// `SearchSettingsView`'s field style. The key is OPTIONAL — without it
+/// "play X on youtube" opens YouTube search directly (the accepted
+/// search-only MVP), and the explanation states that plainly.
+struct YouTubeSettingsView: View {
+    @EnvironmentObject var coordinator: AppCoordinator
+    @State private var draftAPIKey = ""
+    @State private var showClearConfirm = false
+
+    var body: some View {
+        LeafScreen(titleKey: "youtubeSettings.title") {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("youtubeSettings.explanation")
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+
+                VStack(alignment: .leading, spacing: 14) {
+                    credentialField(labelKey: "youtubeSettings.apiKey",
+                                    placeholderKey: "youtubeSettings.apiKey",
+                                    text: $draftAPIKey)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(DesignTokens.card)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+
+                Button {
+                    // An empty draft leaves the stored value untouched —
+                    // clearing is the explicit Remove action below.
+                    let trimmedKey = draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmedKey.isEmpty {
+                        coordinator.youtubeConfigStore.saveAPIKey(trimmedKey)
+                    }
+                    draftAPIKey = ""
+                } label: {
+                    Text("youtubeSettings.save")
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: DesignTokens.minTapTargetSize)
+                        .background(draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    ? DesignTokens.textSecondary.opacity(0.4) : DesignTokens.accent)
+                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                }
+                .buttonStyle(.plain)
+                .disabled(draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if coordinator.youtubeConfigStore.isConfigured {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(DesignTokens.accent)
+                        Text("youtubeSettings.statusConnected")
+                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                            .foregroundColor(DesignTokens.textSecondary)
+                        Spacer()
+                        Button(role: .destructive) {
+                            showClearConfirm = true
+                        } label: {
+                            Text("youtubeSettings.remove")
+                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                }
+
+                Text("youtubeSettings.quotaNote")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("youtubeSettings.privacy")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .confirmationDialog("youtubeSettings.removeConfirm", isPresented: $showClearConfirm) {
+            Button("youtubeSettings.remove", role: .destructive) {
+                coordinator.youtubeConfigStore.clear()
+            }
+            Button("common.back", role: .cancel) {}
+        }
+    }
+
+    /// One labeled SecureField card — same visual recipe as the search
     /// key field (monospaced, min tap height, outlined bubble).
     private func credentialField(labelKey: LocalizedStringKey,
                                  placeholderKey: LocalizedStringKey,
