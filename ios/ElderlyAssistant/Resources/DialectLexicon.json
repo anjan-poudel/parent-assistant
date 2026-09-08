@@ -1,0 +1,20 @@
+{
+  "formatVersion": 1,
+  "generation": {
+    "status": "SEED-LEXICON",
+    "path": "Tag lines name the variety (safe conditioning text). Phrases are small sets of attested lexical markers — eastern -इछ perfectives (गइछ/भइछ/खाइछ for standard गएछ/भएछ/खाएछ) and Doteli/far-west past forms (भया for भयो, रह्याको for रहेको, भण्याको for भनेको) — pending linguist review. The calibration pipeline (accent-adaptation.md §6 P0.4) replaces phrases and may add clusters. Structural corruption is refused by DialectLexicon.issues(); wrong-but-well-formed content degrades softly (soft lexical bias inside a <=100-token budget).",
+    "date": null
+  },
+  "entries": [
+    {
+      "dialect": "eastern",
+      "tagLine": "पूर्वेली नेपाली बोली",
+      "phrases": ["गइछ", "भइछ", "खाइछ"]
+    },
+    {
+      "dialect": "doteli",
+      "tagLine": "डोटेली भाषा, सुदूरपश्चिम नेपाल",
+      "phrases": ["भया", "रह्याको", "भण्याको"]
+    }
+  ]
+}

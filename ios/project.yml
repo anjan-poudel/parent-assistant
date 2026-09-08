@@ -103,6 +103,14 @@ targets:
       # in the app bundle and DialectCentroidTable.bundled() finds nothing.
       - path: ElderlyAssistant/Resources/DialectCentroids.json
         buildPhase: resources
+      # Bundled per-dialect lexicon for decode biasing ([ACCENT-ADAPT],
+      # accent-adaptation.md P0.3 — tag lines + known dialect words per
+      # label). SEED-LEXICON placeholder pending linguist review. Same
+      # single-file pattern as DialectCentroids.json: without this entry
+      # the file never lands in the app bundle and
+      # DialectLexicon.bundled() finds nothing.
+      - path: ElderlyAssistant/Resources/DialectLexicon.json
+        buildPhase: resources
       # Official multicolor logos for the quick-access app catalog
       # (Wikimedia Commons PNGs, 2026-09-07 — sources in the catalog's
       # README.md). `Resources` is excluded from the source glob above, so
