@@ -39,8 +39,29 @@ DEST="$(cd "$(dirname "$0")/.." && pwd)/ios/ElderlyAssistant/Resources/Models/kw
 # ":score" and "#threshold" suffixes (defaults keywordsScore 1.0 /
 # keywordsThreshold 0.25 apply when omitted); "@phrase" is only needed
 # when a keyword differs from its tokens, which is never the case here.
-KEYWORD_RAW="YEAH KANCHHI"
-KEYWORD_TOKENS="▁YEAH ▁K AN CH H I"
+# Acoustic candidate set for the one phrase (Nepali "ये कान्छी"). The
+# English-trained GigaSpeech decoder maps the user's Nepali phones to
+# its nearest English subword tokens, which vary (aspiration, vowel
+# quality, trailing iy) — so keywords.txt ships every plausible
+# tokenization instead of betting on one. The aspirated CH-H form is
+# included for completeness though it is essentially never emitted.
+# keywords.txt supports multiple keywords; all lines are verified below.
+KEYWORD_RAW="YEAH KANCHI
+YEAH KANCHIY
+YEAH KAHNCHI
+YEAH KAHNCHIY
+YEAH KUNCHI
+YEAH KUNCHIY
+YEAH KANCHHI
+YEAH KAHNCHHI"
+KEYWORD_TOKENS="▁YEAH ▁K AN CH I
+▁YEAH ▁K AN CH I Y
+▁YEAH ▁K A H N CH I
+▁YEAH ▁K A H N CH I Y
+▁YEAH ▁K UN CH I
+▁YEAH ▁K UN CH I Y
+▁YEAH ▁K AN CH H I
+▁YEAH ▁K A H N CH H I"
 
 if [ -d "$DEST/$MODEL" ]; then
   echo "  ✓ $MODEL already present — skipping"
