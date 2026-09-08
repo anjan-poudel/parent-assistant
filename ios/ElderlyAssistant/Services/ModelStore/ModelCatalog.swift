@@ -131,6 +131,9 @@ enum ModelCatalog {
     /// the distillation findings, now interactive via ANE (~1.3 s per
     /// utterance vs 128 s CPU, iPhone 14 Pro Max, 2026-09-05).
     static let whisperKitNepaliMedium = ModelID("whisperkit-ne-medium")
+    /// v5 fine-tune on the ANE path — 6-bit palettized, best accuracy +
+    /// fast (v9 release, 2026-09-09).
+    static let whisperKitMediumV5 = ModelID("whisperkit-ne-medium-v5-q6")
     static let whisperSmallMultilingual = ModelID("whisper-small-multilingual-q5_1")
     /// The FINISHED small Devanagari Nepali model: stage-4 fine-tune on
     /// labeled Devanagari transcripts, started from the distilled
@@ -370,6 +373,28 @@ enum ModelCatalog {
             dependsOn: nil,
             whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v4/whisperkit-ne-medium.zip")!,
             whisperKitZipBytes: 1_413_743_470
+        ),
+        ModelCatalogEntry(
+            id: whisperKitMediumV5,
+            kind: .whisperBase,
+            displayName: "Nepali — Medium v5 · WhisperKit (best + fast)",
+            // finetune-medium-v5-final, 6-bit palettized CoreML (group 64,
+            // 2-bit sparse outliers) — FLEURS WER 28.23 / CER 8.89, the
+            // best measured accuracy, on the ANE fast path. CoreML spec
+            // v9 → iOS 18+.
+            filename: "whisperkit-ne-medium-v5-q6",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v9/whisperkit-ne-medium-v5-q6.zip")!,
+            // Unpacked q6 mlmodelc trio + tokenizer (~642 MB zip).
+            sizeBytes: 800_000_000,
+            // SHA-256 of the release ZIP — verified by installWhisperKitModel.
+            sha256: "e4f8a20310601fb67decb424510858fdc4602b692366896eeb6c1d3d0cab1100",
+            // q6 weights ~0.6 GB + KV: live footprint well under the
+            // fp16 sibling's; 4 GB floor stays conservative.
+            minDeviceRAMBytes: 4_000_000_000,
+            dependsOn: nil,
+            whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v9/whisperkit-ne-medium-v5-q6.zip")!,
+            whisperKitZipBytes: 642_347_390,
+            requiresiOS18: true
         ),
         ModelCatalogEntry(
             id: whisperSmallMultilingual,
