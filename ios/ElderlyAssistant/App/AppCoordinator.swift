@@ -3956,8 +3956,8 @@ final class AppCoordinator: ObservableObject {
                 self.emitDirections(eventType: "geocode", outcome: "fallback_address")
                 url = app == .appleMaps
                     ? MapsLinks.appleMapsDirectionsURL(address: address)
-                    : MapsLinks.googleMapsDirectionsURL(address: address,
-                                                        uiLanguageCode: mapsUILanguageCode)
+                    : MapsLinks.googleMapsWalkingNavigateURL(address: address,
+                                                            uiLanguageCode: mapsUILanguageCode)
             }
             guard let url else {
                 // No URL at all (both builders refused the input) — say

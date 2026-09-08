@@ -186,6 +186,53 @@ final class MapsLinks {
         return components.url
     }
 
+    /// The Google surface's WALKING auto-start form (gmaps-walking task,
+    /// 2026-09-08): the HTTP Maps URLs API with `travelmode=walking` +
+    /// `dir_action=navigate` and NO origin. Omitting `origin` makes the
+    /// Maps app treat the user's CURRENT location as the start — per
+    /// Google's documentation that combination launches turn-by-turn
+    /// navigation directly (no Start tap) in walking mode. The https URL
+    /// is a Universal Link, so it opens the Google Maps app when
+    /// installed and Safari otherwise. Honest limits stay documented:
+    /// if the destination cannot navigate or location is unavailable,
+    /// Maps falls back to a route preview (the parameter is ignored).
+    static func googleMapsWalkingNavigateURL(latitude: Double, longitude: Double,
+                                             uiLanguageCode: String) -> URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "www.google.com"
+        components.path = "/maps/dir/"
+        components.queryItems = [
+            URLQueryItem(name: "api", value: "1"),
+            URLQueryItem(name: "destination",
+                         value: daddrValue(latitude: latitude, longitude: longitude)),
+            URLQueryItem(name: "travelmode", value: "walking"),
+            URLQueryItem(name: "dir_action", value: "navigate"),
+            URLQueryItem(name: "hl", value: uiLanguageCode)
+        ]
+        return components.url
+    }
+
+    /// Address-string fallback of the walking auto-start form, used ONLY
+    /// when forward geocoding failed — same honest limits.
+    static func googleMapsWalkingNavigateURL(address: String,
+                                             uiLanguageCode: String) -> URL? {
+        let trimmed = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "www.google.com"
+        components.path = "/maps/dir/"
+        components.queryItems = [
+            URLQueryItem(name: "api", value: "1"),
+            URLQueryItem(name: "destination", value: trimmed),
+            URLQueryItem(name: "travelmode", value: "walking"),
+            URLQueryItem(name: "dir_action", value: "navigate"),
+            URLQueryItem(name: "hl", value: uiLanguageCode)
+        ]
+        return components.url
+    }
+
     /// The directions URL the resolved map app opens — nil for `.auto`
     /// (never passed a resolved policy) and `.inApp` (no external URL).
     /// `uiLanguageCode` feeds the Google surface's `hl` deep-link ask
@@ -197,8 +244,8 @@ final class MapsLinks {
                               uiLanguageCode: String) -> URL? {
         switch app {
         case .googleMaps:
-            return googleMapsDirectionsURL(latitude: latitude, longitude: longitude,
-                                           uiLanguageCode: uiLanguageCode)
+            return googleMapsWalkingNavigateURL(latitude: latitude, longitude: longitude,
+                                                uiLanguageCode: uiLanguageCode)
         case .appleMaps:
             return appleMapsDirectionsURL(latitude: latitude, longitude: longitude)
         case .auto, .inApp:
