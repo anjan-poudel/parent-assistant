@@ -15,10 +15,10 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "9967E45A189F990A572818AA"
+               BlueprintIdentifier = "7675AC04A0FAA99ACB9C184F"
                BuildableName = "ElderlyAssistant.app"
                BlueprintName = "ElderlyAssistant"
-               ReferencedContainer = "container:ElderlyAssistant.xcodeproj">
+               ReferencedContainer = "container:seniOS.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
          <BuildActionEntry
@@ -29,10 +29,10 @@
             buildForAnalyzing = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "DD44C866B90F5DD4A561A04E"
+               BlueprintIdentifier = "F6F40A7946EB37A2CECF5CD2"
                BuildableName = "ElderlyAssistantTests.xctest"
                BlueprintName = "ElderlyAssistantTests"
-               ReferencedContainer = "container:ElderlyAssistant.xcodeproj">
+               ReferencedContainer = "container:seniOS.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -46,10 +46,10 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "9967E45A189F990A572818AA"
+            BlueprintIdentifier = "7675AC04A0FAA99ACB9C184F"
             BuildableName = "ElderlyAssistant.app"
             BlueprintName = "ElderlyAssistant"
-            ReferencedContainer = "container:ElderlyAssistant.xcodeproj">
+            ReferencedContainer = "container:seniOS.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
@@ -58,10 +58,10 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "DD44C866B90F5DD4A561A04E"
+               BlueprintIdentifier = "F6F40A7946EB37A2CECF5CD2"
                BuildableName = "ElderlyAssistantTests.xctest"
                BlueprintName = "ElderlyAssistantTests"
-               ReferencedContainer = "container:ElderlyAssistant.xcodeproj">
+               ReferencedContainer = "container:seniOS.xcodeproj">
             </BuildableReference>
          </TestableReference>
          <TestableReference
@@ -69,10 +69,10 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "36E854FB6B15BEC4FE4ACBFB"
+               BlueprintIdentifier = "50171E53856C230054A9E85B"
                BuildableName = "ElderlyAssistantUITests.xctest"
                BlueprintName = "ElderlyAssistantUITests"
-               ReferencedContainer = "container:ElderlyAssistant.xcodeproj">
+               ReferencedContainer = "container:seniOS.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -93,10 +93,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "9967E45A189F990A572818AA"
+            BlueprintIdentifier = "7675AC04A0FAA99ACB9C184F"
             BuildableName = "ElderlyAssistant.app"
             BlueprintName = "ElderlyAssistant"
-            ReferencedContainer = "container:ElderlyAssistant.xcodeproj">
+            ReferencedContainer = "container:seniOS.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <CommandLineArguments>
@@ -112,10 +112,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "9967E45A189F990A572818AA"
+            BlueprintIdentifier = "7675AC04A0FAA99ACB9C184F"
             BuildableName = "ElderlyAssistant.app"
             BlueprintName = "ElderlyAssistant"
-            ReferencedContainer = "container:ElderlyAssistant.xcodeproj">
+            ReferencedContainer = "container:seniOS.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <CommandLineArguments>

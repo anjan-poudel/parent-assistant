@@ -7,7 +7,10 @@
 # ElderlyAssistant.xcodeproj/project.pbxproj by hand — regenerate it from
 # this file so history stays legible.
 
-name: ElderlyAssistant
+# [VOICE-SETTINGS] Project rename parity with the coordinator's in-flight
+# seniOS rename (the .xcodeproj directory changes; targets/scheme/bundle-id
+# stay ElderlyAssistant).
+name: seniOS
 options:
   bundleIdPrefix: com.elderlyassistant
   deploymentTarget:
