@@ -156,12 +156,16 @@ def strip_oob_added_tokens(model_dir: Path) -> None:
     llama.cpp's convert_hf_to_gguf asserts max(tokenizer.vocab.values()) <
     vocab_size; transformers v5 loads tokenizer.json added_tokens into
     .vocab, so gemma-3's multimodal placeholder <image_soft_token> (id
-    262144, one past a 262144 vocab) trips the assert. The token never
-    appears in text-only intent I/O and has no embedding row, so stripping
-    it is safe and makes the exported vocab 0..vocab_size-1. Idempotent:
-    re-running on an already-stripped dir is a no-op.
+    262144, one past a 262144 vocab) trips the assert. v5 re-injects the
+    token on every load from tokenizer_config.json's multimodal keys
+    (image_token / boi_token / eoi_token / model_specific_special_tokens),
+    so those are dropped too. None of these tokens appear in text-only
+    intent I/O or have embedding rows, so stripping is safe and makes the
+    exported vocab 0..vocab_size-1. Idempotent: re-running on an
+    already-stripped dir is a no-op.
     """
     tj_path = model_dir / "tokenizer.json"
+    tcf_path = model_dir / "tokenizer_config.json"
     cfg_path = model_dir / "config.json"
     if not (tj_path.exists() and cfg_path.exists()):
         return
@@ -184,6 +188,20 @@ def strip_oob_added_tokens(model_dir: Path) -> None:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(tj, f, ensure_ascii=False)
         tmp.replace(tj_path)
+    if tcf_path.exists():
+        with open(tcf_path, encoding="utf-8") as f:
+            tcf = json.load(f)
+        multimodal = {"image_token", "boi_token", "eoi_token",
+                      "model_specific_special_tokens"}
+        present = [k for k in multimodal if tcf.get(k) not in (None, {})]
+        if present:
+            for k in present:
+                tcf.pop(k, None)
+                print(f"[export] drop tokenizer_config multimodal key {k!r}")
+            tmp = Path(str(tcf_path) + ".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(tcf, f, ensure_ascii=False)
+            tmp.replace(tcf_path)
 
 
 def main() -> None:
