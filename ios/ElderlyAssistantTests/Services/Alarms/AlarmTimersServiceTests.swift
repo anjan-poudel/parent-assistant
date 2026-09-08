@@ -13,7 +13,7 @@ private final class RecordingNotificationCenter: LocalNotificationScheduling {
     var authorizationGranted = true
     private(set) var authorizationRequestCount = 0
     private(set) var addedRequests: [UNNotificationRequest] = []
-    private(set) var removedIdentifiers: [String] = []
+    var removedIdentifiers: [String] = []
 
     func requestAuthorization() async -> Bool {
         authorizationRequestCount += 1
@@ -36,7 +36,11 @@ private final class RecordingNotificationCenter: LocalNotificationScheduling {
 /// recording fakes: persist-before-arm ordering, daily-repeat vs one-shot
 /// notification shapes, permission denial storing nothing, caps, toggling /
 /// cancelling / expiring / pruning, the FR-025 `scheduleAll` re-arm and
-/// localized notification content.
+/// localized notification content. (2026-09-08) Plus the voice OFF +
+/// SNOOZE paths: disable persists off and cancels the daily + snooze
+/// requests, snooze arms a one-shot at now+N that leaves the daily repeat
+/// untouched, target resolution picks the most recently rung enabled
+/// alarm, and every failure stays honest (nothing armed or cancelled).
 ///
 /// Main-confined by contract: `AlarmTimersService` mutates its state on the
 /// main thread and `scheduleAll()` / `expireTimer(id:)` DISPATCH to main when
@@ -222,6 +226,243 @@ final class AlarmTimersServiceTests: XCTestCase {
         XCTAssertTrue(service.alarms.isEmpty)
         XCTAssertTrue(center.addedRequests.isEmpty)
         XCTAssertEqual(lastEvent(service)?.eventType, "alarm_persistence_failed")
+    }
+
+    // MARK: - Voice OFF + SNOOZE (2026-09-08)
+
+    func testDisableAlarmPersistsOffAndCancelsPendingDaily() async throws {
+        let service = makeService()
+        _ = await service.addAlarm(at: date(2026, 9, 7, 6, 0), label: nil)
+        let alarmID = try XCTUnwrap(service.alarms.first?.id)
+        XCTAssertEqual(center.addedRequests.count, 1)
+
+        let outcome = service.disableAlarm(id: alarmID)
+
+        guard case .disabled(let time) = outcome else {
+            return XCTFail("expected .disabled, got \(outcome)")
+        }
+        // The confirmation time is the alarm's time-of-day.
+        let components = Calendar.current.dateComponents([.hour, .minute], from: time)
+        XCTAssertEqual(components.hour, 6)
+        XCTAssertEqual(components.minute, 0)
+        XCTAssertEqual(service.alarms[0].isEnabled, false)
+        // Both the daily repeat and (defensively) any snooze request are
+        // cancelled.
+        XCTAssertEqual(center.removedIdentifiers.sorted(), [
+            AlarmScheduler.alarmRequestID(alarmID),
+            AlarmScheduler.alarmSnoozeRequestID(alarmID)
+        ].sorted())
+        XCTAssertEqual(lastEvent(service)?.eventType, "alarm_disabled")
+        XCTAssertEqual(lastEvent(service)?.outcome, "success")
+        // Persisted — a fresh service over the same storage sees it off.
+        let reloaded = AlarmTimersService(store: store, scheduler: scheduler,
+                                          observabilityBus: bus, now: fixedNow)
+        XCTAssertEqual(reloaded.alarms[0].isEnabled, false)
+        XCTAssertNil(reloaded.alarms[0].snoozedUntil)
+    }
+
+    func testDisableAlarmClearsSnoozeStateAndCancelsTheSnoozeRequest() async throws {
+        let service = makeService()
+        _ = await service.addAlarm(at: date(2026, 9, 7, 6, 0), label: nil)
+        let alarmID = try XCTUnwrap(service.alarms.first?.id)
+        _ = service.snoozeAlarm(id: alarmID, minutes: 10)
+        XCTAssertEqual(center.addedRequests.count, 2)   // daily + one-shot
+        center.removedIdentifiers.removeAll()
+
+        let outcome = service.disableAlarm(id: alarmID)
+
+        guard case .disabled = outcome else {
+            return XCTFail("expected .disabled, got \(outcome)")
+        }
+        XCTAssertEqual(center.removedIdentifiers.sorted(), [
+            AlarmScheduler.alarmRequestID(alarmID),
+            AlarmScheduler.alarmSnoozeRequestID(alarmID)
+        ].sorted())
+        XCTAssertNil(service.alarms[0].snoozedUntil)
+    }
+
+    func testDisableAlarmHonestNoAlarm() async {
+        let service = makeService()
+
+        // No alarms at all.
+        XCTAssertEqual(service.disableAlarm(id: UUID()), .noAlarm)
+
+        // An alarm that is already off is not "turned off" again.
+        _ = await service.addAlarm(at: date(2026, 9, 7, 6, 0), label: nil)
+        let alarmID = service.alarms[0].id
+        _ = service.disableAlarm(id: alarmID)
+        XCTAssertEqual(service.disableAlarm(id: alarmID), .noAlarm)
+    }
+
+    func testDisableAlarmPersistFailureCancelsNothing() async {
+        let service = makeService()
+        _ = await service.addAlarm(at: date(2026, 9, 7, 6, 0), label: nil)
+        let alarmID = service.alarms[0].id
+        storage.shouldFailWrite = true
+
+        let outcome = service.disableAlarm(id: alarmID)
+
+        XCTAssertEqual(outcome, .failed)
+        XCTAssertTrue(service.alarms[0].isEnabled, "a failed persist must not flip the list")
+        XCTAssertTrue(center.removedIdentifiers.isEmpty,
+                      "nothing is cancelled when the persist failed")
+        XCTAssertEqual(lastEvent(service)?.eventType, "alarm_persistence_failed")
+    }
+
+    func testSnoozeArmsOneShotAtNowPlusNLeavesDailyRepeatUntouched() async throws {
+        let service = makeService()
+        _ = await service.addAlarm(at: date(2026, 9, 7, 6, 0), label: nil)
+        let alarmID = try XCTUnwrap(service.alarms.first?.id)
+        XCTAssertEqual(center.addedRequests.count, 1)   // the daily repeat
+
+        let outcome = service.snoozeAlarm(id: alarmID, minutes: 10)
+
+        guard case .snoozed(let until) = outcome else {
+            return XCTFail("expected .snoozed, got \(outcome)")
+        }
+        XCTAssertEqual(until, date(2026, 9, 7, 10, 10)) // fixed now + 10 min
+
+        // The one-shot replaces nothing: the daily request is untouched
+        // and the snooze joins it under its own identifier.
+        XCTAssertEqual(center.addedRequests.count, 2)
+        let snoozeRequest = try XCTUnwrap(center.addedRequests.last)
+        XCTAssertEqual(snoozeRequest.identifier,
+                       AlarmScheduler.alarmSnoozeRequestID(alarmID))
+        let trigger = try XCTUnwrap(
+            snoozeRequest.trigger as? UNTimeIntervalNotificationTrigger)
+        XCTAssertEqual(trigger.timeInterval, 600)
+        XCTAssertFalse(trigger.repeats)
+        XCTAssertEqual(snoozeRequest.content.userInfo["kind"] as? String, "alarm")
+        XCTAssertEqual(snoozeRequest.content.userInfo["id"] as? String, alarmID.uuidString)
+
+        // The alarm stays enabled, the daily request stays armed.
+        XCTAssertTrue(service.alarms[0].isEnabled)
+        XCTAssertEqual(center.addedRequests.first?.identifier,
+                       AlarmScheduler.alarmRequestID(alarmID))
+        // Persisted BEFORE arming — a fresh service sees the marker.
+        let reloaded = AlarmTimersService(store: store, scheduler: scheduler,
+                                          observabilityBus: bus, now: fixedNow)
+        XCTAssertEqual(reloaded.alarms[0].snoozedUntil, date(2026, 9, 7, 10, 10))
+        XCTAssertEqual(lastEvent(service)?.eventType, "alarm_snoozed")
+        XCTAssertEqual(lastEvent(service)?.outcome, "success")
+    }
+
+    func testSnoozeHonorsCustomMinutes() async throws {
+        let service = makeService()
+        _ = await service.addAlarm(at: date(2026, 9, 7, 6, 0), label: nil)
+        let alarmID = service.alarms[0].id
+
+        let outcome = service.snoozeAlarm(id: alarmID, minutes: 15)
+
+        guard case .snoozed(let until) = outcome else {
+            return XCTFail("expected .snoozed, got \(outcome)")
+        }
+        XCTAssertEqual(until, date(2026, 9, 7, 10, 15))
+        let request = try XCTUnwrap(center.addedRequests.last)
+        let trigger = try XCTUnwrap(request.trigger as? UNTimeIntervalNotificationTrigger)
+        XCTAssertEqual(trigger.timeInterval, 900)
+    }
+
+    func testSnoozeClampsOutOfRangeMinutesDefensively() async throws {
+        let service = makeService()
+        _ = await service.addAlarm(at: date(2026, 9, 7, 6, 0), label: nil)
+        let alarmID = service.alarms[0].id
+
+        let outcome = service.snoozeAlarm(id: alarmID, minutes: 120)
+
+        guard case .snoozed(let until) = outcome else {
+            return XCTFail("expected .snoozed, got \(outcome)")
+        }
+        XCTAssertEqual(until, date(2026, 9, 7, 11, 0))   // clamped to 60 min
+        let request = try XCTUnwrap(center.addedRequests.last)
+        let trigger = try XCTUnwrap(request.trigger as? UNTimeIntervalNotificationTrigger)
+        XCTAssertEqual(trigger.timeInterval, 3600)
+    }
+
+    func testRepeatSnoozeReplacesTheOneShotInPlace() async {
+        let service = makeService()
+        _ = await service.addAlarm(at: date(2026, 9, 7, 6, 0), label: nil)
+        let alarmID = service.alarms[0].id
+
+        _ = service.snoozeAlarm(id: alarmID, minutes: 10)
+        _ = service.snoozeAlarm(id: alarmID, minutes: 5)
+
+        // Same identifier on every arm — the OS replaces the first one-shot
+        // in place; the daily repeat remains the only other request.
+        XCTAssertEqual(center.addedRequests.count, 3)
+        XCTAssertEqual(center.addedRequests[1].identifier,
+                       AlarmScheduler.alarmSnoozeRequestID(alarmID))
+        XCTAssertEqual(center.addedRequests[2].identifier,
+                       AlarmScheduler.alarmSnoozeRequestID(alarmID))
+        XCTAssertEqual(service.alarms[0].snoozedUntil, date(2026, 9, 7, 10, 5))
+    }
+
+    func testSnoozeHonestNoAlarm() async {
+        let service = makeService()
+        XCTAssertEqual(service.snoozeAlarm(id: UUID(), minutes: 10), .noAlarm)
+
+        // A disabled alarm cannot be snoozed.
+        _ = await service.addAlarm(at: date(2026, 9, 7, 6, 0), label: nil)
+        let alarmID = service.alarms[0].id
+        service.setAlarmEnabled(id: alarmID, enabled: false)
+        XCTAssertEqual(service.snoozeAlarm(id: alarmID, minutes: 10), .noAlarm)
+    }
+
+    func testSnoozePersistFailureArmsNothing() async {
+        let service = makeService()
+        _ = await service.addAlarm(at: date(2026, 9, 7, 6, 0), label: nil)
+        let alarmID = service.alarms[0].id
+        let armedBefore = center.addedRequests.count
+        storage.shouldFailWrite = true
+
+        let outcome = service.snoozeAlarm(id: alarmID, minutes: 10)
+
+        XCTAssertEqual(outcome, .failed)
+        XCTAssertEqual(center.addedRequests.count, armedBefore)
+        XCTAssertNil(service.alarms[0].snoozedUntil)
+        XCTAssertEqual(lastEvent(service)?.eventType, "alarm_persistence_failed")
+    }
+
+    func testMostRecentlyRungEnabledAlarmPicksTheClosestRing() async {
+        let service = makeService()
+        // 6 am today and 8 pm (yesterday's 8 pm is the most recent ring
+        // of THAT one at 10:00) — the 6 am alarm wins.
+        _ = await service.addAlarm(at: date(2026, 9, 7, 6, 0), label: nil)
+        _ = await service.addAlarm(at: date(2026, 9, 7, 20, 0), label: nil)
+        XCTAssertEqual(service.mostRecentlyRungEnabledAlarm()?.time,
+                       date(2026, 9, 8, 6, 0))
+
+        // A 9 am alarm rings closer to 10:00 than the 6 am one.
+        _ = await service.addAlarm(at: date(2026, 9, 7, 9, 0), label: nil)
+        XCTAssertEqual(service.mostRecentlyRungEnabledAlarm()?.time,
+                       date(2026, 9, 8, 9, 0))
+
+        // Disabled alarms are excluded from the target set.
+        service.setAlarmEnabled(id: service.alarms[2].id, enabled: false)
+        XCTAssertEqual(service.mostRecentlyRungEnabledAlarm()?.time,
+                       date(2026, 9, 8, 6, 0))
+
+        // Nothing enabled → nil.
+        service.setAlarmEnabled(id: service.alarms[0].id, enabled: false)
+        service.setAlarmEnabled(id: service.alarms[1].id, enabled: false)
+        XCTAssertNil(service.mostRecentlyRungEnabledAlarm())
+    }
+
+    func testScheduleAllDoesNotRearmSnoozes() async {
+        let service = makeService()
+        _ = await service.addAlarm(at: date(2026, 9, 7, 6, 0), label: nil)
+        let alarmID = service.alarms[0].id
+        _ = service.snoozeAlarm(id: alarmID, minutes: 10)
+        XCTAssertEqual(center.addedRequests.count, 2)
+
+        service.scheduleAll()
+
+        // Re-queue re-arms the enabled daily alarm only — the ephemeral
+        // one-shot snooze is the OS's to hold, never re-armed here.
+        XCTAssertEqual(center.addedRequests.count, 3)
+        XCTAssertEqual(center.addedRequests.last?.identifier,
+                       AlarmScheduler.alarmRequestID(alarmID))
+        XCTAssertEqual(service.alarms[0].snoozedUntil, date(2026, 9, 7, 10, 10))
     }
 
     // MARK: - Timers

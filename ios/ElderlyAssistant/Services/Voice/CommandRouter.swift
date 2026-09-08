@@ -233,6 +233,27 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// permission, persist-then-arm contract and outcome contract as
     /// `requestAlarmSet`.
     func requestTimerStart(durationSeconds: Int, label: String?) async -> AlarmTimerSetOutcome
+
+    /// [ALARMS-TIMERS] (2026-09-08) Voice alarm OFF ("turn off the
+    /// alarm", "अलार्म बन्द गर"): disables the most recently rung
+    /// enabled alarm — persists `enabled=false`, clears any snooze and
+    /// cancels the pending daily notification — and returns the honest
+    /// outcome so the router speaks the confirmation (with the alarm's
+    /// spoken time) or the "no alarms" / failure fallback. SYNCHRONOUS
+    /// (disabling needs no permission round-trip), main-confined like
+    /// the service. Same requirement-with-extension-default pattern as
+    /// `requestAlarmSet` (the router holds the coordinator as a
+    /// protocol reference).
+    func requestAlarmOff() -> AlarmOffOutcome
+
+    /// [ALARMS-TIMERS] (2026-09-08) Voice SNOOZE ("snooze", "snooze for
+    /// 15 minutes", "स्नुज गर"): arms a ONE-SHOT re-wake notification
+    /// `minutes` from now (parser default 10) for the most recently
+    /// rung enabled alarm WITHOUT disturbing its daily repeat, and
+    /// persists the snooze-until marker. Same synchronous
+    /// outcome-returning contract as `requestAlarmOff`; the router
+    /// speaks the honest "snoozed until <spoken time>" line on success.
+    func requestAlarmSnooze(minutes: Int) -> AlarmSnoozeOutcome
     /// [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1: fires the
     /// proactive morning briefing ("read me my briefing"). The briefing
     /// speaks itself through the shell's speak queue (once per calendar
@@ -270,6 +291,14 @@ extension VoiceCommandCoordinating {
     // and a scripted mock under test) makes the stage do anything.
     func requestAlarmSet(at time: Date, label: String?) async -> AlarmTimerSetOutcome { .failed }
     func requestTimerStart(durationSeconds: Int, label: String?) async -> AlarmTimerSetOutcome { .failed }
+    // [ALARMS-TIMERS] (2026-09-08) OFF/SNOOZE defaults — see the
+    // requirement docs above. Inert: a conformer that does not opt in
+    // (mocks/doubles) reports .noAlarm, and the router stage speaks the
+    // honest "no alarms" line. Only a coordinator that explicitly
+    // implements the members (AppCoordinator, and the scripted mock
+    // under test) makes the stage do anything.
+    func requestAlarmOff() -> AlarmOffOutcome { .noAlarm }
+    func requestAlarmSnooze(minutes: Int) -> AlarmSnoozeOutcome { .noAlarm }
     // [MORNING-BRIEFING] (2026-09-07) Inert default — a conformer that
     // does not opt in (every mock/double across app and test target)
     // never fires a briefing, so the deterministic ladder stage falls
@@ -632,6 +661,24 @@ final class CommandRouter {
             handleAlarmSetCommand(at: alarm.time, label: alarm.label)
             return .unrecognised(transcript: raw)
         }
+        // [ALARMS-TIMERS] (2026-09-08) OFF + SNOOZE branches — checked
+        // AFTER the set parses (a set command wins first) and BEFORE the
+        // briefing stage + topic table. Only the sanctioned shapes parse
+        // (see `AlarmTimerCommandParser`): time-qualified cancellations
+        // ("cancel the 6 am alarm" — the off branch must not guess which
+        // alarm) and timer-worded snoozes fall through unchanged. The
+        // stage only PARSES and hands off; the coordinator resolves the
+        // target (the most recently rung enabled alarm) and returns the
+        // honest outcome this stage speaks. SYNCHRONOUS — no permission
+        // round-trip, so the reply is committed inside `route()` itself.
+        if AlarmTimerCommandParser.parseAlarmOff(raw) {
+            handleAlarmOffCommand()
+            return .unrecognised(transcript: raw)
+        }
+        if let snoozeMinutes = AlarmTimerCommandParser.parseAlarmSnooze(raw) {
+            handleAlarmSnoozeCommand(minutes: snoozeMinutes)
+            return .unrecognised(transcript: raw)
+        }
 
         // [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1: "read me my
         // briefing" — a deterministic pre-answer stage like the topic
@@ -887,6 +934,63 @@ final class CommandRouter {
                 self.emitAlarmTimers(eventType: "timer_started", outcome: "failed")
                 self.speakWithVisibleOutcome(key: "timers.setFailed")
             }
+        }
+    }
+
+    /// Voice alarm OFF handler — same contract as the set handlers but
+    /// SYNCHRONOUS (no permission round-trip): the coordinator resolves
+    /// the most recently rung enabled alarm, disables it and returns the
+    /// outcome this handler speaks. `.disabled` confirms with the
+    /// alarm's SPOKEN time, `.noAlarm` speaks the honest "no alarms"
+    /// line, `.failed` the honest fallback. Observability is emitted at
+    /// resolution (component "alarms_timers"), never before.
+    private func handleAlarmOffCommand() {
+        guard coordinator != nil else {
+            speakWithVisibleOutcome(key: "alarms.offFailed")
+            return
+        }
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        switch coordinator?.requestAlarmOff() ?? .noAlarm {
+        case .disabled(let time):
+            emitAlarmTimers(eventType: "alarm_off", outcome: "success")
+            let timeText = formattedTime(
+                Calendar.current.dateComponents([.hour, .minute], from: time),
+                locale: locale
+            )
+            let text = L10n.fmt("alarms.off", locale: locale, timeText)
+            coordinator?.noteGenericReply(text)
+            speak(text: text, locale: locale)
+        case .noAlarm:
+            emitAlarmTimers(eventType: "alarm_off", outcome: "no_alarm")
+            speakWithVisibleOutcome(key: "alarms.none")
+        case .failed:
+            emitAlarmTimers(eventType: "alarm_off", outcome: "failed")
+            speakWithVisibleOutcome(key: "alarms.offFailed")
+        }
+    }
+
+    /// Voice SNOOZE handler — same synchronous contract; the success
+    /// confirmation embeds the re-wake instant as a SPOKEN time
+    /// ("Snoozed until 6:15 am.") via the shared `SpokenTime` helper.
+    private func handleAlarmSnoozeCommand(minutes: Int) {
+        guard coordinator != nil else {
+            speakWithVisibleOutcome(key: "alarms.snoozeFailed")
+            return
+        }
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        switch coordinator?.requestAlarmSnooze(minutes: minutes) ?? .noAlarm {
+        case .snoozed(let until):
+            emitAlarmTimers(eventType: "alarm_snoozed", outcome: "success")
+            let timeText = SpokenTime.string(from: until, locale: locale)
+            let text = L10n.fmt("alarms.snoozed", locale: locale, timeText)
+            coordinator?.noteGenericReply(text)
+            speak(text: text, locale: locale)
+        case .noAlarm:
+            emitAlarmTimers(eventType: "alarm_snoozed", outcome: "no_alarm")
+            speakWithVisibleOutcome(key: "alarms.none")
+        case .failed:
+            emitAlarmTimers(eventType: "alarm_snoozed", outcome: "failed")
+            speakWithVisibleOutcome(key: "alarms.snoozeFailed")
         }
     }
 
