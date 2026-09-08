@@ -122,7 +122,7 @@ final class MapsLinksTests: XCTestCase {
     func testDirectionsURLDispatchesByResolvedApp() {
         XCTAssertEqual(MapsLinks.directionsURL(for: .googleMaps, latitude: 1, longitude: 2,
                                                uiLanguageCode: "ne")?.scheme,
-                       "comgooglemaps")
+                       "https")
         XCTAssertEqual(MapsLinks.directionsURL(for: .appleMaps, latitude: 1, longitude: 2,
                                                uiLanguageCode: "ne")?.scheme,
                        "maps")
@@ -141,7 +141,7 @@ final class MapsLinksTests: XCTestCase {
         XCTAssertEqual(MapsLinks.directionsURL(for: .googleMaps,
                                                latitude: 27.7172, longitude: 85.3240,
                                                uiLanguageCode: "ne")?.absoluteString,
-                       "comgooglemaps://?daddr=27.717200,85.324000&directionsmode=driving&hl=ne&navigation=1")
+                       "https://www.google.com/maps/dir/?api=1&destination=27.717200,85.324000&travelmode=walking&dir_action=navigate&hl=ne")
         XCTAssertEqual(MapsLinks.directionsURL(for: .appleMaps,
                                                latitude: 27.7172, longitude: 85.3240,
                                                uiLanguageCode: "en")?.absoluteString,
@@ -188,5 +188,52 @@ final class MapsLinksTests: XCTestCase {
     func testDaddrValueUsesSixDecimalPrecision() {
         XCTAssertEqual(MapsLinks.daddrValue(latitude: 27.71723456, longitude: 85.32404567),
                        "27.717235,85.324046")
+    }
+
+    // MARK: - Walking auto-start (gmaps-walking task, 2026-09-08)
+
+    func testGoogleWalkingNavigateURLUsesMapsDirAPIWithWalkingAndNavigate() throws {
+        let url = try XCTUnwrap(MapsLinks.googleMapsWalkingNavigateURL(
+            latitude: 27.717245, longitude: 85.323961, uiLanguageCode: "ne"))
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(components.scheme, "https")
+        XCTAssertEqual(components.host, "www.google.com")
+        XCTAssertEqual(components.path, "/maps/dir/")
+        let items = Dictionary(uniqueKeysWithValues: (components.queryItems ?? [])
+            .map { ($0.name, $0.value ?? "") })
+        XCTAssertEqual(items["api"], "1")
+        XCTAssertEqual(items["destination"], "27.717245,85.323961")
+        XCTAssertEqual(items["travelmode"], "walking")
+        XCTAssertEqual(items["dir_action"], "navigate")
+        XCTAssertEqual(items["hl"], "ne")
+        XCTAssertNil(items["origin"],
+                     "no origin — current location is the start, which launches navigation")
+    }
+
+    func testGoogleWalkingNavigateURLAddressFormPercentEncodes() throws {
+        let url = try XCTUnwrap(MapsLinks.googleMapsWalkingNavigateURL(
+            address: "बूढानीलकण्ठ, काठमाडौं ९", uiLanguageCode: "en"))
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        let destination = components.queryItems?.first { $0.name == "destination" }?.value
+        XCTAssertNotNil(destination)
+        XCTAssertEqual(destination, "बूढानीलकण्ठ, काठमाडौं ९",
+                       "queryItems carry the raw value — encoding happens at serialization")
+        XCTAssertTrue(url.absoluteString.contains("%E0%A4%AC"),
+                      "the serialized URL must percent-encode the Devanagari address")
+    }
+
+    func testGoogleWalkingNavigateURLBlankAddressYieldsNil() {
+        XCTAssertNil(MapsLinks.googleMapsWalkingNavigateURL(address: "  ", uiLanguageCode: "en"))
+    }
+
+    func testDirectionsURLDispatchesGoogleSurfaceToWalkingAutoStart() throws {
+        let url = try XCTUnwrap(MapsLinks.directionsURL(
+            for: .googleMaps, latitude: 1, longitude: 2, uiLanguageCode: "en"))
+        XCTAssertEqual(url.host, "www.google.com")
+        XCTAssertEqual(url.query, url.query?.removingPercentEncoding.map { _ in
+            "api=1&destination=1.000000,2.000000&travelmode=walking&dir_action=navigate&hl=en"
+        } ?? "")
+        XCTAssertTrue(url.absoluteString.contains("travelmode=walking"))
+        XCTAssertTrue(url.absoluteString.contains("dir_action=navigate"))
     }
 }
