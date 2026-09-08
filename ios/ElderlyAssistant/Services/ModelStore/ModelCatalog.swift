@@ -115,6 +115,10 @@ enum ModelCatalog {
     /// The MEDIUM-class fine-tune (stock medium geometry, 24 enc layers,
     /// 80-mel — training-model-size-findings bet). The new default.
     static let whisperMediumFinetunedNepali = ModelID("whisper-medium-ne-q5_1")
+    /// v5 fine-tune on the expanded 162k-row manifest — best measured
+    /// FLEURS accuracy (28.23/8.89), downloadable (v8 release), not
+    /// bundled.
+    static let whisperMediumV5 = ModelID("whisper-medium-v5-q5_1")
     /// WhisperKit-format Nepali model (directory artifact, zip-delivered)
     /// — the ANE-accelerated path that replaces the ggml STT entries.
     /// Placeholder until the teacher conversion lands (see migration).
@@ -200,6 +204,22 @@ enum ModelCatalog {
             dependsOn: nil,
             coreMLEncoderBundledName: nil,
             bundledResourceName: "whisper-medium-ne-q5_1"
+        ),
+        ModelCatalogEntry(
+            id: whisperMediumV5,
+            kind: .whisperBase,
+            displayName: "Nepali — Medium v5 (best accuracy)",
+            // finetune-medium-v5-final (2026-09-09): 3 epochs on the
+            // expanded 162k-row manifest (complete SLR54 + FLEURS +
+            // slr43/143), fleurs-weight 25. FLEURS WER 28.23 / CER 8.89 —
+            // best measured, vs 31.18/10.02 for the default above.
+            filename: "whisper-medium-v5-q5_1.bin",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v8/whisper-medium-v5-q5_1.bin")!,
+            sizeBytes: 586_572_036,
+            sha256: "4516cbcc98d8308fed342d051ee97b56c30df2a4f3a7620d82ed6b5ee51f7d71",
+            minDeviceRAMBytes: 3_500_000_000,
+            dependsOn: nil,
+            coreMLEncoderBundledName: nil
         ),
         ModelCatalogEntry(
             id: whisperFinetunedNepali,
