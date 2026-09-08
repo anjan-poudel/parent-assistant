@@ -308,6 +308,48 @@ final class CommandRouter {
     private let observabilityBus: ObservabilityBus
     private let speaker: Speaker?
     private let interpreter: CommandInterpreter
+
+    /// [REST-DIP-FIX] (2026-09-08) Turn-scoped "async reply pending"
+    /// token. Set while `route()` has handed the turn to an ASYNC
+    /// dispatch whose reply speech is still outstanding — today that is
+    /// the LLM interpreter round-trip: `interpreter.interpret` fires and
+    /// its completion (IntentRouter: local brain / cloud preparse / cloud
+    /// escalation) lands on an arbitrary queue seconds later, committing
+    /// the reply (or the abstention re-prompt) only then.
+    ///
+    /// VoicePipeline reads the token right after `route()` returns: while
+    /// it is set the pipeline DEFERS its return to `.idle` (see
+    /// `VoicePipeline.holdIdleForTurnReply`), so the UI session never
+    /// drops to rest between "understanding" and the reply this same turn
+    /// is about to produce — the reported rest dip. When route()'s reply
+    /// was committed synchronously the token is already clear at return
+    /// and the pipeline behaves exactly as before.
+    ///
+    /// The token is cleared — and `onTurnReplyResolved` fired — at the
+    /// END of the async dispatch's completion, AFTER the reply speech was
+    /// committed (or definitively declined), so on the main queue the
+    /// reply's speech-start hop always precedes the pipeline's deferred
+    /// idle hop. A dispatch that never completes leaves the token set;
+    /// the pipeline's safety timeout then falls back to today's behavior.
+    private(set) var isTurnReplyPending = false
+    /// Fired once when `isTurnReplyPending` clears. The pipeline sets
+    /// this in its init; nil when the router is exercised standalone.
+    var onTurnReplyResolved: (() -> Void)?
+
+    /// Marks the turn's reply as still outstanding (async dispatch) —
+    /// the completion of that dispatch clears it again.
+    private func markTurnReplyPending() {
+        isTurnReplyPending = true
+    }
+
+    /// Resolves the turn: the async dispatch has committed its reply (or
+    /// decided there is none) — release the pipeline's deferred idle.
+    private func resolveTurnReplyPending() {
+        guard isTurnReplyPending else { return }
+        isTurnReplyPending = false
+        onTurnReplyResolved?()
+    }
+
     /// Optional — `.plugin` dispatch needs both: the registry to resolve
     /// pluginAction names, and the client to build each plugin's
     /// `PluginExecutionContext`. Nil preserves pre-plugin behavior
@@ -724,6 +766,13 @@ final class CommandRouter {
                 pendingMedications: [],
                 userLanguageHint: coordinator?.activeLocale.languageCode ?? "en"
             )
+            // [REST-DIP-FIX] (2026-09-08) The interpreter round-trip is
+            // ASYNC: this route returns before the reply exists, and the
+            // pipeline would drop the session to rest in between (the
+            // reported dip). Mark the turn pending so VoicePipeline holds
+            // its return to idle until the completion below resolves the
+            // token — AFTER the reply speech was committed.
+            markTurnReplyPending()
             interpreter.interpret(transcript: raw, context: context) { [weak self] command in
                 guard let self else { return }
                 if let command = command {
@@ -738,14 +787,19 @@ final class CommandRouter {
                        self.coordinator?.pendingRephraseCommand == nil {
                         self.coordinator?.startRephraseConfirmation(command, sourceTranscript: raw)
                         self.emit(eventType: "rephrase_question_started", outcome: "info")
-                        return
+                    } else {
+                        self.pendingTranscript = raw
+                        self.dispatchInterpreted(command)
+                        self.pendingTranscript = nil
                     }
-                    self.pendingTranscript = raw
-                    self.dispatchInterpreted(command)
-                    self.pendingTranscript = nil
                 } else {
                     _ = self.routeKeywordRemainder(raw)
                 }
+                // The async dispatch has committed its reply (spoken /
+                // queued / declined) — the turn is no longer pending.
+                // This runs AFTER the commit, so the reply's speech-start
+                // hop is enqueued before the pipeline's deferred idle hop.
+                self.resolveTurnReplyPending()
             }
             // We can't return a synchronous result once the LLM path fires;
             // report the transcript as "handled asynchronously".

@@ -370,6 +370,32 @@ private final class FakeCommandInterpreter: CommandInterpreter {
     }
 }
 
+/// [REST-DIP-FIX] (2026-09-08) Deterministic interpreter double that
+/// HOLDS its completion until the test fires it — mirrors the production
+/// round-trip (IntentRouter completions land on arbitrary queues seconds
+/// after `route()` returned), so tests can observe the router between
+/// `route()` returning and the async reply dispatch finishing.
+private final class HoldableCommandInterpreter: CommandInterpreter {
+    var isAvailable = true
+    private(set) var interpretCallCount = 0
+    private var heldCompletions: [(transcript: String,
+                                   context: InterpreterContext,
+                                   completion: (InterpretedCommand?) -> Void)] = []
+
+    func interpret(transcript: String, context: InterpreterContext,
+                   completion: @escaping (InterpretedCommand?) -> Void) {
+        interpretCallCount += 1
+        heldCompletions.append((transcript, context, completion))
+    }
+
+    /// Fires the oldest held completion with `command` (nil = the
+    /// interpreter abstains, exactly like a real no-confidence result).
+    func completeNext(with command: InterpretedCommand?) {
+        let held = heldCompletions.removeFirst()
+        held.completion(command)
+    }
+}
+
 private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
     var recordedTranscripts: [String] = []
     var pendingReminderId: UUID?
@@ -428,7 +454,13 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
         isAwaitingConfirmation = false
     }
 
-    func noteSpeakingStarted() {}
+    /// [REST-DIP-FIX] (2026-09-08) Speech-start recorder. The router
+    /// calls `noteSpeakingStarted()` synchronously when it commits a
+    /// reply, so the turn-holding tests can pin that the commit happens
+    /// while the turn is still pending (its main-queue speech-start hop
+    /// precedes the pipeline's deferred idle hop).
+    private(set) var speakingStarts = 0
+    func noteSpeakingStarted() { speakingStarts += 1 }
     func noteSpeakingEnded() {}
 
     /// [LOCAL-TOOLS] (2026-09-07) Every spoken line, in speech order. The
@@ -2306,5 +2338,183 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
             $0.component == "alarms_timers" && $0.eventType == "timer_started"
                 && $0.outcome == "permission_denied"
         })
+    }
+}
+
+// MARK: - REST-DIP-FIX (2026-09-08): the turn-pending token
+
+/// Router-side pins for the no-rest-dip fix. The user-visible guarantee —
+/// the UI session never drops to rest between "understanding" and the
+/// reply this same turn produces — is enforced by VoicePipeline: it reads
+/// `CommandRouter.isTurnReplyPending` right after `route()` returns and
+/// DEFERS its return to `.idle` while the token is set (the session holds
+/// "understanding"), releasing only when the token clears or the safety
+/// timeout falls back to today's behavior. These tests pin the token
+/// contract the pipeline defers on:
+///
+///  - a turn handed to the async LLM interpreter stays pending from
+///    `route()` returning until the interpret completion commits the
+///    reply — for BOTH outcomes (abstention → re-prompt, and a routed
+///    command → spoken reply);
+///  - the reply speech is committed BEFORE the token clears, so its
+///    speech-start hop precedes the pipeline's deferred idle hop on the
+///    main queue (the FIFO ordering the no-rest guarantee rests on);
+///  - turns whose reply is committed synchronously inside `route()`
+///    (deterministic stages, or a synchronous interpreter completion —
+///    instant-STT shapes) never hold the token, so the pipeline returns
+///    to idle immediately exactly as before — the session mapping
+///    (speakingCount > 0 → `.speaking`) then keeps it off rest.
+///
+/// The VoicePipeline half — the deferral, its generation-guarded release,
+/// and the 35 s safety timeout — has no unit harness (concrete
+/// AVAudioEngine/AudioSessionManager deps); those pins live in the
+/// pipeline implementation and are exercised by the main-checkout build.
+final class CommandRouterTurnHoldingTests: XCTestCase {
+
+    private let ne = Locale(identifier: "ne-NP")
+
+    private func makeRouter(_ coordinator: MockVoiceCommandCoordinator,
+                            interpreter: CommandInterpreter)
+        -> (CommandRouter, MockObservabilityBus) {
+        let bus = MockObservabilityBus()
+        let router = CommandRouter(coordinator: coordinator,
+                                   observabilityBus: bus,
+                                   speaker: MockSpeaker(),
+                                   interpreter: interpreter)
+        return (router, bus)
+    }
+
+    /// A plain request that clears every deterministic stage (safety net,
+    /// confirmation, contact search, directions, alarms/timers, briefing,
+    /// topic table, calculator) so routing hands the turn to the LLM
+    /// interpreter — the async path the rest dip came from.
+    private let llmBoundTranscript = "मलाई एउटा कथा सुनाउनुहोस्"
+
+    private func queryCommand(reply: String) -> InterpretedCommand {
+        InterpretedCommand(
+            action: .query, entryId: nil, contact: nil, time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil, pluginAction: nil,
+            pluginEntities: nil, confidence: 0.9, reply: reply)
+    }
+
+    /// (a) An unrecognised transcript (the interpreter ABSTAINS → the
+    /// re-prompt fallback) must keep the turn pending from `route()`
+    /// returning until the abstention completion has committed the
+    /// re-prompt speech — the pipeline therefore holds "understanding"
+    /// across the whole window instead of dropping to rest, and releases
+    /// only after the reply's speech-start hop was enqueued.
+    func testUnrecognisedTranscriptKeepsTurnPendingUntilFallbackReplyIsCommitted() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let interpreter = HoldableCommandInterpreter()
+        let (router, _) = makeRouter(coordinator, interpreter: interpreter)
+
+        let result = router.route(transcript: llmBoundTranscript)
+
+        XCTAssertEqual(result, .unrecognised(transcript: llmBoundTranscript))
+        XCTAssertEqual(interpreter.interpretCallCount, 1)
+        // The model is still "thinking" — nothing spoken, turn pending:
+        // the pipeline must NOT return to idle here (that was the dip).
+        XCTAssertTrue(router.isTurnReplyPending,
+                      "the turn must stay pending while the interpreter round-trip is outstanding")
+        XCTAssertTrue(coordinator.assistantSpoken.isEmpty,
+                      "no reply speech may exist while the turn is pending")
+
+        // The completion lands: the brain abstained → the router commits
+        // the re-prompt fallback and only then resolves the turn.
+        interpreter.completeNext(with: nil)
+
+        XCTAssertEqual(coordinator.assistantSpoken, [L10n.str("router.reprompt", locale: ne)])
+        XCTAssertEqual(coordinator.speakingStarts, 1,
+                       "the fallback reply speech must be committed by the time the turn resolves")
+        XCTAssertFalse(router.isTurnReplyPending,
+                       "the turn resolves only after the reply speech was committed")
+    }
+
+    /// (b) A transcript routed through the LLM must never release the
+    /// pipeline to idle while the model thinks — the token stays set from
+    /// `route()` returning until the interpreted command's reply speech
+    /// is committed.
+    func testLlmRoutedTranscriptKeepsTurnPendingWhileTheModelThinks() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let interpreter = HoldableCommandInterpreter()
+        let modelReply = "कथाको सुरुवात: एक देशमा एउटा बूढो बाबा थिए।"
+        let (router, _) = makeRouter(coordinator, interpreter: interpreter)
+
+        _ = router.route(transcript: llmBoundTranscript)
+
+        // The model is thinking — the session must hold "understanding".
+        XCTAssertTrue(router.isTurnReplyPending)
+        XCTAssertTrue(coordinator.assistantSpoken.isEmpty)
+
+        interpreter.completeNext(with: queryCommand(reply: modelReply))
+
+        // The reply was spoken, and the turn resolved only after the
+        // commit (speech-start hop precedes the deferred idle hop).
+        XCTAssertEqual(coordinator.assistantSpoken.first, modelReply)
+        XCTAssertEqual(coordinator.speakingStarts, 1)
+        XCTAssertFalse(router.isTurnReplyPending)
+    }
+
+    /// (c) Instant-STT shapes: a SYNCHRONOUS interpreter completion (the
+    /// test fakes' shape) commits the fallback reply inside `route()`
+    /// itself, so the token is already clear when `route()` returns —
+    /// the pipeline returns to idle immediately, and the session mapping
+    /// (the reply's speech-start hop already precedes the idle hop) keeps
+    /// it on `.speaking`, never rest. The pipeline's visible path
+    /// (`.transcribing` → `.understanding` → `.speaking`) is the
+    /// `.processing`-before-`.routing` guard's half of the fix.
+    func testSynchronousInterpreterCompletionNeverHoldsTheTurn() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = nil   // abstains → re-prompt, all inside route()
+        let (router, _) = makeRouter(coordinator, interpreter: interpreter)
+
+        let result = router.route(transcript: llmBoundTranscript)
+
+        XCTAssertEqual(result, .unrecognised(transcript: llmBoundTranscript))
+        XCTAssertFalse(router.isTurnReplyPending,
+                       "a synchronously-answered turn must not hold the pipeline")
+        XCTAssertEqual(coordinator.assistantSpoken, [L10n.str("router.reprompt", locale: ne)],
+                       "the fallback was committed synchronously inside route()")
+        XCTAssertEqual(coordinator.speakingStarts, 1)
+    }
+
+    /// (c) Deterministic-stage turns (topic pre-answer here) speak
+    /// synchronously inside `route()` and must never hold the token —
+    /// the pipeline returns to idle exactly as before; no artificial
+    /// busy-hold for speech that is already committed.
+    func testDeterministicStageTurnNeverHoldsTheTurn() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let interpreter = FakeCommandInterpreter()
+        let (router, _) = makeRouter(coordinator, interpreter: interpreter)
+
+        let result = router.route(transcript: "अहिले कति बजेको छ?")
+
+        XCTAssertEqual(result, .unrecognised(transcript: "अहिले कति बजेको छ?"))
+        XCTAssertEqual(interpreter.interpretCallCount, 0,
+                       "the topic table answers without the interpreter")
+        XCTAssertFalse(router.isTurnReplyPending)
+        XCTAssertEqual(coordinator.speakingStarts, 1,
+                       "the topic reply was committed synchronously inside route()")
+    }
+
+    /// (d) Safety-timeout precondition: a turn whose interpreter
+    /// completion NEVER fires keeps the token set (the router never
+    /// resolves on its own — it cannot know the dispatch died). The
+    /// PIPELINE's 35 s safety timeout is the fallback that then returns
+    /// it to idle / wake listening — today's behavior — for such a turn.
+    func testTurnWhoseCompletionNeverFiresStaysPendingForTheSafetyTimeout() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let interpreter = HoldableCommandInterpreter()
+        let (router, _) = makeRouter(coordinator, interpreter: interpreter)
+
+        _ = router.route(transcript: llmBoundTranscript)
+
+        // No completion is ever fired — the token must remain set: only
+        // the pipeline's bounded safety timeout (not the router) may
+        // release a dead turn, so a wedged interpreter can never silently
+        // strand the pipeline in a busy state past that bound.
+        XCTAssertTrue(router.isTurnReplyPending)
+        XCTAssertTrue(coordinator.assistantSpoken.isEmpty)
     }
 }
