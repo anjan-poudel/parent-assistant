@@ -104,6 +104,45 @@ final class NewsStageRoutingTests: XCTestCase {
                        "matching is against the lowercased trimmed transcript")
     }
 
+    func testNoiseFilteredIrregularSpacingTranscriptStillMatches() {
+        // [NEWS-READER][NOISE-FILTER] (2026-09-08) The STT joins
+        // per-segment text with single spaces while each segment's text
+        // carries its own leading/trailing spaces (WhisperKit segment
+        // decode, pinned rev ea872ffd), so multi-segment utterances —
+        // exactly what the noise-filter front-end's altered segmentation
+        // produces — arrive with interior whitespace runs. They look
+        // "clear" on the caption, but a raw substring match against the
+        // single-spaced phrase list misses and the utterance falls
+        // through to the "didn't understand" re-prompt (device report
+        // 2026-09-08). The stage must canonicalize interior whitespace
+        // before matching, for English AND नेपाली alike.
+        let utterances = [
+            "read  me  the   news",
+            "read me the  news",
+            "read  me the news",
+            "tell  me the news",
+            "what's  the news",
+            "whats   the news",
+            "what  is the news",
+            "समाचार  सुनाऊ",
+            "समाचार   सुनाउनुहोस्",
+            "खबर  सुनाऊ",
+            "samachar  sunau"
+        ]
+        for utterance in utterances {
+            let (router, coordinator, bus) = makeRouter()
+            let result = router.route(transcript: utterance)
+            XCTAssertEqual(coordinator.newsFireCount, 1,
+                           "\(utterance) must fire the news reader — interior whitespace runs are STT segment artifacts, not user errors")
+            XCTAssertEqual(result, .unrecognised(transcript: utterance),
+                           "the stage hands off and ends the turn — the reader speaks")
+            XCTAssertTrue(bus.emitted.contains {
+                $0.component == "command_router" && $0.eventType == "news_reader_command"
+                    && $0.outcome == "success"
+            }, "\(utterance) must emit the news_reader_command event")
+        }
+    }
+
     func testGreetingPrefixedRequestIsNewsNeverSmallTalk() {
         let (router, coordinator, _) = makeRouter()
         _ = router.route(transcript: "नमस्ते, खबर सुनाऊ")

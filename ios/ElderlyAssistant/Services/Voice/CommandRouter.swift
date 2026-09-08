@@ -488,9 +488,22 @@ final class CommandRouter {
         // Emergency outranks even an outstanding confirmation: "मद्दत"
         // said during a yes/no challenge is an emergency, not an answer
         // (constitution: never blocked, by anything, ever).
+        //
+        // [NEWS-READER][NOISE-FILTER] (2026-09-08) Interior whitespace is
+        // canonicalized here, not just trimmed: the STT joins per-segment
+        // text with single spaces while each segment's text carries its
+        // own leading/trailing spaces (WhisperKit segment decode — pinned
+        // rev ea872ffd), so multi-segment utterances arrive with interior
+        // whitespace runs ("read  me  the   news") — visually clear, but a
+        // raw substring match against a single-spaced phrase misses and
+        // the utterance falls through to the "didn't understand"
+        // re-prompt (device report 2026-09-08). The phrase lists are all
+        // single-spaced, so canonicalizing can only turn misses into the
+        // correct matches.
         let preText = raw
             .lowercased()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
         if Self.emergencyPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
             emit(eventType: "command_emergency_keyword", outcome: "success")
             handleEmergency()
