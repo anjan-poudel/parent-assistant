@@ -281,6 +281,121 @@ def build_slr143(cfg: dict, data_dir: Path, known: set[str], out: Path) -> int:
     return added
 
 
+def build_indicvoices(cfg: dict, data_dir: Path, known: set[str], out: Path) -> int:
+    """IndicVoices ne train (AI4Bharat, CC BY 4.0 — commercially usable,
+    no exclusion tag) from parquet shards staged in data/raw/indicvoices-ne/.
+
+    Each row embeds FLAC audio (verified 16 kHz across all 246,593 rows);
+    surviving rows are decoded to cached 16 kHz mono WAVs under
+    data/audio/indicvoices/ (soundfile — no ffmpeg on this box) and the
+    part file gets one row per utterance. Filters, applied BEFORE decode:
+      duration < 0.5 s or > 30 s (data max is 29.81 s; whisper's 30 s
+        window + tokenize truncation would silently misalign longer clips)
+      text empty after canonicalization (falls back to `normalized`)
+      canonicalized text != canonicalized normalized (label ambiguity)
+    The `text` field is the label (NOT `unsanitized_*`, which retain noise
+    markers); row id `indicvoices-<flac stem>` is stable across re-runs
+    and cannot collide with any other source's ids.
+    """
+    import multiprocessing as mp
+
+    import pyarrow.parquet as pq
+
+    known = known | load_ids(out)  # re-runs must not duplicate rows
+    shard_dir = data_dir / "raw" / "indicvoices-ne"
+    audio_dir = data_dir / "audio" / "indicvoices"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    shards = sorted(shard_dir.glob("train-*.parquet"))
+    if not shards:
+        print("warning: no indicvoices shards staged under "
+              f"{shard_dir} — nothing added")
+        return 0
+
+    added = 0
+    dropped = {"duration": 0, "empty_text": 0, "text_mismatch": 0, "decode": 0}
+    with mp.Pool(16) as pool:
+        for shard_i, shard in enumerate(shards, 1):
+            tab = pq.read_table(shard, columns=[
+                "audio_filepath", "text", "normalized", "duration"])
+            cols = tab.to_pydict()
+            want = {}  # flac stem -> canonical text (survivors)
+            blob = {}  # flac stem -> embedded bytes (survivors only)
+            for i in range(len(cols["duration"])):
+                dur = cols["duration"][i]
+                if dur < 0.5 or dur > 30.0:
+                    dropped["duration"] += 1
+                    continue
+                text = norm_text(cols["text"][i] or "")
+                if not text:
+                    text = norm_text(cols["normalized"][i] or "")
+                if not text:
+                    dropped["empty_text"] += 1
+                    continue
+                norm = norm_text(cols["normalized"][i] or "")
+                if norm and text != norm:
+                    dropped["text_mismatch"] += 1
+                    continue
+                stem = Path(cols["audio_filepath"][i]["path"]).stem
+                if f"indicvoices-{stem}" in known:
+                    continue
+                want[stem] = text
+                blob[stem] = cols["audio_filepath"][i]["bytes"]
+            jobs = [(stem, blob[stem], str(audio_dir)) for stem in want]
+            del blob
+            for stem, ok, err in pool.imap_unordered(
+                    _iv_decode_write, jobs, chunksize=64):
+                if not ok:
+                    dropped["decode"] += 1
+                    print(f"warning: indicvoices {stem}: {err} — skipped")
+                    continue
+                rid = f"indicvoices-{stem}"
+                known.add(rid)
+                append_row(out, {"id": rid,
+                                 "audio": str(audio_dir / f"{stem}.wav"),
+                                 "text": want[stem],
+                                 "source": "indicvoices", "split": "train"})
+                added += 1
+                if added % 5000 == 0:
+                    log_progress(f"indicvoices: {added} rows added")
+            log_progress(f"indicvoices shard {shard_i}/{len(shards)} "
+                         f"(+{added} rows)")
+    print(f"indicvoices drops: duration={dropped['duration']} "
+          f"empty_text={dropped['empty_text']} "
+          f"text_mismatch={dropped['text_mismatch']} "
+          f"decode={dropped['decode']}")
+    return added
+
+
+def _iv_decode_write(job: tuple) -> tuple[str, bool, str]:
+    """Pool worker: decode one embedded FLAC to a cached 16 kHz WAV.
+
+    Module-level (not a closure) so multiprocessing can pickle it. Writes
+    {stem}.wav via a tmp file + os.replace so a crash mid-write can never
+    leave a half-wav behind. Job: (flac_stem, flac_bytes, audio_dir_str).
+    """
+    import io
+    from pathlib import Path
+
+    import soundfile as sf
+
+    stem, flac_bytes, audio_dir_str = job
+    audio_dir = Path(audio_dir_str)
+    wav = audio_dir / f"{stem}.wav"
+    if wav.exists():
+        return stem, True, "cached"
+    tmp = audio_dir / f"{stem}.wav.tmp"
+    try:
+        y, sr = sf.read(io.BytesIO(flac_bytes), dtype="float32")
+        if sr != 16000:
+            return stem, False, f"unexpected sample rate {sr}"
+        sf.write(tmp, y, sr, format="WAV", subtype="PCM_16")
+        tmp.replace(wav)
+        return stem, True, ""
+    except Exception as e:  # corrupt clip — skip, log, keep going
+        tmp.unlink(missing_ok=True)
+        return stem, False, str(e)[:120]
+
+
 def build_custom(cfg: dict, data_dir: Path, known: set[str]) -> int:
     src = Path(cfg["custom_data"] or "")
     if not src or not src.exists():
@@ -318,7 +433,7 @@ def main() -> None:
     add_common(parser)
     parser.add_argument("--skip", nargs="*", default=[],
                         choices=["slr54", "fleurs", "custom",
-                                 "cv", "slr43", "slr143"],
+                                 "cv", "slr43", "slr143", "indicvoices"],
                         help="sources to skip")
     parser.add_argument("--smoke-pairs", type=str, default=None,
                         help="file with '<audio><TAB><text>' lines for smoke mode")
@@ -356,6 +471,9 @@ def main() -> None:
     if "slr143" not in args.skip:
         n = build_slr143(cfg, data_dir, known, data_dir / "slr143.jsonl")
         print(f"slr143: +{n} rows")
+    if "indicvoices" not in args.skip:
+        n = build_indicvoices(cfg, data_dir, known, data_dir / "indicvoices.jsonl")
+        print(f"indicvoices: +{n} rows")
     if "custom" not in args.skip:
         n = build_custom(cfg, data_dir, known)
         print(f"custom: +{n} rows")
@@ -363,9 +481,13 @@ def main() -> None:
     # Union of train parts for stages 2–5.
     parts = [data_dir / "slr54.jsonl", data_dir / "fleurs-train.jsonl",
              data_dir / "common-voice.jsonl", data_dir / "slr43.jsonl",
-             data_dir / "slr143.jsonl", data_dir / "custom.jsonl"]
+             data_dir / "slr143.jsonl", data_dir / "indicvoices.jsonl",
+             data_dir / "custom.jsonl"]
+    from collections import Counter
     seen = set()
-    with open(union, "w", encoding="utf-8") as f:
+    by_source = Counter()
+    tmp = union.with_suffix(".jsonl.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
         for part in parts:
             if not part.exists():
                 continue
@@ -373,8 +495,13 @@ def main() -> None:
                 row = json.loads(line)
                 if row["id"] not in seen:
                     seen.add(row["id"])
+                    by_source[row["source"]] += 1
                     f.write(line)
-    print(f"manifest.jsonl: {len(seen)} rows total")
+    # Atomic swap — a crash mid-union must never leave a truncated
+    # manifest.jsonl behind (train lanes read it concurrently).
+    tmp.replace(union)
+    breakdown = ", ".join(f"{k}={v}" for k, v in by_source.most_common())
+    print(f"manifest.jsonl: {len(seen)} rows total ({breakdown})")
     return 0
 
 
