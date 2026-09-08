@@ -210,6 +210,65 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// candidates), and the generic medication-flavored confirmation
     /// speech is skipped.
     var isAwaitingNavigationDisambiguation: Bool { get }
+
+    /// [ALARMS-TIMERS] (2026-09-07) Requests an ALARM at `time` (already
+    /// the next future occurrence; only its hour/minute-of-day matters —
+    /// the OS alarm is a DAILY-repeating local notification, see
+    /// `AlarmScheduler`; iOS does not let third-party apps write to the
+    /// built-in Clock). ASYNC because notification permission is requested
+    /// at POINT OF USE (the first alarm/timer set asks). The coordinator
+    /// persists + arms and returns the outcome so the router speaks the
+    /// honest line — a success confirmation only once the alarm actually
+    /// rings, the denial fallback when notifications are off. Same
+    /// requirement-with-extension-default pattern as the tool surfaces
+    /// above: the router holds the coordinator as a protocol reference,
+    /// so an extension-only member would bind statically and the
+    /// coordinator's implementation could never be reached.
+    func requestAlarmSet(at time: Date, label: String?) async -> AlarmTimerSetOutcome
+
+    /// [ALARMS-TIMERS] (2026-09-07) Requests an in-app countdown TIMER of
+    /// `durationSeconds` (1…86400; the countdown lives in the app, its
+    /// completion fires a one-shot notification and — while the app is
+    /// foregrounded — a spoken "Timer finished."). Same point-of-use
+    /// permission, persist-then-arm contract and outcome contract as
+    /// `requestAlarmSet`.
+    func requestTimerStart(durationSeconds: Int, label: String?) async -> AlarmTimerSetOutcome
+
+    /// [ALARMS-TIMERS] (2026-09-08) Voice alarm OFF ("turn off the
+    /// alarm", "अलार्म बन्द गर"): disables the most recently rung
+    /// enabled alarm — persists `enabled=false`, clears any snooze and
+    /// cancels the pending daily notification — and returns the honest
+    /// outcome so the router speaks the confirmation (with the alarm's
+    /// spoken time) or the "no alarms" / failure fallback. SYNCHRONOUS
+    /// (disabling needs no permission round-trip), main-confined like
+    /// the service. Same requirement-with-extension-default pattern as
+    /// `requestAlarmSet` (the router holds the coordinator as a
+    /// protocol reference).
+    func requestAlarmOff() -> AlarmOffOutcome
+
+    /// [ALARMS-TIMERS] (2026-09-08) Voice SNOOZE ("snooze", "snooze for
+    /// 15 minutes", "स्नुज गर"): arms a ONE-SHOT re-wake notification
+    /// `minutes` from now (parser default 10) for the most recently
+    /// rung enabled alarm WITHOUT disturbing its daily repeat, and
+    /// persists the snooze-until marker. Same synchronous
+    /// outcome-returning contract as `requestAlarmOff`; the router
+    /// speaks the honest "snoozed until <spoken time>" line on success.
+    func requestAlarmSnooze(minutes: Int) -> AlarmSnoozeOutcome
+    /// [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1: fires the
+    /// proactive morning briefing ("read me my briefing"). The briefing
+    /// speaks itself through the shell's speak queue (once per calendar
+    /// day) and renders its own outcome card — the router adds no speech
+    /// and no card of its own, exactly like a topic pre-answer that has
+    /// already spoken.
+    func fireMorningBriefing()
+
+    /// [NEWS-READER] (2026-09-08) Voice-OS news digest ("read me the
+    /// news"). The `NewsReader` announces its localized "checking" line,
+    /// fetches every effective source and then speaks the composed digest
+    /// itself through the shell's speak queue, with its own outcome card
+    /// — the router adds no speech and no card of its own, exactly like
+    /// the briefing stage. On-demand: no once-per-wake-window budget.
+    func fireNewsReader()
 }
 
 /// [INTENT-TOOLS] (2026-09-07) Tool-capability default. The default keeps
@@ -232,6 +291,32 @@ extension VoiceCommandCoordinating {
     var isAwaitingNavigationDisambiguation: Bool { false }
     func requestNavigation(to target: DirectionsRoute.PlaceTarget) {}
     func requestNavigationDisambiguation(targets: [DirectionsCandidate]) -> String? { nil }
+    // [ALARMS-TIMERS] (2026-09-07) Alarm/timer defaults — see the
+    // requirement docs above. Inert: a conformer that does not opt in
+    // (mocks/doubles) reports .failed, and the router stage speaks the
+    // honest "couldn't set it" fallback for its utterance. Only a
+    // coordinator that explicitly implements the members (AppCoordinator,
+    // and a scripted mock under test) makes the stage do anything.
+    func requestAlarmSet(at time: Date, label: String?) async -> AlarmTimerSetOutcome { .failed }
+    func requestTimerStart(durationSeconds: Int, label: String?) async -> AlarmTimerSetOutcome { .failed }
+    // [ALARMS-TIMERS] (2026-09-08) OFF/SNOOZE defaults — see the
+    // requirement docs above. Inert: a conformer that does not opt in
+    // (mocks/doubles) reports .noAlarm, and the router stage speaks the
+    // honest "no alarms" line. Only a coordinator that explicitly
+    // implements the members (AppCoordinator, and the scripted mock
+    // under test) makes the stage do anything.
+    func requestAlarmOff() -> AlarmOffOutcome { .noAlarm }
+    func requestAlarmSnooze(minutes: Int) -> AlarmSnoozeOutcome { .noAlarm }
+    // [MORNING-BRIEFING] (2026-09-07) Inert default — a conformer that
+    // does not opt in (every mock/double across app and test target)
+    // never fires a briefing, so the deterministic ladder stage falls
+    // through to the interpreter/keyword remainder exactly as before.
+    func fireMorningBriefing() {}
+    // [NEWS-READER] (2026-09-08) Inert default — a conformer that does
+    // not opt in (every mock/double across app and test target) never
+    // fires a news digest, so the deterministic ladder stage falls
+    // through to the interpreter/keyword remainder exactly as before.
+    func fireNewsReader() {}
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -265,6 +350,48 @@ final class CommandRouter {
     private let observabilityBus: ObservabilityBus
     private let speaker: Speaker?
     private let interpreter: CommandInterpreter
+
+    /// [REST-DIP-FIX] (2026-09-08) Turn-scoped "async reply pending"
+    /// token. Set while `route()` has handed the turn to an ASYNC
+    /// dispatch whose reply speech is still outstanding — today that is
+    /// the LLM interpreter round-trip: `interpreter.interpret` fires and
+    /// its completion (IntentRouter: local brain / cloud preparse / cloud
+    /// escalation) lands on an arbitrary queue seconds later, committing
+    /// the reply (or the abstention re-prompt) only then.
+    ///
+    /// VoicePipeline reads the token right after `route()` returns: while
+    /// it is set the pipeline DEFERS its return to `.idle` (see
+    /// `VoicePipeline.holdIdleForTurnReply`), so the UI session never
+    /// drops to rest between "understanding" and the reply this same turn
+    /// is about to produce — the reported rest dip. When route()'s reply
+    /// was committed synchronously the token is already clear at return
+    /// and the pipeline behaves exactly as before.
+    ///
+    /// The token is cleared — and `onTurnReplyResolved` fired — at the
+    /// END of the async dispatch's completion, AFTER the reply speech was
+    /// committed (or definitively declined), so on the main queue the
+    /// reply's speech-start hop always precedes the pipeline's deferred
+    /// idle hop. A dispatch that never completes leaves the token set;
+    /// the pipeline's safety timeout then falls back to today's behavior.
+    private(set) var isTurnReplyPending = false
+    /// Fired once when `isTurnReplyPending` clears. The pipeline sets
+    /// this in its init; nil when the router is exercised standalone.
+    var onTurnReplyResolved: (() -> Void)?
+
+    /// Marks the turn's reply as still outstanding (async dispatch) —
+    /// the completion of that dispatch clears it again.
+    private func markTurnReplyPending() {
+        isTurnReplyPending = true
+    }
+
+    /// Resolves the turn: the async dispatch has committed its reply (or
+    /// decided there is none) — release the pipeline's deferred idle.
+    private func resolveTurnReplyPending() {
+        guard isTurnReplyPending else { return }
+        isTurnReplyPending = false
+        onTurnReplyResolved?()
+    }
+
     /// Optional — `.plugin` dispatch needs both: the registry to resolve
     /// pluginAction names, and the client to build each plugin's
     /// `PluginExecutionContext`. Nil preserves pre-plugin behavior
@@ -287,6 +414,17 @@ final class CommandRouter {
     private let searchTransport: LocalToolTransport?
     private let searchQuotaDefaults: UserDefaults
 
+    // [YOUTUBE] (2026-09-08) YouTube tool seams — every one defaults to
+    // dormant (nil), exactly like the search-tool seams above, so
+    // pre-existing router construction sites and every existing router
+    // test keep compiling and behaving as before: without a config
+    // store the keyed lookup can never fire, and without an opener the
+    // stage speaks the honest unavailable line and opens nothing. Only
+    // `AppCoordinator` (and scripted test routers) arm the seams.
+    private let youtubeConfigStore: YouTubeConfigStore?
+    private let youtubeTransport: LocalToolTransport?
+    private let youtubeLinkOpener: CallLinkOpening?
+
     /// [TOOL-DEBUG-LOG] (2026-09-07) Encrypted on-device debug log of
     /// every local-tool (weather/search) request + outcome — the store
     /// behind Settings → Tool requests. Nil = dormant (pre-existing
@@ -305,7 +443,10 @@ final class CommandRouter {
          weatherTransport: LocalToolTransport? = nil,
          searchTransport: LocalToolTransport? = nil,
          searchQuotaDefaults: UserDefaults = .standard,
-         localToolLogStore: LocalToolLogStore? = nil) {
+         localToolLogStore: LocalToolLogStore? = nil,
+         youtubeConfigStore: YouTubeConfigStore? = nil,
+         youtubeTransport: LocalToolTransport? = nil,
+         youtubeLinkOpener: CallLinkOpening? = nil) {
         self.coordinator = coordinator
         self.observabilityBus = observabilityBus
         self.speaker = speaker
@@ -318,6 +459,9 @@ final class CommandRouter {
         self.searchTransport = searchTransport
         self.searchQuotaDefaults = searchQuotaDefaults
         self.localToolLogStore = localToolLogStore
+        self.youtubeConfigStore = youtubeConfigStore
+        self.youtubeTransport = youtubeTransport
+        self.youtubeLinkOpener = youtubeLinkOpener
     }
 
     @discardableResult
@@ -344,9 +488,22 @@ final class CommandRouter {
         // Emergency outranks even an outstanding confirmation: "मद्दत"
         // said during a yes/no challenge is an emergency, not an answer
         // (constitution: never blocked, by anything, ever).
+        //
+        // [NEWS-READER][NOISE-FILTER] (2026-09-08) Interior whitespace is
+        // canonicalized here, not just trimmed: the STT joins per-segment
+        // text with single spaces while each segment's text carries its
+        // own leading/trailing spaces (WhisperKit segment decode — pinned
+        // rev ea872ffd), so multi-segment utterances arrive with interior
+        // whitespace runs ("read  me  the   news") — visually clear, but a
+        // raw substring match against a single-spaced phrase misses and
+        // the utterance falls through to the "didn't understand"
+        // re-prompt (device report 2026-09-08). The phrase lists are all
+        // single-spaced, so canonicalizing can only turn misses into the
+        // correct matches.
         let preText = raw
             .lowercased()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: { $0.isWhitespace })
+            .joined(separator: " ")
         if Self.emergencyPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
             emit(eventType: "command_emergency_keyword", outcome: "success")
             handleEmergency()
@@ -510,6 +667,141 @@ final class CommandRouter {
             break   // not directions business — continue the ladder
         }
 
+        // [ALARMS-TIMERS] (2026-09-07) Deterministic voice ALARMS + TIMERS
+        // stage: "set an alarm for 6 am", "wake me up at 7:30", "बिहान ६
+        // बजे उठाउनुहोस्", "set a timer for 5 minutes", "टाइमर ५ मिनेट".
+        // Marker-gated parsing (`AlarmTimerCommandParser`) — the same
+        // pre-route pattern as the contact-search / directions stages:
+        // no model, no IntentPrompt tokens (the prompt budget is pinned
+        // by IntentPromptTests), so an alarm/timer command can never
+        // depend on interpreter availability or confidence.
+        //
+        // Placement: AFTER the safety net + confirmation flow + contact
+        // search + directions — emergency / med-ack / yes-no / search /
+        // navigation utterances win exactly as before — and BEFORE the
+        // topic table, so a greeting- or weather-prefixed alarm command
+        // is a command, never small talk ("नमस्ते, ५ मिनेटको टाइमर लगाऊ"
+        // must set a timer, not get a greeting). The parser vetoes
+        // questions ("when is my alarm?", "कति बजेको अलार्म?"),
+        // cancellations ("cancel the timer"), third-person wake requests
+        // ("wake my grandson", "छोरालाई उठाउनुहोस्") and countdown
+        // phrasings ("alarm in 5 minutes" — a countdown is a TIMER,
+        // which parses FIRST below). Anything vetoed or unparseable
+        // falls through this stage unchanged.
+        //
+        // The stage only PARSES and hands off: the coordinator owns the
+        // permission round-trip (point-of-use requestAuthorization), the
+        // persistence and the arming, and RETURNS the outcome so this
+        // stage speaks the honest line — the confirmation only once the
+        // item is stored + armed, the denial fallback when notifications
+        // are off.
+        if let timer = AlarmTimerCommandParser.parseTimer(raw) {
+            handleTimerStartCommand(durationSeconds: timer.durationSeconds,
+                                    label: timer.label)
+            return .unrecognised(transcript: raw)
+        }
+        if let alarm = AlarmTimerCommandParser.parseAlarm(raw) {
+            handleAlarmSetCommand(at: alarm.time, label: alarm.label)
+            return .unrecognised(transcript: raw)
+        }
+        // [ALARMS-TIMERS] (2026-09-08) OFF + SNOOZE branches — checked
+        // AFTER the set parses (a set command wins first) and BEFORE the
+        // briefing stage + topic table. Only the sanctioned shapes parse
+        // (see `AlarmTimerCommandParser`): time-qualified cancellations
+        // ("cancel the 6 am alarm" — the off branch must not guess which
+        // alarm) and timer-worded snoozes fall through unchanged. The
+        // stage only PARSES and hands off; the coordinator resolves the
+        // target (the most recently rung enabled alarm) and returns the
+        // honest outcome this stage speaks. SYNCHRONOUS — no permission
+        // round-trip, so the reply is committed inside `route()` itself.
+        if AlarmTimerCommandParser.parseAlarmOff(raw) {
+            handleAlarmOffCommand()
+            return .unrecognised(transcript: raw)
+        }
+        if let snoozeMinutes = AlarmTimerCommandParser.parseAlarmSnooze(raw) {
+            handleAlarmSnoozeCommand(minutes: snoozeMinutes)
+            return .unrecognised(transcript: raw)
+        }
+
+        // [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1: "read me my
+        // briefing" — a deterministic pre-answer stage like the topic
+        // table below: after the safety net + confirmation flow +
+        // directions, before any model. `fireMorningBriefing()` composes
+        // and speaks the briefing through the shell's speak queue (once
+        // per calendar day, its own card) — the router adds NO speech and
+        // NO visible outcome of its own, so this stage ends the turn with
+        // the same `.unrecognised(transcript:)` the topic/calculator
+        // stages return once they have already spoken.
+        if Self.briefingPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
+            coordinator?.fireMorningBriefing()
+            emit(eventType: "morning_briefing_command", outcome: "success")
+            return .unrecognised(transcript: raw)
+        }
+
+        // [NEWS-READER] (2026-09-08) Voice-OS news digest: "read me the
+        // news" / "what's the news" / "समाचार सुनाऊ" / "खबर सुनाऊ" — a
+        // deterministic pre-answer stage like the briefing stage above:
+        // after the safety net + confirmation flow + contact search +
+        // directions + alarms/timers + briefing, before any model. No
+        // interpreter involvement, no IntentPrompt tokens (the prompt
+        // budget is pinned by IntentPromptTests) — the digest can never
+        // depend on interpreter availability or confidence, and can never
+        // be misclassified into a topic answer.
+        //
+        // Placement: AFTER the briefing stage (a briefing utterance can
+        // never be swallowed by the news stage) and BEFORE the topic
+        // table (a greeting-prefixed news request — "नमस्ते, खबर सुनाऊ" —
+        // is a digest, never small talk).
+        //
+        // Vetoes (same discipline as the briefing phrase list):
+        //  - full-phrase containment only — the bare word "news" /
+        //    "समाचार" is never matched, so an utterance that merely
+        //    mentions news ("news from my son about school") can never
+        //    hijack the stage;
+        //  - imperative/question FORMS only ("सुनाऊ", "read me", "what's")
+        //    — a noun phrase ("today's news", "समाचार") never matches.
+        //
+        // The stage only DECIDES and hands off: the coordinator owns the
+        // reader (`fireNewsReader()`), and the reader owns every spoken
+        // line — the checking announcement, the digest, and the honest
+        // failure lines — with its own outcome card, so this stage ends
+        // the turn with the same `.unrecognised(transcript:)` the
+        // topic/calculator stages return once they have already spoken.
+        if Self.newsPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
+            coordinator?.fireNewsReader()
+            emit(eventType: "news_reader_command", outcome: "success")
+            return .unrecognised(transcript: raw)
+        }
+
+        // [YOUTUBE] (2026-09-08) Deterministic voice YOUTUBE stage:
+        // "play bhajan on youtube", "youtube news", "search youtube for
+        // old songs", "युट्युबमा गीत चलाऊ", "युट्युबमा रामायण खोज".
+        // Marker-gated parsing (`YouTubeRoute`) — the same pre-route
+        // pattern as the contact-search / directions / alarms-timers
+        // stages: no model, no IntentPrompt tokens (the prompt budget
+        // is pinned by IntentPromptTests), so a YouTube request can
+        // never depend on interpreter availability or confidence. A
+        // bare "play" with no YouTube word never fires (`YouTubeRoute`
+        // vetoes it), so pre-existing play/music talk falls through
+        // unchanged.
+        //
+        // Placement: AFTER the safety net + confirmation flow + contact
+        // search + directions + alarms/timers + morning briefing —
+        // emergency / med-ack / yes-no / phone-search / navigation /
+        // alarm utterances win exactly as before — and BEFORE the topic
+        // table, so a greeting-prefixed request ("नमस्ते, युट्युबमा
+        // भजन चलाऊ") is a command, never small talk.
+        //
+        // The stage only DECIDES and executes the tool: with an API key
+        // configured it fetches the top result and opens the watch link
+        // (https fallback when the app is absent), without one it opens
+        // the SEARCH deeplink (the accepted search-only MVP); every
+        // failure speaks the honest localized fallback (`fireYouTubePlay`).
+        if case .play(let query) = YouTubeRoute.decide(transcript: raw) {
+            fireYouTubePlay(query: query)
+            return .unrecognised(transcript: raw)
+        }
+
         // [NO-GIBBERISH] Deterministic TOPIC PRE-ANSWERS (2026-09-07): the
         // most common Q&A topics — weather, time, date, greetings — are
         // answered from a pre-written, honest table (`TopicPreAnswer`)
@@ -628,6 +920,13 @@ final class CommandRouter {
                 pendingMedications: [],
                 userLanguageHint: coordinator?.activeLocale.languageCode ?? "en"
             )
+            // [REST-DIP-FIX] (2026-09-08) The interpreter round-trip is
+            // ASYNC: this route returns before the reply exists, and the
+            // pipeline would drop the session to rest in between (the
+            // reported dip). Mark the turn pending so VoicePipeline holds
+            // its return to idle until the completion below resolves the
+            // token — AFTER the reply speech was committed.
+            markTurnReplyPending()
             interpreter.interpret(transcript: raw, context: context) { [weak self] command in
                 guard let self else { return }
                 if let command = command {
@@ -642,14 +941,19 @@ final class CommandRouter {
                        self.coordinator?.pendingRephraseCommand == nil {
                         self.coordinator?.startRephraseConfirmation(command, sourceTranscript: raw)
                         self.emit(eventType: "rephrase_question_started", outcome: "info")
-                        return
+                    } else {
+                        self.pendingTranscript = raw
+                        self.dispatchInterpreted(command)
+                        self.pendingTranscript = nil
                     }
-                    self.pendingTranscript = raw
-                    self.dispatchInterpreted(command)
-                    self.pendingTranscript = nil
                 } else {
                     _ = self.routeKeywordRemainder(raw)
                 }
+                // The async dispatch has committed its reply (spoken /
+                // queued / declined) — the turn is no longer pending.
+                // This runs AFTER the commit, so the reply's speech-start
+                // hop is enqueued before the pipeline's deferred idle hop.
+                self.resolveTurnReplyPending()
             }
             // We can't return a synchronous result once the LLM path fires;
             // report the transcript as "handled asynchronously".
@@ -659,6 +963,186 @@ final class CommandRouter {
 
         return routeKeywordRemainder(raw)
     }
+
+    // MARK: - [ALARMS-TIMERS] Alarm + timer command handlers
+
+    /// Hands an alarm command to the coordinator — ASYNC because the
+    /// notification permission is requested at point of use — then speaks
+    /// the outcome-dependent line: the localized confirmation with the
+    /// resolved time only on `.scheduled`, the honest denial / capacity /
+    /// failure fallback otherwise. `noteGenericReply` is used for the
+    /// dynamic confirmation (the live-caption pill is gone by the time
+    /// the permission round-trip returns, so spoken-only would vanish);
+    /// the fallbacks ride `speakWithVisibleOutcome`. Observability is
+    /// emitted at resolution (component "alarms_timers"), never before.
+    private func handleAlarmSetCommand(at time: Date, label: String?) {
+        guard coordinator != nil else {
+            speakWithVisibleOutcome(key: "alarms.setFailed")
+            return
+        }
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let timeText = formattedTime(
+            Calendar.current.dateComponents([.hour, .minute], from: time),
+            locale: locale
+        )
+        Task { [weak self] in
+            guard let self else { return }
+            let outcome = await self.coordinator?.requestAlarmSet(at: time, label: label)
+                ?? .failed
+            switch outcome {
+            case .scheduled:
+                self.emitAlarmTimers(eventType: "alarm_set", outcome: "success")
+                let text = L10n.fmt("alarms.set", locale: locale, timeText)
+                self.coordinator?.noteGenericReply(text)
+                self.speak(text: text, locale: locale)
+            case .permissionDenied:
+                self.emitAlarmTimers(eventType: "alarm_set", outcome: "permission_denied")
+                self.speakWithVisibleOutcome(key: "alarms.permissionDenied")
+            case .atCapacity:
+                self.emitAlarmTimers(eventType: "alarm_set", outcome: "at_capacity")
+                self.speakWithVisibleOutcome(key: "alarms.capacity")
+            case .failed:
+                self.emitAlarmTimers(eventType: "alarm_set", outcome: "failed")
+                self.speakWithVisibleOutcome(key: "alarms.setFailed")
+            }
+        }
+    }
+
+    /// Same contract as `handleAlarmSetCommand` for countdown timers; the
+    /// confirmation embeds the localized duration ("Timer started for
+    /// 5 minutes.") via `AlarmTimerCommandParser.durationText`.
+    private func handleTimerStartCommand(durationSeconds: Int, label: String?) {
+        guard coordinator != nil else {
+            speakWithVisibleOutcome(key: "timers.setFailed")
+            return
+        }
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        Task { [weak self] in
+            guard let self else { return }
+            let outcome = await self.coordinator?.requestTimerStart(
+                durationSeconds: durationSeconds, label: label
+            ) ?? .failed
+            switch outcome {
+            case .scheduled:
+                self.emitAlarmTimers(eventType: "timer_started", outcome: "success")
+                let durationText = AlarmTimerCommandParser.durationText(
+                    seconds: durationSeconds, locale: locale
+                )
+                let text = L10n.fmt("timers.started", locale: locale, durationText)
+                self.coordinator?.noteGenericReply(text)
+                self.speak(text: text, locale: locale)
+            case .permissionDenied:
+                self.emitAlarmTimers(eventType: "timer_started", outcome: "permission_denied")
+                self.speakWithVisibleOutcome(key: "timers.permissionDenied")
+            case .atCapacity:
+                self.emitAlarmTimers(eventType: "timer_started", outcome: "at_capacity")
+                self.speakWithVisibleOutcome(key: "timers.capacity")
+            case .failed:
+                self.emitAlarmTimers(eventType: "timer_started", outcome: "failed")
+                self.speakWithVisibleOutcome(key: "timers.setFailed")
+            }
+        }
+    }
+
+    /// Voice alarm OFF handler — same contract as the set handlers but
+    /// SYNCHRONOUS (no permission round-trip): the coordinator resolves
+    /// the most recently rung enabled alarm, disables it and returns the
+    /// outcome this handler speaks. `.disabled` confirms with the
+    /// alarm's SPOKEN time, `.noAlarm` speaks the honest "no alarms"
+    /// line, `.failed` the honest fallback. Observability is emitted at
+    /// resolution (component "alarms_timers"), never before.
+    private func handleAlarmOffCommand() {
+        guard coordinator != nil else {
+            speakWithVisibleOutcome(key: "alarms.offFailed")
+            return
+        }
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        switch coordinator?.requestAlarmOff() ?? .noAlarm {
+        case .disabled(let time):
+            emitAlarmTimers(eventType: "alarm_off", outcome: "success")
+            let timeText = formattedTime(
+                Calendar.current.dateComponents([.hour, .minute], from: time),
+                locale: locale
+            )
+            let text = L10n.fmt("alarms.off", locale: locale, timeText)
+            coordinator?.noteGenericReply(text)
+            speak(text: text, locale: locale)
+        case .noAlarm:
+            emitAlarmTimers(eventType: "alarm_off", outcome: "no_alarm")
+            speakWithVisibleOutcome(key: "alarms.none")
+        case .failed:
+            emitAlarmTimers(eventType: "alarm_off", outcome: "failed")
+            speakWithVisibleOutcome(key: "alarms.offFailed")
+        }
+    }
+
+    /// Voice SNOOZE handler — same synchronous contract; the success
+    /// confirmation embeds the re-wake instant as a SPOKEN time
+    /// ("Snoozed until 6:15 am.") via the shared `SpokenTime` helper.
+    private func handleAlarmSnoozeCommand(minutes: Int) {
+        guard coordinator != nil else {
+            speakWithVisibleOutcome(key: "alarms.snoozeFailed")
+            return
+        }
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        switch coordinator?.requestAlarmSnooze(minutes: minutes) ?? .noAlarm {
+        case .snoozed(let until):
+            emitAlarmTimers(eventType: "alarm_snoozed", outcome: "success")
+            let timeText = SpokenTime.string(from: until, locale: locale)
+            let text = L10n.fmt("alarms.snoozed", locale: locale, timeText)
+            coordinator?.noteGenericReply(text)
+            speak(text: text, locale: locale)
+        case .noAlarm:
+            emitAlarmTimers(eventType: "alarm_snoozed", outcome: "no_alarm")
+            speakWithVisibleOutcome(key: "alarms.none")
+        case .failed:
+            emitAlarmTimers(eventType: "alarm_snoozed", outcome: "failed")
+            speakWithVisibleOutcome(key: "alarms.snoozeFailed")
+        }
+    }
+
+    /// Observability for the alarms/timers feature — component
+    /// "alarms_timers" (the feature's own bus name, not the router's).
+    private func emitAlarmTimers(eventType: String, outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "alarms_timers",
+            eventType: eventType,
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+    /// [MORNING-BRIEFING] (2026-09-07) Imperative phrasings that request
+    /// the proactive morning briefing — English, नेपाली, and romanized
+    /// Nepali, matched against the lowercased transcript like every other
+    /// phrase list. Imperative forms ONLY: a bare "briefing" / "मेरो
+    /// ब्रीफिङ" is never matched here, so a reminder-set or other
+    /// utterance that merely mentions the word can never hijack the
+    /// briefing's once-per-calendar-day budget (the confirmation-flow and
+    /// interpreter stages already ran before this stage, so an answered
+    /// yes/no or a confident command always wins).
+    private static let briefingPhrases = [
+        "read me my briefing", "read my briefing", "tell me my briefing",
+        "मेरो ब्रीफिङ सुनाऊ", "ब्रीफिङ सुनाऊ",
+        "मेरो बिहानको सारांश सुनाऊ", "बिहानको सारांश सुनाऊ",
+        "mero briefing sunau", "bihanko sarsang sunau"
+    ]
+
+    /// [NEWS-READER] (2026-09-08) Request phrasings for the news digest —
+    /// English, नेपाली, and romanized Nepali, matched against the
+    /// lowercased transcript like every other phrase list. Full phrases
+    /// only (see the stage's veto notes): the bare word "news" /
+    /// "समाचार" is deliberately absent, so a mention can never fire the
+    /// digest. STT spacing varies, so all spellings ship: "what's" /
+    /// "whats" / "what is".
+    private static let newsPhrases = [
+        "read me the news", "read the news", "tell me the news",
+        "what's the news", "whats the news", "what is the news",
+        "समाचार सुनाऊ", "समाचार सुनाउनुहोस्", "समाचार पढ",
+        "खबर सुनाऊ", "खबर सुनाउनुहोस्", "खबर पढ",
+        "samachar sunau", "samachar sunaunuhos", "khabar sunau"
+    ]
 
     // MARK: - Keyword fallback
 
@@ -1138,23 +1622,176 @@ final class CommandRouter {
                        durationMs: Self.elapsedMilliseconds(since: startedAt))
     }
 
+    // MARK: - [YOUTUBE] Voice YouTube search/play (youtube-plugin, 2026-09-08)
+
+    /// The YouTube stage's execution (see the stage comment in `route`).
+    /// Called only after `YouTubeRoute.decide` matched with an extracted
+    /// query. Two honest paths:
+    ///
+    ///   · API key configured: announce `youtube.looking`, fetch the TOP
+    ///     video from the YouTube Data API v3 (`LocalToolTransport` seam,
+    ///     8 s timeout — the weather/search budget), open
+    ///     `youtube://watch` (https fallback when the app is absent via
+    ///     the `CallLinkOpening` seam), and speak the title-bearing
+    ///     confirmation. The title goes through the SPOKEN path ONLY: no
+    ///     visible card, never into the observability bus or the debug
+    ///     log (the log entry for the success path carries the query +
+    ///     outcome, an EMPTY response by design — see `logToolRequest`).
+    ///   · No key: open the SEARCH deeplink directly
+    ///     (`youtube://www.youtube.com/results` → https fallback) and
+    ///     speak `youtube.openingSearch` — the user accepted
+    ///     search-only as the MVP, so this is the whole feature, not a
+    ///     degraded mode.
+    ///
+    ///   Every failure (no transport, no opener, network error, non-200
+    ///   quota/rate-limit, empty results, malformed payload) speaks an
+    ///   honest localized fallback — `youtube.notFound` for an empty
+    ///   result set, `youtube.unavailable` otherwise — never a
+    ///   fabricated title, never a dead end.
+    private func fireYouTubePlay(query: String) {
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let attemptStartedAt = Date()
+
+        // Keyless path — no network at all; the deeplink IS the
+        // feature. Synchronous: the confirmation is committed before
+        // this turn returns.
+        guard let apiKey = youtubeConfigStore?.apiKey else {
+            guard let opener = youtubeLinkOpener else {
+                deliverYouTubeFailure(locale: locale, query: query,
+                                      fallbackKey: "youtube.unavailable",
+                                      statusCode: nil, startedAt: attemptStartedAt)
+                return
+            }
+            let outcome = YouTubeTool.openSearch(query: query, opener: opener)
+            emitYouTube(eventType: "youtube_search",
+                        outcome: outcome == .openedApp ? "opened_app" : "opened_web")
+            let text = L10n.fmt("youtube.openingSearch", locale: locale, query)
+            speak(text: text, locale: locale)
+            // [TOOL-DEBUG-LOG] The spoken line embeds the query (the
+            // user's own words — already logged raw by the search tool's
+            // convention); response stays EMPTY on the ok path so the
+            // encrypted store never gains text the design keeps to
+            // speech.
+            logToolRequest(kind: .youtube, query: query, response: "", outcome: "ok",
+                           statusCode: nil,
+                           durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
+            return
+        }
+
+        // Keyed path — async Data API round-trip.
+        speak(key: "youtube.looking")
+        Task { [weak self] in
+            guard let self else { return }
+            guard let transport = self.youtubeTransport else {
+                await MainActor.run {
+                    self.deliverYouTubeFailure(locale: locale, query: query,
+                                               fallbackKey: "youtube.unavailable",
+                                               statusCode: nil, startedAt: attemptStartedAt)
+                }
+                return
+            }
+            do {
+                let top = try await YouTubeTool.fetchTopResult(query: query,
+                                                               apiKey: apiKey,
+                                                               transport: transport)
+                await MainActor.run {
+                    guard let opener = self.youtubeLinkOpener else {
+                        self.deliverYouTubeFailure(locale: locale, query: query,
+                                                   fallbackKey: "youtube.unavailable",
+                                                   statusCode: nil, startedAt: attemptStartedAt)
+                        return
+                    }
+                    let outcome = YouTubeTool.openWatch(videoID: top.videoID, opener: opener)
+                    self.emitYouTube(eventType: "youtube_play",
+                                     outcome: outcome == .openedApp ? "opened_app" : "opened_web")
+                    let text = L10n.fmt("youtube.playing", locale: locale, top.title)
+                    // Spoken path ONLY: the title-bearing confirmation
+                    // is never carded and never logged (the design's
+                    // "SPOKEN path only (no logs)" rule). The debug-log
+                    // entry below records the attempt with an EMPTY
+                    // response for exactly that reason.
+                    self.speak(text: text, locale: locale)
+                    self.logToolRequest(kind: .youtube, query: query, response: "",
+                                        outcome: "ok", statusCode: 200,
+                                        durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
+                }
+            } catch YouTubeTool.FetchError.noResults {
+                await MainActor.run {
+                    self.deliverYouTubeFailure(locale: locale, query: query,
+                                               fallbackKey: "youtube.notFound",
+                                               statusCode: 200, startedAt: attemptStartedAt)
+                }
+            } catch YouTubeTool.FetchError.invalidResponse(let statusCode) {
+                await MainActor.run {
+                    self.deliverYouTubeFailure(locale: locale, query: query,
+                                               fallbackKey: "youtube.unavailable",
+                                               statusCode: statusCode, startedAt: attemptStartedAt)
+                }
+            } catch {
+                await MainActor.run {
+                    self.deliverYouTubeFailure(locale: locale, query: query,
+                                               fallbackKey: "youtube.unavailable",
+                                               statusCode: nil, startedAt: attemptStartedAt)
+                }
+            }
+        }
+    }
+
+    /// Failure delivery for the YouTube stage — the honest localized
+    /// fallback line (`youtube.notFound` / `youtube.unavailable`), a
+    /// `youtube` component `fail` event, and one "fail" debug-log entry
+    /// carrying the line the user actually heard (never a title).
+    private func deliverYouTubeFailure(locale: Locale, query: String,
+                                       fallbackKey: String,
+                                       statusCode: Int?, startedAt: Date) {
+        emitYouTube(eventType: "youtube", outcome: "fail")
+        speakWithVisibleOutcome(key: fallbackKey)
+        let line = L10n.str(fallbackKey, locale: locale)
+        logToolRequest(kind: .youtube, query: query, response: line, outcome: "fail",
+                       statusCode: statusCode,
+                       durationMs: Self.elapsedMilliseconds(since: startedAt))
+    }
+
+    /// [YOUTUBE] (2026-09-08) `youtube` observability events — one per
+    /// YouTube turn. Component `youtube`, eventType
+    /// `youtube_search`/`youtube_play`/`youtube`, outcome
+    /// `opened_app`/`opened_web`/`fail`. No metadata keys are attached,
+    /// so nothing user-identifying (the query, the video ID, the title)
+    /// ever reaches the bus.
+    private func emitYouTube(eventType: String, outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "youtube",
+            eventType: eventType,
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+
     // MARK: - [TOOL-DEBUG-LOG] Local-tool request log
 
     /// [TOOL-DEBUG-LOG] (2026-09-07) One debug-log entry per local-tool
-    /// request (weather or search) — the helper behind every hook point
-    /// in the [LOCAL-TOOLS] section above. `query` was snapshotted
-    /// BEFORE the request went out; this call adds the outcome + what the
-    /// app answered on the completion path:
+    /// request (weather, search or youtube) — the helper behind every
+    /// hook point in the [LOCAL-TOOLS] section above and the [YOUTUBE]
+    /// stage. `query` was snapshotted BEFORE the request went out; this
+    /// call adds the outcome + what the app answered on the completion
+    /// path:
     ///
     ///   · ok — a live answer was delivered: the weather conditions
-    ///     sentence or the search summary (the spoken text),
+    ///     sentence, the search summary, or the YouTube confirmation
+    ///     (the spoken text). YouTube's ok entries carry an EMPTY
+    ///     response by design — the title-bearing confirmation is
+    ///     spoken-only and never recorded anywhere ([YOUTUBE]
+    ///     2026-09-08),
     ///   · fallback — weather only: the NAMED place failed to resolve
     ///     (geocode error/empty) and the live DEVICE reading answered
     ///     instead — still a live reading, but for the wrong place,
     ///   · cap — search only: quota exhausted before any request; the cap
     ///     line is the response,
-    ///   · fail — no live answer: the honest static weather no-data line
-    ///     or the generic search re-prompt was delivered.
+    ///   · fail — no live answer: the honest static weather no-data line,
+    ///     the generic search re-prompt, or the YouTube fallback line
+    ///     (never a title) was delivered.
     ///
     /// Scope note: the Gemini grounding path ([INTENT-TOOLS] — the cloud
     /// stack's search-grounded interpreter) is deliberately OUT of scope.
@@ -1522,11 +2159,15 @@ final class CommandRouter {
         }
     }
 
+    /// Spoken-form time for alarm/reminder confirmations (spoken-time
+    /// task, 2026-09-08): the old `.shortened` clock text made the TTS
+    /// read "१३:००"/"13:00" as digits ("thirteen hundred") instead of
+    /// "1 pm" / "दिउँसो १ बजे". All speech-bound lines share
+    /// `SpokenTime`; UI display formatting is untouched.
     private func formattedTime(_ components: DateComponents, locale: Locale) -> String {
-        let calendar = Calendar.current
-        guard let date = calendar.date(from: components) else { return "" }
-        return date.formatted(Date.FormatStyle(date: .omitted, time: .shortened)
-            .locale(locale))
+        SpokenTime.string(hour: components.hour ?? 0,
+                          minute: components.minute ?? 0,
+                          locale: locale)
     }
 
     private func handleMedicationAcknowledgement(replyOverride: String? = nil) {

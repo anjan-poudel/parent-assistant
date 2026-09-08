@@ -11,7 +11,7 @@ import UIKit
 /// Guidance layout: instead of one crammed overlay on the full photo, each
 /// step is its own card — the instruction text up top, then a CROPPED,
 /// zoomed close-up of the relevant section with the button circled (a
-/// `talkGlowEnd` ring, white under-stroke, step badge) and the button's
+/// `warmGlowEnd` ring, white under-stroke, step badge) and the button's
 /// label beneath it (augmented into the ACTIVE locale's language when the
 /// localizer knows the label). Close-ups are pinch-zoomed up to 4×
 /// (double-tap resets to 1×).
@@ -66,7 +66,11 @@ struct ApplianceHelperView: View {
             }
         }
         .onAppear {
-            guard !didAutoOpenCamera else { return }
+            // Auto-open belongs to a live capture session only: an ARMED
+            // session (bundled default manuals opened from the library or
+            // Settings, 2026-09-07) is already in .guidance and must not
+            // pop the camera over its step cards.
+            guard !didAutoOpenCamera, session.state == .capturing else { return }
             didAutoOpenCamera = true
             showCamera = true
         }
@@ -305,7 +309,7 @@ struct ApplianceHelperView: View {
             steps: presentation.guidance.steps,
             controls: presentation.visibleControls)
         return ForEach(cards, id: \.number) { card in
-            stepCard(card, image: image)
+            stepCard(card, image: session.bundledStepImages[card.number] ?? image)
         }
     }
 
@@ -483,11 +487,11 @@ private struct ZoomableStepImage: View {
                 .frame(width: (radius + 3) * 2, height: (radius + 3) * 2)
                 .position(ringCenter)
             Circle()
-                .stroke(DesignTokens.talkGlowEnd, lineWidth: 4.5)
+                .stroke(DesignTokens.warmGlowEnd, lineWidth: 4.5)
                 .frame(width: radius * 2, height: radius * 2)
                 .position(ringCenter)
             ZStack {
-                Circle().fill(DesignTokens.talkGlowEnd)
+                Circle().fill(DesignTokens.warmGlowEnd)
                 Text(badgeText)
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                     .foregroundColor(.white)

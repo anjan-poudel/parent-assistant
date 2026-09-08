@@ -73,8 +73,24 @@ enum VoiceContactSearchRoute {
         // GoldenCorpus; "फोन नम्बर" alone would match its marker).
         if isDirectCallUtterance(text) { return .notSearch }
 
+        // [YOUTUBE] (2026-09-08) YouTube-marked utterances belong to the
+        // YouTube stage, which runs LATER in the ladder — "search
+        // youtube for ram" and "युट्युबमा गीत खोज" are YouTube
+        // searches, never contact searches. Without this veto the bare
+        // "search"/"खोज" markers below would swallow them (opening the
+        // Phone screen for "youtube ram") before the YouTube stage ever
+        // ran.
+        if isYouTubeUtterance(text) { return .notSearch }
+
         guard isSearchMarkerHit(text) else { return .notSearch }
         return .openPhone(extractQuery(from: text))
+    }
+
+    /// True when the utterance names YouTube — whole-token "youtube"
+    /// (Latin) or Devanagari substring "युट्युब" (the locative
+    /// "युट्युबमा" contains the bare stem).
+    private static func isYouTubeUtterance(_ text: String) -> Bool {
+        token("youtube", in: text) || text.contains("युट्युब")
     }
 
     // MARK: - Direct-call veto

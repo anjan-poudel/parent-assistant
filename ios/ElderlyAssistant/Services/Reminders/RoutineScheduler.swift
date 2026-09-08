@@ -92,6 +92,82 @@ final class RoutineScheduler {
         onScheduleChanged?()
     }
 
+    // MARK: - Native-edit application (calendar-driven task, 2026-09-07)
+
+    /// Mutators the coordinator applies `CalendarSyncService`
+    /// mutations through (family edits made in the native Calendar on
+    /// the two-way Sahayak mirror). Every lookup is keyed by
+    /// TIME-OF-DAY, never by list index: reconciliation plans against
+    /// an entry snapshot, then mutations apply sequentially — earlier
+    /// ones may have compacted `scheduleTimes`, so an index would go
+    /// stale while an hour:minute survives. Like every other mutator
+    /// here they persist, re-arm and fire `onScheduleChanged` (the
+    /// mirror re-syncs; the planners then see equal shapes and stop).
+
+    /// Retimes one slot of an entry. No-op (returns false) when the
+    /// entry or the from-time no longer exists.
+    @discardableResult
+    func retimeSlot(entryId: UUID, fromHour: Int, fromMinute: Int,
+                    toHour: Int, toMinute: Int) -> Bool {
+        guard var entry = entry(for: entryId),
+              let index = slotIndex(in: entry, hour: fromHour, minute: fromMinute)
+        else { return false }
+        entry.scheduleTimes[index] = DateComponents(hour: toHour, minute: toMinute)
+        return persistAndReschedule(entry, eventType: "entry_retimed",
+                                    metadata: ["entry_id_hash": idHash(entryId)])
+    }
+
+    /// Drops one slot of an entry (its native mirror event was
+    /// deleted). Refuses to empty the list — an entry whose last slot
+    /// goes is DISABLED instead (the planner emits `disableEntry` for
+    /// that shape; an enabled entry with zero times could never fire
+    /// anything but would keep mirroring confusion).
+    @discardableResult
+    func dropSlot(entryId: UUID, hour: Int, minute: Int) -> Bool {
+        guard var entry = entry(for: entryId),
+              let index = slotIndex(in: entry, hour: hour, minute: minute)
+        else { return false }
+        entry.scheduleTimes.remove(at: index)
+        guard !entry.scheduleTimes.isEmpty else { return false }
+        return persistAndReschedule(entry, eventType: "slot_dropped",
+                                    metadata: ["entry_id_hash": idHash(entryId)])
+    }
+
+    /// Converts an entry's recurrence (a native daily↔weekly edit).
+    /// `.daily` clears weekdays; `.weekly` stores the record's list
+    /// (empty weekdays under `.weekly` means every day — but the
+    /// planner only emits `.weekly` with days).
+    @discardableResult
+    func updateRecurrence(entryId: UUID, frequency: RoutineFrequency,
+                          weekdays: [Int]) -> Bool {
+        guard var entry = entry(for: entryId) else { return false }
+        entry.frequency = frequency
+        entry.weekdays = frequency == .daily ? [] : weekdays.sorted()
+        return persistAndReschedule(entry, eventType: "entry_recurrence_updated",
+                                    metadata: ["entry_id_hash": idHash(entryId)])
+    }
+
+    /// First slot whose hour/minute match — the compaction-safe lookup
+    /// every native-edit mutator keys on.
+    private func slotIndex(in entry: RoutineEntry, hour: Int, minute: Int) -> Int? {
+        entry.scheduleTimes.firstIndex { time in
+            time.hour == hour && time.minute == minute
+        }
+    }
+
+    private func persistAndReschedule(_ entry: RoutineEntry,
+                                      eventType: String,
+                                      metadata: [String: String]) -> Bool {
+        guard store.update(entry) else {
+            emit("entry_persistence_failed", metadata: [:])
+            return false
+        }
+        emit(eventType, metadata: metadata)
+        scheduleAll()
+        onScheduleChanged?()
+        return true
+    }
+
     // MARK: - Schedule All (launch + BGTask wake, mirrors MedicationScheduler)
 
     /// Restores persisted occurrences once per process, then regenerates

@@ -15,6 +15,11 @@ struct ScannedEvent: Equatable {
     /// `EKEvent.hasAlarms` — items with their own alarm are flagged
     /// (not dropped) so they surface without a duplicate notification.
     let hasAlarms: Bool
+    /// Owning calendar's EventKit identifier — lets the import exclude
+    /// whole calendars by identity (calendar-driven task, 2026-09-07:
+    /// the app's own two-way "Sahayak" calendar must never import back;
+    /// mirror-tag notes are the braces, calendar-id exclusion the belt).
+    let calendarIdentifier: String?
     let calendarName: String
 }
 
@@ -63,7 +68,7 @@ protocol NativeCalendarScanning {
 /// The real EventKit-backed scanner. Deliberately tiny and side-effect-
 /// only (fetch + struct-map in one function) so `ExternalCalendarService`
 /// logic is fully testable against a fake — same split as
-/// `CalendarSyncService` / `EKEventWriter`.
+/// `CalendarSyncService` / `EventKitCalendarGateway`.
 final class EKCalendarScanner: NativeCalendarScanning {
 
     enum ScannerError: Error {
@@ -75,9 +80,19 @@ final class EKCalendarScanner: NativeCalendarScanning {
     var eventAuthorizationGranted: Bool {
         let status = EKEventStore.authorizationStatus(for: .event)
         if #available(iOS 17.0, *) {
-            // Write-only access cannot READ events — not enough for a
-            // scan, so only full access counts as granted here.
-            return status == .fullAccess
+            // iOS 17 splits event access: `.fullAccess` reads AND
+            // writes; `.writeOnly` can add/edit its own events but
+            // CANNOT read — never enough for a scan, so only full
+            // access counts as granted here. A write-only user gets an
+            // honest "not readable" status; the point-of-use
+            // `requestFullAccessToEvents()` (below) is the OS's
+            // upgrade prompt if they want to try again.
+            switch status {
+            case .fullAccess: return true
+            case .writeOnly, .denied, .restricted, .notDetermined:
+                return false
+            @unknown default: return false
+            }
         } else {
             return status == .authorized
         }
@@ -130,6 +145,7 @@ final class EKCalendarScanner: NativeCalendarScanning {
                 // of `status == .canceled`.
                 isDeclined: event.status == .canceled,
                 hasAlarms: event.hasAlarms,
+                calendarIdentifier: event.calendar.calendarIdentifier,
                 calendarName: event.calendar.title
             )
         }

@@ -17,12 +17,33 @@ Backends:
                               gate "within −3 pts of Gemini" uses this run)
 
 Exits non-zero when any gate in config.yaml:gates fails.
+
+Generation discipline (phase-3 [EVAL-DEGENERATION], 2026-09-07):
+Both bake-off legs ran to the token cap on every row without emitting any
+end-of-generation token, because train_qlora.py's training text ends the
+JSON label at the raw closing brace — no EOS/chat-template tokens are ever
+appended, so the models never learned a terminator. Eval therefore:
+  - passes per-family stop strings (harmless if the model never emits the
+    base model's EOG tokens, and truncates the synthetic "next training
+    row" continuations both legs stack after their first JSON object);
+  - raises max_tokens 700 -> 956 (rows whose JSON lands after an echoed
+    preamble were being cut before their closing brace);
+  - applies a per-family repeat penalty (qwen 1.05: temperature-0 greedy
+    repetition attractors — qwen gc-emergency-003 emitted the correct
+    {"action":"emergency"...} but repeated its reply phrase forever and
+    never closed the brace at penalty 1.0; gemma stays 1.0 — higher
+    penalties perturb fine-grained slots at the margin);
+  - n_ctx 4096 (longest prompt is ~1224 tokens; 956 cap needs headroom);
+  - parses the FIRST complete JSON object anywhere in the output
+    (skipping template-echo preamble / stacked objects / trailing prose),
+    instead of slicing first-brace-to-last-brace.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -34,26 +55,106 @@ CLOSED_INTENTS = {"ack_med", "call", "emergency", "set_reminder",
                   "create_calendar_event", "suggest_video"}
 SIDE_EFFECT_INTENTS = {"call", "send_message"}
 
+GGUF_MAX_TOKENS = 956        # was 700; rows with a preamble echo need the room
+GGUF_TEMPERATURE = 0.0       # deterministic; keep
+
+
+def _repeat_penalty(model_path: str) -> float:
+    """Per-family repeat penalty.
+
+    At penalty 1.0 the temperature-0 qwen leg falls into a repetition
+    attractor on gc-emergency-003 (the correct {"action":"emergency"…}
+    JSON never reaches its closing brace because the reply phrase loops
+    forever); 1.05 breaks the loop and the JSON completes. Gemma shows no
+    such loop, and probing showed penalties perturb fine-grained slots at
+    the margin (gemma contact माइया → माइयालाई at 1.15; qwen's
+    mislabeled-ack time slot grows ७:३० → ७:३० बजे from penalty 1.08
+    up), so gemma stays at the unperturbed 1.0 and qwen at the smallest
+    verified loop-breaking value."""
+    name = Path(model_path).name.lower()
+    return 1.05 if "qwen" in name else 1.0
+
+
+def _stop_strings(model_path: str) -> list[str]:
+    """Per-model-family stop strings.
+
+    The base tokenizers' EOG tokens (gemma <eos>/<end_of_turn>, qwen
+    <|endoftext|>/<|im_end|>) are decoded as control tokens (empty text),
+    so the string stops below mostly act as documentation; the load-bearing
+    stops are the "\n\n" continuations both fine-tunes emit AFTER their
+    first JSON object (they were trained on concatenated raw rows with no
+    delimiter, and keep generating "next row" style text forever)."""
+    base = ["\n\nUser said:", "\n\n{"]  # observed post-JSON stacking markers
+    name = Path(model_path).name.lower()
+    if "qwen" in name:
+        return ["<|endoftext|>", "<|im_end|>"] + base
+    if "gemma" in name:
+        return ["<eos>", "<end_of_turn>", "</s>"] + base
+    return ["<|endoftext|>", "<|im_end|>", "<eos>", "<end_of_turn>", "</s>"] + base
+
 
 def predict_echo(utterance: str, cfg: dict) -> dict:
     return {"action": "none", "confidence": 0.0}
+
+
+def _first_complete_json(text: str) -> dict | None:
+    """Return the first complete JSON object in text, skipping any
+    non-JSON preamble (template echo, self-instruction prose, ...).
+
+    The output is expected to START with the model's JSON object, but some
+    rows begin by echoing/continuing the prompt template first; every brace
+    candidate is tried until one parses as a complete object with an
+    "action" field. Returns None when no complete object exists (the model
+    refused / echoed forever / degenerated without emitting JSON)."""
+    decoder = json.JSONDecoder()
+    for m in re.finditer(r"\{", text):
+        try:
+            obj, _ = decoder.raw_decode(text, m.start())
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict) and isinstance(obj.get("action"), str):
+            return obj
+    return None
 
 
 def predict_gguf(utterance: str, cfg: dict, model_path: str) -> dict:
     """Local GGUF via llama-cpp-python. The prompt MUST mirror
     IntentPrompt.build exactly — training and inference use the identical
     prompt (seeds/prompt_template.txt is extracted from the Swift source
-    of truth)."""
+    of truth; train_qlora.py tokenizes that raw text with NO chat-template
+    wrapper, so the eval prompt must stay raw too — never pass the prompt
+    through a chat template here)."""
     from llama_cpp import Llama  # pip install llama-cpp-python
 
     if not hasattr(predict_gguf, "_llm"):
         template = (Path(__file__).parent.parent / "seeds" / "prompt_template.txt").read_text(encoding="utf-8")
-        predict_gguf._llm = Llama(model_path=model_path, n_ctx=1024)
+        # Thread caps via env (LLAMA_N_THREADS / LLAMA_N_THREADS_BATCH):
+        # llama-cpp-python's default (~cpu_count) OpenMP threads thrash on a
+        # shared box — two concurrent gguf evals dropped to ~1 tok/s at load
+        # 48. A capped run keeps full throughput for all tenants.
+        n_threads = int(os.environ.get("LLAMA_N_THREADS", "0")) or None
+        n_threads_batch = int(os.environ.get("LLAMA_N_THREADS_BATCH", "0")) or None
+        predict_gguf._llm = Llama(model_path=model_path, n_ctx=4096,
+                                  n_threads=n_threads,
+                                  n_threads_batch=n_threads_batch)
+        # n_ctx 1024 OOMs prompts: qwen3 chat template + longest golden
+        # utterance + 192 max_tokens reached 1214 tokens (ValueError).
+        # 4096 leaves room for the 1224-token longest prompt + cap 956.
         predict_gguf._template = template
     prompt = predict_gguf._template.replace("{transcript}", utterance)
-    out = predict_gguf._llm(prompt, max_tokens=192, temperature=0.0)
+    out = predict_gguf._llm(prompt, max_tokens=GGUF_MAX_TOKENS,
+                            temperature=GGUF_TEMPERATURE,
+                            repeat_penalty=_repeat_penalty(model_path),
+                            stop=_stop_strings(model_path))
     text = out["choices"][0]["text"]
-    return json.loads(text[text.index("{"): text.rindex("}") + 1])
+    obj = _first_complete_json(text)
+    if obj is None:
+        # No complete JSON object — model refused/echoed/degenerated. Count
+        # as an abstention (action none) but surface the raw output.
+        print(f"[gguf] NO-JSON output for {utterance[:60]!r}: {text[:300]!r}",
+              file=sys.stderr)
+        return {"action": "none", "confidence": 0.0}
+    return obj
 
 
 def predict_gemini(utterance: str, cfg: dict) -> dict:

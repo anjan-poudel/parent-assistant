@@ -72,6 +72,13 @@ final class AppCoordinator: ObservableObject {
         routineAlarmScheduler.locale = activeLocale
         routineScheduler.locale = activeLocale
         externalCalendar.locale = activeLocale
+        alarmTimersService.locale = activeLocale
+        // Voice-OS shell v1: the briefing composes in the app language,
+        // same injection pattern as every other locale-aware service.
+        morningBriefing?.locale = activeLocale
+        // [NEWS-READER] (2026-09-08) The news digest composes in the app
+        // language too — same injection pattern.
+        newsReader?.locale = activeLocale
     }
 
     /// First-run onboarding progress (spec §4.2). Persisted per step.
@@ -95,6 +102,7 @@ final class AppCoordinator: ObservableObject {
         }
     }
     private static let sttPreferenceKey = "sttModelPreference"
+    private static let noiseFilterEnabledKey = "noiseFilterEnabled"
 
     /// The app-wide background theme (skinnable home, 2026-09-07) — a UI
     /// preference, not a secret, persisted in UserDefaults the same way as
@@ -193,6 +201,49 @@ final class AppCoordinator: ObservableObject {
         }
     }
     private static let cloudFallbackKey = "cloudFallbackEnabled"
+
+    /// Voice Processing I/O A/B gate (voice-personalisation P0, slice C,
+    /// 2026-09-08): when ON, the audio session activates with the VPIO
+    /// preset (`.voiceChat` mode + `setVoiceProcessingEnabled(true)` on
+    /// the engine's input node — AEC + built-in noise suppression below
+    /// the tap, phone-call-tuned). Default OFF: today's `.measurement`
+    /// behavior stays byte-identical. The persisted source of truth lives
+    /// on `AudioSessionManager` (its `voiceProcessingEnabled`, under
+    /// UserDefaults "voiceProcessingEnabled"); this published mirror is
+    /// the composition-root seam a Settings row / remote-config A/B flips.
+    /// didSet pushes the new value to the manager (which persists it) AND
+    /// re-applies the preset — the session re-activates under the new
+    /// configuration immediately (see `applyVoiceProcessingPresetChange`).
+    /// The init-time restore assigns the mirror directly (house pattern —
+    /// didSet does not fire there) after the manager composed above has
+    /// already read the persisted value.
+    @Published var voiceProcessingEnabled: Bool {
+        didSet {
+            guard voiceProcessingEnabled != oldValue else { return }
+            audioSessionManager.voiceProcessingEnabled = voiceProcessingEnabled
+            applyVoiceProcessingPresetChange()
+        }
+    }
+
+    /// Spectral-gate noise filter A/B gate ([NOISE-FILTER] P1 front-end,
+    /// 2026-09-08). ON = the voice pipeline's CAPTURE stream runs through
+    /// `SpectralGateDenoiser` — the model-free classic DSP spectral gate
+    /// (conservative stationary-noise suppression; NOT DeepFilterNet3 —
+    /// that needs model artifacts, P1 step 2 — see the gap note in
+    /// SpectralGateDenoiser). The VPIO session preset is untouched by
+    /// this toggle (independent A/B arms). Default OFF: the capture path
+    /// is byte-identical to today's. Unlike the VPIO preset, this stage
+    /// hot-swaps WITHOUT a pipeline recycle (`setNoiseSuppressor`).
+    /// Persisted under UserDefaults "noiseFilterEnabled" (a UI
+    /// preference, not a secret — house pattern).
+    @Published var noiseFilterEnabled: Bool {
+        didSet {
+            guard noiseFilterEnabled != oldValue else { return }
+            UserDefaults.standard.set(noiseFilterEnabled,
+                                      forKey: Self.noiseFilterEnabledKey)
+            applyNoiseFilterChange()
+        }
+    }
 
     /// Which cloud provider an opted-in on-device escalation may reach
     /// (cloud-fallback task, 2026-09-07). Provider-ready for a future
@@ -328,29 +379,38 @@ final class AppCoordinator: ObservableObject {
     private lazy var chatHistoryStore = ChatHistoryStore(storage: storage)
 
     // MARK: - Assistant activity history + live-call detection
-    // (call-history task, 2026-09-06)
+    // (call-history task, 2026-09-06; unanswered-call capture,
+    // missed-calls task, 2026-09-07)
 
     /// Encrypted, bounded (100-entry) log of what THIS app itself
     /// called/messaged — the Recent activity leaf's source of truth.
     /// Never the system call log, never other apps' messages (iOS
-    /// platform wall). Lazy like `chatHistoryStore`: `storage` is
-    /// assigned at the top of `init`, long before any call/message path
-    /// can record. Main-queue confined by contract.
+    /// platform wall). The ONE exception is the anonymous unanswered-call
+    /// row (missed-calls task, 2026-09-07): a presence-only fact the
+    /// live-call observer saw — a call ended without ever connecting —
+    /// recorded with no name and no number, never the identity the
+    /// system call log would carry (iOS does not expose it). Lazy like
+    /// `chatHistoryStore`: `storage` is assigned at the top of `init`,
+    /// long before any call/message path can record. Main-queue confined
+    /// by contract.
     private(set) lazy var activityLog = AppActivityLog(storage: storage)
 
     /// Published window over `activityLog`, newest first — the leaf's
     /// read side. Mirrors the `conversationHistory` window pattern:
     /// the store stays the source of truth and `recordActivity` refreshes
     /// this window after every write, so a row recorded while the leaf is
-    /// open (a re-initiated call/message) appears without a re-push.
+    /// open (a re-initiated call/message, or a call that just went
+    /// unanswered) appears without a re-push.
     @Published private(set) var recentActivity: [AppActivityEntry] = []
 
     /// True while a call is connected (CXCallObserver via
     /// `liveCallDetector`). Identity-free BY PLATFORM DESIGN: iOS masks
     /// calls that involve other apps — no handle, number, or identity is
     /// ever delivered, so this flag says "a call is in progress" and the
-    /// app never learns (or claims) whose. Nothing from the observer is
-    /// read for storage or logged.
+    /// app never learns (or claims) whose. The observer's ONLY other
+    /// output is the unanswered event (missed-calls task, 2026-09-07),
+    /// recorded by `recordUnansweredCall` — one anonymous "ended without
+    /// connecting" row, still no identity or number.
     @Published private(set) var liveCallActive = false
 
     /// Edge-triggered detector; armed (constructed) in `start()`. Lazy
@@ -471,6 +531,50 @@ final class AppCoordinator: ObservableObject {
     let placeStore: SavedPlaceStore
     @Published private(set) var savedPlaces: [SavedPlace]
 
+    /// Doctor's appointments (medical task, 2026-09-07) — the Medical
+    /// leaf's list, persisted encrypted under `medical.appointments` by
+    /// `AppointmentStore` (same shape as `familyContactStore` above).
+    /// Loaded once in `init`; every mutation below (Medical leaf add/remove
+    /// and the paste-confirmation flow) refreshes the published list from
+    /// the store, so the leaf and any future voice route read one truth.
+    /// The store also hands every saved appointment to the
+    /// `MedicalAppointmentCalendarWriting` seam — the calendar-2way task's
+    /// EventKit backend replaces the shipped no-op; see
+    /// `calendarWritesEnabled` in the store and the toggle below.
+    let appointmentStore: AppointmentStore
+    @Published private(set) var appointments: [MedicalAppointment]
+
+    /// Whether saved appointments are ALSO written to the native iPhone
+    /// Calendar (medical task, 2026-09-07) — the Medical leaf's toggle
+    /// `medical.calendarToggle`, default ON. A UI preference, not a
+    /// secret — persisted in UserDefaults the same way as `appTheme`.
+    /// didSet persists AND re-syncs the store's `calendarWritesEnabled`
+    /// gate, so flipping the toggle acts immediately (the same
+    /// instant-apply rule as `cloudFallbackEnabled`). The init-time
+    /// restore assigns directly and syncs the gate by hand (house
+    /// pattern — didSet does not fire there).
+    @Published var appointmentsToCalendar: Bool {
+        didSet {
+            UserDefaults.standard.set(appointmentsToCalendar,
+                                      forKey: Self.appointmentsToCalendarKey)
+            appointmentStore.calendarWritesEnabled = appointmentsToCalendar
+        }
+    }
+    private static let appointmentsToCalendarKey = "appointmentsToCalendar"
+
+    /// One-shot honest SMS caption (medical task, 2026-09-07): the
+    /// Medical leaf shows "the iPhone does not let apps read your text
+    /// messages…" once, until the senior (or family) dismisses it — a
+    /// preference, not a secret, persisted like `appTheme`. Dismissal is
+    /// confined to `dismissAppointmentSmsNote`.
+    @Published private(set) var appointmentSmsNoteDismissed: Bool {
+        didSet {
+            UserDefaults.standard.set(appointmentSmsNoteDismissed,
+                                      forKey: Self.appointmentSmsNoteDismissedKey)
+        }
+    }
+    private static let appointmentSmsNoteDismissedKey = "appointmentSmsNoteDismissed.v1"
+
     // Voice
     private let audioEngine: AVAudioEngine
     private let audioSessionManager: AudioSessionManager
@@ -479,14 +583,59 @@ final class AppCoordinator: ObservableObject {
     private var voicePipeline: VoicePipeline!
     private var voiceStateCancellable: AnyCancellable?
     private var geminiSwapCancellable: AnyCancellable?
-    /// Forwards the wake-word access-key store's publishes (2026-09-06):
-    /// `wakeWordAccessKeyStore` is a nested ObservableObject, so a
-    /// save/clear alone would not invalidate views observing the
-    /// coordinator — the Settings "Voice activation" status derives from
-    /// the store's `accessKey` and must refresh the moment the family
-    /// member saves (or removes) the key.
-    private var wakeWordKeyStoreCancellable: AnyCancellable?
     private var speaker: Speaker?
+
+    // Voice-OS shell v1 (composition — built in `start()`, nil until then
+    // like `speaker` itself): the speak queue that now owns all speech,
+    // the speech-source registry, the morning-briefing source, and the
+    // single `UNUserNotificationCenter` delegate facade. `speakQueue` is
+    // retained here so the coordinator stays the composition root; the
+    // facade is retained because the notification center holds its
+    // delegate weakly. `shellCardCancellable` forwards the queue's
+    // announcement cards to the existing outcome-card presentation.
+    private var speakQueue: SpeakQueue?
+    private var speechSourceRegistry: SpeechSourceRegistry?
+    private var morningBriefing: MorningBriefing?
+    private var newsReader: NewsReader?
+    private var notificationFacade: NotificationFacade?
+    private var shellCardCancellable: AnyCancellable?
+
+    /// The morning briefing's day slot (briefing persistence task,
+    /// 2026-09-08) — the same encrypted store instance `MorningBriefing`
+    /// writes on `fire()`. Loaded once in `init` so the published
+    /// `todayBriefing` (the Home widget + briefing leaf's source of
+    /// truth) starts populated on relaunch, and re-read on every app
+    /// activation + after every fire so presence tracks the store.
+    private let morningBriefingStore: MorningBriefingStore
+    /// Today's stored briefing (briefing persistence task, 2026-09-08) —
+    /// non-nil only while a briefing was composed for the CURRENT
+    /// calendar day. Mutations are main-confined through
+    /// `refreshTodayBriefing()` (called on the main actor in
+    /// `handleScenePhase`, and via `MainActor.run` after async fires).
+    /// Drives the Today's-briefing Home widget presence and the briefing
+    /// leaf; the leaf's "Speak again" replays this stored text.
+    @Published private(set) var todayBriefing: StoredBriefing?
+    // Feed agent (feed-agent task, 2026-09-08): the feed's composition
+    // root lives here like every other store/service — the Settings leaf
+    // edits through the coordinator's mutation methods, the Feed leaf
+    // renders the published state, and the service itself publishes
+    // nothing (its results forward through `refreshFeed()`).
+    private let feedSettingsStore: FeedSettingsStore
+    private let feedService: FeedService
+
+    /// The configured feed sources — the Settings leaf's list (published
+    /// so add/remove re-renders it live).
+    @Published private(set) var feedSources: [FeedSource] = []
+    /// The configured topic keywords — same contract as `feedSources`.
+    @Published private(set) var feedTopics: [String] = []
+    /// The composed feed items (newest first).
+    @Published private(set) var feedItems: [FeedItem] = []
+    /// The Feed leaf's load state (idle/loading/loaded/failed).
+    @Published private(set) var feedLoadState: FeedLoadState = .idle
+    /// Source display names that failed the last refresh (honest partial
+    /// failure caption; empty = all sources reached).
+    @Published private(set) var feedFailedSourceNames: [String] = []
+
 
     /// Voice-session derivation state (spec §3.3): the last pipeline state
     /// plus how many `speak()` calls are currently in flight. `speaking`
@@ -499,6 +648,22 @@ final class AppCoordinator: ObservableObject {
     /// the session stuck in `.stopped` with no outcome. The watchdog
     /// surfaces that as an error with a truthful caption.
     private var voiceStartWatchdog: DispatchWorkItem?
+
+    /// Transient localized notice shown on the Talk button's status line
+    /// after a long-press reset (TALK-CRASH-FIX, 2026-09-07) — e.g.
+    /// "Voice reset. I'm ready." Cleared after `voiceResetNoticeSeconds`
+    /// and whenever a NEW capture begins (handlePipelineState
+    /// .capturingCommand), so a live cycle never shares its line with
+    /// stale feedback.
+    @Published private(set) var voiceResetNotice: String?
+    /// Token-guards the auto-clear: only the timer issued by the LATEST
+    /// show may clear — a repeat reset inside the window must not have
+    /// its fresh notice wiped by the previous notice's timer.
+    private var voiceResetNoticeToken = 0
+    /// Seconds the post-reset notice stays on the status line — long
+    /// enough for a slow read, short enough not to linger into the next
+    /// turn.
+    private static let voiceResetNoticeSeconds: TimeInterval = 4
 
     /// `start()` is idempotent — the onboarding wizard and Home both call
     /// it (spec §4.2: wizard runs before voice engages).
@@ -532,30 +697,33 @@ final class AppCoordinator: ObservableObject {
     private let geminiClient: GeminiClient
     private let geminiSpeechRecognizer: GeminiSpeechRecognizer
 
-    // MARK: - Wake word ("Hey Sahayak", open item #4)
+    // MARK: - Wake phrase ("ये कान्छी", open item #4)
     //
-    // Three moving parts: `wakeWordAccessKeyStore` (the Settings paste-in
-    // field's home — Keychain-backed, same pattern as geminiConfigStore),
-    // `wakeWordEnabled` (the persisted Settings toggle), and the launch
-    // engine built in init. The pure logic behind these lives in
+    // Two moving parts: `wakeWordEnabled` (the persisted Settings toggle)
+    // and the launch engine built in init (sherpa-onnx KWS when the model
+    // is bundled, Null otherwise). The pure logic behind these lives in
     // Services/Voice/WakeWordConfig.swift so it is unit-testable without
-    // the Porcupine SPM package linked.
-
-    /// Picovoice access key the family pastes into Settings → "Voice
-    /// activation". `makeWakeWordEngine()` reads it as the FALLBACK when
-    /// the build-time Info.plist key (`PicovoiceAccessKey`) is absent.
-    let wakeWordAccessKeyStore: WakeWordAccessKeyStore
+    // the sherpa-onnx SPM package linked.
 
     // MARK: - Local tools (weather + web search, on-device stack)
 
     /// [LOCAL-TOOLS] (2026-09-07) Google Custom Search credentials
     /// (API key + engine ID) for the on-device-stack web-search tool —
     /// the same Keychain `EncryptedLocalStorage` pattern as
-    /// `geminiConfigStore`/`wakeWordAccessKeyStore` above; a family member
-    /// enters them via Settings → Web search. Exposed for that Settings
-    /// screen; `CommandRouter` consults `isConfigured` before the search
-    /// tool may ever fire.
+    /// `geminiConfigStore` above; a family member enters them via
+    /// Settings → Web search. Exposed for that Settings screen;
+    /// `CommandRouter` consults `isConfigured` before the search tool may
+    /// ever fire.
     let searchConfigStore: SearchConfigStore
+
+    /// [YOUTUBE] (2026-09-08) YouTube Data API v3 key for the voice
+    /// YouTube feature — the same Keychain `EncryptedLocalStorage`
+    /// pattern as `searchConfigStore`; a family member enters it via
+    /// Settings → YouTube. OPTIONAL: without it the voice command opens
+    /// the YouTube search deeplink instead of resolving + playing the
+    /// top result. Exposed for that Settings screen; `CommandRouter`
+    /// consults `apiKey` at stage time.
+    let youtubeConfigStore: YouTubeConfigStore
 
     /// [TOOL-DEBUG-LOG] (2026-09-07) Encrypted debug log of every
     /// local-tool (weather + web search) request and outcome — the store
@@ -565,11 +733,21 @@ final class AppCoordinator: ObservableObject {
     /// `start()` injects it into the `CommandRouter` it builds.
     private(set) lazy var localToolLogStore = LocalToolLogStore(storage: storage)
 
-    /// Persisted "listen for Hey Sahayak" UI preference — UserDefaults
+    /// [NEWS-READER] (2026-09-08) Configured news sources + curated
+    /// defaults (REPLACE rule — configured sources are THE news) for the
+    /// voice digest, and the store the feeds-settings agent's Settings →
+    /// Feeds editor binds to. Same Keychain `EncryptedLocalStorage`
+    /// pattern and lazy timing as `localToolLogStore` above: `storage` is
+    /// assigned at the top of `init`, long before any voice turn can
+    /// read it.
+    private(set) lazy var newsSourceStore = NewsSourceStore(storage: storage)
+
+    /// Persisted "listen for ये कान्छी" UI preference — UserDefaults
     /// (not a secret), same shape as `sttModelPreference` /
-    /// `voiceEngineStack`. Defaults ON: inert until the key + .ppn exist
-    /// (the Null engine is in place regardless), then listening starts at
-    /// the next launch — see `WakeWordPreferences` for the rationale.
+    /// `voiceEngineStack`. Defaults ON: with the sherpa model bundled,
+    /// listening is genuinely active from the next launch on (the engine
+    /// is fixed per launch); without a model the Null engine is in place
+    /// regardless — see `WakeWordPreferences` for the rationale.
     /// didSet persists AND closes/opens the live audio gate so the
     /// Settings toggle acts immediately (no relaunch needed to STOP).
     @Published var wakeWordEnabled: Bool {
@@ -588,9 +766,10 @@ final class AppCoordinator: ObservableObject {
     /// tap's processing queue — the lock lives inside the gate.
     private let wakeWordActivityGate = WakeWordActivityGate()
 
-    /// Whether the engine built in `init` is a REAL Porcupine engine (vs
-    /// the Null fallback). Recorded once so Settings → "Voice activation"
-    /// can truthfully distinguish active / needs-setup / off-at-launch.
+    /// Whether the engine built in `init` is a REAL sherpa-onnx KWS engine
+    /// (vs the Null fallback). Recorded once so Settings → "Voice
+    /// activation" can truthfully distinguish active / needs-setup /
+    /// off-at-launch.
     private let wakeWordEngineRealAtLaunch: Bool
 
     /// On-device LLaMA interpreter — the "LLaMA today" half of the local
@@ -798,6 +977,53 @@ final class AppCoordinator: ObservableObject {
         self.placeStore = placeStore
         self.savedPlaces = placeStore.load()
 
+        // Doctor's appointments (medical task, 2026-09-07) — encrypted
+        // like the contacts above; loaded immediately so the published
+        // list (Medical leaf) starts populated. The store invokes the
+        // `MedicalAppointmentCalendarWriting` seam (calendar-2way) on
+        // every save/remove when the toggle below is on; the shipped
+        // Noop writer means nothing happens until the integrator swaps
+        // in the EventKit backend.
+        let appointmentStore = AppointmentStore(storage: storage)
+        self.appointmentStore = appointmentStore
+        self.appointments = appointmentStore.load()
+
+        // Morning-briefing day slot (briefing persistence task,
+        // 2026-09-08) — encrypted like the stores above (the composed
+        // text embeds medication names and event titles). Loaded here so
+        // a relaunch mid-day still shows the day's stored briefing on
+        // Home; `MorningBriefing.fire()` writes through the same
+        // instance (passed in `start()`), and every activation + fire
+        // completion re-reads it into the published `todayBriefing`.
+        let briefingStore = MorningBriefingStore(storage: storage)
+        self.morningBriefingStore = briefingStore
+        self.todayBriefing = briefingStore.todaysBriefing(now: Date())
+        // Feed agent (feed-agent task, 2026-09-08) — encrypted config
+        // (sources + topics) like the stores above, loaded immediately
+        // so the published lists start populated, and the bounded-fetch
+        // service (TTL cache, per-source timeout, PII-free logging).
+        // Created after the bus exists, same as every bus consumer.
+        let feedSettingsStore = FeedSettingsStore(storage: storage)
+        self.feedSettingsStore = feedSettingsStore
+        let feedConfig = feedSettingsStore.load()
+        self.feedSources = feedConfig.sources
+        self.feedTopics = feedConfig.topics
+        self.feedService = FeedService(settings: feedSettingsStore,
+                                       transport: URLSession.shared,
+                                       observability: bus)
+
+        // Calendar auto-add toggle (medical task, 2026-09-07) — default
+        // ON when no value was ever stored. This is the property's ONLY
+        // initial assignment, so its didSet does not fire here; the
+        // store's calendar gate is synced by hand (same rule as
+        // `appTheme` above).
+        let appointmentsToCalendarValue =
+            UserDefaults.standard.object(forKey: Self.appointmentsToCalendarKey) as? Bool ?? true
+        self.appointmentsToCalendar = appointmentsToCalendarValue
+        appointmentStore.calendarWritesEnabled = appointmentsToCalendarValue
+        self.appointmentSmsNoteDismissed =
+            UserDefaults.standard.bool(forKey: Self.appointmentSmsNoteDismissedKey)
+
         // Safety-critical service (no LLM dependency)
         self.medicationScheduler = MedicationScheduler(
             storage: storage,
@@ -831,6 +1057,35 @@ final class AppCoordinator: ObservableObject {
         // ask.
         let externalCalendar = ExternalCalendarService(observabilityBus: bus)
         self.externalCalendar = externalCalendar
+
+        // Alarms + timers (alarms-timers task, 2026-09-07). One service
+        // behind the voice stage, the Settings leaf and the launch +
+        // BGTask re-queue; locale starts at the scheduler default and is
+        // pushed to the service by `syncServiceLocales()` below (this
+        // runs before the persisted app language is restored).
+        let alarmTimersService = AlarmTimersService(
+            store: AlarmTimersStore(storage: storage),
+            scheduler: AlarmScheduler(
+                notifications: UNNotificationCenterScheduler()
+            ),
+            observabilityBus: bus
+        )
+        self.alarmTimersService = alarmTimersService
+
+        // Foreground notification delegate for alarms/timers. Constructed
+        // and RETAINED here — the center's delegate property is weak, so
+        // the coordinator owns the delegate's lifetime. The app had NO
+        // notification delegate before this feature (medication/routine
+        // banners only ever presented from the OS); this delegate presents
+        // alarm/timer notifications while the app is foregrounded and
+        // reports timer completions up for spoken output — every other
+        // notification keeps its old silent-foreground behavior (see
+        // `AlarmTimerNotificationDelegate`). Construction touches no
+        // permissions; its completion closure is attached at the end of
+        // init because it captures self.
+        let alarmTimerDelegate = AlarmTimerNotificationDelegate()
+        self.alarmTimerNotificationDelegate = alarmTimerDelegate
+        UNUserNotificationCenter.current().delegate = alarmTimerDelegate
 
         // Language — restore the persisted choice, defaulting to the Nepali
         // pilot language (spec §3.2).
@@ -893,26 +1148,31 @@ final class AppCoordinator: ObservableObject {
                                          costGovernor: costGovernor)
         self.geminiSpeechRecognizer = GeminiSpeechRecognizer(client: geminiClient, observabilityBus: bus)
 
-        // Wake word (#4): the access-key store the Settings paste-in field
-        // writes to. makeWakeWordEngine() reads it as the fallback when
-        // the build-time Info.plist `PicovoiceAccessKey` is absent.
-        self.wakeWordAccessKeyStore = WakeWordAccessKeyStore(storage: storage)
-
         // [LOCAL-TOOLS] (2026-09-07): Google Custom Search credentials for
         // the on-device-stack web-search tool (Settings → Web search).
         // Deliberately created BEFORE the router below — the router must
         // receive the store (not nil) or the search hook stays dormant.
         self.searchConfigStore = SearchConfigStore(storage: storage)
+        // [YOUTUBE] (2026-09-08): YouTube Data API key for the voice
+        // YouTube feature (Settings → YouTube). Created BEFORE the plugin
+        // registry and the router below — the plugin and the router's
+        // YouTube stage both receive this store (never a private copy).
+        let youtubeConfigStore = YouTubeConfigStore(storage: storage)
+        self.youtubeConfigStore = youtubeConfigStore
 
-        // Voice pipeline. Uses NullWakeWordEngine unless the Porcupine SPM
-        // package is present AND the Settings toggle is ON AND a valid
-        // access key / .ppn file are found — see Services/Voice/
-        // WakeWordEngine.swift and docs/wake-word-setup.md for the
-        // enablement steps. The launch outcome is recorded so Settings →
-        // "Voice activation" can report an honest status.
+        // Voice pipeline. Uses the sherpa-onnx KWS engine when the
+        // Settings toggle is ON and the KWS model directory is bundled
+        // (see Services/Voice/SherpaKWSWakeWordEngine.swift +
+        // tools/fetch-kws-model.sh), else NullWakeWordEngine. The launch
+        // outcome is recorded so Settings → "Voice activation" can report
+        // an honest status.
         self.audioEngine = AVAudioEngine()
-        self.audioSessionManager = AudioSessionManager(observabilityBus: bus)
-        let wakeWordLaunch = Self.makeWakeWordEngine(accessKeyStore: wakeWordAccessKeyStore)
+        // The manager shares THIS engine (not its own): the VPIO node
+        // flag must land on the instance the pipeline installs its tap
+        // on (voice-personalisation P0, slice C).
+        self.audioSessionManager = AudioSessionManager(observabilityBus: bus,
+                                                       audioEngine: audioEngine)
+        let wakeWordLaunch = Self.makeWakeWordEngine(observabilityBus: bus)
         self.wakeWordEngine = wakeWordLaunch.engine
         self.wakeWordEngineRealAtLaunch = wakeWordLaunch.isReal
         self.voiceActivityDetector = EnergyVAD()
@@ -950,6 +1210,33 @@ final class AppCoordinator: ObservableObject {
             whisperKitSpeechRecognizer.modelName = name
         }
 
+        // [ACCENT-ADAPT] per-user decode-biasing terms (doc
+        // accent-adaptation.md P0.3): contact names + medication names +
+        // supported app names compose into the dialect prompt once the
+        // user's dialect is identified (a `.default` label keeps STT
+        // byte-identical). Runs on the recognizer's inference/attempt
+        // queue, never main; `DialectBiasComposer` caps + sanitises.
+        // Contacts require permission — a denied/absent address book is
+        // an honest empty list, never a failure.
+        // NOTE: `[weak self]` capture is illegal during init (definite
+        // initialization) — capture a local alias of the already-
+        // initialized scheduler instead; it has the same lifetime as the
+        // coordinator and never references the coordinator back, so no
+        // retain cycle is possible.
+        let medicationScheduler = medicationScheduler
+        let biasProfileProvider: () -> DialectBiasProfile = { [weak medicationScheduler] in
+            var profile = DialectBiasProfile()
+            if let entries = try? AddressBookDirectory().allEntries() {
+                profile.contactNames = entries.map(\.name)
+            }
+            profile.medicationNames = medicationScheduler?.medicationEntries()
+                .map(\.medicationName) ?? []
+            profile.appNames = DialectBiasProfile.standardSupportedAppNames
+            return profile
+        }
+        whisperKitSpeechRecognizer.biasProfileProvider = biasProfileProvider
+        whisperSpeechRecognizer.biasProfileProvider = biasProfileProvider
+
         // Plugin registry (design: docs/superpowers/specs/
         // 2026-09-05-plugin-architecture-design.md). Built-ins are
         // registered here; both interpreters get it for prompt
@@ -958,6 +1245,10 @@ final class AppCoordinator: ObservableObject {
         pluginRegistry.register(NepaliCalendarPlugin(storage: storage))
         pluginRegistry.register(ApplianceHelperPlugin(storage: storage))
         pluginRegistry.register(routinePlugin)
+        // [YOUTUBE] (2026-09-08) The interpreter-side twin of the
+        // router's deterministic YouTube stage — same `YouTubeTool`
+        // behavior (shared config store + transport + opener seams).
+        pluginRegistry.register(YouTubePlugin(configStore: youtubeConfigStore))
         self.pluginRegistry = pluginRegistry
 
         // Restore the persisted brain-model choice BEFORE the interpreter
@@ -1018,6 +1309,22 @@ final class AppCoordinator: ObservableObject {
         self.cloudProvider = UserDefaults.standard.string(forKey: Self.cloudProviderKey)
             .flatMap(CloudProvider.init(rawValue:)) ?? .gemini
 
+        // Restore the persisted Voice Processing I/O preset mirror
+        // (voice-personalisation P0, slice C — default OFF, the A/B
+        // gate). The manager composed above already read the persisted
+        // value in its own init; this is the mirror's ONLY initial
+        // assignment, so its didSet does not fire here (same rule as
+        // `voiceEngineStack` above) — the pipeline's own start applies
+        // the restored preset at launch.
+        self.voiceProcessingEnabled = audioSessionManager.voiceProcessingEnabled
+
+        // Restore the persisted noise-filter A/B mirror ([NOISE-FILTER]
+        // P1 front-end — default OFF). This is the mirror's ONLY initial
+        // assignment (didSet does not fire here); the restored stage is
+        // attached to the pipeline at its construction below.
+        self.noiseFilterEnabled =
+            UserDefaults.standard.bool(forKey: Self.noiseFilterEnabledKey)
+
         // Restore the persisted quick-access favourites (quick-access-apps
         // task, 2026-09-06). Pure prune — dedupe, drop ids naming no
         // catalog app, cap at 8 — with NO scheme probes at launch, so no
@@ -1030,12 +1337,12 @@ final class AppCoordinator: ObservableObject {
         )
 
         // Restore the persisted wake-word listening preference (default
-        // ON — inert until the access key + .ppn exist, see
-        // `WakeWordPreferences`). This is the property's ONLY initial
-        // assignment, so its didSet does not fire here (same rule as
-        // `voiceEngineStack` above) — the live audio gate is synced
-        // explicitly instead, or a stored OFF would sit on the gate's
-        // default ON until the first Settings toggle.
+        // ON — with the sherpa model bundled it is genuinely active from
+        // the next launch on; see `WakeWordPreferences`). This is the
+        // property's ONLY initial assignment, so its didSet does not fire
+        // here (same rule as `voiceEngineStack` above) — the live audio
+        // gate is synced explicitly instead, or a stored OFF would sit on
+        // the gate's default ON until the first Settings toggle.
         self.wakeWordEnabled = wakeWordPreferences.isEnabled
         wakeWordActivityGate.setEnabled(wakeWordEnabled)
 
@@ -1073,18 +1380,6 @@ final class AppCoordinator: ObservableObject {
         // language into services that build user-facing strings.
         syncServiceLocales()
 
-        // Forward the wake-word access-key store's publishes (2026-09-06):
-        // `wakeWordAccessKeyStore` is a nested ObservableObject, so a
-        // save/clear alone would not invalidate views observing the
-        // coordinator — the Settings "Voice activation" status derives
-        // from the store's `accessKey` and must refresh the moment the
-        // family member saves (or removes) the key. Placed here (not next
-        // to the store's init) because the closure captures self.
-        wakeWordKeyStoreCancellable = wakeWordAccessKeyStore.objectWillChange
-            .sink { [weak self] _ in
-                self?.objectWillChange.send()
-            }
-
         // Fold today's medication reminders into the routine plugin's
         // "what are my reminders today" answer — the user's mental model
         // is ONE reminder list spanning both systems. Attached here (not
@@ -1112,11 +1407,39 @@ final class AppCoordinator: ObservableObject {
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
             }
+
+        // Forward the alarms/timers service's publishes ([ALARMS-TIMERS]
+        // 2026-09-07) — nested ObservableObject, same pattern as the
+        // external-calendar forwarding above: the Settings leaf observes
+        // the coordinator, so a toggle/delete/timer-start must invalidate
+        // it through this sink.
+        alarmTimersCancellable = alarmTimersService.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+
+        // Foreground timer-completion reporting ([ALARMS-TIMERS]
+        // 2026-09-07): the retained delegate reports finished timers up
+        // through this closure — the row is expired and the completion is
+        // SPOKEN while the app is active (a chime the user cannot see is
+        // useless to someone already looking at the phone). Attached here
+        // (not next to the delegate's construction) because the closure
+        // captures self.
+        alarmTimerNotificationDelegate?.onForegroundTimerFinished = { [weak self] timerID in
+            self?.handleForegroundTimerFinished(timerID: timerID)
+        }
     }
 
     func start() {
         guard !started else { return }
         started = true
+
+        // News reader editor seam (news-reader task, 2026-09-08):
+        // the Feeds settings leaf hosts the news-source editor through
+        // this static hook — assigned once the store exists.
+        NewsSourceEditorSeam.makeEditor = { [newsSourceStore] in
+            AnyView(NewsSourcesSettingsView(store: newsSourceStore))
+        }
 
         // Restore the persisted conversation history (local-cache-chat
         // task, 2026-09-06). Nothing records a turn before this point —
@@ -1169,6 +1492,10 @@ final class AppCoordinator: ObservableObject {
         medicationScheduler.scheduleAll()
         // Same re-queue for routine reminders (FR-025)
         routineScheduler.scheduleAll()
+        // Same re-queue for alarms + timers ([ALARMS-TIMERS] 2026-09-07 —
+        // idempotent: pending requests replace in place by id, and
+        // expired timer rows are pruned first).
+        alarmTimersService.scheduleAll()
 
         // Festival notifications (BS calendar, 2026-09-06): day-of for
         // every catalog festival + advance N-day reminders for important
@@ -1185,6 +1512,24 @@ final class AppCoordinator: ObservableObject {
         // calendar view of the routine is current from a fresh start.
         if calendarSync.isEnabled {
             calendarSync.syncNow(entries: routineScheduler.entries())
+        }
+
+        // Two-way mirroring (calendar-driven task, 2026-09-07): the
+        // coordinator relays native edits — family changes made in the
+        // Calendar app on Sahayak mirror events — back into
+        // RoutineScheduler's mutators, so persistence, re-arming and
+        // the mirror re-sync stay on the one mutation path. The
+        // Sahayak calendar id (restored from the link store) is
+        // excluded from the read-only import: those events ARE the
+        // routine, whose alarms fire in-app already.
+        calendarSync.entriesProvider = { [weak self] in
+            self?.routineScheduler.entries() ?? []
+        }
+        calendarSync.onNativeChanges = { [weak self] mutations in
+            self?.applyNativeCalendarMutations(mutations)
+        }
+        if let sahayakIdentifier = calendarSync.sahayakCalendarIdentifier {
+            externalCalendar.excludedCalendarIdentifiers.insert(sahayakIdentifier)
         }
 
         // Voice pipeline is built lazily here so the CommandRouter can hold a
@@ -1206,6 +1551,66 @@ final class AppCoordinator: ObservableObject {
         pluginRegistry.plugins
             .compactMap { $0 as? ApplianceHelperPlugin }
             .forEach { $0.speaker = speaker }
+        // Voice-OS shell v1 — push-speech composition (design §3–§5).
+        // The SpeakQueue now owns the single shared speaker for every
+        // utterance: push sources (notification read-aloud, morning
+        // briefing) enqueue here, and coordinator-level replies enter on
+        // the `.interactive` lane through the `speak(text:)` shim below.
+        // `SpeechNoteForwarder` keeps the wake-word gate and the
+        // voice-session speaking count balanced per utterance — the same
+        // note pair the direct-speak path fired, so nesting/cancellation
+        // behavior is unchanged.
+        let speechNoter = SpeechNoteForwarder(speaker: speaker) { [weak self] in
+            self?.noteSpeakingStarted()
+        } onEnded: { [weak self] in
+            self?.noteSpeakingEnded()
+        }
+        let queue = SpeakQueue(speaker: speechNoter, observability: observabilityBus)
+        let notificationReader = NotificationReader(queue: queue, observability: observabilityBus)
+        let briefing = MorningBriefing(
+            queue: queue,
+            observability: observabilityBus,
+            routineSource: routineScheduler,
+            medicationSource: medicationScheduler,
+            calendarSource: externalCalendar,
+            briefingStore: morningBriefingStore,
+            locale: activeLocale
+        )
+        // [NEWS-READER] (2026-09-08) The news digest source: same shell
+        // queue + observability bus, the Keychain source store (REPLACE
+        // rule), and the shared bounded-fetch seam (URLSession — 8 s
+        // per source). Fired by the router's deterministic news stage via
+        // `fireNewsReader()` below.
+        let newsReader = NewsReader(
+            queue: queue,
+            observability: observabilityBus,
+            store: newsSourceStore,
+            transport: URLSession.shared,
+            locale: activeLocale
+        )
+        let registry = SpeechSourceRegistry(observabilityBus: observabilityBus)
+        registry.register(notificationReader)
+        registry.register(briefing)
+        registry.register(newsReader)
+        // Single UNUserNotificationCenter delegate (design §2 confirmed
+        // decision — verified no other object in the app owns this slot).
+        let facade = NotificationFacade(handlers: [notificationReader],
+                                         observability: observabilityBus)
+        UNUserNotificationCenter.current().delegate = facade
+        self.speakQueue = queue
+        self.speechSourceRegistry = registry
+        self.notificationFacade = facade
+        self.morningBriefing = briefing
+        self.newsReader = newsReader
+        // Push-speech cards surface through the EXISTING Home outcome-card
+        // presentation (speech + card, spec §4.6). Interactive replies
+        // carry nil cards and never touch this outcome. The card persists
+        // after speech ends — the queue clears only its own state.
+        shellCardCancellable = queue.$currentCard
+            .compactMap { $0 }
+            .sink { [weak self] card in
+                self?.presentShellCard(card)
+            }
         // v2 pivot: Gemini interpreter. `isAvailable` stays false until an
         // API key is configured (GeminiConfigStore) — CommandRouter treats
         // that exactly like the old "LLM not linked" case: fall through to
@@ -1284,7 +1689,16 @@ final class AppCoordinator: ObservableObject {
             locationFetcherFactory: { LocationFetcher() },
             weatherTransport: URLSession.shared,
             searchTransport: URLSession.shared,
-            localToolLogStore: localToolLogStore
+            localToolLogStore: localToolLogStore,
+            // [YOUTUBE] (2026-09-08) YouTube stage seams: the Data API
+            // key store, URLSession for the lookup round-trip (the
+            // tool's request carries its own timeout), and the same
+            // call-link opener seam the call/message flows use for
+            // canOpenURL probing + opening (youtube:// → https
+            // fallback).
+            youtubeConfigStore: youtubeConfigStore,
+            youtubeTransport: URLSession.shared,
+            youtubeLinkOpener: SystemCallLinkOpener()
         )
         // Start with the fallback STT. Gemini is swapped in below once an
         // API key is configured.
@@ -1298,6 +1712,9 @@ final class AppCoordinator: ObservableObject {
             router: router,
             observabilityBus: observabilityBus
         )
+        // [NOISE-FILTER] Attach the restored A/B stage (nil when OFF —
+        // the hot-swap seam emits the honest engine name either way).
+        voicePipeline?.setNoiseSuppressor(makeNoiseSuppressor())
         voiceStateCancellable = voicePipeline.$state
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
@@ -1359,7 +1776,19 @@ final class AppCoordinator: ObservableObject {
             voiceSession.transition(to: speakingCount > 0 ? .speaking : .idle)
             cancelVoiceWatchdog()
             cancelVoiceStartWatchdog()
+            // Voice Processing I/O preset A/B (P0, slice C): a flip that
+            // landed mid-turn applies now the pipeline has settled back
+            // to idle — and only once no reply is playing (every speech
+            // end re-runs this case via `noteSpeakingEnded`).
+            if pendingVoiceProcessingPresetChange, speakingCount == 0 {
+                pendingVoiceProcessingPresetChange = false
+                applyVoiceProcessingPresetChange()
+            }
         case .capturingCommand:
+            // A fresh capture supersedes any post-reset notice: the
+            // status line must speak for the LIVE cycle, not the last
+            // reset (TALK-CRASH-FIX, 2026-09-07).
+            clearVoiceResetNotice()
             // Redesign spec §3.1/§6: the live-caption pill must not show
             // the PREVIOUS utterance's transcript while a new one is being
             // captured — clear BOTH transcript buffers at the start of
@@ -1435,13 +1864,26 @@ final class AppCoordinator: ObservableObject {
         voiceWatchdog = nil
     }
 
-    /// Stops and restarts the voice pipeline — the recovery path for a
-    /// wedged talk cycle. Also the manual escape hatch: the Talk button
-    /// calls this when tapped mid-cycle. Spoken re-prompt included so the
-    /// user knows the assistant is listening again.
-    func recoverVoiceCycle() {
+    /// Stops and restarts the voice pipeline — the ONE recovery core for
+    /// a wedged or cancelled talk cycle. Every recycle path runs through
+    /// here: the "stuck in listening" watchdog, the Talk-button tap
+    /// escape hatch (`recoverVoiceCycle`) and the Talk-button long-press
+    /// reset (`resetVoiceActivation`). One teardown sequence means one
+    /// set of cancel-safe semantics to reason about (a `stop()` during an
+    /// in-flight capture bumps the pipeline's capture generation, so the
+    /// cancelled capture's stale completion tails are dropped instead of
+    /// being run against the stopped session — TALK-CRASH-FIX,
+    /// 2026-09-07).
+    ///
+    /// Speaks nothing itself; the caller supplies the follow-up on the
+    /// restart completion (re-prompt on tap, status notice on long-press
+    /// reset). Called from main (button/watchdog paths); the start
+    /// completion arrives on main.
+    private func recycleVoicePipeline(
+        onRestart completion: @escaping (Result<Void, Error>) -> Void
+    ) {
         cancelVoiceWatchdog()
-        print("[AppCoordinator] recovering voice cycle — recycling pipeline")
+        print("[AppCoordinator] recycling voice pipeline")
         voicePipeline?.stop()
         armVoiceStartWatchdog()
         voicePipeline?.start { [weak self] result in
@@ -1453,8 +1895,81 @@ final class AppCoordinator: ObservableObject {
                 self.voiceError = "\(err)"
                 self.voiceState = .error("\(err)")
             }
+            completion(result)
         }
-        speak(key: "router.reprompt")
+    }
+
+    /// Tap escape hatch + watchdog recovery: recycle the pipeline, and —
+    /// once the restart has actually landed (`.idle`) — speak the
+    /// re-prompt so the user knows the assistant is listening again.
+    ///
+    /// 2026-09-07 (TALK-CRASH-FIX): the re-prompt used to be spoken
+    /// BEFORE the restart completed. `speak()` then ran while the session
+    /// was still `.stopped`; when the restart delivered `.idle`,
+    /// `handlePipelineState` mapped it through `speakingCount > 0` to
+    /// `.speaking` — a `.stopped → .speaking` transition the state
+    /// machine then rejected (DEBUG assertionFailure crash; the second
+    /// half of the Talk-button crash). Deferring the speech to the
+    /// restart completion still orders the re-prompt AFTER the recycle
+    /// has landed (`.stopped → .idle → .speaking`). The table has
+    /// admitted `.stopped → .speaking` since STOPPED-SPEAKING-FIX
+    /// (2026-09-08) — push speech such as the launch morning briefing
+    /// may start before the pipeline is primed — but deferral stays: the
+    /// user hears "I'm listening again" only once the assistant is.
+    func recoverVoiceCycle() {
+        cancelVoiceWatchdog()
+        print("[AppCoordinator] recovering voice cycle — recycling pipeline")
+        recycleVoicePipeline { [weak self] result in
+            guard let self, case .success = result else { return }
+            self.speak(key: "router.reprompt")
+        }
+    }
+
+    /// Long-press reset of the Talk button (TALK-CRASH-FIX, 2026-09-07):
+    /// the "give up and go home" path. Holding the hero ~2 s cancels the
+    /// current talk cycle (or re-primes a dead/errored pipeline) through
+    /// the SAME `recycleVoicePipeline` core as a tap — but a reset must
+    /// not talk AT the user (it usually follows a wedged cycle they are
+    /// trying to silence), so instead of a spoken re-prompt it shows the
+    /// transient `voiceResetNotice` on the button's status line. The hero
+    /// itself passes through the recycle's brief `.stopped` ("Voice off")
+    /// flip before the restarted pipeline lands `.idle` — the honest
+    /// "reset happened" visual.
+    ///
+    /// Offered from `.idle`, `.listening`, `.transcribing`,
+    /// `.understanding`, `.error` and `.stopped` — see
+    /// `VoiceSessionState.supportsTalkReset`. The Home view gates the
+    /// gesture on that property too; the guard here is the
+    /// coordinator-side backstop (`.speaking` / `.awaitingConfirmation`
+    /// keep their plain tap semantics).
+    func resetVoiceActivation() {
+        guard voiceSession.state.supportsTalkReset else { return }
+        print("[AppCoordinator] talk long-press reset — recycling pipeline to idle")
+        recycleVoicePipeline { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.showVoiceResetNotice()
+            case .failure(let err):
+                self.voiceError = "\(err)"
+                self.voiceState = .error("\(err)")
+            }
+        }
+    }
+
+    private func showVoiceResetNotice() {
+        voiceResetNoticeToken += 1
+        let token = voiceResetNoticeToken
+        voiceResetNotice = L10n.str("voice.resetDone", locale: activeLocale)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.voiceResetNoticeSeconds) { [weak self] in
+            guard let self, self.voiceResetNoticeToken == token else { return }
+            self.voiceResetNotice = nil
+        }
+    }
+
+    private func clearVoiceResetNotice() {
+        voiceResetNoticeToken += 1
+        voiceResetNotice = nil
     }
 
     // MARK: - Pipeline start watchdog
@@ -1489,6 +2004,13 @@ final class AppCoordinator: ObservableObject {
     /// capture completes; false when the pipeline was already stopped.
     private var voiceWasSuspendedForSearchCapture = false
     private var searchPhraseCaptureActive = false
+
+    /// A Voice Processing I/O preset flip (P0, slice C) that landed while
+    /// the pipeline was busy (mid-capture, mid-reply, mid-recycle) and
+    /// must apply once it next settles to `.idle` — see
+    /// `applyVoiceProcessingPresetChange` and the `.idle` case of
+    /// `handlePipelineState`.
+    private var pendingVoiceProcessingPresetChange = false
 
     private lazy var searchPhraseCapture = SearchPhraseCapture(
         audioSession: audioSessionManager,
@@ -1565,6 +2087,30 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    // MARK: - Enrollment sample capture ([VOICE-SETTINGS])
+
+    /// The press-to-record capture behind Voice personalization →
+    /// "Enroll voice": the SAME shared audio engine and session manager
+    /// as the pipeline and the search-phrase capture — one tap slot
+    /// doctrine, so `suspendForSampleCapture` (the `VoicePipelineSuspending`
+    /// conformance at the bottom of this file) must have run first;
+    /// `VoiceEnrollmentSession` enforces that order.
+    private lazy var enrollmentRecorder = VoiceEnrollmentRecorder(
+        audioEngine: audioEngine,
+        audioSession: audioSessionManager
+    )
+
+    /// The recorder the Voice personalization screen's enrollment
+    /// session captures through (see `VoiceEnrollmentSession`).
+    func makeEnrollmentSampleRecorder() -> VoiceEnrollmentRecorder {
+        enrollmentRecorder
+    }
+
+    /// True when we stopped a LIVE pipeline for an enrollment sample
+    /// that must be restarted once the sample is banked (parallel to
+    /// `voiceWasSuspendedForSearchCapture`).
+    private var voiceWasSuspendedForEnrollmentSample = false
+
     /// Called by `CommandRouter` when a speak begins/ends — drives the
     /// derived `speaking` state. Callers may be on any queue; mutations
     /// are pinned to main (H1).
@@ -1574,7 +2120,7 @@ final class AppCoordinator: ObservableObject {
     /// feeding mic audio to the wake-word engine. Self-hearing
     /// mitigation: the audio session is `.measurement` mode without AEC
     /// (AudioSessionManager), so while the assistant's own reply plays
-    /// the mic hears it — including the phrase "Hey Sahayak" if the reply
+    /// the mic hears it — including the phrase "ये कान्छी" if the reply
     /// contained it. We suppress HERE (per-reply, reversible) rather than
     /// switching the global audio-session mode, which is a regression
     /// risk for the always-on tap and the recognizers that share it. The
@@ -1582,7 +2128,7 @@ final class AppCoordinator: ObservableObject {
     /// multiple speak()s overlap during a busy turn). One benign race:
     /// `speak()` launches the TTS Task before the main-async block below
     /// runs, so the first milliseconds of a reply may not be suppressed —
-    /// Porcupine needs ~a second of audio to fire the keyword, so no
+    /// the keyword spotter needs ~a second of audio to fire, so no
     /// practical window.
     func noteSpeakingStarted() {
         DispatchQueue.main.async { [weak self] in
@@ -1599,6 +2145,16 @@ final class AppCoordinator: ObservableObject {
             // the pipeline eventually emitted .idle. All three pre-speech
             // states legally transition to .speaking (VoiceSessionState
             // transition table).
+            //
+            // Else-branch push speech (STOPPED-SPEAKING-FIX, 2026-09-08):
+            // when the utterance starts from a NON pre-speech state — the
+            // session still `.stopped`, because push speech (launch
+            // briefing, read-aloud) beat the pipeline's start — the
+            // handlePipelineState re-run below promotes through
+            // `speakingCount > 0` to `.speaking`. `.stopped → .speaking`
+            // is legal by table (mirrors `.idle`), so no DEBUG trap; the
+            // round trip closes on noteSpeakingEnded once the pipeline
+            // reports.
             let preSpeech: Set<VoiceSessionState> = [.listening, .transcribing, .understanding]
             if preSpeech.contains(self.voiceSession.state) {
                 self.voiceSession.transition(to: .speaking)
@@ -1638,6 +2194,27 @@ final class AppCoordinator: ObservableObject {
     /// Speaks dynamic, already-resolved text (e.g. a call-confirmation
     /// prompt built from a contact's name) — no catalog lookup.
     func speak(text: String) {
+        if let queue = speakQueue {
+            // Voice-OS shell v1: coordinator-level replies enter the
+            // speak queue on the `.interactive` lane — lowest priority,
+            // never preempted once started, announcement carries NO card
+            // (speech only), so the existing outcome-card flow is
+            // untouched. Zero policy change for the utterance itself: the
+            // queue owns the shared speaker and the speech notes fire
+            // around each utterance via `SpeechNoteForwarder`.
+            guard !text.isEmpty else { return }
+            noteAssistantSpoke(text)
+            queue.enqueue(Announcement(
+                id: UUID(),
+                text: text,
+                priority: .interactive,
+                sourceID: "coordinator_reply",
+                card: nil
+            ))
+            return
+        }
+        // Pre-`start()` fallback — verbatim original direct-speak path
+        // (the queue only exists once `start()` has composed it).
         guard let speaker, !text.isEmpty else { return }
         noteAssistantSpoke(text)
         noteSpeakingStarted()
@@ -1740,6 +2317,55 @@ final class AppCoordinator: ObservableObject {
                 self?.updateActiveSTTName()
             }
         }
+    }
+
+    /// Re-applies the audio-session preset after `voiceProcessingEnabled`
+    /// changed (voice-personalisation P0, slice C). A preset change needs
+    /// the engine stopped — the manager's VPIO node call refuses a
+    /// running engine — and the ONLY restart path that owns the
+    /// session + engine lifecycle together is the pipeline recycle, so a
+    /// flip recycles the always-on pipeline through its canonical
+    /// stop/start core (`recycleVoicePipeline`, same one the cycle
+    /// watchdog and Talk-button reset use). The recycle's start
+    /// re-activates the session, and `AudioSessionManager.activate`
+    /// applies the preset the flag now requests; failures surface
+    /// through the recycle's own state mapping. Timing:
+    ///  - pipeline settled idle, nobody speaking → recycle immediately;
+    ///  - mid-turn (capture/reply/recycle) → defer via
+    ///    `pendingVoiceProcessingPresetChange`, applied when the pipeline
+    ///    next reports `.idle` (the manager flag is already set, so any
+    ///    activation in between — e.g. a search-phrase capture's resume —
+    ///    already uses the new preset);
+    ///  - a search-phrase capture holds the engine → leave it alone; its
+    ///    own resume activation picks up the new preset.
+    private func applyVoiceProcessingPresetChange() {
+        guard started else { return }
+        guard !searchPhraseCaptureActive else { return }
+        guard let voicePipeline, voicePipeline.state != .stopped else { return }
+        if voicePipeline.state == .idle && speakingCount == 0 {
+            pendingVoiceProcessingPresetChange = false
+            recycleVoicePipeline { _ in }
+        } else {
+            pendingVoiceProcessingPresetChange = true
+        }
+    }
+
+    /// [NOISE-FILTER] Builds the denoising stage the A/B toggle selects:
+    /// nil (legacy capture path) when OFF, the spectral-gate denoiser
+    /// when ON. A DeepFilterNet3-class suppressor (P1 step 2 — model
+    /// artifacts + ModelStore delivery) would slot in here once it lands.
+    private func makeNoiseSuppressor() -> NoiseSuppressor? {
+        guard noiseFilterEnabled else { return nil }
+        return SpectralGateDenoiser(observabilityBus: observabilityBus)
+    }
+
+    /// [NOISE-FILTER] Applies the A/B toggle immediately: the stage is a
+    /// pipeline-level injection with its own hot-swap seam, so unlike the
+    /// VPIO preset this needs NO pipeline recycle — a mid-session flip
+    /// takes effect on the very next capture (the stage's streaming
+    /// state starts cold, warmup passthrough included).
+    private func applyNoiseFilterChange() {
+        voicePipeline?.setNoiseSuppressor(makeNoiseSuppressor())
     }
 
     /// Whether the on-device stack (Whisper STT + LLaMA interpreter) is
@@ -1961,18 +2587,26 @@ final class AppCoordinator: ObservableObject {
     ///
     /// `address` (directions task, 2026-09-07) is the contact's optional
     /// home address for voice navigation — blank text is stored as nil.
+    ///
+    /// `isEmergencyContact` (family-emergency task, 2026-09-07): whether
+    /// the wizard's "Emergency contact" toggle was on — the Emergency
+    /// affordance prefers flagged contacts (see `emergencyContact`).
+    /// Defaulted so the onboarding call site (which has no toggle) is
+    /// unchanged; an add written before the flag simply stores false.
     @discardableResult
     func addFamilyContact(name: String, phone: String, relationship: String,
                           messengerHandle: String? = nil,
                           photo: UIImage? = nil,
                           nickname: String? = nil,
-                          address: String? = nil) -> Bool {
+                          address: String? = nil,
+                          isEmergencyContact: Bool = false) -> Bool {
         let filename = photo.flatMap { contactPhotoStore.save($0) }
         let contact = FamilyContact(name: name, phone: phone, relationship: relationship,
                                     messengerHandle: messengerHandle,
                                     photoFilename: filename,
                                     nickname: nickname,
-                                    address: Self.normalizedOptionalText(address))
+                                    address: Self.normalizedOptionalText(address),
+                                    isEmergencyContact: isEmergencyContact)
         guard familyContactStore.add(contact) else {
             if let filename { contactPhotoStore.delete(named: filename) }
             return false
@@ -1998,18 +2632,29 @@ final class AppCoordinator: ObservableObject {
     /// `nickname` (family-wizard task, 2026-09-07): the wizard's
     /// optional informal name; nil clears a stored one, defaulted so
     /// pre-wizard callers compile unchanged.
+    ///
+    /// `isEmergencyContact` (family-emergency task, 2026-09-07): the
+    /// editor's current "Emergency contact" toggle value — the save
+    /// REPLACES the stored flag, so un-toggling an emergency contact is
+    /// an ordinary edit. The wizard — the only caller — always passes
+    /// it on every save, and an edit loads the stored flag into the
+    /// toggle first, so a flag the user did not touch survives. The
+    /// false default exists only so pre-toggle call sites compile
+    /// unchanged; a caller that omits it means "not flagged".
     @discardableResult
     func updateFamilyContact(id: UUID, name: String, phone: String, relationship: String,
                              messengerHandle: String?,
                              photo: UIImage? = nil, removingPhoto: Bool = false,
                              nickname: String? = nil,
-                             address: String? = nil) -> Bool {
+                             address: String? = nil,
+                             isEmergencyContact: Bool = false) -> Bool {
         guard var contact = familyContacts.first(where: { $0.id == id }) else { return false }
         contact.name = name
         contact.phone = phone
         contact.relationship = relationship
         contact.messengerHandle = messengerHandle
         contact.nickname = nickname
+        contact.isEmergencyContact = isEmergencyContact
         // The editor passes the CURRENT text each save; blank clears the
         // stored address (nil), so "remove the address" is an edit, not a
         // separate affordance (directions task, 2026-09-07).
@@ -2137,13 +2782,30 @@ final class AppCoordinator: ObservableObject {
 
     // MARK: - Emergency (redesign spec §3.1/§3.2 — persistent icon everywhere)
 
-    /// The contact the Emergency affordance calls. Every stored family
-    /// contact is already treated as an emergency target (see
-    /// `emergencyContacts(from:)` above) — there's no separate
-    /// "designate as emergency contact" flag yet, so this is simply the
-    /// first configured contact. Nil when none is configured, which the
-    /// view surfaces honestly instead of pretending an action is available.
-    var emergencyContact: FamilyContact? { familyContacts.first }
+    /// The contact the Emergency affordance calls (family-emergency
+    /// task, 2026-09-07): the first contact flagged
+    /// `isEmergencyContact` — whichever person the family marked with
+    /// the wizard's "Emergency contact" toggle — else the first
+    /// configured contact, the pre-flag behavior kept as the fallback
+    /// so an unflagged list still dials somebody. Nil when none is
+    /// configured, which the view surfaces honestly instead of
+    /// pretending an action is available. The rule itself is the pure
+    /// `preferredEmergencyContact(_:)` below so tests can pin it
+    /// without an instance.
+    var emergencyContact: FamilyContact? {
+        Self.preferredEmergencyContact(familyContacts)
+    }
+
+    /// The emergency-preference rule as a pure function
+    /// (family-emergency task, 2026-09-07): contacts flagged
+    /// `isEmergencyContact` win, in list order (the FIRST flag is THE
+    /// number — the toggle's caption promises "dials this person
+    /// first"); an all-unflagged list falls back to the first contact,
+    /// exactly what `emergencyContact` resolved before the flag
+    /// existed; an empty list resolves nil. Pinned by tests.
+    static func preferredEmergencyContact(_ contacts: [FamilyContact]) -> FamilyContact? {
+        contacts.first(where: \.isEmergencyContact) ?? contacts.first
+    }
 
     /// Posts the same local notification `CommandRouter` already posts for
     /// a voice-triggered emergency, and speaks the ack — reused here so the
@@ -2886,23 +3548,48 @@ final class AppCoordinator: ObservableObject {
     /// that actually opened a surface — never with a failure branch:
     /// recording an open that didn't happen would lie about what the
     /// assistant did (the same honesty rule `contactNumberUsed` holds
-    /// to). Called on the main queue only.
+    /// to). `timestamp` defaults to now and is overridden only by the
+    /// unanswered-call path, which records the moment the live-call
+    /// observer reported the call's end (missed-calls task, 2026-09-07).
+    /// Called on the main queue only.
     private func recordActivity(kind: AppActivityEntry.Kind,
                                 channel: AppActivityEntry.Channel,
                                 contactName: String,
                                 phone: String = "",
                                 messengerHandle: String? = nil,
-                                body: String? = nil) {
+                                body: String? = nil,
+                                timestamp: Date = Date()) {
         // Message text is stored only when it is non-blank (a pre-filled
         // draft is content; an empty compose sheet is not).
         let trimmed = body?.trimmingCharacters(in: .whitespacesAndNewlines)
         let storedBody = trimmed.flatMap { $0.isEmpty ? nil : $0 }
-        activityLog.append(AppActivityEntry(kind: kind, channel: channel,
+        activityLog.append(AppActivityEntry(timestamp: timestamp,
+                                            kind: kind, channel: channel,
                                             contactName: contactName,
                                             phone: phone,
                                             messengerHandle: messengerHandle,
                                             body: storedBody))
         refreshRecentActivity()
+    }
+
+    /// Records one ANONYMOUS unanswered call — the coordinator side of
+    /// the live-call detector's `onUnanswered` (missed-calls task,
+    /// 2026-09-07). Fired when CXCallObserver reported a call that ended
+    /// without ever connecting: a missed or declined incoming call, or
+    /// an attempted outgoing call nobody picked up. iOS masks calls that
+    /// involve other apps so completely that these are
+    /// indistinguishable — this row claims only the shared fact, "a call
+    /// ended unanswered". `contactName` and `phone` are EMPTY ON
+    /// PURPOSE: the caller's identity AND number are masked by iOS —
+    /// there is no name to store, no number to look up or dial, and no
+    /// address-book match is possible — and the UI renders the localized
+    /// "Unanswered call" label (`history.unanswered`) instead of a
+    /// stored locale string. The row's action opens the Phone app
+    /// (`PhoneAppOpener`), where the caller's identity genuinely lives
+    /// (its Recents tab, one tap from the dialer).
+    private func recordUnansweredCall(at timestamp: Date) {
+        recordActivity(kind: .call, channel: .unanswered,
+                       contactName: "", phone: "", timestamp: timestamp)
     }
 
     /// Refreshes the published window from the store (see
@@ -2912,14 +3599,25 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Builds the live-call detector. Instance method (not a closure over
-    /// `self` in the lazy declaration) so the onChange closure can hold
-    /// `self` weakly without capture-list gymnastics in a lazy
-    /// initializer. Main queue by contract — CXCallStateProvider's
-    /// delegate is `.main`, and `liveCallActive` is main-queue confined.
+    /// `self` in the lazy declaration) so the closures can hold `self`
+    /// weakly without capture-list gymnastics in a lazy initializer.
+    /// Main queue by contract — CXCallStateProvider's delegate is
+    /// `.main`, and `liveCallActive`/`recentActivity` are main-queue
+    /// confined.
     private func makeLiveCallDetector() -> LiveCallDetector {
-        let detector = LiveCallDetector(provider: CXCallStateProvider()) { [weak self] active in
-            DispatchQueue.main.async { self?.liveCallActive = active }
-        }
+        let detector = LiveCallDetector(
+            provider: CXCallStateProvider(),
+            onChange: { [weak self] active in
+                DispatchQueue.main.async { self?.liveCallActive = active }
+            },
+            onUnanswered: { [weak self] timestamp in
+                // Record the anonymous unanswered row (missed-calls task,
+                // 2026-09-07). Same main-hop rule as onChange: the store
+                // is main-queue confined, whatever queue the provider
+                // fired on.
+                DispatchQueue.main.async { self?.recordUnansweredCall(at: timestamp) }
+            }
+        )
         // Initial state: a call already connected at launch must show on
         // the leaf immediately (the detector does not fire onChange for
         // its initial snapshot — that is exactly what this read is for).
@@ -3236,6 +3934,13 @@ final class AppCoordinator: ObservableObject {
     /// address text well) and Google Maps gets the same documented
     /// fallback form.
     private func openExternalNavigation(app: NavigationMapApp, name: String, address: String) {
+        // The Google surface's `hl` deep-link ask carries the app's active
+        // language — "ne" under Nepali, "en" under English — resolved from
+        // the same locale every user-facing string uses, once per launch.
+        // Apple Maps' scheme exposes no language parameter (its UI follows
+        // the device and Maps' own settings — nothing to send, and none is
+        // invented), so this code feeds the Google builders only.
+        let mapsUILanguageCode = activeLocale.languageCode ?? appLanguage.rawValue
         let geocoder = NavigationGeocoder()
         geocoder.geocode(address: address) { [weak self] result in
             guard let self else { return }
@@ -3245,12 +3950,14 @@ final class AppCoordinator: ObservableObject {
                 self.emitDirections(eventType: "geocode", outcome: "ok")
                 url = MapsLinks.directionsURL(for: app,
                                               latitude: destination.latitude,
-                                              longitude: destination.longitude)
+                                              longitude: destination.longitude,
+                                              uiLanguageCode: mapsUILanguageCode)
             case .failure:
                 self.emitDirections(eventType: "geocode", outcome: "fallback_address")
                 url = app == .appleMaps
                     ? MapsLinks.appleMapsDirectionsURL(address: address)
-                    : MapsLinks.googleMapsDirectionsURL(address: address)
+                    : MapsLinks.googleMapsWalkingNavigateURL(address: address,
+                                                            uiLanguageCode: mapsUILanguageCode)
             }
             guard let url else {
                 // No URL at all (both builders refused the input) — say
@@ -3337,6 +4044,29 @@ final class AppCoordinator: ObservableObject {
         presentPluginView(AnyView(ApplianceHelperView(session: session)))
     }
 
+    /// Opens a bundled default manual from the Settings → Manuals leaf.
+    /// The session is armed already in `.guidance`, so the presented
+    /// sheet renders the manual's step cards immediately and never shows
+    /// the camera-capture state (ApplianceHelperView's auto-open camera is
+    /// gated on `.capturing`). Not gated on `geminiClient.isAvailable` —
+    /// unlike `presentApplianceHelper`, bundled content must work first
+    /// launch, offline, with no key configured.
+    ///
+    /// Returns false when the manual's overview image is unavailable — the
+    /// caller stays on the browse list and shows an honest failure.
+    @MainActor
+    func presentBundledManual(_ manual: BundledManual) -> Bool {
+        let session = ApplianceHelperSession(question: nil,
+                                             locale: activeLocale,
+                                             geminiClient: geminiClient,
+                                             cache: ApplianceCache(storage: storage),
+                                             observabilityBus: observabilityBus,
+                                             speaker: speaker)
+        guard session.presentBundledManual(manual, locale: activeLocale) else { return false }
+        presentPluginView(AnyView(ApplianceHelperView(session: session)))
+        return true
+    }
+
     /// `send_message` (v2 pivot Phase 2, §4.3). Every surface ends with
     /// the user's own tap on Send — that tap IS the `.confirm`-tier
     /// confirmation, exactly as the shipped SMS flow models it:
@@ -3414,7 +4144,8 @@ final class AppCoordinator: ObservableObject {
     var pendingReminders: [ScheduledReminder] { medicationScheduler.pendingReminders }
 
     /// Configured medication entries — read-only view for the Settings
-    /// editor and the Meds leaf.
+    /// editor and the Medical leaf (the renamed Meds leaf, medical task
+    /// 2026-09-07).
     var medicationEntries: [MedicationEntry] { medicationScheduler.medicationEntries() }
 
     func medicationName(for entryId: UUID) -> String {
@@ -3466,6 +4197,45 @@ final class AppCoordinator: ObservableObject {
         calendarSync.syncNow(entries: routineScheduler.entries())
     }
 
+    // MARK: - Doctor's appointments (medical task, 2026-09-07)
+
+    /// Adds an appointment from the Medical leaf's add form or the
+    /// paste-confirmation flow. Blank labels are stored as nil via
+    /// `normalizedOptionalText` (house rule — blank text is not stored);
+    /// the store rejects the write at its cap (50) and returns false.
+    /// Success persists, refreshes the published list (newest first),
+    /// and — when the calendar toggle is on — hands the appointment to
+    /// the `MedicalAppointmentCalendarWriting` seam inside the store.
+    @discardableResult
+    func addAppointment(doctorOrPlace: String, place: String?, date: Date,
+                        note: String?) -> Bool {
+        let trimmed = doctorOrPlace.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        let appointment = MedicalAppointment(
+            doctorOrPlace: trimmed,
+            place: Self.normalizedOptionalText(place),
+            date: date,
+            note: Self.normalizedOptionalText(note)
+        )
+        guard appointmentStore.add(appointment) else { return false }
+        self.appointments = appointmentStore.load()
+        return true
+    }
+
+    /// Removes an appointment from the Medical leaf (store-remove; the
+    /// calendar-2way seam mirrors the removal when the toggle is on).
+    func removeAppointment(id: UUID) {
+        appointmentStore.remove(id: id)
+        self.appointments = appointmentStore.load()
+    }
+
+    /// Dismisses the one-shot SMS caption on the Medical leaf; persisted
+    /// so it never nags again (the store keeps the truth; this is a
+    /// preference).
+    func dismissAppointmentSmsNote() {
+        appointmentSmsNoteDismissed = true
+    }
+
     // MARK: - Native Calendar mirroring (v2 design §4.1, 2026-09-06)
 
     /// EventKit mirror of the unified routine schedule — the app remains
@@ -3489,8 +4259,34 @@ final class AppCoordinator: ObservableObject {
     /// it is a nested ObservableObject, so a scan/status/lead change
     /// alone would not invalidate views observing the coordinator — the
     /// Settings card, Reminders leaf and Calendar leaf must refresh the
-    /// moment a scan lands (same pattern as `wakeWordKeyStoreCancellable`).
+    /// moment a scan lands (same nested-ObservableObject forwarding
+    /// pattern as `geminiSwapCancellable`).
     private var externalCalendarCancellable: AnyCancellable?
+
+    /// Alarms + timers (alarms-timers task, 2026-09-07): owns the
+    /// voice-set alarms and the in-app countdown timers — one service
+    /// behind the router's alarm/timer stage, the Settings leaf, the
+    /// launch + BGTask re-queue (FR-025) and the foreground completion
+    /// speech. Eager (not lazy) because the language sync, the
+    /// objectWillChange forwarding and the delegate closure below must
+    /// reach it from init. See `AlarmScheduler` for the platform-honesty
+    /// contract (iOS does not write to the built-in Clock app — the
+    /// "alarm" is a daily-repeating local notification).
+    private(set) var alarmTimersService: AlarmTimersService
+
+    /// [ALARMS-TIMERS] (2026-09-07) Foreground presentation for
+    /// alarm/timer notifications. RETAINED here — the center's delegate
+    /// property is weak, and before this feature the app had no
+    /// notification delegate at all (medication/routine reminders
+    /// presented via the OS alone). See `AlarmTimerNotificationDelegate`
+    /// for what presents and what stays silent.
+    private var alarmTimerNotificationDelegate: AlarmTimerNotificationDelegate?
+
+    /// Forwards the alarms/timers service's publishes ([ALARMS-TIMERS]
+    /// 2026-09-07): nested ObservableObject — a toggle/delete/timer-start
+    /// alone would not invalidate views observing the coordinator (same
+    /// pattern as `externalCalendarCancellable`).
+    private var alarmTimersCancellable: AnyCancellable?
 
     /// Offline Bikram Sambat + tithi + festival overlay and festival
     /// notification scheduling (2026-09-06 BS calendar feature).
@@ -3502,6 +4298,59 @@ final class AppCoordinator: ObservableObject {
         calendarSync.isEnabled = enabled
         if enabled {
             await calendarSync.enableAndSync(entries: routineScheduler.entries())
+        }
+    }
+
+    // MARK: - Two-way calendar mirroring (calendar-driven task, 2026-09-07)
+
+    /// Settings toggle handler for two-way mirroring (default OFF):
+    /// ON ensures the mirror is on first, requests FULL calendar
+    /// access at point of use (read access is what lets native edits
+    /// reconcile back), then mirrors the schedule into the dedicated
+    /// "Sahayak" calendar; OFF removes the Sahayak events (the legacy
+    /// mode-switch wipe) and falls back to the one-way default-calendar
+    /// mirror. The Sahayak id feeds the import's calendar-id exclusion
+    /// in every direction.
+    func setCalendarTwoWayEnabled(_ enabled: Bool) async {
+        if enabled {
+            if !calendarSync.isEnabled {
+                calendarSync.isEnabled = true
+                await calendarSync.enableAndSync(entries: routineScheduler.entries())
+            }
+            await calendarSync.enableTwoWayAndSync(entries: routineScheduler.entries())
+        } else {
+            calendarSync.disableTwoWayAndSyncIfMirrorEnabled(entries: routineScheduler.entries())
+        }
+        if let sahayakIdentifier = calendarSync.sahayakCalendarIdentifier {
+            externalCalendar.excludedCalendarIdentifiers.insert(sahayakIdentifier)
+        }
+    }
+
+    /// Applies native-calendar edits to the app's routine schedule —
+    /// the `onNativeChanges` relay. Runs off any gesture (the family
+    /// edits in another app; the store-change notification delivers it
+    /// here), so the republish below is what refreshes views.
+    private func applyNativeCalendarMutations(
+        _ mutations: [CalendarSyncService.RoutineCalendarMutation]) {
+        for mutation in mutations {
+            switch mutation {
+            case .dropSlot(let entryId, let hour, let minute):
+                routineScheduler.dropSlot(entryId: entryId, hour: hour, minute: minute)
+            case .retimeSlot(let entryId, let fromHour, let fromMinute,
+                             let toHour, let toMinute):
+                routineScheduler.retimeSlot(entryId: entryId, fromHour: fromHour,
+                                            fromMinute: fromMinute,
+                                            toHour: toHour, toMinute: toMinute)
+            case .setRecurrence(let entryId, let frequency, let weekdays):
+                routineScheduler.updateRecurrence(entryId: entryId,
+                                                  frequency: frequency,
+                                                  weekdays: weekdays)
+            case .disableEntry(let entryId):
+                routineScheduler.setEnabled(entryId, enabled: false)
+            }
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
         }
     }
 
@@ -3534,7 +4383,8 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Scene-phase reactions wired from `ContentView`: foreground
-    /// rescans (family edits in the native apps land immediately),
+    /// rescans (family edits in the native apps land immediately —
+    /// the import's scan AND the two-way mirror's reconciliation),
     /// background submits the hourly BGAppRefresh that keeps scans
     /// coming while the app isn't running.
     func handleScenePhase(_ phase: ScenePhase) {
@@ -3542,11 +4392,60 @@ final class AppCoordinator: ObservableObject {
         switch phase {
         case .active:
             Task { await externalCalendar.startIfEnabled() }
+            Task {
+                await calendarSync.reconcileNativeChanges(entries: routineScheduler.entries())
+            }
+            // Voice-OS shell v1 — proactive morning briefing (design
+            // §4.4 trigger a): fires on the first app activation inside
+            // the wake window, once per calendar day. Idempotent —
+            // `shouldFireOnActivation` + `fire()` share the same
+            // once-per-day budget as the spoken command, so repeated
+            // activations never double-speak. After the fire completes,
+            // the stored slot is re-read into `todayBriefing` (a same-day
+            // no-op leaves the earlier composition untouched).
+            // activations never double-speak.
+            //
+            // Launch ordering (STOPPED-SPEAKING-FIX, 2026-09-08): this
+            // fire is deliberately NOT serialized behind the voice
+            // pipeline's start — the briefing Task can beat pipeline
+            // start (observed log order briefing_fired →
+            // pipeline_started) and speak while the session is still
+            // `.stopped`. That is legal by design: the session table
+            // admits `.stopped → .speaking` for push speech that starts
+            // before the pipeline is primed, so start() needs no
+            // reordering.
+            if let briefing = morningBriefing,
+               briefing.shouldFireOnActivation(now: Date(),
+                                               calendar: Calendar.current) {
+                Task {
+                    await briefing.fire()
+                    await MainActor.run { self.refreshTodayBriefing() }
+                }
+            }
+            // Unconditional re-read of the day slot on every activation
+            // (briefing persistence task, 2026-09-08): cheap, keeps the
+            // Home widget presence + briefing leaf truthful even when no
+            // fire ran, and any refresh racing the task above is
+            // superseded by the task's post-fire read.
+            refreshTodayBriefing()
         case .background:
             externalCalendar.submitBackgroundRefresh()
         default:
             break
         }
+    }
+
+    // MARK: - Today's briefing slot (briefing persistence task, 2026-09-08)
+
+    /// Re-reads the encrypted day slot into the published `todayBriefing`.
+    /// Main-confined: called synchronously from `init` / `handleScenePhase`
+    /// (SwiftUI main thread) and from `MainActor.run` after async fires —
+    /// the only two places the store's contents can change (a fire writes
+    /// the day's slot) or staleness could matter (midnight rollover, where
+    /// the stale slot stops matching the new day and the Home widget hides
+    /// itself until tomorrow's composition).
+    private func refreshTodayBriefing() {
+        todayBriefing = morningBriefingStore.todaysBriefing(now: Date())
     }
 
     // MARK: - Routine reminder surface (v2 pivot Phase 1)
@@ -3573,15 +4472,16 @@ final class AppCoordinator: ObservableObject {
 
     /// Today's medication reminders as localized "name — time" lines for
     /// the routine plugin's `routine.query` answer — one spoken list
-    /// spanning both reminder systems.
+    /// spanning both reminder systems. Spoken-form times (spoken-time
+    /// task, 2026-09-08): these lines are read aloud, so they share the
+    /// `SpokenTime` helper; UI display formatting is untouched.
     private func todayMedicationSummaryLines() -> [String] {
         medicationScheduler.pendingReminders
             .filter { Calendar.current.isDateInToday($0.scheduledAt) }
             .sorted { $0.scheduledAt < $1.scheduledAt }
             .map { reminder in
                 let name = medicationName(for: reminder.medicationEntryId)
-                let time = reminder.scheduledAt.formatted(
-                    Date.FormatStyle(date: .omitted, time: .shortened).locale(activeLocale))
+                let time = SpokenTime.string(from: reminder.scheduledAt, locale: activeLocale)
                 return "\(name) — \(time)"
             }
     }
@@ -3769,6 +4669,10 @@ final class AppCoordinator: ObservableObject {
         ) { [weak self] task in
             self?.medicationScheduler.scheduleAll()
             self?.routineScheduler.scheduleAll()
+            // Same re-queue for alarms + timers ([ALARMS-TIMERS]
+            // 2026-09-07): the handler dispatches to main, where it is
+            // idempotent (requests replace in place by id).
+            self?.alarmTimersService.scheduleAll()
             task.setTaskCompleted(success: true)
         }
         // External calendar rescan (calendar-driven task, 2026-09-07):
@@ -3794,94 +4698,58 @@ final class AppCoordinator: ObservableObject {
     // MARK: - Wake-word engine selection & status (open item #4)
 
     /// Builds the launch wake-word engine and reports whether it is REAL
-    /// (Porcupine) or the Null fallback — Settings → "Voice activation"
-    /// needs that truth for its status row.
+    /// (sherpa-onnx KWS) or the Null fallback — Settings → "Voice
+    /// activation" needs that truth for its status row.
     ///
-    /// Decision order (2026-09-06):
+    /// Decision order (2026-09-08, P0 slice A + settings cleanup):
     ///  1. The persisted Settings toggle is the master switch: OFF means
-    ///     NullWakeWordEngine even when an access key + .ppn are both
-    ///     present (the open-item requirement — disabled must behave
-    ///     exactly like today).
-    ///  2. Access key: build-time Info.plist `PicovoiceAccessKey`, else
-    ///     the Settings paste-in value in `EncryptedLocalStorage`
-    ///     (`wakeWordAccessKeyStore` — Keychain, Data Protection
-    ///     Complete).
-    ///  3. The trained keyword file must be in the bundle
-    ///     (hey-sahayak_ios.ppn).
-    ///  4. Porcupine init must succeed (a malformed key throws).
+    ///     NullWakeWordEngine even when a KWS model is bundled (disabled
+    ///     must behave exactly like today).
+    ///  2. The sherpa-onnx candidate runs: `SherpaKWSWakeWordEngine
+    ///     .attempt()` builds a live engine when the model directory is
+    ///     bundled and loadable and emits an honest observability event
+    ///     (`kws_engine_ready` / `kws_engine_unavailable`) when it cannot —
+    ///     no access key, no `.ppn`, nothing else to configure.
     ///
     /// The pure decision table lives in `WakeWordEngineSelection`
-    /// (unit-tested without the Porcupine package linked); only the real
-    /// engine's construction is Porcupine-guarded, below.
-    private static func makeWakeWordEngine(accessKeyStore: WakeWordAccessKeyStore)
+    /// (unit-tested without the sherpa package linked); only the real
+    /// engine's construction is sherpa-guarded, inside `attempt()`.
+    private static func makeWakeWordEngine(observabilityBus: ObservabilityBus)
         -> (engine: WakeWordEngine, isReal: Bool) {
         guard let real = WakeWordEngineSelection.make(
             toggleEnabled: WakeWordPreferences().isEnabled,
-            accessKey: configuredAccessKey(accessKeyStore: accessKeyStore),
-            keywordPath: WakeWordModelFile.bundledPath(),
-            build: buildRealWakeWordEngine
+            sherpaCandidate: {
+                SherpaKWSWakeWordEngine.attempt(observabilityBus: observabilityBus)
+            }
         ) else {
             print("[AppCoordinator] Wake-word engine: NullWakeWordEngine "
-                  + "(toggle off, artifact missing, or Porcupine init failed) — "
+                  + "(toggle off or sherpa model missing) — "
                   + "Talk button + simulate path unchanged")
             return (NullWakeWordEngine(), false)
         }
         return (real, true)
     }
 
-    /// The Picovoice access key for this build: the Info.plist value
-    /// (`PicovoiceAccessKey`, embedded at build time for team builds)
-    /// wins; otherwise the Settings paste-in value. The precedence rule
-    /// itself is `WakeWordAccessKeyStore.resolvedAccessKey` (unit-tested).
-    private static func configuredAccessKey(accessKeyStore: WakeWordAccessKeyStore) -> String? {
-        WakeWordAccessKeyStore.resolvedAccessKey(
-            plistKey: Bundle.main.object(forInfoDictionaryKey: "PicovoiceAccessKey") as? String,
-            storedKey: accessKeyStore.accessKey
-        )
-    }
-
-    #if canImport(Porcupine)
-    /// Attempts the real engine — compiles only when the Porcupine SPM
-    /// package is linked into the build (project.yml keeps it commented
-    /// until a key + trained .ppn exist — docs/wake-word-setup.md).
-    private static func buildRealWakeWordEngine(accessKey: String, keywordPath: String) -> WakeWordEngine? {
-        try? PorcupineWakeWordEngine(accessKey: accessKey, keywordPath: keywordPath)
-    }
-    #else
-    /// Porcupine is not linked into this build — the selection logic above
-    /// still runs so Settings can report the honest "runtime missing"
-    /// status, but no real engine can be built.
-    private static func buildRealWakeWordEngine(accessKey: String, keywordPath: String) -> WakeWordEngine? {
-        nil
-    }
-    #endif
-
-    /// Compile-time: is the Porcupine runtime linked into THIS build?
-    /// Mirrors the `#if canImport(Porcupine)` around the real engine so
+    /// Compile-time: is the sherpa-onnx runtime linked into THIS build?
+    /// Mirrors the `#if canImport(SherpaOnnx)` guard inside
+    /// `SherpaKWSWakeWordEngine` (project.yml pins the package today), so
     /// the Settings status can never claim "Active" for a build whose
     /// engine is Null by construction.
     static var isWakeWordRuntimeLinked: Bool {
-        #if canImport(Porcupine)
+        #if canImport(SherpaOnnx)
         return true
         #else
         return false
         #endif
     }
 
-    /// True when an access key is available to this build — the build-time
-    /// Info.plist value, or the Settings paste-in (EncryptedLocalStorage).
-    var isWakeWordAccessKeyConfigured: Bool {
-        Self.configuredAccessKey(accessKeyStore: wakeWordAccessKeyStore) != nil
-    }
-
-    /// True when THIS build has everything the real engine needs: runtime
-    /// linked, an access key, and the bundled keyword file — the same
-    /// inputs `makeWakeWordEngine()` decides on, so the status row and the
-    /// actually-built engine cannot disagree.
+    /// True when THIS build has everything the real engine needs: the
+    /// sherpa runtime linked AND the KWS model directory bundled — the
+    /// same inputs `makeWakeWordEngine()` decides on, so the status row
+    /// and the actually-built engine cannot disagree.
     var isWakeWordProvisioned: Bool {
         Self.isWakeWordRuntimeLinked
-            && Self.configuredAccessKey(accessKeyStore: wakeWordAccessKeyStore) != nil
-            && WakeWordModelFile.bundledPath() != nil
+            && SherpaKWSModelFile.bundledDirectory() != nil
     }
 
     /// Honest state for the Settings "Voice activation" row/screen
@@ -3895,7 +4763,253 @@ final class AppCoordinator: ObservableObject {
     }
 }
 
-extension AppCoordinator: VoiceCommandCoordinating {}
+// MARK: - [ALARMS-TIMERS] Alarms + timers (voice stage + Settings leaf)
+
+extension AppCoordinator {
+
+    /// Settings-leaf access to the service's lists. The leaf observes the
+    /// coordinator; the service's publishes reach it through
+    /// `alarmTimersCancellable` (see the property docs).
+    var alarms: [Alarm] { alarmTimersService.alarms }
+    var activeTimers: [TimerItem] { alarmTimersService.activeTimers }
+
+    /// [ALARMS-TIMERS] (2026-09-07) Voice + UI alarm creation — the
+    /// router's alarm stage and the Settings leaf both land here. The
+    /// notification-permission round-trip happens at point of use inside
+    /// the service; the outcome drives the router's honest spoken line
+    /// (and the leaf's error text).
+    func requestAlarmSet(at time: Date, label: String?) async -> AlarmTimerSetOutcome {
+        await alarmTimersService.addAlarm(at: time, label: label)
+    }
+
+    /// [ALARMS-TIMERS] (2026-09-07) Voice + UI timer start — same
+    /// contract as `requestAlarmSet` for the in-app countdown timers.
+    func requestTimerStart(durationSeconds: Int, label: String?) async -> AlarmTimerSetOutcome {
+        await alarmTimersService.startTimer(durationSeconds: durationSeconds, label: label)
+    }
+
+    /// [ALARMS-TIMERS] (2026-09-08) Voice alarm OFF — resolves the most
+    /// recently rung enabled alarm and disables it (persist off, cancel
+    /// the pending daily + any snooze). Synchronous; the router speaks
+    /// the returned outcome. A nil target (no enabled alarms) reports
+    /// `.noAlarm` so the router speaks the honest "no alarms" line.
+    func requestAlarmOff() -> AlarmOffOutcome {
+        guard let target = alarmTimersService.mostRecentlyRungEnabledAlarm() else {
+            return .noAlarm
+        }
+        return alarmTimersService.disableAlarm(id: target.id)
+    }
+
+    /// [ALARMS-TIMERS] (2026-09-08) Voice SNOOZE — arms the one-shot
+    /// re-wake notification for the most recently rung enabled alarm
+    /// without touching its daily repeat. Same synchronous,
+    /// outcome-returning contract as `requestAlarmOff`.
+    func requestAlarmSnooze(minutes: Int) -> AlarmSnoozeOutcome {
+        guard let target = alarmTimersService.mostRecentlyRungEnabledAlarm() else {
+            return .noAlarm
+        }
+        return alarmTimersService.snoozeAlarm(id: target.id, minutes: minutes)
+    }
+
+    /// Settings-leaf mutations (main-confined — the leaf's buttons run on
+    /// main). Toggle re-arms/cancels the pending daily notification;
+    /// remove/cancel persist the removal before cancelling the OS request.
+    func toggleAlarm(id: UUID, enabled: Bool) {
+        alarmTimersService.setAlarmEnabled(id: id, enabled: enabled)
+    }
+
+    func removeAlarm(id: UUID) {
+        alarmTimersService.removeAlarm(id: id)
+    }
+
+    func cancelTimer(id: UUID) {
+        alarmTimersService.cancelTimer(id: id)
+    }
+
+    /// [ALARMS-TIMERS] (2026-09-07) A timer's completion notification
+    /// arrived while the app was foregrounded (the retained
+    /// `AlarmTimerNotificationDelegate` closure — possibly off main): the
+    /// service expires the row (it dispatches to main itself), then the
+    /// completion surfaces as an outcome card and is spoken. The spoken
+    /// line matters: a countdown the user set by voice should end in a
+    /// voice when they are looking at the phone, not just a banner.
+    func handleForegroundTimerFinished(timerID: UUID) {
+        alarmTimersService.expireTimer(id: timerID)
+        let text = L10n.str("timers.finished", locale: activeLocale)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.setOutcome(icon: "timer", text: text, undo: nil)
+            self.speak(text: text)
+        }
+    }
+}
+
+extension AppCoordinator: VoiceCommandCoordinating {
+    /// [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1 — the router's
+    /// "read me my briefing" hook. `fire()` is idempotent per calendar
+    /// day and shares its once-per-day budget with the activation
+    /// trigger, so command + activation can never double-speak.
+    func fireMorningBriefing() {
+        guard let morningBriefing else { return }
+        Task {
+            await morningBriefing.fire()
+            // Briefing persistence task, 2026-09-08: surface the composed
+            // day slot on Home right away (a same-day no-op re-reads the
+            // earlier composition — never clobbers it).
+            await MainActor.run { self.refreshTodayBriefing() }
+        }
+    }
+
+    /// [NEWS-READER] (2026-09-08) The router's "read me the news" hook.
+    /// The reader announces its checking line, fetches and speaks the
+    /// digest — all through the shell's speak queue, with its own card.
+    /// On-demand: no once-per-day budget; the reader's own in-flight
+    /// guard makes a repeat command an honest "already fetching" line.
+    func fireNewsReader() {
+        guard let newsReader else { return }
+        Task {
+            await newsReader.fire()
+        }
+    }
+}
+
+// MARK: - Voice-OS shell v1: push-speech card presentation
+
+extension AppCoordinator {
+    /// Surfaces the speak queue's announcement card through the EXISTING
+    /// Home outcome-card presentation (speech + card, spec §4.6). The
+    /// card IS the content of a push announcement (briefing composition,
+    /// notification read-aloud) — there is no user command behind it —
+    /// so the transcript row is always omitted and the icon/text come
+    /// from the announcement. Cards persist after speech ends: the queue
+    /// clears only its own `currentCard`, never this outcome.
+    fileprivate func presentShellCard(_ card: AnnouncementCard) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.lastOutcome = OutcomeSummary(
+                icon: card.symbolName,
+                text: card.body.isEmpty ? card.title : card.body,
+                transcript: nil,
+                timestamp: Date(),
+                undo: nil
+            )
+        }
+    }
+}
+
+// MARK: - Voice-OS shell v1: speech-note forwarder (SpeakQueue adapter)
+
+/// Adapts the coordinator's per-utterance speech notes (wake-word gate,
+/// voice-session speaking state) onto the `Speaker` instance the
+/// `SpeakQueue` owns, so pushed announcements and interactive replies
+/// keep the same note balance as the direct-speak path. Speech nests and
+/// queue-initiated preemption cancels mid-utterance: the note pair fires
+/// around every single `speak` call, so `speakingCount` always returns
+/// to zero.
+fileprivate final class SpeechNoteForwarder: Speaker {
+    private let inner: Speaker
+    private let onStarted: () -> Void
+    private let onEnded: () -> Void
+
+    init(speaker: Speaker,
+         onStarted: @escaping () -> Void,
+         onEnded: @escaping () -> Void) {
+        self.inner = speaker
+        self.onStarted = onStarted
+        self.onEnded = onEnded
+    }
+
+    func speak(_ text: String, locale: Locale) async {
+        onStarted()
+        await inner.speak(text, locale: locale)
+        onEnded()
+    }
+
+    func cancel() {
+        inner.cancel()
+    }
+}
+
+// MARK: - [FEED-AGENT] Feed agent (feed leaf + Settings → Feeds)
+
+extension AppCoordinator {
+
+    /// Full refresh WITH the loading state (feed-agent task, 2026-09-08)
+    /// — the Refresh/Retry buttons, where the user asked for a fetch and
+    /// deserves the visible "loading" feedback.
+    func refreshFeed() async {
+        guard feedLoadState != .loading else { return }
+        feedLoadState = .loading
+        await performFeedRefresh()
+    }
+
+    /// Refresh-on-appear with TTL: the leaf's `.task` calls this so the
+    /// service can serve its cache while fresh — the network is never
+    /// thrashed by re-entry, and the loading card only shows for the
+    /// FIRST load (re-appearing with content on screen refreshes
+    /// silently behind the existing cards).
+    func refreshFeedIfNeeded() async {
+        guard feedLoadState != .loading else { return }
+        if feedLoadState == .idle {
+            feedLoadState = .loading
+        }
+        await performFeedRefresh()
+    }
+
+    /// The shared fetch + state mapping. Post-await published updates
+    /// hop to the main actor so SwiftUI observes them coherently (the
+    /// house `refreshTodayBriefing` pattern).
+    private func performFeedRefresh() async {
+        let result = await feedService.refresh()
+        await MainActor.run { [self] in
+            feedItems = result.items
+            feedFailedSourceNames = result.failedSourceNames
+            // Honest state mapping: empty + failures = the failed card
+            // (something is wrong); empty + clean = the honest
+            // "nothing here" empty state.
+            feedLoadState = result.items.isEmpty && !result.failedSourceNames.isEmpty
+                ? .failed : .loaded
+        }
+    }
+
+    /// Adds a feed source (Settings → Feeds). False keeps the form's
+    /// draft on screen (duplicate/invalid/cap/storage failure — the
+    /// store is the gate; nothing is claimed that didn't happen).
+    @discardableResult
+    func addFeedSource(name: String, urlString: String) -> Bool {
+        let added = feedSettingsStore.addSource(name: name, urlString: urlString)
+        reloadFeedConfig()
+        return added
+    }
+
+    func removeFeedSource(id: String) {
+        feedSettingsStore.removeSource(id: id)
+        reloadFeedConfig()
+    }
+
+    /// Adds a topic keyword. Same honest-false contract as the source
+    /// add (duplicate/cap/empty rejected by the store).
+    @discardableResult
+    func addFeedTopic(_ topic: String) -> Bool {
+        let added = feedSettingsStore.addTopic(topic)
+        reloadFeedConfig()
+        return added
+    }
+
+    func removeFeedTopic(_ topic: String) {
+        feedSettingsStore.removeTopic(topic)
+        reloadFeedConfig()
+    }
+
+    /// Re-reads the store into the published lists after any mutation —
+    /// the single path both the Settings leaf and the next refresh's
+    /// config read through, so UI and service can never disagree.
+    private func reloadFeedConfig() {
+        let config = feedSettingsStore.load()
+        feedSources = config.sources
+        feedTopics = config.topics
+    }
+}
 
 // MARK: - ConsoleObservabilityBus (routes every event through LogSanitiser)
 
@@ -3917,5 +5031,56 @@ final class ConsoleObservabilityBus: ObservabilityBus {
         let err = clean.errorCode.map { " errorCode=\($0)" } ?? ""
         let ts = Self.logFormatter.string(from: Date())
         print("[\(ts)][\(clean.component)] \(clean.eventType) outcome=\(clean.outcome)\(err) metadata=\(clean.metadata)")
+    }
+}
+
+// MARK: - Voice personalization seams ([VOICE-SETTINGS])
+
+/// Noise-filter toggle: the coordinator's `@Published noiseFilterEnabled`
+/// already persists the UserDefaults key AND hot-swaps the pipeline's
+/// `NoiseSuppressor` — the single writer the Voice personalization
+/// screen binds through.
+extension AppCoordinator: NoiseFilterPreferenceControlling {}
+
+/// Pipeline suspension around one enrollment sample: the same
+/// stop → capture → start cycle as `startSearchPhraseCapture`, minus
+/// the capture itself (the enrollment session owns that). Refuses while
+/// a talk cycle is mid-flight or the assistant is mid-reply — the same
+/// `.busy` reasoning as the search capture.
+extension AppCoordinator: VoicePipelineSuspending {
+
+    func suspendForSampleCapture() -> Bool {
+        guard let voicePipeline else { return true }
+        switch voicePipeline.state {
+        case .idle:
+            guard speakingCount == 0 else { return false }
+            voiceWasSuspendedForEnrollmentSample = true
+            voicePipeline.stop()
+            return true
+        case .capturingCommand, .processing, .routing:
+            return false
+        case .stopped, .error:
+            // Nothing to suspend, but stop anyway: a half-failed start
+            // (.error paths can leave the engine running with a tap
+            // installed) must never collide with the capture's own tap.
+            voiceWasSuspendedForEnrollmentSample = false
+            voicePipeline.stop()
+            return true
+        }
+    }
+
+    func resumeAfterSampleCapture() {
+        guard voiceWasSuspendedForEnrollmentSample else { return }
+        voiceWasSuspendedForEnrollmentSample = false
+        voicePipeline?.start { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.voiceState = .idle
+            case .failure(let err):
+                self.voiceError = "\(err)"
+                self.voiceState = .error("\(err)")
+            }
+        }
     }
 }

@@ -38,7 +38,7 @@ fi
 echo "      device: $UDID"
 
 echo "[3/4] Building (first run takes a while — whisper.cpp)..."
-xcodebuild -project ElderlyAssistant.xcodeproj -scheme ElderlyAssistant \
+xcodebuild -project seniOS.xcodeproj -scheme ElderlyAssistant \
     -destination "platform=iOS,id=$UDID" \
     -derivedDataPath "$DERIVED" \
     -allowProvisioningUpdates build | tail -4

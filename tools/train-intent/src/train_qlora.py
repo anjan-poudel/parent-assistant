@@ -4,10 +4,12 @@ Trains a small multilingual base (Gemma 3 1B / Qwen 3 1.7B) on
 data/train.jsonl (+ valid.jsonl) produced by build_dataset.py.
 
 Training text = seeds/prompt_template.txt with {transcript} filled,
-followed by the row's intent/v2 JSON — the SAME prompt the app sends
-(IntentPrompt.build), so the fine-tune teaches the distribution the app
-actually produces at inference time (training/inference prompt identity
-is a hard requirement, spec README §Training).
+followed by the row's intent/v2 JSON and the base model's EOS token —
+the SAME prompt the app sends (IntentPrompt.build), so the fine-tune
+teaches the distribution the app actually produces at inference time
+(training/inference prompt identity is a hard requirement, spec README
+§Training). EOS per family is appended in to_text — bake-off round 1
+(2026-09-07) failed the §10 gates because no terminator was ever taught.
 
 Resumable: checkpoints save every save_steps; re-running the same command
 resumes from the latest checkpoint in checkpoints/<base-tag>/.
@@ -40,10 +42,20 @@ def load_rows(path: Path) -> list[dict]:
     return [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()]
 
 
-def to_text(row: dict, template: str) -> str:
+def to_text(row: dict, template: str, eos: str = "") -> str:
+    """Training text: raw prompt template + JSON label + the base model's
+    EOS token.
+
+    Bake-off round 1 (2026-09-07, §10 eval) proved the no-EOS format is
+    fatal: with no end-of-generation token the models never emitted an EOG
+    token at inference (0 EOG hits in probe generations) and ran every
+    golden row to the token cap. The JSON label therefore ends with the
+    family-appropriate terminator (gemma `<eos>`, qwen `<|endoftext|>`),
+    so the CLM loss teaches the model to stop after the closing brace.
+    """
     label = {f: row[f] for f in LABEL_FIELDS}
     return (template.replace("{transcript}", row["utterance"]) + "\n"
-            + json.dumps(label, ensure_ascii=False))
+            + json.dumps(label, ensure_ascii=False) + eos)
 
 
 def latest_checkpoint(out_dir: Path) -> str | None:
@@ -77,12 +89,25 @@ def main() -> None:
     assert train_rows, "data/train.jsonl is empty — run build_dataset.py first"
     print(f"[train] {len(train_rows)} train / {len(valid_rows)} valid rows, base={args.base}")
 
-    train_ds = Dataset.from_list([{"text": to_text(r, template)} for r in train_rows])
-    eval_ds = Dataset.from_list([{"text": to_text(r, template)} for r in valid_rows]) or None
-
     base_id = BASE_TAGS[args.base]
     tokenizer = AutoTokenizer.from_pretrained(base_id)
     tokenizer.pad_token = tokenizer.pad_token or tokenizer.eos_token
+
+    # EOS fix (2026-09-07, bake-off round 2): every example ends with the
+    # base model's OWN eos token as text, so the model learns a terminator.
+    # train.jsonl is shared between legs, so the eos STRING is injected at
+    # train time per family (gemma "<eos>" / qwen "<|endoftext|>") — baking
+    # one family's token into the shared file would teach the other family
+    # a foreign (multi-token) terminator. Guard: the eos text must round-trip
+    # as exactly the tokenizer's eos id, else we would silently teach a
+    # multi-token garbage terminator.
+    eos = tokenizer.eos_token
+    eos_ids = tokenizer(eos, add_special_tokens=False)["input_ids"]
+    assert eos_ids == [tokenizer.eos_token_id], (
+        f"eos token {eos!r} tokenizes to {eos_ids}, expected [{tokenizer.eos_token_id}]")
+
+    train_ds = Dataset.from_list([{"text": to_text(r, template, eos)} for r in train_rows])
+    eval_ds = Dataset.from_list([{"text": to_text(r, template, eos)} for r in valid_rows]) or None
 
     bnb = BitsAndBytesConfig(load_in_4bit=True,
                              bnb_4bit_quant_type="nf4",
@@ -111,6 +136,7 @@ def main() -> None:
         # 4/8 keeps the same effective batch 32 — steps and recipe unchanged.
         per_device_train_batch_size=4,
         gradient_accumulation_steps=8,
+        per_device_eval_batch_size=2,  # default 8 OOMs the step-250 eval on this 24 GB GPU
         num_train_epochs=float(cfg["training.epochs"]),
         learning_rate=float(cfg["training.lr"]),
         lr_scheduler_type="cosine",

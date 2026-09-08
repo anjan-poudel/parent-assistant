@@ -1,0 +1,598 @@
+{
+  "schemaVersion": 1,
+  "manuals": [
+    {
+      "id": "iphone",
+      "title": {
+        "en": "iPhone basics",
+        "ne": "आइफोन सुरुवात"
+      },
+      "overview": {
+        "en": "Your iPhone wakes with the button on the side. Then you unlock it, see the home screen, and open apps. This guide shows these steps, useful swipes, and the back arrow that returns you to the previous screen.",
+        "ne": "तपाईंको आइफोन छेउको बटनले ब्युँझन्छ। त्यसपछि खोल्नुहोस्, होम स्क्रिन हेर्नुहोस् र एपहरू खोल्नुहोस्। यो गाइडले यी कदमहरू, उपयोगी स्वाइपहरू र अघिल्लो स्क्रिनमा फर्काउने पछाडिको तीर देखाउँछ।"
+      },
+      "overviewImage": "iphone/overview.png",
+      "steps": [
+        {
+          "number": 1,
+          "text": {
+            "en": "Your phone is asleep. Press the button on the right side to wake it.",
+            "ne": "तपाईंको फोन सुतिरहेको छ। ब्युँझाउन दायाँपट्टिको बटन थिच्नुहोस्।"
+          },
+          "image": "iphone/step-01.png",
+          "annotation": {
+            "label": {
+              "en": "Date and time",
+              "ne": "मिति र समय"
+            },
+            "x": 0.5,
+            "y": 0.2
+          }
+        },
+        {
+          "number": 2,
+          "text": {
+            "en": "The screen shows the time. Look at your phone. Face ID unlocks it.",
+            "ne": "स्क्रिनमा समय देखिन्छ। फोन हेर्नुहोस्। फेस आईडीले फोन खोल्छ।"
+          }
+        },
+        {
+          "number": 3,
+          "text": {
+            "en": "Swipe up from the bottom. The home screen opens with your apps.",
+            "ne": "तलबाट माथि स्वाइप गर्नुहोस्। एपहरूसहित होम स्क्रिन खुल्छ।"
+          }
+        },
+        {
+          "number": 4,
+          "text": {
+            "en": "Open an app. Tap its icon once with your finger.",
+            "ne": "एप खोल्नुहोस्। आफ्नो औंलाले आइकनमा एक पटक थिच्नुहोस्।"
+          }
+        },
+        {
+          "number": 5,
+          "text": {
+            "en": "Leave an app. Swipe up from the bottom. The home screen returns.",
+            "ne": "एप छोड्नुहोस्। तलबाट माथि स्वाइप गर्नुहोस्। होम स्क्रिन फर्कन्छ।"
+          }
+        },
+        {
+          "number": 6,
+          "text": {
+            "en": "Control Center: swipe down from the top-right corner. Swipe up to close it.",
+            "ne": "कन्ट्रोल सेन्टर: माथि दायाँपट्टिबाट तल स्वाइप गर्नुहोस्। बन्द गर्न माथि स्वाइप गर्नुहोस्।"
+          }
+        },
+        {
+          "number": 7,
+          "text": {
+            "en": "In a list, slide a row to the left. A red Delete button appears.",
+            "ne": "सूचीमा एउटा पङ्क्ति बायाँ सार्नुहोस्। रातो 'मेट्नुहोस्' बटन देखिन्छ।"
+          },
+          "image": "iphone/step-07.png",
+          "annotation": {
+            "label": {
+              "en": "Delete",
+              "ne": "मेट्नुहोस्"
+            },
+            "x": 0.95,
+            "y": 0.6
+          }
+        },
+        {
+          "number": 8,
+          "text": {
+            "en": "Many screens show a back arrow at the top left. Tap it to go back.",
+            "ne": "धेरै स्क्रिनमा माथि बायाँपट्टि पछाडिको तीर देखिन्छ। थिचेर फर्कनुहोस्।"
+          },
+          "image": "iphone/step-08.png",
+          "annotation": {
+            "label": {
+              "en": "Back arrow",
+              "ne": "पछाडिको तीर"
+            },
+            "x": 0.07,
+            "y": 0.16
+          }
+        },
+        {
+          "number": 9,
+          "text": {
+            "en": "This Settings screen has one too. The arrow looks the same everywhere.",
+            "ne": "यो सेटिङ स्क्रिनमा पनि हुन्छ। तीर जताततै उस्तै देखिन्छ।"
+          },
+          "image": "iphone/step-09.png",
+          "annotation": {
+            "label": {
+              "en": "Back arrow",
+              "ne": "पछाडिको तीर"
+            },
+            "x": 0.07,
+            "y": 0.24
+          }
+        },
+        {
+          "number": 10,
+          "text": {
+            "en": "Fast back: put your finger on the left edge. Slide it to the right.",
+            "ne": "छिटो फर्कनुहोस्: बायाँ किनारामा औंला राख्नुहोस्। दायाँतिर सार्नुहोस्।"
+          },
+          "image": "iphone/step-10.png",
+          "annotation": {
+            "label": {
+              "en": "Left edge",
+              "ne": "बायाँ किनारा"
+            },
+            "x": 0.045,
+            "y": 0.55
+          }
+        }
+      ]
+    },
+    {
+      "id": "phone",
+      "title": {
+        "en": "Phone calls",
+        "ne": "फोन कल"
+      },
+      "overview": {
+        "en": "The Phone app makes and receives calls. You will learn to dial a number with the keypad, tap the green button to call, end the call, call back from Recents, and go back.",
+        "ne": "फोन एपले कल गर्न र कल लिन मद्दत गर्छ। तपाईं कीप्याडले नम्बर डायल गर्ने, हरियो बटन थिचेर कल गर्ने, कल सक्ने, 'हालैका कल' बाट फेरि कल गर्ने र फर्कने सिक्नुहुनेछ।"
+      },
+      "overviewImage": "phone/overview.png",
+      "steps": [
+        {
+          "number": 1,
+          "text": {
+            "en": "Open the Phone app. It is green with a white phone symbol.",
+            "ne": "फोन एप खोल्नुहोस्। यो सेतो फोनको चिन्ह भएको हरियो एप हो।"
+          }
+        },
+        {
+          "number": 2,
+          "text": {
+            "en": "The keypad shows numbers in four rows.",
+            "ne": "कीप्याडमा नम्बरहरू चार पङ्क्तिमा देखिन्छन्।"
+          },
+          "image": "phone/step-02.png"
+        },
+        {
+          "number": 3,
+          "text": {
+            "en": "Dial the number: tap each number one by one.",
+            "ne": "नम्बर डायल गर्नुहोस्: एउटा–एउटा गरेर थिच्नुहोस्।"
+          },
+          "image": "phone/step-03.png",
+          "annotation": {
+            "label": {
+              "en": "Number keys",
+              "ne": "नम्बर कुञ्जीहरू"
+            },
+            "x": 0.5,
+            "y": 0.45
+          }
+        },
+        {
+          "number": 4,
+          "text": {
+            "en": "Tap the big green button to start the call.",
+            "ne": "कल सुरु गर्न ठूलो हरियो बटन थिच्नुहोस्।"
+          },
+          "image": "phone/step-04.png",
+          "annotation": {
+            "label": {
+              "en": "Call button",
+              "ne": "कल बटन"
+            },
+            "x": 0.5,
+            "y": 0.79
+          }
+        },
+        {
+          "number": 5,
+          "text": {
+            "en": "Hold the phone to your ear. If it is hard to hear, tap Speaker.",
+            "ne": "फोन कानमा राख्नुहोस्। राम्रो नसुनिए स्पिकर थिच्नुहोस्।"
+          }
+        },
+        {
+          "number": 6,
+          "text": {
+            "en": "End the call: tap the red button.",
+            "ne": "कल सक्नुहोस्: रातो बटन थिच्नुहोस्।"
+          }
+        },
+        {
+          "number": 7,
+          "text": {
+            "en": "Call someone again: tap Recents at the bottom.",
+            "ne": "फेरि कल गर्नुहोस्: तल 'हालैका कलहरू' थिच्नुहोस्।"
+          },
+          "image": "phone/step-07.png",
+          "annotation": {
+            "label": {
+              "en": "Recents",
+              "ne": "हालैका कलहरू"
+            },
+            "x": 0.32,
+            "y": 0.93
+          }
+        },
+        {
+          "number": 8,
+          "text": {
+            "en": "Recents shows names. Tap a name to call that person.",
+            "ne": "'हालैका कलहरू' मा नामहरू देखिन्छन्। नाम थिचेर कल गर्नुहोस्।"
+          }
+        },
+        {
+          "number": 9,
+          "text": {
+            "en": "Go back: a back arrow appears at the top left of some screens. It looks like this.",
+            "ne": "फर्कनुहोस्: केही स्क्रिनको माथि बायाँपट्टि पछाडिको तीर देखिन्छ। यस्तो देखिन्छ।"
+          },
+          "image": "phone/step-09.png",
+          "annotation": {
+            "label": {
+              "en": "Back arrow",
+              "ne": "पछाडिको तीर"
+            },
+            "x": 0.07,
+            "y": 0.24
+          }
+        },
+        {
+          "number": 10,
+          "text": {
+            "en": "Fast back: slide your finger from the left edge to the right.",
+            "ne": "छिटो फर्कनुहोस्: बायाँ किनाराबाट दायाँतिर औंला सार्नुहोस्।"
+          }
+        }
+      ]
+    },
+    {
+      "id": "messages",
+      "title": {
+        "en": "Text messages",
+        "ne": "पाठ सन्देश"
+      },
+      "overview": {
+        "en": "Messages sends text notes to family and friends. You will learn to open a chat, write and send a message, return to the chat list, and delete a chat you no longer need.",
+        "ne": "म्यासेजले परिवार र साथीहरूलाई पाठ सन्देश पठाउँछ। कुराकानी खोल्ने, सन्देश लेख्ने र पठाउने, सूचीमा फर्कने, र चाहिने नभएको कुराकानी मेट्ने सिक्नुहुनेछ।"
+      },
+      "overviewImage": "messages/overview.png",
+      "steps": [
+        {
+          "number": 1,
+          "text": {
+            "en": "Open Messages. The icon is green with a white speech bubble.",
+            "ne": "म्यासेज खोल्नुहोस्। आइकन सेतो बोल्ने बबल भएको हरियो छ।"
+          }
+        },
+        {
+          "number": 2,
+          "text": {
+            "en": "The chat list shows your chats. Each row is one chat.",
+            "ne": "कुराकानी सूचीमा तपाईंका कुराकानीहरू छन्। प्रत्येक पङ्क्ति एउटा कुराकानी हो।"
+          },
+          "image": "messages/step-02.png"
+        },
+        {
+          "number": 3,
+          "text": {
+            "en": "Open a chat: tap the name of the person.",
+            "ne": "कुराकानी खोल्नुहोस्: व्यक्तिको नाम थिच्नुहोस्।"
+          },
+          "image": "messages/step-03.png",
+          "annotation": {
+            "label": {
+              "en": "Chat name",
+              "ne": "कुराकानीको नाम"
+            },
+            "x": 0.45,
+            "y": 0.72
+          }
+        },
+        {
+          "number": 4,
+          "text": {
+            "en": "The chat shows your old messages. Yours are on the right side.",
+            "ne": "कुराकानीमा पुराना सन्देशहरू देखिन्छन्। तपाईंका दायाँतिर हुन्छन्।"
+          },
+          "image": "messages/step-04.png"
+        },
+        {
+          "number": 5,
+          "text": {
+            "en": "Write a message: tap the empty box, then tap the letters.",
+            "ne": "सन्देश लेख्नुहोस्: खाली बाकसमा थिचेर अक्षरहरू थिच्नुहोस्।"
+          },
+          "image": "messages/step-05.png"
+        },
+        {
+          "number": 6,
+          "text": {
+            "en": "Send it: tap the blue arrow next to the box.",
+            "ne": "पठाउनुहोस्: बाकसको छेउको निलो तीर थिच्नुहोस्।"
+          }
+        },
+        {
+          "number": 7,
+          "text": {
+            "en": "Back to the list: tap the back arrow at the top left.",
+            "ne": "सूचीमा फर्कनुहोस्: माथि बायाँपट्टिको पछाडिको तीर थिच्नुहोस्।"
+          },
+          "image": "messages/step-07.png",
+          "annotation": {
+            "label": {
+              "en": "Back arrow",
+              "ne": "पछाडिको तीर"
+            },
+            "x": 0.07,
+            "y": 0.16
+          }
+        },
+        {
+          "number": 8,
+          "text": {
+            "en": "Or swipe from the left edge to go back.",
+            "ne": "वा बायाँ किनाराबाट दायाँतिर सारेर फर्कनुहोस्।"
+          }
+        },
+        {
+          "number": 9,
+          "text": {
+            "en": "Delete a chat: slide it left, then tap the red trash button.",
+            "ne": "कुराकानी मेट्नुहोस्: बायाँ सारेर रातो फोहोरको बटन थिच्नुहोस्।"
+          },
+          "image": "messages/step-09.png",
+          "annotation": {
+            "label": {
+              "en": "Delete",
+              "ne": "मेट्नुहोस्"
+            },
+            "x": 0.95,
+            "y": 0.6
+          }
+        },
+        {
+          "number": 10,
+          "text": {
+            "en": "Changed your mind? Tap Cancel at the top. Nothing gets deleted.",
+            "ne": "मन फेरियो? माथिको 'रद्द गर्नुहोस्' थिच्नुहोस्। केही मेटिँदैन।"
+          },
+          "image": "messages/step-10.png",
+          "annotation": {
+            "label": {
+              "en": "Cancel",
+              "ne": "रद्द गर्नुहोस्"
+            },
+            "x": 0.85,
+            "y": 0.12
+          }
+        }
+      ]
+    },
+    {
+      "id": "messenger",
+      "title": {
+        "en": "Messenger",
+        "ne": "मेसेन्जर"
+      },
+      "overview": {
+        "en": "Messenger sends free messages and makes free audio and video calls. You will learn to open a chat, search for a person, send a message, and call. You will also learn how to go back.",
+        "ne": "मेसेन्जरले निःशुल्क सन्देश पठाउने र निःशुल्क अडियो तथा भिडियो कल गर्ने सुविधा दिन्छ। कुराकानी खोल्ने, व्यक्ति खोज्ने, सन्देश पठाउने र कल गर्ने सिक्नुहुनेछ। फर्कने तरिका पनि सिक्नुहुनेछ।"
+      },
+      "overviewImage": "messenger/overview.png",
+      "steps": [
+        {
+          "number": 1,
+          "text": {
+            "en": "Open Messenger. The icon is blue with a white lightning bolt.",
+            "ne": "मेसेन्जर खोल्नुहोस्। आइकन सेतो चट्याङको चिन्ह भएको निलो छ।"
+          }
+        },
+        {
+          "number": 2,
+          "text": {
+            "en": "Messenger shows your chats. Each row is one chat.",
+            "ne": "मेसेन्जरमा तपाईंका कुराकानीहरू देखिन्छन्। प्रत्येक पङ्क्ति एउटा कुराकानी हो।"
+          },
+          "image": "messenger/step-02.png"
+        },
+        {
+          "number": 3,
+          "text": {
+            "en": "Find a person: tap the Search bar and type the name.",
+            "ne": "व्यक्ति खोज्नुहोस्: खोज पट्टी थिचेर नाम लेख्नुहोस्।"
+          },
+          "image": "messenger/step-03.png",
+          "annotation": {
+            "label": {
+              "en": "Search bar",
+              "ne": "खोज पट्टी"
+            },
+            "x": 0.42,
+            "y": 0.47
+          }
+        },
+        {
+          "number": 4,
+          "text": {
+            "en": "Open the chat: tap the person's row.",
+            "ne": "कुराकानी खोल्नुहोस्: व्यक्तिको पङ्क्ति थिच्नुहोस्।"
+          },
+          "image": "messenger/step-04.png",
+          "annotation": {
+            "label": {
+              "en": "Chat name",
+              "ne": "कुराकानीको नाम"
+            },
+            "x": 0.45,
+            "y": 0.66
+          }
+        },
+        {
+          "number": 5,
+          "text": {
+            "en": "Type your message at the bottom. Tap Send.",
+            "ne": "तल आफ्नो सन्देश लेख्नुहोस्। 'पठाउनुहोस्' थिच्नुहोस्।"
+          },
+          "image": "messenger/step-05.png"
+        },
+        {
+          "number": 6,
+          "text": {
+            "en": "Call with video or audio: tap the icons at the top right.",
+            "ne": "भिडियो वा अडियो कल गर्नुहोस्: माथि दायाँपट्टिका आइकन थिच्नुहोस्।"
+          },
+          "image": "messenger/step-06.png"
+        },
+        {
+          "number": 7,
+          "text": {
+            "en": "Back to the chat list: tap the back arrow at the top left.",
+            "ne": "कुराकानी सूचीमा फर्कनुहोस्: माथि बायाँपट्टिको पछाडिको तीर थिच्नुहोस्।"
+          },
+          "image": "messenger/step-07.png",
+          "annotation": {
+            "label": {
+              "en": "Back arrow",
+              "ne": "पछाडिको तीर"
+            },
+            "x": 0.09,
+            "y": 0.24
+          }
+        },
+        {
+          "number": 8,
+          "text": {
+            "en": "Or swipe from the left edge to go back.",
+            "ne": "वा बायाँ किनाराबाट दायाँतिर सारेर फर्कनुहोस्।"
+          }
+        },
+        {
+          "number": 9,
+          "text": {
+            "en": "End the call: tap the red button.",
+            "ne": "कल सक्नुहोस्: रातो बटन थिच्नुहोस्।"
+          }
+        }
+      ]
+    },
+    {
+      "id": "youtube",
+      "title": {
+        "en": "YouTube",
+        "ne": "युट्युब"
+      },
+      "overview": {
+        "en": "YouTube plays videos. You will learn to open the app, see suggestions on the home screen, choose a video from a list, play and pause it, and go back.",
+        "ne": "युट्युबले भिडियो चलाउँछ। एप खोल्ने, होम स्क्रिनमा सुझावहरू हेर्ने, सूचीबाट भिडियो रोज्ने, चलाउने र रोक्ने, र फर्कने सिक्नुहुनेछ।"
+      },
+      "overviewImage": "youtube/overview.png",
+      "steps": [
+        {
+          "number": 1,
+          "text": {
+            "en": "Open YouTube. The icon is red with a white play button.",
+            "ne": "युट्युब खोल्नुहोस्। आइकन सेतो चलाउने बटन भएको रातो छ।"
+          }
+        },
+        {
+          "number": 2,
+          "text": {
+            "en": "The home screen shows video suggestions. Scroll down to see more.",
+            "ne": "होम स्क्रिनमा भिडियो सुझावहरू छन्। थप हेर्न तल सार्नुहोस्।"
+          },
+          "image": "youtube/step-02.png"
+        },
+        {
+          "number": 3,
+          "text": {
+            "en": "A list like this shows videos. Tap one video to watch it.",
+            "ne": "यस्तो सूचीमा भिडियोहरू हुन्छन्। हेर्नको लागि एउटा भिडियो थिच्नुहोस्।"
+          },
+          "image": "youtube/step-03.png",
+          "annotation": {
+            "label": {
+              "en": "Video title",
+              "ne": "भिडियोको नाम"
+            },
+            "x": 0.55,
+            "y": 0.69
+          }
+        },
+        {
+          "number": 4,
+          "text": {
+            "en": "The video plays. Sound comes from the phone speakers.",
+            "ne": "भिडियो चल्छ। फोनको स्पिकरबाट आवाज आउँछ।"
+          },
+          "image": "youtube/step-04.png"
+        },
+        {
+          "number": 5,
+          "text": {
+            "en": "Pause the video. Tap the middle of the screen once. Tap again to play.",
+            "ne": "भिडियो रोक्नुहोस्। स्क्रिनको बीचमा एक पटक थिच्नुहोस्। फेरि चलाउन फेरि थिच्नुहोस्।"
+          }
+        },
+        {
+          "number": 6,
+          "text": {
+            "en": "Make the video fill the screen. Turn your phone sideways.",
+            "ne": "भिडियो पूरै स्क्रिनमा देखाउनुहोस्। फोन तेर्सो पार्नुहोस्।"
+          }
+        },
+        {
+          "number": 7,
+          "text": {
+            "en": "Watch it upright again. Turn your phone back.",
+            "ne": "फेरि सिधा हेर्नुहोस्। फोन फर्काउनुहोस्।"
+          }
+        },
+        {
+          "number": 8,
+          "text": {
+            "en": "Leave the video. The back arrow is at the top left. Tap it to return.",
+            "ne": "भिडियो छोड्नुहोस्। माथि बायाँपट्टि पछाडिको तीर हुन्छ। थिचेर फर्कनुहोस्।"
+          },
+          "image": "youtube/step-08.png",
+          "annotation": {
+            "label": {
+              "en": "Back arrow",
+              "ne": "पछाडिको तीर"
+            },
+            "x": 0.07,
+            "y": 0.24
+          }
+        },
+        {
+          "number": 9,
+          "text": {
+            "en": "Or leave by sliding your finger from the left edge.",
+            "ne": "वा बायाँ किनाराबाट औंला सारेर छोड्नुहोस्।"
+          }
+        },
+        {
+          "number": 10,
+          "text": {
+            "en": "Go back to the home screen. Tap Home at the bottom.",
+            "ne": "होम स्क्रिनमा फर्कनुहोस्। तल 'होम' थिच्नुहोस्।"
+          },
+          "image": "youtube/step-10.png",
+          "annotation": {
+            "label": {
+              "en": "Home",
+              "ne": "होम"
+            },
+            "x": 0.22,
+            "y": 0.97
+          }
+        }
+      ]
+    }
+  ]
+}

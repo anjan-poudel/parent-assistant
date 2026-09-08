@@ -1,7 +1,8 @@
 import SwiftUI
 import UIKit
 
-/// Leaf destinations reachable from the dock (spec §4.3).
+/// Leaf destinations reachable from the dock (spec §4.3), the top bar
+/// and pushed screens.
 enum LeafDestination: Identifiable {
     case meds
     case reminders
@@ -12,6 +13,18 @@ enum LeafDestination: Identifiable {
     /// Directions (directions-screen task, 2026-09-07): the saved-targets
     /// map leaf, docked next to Appliance per the task brief.
     case directions
+    /// Today's stored morning briefing (briefing persistence task,
+    /// 2026-09-08): reached from the Updates leaf's Notifications
+    /// section — the briefing is persistent for the day and this leaf is
+    /// its viewer.
+    case briefing
+    /// "Updates" (home-redesign v3, 2026-09-08): the pushed leaf the top
+    /// bar's bell opens — Notifications + Today + Activity sections in
+    /// one vertical scroll (see `UpdatesScreen`).
+    case updates
+    /// The mixed content feed (feed-agent task, 2026-09-08) — docked
+    /// last so the five pre-existing tiles keep their positions.
+    case feed
 
     var id: String {
         switch self {
@@ -22,6 +35,9 @@ enum LeafDestination: Identifiable {
         case .history: return "history"
         case .settings: return "settings"
         case .directions: return "directions"
+        case .briefing: return "briefing"
+        case .updates: return "updates"
+        case .feed: return "feed"
         }
     }
 }
@@ -58,26 +74,64 @@ struct HomeView: View {
                 // Skinnable background (2026-09-07) — the theme's cream is
                 // today's DesignTokens.background; see `AppTheme`.
                 Color(theme: coordinator.appTheme).ignoresSafeArea()
-                VStack(spacing: 14) {
+                VStack(spacing: 12) {
                     topBar
-                    if let line = coordinator.homeCalendarLine {
-                        calendarStrip(line)
-                    }
-                    if !coordinator.onboardingState.pendingSteps.isEmpty {
-                        setupStrip
-                    }
+                    // Quick access ABOVE the Talk hero (home-redesign v3,
+                    // 2026-09-08): the favourites are one-tap launch
+                    // tiles, not reading matter — the user asked for them
+                    // above the hero, and they render only while at least
+                    // one favourite exists.
                     if !coordinator.favoriteApps.isEmpty {
                         quickAccessRow
                     }
-                    Spacer(minLength: 0)
+                    // The talk stage is FIXED chrome (home-redesign v3):
+                    // hero + the small status/rotating texts under it sit
+                    // between the top bar and the outcome region, so the
+                    // speak button is always in the viewport on every
+                    // phone size.
                     talkStage
-                    Spacer(minLength: 0)
-                    feedbackArea
-                    dock
+                    // Everything BELOW the hero — the transient setup
+                    // nudge (only while onboarding steps remain) and the
+                    // live-caption/outcome text — is ONE scroll region.
+                    // This region between the hero and the pinned bottom
+                    // cluster (history chip + dock, see the safeAreaInset
+                    // below) is the only part of Home that ever clips: on
+                    // an iPhone SE-sized viewport the lower content
+                    // scrolls while the hero, chip and dock never leave
+                    // the screen.
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 12) {
+                            if !coordinator.onboardingState.pendingSteps.isEmpty {
+                                setupStrip
+                            }
+                            feedbackArea
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 4)
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
-                .padding(.bottom, 12)
+            }
+            // Dock pinned to the bottom edge (home-redesign 2026-09-08):
+            // previously the dock was the last child of the fixed VStack,
+            // so any overflow above it (the old widget stack) pushed it
+            // off the viewport on small screens. As a `safeAreaInset` it
+            // always owns the bottom of the screen and the scroll region
+            // above it absorbs overflow instead.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                // Fixed bottom cluster (visual-polish 2026-09-08): the
+                // history chip rides ABOVE the dock, 6pt off its top edge,
+                // both pinned — the scroll region between the hero and
+                // this cluster is the only part of Home that clips.
+                VStack(spacing: 6) {
+                    if showsPinnedHistoryChip {
+                        historyChip
+                    }
+                    dock
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 8)
             }
             .navigationBarHidden(true)
             // Value-based navigation (iOS 16 pattern). The previous
@@ -129,13 +183,16 @@ struct HomeView: View {
             // button, so the gear can never be confused with emergency
             // (2026-09-07). Still exactly one entry point, by voice or by
             // touch. Equal-width 44pt containers on both sides keep the
-            // greeting visually centered.
+            // greeting visually centered — the notifications bell joined
+            // the trailing cluster (home-redesign 2026-09-08), so a
+            // balancing invisible 44pt sits beside settings.
             NavigationLink(value: LeafDestination.settings) {
                 IconBadge(systemImage: "gearshape.fill", tint: .settings, diameter: 32)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text(LocalizedStringKey("home.hub.settings")))
             .frame(width: 44, alignment: .leading)
+            Color.clear.frame(width: 44, height: 44)
             Spacer()
             // The date/greeting area doubles as the calendar's entry
             // point (2026-09-06: calendar lives ON the home screen via
@@ -160,51 +217,57 @@ struct HomeView: View {
             }
             .accessibilityLabel(Text("home.hub.calendar"))
             Spacer()
+            // The ONE notifications affordance (home-redesign v3,
+            // 2026-09-08): a bell with the active-panel badge in the top
+            // bar — the "notifications live here" spot every phone has
+            // taught, and the badge count always matches what the Updates
+            // leaf lists (same registry instance). Bell sits between the
+            // greeting and emergency, keeping emergency at the far edge
+            // exactly where it always was. Tap PUSHES the Updates leaf
+            // (home-redesign v3): the pushed leaf replaced the drawer
+            // sheet, so no sheet machinery lives on Home anymore.
+            NotificationBellButton(count: activeNotificationCount) {
+                navPath.append(LeafDestination.updates)
+            }
             EmergencyIconButton()
                 .frame(width: 44, alignment: .trailing)
         }
         .padding(.top, 8)
     }
 
-    /// Slim strip showing today's Nepali (Bikram Sambat) and Hindu
-    /// calendar dates (2026-09-06) — displayed directly on Home per
-    /// product direction, tappable into the full calendar leaf.
-    /// Deliberately a self-contained little view: when the main-screen
-    /// widget system lands, this becomes its first widget.
-    private func calendarStrip(_ line: String) -> some View {
-        NavigationLink(value: LeafDestination.calendar) {
-            HStack(spacing: 8) {
-                Image(systemName: "calendar")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(DesignTokens.accent)
-                Text(line)
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .task { coordinator.refreshHomeCalendarLineIfNeeded() }
+    /// The Home widget registry (rendering v2, home-redesign 2026-09-08):
+    /// panels now feed the Updates leaf + bell badge instead of a stacked
+    /// card row — evaluated on every render; panels self-hide through
+    /// `makeRow`, so no widget bookkeeping lives in this view. The SAME
+    /// instance feeds the bell on Home and the Updates leaf's
+    /// Notifications section (UpdatesScreen receives it), so badge count
+    /// and leaf rows can never disagree.
+    private let widgetRegistry = HomeWidgetRegistry()
+
+    /// Bell badge derivation — the count of active notification panels,
+    /// straight from the registry rows the Updates leaf lists.
+    private var activeNotificationCount: Int {
+        widgetRegistry.activeNotificationCount(coordinator: coordinator)
     }
 
     /// Slim, dismissible-by-navigation strip (redesign spec §3.1) —
     /// replaces the old full-width card so it doesn't compete with the
-    /// Talk hero for vertical space.
+    /// Talk hero for vertical space. Sits BELOW the hero inside the
+    /// outcome scroll region (home-redesign v3): the wizard only shows
+    /// while onboarding steps remain, and this strip is Home's only
+    /// resume affordance for it — but it is transient per-user and must
+    /// never push the hero off the viewport, so the region below the
+    /// hero owns it.
     private var setupStrip: some View {
         Button { showWizard = true } label: {
             HStack(spacing: 8) {
                 Image(systemName: "exclamationmark.circle.fill")
                     .font(.system(size: 14))
                     .foregroundColor(DesignTokens.accent)
+                // Short static catalog microcopy (visual-polish 2026-09-08):
+                // warm rounded, matching the sibling historyChip capsule.
                 Text(remainingText)
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
                 Spacer()
                 Image(systemName: "chevron.right")
@@ -231,7 +294,7 @@ struct HomeView: View {
     private var quickAccessRow: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("home.quickAccess.caption")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
                 .foregroundColor(DesignTokens.textSecondary)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
@@ -304,31 +367,47 @@ struct HomeView: View {
     /// diverge.
     private var stageVisuals: TalkStageVisuals { session.state.talkVisuals }
 
+    /// Status-line override fed to the hero: the failure-specific error
+    /// caption while erroring, else the transient post-reset notice
+    /// (TALK-CRASH-FIX, 2026-09-07). The error caption wins over the
+    /// notice — a failed restart is the more urgent surface.
+    private var talkStatusLineOverride: String? {
+        if stageVisuals.isError { return errorStatusText }
+        return coordinator.voiceResetNotice
+    }
+
     private var talkStage: some View {
         Group {
             if stageVisuals.isConfirmation {
                 ConfirmationChips(titleKey: stageVisuals.captionKey)
             } else {
-                VStack(spacing: 18) {
+                // The stage reads as ONE unit: hero, its status line and
+                // the hint carousel each sit ≤4pt apart (visual-polish
+                // 2026-09-08 — at the old gaps the texts floated loose
+                // below the button; the hints describe the button right
+                // below them, so they must hug it).
+                VStack(spacing: 4) {
                     TalkButton(session: session,
-                               statusOverride: stageVisuals.isError ? errorStatusText : nil) {
-                        switch session.state {
-                        case .idle:
-                            coordinator.simulateWakeWordDetection()
-                        case .listening, .transcribing, .understanding, .speaking:
-                            // Manual escape hatch: tapping mid-cycle cancels
-                            // and recycles the pipeline (the watchdog does
-                            // the same automatically after 15s).
-                            coordinator.recoverVoiceCycle()
-                        case .error, .stopped:
-                            // Boot-time start failed (mic denied, speech
-                            // denied, no audio input) — tapping retries
-                            // the pipeline start instead of staying dead.
-                            coordinator.recoverVoiceCycle()
-                        case .awaitingConfirmation:
-                            break
-                        }
-                    }
+                               onTap: {
+                                   switch session.state {
+                                   case .idle:
+                                       coordinator.simulateWakeWordDetection()
+                                   case .listening, .transcribing, .understanding, .speaking:
+                                       // Manual escape hatch: tapping mid-cycle cancels
+                                       // and recycles the pipeline (the watchdog does
+                                       // the same automatically after 15s).
+                                       coordinator.recoverVoiceCycle()
+                                   case .error, .stopped:
+                                       // Boot-time start failed (mic denied, speech
+                                       // denied, no audio input) — tapping retries
+                                       // the pipeline start instead of staying dead.
+                                       coordinator.recoverVoiceCycle()
+                                   case .awaitingConfirmation:
+                                       break
+                                   }
+                               },
+                               statusOverride: talkStatusLineOverride,
+                               onLongPressReset: coordinator.resetVoiceActivation)
                     if stageVisuals.showsHintCarousel {
                         HintCarousel()
                     }
@@ -363,7 +442,7 @@ struct HomeView: View {
             }
         } label: {
             Label("state.error.openSettings", systemImage: "gear")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                 .foregroundColor(DesignTokens.accent)
                 .padding(.horizontal, 16)
                 .frame(height: DesignTokens.minTapTargetSize)
@@ -406,11 +485,26 @@ struct HomeView: View {
                     guard !Task.isCancelled else { return }
                     withAnimation(.easeInOut) { outcomeExpanded = false }
                 }
-            } else if !coordinator.conversationHistory.isEmpty {
-                // No outcome yet this session, but there is history —
-                // still offer the on-demand sheet rather than nothing.
-                historyChip
             }
+        }
+    }
+
+    /// Pinned history affordance (visual-polish 2026-09-08): the chip
+    /// moved OUT of the scroll region to sit between it and the dock —
+    /// "closer to the dock menus" — so older conversations stay one
+    /// fixed tap away regardless of scroll position. Visibility mirrors
+    /// the chip's old in-scroll rule exactly: shown while there is
+    /// history to open, no fresh outcome card is already offering the
+    /// sheet, and the stage is not mid-capture (the live pill owns the
+    /// moment). Tapping opens the same history sheet as before.
+    private var showsPinnedHistoryChip: Bool {
+        guard coordinator.lastOutcome == nil,
+              !coordinator.conversationHistory.isEmpty else { return false }
+        switch session.state {
+        case .idle, .speaking, .error, .stopped:
+            return true
+        case .listening, .transcribing, .understanding, .awaitingConfirmation:
+            return false
         }
     }
 
@@ -418,9 +512,9 @@ struct HomeView: View {
         Button { showHistory = true } label: {
             HStack(spacing: 6) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 11, weight: .bold))
+                    .font(DesignTokens.warmFont(size: 11, weight: .bold))
                 Text("home.conversation.title")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
             }
             .foregroundColor(DesignTokens.textSecondary)
             .padding(.horizontal, 14)
@@ -434,9 +528,10 @@ struct HomeView: View {
     // MARK: - Dock (redesign spec §3.1 — replaces the 2×2 hub grid; Home
     // is the only screen that shows it). Items share width equally
     // (`frame(maxWidth: .infinity)` per tile) and labels wrap when they
-    // must, so the five tiles — meds, reminders, call, appliance,
-    // directions (directions-screen task, 2026-09-07) — fit one row at
-    // the standard widths the surrounding screens were tuned at.
+    // must, so the five tiles — medical (the renamed meds tile, medical
+    // task 2026-09-07), reminders, call, appliance, directions
+    // (directions-screen task, 2026-09-07) — fit one row at the standard
+    // widths the surrounding screens were tuned at.
 
     private var dock: some View {
         HStack(spacing: 2) {
@@ -445,6 +540,7 @@ struct HomeView: View {
             dockCallItem
             dockApplianceItem
             dockDirectionsItem
+            dockItem(.feed, icon: "rectangle.stack.fill", tint: .feeds, titleKey: "home.hub.feeds")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 10)
@@ -515,7 +611,7 @@ struct HomeView: View {
     private func leafView(for destination: LeafDestination) -> some View {
         switch destination {
         case .meds:
-            MedsView()
+            MedicalView()
         case .reminders:
             RemindersView()
         case .calendar:
@@ -528,6 +624,17 @@ struct HomeView: View {
             SettingsView()
         case .directions:
             DirectionsView()
+        case .briefing:
+            BriefingView()
+        case .updates:
+            // The pushed Updates leaf (home-redesign v3): the bell in the
+            // top bar opens it; the SAME registry instance Home's bell
+            // badge reads is handed in, so the leaf's Notifications
+            // section and the badge can never disagree.
+            UpdatesScreen(registry: widgetRegistry)
+        case .feed:
+            // The Feed leaf (feed-agent task, 2026-09-08).
+            FeedsView()
         }
     }
 
@@ -566,10 +673,29 @@ struct TalkButton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let onTap: () -> Void
     /// Replaces the state-bound status line when set (used for the
-    /// error state's failure-specific caption).
+    /// error state's failure-specific caption and the post-reset notice).
     var statusOverride: String? = nil
+    /// Long-press reset (TALK-CRASH-FIX, 2026-09-07): holding the hero
+    /// for `DesignTokens.talkResetHoldSeconds` cancels the talk cycle /
+    /// re-primes a dead pipeline through the coordinator's reset path.
+    /// Provided only for reset-eligible states (see
+    /// `VoiceSessionState.supportsTalkReset`) — where it is nil the hero
+    /// stays a plain tap target, and a long hold there still fires the
+    /// tap on release exactly as it did before this feature.
+    var onLongPressReset: (() -> Void)? = nil
 
     @State private var breathe = false
+    /// True while a hold that CAN reset is underway (touch down, past the
+    /// gesture's tracking start) — drives the hold hint + progress ring.
+    @State private var isPressingForReset = false
+    /// Ring fill 0...1, animated linearly so it completes exactly when the
+    /// reset fires (nil while not pressing).
+    @State private var holdProgress: Double?
+    /// Backstop against the tap action ALSO firing on release after a
+    /// successful hold: SwiftUI's long-press gesture normally wins the
+    /// arena and cancels the button's own press, but this guard makes the
+    /// "no double action" promise independent of gesture arbitration.
+    @State private var suppressTapAfterReset = false
 
     /// Single visual mapping for the hero (call-UI fix, 2026-09-07):
     /// icon, fill, halo, labels and motion all come from
@@ -581,14 +707,36 @@ struct TalkButton: View {
 
     private var isBreathing: Bool { visuals.pulses && !reduceMotion }
 
+    /// The hold-to-reset affordance is live (reset-eligible state AND a
+    /// reset action was provided). The Home stage always supplies the
+    /// action, so this effectively means `supportsTalkReset` — kept
+    /// separate so a future reuse of TalkButton without a reset stays a
+    /// plain tap target.
+    private var resetHoldable: Bool {
+        onLongPressReset != nil && session.state.supportsTalkReset
+    }
+
     var body: some View {
-        VStack(spacing: 12) {
-            Button(action: onTap) {
+        // 4pt — the status line HUGS the hero circle so button + caption
+        // read as one unit (visual-polish 2026-09-08; the stage VStack
+        // keeps its own ≤4pt below this line to the hint carousel).
+        VStack(spacing: 4) {
+            Button(action: {
+                // The reset backstop (see `suppressTapAfterReset`): after
+                // a completed hold the release must not ALSO run the tap
+                // action. Quick taps and sub-threshold holds never set the
+                // flag and are unaffected.
+                guard !suppressTapAfterReset else { return }
+                onTap()
+            }) {
                 ZStack {
-                    if isBreathing {
+                    // While a reset hold is underway the breathing rings
+                    // stand down (the arc below is the motion that
+                    // matters); they return on release.
+                    if isBreathing && !isPressingForReset {
                         breathingRings
                     }
-                    if visuals.showsHalo {
+                    if visuals.showsHalo && !isPressingForReset {
                         // Steady state-color halo through every mid-cycle
                         // state (listening → transcribing → understanding
                         // → speaking). The ring used to drop out for
@@ -600,22 +748,23 @@ struct TalkButton: View {
                             .frame(width: DesignTokens.talkButtonDiameter + 28,
                                    height: DesignTokens.talkButtonDiameter + 28)
                     }
+                    // Traffic-light hero (visual-polish 2026-09-08): a
+                    // SOLID state-color disc — flat fills read calmer and
+                    // clearer than the old radial amber "diya" glow, and
+                    // white glyphs hold ≥4.5:1 on every state color (unit
+                    // tested). The breathing rings + halo + shadow carry
+                    // the "alive" light in the state's own color family.
                     Circle()
-                        .fill(heroFill)
+                        .fill(visuals.tint)
                         .frame(width: DesignTokens.talkButtonDiameter,
                                height: DesignTokens.talkButtonDiameter)
-                        // Flat-color heroes (speaking green, transcribing,
-                        // understanding) cast a slightly heavier shadow
-                        // than the amber-gradient glow so they lift off the
-                        // warm background; idle/listening's amber stays at
-                        // 0.35 (2026-09-07 listening-vs-speaking fix).
-                        .shadow(color: visuals.tint.opacity(visuals.usesAmberHero ? 0.35 : 0.45), radius: 10, y: 4)
+                        .shadow(color: visuals.tint.opacity(0.4), radius: 10, y: 4)
                         .overlay(
                             VStack(spacing: 6) {
                                 Image(systemName: visuals.icon)
                                     .font(.system(size: 32))
                                 Text(session.state.buttonText(locale: locale))
-                                    .font(.system(size: 20, weight: .bold))
+                                    .font(DesignTokens.warmFont(size: 20, weight: .bold))
                                     .multilineTextAlignment(.center)
                                     .lineLimit(2)
                                     .minimumScaleFactor(0.7)
@@ -623,6 +772,9 @@ struct TalkButton: View {
                             }
                             .foregroundColor(.white)
                         )
+                    if isPressingForReset {
+                        resetProgressRing
+                    }
                 }
             }
             .buttonStyle(.plain)
@@ -632,9 +784,34 @@ struct TalkButton: View {
             // the failed boot-time pipeline start.
             .disabled(session.state == .awaitingConfirmation)
             .accessibilityLabel(Text(session.state.buttonText(locale: locale)))
+            // The hold-to-reset gesture + VoiceOver hint exist ONLY in
+            // reset-eligible states. An always-attached long press would
+            // swallow the tap on holds ≥ `talkResetHoldSeconds` in
+            // .speaking too — changing the "hold to stop the reply" tap
+            // that users rely on today (TALK-CRASH-FIX, 2026-09-07).
+            .if(resetHoldable, ResetHoldAffordance(
+                holdSeconds: DesignTokens.talkResetHoldSeconds,
+                // 40pt finger travel before the hold is abandoned — far
+                // more forgiving than the 10pt default for unsteady
+                // hands, well inside the hero + halo's 160pt footprint.
+                maxDistance: 40,
+                accessibilityHint: L10n.str("voice.resetA11y", locale: locale),
+                onReset: {
+                    // Re-check at fire time: the session may have moved
+                    // since the hold began (e.g. a router utterance
+                    // flipped it to .speaking mid-hold).
+                    guard session.state.supportsTalkReset else { return }
+                    suppressTapAfterReset = true
+                    onLongPressReset?()
+                },
+                onPressingChanged: handleHoldPressing(_:)
+            ))
 
-            Text(statusOverride ?? session.state.statusText(locale: locale))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .medium))
+            // Warm rounded status line ("I'm ready", hold hint, error
+            // captions) — short human-facing microcopy (visual-polish
+            // 2026-09-08).
+            Text(statusTextLine)
+                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .medium))
                 .foregroundColor(DesignTokens.textSecondary)
                 .multilineTextAlignment(.center)
         }
@@ -646,33 +823,120 @@ struct TalkButton: View {
         }
     }
 
-    /// Amber gradient only while idle/listening (redesign spec §2 —
-    /// "listening/live"); other states keep the existing semantic color so
-    /// error/speaking/etc. stay legible against their own state color.
-    private var heroFill: AnyShapeStyle {
-        guard visuals.usesAmberHero else { return AnyShapeStyle(visuals.tint) }
-        return AnyShapeStyle(
-            RadialGradient(colors: [DesignTokens.talkGlowStart, DesignTokens.talkGlowEnd],
-                           center: UnitPoint(x: 0.35, y: 0.3),
-                           startRadius: 4,
-                           endRadius: DesignTokens.talkButtonDiameter * 0.7)
-        )
+    /// Status line under the hero: the live hold hint while a reset
+    /// press is underway, else the caller's override (error caption /
+    /// post-reset notice), else the state's own status text. The hold
+    /// hint wins over everything — while the finger is down the line
+    /// must say what the press will DO (TALK-CRASH-FIX, 2026-09-07).
+    private var statusTextLine: String {
+        if isPressingForReset {
+            return L10n.str("voice.resetHold", locale: locale)
+        }
+        return statusOverride ?? session.state.statusText(locale: locale)
+    }
+
+    /// Long-press tracking (called on main): arms the hold hint + ring
+    /// while the finger is down, clears everything on release, and
+    /// re-arms the tap action for the next touch. Guarded on
+    /// `resetHoldable` — the gesture is only attached in eligible states,
+    /// but the guard keeps the state coherent if a state change races
+    /// the callbacks.
+    private func handleHoldPressing(_ pressing: Bool) {
+        guard resetHoldable else { return }
+        if pressing {
+            isPressingForReset = true
+            suppressTapAfterReset = false
+            holdProgress = 0
+            guard !reduceMotion else { return }
+            withAnimation(.linear(duration: DesignTokens.talkResetHoldSeconds)) {
+                holdProgress = 1
+            }
+        } else {
+            isPressingForReset = false
+            holdProgress = nil
+            suppressTapAfterReset = false
+        }
+    }
+
+    /// The hold-to-reset arc (TALK-CRASH-FIX, 2026-09-07): a white
+    /// progress ring just outside the hero rim, filling over
+    /// `talkResetHoldSeconds` so it completes at the moment the reset
+    /// fires. Skipped under `accessibilityReduceMotion` — the hero's
+    /// color flip into the stopped pass-through is the feedback there,
+    /// and the hold hint still appears on the status line.
+    @ViewBuilder
+    private var resetProgressRing: some View {
+        if !reduceMotion {
+            ZStack {
+                Circle()
+                    .stroke(Color.white.opacity(0.3), lineWidth: 6)
+                Circle()
+                    .trim(from: 0, to: min(holdProgress ?? 0, 1))
+                    .stroke(Color.white, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: DesignTokens.talkButtonDiameter + 16,
+                   height: DesignTokens.talkButtonDiameter + 16)
+        }
     }
 
     /// Two concentric rings that breathe outward and fade — the
-    /// "signature" motion element (redesign spec §2). Respects
+    /// "signature" motion element (redesign spec §2). The rings breathe
+    /// in the ACTIVE state's color (visual-polish 2026-09-08): blue
+    /// rings at rest, amber while listening — the light follows the
+    /// traffic-light family, never a fixed amber. Respects
     /// `accessibilityReduceMotion` (checked by the caller before this is
     /// even placed in the view tree).
     private var breathingRings: some View {
         ZStack {
             Circle()
-                .stroke(DesignTokens.talkGlowEnd.opacity(breathe ? 0.05 : 0.35), lineWidth: 2)
+                .stroke(visuals.tint.opacity(breathe ? 0.05 : 0.35), lineWidth: 2)
                 .frame(width: breathe ? DesignTokens.talkButtonDiameter + 90 : DesignTokens.talkButtonDiameter + 20,
                        height: breathe ? DesignTokens.talkButtonDiameter + 90 : DesignTokens.talkButtonDiameter + 20)
             Circle()
-                .stroke(DesignTokens.talkGlowEnd.opacity(breathe ? 0.02 : 0.22), lineWidth: 2)
+                .stroke(visuals.tint.opacity(breathe ? 0.02 : 0.22), lineWidth: 2)
                 .frame(width: breathe ? DesignTokens.talkButtonDiameter + 130 : DesignTokens.talkButtonDiameter + 40,
                        height: breathe ? DesignTokens.talkButtonDiameter + 130 : DesignTokens.talkButtonDiameter + 40)
+        }
+    }
+}
+
+// MARK: - Hold-to-reset affordance (TALK-CRASH-FIX, 2026-09-07)
+
+/// Attaches the Talk hero's hold-to-reset long press AND its VoiceOver
+/// hint in one modifier so the two can be applied conditionally (see the
+/// `.if` at the call site). Conditional attachment matters: in
+/// non-reset states (.speaking, .awaitingConfirmation) the hero must
+/// stay a plain tap target — an always-attached long press would swallow
+/// the tap on holds ≥ `talkResetHoldSeconds` there, changing the
+/// "hold to stop the reply" behavior users rely on today.
+private struct ResetHoldAffordance: ViewModifier {
+    let holdSeconds: TimeInterval
+    let maxDistance: CGFloat
+    let accessibilityHint: String
+    let onReset: () -> Void
+    let onPressingChanged: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .accessibilityHint(Text(accessibilityHint))
+            .onLongPressGesture(minimumDuration: holdSeconds,
+                                maximumDistance: maxDistance,
+                                perform: onReset,
+                                onPressingChanged: onPressingChanged)
+    }
+}
+
+/// Conditional-modifier helper: applies `modifier` only while `condition`
+/// holds. Used by the hero's reset affordance, which exists only in
+/// reset-eligible states. File-private — no other file sees it.
+private extension View {
+    @ViewBuilder
+    func `if`<M: ViewModifier>(_ condition: Bool, _ modifier: M) -> some View {
+        if condition {
+            self.modifier(modifier)
+        } else {
+            self
         }
     }
 }
@@ -707,7 +971,7 @@ struct ConfirmationChips: View {
                         .font(.system(size: 24))
                         .foregroundColor(DesignTokens.stateUnderstanding)
                     Text(LocalizedStringKey(titleKey))
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
                         .foregroundColor(DesignTokens.textSecondary)
                 }
                 if let prompt = coordinator.lastAssistantReply, !prompt.isEmpty {
@@ -746,7 +1010,7 @@ struct ConfirmationChips: View {
             }
         } label: {
             Text(LocalizedStringKey(key))
-                .font(.system(size: 24, weight: .bold))
+                .font(DesignTokens.warmFont(size: 24, weight: .bold))
                 .foregroundColor(isYes ? DesignTokens.accent : DesignTokens.textSecondary)
                 .frame(maxWidth: .infinity)
                 .frame(height: DesignTokens.chipHeight)
@@ -767,29 +1031,31 @@ struct ConfirmationChips: View {
 /// The Home talk stage's per-state look, computed in a single switch over
 /// `VoiceSessionState` — the ONE source of truth for every visual on the
 /// stage. Hero icon, in-hero caption, under-hero status line, tint, the
-/// amber "live" fill, the halo/pulse motion, and the auxiliary stage
-/// pieces (hint carousel, confirmation chips, error detail) are all
-/// decided here. Previously the views re-derived these with their own
-/// ad-hoc conditions (`isGlowing`, the halo's `== .listening ||
-/// == .speaking`, `capturePlaceholderKey`) — duplicate mappings that
-/// could diverge and did: transcribing/understanding rendered with no
-/// glow and no halo while speaking kept its ring, and each view had to
-/// be edited in lockstep to keep a state's look consistent. Nothing
-/// below branches on state equality; views read this table only.
+/// flat traffic-light fill, the halo/pulse motion, and the auxiliary
+/// stage pieces (hint carousel, confirmation chips, error detail) are all
+/// decided here. Since visual-polish 2026-09-08 the hero is a SOLID
+/// state-tint disc (traffic-light fills — see `DesignTokens`) and every
+/// glow element (halo, breathing rings, shadow, carousel dots) derives
+/// from the same `tint`, so the light follows the active state family.
+/// Previously the views re-derived these with their own ad-hoc conditions
+/// (`isGlowing`, the halo's `== .listening || == .speaking`,
+/// `capturePlaceholderKey`) — duplicate mappings that could diverge and
+/// did: transcribing/understanding rendered with no glow and no halo
+/// while speaking kept its ring, and each view had to be edited in
+/// lockstep to keep a state's look consistent. Nothing below branches on
+/// state equality; views read this table only.
 struct TalkStageVisuals {
     /// SF Symbol inside the hero (state icons — spec §3.3).
     let icon: String
-    /// Hero tint: flat fill, shadow and halo color (the DesignTokens
-    /// state palette — listening amber, speaking green, etc.).
+    /// Hero tint: flat fill, shadow, halo and glow color (the
+    /// DesignTokens traffic-light state palette — rest blue, wait amber,
+    /// go green, stop red).
     let tint: Color
     /// Big caption inside the hero (`state.*.button` keys).
     let captionKey: String
     /// Small status line under the hero (`state.*.status` keys). For
     /// `.awaitingConfirmation` it is the chips card's title instead.
     let statusKey: String
-    /// Amber radial-gradient hero ("listening/live", redesign spec §2) —
-    /// idle and listening only.
-    let usesAmberHero: Bool
     /// Breathing rings animate around the hero — idle + listening. All
     /// other hero states are motionless by design (redesign spec §2:
     /// the rate and presence of motion itself communicates state).
@@ -817,7 +1083,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateIdle,
                                     captionKey: "state.idle.button",
                                     statusKey: "state.idle.status",
-                                    usesAmberHero: true,
                                     pulses: true,
                                     showsHalo: false,
                                     showsHintCarousel: true,
@@ -828,7 +1093,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateListening,
                                     captionKey: "state.listening.button",
                                     statusKey: "state.listening.status",
-                                    usesAmberHero: true,
                                     pulses: true,
                                     showsHalo: true,
                                     showsHintCarousel: false,
@@ -839,7 +1103,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateTranscribing,
                                     captionKey: "state.transcribing.button",
                                     statusKey: "state.transcribing.status",
-                                    usesAmberHero: false,
                                     pulses: false,
                                     showsHalo: true,
                                     showsHintCarousel: false,
@@ -850,7 +1113,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateUnderstanding,
                                     captionKey: "state.understanding.button",
                                     statusKey: "state.understanding.status",
-                                    usesAmberHero: false,
                                     pulses: false,
                                     showsHalo: true,
                                     showsHintCarousel: false,
@@ -861,7 +1123,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateSpeaking,
                                     captionKey: "state.speaking.button",
                                     statusKey: "state.speaking.status",
-                                    usesAmberHero: false,
                                     pulses: false,
                                     showsHalo: true,
                                     showsHintCarousel: false,
@@ -872,7 +1133,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateUnderstanding,
                                     captionKey: "state.awaitingConfirmation.title",
                                     statusKey: "state.awaitingConfirmation.title",
-                                    usesAmberHero: false,
                                     pulses: false,
                                     showsHalo: false,
                                     showsHintCarousel: false,
@@ -883,7 +1143,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateError,
                                     captionKey: "state.error.button",
                                     statusKey: "state.error.status",
-                                    usesAmberHero: false,
                                     pulses: false,
                                     showsHalo: false,
                                     showsHintCarousel: false,
@@ -894,7 +1153,6 @@ extension VoiceSessionState {
                                     tint: DesignTokens.stateStopped,
                                     captionKey: "state.stopped.button",
                                     statusKey: "state.stopped.status",
-                                    usesAmberHero: false,
                                     pulses: false,
                                     showsHalo: false,
                                     showsHintCarousel: false,

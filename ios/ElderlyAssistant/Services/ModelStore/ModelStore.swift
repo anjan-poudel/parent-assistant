@@ -78,6 +78,9 @@ final class ModelStore {
         if let entry = ModelCatalog.entry(for: id), entry.kind == .tts {
             return ttsVoiceDirectory(for: id) != nil
         }
+        if let entry = ModelCatalog.entry(for: id), entry.kind == .kws {
+            return kwsModelDirectory(for: id) != nil
+        }
         return path(for: id) != nil
     }
 
@@ -132,6 +135,56 @@ final class ModelStore {
             return dest
         } catch {
             emit("bundled_tts_voice_install_failed", outcome: "failure",
+                 modelId: id, errorCode: "copy")
+            return nil
+        }
+    }
+
+    // MARK: - KWS models (sherpa-layout directories)
+
+    /// URL of an installed wake-word (sherpa-onnx KWS) model directory
+    /// (encoder/decoder/joiner .onnx + tokens.txt + keywords.txt). Nil
+    /// when never installed. Mirrors the TTS-voice directory handling —
+    /// KWS models are directory artifacts, not single files.
+    func kwsModelDirectory(for id: ModelID) -> URL? {
+        guard let entry = ModelCatalog.entry(for: id),
+              entry.kind == .kws else { return nil }
+        let dir = rootDirectory
+            .appendingPathComponent("kws", isDirectory: true)
+            .appendingPathComponent(entry.filename, isDirectory: true)
+        var isDir: ObjCBool = false
+        return fileManager.fileExists(atPath: dir.path, isDirectory: &isDir)
+            && isDir.boolValue ? dir : nil
+    }
+
+    /// Installs a bundled wake-word model directory
+    /// (Resources/Models/kws/<name> — bundle subdirectory "kws") into the
+    /// ModelStore. Idempotent — returns the existing directory when
+    /// already installed, nil when the catalog/bundle has no such model
+    /// (the wake-word selection then falls back exactly as before).
+    @discardableResult
+    func installBundledKWSModel(for id: ModelID, bundle: Bundle = .main) -> URL? {
+        guard let entry = ModelCatalog.entry(for: id),
+              entry.kind == .kws,
+              let resourceName = entry.bundledResourceName,
+              let source = bundle.url(forResource: resourceName,
+                                      withExtension: nil,
+                                      subdirectory: "kws") else {
+            return nil
+        }
+        let parent = rootDirectory.appendingPathComponent("kws", isDirectory: true)
+        let dest = parent.appendingPathComponent(entry.filename, isDirectory: true)
+        if fileManager.fileExists(atPath: dest.path) {
+            return dest
+        }
+        do {
+            try ensureDirectory(parent)
+            try fileManager.copyItem(at: source, to: dest)
+            emit("bundled_kws_model_installed", outcome: "success", modelId: id,
+                 errorCode: nil)
+            return dest
+        } catch {
+            emit("bundled_kws_model_install_failed", outcome: "failure",
                  modelId: id, errorCode: "copy")
             return nil
         }

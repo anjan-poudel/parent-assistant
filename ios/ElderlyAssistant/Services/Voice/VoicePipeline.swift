@@ -56,6 +56,13 @@ final class VoicePipeline {
     private let wakeWordGate: WakeWordActivityGate?
     private var speechRecognizer: SpeechRecognizerProtocol
     private var vad: VoiceActivityDetector?
+    /// [NOISE-FILTER] Denoising stage applied to the capture stream only
+    /// (P1 front-end — docs/research-sections/noise-filter.md). Nil (or a
+    /// null stage) by default: byte-identical legacy behavior. The idle
+    /// wake-word path is deliberately NOT processed in this phase — the
+    /// doc gates wake-on-enhanced-stream behind a wake-FRR measurement
+    /// (open question 7), and the VPIO session preset is untouched.
+    private var noiseSuppressor: NoiseSuppressor?
     private let router: CommandRouter
     private let observabilityBus: ObservabilityBus
 
@@ -88,6 +95,59 @@ final class VoicePipeline {
     /// Held only during the VAD-gated capture phase — how far past silence
     /// onset we've counted before firing `finish()`.
     private var silenceCounter: Int = 0
+    /// Capture-generation guard (TALK-CRASH-FIX, 2026-09-07).
+    ///
+    /// Every capture start — and every `stop()` — advances this counter.
+    /// Each capture's async tails (the STT completion, the "stuck in
+    /// listening" wedge guard, and the VAD end-of-utterance hop) capture
+    /// the generation they were started under and bail out when it no
+    /// longer matches. Without the guard, a completion settling a capture
+    /// that `stop()` already cancelled still ran the full post-capture
+    /// tail — `state = .routing`, `resumeWakeListening()` — against a
+    /// stopped pipeline. AppCoordinator maps that .routing onto the UI
+    /// session while it is `.stopped`: an illegal `.stopped → .understanding`
+    /// transition that assertion-crashed in DEBUG ("stale-tail" crash,
+    /// Talk-button tap while listening). The wedge guard had the reverse
+    /// bug — it checked only `state == .capturingCommand`, so a stale
+    /// guard could force-cancel a *newer* capture.
+    ///
+    /// Writes and checks are confined to the main queue (capture start,
+    /// `stop()`, and every tail), so the counter itself never races; only
+    /// `handleAudioBuffer`'s pre-existing `state` reads run on the
+    /// processing queue.
+    private var captureGeneration = 0
+
+    // MARK: - Deferred return to idle (REST-DIP-FIX, 2026-09-08)
+
+    /// [REST-DIP-FIX] Safety ceiling for the deferred return to idle.
+    /// When the recognition completion routes a transcript whose reply is
+    /// still outstanding (the router's async LLM interpreter round-trip —
+    /// see `CommandRouter.isTurnReplyPending`), the pipeline holds
+    /// `.routing` (the session shows "understanding") instead of dropping
+    /// to `.idle` — the reported rest dip between "understanding" and the
+    /// same turn's reply. The hold ends when the router resolves the
+    /// token (`onTurnReplyResolved` → `releaseIdleHold`); this timeout is
+    /// the fallback for a turn that never resolves, and it falls back to
+    /// TODAY's behavior (return to idle / wake listening resumes).
+    ///
+    /// The value MUST exceed the longest legitimate same-turn reply
+    /// latency — the interpreter chain's own bounded round-trip (the
+    /// local leg's timeout, then GeminiClient's 25 s HTTP timeout on
+    /// escalation, all of which guarantee the interpret completion
+    /// eventually fires and clears the token) — so it never fires while a
+    /// reply is genuinely on its way. It sits deliberately below the 40 s
+    /// voice watchdog (AppCoordinator.voiceWatchdogSeconds — the
+    /// coupled-numbers family: capture timeout, wedge guard, Gemini
+    /// HTTP timeout, voice watchdog — re-checked together whenever one
+    /// changes).
+    private static let turnPendingSafetySeconds: TimeInterval = 35
+
+    /// Armed while a route's async reply is outstanding: the pipeline
+    /// holds `.routing` instead of calling `resumeWakeListening()`. The
+    /// generation is the CAPTURE the hold belongs to — `stop()` disarms
+    /// (see `stop()`), and a stale release (a superseded turn's
+    /// completion) can never resume a newer capture's hold.
+    private var idleHold: (generation: Int, safetyWork: DispatchWorkItem)?
 
     init(audioSession: AudioSessionManager,
          audioEngine: AVAudioEngine,
@@ -95,6 +155,7 @@ final class VoicePipeline {
          wakeWordGate: WakeWordActivityGate? = nil,
          speechRecognizer: SpeechRecognizerProtocol,
          voiceActivityDetector: VoiceActivityDetector? = nil,
+         noiseSuppressor: NoiseSuppressor? = nil,
          router: CommandRouter,
          observabilityBus: ObservabilityBus) {
         self.audioSession = audioSession
@@ -103,20 +164,47 @@ final class VoicePipeline {
         self.wakeWordGate = wakeWordGate
         self.speechRecognizer = speechRecognizer
         self.vad = voiceActivityDetector
+        self.noiseSuppressor = noiseSuppressor
         self.router = router
         self.observabilityBus = observabilityBus
 
         self.wakeWordEngine.onDetection = { [weak self] in
             self?.handleWakeDetected()
         }
+        // [REST-DIP-FIX] Release hook for the deferred return to idle: the
+        // router fires it when the turn's async reply dispatch finishes
+        // (after the reply speech was committed). The router's completion
+        // can land on ANY queue (LLaMA/Gemini/URLSession), so the handler
+        // hops to main before touching pipeline state.
+        router.onTurnReplyResolved = { [weak self] in
+            self?.handleTurnReplyResolved()
+        }
         wireVADCallbacks()
     }
 
     private func wireVADCallbacks() {
-        vad?.onEndOfUtterance = { [weak self] in
-            guard let self, self.state == .capturingCommand else { return }
-            self.emit("vad_end_of_utterance", outcome: "success")
-            self.speechRecognizer.finish()
+        // Re-wired at every capture start (handleWakeDetected) and after a
+        // VAD hot-swap — always on the main queue. The closure captures the
+        // capture generation at wire time so a fire that belongs to a
+        // superseded capture can never act on a newer one.
+        guard let vad else { return }
+        let generation = captureGeneration
+        vad.onEndOfUtterance = { [weak self] in
+            guard let self else { return }
+            // The VAD calls this from the pipeline's processing queue
+            // (vad.process runs there, via handleAudioBuffer), but the
+            // recognizer lifecycle is main-confined: a finish() issued
+            // from the processing queue raced a main-queue stop()/cancel()
+            // on the recognizers' internal buffers. Hop to main first,
+            // then re-check generation + state — by the time the hop runs
+            // the capture may already be over (stop(), or a newer capture
+            // started), and finish() must not cross generations.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.captureGeneration == generation,
+                      self.state == .capturingCommand else { return }
+                self.emit("vad_end_of_utterance", outcome: "success")
+                self.speechRecognizer.finish()
+            }
         }
     }
 
@@ -136,6 +224,18 @@ final class VoicePipeline {
         vad = newVAD
         wireVADCallbacks()
         emit("vad_hot_swap", outcome: "success")
+    }
+
+    /// [NOISE-FILTER] Hot-swap the denoising stage (mirrors
+    /// `setVoiceActivityDetector`). Nil = the capture path is
+    /// byte-identical to the pre-stage behavior. Safe mid-session: the
+    /// stage's streaming state starts cold (warmup passthrough), and the
+    /// capture bookends re-arm on the next wake.
+    func setNoiseSuppressor(_ newSuppressor: NoiseSuppressor?) {
+        noiseSuppressor = newSuppressor
+        newSuppressor?.setMode(state == .idle ? .idleListening : .capturing)
+        emit("noise_suppressor_hot_swap", outcome: "success",
+             metadata: ["engine": newSuppressor?.name ?? "off"])
     }
 
     func start(completion: @escaping (Result<Void, Error>) -> Void) {
@@ -167,6 +267,20 @@ final class VoicePipeline {
     }
 
     func stop() {
+        // Invalidate any in-flight capture BEFORE tearing the recognizer
+        // down: its completion (settled by the cancel below, possibly
+        // synchronously) must not run the post-capture tail against a
+        // stopped pipeline — see `captureGeneration` (TALK-CRASH-FIX).
+        captureGeneration += 1
+        // [REST-DIP-FIX] Disarm any deferred return to idle: the hold
+        // belongs to the cancelled turn. (Its generation is already stale
+        // after the bump above, but cancelling the safety work and
+        // clearing the slot now also lets a NEW capture's hold arm — the
+        // arming guard requires an empty slot.)
+        if let hold = idleHold {
+            hold.safetyWork.cancel()
+            idleHold = nil
+        }
         wakeWordEngine.stop()
         vad?.stop()
         speechRecognizer.cancel()
@@ -266,20 +380,91 @@ final class VoicePipeline {
         }
     }
 
-    private func feedCapture(pcm samples: [Int16], buffer: AVAudioPCMBuffer) {
+    // MARK: - Noise filter (P1 front-end)
+
+    /// [NOISE-FILTER] Internal seam (same doctrine as the
+    /// `AudioSessionControlling` test seam — the wiring must be testable
+    /// without the mic tap). The denoising step of the capture fan-out:
+    /// stage applied ONCE, before the STT push and the VAD slice. No
+    /// stage (nil) = identity.
+    func enhanceCaptureSamples(_ samples: [Int16]) -> [Int16] {
+        guard let suppressor = noiseSuppressor else { return samples }
+        let processed = suppressor.process(samples)
+        if !processed.isEmpty || samples.isEmpty {
+            return processed
+        }
+        // Contract violation guard: a stage that returns nothing for a
+        // non-empty chunk would silently starve the capture — fall back
+        // to raw and say so, never corrupt the stream.
+        emit("noise_suppressor_starved", outcome: "fallback",
+             metadata: ["engine": suppressor.name])
+        return samples
+    }
+
+    /// [NOISE-FILTER] Internal seam: capture bookend — mode, streaming
+    /// reset, telemetry window. The stage KEEPS its learned noise
+    /// estimate across captures (room calibration — EnergyVAD's contract
+    /// for its own noiseFloor).
+    func beginNoiseFilterCapture() {
+        noiseSuppressor?.setMode(.capturing)
+        noiseSuppressor?.reset()
+        noiseSuppressor?.captureStarted()
+    }
+
+    /// [NOISE-FILTER] Internal seam: capture bookend — close the
+    /// per-utterance telemetry window, return the stage to the idle
+    /// preset. Idempotent inside the stage (a duplicate end from a
+    /// cancelled capture emits nothing).
+    func endNoiseFilterCapture() {
+        noiseSuppressor?.captureEnded()
+        noiseSuppressor?.setMode(.idleListening)
+    }
+
+    /// [NOISE-FILTER] Internal for the seam tests (no audio hardware
+    /// involved — pure fan-out over caller-supplied PCM).
+    func feedCapture(pcm samples: [Int16], buffer: AVAudioPCMBuffer) {
+        // [NOISE-FILTER] The denoising stage — applied ONCE here, after
+        // the 48→16 kHz conversion and before the fan-out, so the STT
+        // push and the endpointing VAD consume the identical enhanced
+        // stream (the doc's single-choke-point design). No stage (nil) =
+        // byte-identical legacy path. The stage is a STREAMING filter:
+        // per-call output length may vary by up to its latency (its
+        // doc), so the STT buffer is rebuilt from the enhanced samples
+        // instead of mutating the converter's buffer.
+        let enhanced = enhanceCaptureSamples(samples)
         // Push to STT — the STT is in push mode when a VAD is present.
         if !speechRecognizer.ownsAudioCapture {
-            speechRecognizer.feed(buffer)
+            if noiseSuppressor != nil {
+                speechRecognizer.feed(Self.makeInt16Buffer(from: enhanced,
+                                                           format: buffer.format))
+            } else {
+                speechRecognizer.feed(buffer)
+            }
         }
         // Push to VAD — chunks of its expected frame length.
         guard let vad = vad else { return }
-        pcmBuffer.append(contentsOf: samples)
+        pcmBuffer.append(contentsOf: enhanced)
         let frameLength = vad.frameLength
         while pcmBuffer.count >= frameLength {
             let frame = Array(pcmBuffer.prefix(frameLength))
             pcmBuffer.removeFirst(frameLength)
             vad.process(frame)
         }
+    }
+
+    /// Builds a fresh 16 kHz int16 mono buffer holding `samples` — used
+    /// for the STT push when the noise stage's output length differs
+    /// from the converter's chunk length (streaming stage contract).
+    /// Internal for the seam tests (no audio hardware involved).
+    static func makeInt16Buffer(from samples: [Int16],
+                                format: AVAudioFormat) -> AVAudioPCMBuffer {
+        let buffer = AVAudioPCMBuffer(pcmFormat: format,
+                                      frameCapacity: AVAudioFrameCount(max(samples.count, 1)))!
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        samples.withUnsafeBufferPointer { src in
+            buffer.int16ChannelData?.pointee.update(from: src.baseAddress!, count: src.count)
+        }
+        return buffer
     }
 
     // MARK: - Wake handling
@@ -294,9 +479,18 @@ final class VoicePipeline {
         // `simulateWakeWordDetection()` through this same path and must
         // keep working with listening switched off.
         guard state == .idle, wakeWordGate?.allowsWakeDetection ?? true else { return }
+        // A fresh capture epoch: the tails scheduled below (STT
+        // completion, wedge guard, VAD end-of-utterance) all capture
+        // `generation` and are inert once a stop() or a newer capture
+        // bumps the counter — see `captureGeneration` (TALK-CRASH-FIX).
+        captureGeneration += 1
+        let generation = captureGeneration
         state = .capturingCommand
         pcmBuffer.removeAll()
         silenceCounter = 0
+        // [NOISE-FILTER] Capture bookend (start) — see
+        // `beginNoiseFilterCapture` for the contract.
+        beginNoiseFilterCapture()
         emit("wake_word_detected", outcome: "success")
 
         if speechRecognizer.ownsAudioCapture {
@@ -311,9 +505,11 @@ final class VoicePipeline {
             }
             if audioEngine.isRunning { audioEngine.stop() }
         } else {
-            // Push mode: our tap stays live. Prime the VAD.
+            // Push mode: our tap stays live. Prime the VAD and wire its
+            // end-of-utterance callback to THIS capture's generation.
             vad?.reset()
             vad?.start(endOfUtteranceMs: Self.endOfUtteranceMs)
+            wireVADCallbacks()
         }
 
         // `Self.captureTimeoutSeconds` after startListening, if we haven't
@@ -340,14 +536,49 @@ final class VoicePipeline {
         // unaffected; this only widens the worst-case "truly wedged"
         // ceiling, it doesn't change the common-case latency.
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.captureTimeoutSeconds + Self.wedgeGuardMarginSeconds) { [weak self] in
-            guard let self, self.state == .capturingCommand else { return }
+            // Generation guard: this wedge belongs to the capture started
+            // above. It previously checked only `state == .capturingCommand`,
+            // so a wedge left over from a recycled capture could force-cancel
+            // a brand-new capture ~18 s in. With the guard, a stale wedge
+            // (stop(), or a newer capture) is a no-op.
+            guard let self, self.captureGeneration == generation,
+                  self.state == .capturingCommand else { return }
             self.state = .processing
             self.speechRecognizer.cancel()
         }
 
         speechRecognizer.startListening(timeout: Self.captureTimeoutSeconds) { [weak self] result in
             guard let self else { return }
+            // Generation guard: this completion may be settling a capture
+            // that stop() already invalidated (cancel settles the
+            // recognizer, which completes this closure). Running the tail
+            // then would flip `state = .routing` against the stopped
+            // pipeline; AppCoordinator maps that .routing onto the UI
+            // session's `.stopped → .understanding` — an illegal
+            // transition that assertion-crashed in DEBUG (the "stale-tail"
+            // Talk-button crash, TALK-CRASH-FIX). Stale completions are
+            // dropped whole: stop() already reset the VAD/state, or a
+            // newer capture owns the tail.
+            guard self.captureGeneration == generation else { return }
             self.vad?.stop()
+            // [NOISE-FILTER] Capture bookend (end) — see
+            // `endNoiseFilterCapture` for the contract.
+            self.endNoiseFilterCapture()
+            // [REST-DIP-FIX] Requirement 3 — `.processing` (the session's
+            // writing/transcribing state) must precede `.routing` for
+            // EVERY live capture, not just wedge-forced ones: `.processing`
+            // is otherwise only set by the 18 s "stuck in listening"
+            // wedge, so on the normal VAD path (and instant STT
+            // completions) a live capture still in `.capturingCommand`
+            // here would jump straight to `.routing` and the session
+            // would skip the writing state entirely. The completion and
+            // the wedge are both main-confined so they cannot race — this
+            // guard simply covers the completion-won case: if the wedge
+            // already flipped `.processing`, leave it; a stale/stopped
+            // completion never reaches here (generation guard above).
+            if self.state == .capturingCommand {
+                self.state = .processing
+            }
             self.state = .routing
             switch result {
             case .success(let transcript):
@@ -358,8 +589,67 @@ final class VoicePipeline {
                 let msg = "STT: \(err)"
                 DispatchQueue.main.async { self.onSTTError?(msg) }
             }
-            self.resumeWakeListening()
+            if self.router.isTurnReplyPending {
+                // The route handed the turn to an async dispatch whose
+                // reply speech is still outstanding (the LLM interpreter
+                // round-trip). Defer the return to idle — the session
+                // stays on "understanding" (state `.routing`) until the
+                // reply is committed or the safety timeout falls back to
+                // today's behavior — instead of dropping to rest for the
+                // beat before the reply starts (the reported rest dip).
+                self.holdIdleForTurnReply(generation: generation)
+            } else {
+                self.resumeWakeListening()
+            }
         }
+    }
+
+    // MARK: - Deferred return to idle (REST-DIP-FIX, 2026-09-08)
+
+    /// Holds the pipeline on `.routing` (the session's "understanding")
+    /// instead of returning to idle: the turn's async reply is still
+    /// outstanding (`router.isTurnReplyPending`, checked right after
+    /// `route()` returned). Wake listening stays off while held — the
+    /// session is visibly busy — and the escape hatches still work: the
+    /// Talk-button tap mid-cycle runs `stop()` (which disarms the hold),
+    /// and the safety timeout below restores today's behavior for a turn
+    /// that never resolves.
+    private func holdIdleForTurnReply(generation: Int) {
+        guard idleHold == nil else { return }
+        let safetyWork = DispatchWorkItem { [weak self] in
+            // Safety fallback: the turn never resolved (a reply path that
+            // neither spoke nor cleared the token) — fall back to today's
+            // behavior and return to idle / resume wake listening.
+            self?.releaseIdleHold()
+        }
+        idleHold = (generation, safetyWork)
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.turnPendingSafetySeconds,
+            execute: safetyWork)
+    }
+
+    /// Main-queue entry point for the router's resolution notification
+    /// (its interpret completion can land on any queue — LLaMA / Gemini /
+    /// URLSession workers).
+    private func handleTurnReplyResolved() {
+        DispatchQueue.main.async { [weak self] in
+            self?.releaseIdleHold()
+        }
+    }
+
+    /// Ends the deferred return to idle. When the hold is still armed for
+    /// the CURRENT capture, resumes wake listening (the reply's
+    /// speech-start hop was already enqueued by the router before it
+    /// resolved the token, so the session maps to `.speaking`, never to
+    /// rest). Idempotent; a stale hold (superseded capture — generation
+    /// mismatch, or `stop()` already disarmed) is cleared without
+    /// resuming.
+    private func releaseIdleHold() {
+        guard let hold = idleHold else { return }
+        idleHold = nil
+        hold.safetyWork.cancel()
+        guard hold.generation == captureGeneration else { return }
+        resumeWakeListening()
     }
 
     private func resumeWakeListening() {
@@ -379,14 +669,16 @@ final class VoicePipeline {
 
     // MARK: - Observability
 
-    private func emit(_ eventType: String, outcome: String, errorCode: String? = nil) {
+    private func emit(_ eventType: String, outcome: String,
+                      errorCode: String? = nil,
+                      metadata: [String: String] = [:]) {
         observabilityBus.emit(ObservabilityEvent(
             component: "voice_pipeline",
             eventType: eventType,
             durationMs: nil,
             outcome: outcome,
             errorCode: errorCode,
-            metadata: [:]
+            metadata: metadata
         ))
     }
 }

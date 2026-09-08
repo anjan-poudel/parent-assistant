@@ -1,25 +1,26 @@
 import Foundation
 
 /// Wake-word ("Hey Sahayak") configuration surface — open item #4
-/// (docs/OPEN-ITEMS.md). Everything here is deliberately FREE of Porcupine
-/// types: the pieces below (persisted toggle, encrypted access-key store,
-/// pure engine-selection decision, honest status derivation, live audio
-/// gate) are the testable logic behind `AppCoordinator.makeWakeWordEngine()`
-/// and the Settings → "Voice activation" screen. The only Porcupine-touching
-/// code in the app stays behind `#if canImport(Porcupine)` in
-/// `WakeWordEngine.swift` and `AppCoordinator` — nothing in this file may
-/// reference it, so the whole decision table is unit-testable without the
-/// SPM package linked.
+/// (docs/OPEN-ITEMS.md). The pieces below (persisted toggle, pure
+/// engine-selection decision, honest status derivation, live audio gate)
+/// are the testable logic behind `AppCoordinator.makeWakeWordEngine()`
+/// and the Settings → "Voice activation" screen, and they are deliberately
+/// FREE of engine types (no sherpa, no Porcupine): the real engine is
+/// injected as the selection's `sherpaCandidate` closure, so the whole
+/// decision table is unit-testable without the sherpa-onnx SPM package
+/// linked.
 ///
-/// Activation flow for a family member (full steps in
-/// docs/wake-word-setup.md): create a Picovoice Console account, train the
-/// "Hey Sahayak" keyword (English phonemes — see the caveat in that doc),
-/// drop the iOS `.ppn` into ios/ElderlyAssistant/Resources/, add the
-/// Porcupine SPM package in project.yml, and paste the access key either
-/// into Settings (EncryptedLocalStorage, below) or the build-time
-/// Info.plist key. Until ALL of that exists, `NullWakeWordEngine` remains
-/// the honest default and the app behaves exactly as it did before this
-/// feature — Talk button and debug "Simulate wake word" path untouched.
+/// Selection, 2026-09-08 (voice-personalisation P0, slice A + settings
+/// cleanup): the Picovoice/Porcupine free tier ended 2026-06-30, so the
+/// sherpa-onnx keyword spotter (`SherpaKWSWakeWordEngine.attempt()`) is
+/// the ONLY real engine candidate — it needs neither an access key nor a
+/// trained `.ppn`: a bundled model directory + runtime `keywords.txt`
+/// carry the "HEY SAHAYAK" keyword (tools/fetch-kws-model.sh fetches
+/// both). It is invoked once the toggle is ON; when it declines (no model
+/// in this build, or the runtime not linked), the caller falls back to
+/// `NullWakeWordEngine` — the honest default — and `WakeWordStatus` is
+/// derived from that same reality, so no screen can claim "listening"
+/// while the engine is Null.
 
 // MARK: - Persisted "listen for Hey Sahayak" toggle
 
@@ -27,13 +28,11 @@ import Foundation
 /// A UI preference, not a secret — UserDefaults is the right home (same
 /// treatment as `sttModelPreference` / `voiceEngineStack`).
 ///
-/// Defaults to ON. 2026-09-06 rationale: the toggle is inert until the
-/// access key + trained `.ppn` exist, and NO shipped build has either
-/// artifact — so ON today changes nothing (the engine is Null regardless,
-/// and the mic tap itself is already always-on either way; VoicePipeline
-/// installs it at startup). When the artifacts do land, ON means the wake
-/// word activates at the next launch with no extra Settings visit, which
-/// is the whole point of the feature ("always on mic — like Siri"). The
+/// Defaults to ON. 2026-09-08 rationale: with the sherpa model bundled,
+/// ON means the wake word is genuinely listening from the next launch on
+/// with no extra Settings visit — the whole point of the feature
+/// ("always on mic — like Siri"). When the model is absent from the
+/// build the engine is Null regardless, exactly like before. The
 /// battery/always-listening trade-off is disclosed on the Settings screen
 /// (wakeWord.batteryNote), and the family can switch listening off here.
 final class WakeWordPreferences {
@@ -56,109 +55,27 @@ final class WakeWordPreferences {
     }
 }
 
-// MARK: - Encrypted access-key store (Settings paste-in field)
-
-/// Holds the Picovoice access key that a family member pastes into
-/// Settings → "Voice activation" — an exact mirror of `GeminiConfigStore`
-/// (same `EncryptedLocalStorage` = Keychain, Data Protection Complete;
-/// never UserDefaults, never hardcoded). `AppCoordinator.makeWakeWordEngine()`
-/// reads it as the fallback when the build-time Info.plist
-/// (`PicovoiceAccessKey`) is absent.
-final class WakeWordAccessKeyStore: ObservableObject {
-    static let storageKey = "wakeWord.picovoiceAccessKey"
-
-    private let storage: EncryptedLocalStorage
-
-    @Published private(set) var accessKey: String?
-
-    var isConfigured: Bool { accessKey != nil }
-
-    init(storage: EncryptedLocalStorage) {
-        self.storage = storage
-        self.accessKey = Self.load(storage: storage)
-    }
-
-    /// Where the access key can come from, in priority order. Exposed as a
-    /// pure function so the precedence rule is unit-testable: a build-time
-    /// Info.plist key (team builds) wins over the Settings paste-in value.
-    static func resolvedAccessKey(plistKey: String?, storedKey: String?) -> String? {
-        normalized(plistKey) ?? normalized(storedKey)
-    }
-
-    /// Trims and rejects blank strings (mirrors `GeminiConfigStore.save`).
-    static func normalized(_ value: String?) -> String? {
-        guard let value else { return nil }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
-    func save(_ newKey: String) {
-        let trimmed = newKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            clear()
-            return
-        }
-        _ = storage.write(key: Self.storageKey, value: trimmed)
-        accessKey = trimmed
-    }
-
-    func clear() {
-        _ = storage.delete(key: Self.storageKey)
-        accessKey = nil
-    }
-
-    private static func load(storage: EncryptedLocalStorage) -> String? {
-        guard case .success(let value) = storage.read(key: storageKey, type: String.self),
-              !value.isEmpty else { return nil }
-        return value
-    }
-}
-
-// MARK: - Bundled keyword-file lookup
-
-/// The trained "Hey Sahayak" keyword file expected in the app bundle
-/// (ios/ElderlyAssistant/Resources/hey-sahayak_ios.ppn). Filename split so
-/// `Bundle.path(forResource:ofType:)` gets its two halves.
-enum WakeWordModelFile {
-    static let baseName = "hey-sahayak_ios"
-    static let fileExtension = "ppn"
-
-    /// Absolute path of the bundled `.ppn`, or nil when this build has no
-    /// keyword file (the normal state until a family member drops one in).
-    static func bundledPath(in bundle: Bundle = .main) -> String? {
-        bundle.path(forResource: baseName, ofType: fileExtension)
-    }
-}
-
 // MARK: - Pure engine-selection decision
 
-/// Decides between the real Porcupine engine and the Null fallback.
+/// Decides between the sherpa-onnx KWS engine and the Null fallback.
 /// 2026-09-06: factored OUT of `AppCoordinator.makeWakeWordEngine()` — and
-/// out of the `#if canImport(Porcupine)` guard — so the whole decision
-/// table is unit-testable without the Porcupine package linked. The real
-/// engine's construction arrives as the `build` closure, which the app
-/// target only supplies inside its existing compile guard.
+/// out of any compile guard — so the whole decision table is unit-testable
+/// without the sherpa package linked. The real engine's construction
+/// arrives as the `sherpaCandidate` closure, which defaults to the
+/// sherpa-onnx `attempt()` (bundle-direct model resolution).
+/// 2026-09-08 (P0 slice A + settings cleanup): the legacy Porcupine chain
+/// (access key + bundled `.ppn` + guarded init) is gone — the Porcupine
+/// free tier ended 2026-06-30 and sherpa needs none of those artifacts.
+/// The decision is now: toggle ON + a live sherpa candidate ⇒ real engine;
+/// anything else ⇒ nil, and the caller falls back to `NullWakeWordEngine`
+/// (the honest default until a model is installed). `sherpaCandidate` is
+/// NOT invoked when the toggle is off (model load is not free).
 enum WakeWordEngineSelection {
-    /// Returns the real engine when EVERY precondition holds:
-    ///  1. the persisted Settings toggle is ON — OFF means the Null engine
-    ///     even when a key + .ppn are both present (master switch);
-    ///  2. an access key exists;
-    ///  3. the keyword file exists in the bundle;
-    ///  4. `build` succeeds (Porcupine init can throw on a bad key).
-    /// Any failure returns nil and the caller falls back to
-    /// `NullWakeWordEngine` — the honest default until real artifacts
-    /// exist. `build` is NOT invoked when the toggle is off or an artifact
-    /// is missing (Porcupine init is not free).
     static func make(toggleEnabled: Bool,
-                     accessKey: String?,
-                     keywordPath: String?,
-                     build: (_ accessKey: String, _ keywordPath: String) -> WakeWordEngine?) -> WakeWordEngine? {
-        guard toggleEnabled,
-              let accessKey = WakeWordAccessKeyStore.normalized(accessKey),
-              let keywordPath = WakeWordAccessKeyStore.normalized(keywordPath) else {
-            return nil
-        }
-        return build(accessKey, keywordPath)
+                     sherpaCandidate: () -> WakeWordEngine? = { SherpaKWSWakeWordEngine.attempt() }) -> WakeWordEngine? {
+        // Master switch first — the engine must honor it.
+        guard toggleEnabled else { return nil }
+        return sherpaCandidate()
     }
 }
 
@@ -168,7 +85,9 @@ enum WakeWordEngineSelection {
 /// screen exists so a family member can see — in one place — whether the
 /// wake word is really listening, and exactly what is missing if not. No
 /// dead ends: every non-active state names the concrete next step on the
-/// screen (toggle, setup checklist, restart note).
+/// screen (toggle, model note, restart note). 2026-09-08: the states now
+/// describe the sherpa reality — "provisioned" means the sherpa runtime
+/// is linked and the KWS model directory is bundled.
 enum WakeWordStatus: Equatable {
     /// A real engine is live (built at launch) and listening is ON.
     case active
@@ -177,8 +96,9 @@ enum WakeWordStatus: Equatable {
     /// unaffected.
     case off
     /// Listening is ON but this build is missing something the real engine
-    /// needs (runtime link, access key, or the bundled keyword file) — the
-    /// Null engine is in place, i.e. today's exact pre-wake-word behavior.
+    /// needs (the sherpa runtime, or the bundled KWS model directory) —
+    /// the Null engine is in place, i.e. today's exact pre-wake-word
+    /// behavior.
     case needsSetup
     /// Listening is ON and everything is in place, but the engine was
     /// built at launch while listening was OFF (or the artifacts arrived

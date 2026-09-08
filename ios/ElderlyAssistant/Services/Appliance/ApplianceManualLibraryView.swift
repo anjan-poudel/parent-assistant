@@ -14,8 +14,14 @@ struct ApplianceManualLibraryView: View {
     @ObservedObject var model: ApplianceManualLibraryModel
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.locale) private var locale
     @State private var pendingDeletion: ApplianceManualLibraryModel.Manual?
     @State private var didFailToOpen = false
+    @State private var didFailToOpenBundled = false
+    /// The shipped default manuals (2026-09-07), loaded once per open —
+    /// fixed at build time, so a single load suffices (unlike the saved
+    /// list, which reloads because it tracks the cache).
+    @State private var bundled: [BundledManual] = []
 
     private static let thumbnailSize: CGFloat = 64
 
@@ -63,8 +69,18 @@ struct ApplianceManualLibraryView: View {
             } message: {
                 Text("appliance.manual.openFailedMessage")
             }
+            // Bundled-manual open failure (2026-09-07): the message above
+            // talks about deletion/refresh, which is a SAVED-manual
+            // truth — a default manual that cannot open (missing overview
+            // image) gets a title-only alert instead of that lie.
+            .alert("appliance.manual.openFailedTitle", isPresented: $didFailToOpenBundled) {
+                Button("appliance.manual.cancel", role: .cancel) {}
+            }
         }
-        .task { model.reload() }
+        .task {
+            bundled = ApplianceManualLibraryModel.bundledManuals()
+            model.reload()
+        }
     }
 
     private var deletionDialogPresented: Binding<Bool> {
@@ -76,7 +92,10 @@ struct ApplianceManualLibraryView: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.manuals.isEmpty {
+        // The whole-screen empty state belongs to "nothing was ever
+        // saved AND no default manuals shipped" — with defaults on board
+        // the library is never empty, so the search pill and list show.
+        if model.manuals.isEmpty && bundled.isEmpty && !model.isSearching {
             emptyLibrary
         } else {
             VStack(spacing: 14) {
@@ -86,6 +105,14 @@ struct ApplianceManualLibraryView: View {
             .padding(.horizontal, 16)
             .padding(.top, 8)
         }
+    }
+
+    /// The bundled rows after the query filter (default manuals search
+    /// like saved ones — the elder may be looking for "youtube").
+    private var visibleBundled: [BundledManual] {
+        ApplianceManualLibraryModel.filterBundled(bundled,
+                                                  query: model.query,
+                                                  locale: locale)
     }
 
     private var emptyLibrary: some View {
@@ -125,11 +152,24 @@ struct ApplianceManualLibraryView: View {
     @ViewBuilder
     private var results: some View {
         let matches = model.visibleManuals
-        if matches.isEmpty {
+        let bundledMatches = visibleBundled
+        if matches.isEmpty && bundledMatches.isEmpty {
             noResults
         } else {
             ScrollView {
                 LazyVStack(spacing: 12) {
+                    // Default manuals section (2026-09-07): the shipped
+                    // rows sit above the saved list — they are the
+                    // starting point for an elder who just wants to read
+                    // "how do I use this app" with no camera involved.
+                    if !bundledMatches.isEmpty {
+                        bundledSectionHeader
+                        ForEach(bundledMatches, id: \.id) { manual in
+                            BundledManualRow(manual: manual) {
+                                openBundled(manual)
+                            }
+                        }
+                    }
                     ForEach(matches) { manual in
                         row(manual)
                     }
@@ -137,6 +177,15 @@ struct ApplianceManualLibraryView: View {
                 .padding(.bottom, 24)
             }
         }
+    }
+
+    /// Small caps label above the bundled rows.
+    private var bundledSectionHeader: some View {
+        Text("appliance.manual.bundled")
+            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+            .foregroundColor(DesignTokens.textSecondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4)
     }
 
     private var noResults: some View {
@@ -242,5 +291,87 @@ struct ApplianceManualLibraryView: View {
             return
         }
         dismiss()
+    }
+
+    /// Opens a DEFAULT (bundled) manual through the session's
+    /// catalog-based path — no cache entry exists for it (2026-09-07).
+    private func openBundled(_ manual: BundledManual) {
+        guard session.presentBundledManual(manual, locale: session.locale) else {
+            // Overview image missing (the images folder is a separate
+            // content deliverable) — say so and stay in the library.
+            didFailToOpenBundled = true
+            return
+        }
+        dismiss()
+    }
+}
+
+// MARK: - Bundled manual row (2026-09-07, bundled-manuals task)
+
+/// One DEFAULT (bundled) manual row: overview thumbnail, localized title
+/// and overview snippet — non-deletable (ships with the app), the whole
+/// card is the open target. Shared by the library's "Default manuals"
+/// section and the Settings browse leaf.
+struct BundledManualRow: View {
+    let manual: BundledManual
+    let open: () -> Void
+
+    @Environment(\.locale) private var locale
+
+    private static let thumbnailSize: CGFloat = 64
+
+    var body: some View {
+        Button(action: open) {
+            HStack(spacing: 14) {
+                thumbnail
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(BundledManualCatalog.localized(manual.title, locale: locale))
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Text(BundledManualCatalog.localized(manual.overview, locale: locale))
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(minHeight: DesignTokens.minTapTargetSize)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+    }
+
+    /// The manual's overview image, or a book placeholder while the
+    /// images folder has not been populated (a separate deliverable).
+    @ViewBuilder
+    private var thumbnail: some View {
+        Group {
+            if let image = BundledManualCatalog.image(named: manual.overviewImage) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                ZStack {
+                    DesignTokens.userBubble
+                    Image(systemName: "book.closed.fill")
+                        .font(.system(size: 22))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+            }
+        }
+        .frame(width: Self.thumbnailSize, height: Self.thumbnailSize)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .accessibilityHidden(true)
     }
 }

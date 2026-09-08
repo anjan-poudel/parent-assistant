@@ -47,7 +47,22 @@ final class AppLauncher {
         /// The scheme-only root URL `canOpenURL` probes and `open` opens
         /// (e.g. `whatsapp://`). The schemes are compile-time constants,
         /// so the forced unwrap can never trap.
-        var rootURL: URL { URL(string: "\(scheme)://")! }
+        ///
+        /// Apple's own telephony schemes are the exception (tel-scheme
+        /// fix, 2026-09-07): `tel` and `sms` root URLs are built WITHOUT
+        /// slashes (`tel:`, `sms:`). iOS does not handle the slashed
+        /// `tel://` form when the number is EMPTY — it shows an
+        /// Open/Cancel confirmation sheet that then opens nothing — while
+        /// the slashes-less `tel:` opens the Phone app's dialer and
+        /// `canOpenURL("tel:")` is the honest probe. Every other catalog
+        /// scheme keeps `scheme://`, which is the form third-party apps
+        /// register.
+        var rootURL: URL {
+            if scheme == "tel" || scheme == "sms" {
+                return URL(string: "\(scheme):")!
+            }
+            return URL(string: "\(scheme)://")!
+        }
     }
 
     /// The curated catalog, in display order: Apple built-ins first, then

@@ -89,4 +89,96 @@ final class VoiceSessionStateMachineTests: XCTestCase {
         }
         wait(for: [lateCheck], timeout: 3.0)
     }
+
+    // MARK: - Talk-crash regression anchors (TALK-CRASH-FIX, 2026-09-07)
+
+    /// The DEBUG assertion crashes behind "the app crashes when I tap the
+    /// Talk button while it's listening" were ILLEGAL transitions this
+    /// machine's own table rejected. Pinning the rejection the fix
+    /// guarantees never gets attempted:
+    ///
+    ///  `.stopped → .understanding` — a stale capture completion
+    ///      (settled by the recycle's cancel()) used to run the
+    ///      pipeline's post-capture tail (`state = .routing` →
+    ///      `.understanding`) against the session `recoverVoiceCycle()`
+    ///      had just left `.stopped`. The pipeline's capture-generation
+    ///      guard now drops stale tails before they reach this mapping.
+    ///
+    /// The table ALSO used to reject `.stopped → .speaking` — the
+    /// re-prompt speaking before the recycle's restart completed;
+    /// `recoverVoiceCycle` still defers that speech to the restart
+    /// completion (`.stopped → .idle → .speaking`). STOPPED-SPEAKING-FIX
+    /// (2026-09-08) makes it LEGAL, mirroring `.idle`: push speech — the
+    /// launch morning briefing (fires before the pipeline starts:
+    /// briefing_fired → pipeline_started), notification read-alouds — can
+    /// legitimately start while the session is `.stopped`, before the
+    /// pipeline has been primed. `.speaking → .stopped` stays legal so
+    /// the round trip closes when the utterance ends and the pipeline
+    /// state re-lands.
+    @MainActor
+    func testStoppedAcceptsPushSpeechButRejectsTheStaleCaptureTail() {
+        XCTAssertFalse(VoiceSessionState.stopped.canTransition(to: .understanding),
+                       "a stale capture tail must never drive .stopped → .understanding")
+        XCTAssertTrue(VoiceSessionState.stopped.canTransition(to: .speaking),
+                      "push speech (launch briefing, read-aloud) may start while .stopped")
+        XCTAssertTrue(VoiceSessionState.speaking.canTransition(to: .stopped),
+                      ".speaking → .stopped must stay legal so the round trip closes")
+    }
+
+    /// The reset path needs NO new transition-table semantics: holding
+    /// the Talk button mid-capture recycles the pipeline, which travels
+    /// existing legal transitions (busy → .stopped on stop, .stopped →
+    /// .idle on restart). A tap after the reset still re-prompts through
+    /// the legal .idle → .speaking async-reply transition.
+    @MainActor
+    func testResetPathIsFullyLegalWithoutNewTransitions() {
+        let machine = VoiceSessionStateMachine()
+        machine.transition(to: .idle)
+        machine.transition(to: .listening)   // user holds the Talk button mid-capture
+        machine.transition(to: .stopped)     // recycle: pipeline stop()
+        XCTAssertEqual(machine.state, .stopped)
+        machine.transition(to: .idle)        // recycle: restart lands
+        XCTAssertEqual(machine.state, .idle)
+        XCTAssertTrue(VoiceSessionState.idle.canTransition(to: .speaking))
+        XCTAssertEqual(machine.state, .idle)
+    }
+
+    // MARK: - Launch push-speech anchors (STOPPED-SPEAKING-FIX, 2026-09-08)
+
+    /// Launch-briefing shape of the crash this fix removes: the morning
+    /// briefing speaks BEFORE the voice pipeline starts (log order
+    /// briefing_fired → pipeline_started) while the session is still
+    /// `.stopped` — `SpeechNoteForwarder.onStarted` →
+    /// `noteSpeakingStarted()` → `speakingCount` 0→1 promotes the
+    /// pre-speech-excluded `.stopped` session through
+    /// `handlePipelineState` to `.speaking`. That used to hit the DEBUG
+    /// assertionFailure ("Illegal VoiceSessionState transition:
+    /// stopped → speaking"). The promotion must land `.speaking`, and a
+    /// speaking-ended fallback to `.idle` (the pipeline has since
+    /// reported) must close the round trip legally.
+    @MainActor
+    func testLaunchBriefingSpeaksFromStoppedAndSettlesToIdle() {
+        let machine = VoiceSessionStateMachine()
+        XCTAssertEqual(machine.state, .stopped)   // briefing fires pre-pipeline
+        machine.transition(to: .speaking)          // speakingCount 0→1 promotion
+        XCTAssertEqual(machine.state, .speaking)
+        machine.transition(to: .idle)              // utterance ended, pipeline idle
+        XCTAssertEqual(machine.state, .idle)
+    }
+
+    /// `supportsTalkReset` — the hold-to-reset offer set: the stuck /
+    /// active cycle plus the dead states get the reset; `.speaking` and
+    /// `.awaitingConfirmation` keep plain tap semantics.
+    @MainActor
+    func testTalkResetIsOfferedExactlyFromTheResetStates() {
+        let offered: [VoiceSessionState] = [.idle, .listening, .transcribing,
+                                            .understanding, .error, .stopped]
+        for state in offered {
+            XCTAssertTrue(state.supportsTalkReset, "\(state) should offer the hold-to-reset")
+        }
+        for state in [VoiceSessionState.speaking, .awaitingConfirmation] {
+            XCTAssertFalse(state.supportsTalkReset,
+                           "\(state) must NOT offer the hold-to-reset")
+        }
+    }
 }

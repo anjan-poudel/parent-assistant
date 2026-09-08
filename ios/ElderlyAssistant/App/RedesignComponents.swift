@@ -83,7 +83,7 @@ struct FaceAvatar: View {
 
     var body: some View {
         Circle()
-            .fill(LinearGradient(colors: [DesignTokens.talkGlowStart, DesignTokens.talkGlowEnd],
+            .fill(LinearGradient(colors: [DesignTokens.warmGlowStart, DesignTokens.warmGlowEnd],
                                   startPoint: .topLeading, endPoint: .bottomTrailing))
             .frame(width: diameter, height: diameter)
             .overlay(
@@ -98,10 +98,42 @@ struct FaceAvatar: View {
 // voice-triggered calling — redesign spec §3.2, trial voice wiring)
 
 enum PhoneDialer {
+    /// Deliberately `tel://` WITH slashes (tel-scheme fix, 2026-09-07):
+    /// the slashed form only misbehaves for an EMPTY number — iOS shows
+    /// a dead Open/Cancel sheet instead of the dialer. This URL always
+    /// carries real digits (the guard below returns nil when the phone
+    /// normalizes to none), and WITH a number the slashed form dials
+    /// correctly. The numberless case lives in
+    /// `AppLauncher.App.rootURL`, which special-cases `tel:`/`sms:`
+    /// without slashes for the quick-access tiles.
     static func url(for phone: String) -> URL? {
         let digits = phone.filter { $0.isNumber || $0 == "+" }
         guard !digits.isEmpty else { return nil }
         return URL(string: "tel://\(digits)")
+    }
+}
+
+// MARK: - Unanswered-call row action (missed-calls task, 2026-09-07)
+
+/// Opens the Phone app with an EMPTY dialer — the unanswered-call row's
+/// action in HistoryView and CallView's recentActivitySection.
+///
+/// Why an empty `tel://` is the best available deep link: the caller of
+/// an unanswered call is ANONYMOUS to this app (iOS masks the identity
+/// AND the number of calls that involve other apps), so there is no
+/// number to dial; and no public URL scheme opens the Phone app's
+/// Recents tab directly. An empty `tel://` is the closest honest
+/// surface — the Phone app opens and the call genuinely lives in
+/// Recents, one tab away. Never dials anything: no digits ride on the
+/// link.
+///
+/// Views call this from button actions — main queue by contract, the
+/// same direct `UIApplication.shared.open` pattern as
+/// `EmergencyIconButton`.
+enum PhoneAppOpener {
+    static func openDialer() {
+        guard let url = URL(string: "tel://") else { return }
+        UIApplication.shared.open(url)
     }
 }
 
@@ -159,12 +191,19 @@ struct HintCarousel: View {
     @State private var index = 0
 
     var body: some View {
+        // Warm rounded catalog microcopy + a page-dot in the REST state's
+        // blue (visual-polish 2026-09-08: the carousel only shows under
+        // the idle hero, so its accent follows the hero's blue instead of
+        // the old fixed amber glow).
         VStack(spacing: 6) {
             Text("home.hint.label")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
                 .foregroundColor(DesignTokens.textSecondary)
             Text(LocalizedStringKey(Self.phraseKeys[index]))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                // Static/rotating text under the speak button is caption-
+                // sized (home-redesign v3, 2026-09-08): this rotating
+                // phrase is an idle affordance, not reading matter.
+                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                 .foregroundColor(DesignTokens.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
@@ -176,7 +215,7 @@ struct HintCarousel: View {
             HStack(spacing: 4) {
                 ForEach(Self.phraseKeys.indices, id: \.self) { i in
                     Circle()
-                        .fill(i == index ? DesignTokens.talkGlowEnd : DesignTokens.textSecondary.opacity(0.3))
+                        .fill(i == index ? DesignTokens.stateIdle : DesignTokens.textSecondary.opacity(0.3))
                         .frame(width: 5, height: 5)
                 }
             }
@@ -222,8 +261,11 @@ struct LiveCaptionPill: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+            // Header is short catalog microcopy → warm rounded; the
+            // transcript BELOW stays regular (it is the user's own
+            // dynamic speech — visual-polish 2026-09-08).
             Text("home.liveCaption.label")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
                 .foregroundColor(DesignTokens.textSecondary)
             if let text = readyText {
                 // Full text, immediately — NOT a per-character typewriter.
@@ -237,7 +279,11 @@ struct LiveCaptionPill: View {
                 // `AppCoordinator.conversationHistory`; this just stops
                 // showing a deliberately-incomplete slice of it.
                 Text(text)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    // Caption-sized transcript (home-redesign v3,
+                    // 2026-09-08) — the spoken words are ephemeral
+                    // under-hero text; the full exchange lives in the
+                    // Updates leaf's Activity log.
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
                     .transition(.opacity)
             }
@@ -309,11 +355,15 @@ struct OutcomeCardView: View {
                                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                                 .foregroundColor(DesignTokens.textSecondary)
                             Text(heard)
-                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                                // Caption-sized outcome rows (home-redesign
+                                // v3, 2026-09-08): the assistant already
+                                // SPOKE this text — the visual channel is a
+                                // confirmation glance, not a read.
+                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                                 .foregroundColor(DesignTokens.textPrimary)
                         case .assistant(let response):
                             Text(response)
-                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                                 .foregroundColor(DesignTokens.textPrimary)
                         }
                     }
@@ -431,6 +481,7 @@ enum HistoryRowOrderer {
 /// transcript the way a bare `.reversed()` did.
 struct ConversationHistorySheet: View {
     @ObservedObject var coordinator: AppCoordinator
+    @Environment(\.dismiss) private var dismiss
 
     /// Older-than-the-window pages already fetched via "Show more",
     /// display order (each page newest-first). Drawn below the live
@@ -470,9 +521,27 @@ struct ConversationHistorySheet: View {
                     .frame(width: 36, height: 4)
                     .frame(maxWidth: .infinity)
                     .padding(.top, 8)
-                Text("home.conversation.title")
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                // Title row with an explicit ✕ (2026-09-08 back/close
+                // audit): the sheet's drag indicator is hidden and a
+                // swipe-down is the only dismissal otherwise — an elder
+                // must never be stranded on the history sheet.
+                HStack(alignment: .center, spacing: 12) {
+                    Text("home.conversation.title")
+                        .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                        .foregroundColor(DesignTokens.textPrimary)
+                    Spacer(minLength: 0)
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundColor(DesignTokens.textSecondary)
+                            .accessibilityLabel(Text("common.close"))
+                    }
+                    .buttonStyle(.plain)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
+                }
                 if visibleRows.isEmpty {
                     Text("home.conversation.empty")
                         .font(.system(size: DesignTokens.minBodyPointSize))

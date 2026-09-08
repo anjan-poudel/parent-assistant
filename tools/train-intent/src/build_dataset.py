@@ -13,12 +13,47 @@ Guards (spec §9 / §10):
  - mixture: targets 60% stt-noised / 25% clean devanagari / 15% romanized
    + code-switched (spec §9.2), best-effort given available supply
 """
+
+# Mixture mechanics (rewritten for bake-off round 2, 2026-09-07):
+#
+# Round 1 deduped EVERY source against one shared normalized key (the
+# lossy app-mirror skeleton key — \W strips Devanagari matras, so it only
+# sees the consonant skeleton). STT noise mostly disturbs matras, so
+# nearly every noised row skeleton-collided with its clean teacher twin
+# and was dropped as a "dup": the round-1 corpus ended up ~86% clean /
+# ~14% noised instead of the spec's 60/25/15.
+#
+# Round 2 splits the corpus into three REGISTER buckets before any
+# filtering, dedupes INSIDE each bucket with a lossless-ish key (matras
+# preserved — two rows that differ by a matra are different training
+# examples), and only then samples the buckets toward the §9.2 ratio:
+#
+#   stt_noised             noised.jsonl rows (any register) — the scarce
+#                          supply; ALL kept rows anchor the total so the
+#                          60% target is met exactly when clean supply
+#                          allows (it does)
+#   clean_devanagari       teacher + edge rows, register devanagari or
+#                          elder_fragmented (both Devanagari script)
+#   romanized_codeswitched teacher + edge rows, register romanized or
+#                          code_switched
+#
+# Measured supply (2026-09-07): noised.jsonl holds 29,304 rows but only
+# 2,458 DISTINCT utterances — whisper outputs converge hard, so the file
+# is ~12 copies per text; 703 of the distinct texts carry CONTRADICTORY
+# labels across their copies (different parents collapsed onto one
+# transcript) and are dropped wholesale rather than taught arbitrary
+# labels. teacher.jsonl: ~14.3k distinct rows across the 4 registers,
+# BUT 0 ack_med rows (seed taxonomy never defined the intent — round-1
+# ack gates failed because ack was never taught; data/edge_cases.jsonl
+# supplies them, always kept, exempt from clean-bucket sampling).
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import random
 import re
+import string
 import unicodedata
 from pathlib import Path
 
@@ -37,12 +72,36 @@ VALID_ACTIONS = {"ack_med", "call", "emergency", "set_reminder", "health_query",
 
 DEV_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
 
+# register → mixture bucket. elder_fragmented is Devanagari-script speech,
+# so it belongs to the clean-devanagari side of the §9.2 axis.
+BUCKET_OF_REGISTER = {
+    "devanagari": "clean_devanagari",
+    "elder_fragmented": "clean_devanagari",
+    "romanized": "romanized_codeswitched",
+    "code_switched": "romanized_codeswitched",
+}
+NOISED_SOURCES = ("stt_noise",)
+EDGE_SOURCES = ("edge_cases",)
+BUCKET_NAMES = ("stt_noised", "clean_devanagari", "romanized_codeswitched")
+
 
 def normalize(text: str) -> str:
     """Mirror of the app's NepaliTextNormalizer (leakage checks must use
     the SAME normalization the cache/resolver keys use)."""
     nfc = unicodedata.normalize("NFC", text).translate(DEV_DIGITS).lower()
     stripped = re.sub(r"[।॥\W_]+", " ", nfc, flags=re.UNICODE)
+    return " ".join(stripped.split())
+
+
+def lossless_key(text: str) -> str:
+    """Dedupe key (NOT the leakage key): near-lossless — NFC, Devanagari
+    digits folded, casefolded, ASCII punctuation + danda stripped,
+    whitespace collapsed. Keeps vowel signs: two utterances that differ
+    by a matra are distinct training examples (round-1's matra-stripping
+    skeleton key erased the whole STT-noised axis). Only true textual
+    duplicates (punct/space/case-level differences) collapse."""
+    nfc = unicodedata.normalize("NFC", text).translate(DEV_DIGITS).casefold()
+    stripped = re.sub(r"[" + re.escape(string.punctuation) + r"॥।\s]+", " ", nfc)
     return " ".join(stripped.split())
 
 
@@ -72,41 +131,110 @@ def main() -> None:
     args, cfg = load_config(parser)
     root = Path(__file__).parent.parent
 
-    sources = [root / "data" / "sample.jsonl"] if args.smoke else [
-        root / "data" / "teacher.jsonl",
-        root / "data" / "noised.jsonl",
-    ]
-    rows: list[dict] = []
+    if args.smoke:
+        sources = [root / "data" / "sample.jsonl"]
+    else:
+        sources = [root / "data" / "teacher.jsonl",
+                   root / "data" / "noised.jsonl",
+                   root / "data" / "edge_cases.jsonl"]
+    raw: list[dict] = []
     for src in sources:
         if not src.exists():
-            print(f"[build] warning: {src} missing — skipped")
+            print(f"[build] warning: {src.name} missing — skipped")
             continue
         with open(src, encoding="utf-8") as f:
-            rows.extend(json.loads(line) for line in f if line.strip())
+            raw.extend(json.loads(line) for line in f if line.strip())
 
     golden = load_golden_keys(root / "eval" / "golden_corpus.jsonl")
+    frac = {b: float(cfg[f"mixture.{b}"]) for b in
+            ("stt_noised", "clean_devanagari", "romanized_codeswitched")}
 
-    seen: set[str] = set()
-    kept: list[dict] = []
-    dropped = {"schema": 0, "dup": 0, "leak": 0}
-    for row in rows:
+    # Bucket + validate + leak-check first, dedupe inside each bucket after.
+    buckets: dict[str, list[dict]] = {b: [] for b in BUCKET_NAMES}
+    dropped = {"schema": 0, "leak": 0}
+    for row in raw:
         if not valid_row(row):
             dropped["schema"] += 1
             continue
-        key = normalize(row["utterance"])
-        if key in golden:
+        if normalize(row["utterance"]) in golden:
             dropped["leak"] += 1
             continue
-        if key in seen:
-            dropped["dup"] += 1
+        source = (row.get("source") or "").split(":")[0]
+        register = row.get("register")
+        if source in NOISED_SOURCES:
+            bucket = "stt_noised"
+        elif register and register in BUCKET_OF_REGISTER:
+            bucket = BUCKET_OF_REGISTER[register]
+        else:
+            dropped["schema"] += 1  # no usable register → not classifiable
             continue
-        seen.add(key)
-        kept.append(row)
+        buckets[bucket].append(row)
 
     rng = random.Random(int(cfg["mixture.seed"]))
-    rng.shuffle(kept)
-    n_valid = max(1, int(len(kept) * float(cfg["mixture.valid_fraction"])))
-    valid, train = kept[:n_valid], kept[n_valid:]
+
+    # Per-bucket label-conflict guard + dedupe (lossless key, first wins
+    # after a deterministic shuffle). CONFLICT GUARD FIRST: when several
+    # copies of the SAME utterance disagree on the action, every copy is
+    # dropped — teaching one arbitrary label for a text that occurs with
+    # two is noise (measured: 703 noised keys carry contradictory labels;
+    # the two whisper variants of different parents collapse onto one
+    # transcript). Only then dedupe within the surviving rows.
+    kept: dict[str, list[dict]] = {}
+    for bucket in BUCKET_NAMES:
+        rows = list(buckets[bucket])
+        by_action: dict[str, set] = {}
+        for row in rows:
+            by_action.setdefault(lossless_key(row["utterance"]), set()).add(row["action"])
+        conflict_keys = {k for k, acts in by_action.items() if len(acts) > 1}
+        rows = [r for r in rows if lossless_key(r["utterance"]) not in conflict_keys]
+        rng.shuffle(rows)
+        by_key: dict[str, dict] = {}
+        for row in rows:
+            by_key.setdefault(lossless_key(row["utterance"]), row)
+        kept[bucket] = list(by_key.values())
+        if conflict_keys:
+            print(f"[build] {bucket}: dropped {len(conflict_keys)} "
+                  "conflicting-label keys")
+
+    # A noised text that is byte-equal to a surviving clean text is not an
+    # STT-noised example — it is the clean example under a noise label that
+    # may contradict it. Drop from the noised side (counted as dup_clean).
+    clean_keys = {lossless_key(r["utterance"]) for r in kept["clean_devanagari"]}
+    clean_keys |= {lossless_key(r["utterance"])
+                   for r in kept["romanized_codeswitched"]}
+    before = len(kept["stt_noised"])
+    kept["stt_noised"] = [r for r in kept["stt_noised"]
+                          if lossless_key(r["utterance"]) not in clean_keys]
+    dup_clean = before - len(kept["stt_noised"])
+
+    # Mixture: the noised bucket anchors the total (it is the scarce
+    # supply — round-1's failure was starving it, not over-using it), then
+    # the clean buckets are sampled toward their §9.2 share, capped by
+    # supply. edge_cases rows are always kept (priority) — they carry the
+    # round-2 intent fixes (ack_med/refusal/bare-emergency) and must not
+    # be sampled away.
+    n_noised = len(kept["stt_noised"])
+    total = math.ceil(n_noised / frac["stt_noised"])
+    targets = {"clean_devanagari": round(total * frac["clean_devanagari"]),
+               "romanized_codeswitched": round(total * frac["romanized_codeswitched"])}
+    selected: dict[str, list[dict]] = {"stt_noised": kept["stt_noised"]}
+    supply_capped: list[str] = []
+    for bucket, target in targets.items():
+        rows = list(kept[bucket])
+        priority = [r for r in rows if (r.get("source") or "").startswith(EDGE_SOURCES)]
+        pool = [r for r in rows if r not in priority]
+        rng.shuffle(pool)
+        take = max(0, target - len(priority))
+        if len(pool) < take:
+            supply_capped.append(bucket)
+            take = len(pool)
+        selected[bucket] = priority + pool[:take]
+
+    train_pool = selected["stt_noised"] + selected["clean_devanagari"] \
+        + selected["romanized_codeswitched"]
+    rng.shuffle(train_pool)
+    n_valid = max(1, int(len(train_pool) * float(cfg["mixture.valid_fraction"])))
+    valid, train = train_pool[:n_valid], train_pool[n_valid:]
 
     for name, split in (("train", train), ("valid", valid)):
         out = root / "data" / f"{name}.jsonl"
@@ -114,13 +242,25 @@ def main() -> None:
             for row in split:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-    by_source: dict[str, int] = {}
-    for row in kept:
-        bucket = (row.get("source") or "unknown").split(":")[0]
-        by_source[bucket] = by_source.get(bucket, 0) + 1
-    print(f"[build] kept {len(kept)} rows (train {len(train)}, valid {len(valid)})")
+    # Report: achieved mix vs targets (with supply caps called out).
+    total_kept = sum(len(v) for v in selected.values())
+    achieved = {b: len(v) / total_kept for b, v in selected.items()}
+    print(f"[build] kept {total_kept} rows (train {len(train)}, valid {len(valid)})")
     print(f"[build] dropped: {dropped}")
-    print(f"[build] mixture by source: {by_source}")
+    print(f"[build] mixture by bucket: "
+          + ", ".join(f"{b} {len(v)} ({achieved[b]:.1%})"
+                      for b, v in selected.items()))
+    print(f"[build] mixture targets: "
+          + ", ".join(f"{b} {frac[b]:.0%}" for b in BUCKET_NAMES))
+    if dup_clean:
+        print(f"[build] noised: {dup_clean} rows byte-equal to a clean row "
+              "dropped as dup_clean")
+    for b in BUCKET_NAMES:
+        diff = achieved[b] - frac[b]
+        if abs(diff) > 0.005:
+            flag = " (SUPPLY-CAPPED)" if b in supply_capped else ""
+            print(f"[build] NOTE: {b} {achieved[b]:.1%} vs target "
+                  f"{frac[b]:.0%} (Δ {diff:+.1%}){flag}")
     if dropped["leak"]:
         print("[build] NOTE: leakage rows were REFUSED — investigate gen_teacher overlap with the golden corpus")
 

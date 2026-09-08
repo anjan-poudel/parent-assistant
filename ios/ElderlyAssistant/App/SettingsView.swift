@@ -16,7 +16,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case appearance, language, calling, places, family, meds, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, quickApps, privacy, intentLog, toolLog
+        case appearance, language, calling, places, family, meds, manuals, calendar, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, voicePersonalization, webSearch, youtube, feeds, quickApps, privacy, intentLog, toolLog
 
         var id: String {
             switch self {
@@ -26,11 +26,17 @@ struct SettingsView: View {
             case .places: return "places"
             case .family: return "family"
             case .meds: return "meds"
+            case .manuals: return "manuals"
+            case .calendar: return "calendar"
+            case .alarms: return "alarms"
             case .geminiAI: return "geminiAI"
             case .voiceEngine: return "voiceEngine"
             case .wakeWord: return "wakeWord"
             case .ttsVoices: return "ttsVoices"
+            case .voicePersonalization: return "voicePersonalization"
             case .webSearch: return "webSearch"
+            case .youtube: return "youtube"
+            case .feeds: return "feeds"
             case .quickApps: return "quickApps"
             case .privacy: return "privacy"
             case .intentLog: return "intentLog"
@@ -84,13 +90,38 @@ struct SettingsView: View {
                         voiceEngineSectionRow
                         wakeWordSectionRow
                         ttsVoicesSectionRow
+                        // Voice personalization ([VOICE-SETTINGS], 2026-09-08)
+                        // — noise filter, accent biasing, and the voice
+                        // fingerprint (enroll / status / remove).
+                        sectionRow(.voicePersonalization, icon: "waveform",
+                                   titleKey: "voiceSettings.title")
                         // [LOCAL-TOOLS] (2026-09-07) Web search — Google CSE
                         // credentials for the on-device stack's search tool.
                         sectionRow(.webSearch, icon: "magnifyingglass.circle.fill",
                                    titleKey: "searchSettings.title")
+                        // [YOUTUBE] (2026-09-08) YouTube — the optional Data
+                        // API key behind "play X on youtube" (without it the
+                        // voice command opens YouTube search directly).
+                        sectionRow(.youtube, icon: "play.rectangle.fill",
+                                   titleKey: "youtubeSettings.title")
+                        sectionRow(.feeds, icon: "rectangle.stack.fill", titleKey: "settings.feeds.title")
                         sectionRow(.quickApps, icon: "square.grid.2x2.fill", titleKey: "settings.quickApps.title")
                         sectionRow(.family, icon: "person.2.fill", titleKey: "settings.family.title")
                         sectionRow(.meds, icon: "pills.fill", titleKey: "settings.meds.title")
+                        // Bundled default manuals (2026-09-07) — camera-
+                        // free, Gemini-free "how do I use this" guides.
+                        sectionRow(.manuals, icon: "book.closed.fill",
+                                   titleKey: "settings.manuals.title")
+                        // Native calendar bridge (calendar-settings task,
+                        // 2026-09-07): the mirror/two-way/import cards left
+                        // the meds leaf — this row is their hub entry.
+                        sectionRow(.calendar, icon: "calendar.badge.clock",
+                                   titleKey: "settings.calendar.title")
+                        // Voice-set alarms + in-app countdown timers
+                        // (alarms-timers task, 2026-09-07). See the leaf's
+                        // honesty caption — iOS alarms ring through the
+                        // app's own notifications, not the Clock app.
+                        sectionRow(.alarms, icon: "alarm.fill", titleKey: "settings.alarms.title")
                         sectionRow(.privacy, icon: "lock.shield.fill", titleKey: "settings.privacy.title")
                         sectionRow(.intentLog, icon: "checklist", titleKey: "settings.intentLog.title")
                         // [TOOL-DEBUG-LOG] (2026-09-07) Tool requests —
@@ -121,11 +152,20 @@ struct SettingsView: View {
             case .places: PlacesSettingsView()
             case .family: FamilyContactsSettingsView()
             case .meds: MedicationScheduleSettingsView()
+            case .manuals: DefaultManualsBrowseView()
+            // Calendar settings (calendar-settings task, 2026-09-07) —
+            // the mirror/two-way/import cards that used to crowd the
+            // Medication schedule leaf.
+            case .calendar: CalendarSettingsView()
+            case .alarms: AlarmsTimersSettingsView()
             case .geminiAI: GeminiAPISettingsView()
             case .voiceEngine: VoiceEngineSettingsView()
             case .wakeWord: WakeWordSettingsView()
             case .ttsVoices: TTSVoicesSettingsView()
+            case .voicePersonalization: VoicePersonalizationSettingsView(coordinator: coordinator)
             case .webSearch: SearchSettingsView()
+            case .youtube: YouTubeSettingsView()
+            case .feeds: FeedsSettingsView()
             case .quickApps: QuickAccessAppsView()
             case .privacy: PrivacySettingsView()
             case .intentLog: IntentLogReviewView()
@@ -214,7 +254,7 @@ struct SettingsView: View {
     }
 
 
-    /// Voice activation — "Hey Sahayak" wake word (open item #4). The dot
+    /// Voice activation — "ये कान्छी" wake phrase (open item #4). The dot
     /// color + label come from the same `wakeWordStatus` derivation the
     /// destination screen shows, so the row can never disagree with the
     /// screen (unit-tested logic in `WakeWordStatusResolver`).
@@ -671,6 +711,119 @@ struct SearchSettingsView: View {
     }
 }
 
+// MARK: - YouTube (youtube-plugin, 2026-09-08)
+
+/// [YOUTUBE] (2026-09-08) The optional YouTube Data API v3 key behind
+/// the voice YouTube feature's "play the top result" path. Family-facing
+/// (the elderly primary user is never asked to handle API keys — same
+/// framing as the search/Gemini key screens): one SecureField mirroring
+/// `SearchSettingsView`'s field style. The key is OPTIONAL — without it
+/// "play X on youtube" opens YouTube search directly (the accepted
+/// search-only MVP), and the explanation states that plainly.
+struct YouTubeSettingsView: View {
+    @EnvironmentObject var coordinator: AppCoordinator
+    @State private var draftAPIKey = ""
+    @State private var showClearConfirm = false
+
+    var body: some View {
+        LeafScreen(titleKey: "youtubeSettings.title") {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("youtubeSettings.explanation")
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+
+                VStack(alignment: .leading, spacing: 14) {
+                    credentialField(labelKey: "youtubeSettings.apiKey",
+                                    placeholderKey: "youtubeSettings.apiKey",
+                                    text: $draftAPIKey)
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(DesignTokens.card)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+
+                Button {
+                    // An empty draft leaves the stored value untouched —
+                    // clearing is the explicit Remove action below.
+                    let trimmedKey = draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmedKey.isEmpty {
+                        coordinator.youtubeConfigStore.saveAPIKey(trimmedKey)
+                    }
+                    draftAPIKey = ""
+                } label: {
+                    Text("youtubeSettings.save")
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: DesignTokens.minTapTargetSize)
+                        .background(draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    ? DesignTokens.textSecondary.opacity(0.4) : DesignTokens.accent)
+                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                }
+                .buttonStyle(.plain)
+                .disabled(draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if coordinator.youtubeConfigStore.isConfigured {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(DesignTokens.accent)
+                        Text("youtubeSettings.statusConnected")
+                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                            .foregroundColor(DesignTokens.textSecondary)
+                        Spacer()
+                        Button(role: .destructive) {
+                            showClearConfirm = true
+                        } label: {
+                            Text("youtubeSettings.remove")
+                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                }
+
+                Text("youtubeSettings.quotaNote")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Text("youtubeSettings.privacy")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .confirmationDialog("youtubeSettings.removeConfirm", isPresented: $showClearConfirm) {
+            Button("youtubeSettings.remove", role: .destructive) {
+                coordinator.youtubeConfigStore.clear()
+            }
+            Button("common.back", role: .cancel) {}
+        }
+    }
+
+    /// One labeled SecureField card — same visual recipe as the search
+    /// key field (monospaced, min tap height, outlined bubble).
+    private func credentialField(labelKey: LocalizedStringKey,
+                                 placeholderKey: LocalizedStringKey,
+                                 text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(labelKey)
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .foregroundColor(DesignTokens.textSecondary)
+            SecureField(placeholderKey, text: text)
+                .font(.system(size: DesignTokens.minBodyPointSize, design: .monospaced))
+                .padding(14)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .overlay(
+                    RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
+                        .stroke(DesignTokens.textSecondary.opacity(0.25), lineWidth: 1)
+                )
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+        }
+    }
+}
+
 /// Cost-governance card inside the Gemini settings screen (open item #5,
 /// 2026-09-06). `@ObservedObject` on the governor so today's count and
 /// the cap value update live while the screen is open (the governor
@@ -882,16 +1035,18 @@ struct VoiceEngineSettingsView: View {
     }
 }
 
-// MARK: - Wake word "Hey Sahayak" (open item #4) — Voice activation
+// MARK: - Wake phrase "ये कान्छी" (open item #4) — Voice activation
 //
 // Family-facing "Voice activation" screen. Its one job is honest status:
 // everything that must be true for the wake word to actually listen (the
-// Settings toggle ON, the Porcupine runtime linked into the build, a
-// Picovoice access key, the trained keyword file bundled) is shown
-// explicitly, and every non-active state names the concrete next step —
-// no dead ends (spec §7). Until ALL pieces exist the app keeps
-// `NullWakeWordEngine` (today's exact behavior), which this screen says
-// plainly instead of pretending otherwise.
+// Settings toggle ON, the sherpa-onnx runtime linked into the build, the
+// KWS model directory bundled) is shown explicitly, and every non-active
+// state names the concrete next step — no dead ends (spec §7). Until all
+// pieces exist the app keeps `NullWakeWordEngine` (today's exact
+// behavior), which this screen says plainly instead of pretending
+// otherwise. (2026-09-08: the Porcupine access-key paste-in and its
+// `.ppn` checklist rows are gone — the sherpa-onnx KWS engine needs
+// neither, and the wake phrase + bundled model are stated in plain copy.)
 //
 // Presentation mapping shared between the Settings row dot and this
 // screen's banner (2026-09-06). `WakeWordStatus` itself is pure logic in
@@ -920,8 +1075,6 @@ extension WakeWordStatus {
 
 struct WakeWordSettingsView: View {
     @EnvironmentObject var coordinator: AppCoordinator
-    @State private var draftKey: String = ""
-    @State private var showRemoveConfirm = false
 
     var body: some View {
         LeafScreen(titleKey: "wakeWord.title") {
@@ -934,7 +1087,7 @@ struct WakeWordSettingsView: View {
 
                 toggleCard
 
-                accessKeyCard
+                phraseCard
 
                 if coordinator.wakeWordStatus != .active {
                     Text("wakeWord.talkStillWorks")
@@ -943,12 +1096,6 @@ struct WakeWordSettingsView: View {
                         .padding(.horizontal, 4)
                 }
             }
-        }
-        .confirmationDialog("wakeWord.removeConfirm", isPresented: $showRemoveConfirm) {
-            Button("wakeWord.remove", role: .destructive) {
-                coordinator.wakeWordAccessKeyStore.clear()
-            }
-            Button("common.back", role: .cancel) {}
         }
     }
 
@@ -1002,18 +1149,15 @@ struct WakeWordSettingsView: View {
 
     /// Renders ONLY the absent pieces, each keyed to the coordinator's own
     /// provisioning truth (`isWakeWordRuntimeLinked` /
-    /// `isWakeWordAccessKeyConfigured` / `WakeWordModelFile.bundledPath()`
-    /// — the same inputs the launch engine decision used), so the checklist
-    /// can never contradict the status banner above it.
+    /// `SherpaKWSModelFile.bundledDirectory()` — the same inputs the launch
+    /// engine decision used), so the checklist can never contradict the
+    /// status banner above it.
     private var setupChecklist: some View {
         VStack(spacing: 10) {
             if !AppCoordinator.isWakeWordRuntimeLinked {
                 missingRow("wakeWord.setupNeedsRuntime")
             }
-            if !coordinator.isWakeWordAccessKeyConfigured {
-                missingRow("wakeWord.setupNeedsKey")
-            }
-            if WakeWordModelFile.bundledPath() == nil {
+            if SherpaKWSModelFile.bundledDirectory() == nil {
                 missingRow("wakeWord.setupNeedsModel")
             }
         }
@@ -1036,11 +1180,12 @@ struct WakeWordSettingsView: View {
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
     }
 
-    /// The on/off master switch. ON is the default (inert until the other
-    /// pieces exist — see `WakeWordPreferences`); the coordinator's didSet
-    /// persists it AND closes/opens the live audio gate, so switching OFF
-    /// here stops the mic feed to the wake-word engine immediately. The
-    /// battery trade-off is disclosed underneath (honesty requirement).
+    /// The on/off master switch. ON is the default and means the wake word
+    /// genuinely listens whenever the KWS model is bundled (see
+    /// `WakeWordPreferences`); the coordinator's didSet persists it AND
+    /// closes/opens the live audio gate, so switching OFF here stops the
+    /// mic feed to the wake-word engine immediately. The battery trade-off
+    /// is disclosed underneath (honesty requirement).
     private var toggleCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle(isOn: Binding(
@@ -1065,65 +1210,26 @@ struct WakeWordSettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
-    /// Picovoice access-key paste-in — an exact mirror of the Gemini key
-    /// card. This is the family mechanism: get a free key at
-    /// console.picovoice.ai, paste it here. Stored in the iPhone's secure
-    /// Keychain via `EncryptedLocalStorage` (never UserDefaults, never
-    /// hardcoded). The key card is always editable — even when Porcupine
-    /// isn't linked yet — so setup survives a later app rebuild.
-    private var accessKeyCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("wakeWord.keyLabel")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundColor(DesignTokens.textSecondary)
-            Text("wakeWord.keyDescription")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
-            SecureField("wakeWord.keyPlaceholder", text: $draftKey)
-                .font(.system(size: DesignTokens.minBodyPointSize, design: .monospaced))
-                .padding(14)
-                .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
-                .overlay(
-                    RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
-                        .stroke(DesignTokens.textSecondary.opacity(0.25), lineWidth: 1)
-                )
-                .textInputAutocapitalization(.never)
-                .disableAutocorrection(true)
-
-            Button {
-                coordinator.wakeWordAccessKeyStore.save(draftKey)
-                draftKey = ""
-            } label: {
-                Text("wakeWord.save")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: DesignTokens.minTapTargetSize)
-                    .background(draftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                ? DesignTokens.textSecondary.opacity(0.4) : DesignTokens.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+    /// What the wake word listens for — and where the listening model
+    /// lives. The model line is shown ONLY when the model is really
+    /// bundled (coordinator's own provisioning truth); when it is absent
+    /// the needs-setup checklist names it instead, so this card can never
+    /// claim a model that isn't there. (2026-09-08: replaces the Porcupine
+    /// access-key paste-in card — sherpa-onnx needs no key.)
+    private var phraseCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: "quote.bubble.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(DesignTokens.accent)
+                Text("wakeWord.phrase")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
             }
-            .buttonStyle(.plain)
-            .disabled(draftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-
-            if coordinator.wakeWordAccessKeyStore.isConfigured {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(DesignTokens.accent)
-                    Text("wakeWord.keySaved")
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundColor(DesignTokens.textSecondary)
-                    Spacer()
-                    Button(role: .destructive) {
-                        showRemoveConfirm = true
-                    } label: {
-                        Text("wakeWord.remove")
-                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    }
-                }
-                .padding(.horizontal, 4)
+            if coordinator.isWakeWordProvisioned {
+                Text("wakeWord.modelBundled")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary)
             }
         }
         .padding(16)
@@ -1224,9 +1330,24 @@ struct FamilyContactsSettingsView: View {
                 Text(contact.name)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(DesignTokens.textPrimary)
-                Text(contact.relationship)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    // Role chips (family-emergency task, 2026-09-07):
+                    // the emergency number and the doctor/GP stand out
+                    // next to the plain relationship caption.
+                    if contact.isEmergencyContact {
+                        roleChip(L10n.str("family.emergencyBadge",
+                                          locale: coordinator.activeLocale),
+                                 tint: DesignTokens.BadgeTint.emergency.tint)
+                    }
+                    if isDoctorRelationship(contact.relationship) {
+                        roleChip(L10n.str("family.relationship.doctor",
+                                          locale: coordinator.activeLocale),
+                                 tint: DesignTokens.accent)
+                    }
+                    Text(contact.relationship)
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
                 Text(contact.phone)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
@@ -1267,6 +1388,39 @@ struct FamilyContactsSettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
+    /// One small role capsule (family-emergency task, 2026-09-07) —
+    /// the same accent-tint capsule the call results' `familyChip`
+    /// uses, parameterized by text and tint so the emergency flag can
+    /// wear the emergency red while the doctor wears the accent.
+    /// Decorative for VoiceOver like its call-row sibling: the
+    /// relationship caption right beside it already says who the
+    /// person is.
+    private func roleChip(_ text: String, tint: Color) -> some View {
+        Text(text)
+            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+            .foregroundColor(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 3)
+            .background(tint.opacity(0.12))
+            .clipShape(Capsule())
+            .accessibilityHidden(true)
+    }
+
+    /// True when the stored relationship is the wizard's doctor option
+    /// (the GP kind chip's condition). Records store the option's
+    /// LABEL in the save-time language, and en+ne are the only two
+    /// this app writes — so an exact match against the option label in
+    /// both shipped locales covers every doctor record, whichever
+    /// language the list is being viewed in.
+    private func isDoctorRelationship(_ stored: String) -> Bool {
+        stored == Self.doctorOptionLabel(for: .english)
+            || stored == Self.doctorOptionLabel(for: .nepali)
+    }
+
+    private static func doctorOptionLabel(for language: AppLanguage) -> String {
+        L10n.str("family.relationship.doctor", locale: language.locale)
+    }
+
     /// The row's 44pt visual: the stored photo when one is on file,
     /// else the initials avatar. Photos are best-effort — a missing or
     /// unreadable file reads back as nil and falls through to initials.
@@ -1297,7 +1451,10 @@ struct FamilyContactsSettingsView: View {
 ///      (see `RelationshipOption`). The stored value is the chosen
 ///      option's label; editing recognizes it again by exact label or
 ///      by its `ContactResolver` anchor (see
-///      `preselectedOption(for:)`).
+///      `preselectedOption(for:)`). Below the dropdown sits the
+///      optional "Emergency contact" toggle (family-emergency task,
+///      2026-09-07) — flagged contacts are whom the Emergency button
+///      dials first (see `AppCoordinator.emergencyContact`).
 ///   3. Photo — OPTIONAL (add / change / remove over the initials
 ///      avatar).
 ///   4. Messenger handle — OPTIONAL (with the `messenger.handleHints.*`
@@ -1342,15 +1499,24 @@ private struct FamilyContactWizardSheet: View {
     /// table does not know; that is fine — it simply has no anchor to
     /// compare on edit (see `preselectedOption(for:)`), so
     /// cross-locale edits of a friend need one fresh pick.
+    ///
+    /// `doctor` (family-emergency task, 2026-09-07 — the GP's option,
+    /// last in the user-specified list) is the other one the resolver
+    /// vocabulary lacks: its `anchorWord` is set ("doctor") but no
+    /// resolver word maps onto it, so the anchor never fires and only
+    /// the exact-label rule can select it — a doctor saved in the other
+    /// locale needs one fresh pick, same as a friend.
     private enum RelationshipOption: String, CaseIterable, Identifiable {
         case daughter, son, mother, father, sister, brother, husband,
-             wife, grandmother, grandfather, friend
+             wife, grandmother, grandfather, friend, doctor
 
         var id: String { rawValue }
         /// The `family.relationship.*` localization key for this option.
         var labelKey: String { "family.relationship.\(rawValue)" }
         /// The anchor word this option's labels normalize onto — nil
-        /// for `friend`, which the resolver vocabulary lacks.
+        /// for `friend`, which the resolver vocabulary lacks (`doctor`
+        /// keeps its word even though the resolver has no entry for it,
+        /// so the anchor stays inert rather than pretending to be one).
         var anchorWord: String? { rawValue == "friend" ? nil : rawValue }
     }
 
@@ -1368,6 +1534,11 @@ private struct FamilyContactWizardSheet: View {
     // free-form text; blank saves as nil (no address = not a navigation
     // target).
     @State private var address = ""
+    // Whether the "Emergency contact" toggle is on (family-emergency
+    // task, 2026-09-07) — flagged contacts are whom the Emergency
+    // button dials first. Optional like the photo: an add starts off,
+    // an edit loads the stored flag in `loadDraft`.
+    @State private var isEmergencyContact = false
 
     // Photo draft state: a just-picked image, whether the user asked to
     // remove the stored one, and the stored one itself (loaded once on
@@ -1846,9 +2017,21 @@ private struct FamilyContactWizardSheet: View {
         }
     }
 
-    // MARK: Step 2 — relationship (mandatory dropdown)
+    // MARK: Step 2 — relationship (mandatory dropdown) + emergency flag
 
+    /// The step's content (family-emergency task, 2026-09-07): the
+    /// mandatory relationship dropdown, with the optional "Emergency
+    /// contact" toggle beneath it — which number the emergency button
+    /// dials first is a property of the person being added, so the two
+    /// choices share one decision point.
     private var relationshipStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            relationshipMenu
+            emergencyToggleCard
+        }
+    }
+
+    private var relationshipMenu: some View {
         Menu {
             ForEach(RelationshipOption.allCases) { option in
                 Button {
@@ -1896,6 +2079,31 @@ private struct FamilyContactWizardSheet: View {
         .frame(maxWidth: .infinity, minHeight: 56)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+    }
+
+    /// The optional "Emergency contact" toggle (family-emergency task,
+    /// 2026-09-07) — the same on/off card shape as the wake-word
+    /// toggle. The caption states exactly what the flag does ("the
+    /// emergency button dials this person first"), so the toggle cannot
+    /// be read as "the only person who may be called".
+    private var emergencyToggleCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(isOn: $isEmergencyContact) {
+                Text("family.emergencyToggle")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            Text("family.emergencyToggleHint")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
     // MARK: Step 3 — photo (optional)
@@ -2105,6 +2313,9 @@ private struct FamilyContactWizardSheet: View {
         messengerHandle = contact.messengerHandle ?? ""
         nickname = contact.nickname ?? ""
         address = contact.address ?? ""
+        // The stored flag shows in the step-2 toggle (family-emergency
+        // task, 2026-09-07) — an edit opens with it pre-set.
+        isEmergencyContact = contact.isEmergencyContact
         // Pre-select the stored relationship when it is one of the fixed
         // options (see `preselectedOption(for:)`). A legacy free-text
         // value that is none of them stays unselected — the step is
@@ -2131,7 +2342,10 @@ private struct FamilyContactWizardSheet: View {
     ///      father), normalizes onto the same anchor word as one of the
     ///      option labels. `friend` has no anchor (see
     ///      `RelationshipOption`), so only rule 1 can select it — a
-    ///      friend saved in the other locale needs one fresh pick.
+    ///      friend saved in the other locale needs one fresh pick. The
+    ///      same holds for `doctor` (family-emergency task, 2026-09-07):
+    ///      its anchor is inert because the resolver vocabulary has no
+    ///      doctor word.
     private func preselectedOption(for stored: String) -> RelationshipOption? {
         let locale = coordinator.activeLocale
         if let exact = RelationshipOption.allCases.first(where: {
@@ -2162,12 +2376,14 @@ private struct FamilyContactWizardSheet: View {
                 id: contact.id, name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
                 photo: pickedPhoto, removingPhoto: removingStoredPhoto,
-                nickname: nick, address: homeAddress)
+                nickname: nick, address: homeAddress,
+                isEmergencyContact: isEmergencyContact)
         } else {
             succeeded = coordinator.addFamilyContact(
                 name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
-                photo: pickedPhoto, nickname: nick, address: homeAddress)
+                photo: pickedPhoto, nickname: nick, address: homeAddress,
+                isEmergencyContact: isEmergencyContact)
         }
         if succeeded { dismiss() }
         // A failed store write keeps the draft on screen — Save again to
@@ -2608,9 +2824,11 @@ struct MedicationScheduleSettingsView: View {
                     }
                 }
                 addForm
+                // Native-calendar mirror/two-way/import cards moved to
+                // the Calendar settings leaf (calendar-settings task,
+                // 2026-09-07); this leaf now edits medications (and
+                // festival advance reminders) alone.
                 festivalReminderCard
-                calendarSyncCard
-                externalCalendarCard
             }
         }
     }
@@ -2636,6 +2854,7 @@ struct MedicationScheduleSettingsView: View {
                            height: DesignTokens.minTapTargetSize)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text("settings.meds.delete"))
         }
         .padding(16)
         .frame(maxWidth: .infinity)
@@ -2693,101 +2912,6 @@ struct MedicationScheduleSettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
-    /// EventKit mirror toggle (v2 design §4.1) — requests calendar
-    /// access at point of use; denial leaves the app fully working in
-    /// local-only mode, honestly reported.
-    private var calendarSyncCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle(isOn: Binding(
-                get: { coordinator.calendarSync.isEnabled },
-                set: { newValue in
-                    Task { await coordinator.setCalendarSyncEnabled(newValue) }
-                }
-            )) {
-                Label("calendarSync.toggle", systemImage: "calendar")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-            }
-            .tint(DesignTokens.accent)
-            Text(statusText)
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-    }
-
-    /// Native Calendar/Reminders import (calendar-driven task,
-    /// 2026-09-07) — the mirror card above writes the app's schedule
-    /// OUT to EventKit; this card reads the family's native events and
-    /// due reminders IN (in-app notifications + today's lists). Ask
-    /// happens at point of use (the toggle); the app never writes back.
-    /// Same intent-vs-truth split as the mirror: the toggle is intent,
-    /// the status line is the OS's answer.
-    private var externalCalendarCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Toggle(isOn: Binding(
-                get: { coordinator.externalCalendar.isEnabled },
-                set: { newValue in
-                    Task { await coordinator.setExternalCalendarEnabled(newValue) }
-                }
-            )) {
-                Label("externalReminders.toggle", systemImage: "calendar.badge.clock")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-            }
-            .tint(DesignTokens.accent)
-
-            if coordinator.externalCalendar.isEnabled {
-                HStack {
-                    Text("externalReminders.leadTitle")
-                        .font(.system(size: DesignTokens.minBodyPointSize))
-                        .foregroundColor(DesignTokens.textPrimary)
-                    Spacer()
-                    // Setting the lead re-scans immediately (the
-                    // service's didSet) so armed notifications follow.
-                    Stepper(value: Binding(
-                        get: { coordinator.externalCalendar.leadMinutes },
-                        set: { coordinator.externalCalendar.leadMinutes = $0 }
-                    ), in: 0...ExternalCalendarService.maxLeadMinutes) {
-                        Text(BikramSambat.devanagariDigits(coordinator.externalCalendar.leadMinutes))
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                            .foregroundColor(DesignTokens.accent)
-                    }
-                }
-                .padding(14)
-                .frame(height: 56)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
-
-                Text(L10n.fmt("externalReminders.leadHint", locale: coordinator.activeLocale,
-                              BikramSambat.devanagariDigits(coordinator.externalCalendar.leadMinutes)))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
-            }
-
-            Text(externalStatusText)
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-    }
-
-    private var externalStatusText: String {
-        switch coordinator.externalCalendar.status {
-        case .enabled: return L10n.str("externalReminders.statusOn", locale: coordinator.activeLocale)
-        case .partial: return L10n.str("externalReminders.statusPartial", locale: coordinator.activeLocale)
-        case .denied: return L10n.str("externalReminders.statusDenied", locale: coordinator.activeLocale)
-        case .error: return L10n.str("externalReminders.statusError", locale: coordinator.activeLocale)
-        case .notRequested: return L10n.str("externalReminders.statusHint", locale: coordinator.activeLocale)
-        }
-    }
-
     /// Advance-reminder days for important festivals (BS calendar,
     /// 2026-09-06) — default 2, family-configurable. Changing it
     /// reschedules festival notifications immediately.
@@ -2823,14 +2947,6 @@ struct MedicationScheduleSettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
-    private var statusText: String {
-        switch coordinator.calendarSync.status {
-        case .enabled: return L10n.str("calendarSync.statusOn", locale: coordinator.activeLocale)
-        case .denied: return L10n.str("calendarSync.statusDenied", locale: coordinator.activeLocale)
-        case .error: return L10n.str("calendarSync.statusError", locale: coordinator.activeLocale)
-        case .notRequested: return L10n.str("calendarSync.statusHint", locale: coordinator.activeLocale)
-        }
-    }
 
     private func timesText(_ times: [DateComponents]) -> String {
         times
@@ -3078,6 +3194,7 @@ private struct ModelManagementRow: View {
                                    height: DesignTokens.minTapTargetSize)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(Text("model.delete"))
                 }
             }
             statusLine
@@ -3203,6 +3320,17 @@ struct PrivacySettingsView: View {
 struct TTSVoicesSettingsView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.locale) private var locale
+
+    /// Voice being applied — awaits the confirmation dialog, never the
+    /// live voice (research §6: confirm-before-apply, previews must not
+    /// switch the live voice).
+    @State private var applyCandidate: ResponseVoice?
+    /// The voice confirmed on THIS screen visit (so the checkmark moves
+    /// immediately); the persisted store is the source of truth.
+    @State private var justApplied: ResponseVoice?
+    /// A voice whose install-from-bundle failed at apply time.
+    @State private var installFailure: ModelID?
 
     enum VoiceStatus {
         case installed   // in the ModelStore, ready to speak
@@ -3219,6 +3347,37 @@ struct TTSVoicesSettingsView: View {
             return .bundled
         }
         return .missing
+    }
+
+    /// The sample sentence every Listen/apply-proof speaks. ALWAYS the
+    /// Nepali sentence — the voices being auditioned are Nepali voices —
+    /// and the same Devanagari sentence is shown on screen next to it
+    /// (research §6: never audio-only).
+    private var sampleText: String {
+        L10n.str("settings.voices.sampleGreeting", locale: Locale(identifier: "ne-NP"))
+    }
+
+    /// Current effective voice: the persisted choice, or the locale
+    /// default (google-medium speaker 0) before any pick.
+    private var currentVoice: ResponseVoice {
+        justApplied ?? ResponseVoiceSelection.persisted()
+            ?? ResponseVoice(voiceID: ModelCatalog.piperNepali, speakerID: 0)
+    }
+
+    /// Pickable options in display order: google's default speaker (the
+    /// voice the app shipped with), the new chitwan voice, then google's
+    /// other verified speakers 1-17 under their own header (same voice
+    /// directory, zero download — verified present in the int8 export,
+    /// see ResponseVoiceSelection; each is previewable before use).
+    private var pickerOptions: [ResponseVoice] {
+        [ResponseVoice(voiceID: ModelCatalog.piperNepali, speakerID: 0),
+         ResponseVoice(voiceID: ModelCatalog.piperNepaliChitwan, speakerID: 0)]
+    }
+
+    private var alternateGoogleSpeakers: [ResponseVoice] {
+        ResponseVoice.speakerIDs(for: ModelCatalog.piperNepali).dropFirst().map {
+            ResponseVoice(voiceID: ModelCatalog.piperNepali, speakerID: $0)
+        }
     }
 
     var body: some View {
@@ -3251,9 +3410,59 @@ struct TTSVoicesSettingsView: View {
 
                 ScrollView {
                     VStack(spacing: 12) {
-                        ForEach(ModelCatalog.entries(kind: .tts)) { entry in
-                            voiceRow(entry)
+                        // Picker intro + the sentence every preview speaks,
+                        // shown in the same script (research §6).
+                        Text("settings.voices.chooseTitle")
+                            .font(.system(size: DesignTokens.minBodyPointSize,
+                                          weight: .semibold))
+                            .foregroundColor(DesignTokens.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                        VStack(spacing: 6) {
+                            Text("settings.voices.sampleNote")
+                                .font(.system(size: DesignTokens.minCaptionPointSize,
+                                              weight: .semibold))
+                                .foregroundColor(DesignTokens.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(sampleText)
+                                .font(.system(size: DesignTokens.minBodyPointSize))
+                                .foregroundColor(DesignTokens.textPrimary)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: .infinity)
                         }
+                        .padding(14)
+                        .background(DesignTokens.card)
+                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+
+                        ForEach(pickerOptions) { voice in
+                            voiceOptionCard(voice)
+                        }
+
+                        // Google-medium's other verified speakers (1-17).
+                        if status(of: ModelCatalog.piperNepali) != .missing
+                            && !alternateGoogleSpeakers.isEmpty {
+                            VStack(spacing: 4) {
+                                Text("settings.voices.moreGoogleSpeakers")
+                                    .font(.system(size: DesignTokens.minBodyPointSize,
+                                                  weight: .semibold))
+                                    .foregroundColor(DesignTokens.textPrimary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text("settings.voices.speakerNote")
+                                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                                    .foregroundColor(DesignTokens.textSecondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .padding(.horizontal, 4)
+                            .padding(.top, 8)
+                            ForEach(alternateGoogleSpeakers) { voice in
+                                voiceOptionCard(voice)
+                            }
+                        }
+
+                        // The English reply voice stays a status-only row —
+                        // voice personalisation P0 covers Nepali voices.
+                        voiceRow(ModelCatalog.entry(for: ModelCatalog.piperEnglishUS)!)
+
                         Button {
                             coordinator.speak(text: L10n.str("settings.voices.sampleGreeting",
                                                              locale: coordinator.activeLocale))
@@ -3277,6 +3486,15 @@ struct TTSVoicesSettingsView: View {
                         }
                         .buttonStyle(.plain)
 
+                        if let voiceID = installFailure,
+                           let entry = ModelCatalog.entry(for: voiceID) {
+                            Text(L10n.fmt("settings.voices.installFailed", locale: locale,
+                                          entry.displayName))
+                                .font(.system(size: DesignTokens.minCaptionPointSize))
+                                .foregroundColor(DesignTokens.stateError)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 4)
+                        }
                         if ModelCatalog.entries(kind: .tts).contains(where: {
                             Self.status(for: $0, modelStore: coordinator.modelStore) == .missing
                         }) {
@@ -3293,12 +3511,164 @@ struct TTSVoicesSettingsView: View {
             }
         }
         .navigationBarHidden(true)
+        .confirmationDialog(
+            Text("settings.voices.confirmTitle"),
+            isPresented: Binding(
+                get: { applyCandidate != nil },
+                set: { if !$0 { applyCandidate = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("settings.voices.confirmApply") {
+                if let voice = applyCandidate {
+                    apply(voice)
+                }
+                applyCandidate = nil
+            }
+            Button("common.cancel", role: .cancel) {
+                applyCandidate = nil
+            }
+        } message: {
+            if let voice = applyCandidate {
+                Text(L10n.fmt("settings.voices.confirmMessage", locale: locale,
+                              optionName(voice)))
+            }
+        }
     }
 
+    // MARK: - Option cards
+
+    private func status(of voiceID: ModelID) -> VoiceStatus {
+        guard let entry = ModelCatalog.entry(for: voiceID) else { return .missing }
+        return Self.status(for: entry, modelStore: coordinator.modelStore)
+    }
+
+    private func optionName(_ voice: ResponseVoice) -> String {
+        if voice.voiceID == ModelCatalog.piperNepaliChitwan {
+            return L10n.str("settings.voices.chitwan", locale: locale)
+        }
+        if voice.speakerID == 0 {
+            return L10n.str("settings.voices.google", locale: locale)
+        }
+        return L10n.fmt("settings.voices.googleSpeaker", locale: locale, voice.displayNumber)
+    }
+
+    /// Auditions a voice WITHOUT switching the live one: registers a
+    /// one-shot audition request for the sample sentence, then speaks the
+    /// sample through the normal queue. The speaker consumes the request
+    /// only for that exact utterance (ResponseVoiceSelection), so nothing
+    /// else can pick the voice up.
+    private func audition(_ voice: ResponseVoice) {
+        installFailure = nil
+        ResponseVoiceSelection.requestAudition(of: voice, for: sampleText)
+        coordinator.speak(text: sampleText)
+    }
+
+    /// Confirm-before-apply: persist the choice, install the voice from
+    /// the bundle first if needed (the honest "not downloaded yet" state
+    /// — a bundled voice installs here, a truly missing one can't and
+    /// shows its red status instead), then speak the sample sentence as
+    /// the audible proof, in the newly applied voice.
+    private func apply(_ voice: ResponseVoice) {
+        installFailure = nil
+        if coordinator.modelStore.ttsVoiceDirectory(for: voice.voiceID) == nil,
+           coordinator.modelStore.installBundledTTSVoice(for: voice.voiceID) == nil {
+            installFailure = voice.voiceID
+            return
+        }
+        guard ResponseVoiceSelection.apply(voice) else { return }
+        justApplied = voice
+        ResponseVoiceSelection.requestAudition(of: voice, for: sampleText)
+        coordinator.speak(text: sampleText)
+    }
+
+    private func voiceOptionCard(_ voice: ResponseVoice) -> some View {
+        let voiceStatus = status(of: voice.voiceID)
+        let canSpeak = voiceStatus != .missing
+        let isCurrent = voice == currentVoice
+        let (statusKey, statusColor): (LocalizedStringKey, Color) = {
+            switch voiceStatus {
+            case .installed: return ("settings.voices.statusInstalled", DesignTokens.accent)
+            case .bundled:   return ("settings.voices.statusBundled", DesignTokens.accent)
+            case .missing:   return ("settings.voices.statusMissing", DesignTokens.stateError)
+            }
+        }()
+        return VStack(spacing: 12) {
+            HStack(spacing: 14) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 26))
+                    .foregroundColor(DesignTokens.accent)
+                    .frame(width: 40)
+                Text(optionName(voice))
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+                Spacer()
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 8, height: 8)
+                    Text(statusKey)
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textSecondary)
+                }
+            }
+            HStack(spacing: 12) {
+                Button {
+                    audition(voice)
+                } label: {
+                    Label(L10n.str("settings.voices.listenButton", locale: locale),
+                          systemImage: "play.circle")
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                        .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+                        .background(DesignTokens.textSecondary.opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSpeak)
+                .accessibilityHint(Text(L10n.str("settings.voices.listenHint", locale: locale)))
+
+                if isCurrent {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 22))
+                        Text("settings.voices.currentVoice")
+                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    }
+                    .foregroundColor(DesignTokens.accent)
+                    .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+                } else {
+                    Button {
+                        applyCandidate = voice
+                    } label: {
+                        Label(L10n.str("settings.voices.useButton", locale: locale),
+                              systemImage: "checkmark.circle")
+                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+                            .background(DesignTokens.accent)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSpeak)
+                    .accessibilityHint(Text(L10n.str("settings.voices.useHint", locale: locale)))
+                }
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .opacity(canSpeak ? 1 : 0.55)
+    }
+
+    /// Status-only row for the English reply voice (not user-selectable
+    /// in P0 — the picker covers the Nepali voices above).
     private func voiceRow(_ entry: ModelCatalogEntry) -> some View {
         let status = Self.status(for: entry, modelStore: coordinator.modelStore)
-        let nameKey = entry.id == ModelCatalog.piperNepali
-            ? "settings.voices.nepali" : "settings.voices.english"
+        let nameKey = entry.id == ModelCatalog.piperEnglishUS
+            ? "settings.voices.english" : "settings.voices.nepali"
         let (statusKey, statusColor): (LocalizedStringKey, Color) = {
             switch status {
             case .installed: return ("settings.voices.statusInstalled", DesignTokens.accent)

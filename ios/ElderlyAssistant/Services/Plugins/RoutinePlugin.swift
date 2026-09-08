@@ -156,8 +156,10 @@ final class RoutinePlugin: AssistantPlugin {
             .filter { $0.state == .pending }
             .compactMap { occurrence in
                 guard let entry = scheduler.entry(for: occurrence.entryId) else { return nil }
-                let time = occurrence.scheduledAt.formatted(
-                    Date.FormatStyle(date: .omitted, time: .shortened).locale(context.locale))
+                // Spoken-form time (spoken-time task, 2026-09-08) — see
+                // `formattedTime` below; query lines are spoken aloud.
+                let time = SpokenTime.string(from: occurrence.scheduledAt,
+                                             locale: context.locale)
                 return "\(entry.displayTitle(locale: context.locale)) — \(time)"
             }
         lines.append(contentsOf: medicationSummaryProvider?() ?? [])
@@ -219,9 +221,14 @@ final class RoutinePlugin: AssistantPlugin {
         return symbols[weekday - 1]
     }
 
+    /// Spoken-form time for the routine-set confirmation (spoken-time
+    /// task, 2026-09-08): the old `.shortened` clock text made the
+    /// Nepali TTS read "१७:००" as digits. `SpokenTime` is the shared
+    /// speech-bound formatter; UI display formatting is untouched.
     private static func formattedTime(_ components: DateComponents, locale: Locale) -> String {
-        guard let date = Calendar.current.date(from: components) else { return "" }
-        return date.formatted(Date.FormatStyle(date: .omitted, time: .shortened).locale(locale))
+        SpokenTime.string(hour: components.hour ?? 0,
+                          minute: components.minute ?? 0,
+                          locale: locale)
     }
 
     private func emit(context: PluginExecutionContext, _ type: String,

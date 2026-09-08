@@ -148,4 +148,25 @@ final class VoiceContactSearchRouteTests: XCTestCase {
         XCTAssertEqual(VoiceContactSearchRoute.decide(transcript: ""), .notSearch)
         XCTAssertEqual(VoiceContactSearchRoute.decide(transcript: "   "), .notSearch)
     }
+
+    // MARK: - YouTube veto ([YOUTUBE] 2026-09-08)
+
+    /// YouTube-marked utterances belong to the YouTube stage (which runs
+    /// LATER in the ladder) — the bare "search"/"खोज" markers must never
+    /// swallow them into a Phone-screen search.
+    func testYouTubeShapedUtterancesAreNotContactSearches() {
+        XCTAssertEqual(VoiceContactSearchRoute.decide(transcript: "search youtube for ram"),
+                       .notSearch)
+        XCTAssertEqual(VoiceContactSearchRoute.decide(transcript: "युट्युबमा गीत खोज"),
+                       .notSearch)
+        XCTAssertEqual(VoiceContactSearchRoute.decide(transcript: "युट्युबमा रामायण खोजिदिनुहोस्"),
+                       .notSearch)
+    }
+
+    /// The veto must stay narrow: a genuine contact search that merely
+    /// mentions a search verb still routes.
+    func testNonYouTubeSearchStillRoutes() {
+        XCTAssertEqual(VoiceContactSearchRoute.decide(transcript: "search for ram's number"),
+                       .openPhone("ram"))
+    }
 }

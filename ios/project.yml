@@ -7,7 +7,7 @@
 # ElderlyAssistant.xcodeproj/project.pbxproj by hand — regenerate it from
 # this file so history stays legible.
 
-name: ElderlyAssistant
+name: seniOS
 options:
   bundleIdPrefix: com.elderlyassistant
   deploymentTarget:
@@ -95,6 +95,22 @@ targets:
       # app bundle and every Text("key") renders as the raw key.
       - path: ElderlyAssistant/Resources/Localizable.xcstrings
         buildPhase: resources
+      # Bundled dialect-ID centroid table (voice-personalisation P0 slice D).
+      # SEED-CENTROIDS placeholder — regenerate from field corpora with
+      # tools/generate-seed-dialect-centroids.py (schema + loader:
+      # Services/Voice/DialectIdentifier.swift). Same single-file pattern
+      # as Localizable.xcstrings: without this entry the table never lands
+      # in the app bundle and DialectCentroidTable.bundled() finds nothing.
+      - path: ElderlyAssistant/Resources/DialectCentroids.json
+        buildPhase: resources
+      # Bundled per-dialect lexicon for decode biasing ([ACCENT-ADAPT],
+      # accent-adaptation.md P0.3 — tag lines + known dialect words per
+      # label). SEED-LEXICON placeholder pending linguist review. Same
+      # single-file pattern as DialectCentroids.json: without this entry
+      # the file never lands in the app bundle and
+      # DialectLexicon.bundled() finds nothing.
+      - path: ElderlyAssistant/Resources/DialectLexicon.json
+        buildPhase: resources
       # Official multicolor logos for the quick-access app catalog
       # (Wikimedia Commons PNGs, 2026-09-07 — sources in the catalog's
       # README.md). `Resources` is excluded from the source glob above, so
@@ -117,6 +133,26 @@ targets:
         # espeak-ng-data/) and avoiding flat-copy filename collisions
         # between the two voices' identical espeak-ng-data contents.
         type: folder
+      # Bundled wake-word KWS model (sherpa-layout dirs: encoder/decoder/
+      # joiner-*.int8.onnx + tokens.txt + keywords.txt), loaded straight
+      # from the bundle or installed into the ModelStore by
+      # SherpaKWSWakeWordEngine. Gitignored — fetch with
+      # tools/fetch-kws-model.sh before building (the P0 wake-word swap;
+      # see docs/voice-personalisation-p0-plan.md slice A).
+      - path: ElderlyAssistant/Resources/Models/kws
+        buildPhase: resources
+        # Blue folder reference (same rationale as tts/): the whole
+        # directory lands in the bundle as kws/ — the layout both
+        # SherpaKWSModelFile.bundledDirectory and the ModelStore kws
+        # install expect.
+        type: folder
+      # Bundled default instruction manuals — Resources/Manuals/README.md.
+      # Blue folder reference: the whole directory lands in the bundle as
+      # Manuals/, preserving the layout BundledManualCatalog expects
+      # (Manuals/manifest.json + Manuals/images/<app>/... jpgs).
+      - path: ElderlyAssistant/Resources/Manuals
+        buildPhase: resources
+        type: folder
     # Do NOT add an `info:` block here — that would make XcodeGen overwrite
     # ElderlyAssistant/Info.plist on every `./build.sh generate`, wiping the
     # real permission descriptions and BGTaskScheduler identifiers. Instead,
@@ -129,11 +165,16 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         TARGETED_DEVICE_FAMILY: "1"  # iPhone only
         SWIFT_OBJC_BRIDGING_HEADER: ""
-        # The app ships no home-screen icon yet; AppIcons.xcassets holds
-        # ONLY brand glyphs, and actool refuses a catalog without an
-        # "AppIcon" set unless the requirement is explicitly blanked.
-        ASSETCATALOG_COMPILER_APPICON_NAME: ""
+        # Home-screen icon: AppIcon.appiconset (cropped from the user's
+        # supplied artwork, 2026-09-08).
+        ASSETCATALOG_COMPILER_APPICON_NAME: "AppIcon"
     dependencies:
+      # vDSP FFT for the spectral-gate denoiser ([NOISE-FILTER] P1
+      # front-end, Services/Voice/SpectralGateCore.swift). Declared
+      # explicitly rather than relied on transitively through WhisperKit.
+      # `sdk:` (not `framework:`) — a system SDK framework is linked, not
+      # embedded.
+      - sdk: Accelerate.framework
       - package: SwiftWhisper
       - package: LLM
         product: LLM

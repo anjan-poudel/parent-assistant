@@ -5,13 +5,13 @@ import XCTest
 /// row and the Settings picker (Quick Access Apps feature, 2026-09-06).
 ///
 /// Pins the catalog invariants (18 apps, unique storage keys / name keys /
-/// schemes / symbols, Apple built-ins first, scheme-only root URLs, cap
-/// 8), the pure restore/validation and search rules, and — through a
-/// scripted opener — that installed-probes and opens use exactly the
-/// scheme root URL. Also pins the Info.plist contract that every catalog
-/// scheme is declared in `LSApplicationQueriesSchemes` (the honest
-/// `canOpenURL` answer depends on it) with headroom under the 50-scheme
-/// cap.
+/// schemes / symbols, Apple built-ins first, scheme-only root URLs with
+/// the tel:/sms: slashes-less exception, cap 8), the pure
+/// restore/validation and search rules, and — through a scripted opener —
+/// that installed-probes and opens use exactly the scheme root URL. Also
+/// pins the Info.plist contract that every catalog scheme is declared in
+/// `LSApplicationQueriesSchemes` (the honest `canOpenURL` answer depends
+/// on it) with headroom under the 50-scheme cap.
 final class AppLauncherTests: XCTestCase {
 
     private let en = Locale(identifier: "en-US")
@@ -67,10 +67,42 @@ final class AppLauncherTests: XCTestCase {
 
     func testEveryCatalogAppRootURLIsItsSchemeOnly() {
         // The probe/open URL is always the bare scheme root — never a
-        // path that depends on a third-party app's URL grammar.
+        // path that depends on a third-party app's URL grammar. Apple's
+        // own telephony schemes are the one exception (tel-scheme fix,
+        // 2026-09-07): their root URLs carry NO slashes (`tel:`,
+        // `sms:`) because iOS does not handle the slashed form for an
+        // empty number.
         for app in AppLauncher.catalog {
-            XCTAssertEqual(app.rootURL.absoluteString, "\(app.scheme)://",
+            let expected = (app.scheme == "tel" || app.scheme == "sms")
+                ? "\(app.scheme):"
+                : "\(app.scheme)://"
+            XCTAssertEqual(app.rootURL.absoluteString, expected,
                            "\(app.id) must probe/open its scheme root")
+        }
+    }
+
+    func testPhoneRootURLIsSlashesLessTel() {
+        // tel-scheme fix, 2026-09-07: `tel://` with an EMPTY number is
+        // not handled by iOS — it raises a confirmation sheet that opens
+        // nothing. The Phone tile must probe and open the slashes-less
+        // `tel:`, which lands in the Phone app's dialer. Pinned exactly
+        // so the slashed form can never regress.
+        XCTAssertEqual(AppLauncher.app(for: "phone")?.rootURL.absoluteString, "tel:")
+    }
+
+    func testMessagesRootURLIsSlashesLessSMS() {
+        // Same slashes-less Apple-telephony exception as `tel:` above —
+        // `sms://` with no body is not a URL Messages handles.
+        XCTAssertEqual(AppLauncher.app(for: "messages")?.rootURL.absoluteString, "sms:")
+    }
+
+    func testOtherAppleBuiltInRootURLsKeepSlashes() {
+        // Only Apple's telephony schemes (tel/sms) shed the slashes —
+        // every other catalog root stays `scheme://`.
+        for id in ["facetime", "mail", "calendar", "maps"] {
+            let app = AppLauncher.app(for: id)!
+            XCTAssertEqual(app.rootURL.absoluteString, "\(app.scheme)://",
+                           "\(id) keeps the slashed scheme root")
         }
     }
 

@@ -2,13 +2,13 @@ import Foundation
 import AVFoundation
 
 /// A wake-word engine consumes a stream of PCM audio frames and calls its
-/// `onDetection` handler whenever the trained keyword ("Hey Sahayak") fires.
+/// `onDetection` handler whenever the trained keyword ("ये कान्छी") fires.
 ///
-/// The concrete implementation is Porcupine (`PorcupineWakeWordEngine`), used
-/// only when the Porcupine Swift package is added to the project, the
-/// Settings → "Voice activation" toggle is ON, an access key is configured,
-/// and the trained `.ppn` is bundled — see `WakeWordEngineSelection` and
-/// docs/wake-word-setup.md. When any of that is missing, a
+/// The real implementation is the sherpa-onnx keyword spotter
+/// (`SherpaKWSWakeWordEngine`, Services/Voice/SherpaKWSWakeWordEngine.swift),
+/// used when the Settings → "Voice activation" toggle is ON and the KWS
+/// model directory is bundled — see `WakeWordEngineSelection` and
+/// tools/fetch-kws-model.sh. When any of that is missing, a
 /// `NullWakeWordEngine` is used so the rest of the pipeline still compiles
 /// and runs exactly as before the wake-word feature — Talk button and
 /// `VoicePipeline.simulateWakeWordDetection()` untouched. While the engine
@@ -36,9 +36,12 @@ protocol WakeWordEngine: AnyObject {
 
 // MARK: - Null implementation (compile-safe fallback)
 
-/// No-op engine used when Porcupine is not available. Lets the rest of the
-/// pipeline (audio capture, permissions, STT, command routing) run and be
-/// tested end-to-end via the debug "Simulate wake word" button.
+/// No-op engine used when no real wake-word engine could be built (toggle
+/// off, or no KWS model in this build). Lets the rest of the pipeline
+/// (audio capture, permissions, STT, command routing) run and be tested
+/// end-to-end via the debug "Simulate wake word" button. It is NEVER a
+/// silent stub: selection records why it was chosen, and the Settings →
+/// "Voice activation" screen derives its status from that same truth.
 final class NullWakeWordEngine: WakeWordEngine {
     let requiredSampleRate: Double = 16_000
     let frameLength: Int = 512
@@ -48,69 +51,3 @@ final class NullWakeWordEngine: WakeWordEngine {
     func stop() {}
     func process(_ pcm: [Int16]) { /* intentionally does nothing */ }
 }
-
-// MARK: - Porcupine implementation (guarded)
-
-/// Real wake-word detector using Picovoice's on-device Porcupine engine.
-///
-/// To enable (2026-09-06, full family-facing steps in docs/wake-word-setup.md):
-///  1. Uncomment the Porcupine SPM package in `ios/project.yml`, run
-///     `./build.sh generate` to refresh the Xcode project.
-///  2. A family member pastes the Picovoice access key into Settings →
-///     "Voice activation" (stored in the Keychain via
-///     `WakeWordAccessKeyStore`) — or a team build can embed it as the
-///     `PicovoiceAccessKey` Info.plist value. The app never ships a key.
-///  3. Train the "Hey Sahayak" wake word in the Picovoice Console, download
-///     the iOS `.ppn` file, and drop it into
-///     `ios/ElderlyAssistant/Resources/hey-sahayak_ios.ppn`.
-///  4. Rebuild. `PorcupineWakeWordEngine` will now compile, and
-///     `AppCoordinator.makeWakeWordEngine()` builds it when the Settings
-///     toggle (default ON) is enabled — status shown on the Settings screen.
-///
-/// This file's `#if canImport(Porcupine)` guard (and its mirror,
-/// `AppCoordinator.isWakeWordRuntimeLinked`) is what keeps a build honest:
-/// no Porcupine package, no real engine, no "Active" claim.
-#if canImport(Porcupine)
-import Porcupine
-
-final class PorcupineWakeWordEngine: WakeWordEngine {
-    let requiredSampleRate: Double = 16_000
-    var frameLength: Int { Int(Porcupine.frameLength) }
-    var onDetection: (() -> Void)?
-
-    private let porcupine: Porcupine
-    private let onDetectionQueue: DispatchQueue
-
-    init(accessKey: String, keywordPath: String,
-         sensitivity: Float = 0.6,
-         onDetectionQueue: DispatchQueue = .main) throws {
-        self.porcupine = try Porcupine(
-            accessKey: accessKey,
-            keywordPath: keywordPath,
-            sensitivity: sensitivity
-        )
-        self.onDetectionQueue = onDetectionQueue
-    }
-
-    deinit {
-        porcupine.delete()
-    }
-
-    func start() throws { /* Porcupine is stateless; nothing to start */ }
-    func stop() { /* likewise */ }
-
-    func process(_ pcm: [Int16]) {
-        do {
-            let index = try porcupine.process(pcm: pcm)
-            if index >= 0 {
-                onDetectionQueue.async { [weak self] in
-                    self?.onDetection?()
-                }
-            }
-        } catch {
-            // Silently drop malformed frames — the tap may hand us short
-            // buffers during route changes.
-        }
-    }
-}
-#endif
