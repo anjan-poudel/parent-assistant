@@ -166,6 +166,15 @@ final class WakeWordAcousticSmokeTests: XCTestCase {
     /// (keywords.txt) must be fire-able by a human recording containing
     /// the phrase — measured on-device; the shipped gold pairs are the
     /// automated stand-in until a real Nepali wake recording exists.
+    ///
+    /// 2026-09-08 wake-word fix: the shipped set is now DECODE-DERIVED —
+    /// the romanization guesses ("▁YEAH ▁K AN CH H I" family) were proven
+    /// by the user-recording probes to never fire (the GigaSpeech-English
+    /// model does not hear Nepali-accented "ये कान्छी" as YEAH-K-AN-CH-I;
+    /// its keyword-biased decode locks कान्छी as "GUNCI" = "▁GU N CI" on
+    /// every take and take 1's full phrase as "IT CAN SEE"). The fire
+    /// contract below pins the lines that measured fires on the user's
+    /// own recordings (WakeWordUserRecordingProbeTests).
     func testCandidateKeywordsArePresentInShippedFile() throws {
         guard let dir = SherpaKWSModelFile.bundledDirectory() else {
             throw XCTSkip("kws model not bundled — run tools/fetch-kws-model.sh")
@@ -173,13 +182,15 @@ final class WakeWordAcousticSmokeTests: XCTestCase {
         let keywords = try String(contentsOf: dir.appendingPathComponent("keywords.txt"),
                                   encoding: .utf8)
         let lines = keywords.split(separator: "\n").map(String.init)
-        XCTAssertGreaterThanOrEqual(lines.count, 8,
-                                    "the shipped file carries the acoustic "
+        XCTAssertGreaterThanOrEqual(lines.count, 2,
+                                    "the shipped file carries the decode-derived "
                                     + "candidate set of the wake phrase")
-        for line in lines {
-            XCTAssertTrue(line.contains("▁YEAH"),
-                          "every candidate line starts with the YEAH word "
-                          + "token — got '\(line)'")
-        }
+        let joined = lines.joined(separator: "\n")
+        XCTAssertTrue(joined.contains("▁GU N CI"),
+                      "the कान्छी-syllable lock (GUNCI) must be present — "
+                      + "it fired on every user take in measurement")
+        XCTAssertTrue(joined.contains("▁IT ▁CAN ▁SEE"),
+                      "the take-1 full-phrase lock (IT CAN SEE) must be "
+                      + "present — it fired 3/3 utterances in measurement")
     }
 }

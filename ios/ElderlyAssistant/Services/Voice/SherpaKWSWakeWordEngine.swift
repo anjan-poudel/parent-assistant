@@ -141,21 +141,29 @@ struct SherpaKWSModelFiles {
 ///     falls back to `NullWakeWordEngine` (2026-09-08: the legacy
 ///     Porcupine chain is gone — sherpa is the only real engine).
 ///
-/// Keyword: the Nepali wake phrase "ये कान्छी" (romanized "YEAH KANCHHI")
-/// is read from the model directory's `keywords.txt` — one pre-tokenized
-/// BPE line written by the fetch script (the sherpa runtime does not
-/// tokenize raw text itself). "YEAH" is the closest English word-start
-/// tokenization of "ये" — the GigaSpeech English BPE vocabulary has no
-/// word-start "Y" token. Editing that file at runtime changes the wake
-/// phrase without retraining. Nepali caveat (honest gap, research §5):
-/// no Nepali KWS model exists anywhere; "YEAH KANCHHI" is
-/// English-phoneme and its trigger rate on Nepali-accented speech must
-/// be measured on-device before this is trusted (the zh-en
-/// phone-tokenized model is the accent-tolerant alternative).
+/// Keyword: the Nepali wake phrase "ये कान्छी" is read from the model
+/// directory's `keywords.txt` — pre-tokenized BPE lines written by the
+/// fetch script (the sherpa runtime does not tokenize raw text itself;
+/// every space-separated token must exist in tokens.txt or spotter init
+/// fails). Editing that file at runtime changes the wake phrase without
+/// retraining.
+///
+/// 2026-09-08 (measured, user recordings through this engine): the
+/// English GigaSpeech model does NOT hear Nepali-accented "ये कान्छी"
+/// as its English romanization — the keyword-biased decode locks the
+/// कान्छी syllable as GUNCI and take-dependent whole-phrase decodes as
+/// "IT CAN SEE", which is what keywords.txt ships (decode-derived lines,
+/// each verified to fire; see tools/fetch-kws-model.sh and
+/// WakeWordUserRecordingProbeTests). Honest gap (research §5): no
+/// Nepali KWS model exists; GigaSpeech-English on Nepali speech is
+/// inherently lossy, so utterance coverage is high but not guaranteed
+/// and ambient-speech false positives are unmeasured.
 final class SherpaKWSWakeWordEngine: WakeWordEngine {
 
-    /// The phrase this engine listens for. Mirrored in the keywords file
-    /// by tools/fetch-kws-model.sh — keep the two in sync.
+    /// The USER-FACING phrase this engine listens for (romanized for
+    /// display/metadata only). NOT the keywords.txt content — that file
+    /// carries the decode-derived token lines written by
+    /// tools/fetch-kws-model.sh and is the runtime source of truth.
     static let defaultKeyword = "YEAH KANCHHI"
 
     let requiredSampleRate: Double = 16_000

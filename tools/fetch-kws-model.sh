@@ -29,39 +29,39 @@ DEST="$(cd "$(dirname "$0")/.." && pwd)/ios/ElderlyAssistant/Resources/Models/kw
 
 # Keyword configuration. The sherpa KWS runtime does NOT tokenize raw
 # text (csrc/utils.cc EncodeKeywords): every space-separated token must
-# exist in the model's tokens.txt, so the phrase is pre-tokenized here
-# with the model's own sentencepiece model (Nepali "ये कान्छी" romanized
-# "YEAH KANCHHI" → "▁YEAH ▁K AN CH H I", verified against tokens.txt on
-# 2026-09-08; "YEAH" is the closest English word-start tokenization of
-# "ये" — the GigaSpeech English BPE vocabulary has no word-start "Y").
+# exist in the model's tokens.txt, so each phrase is pre-tokenized here
+# with the model's own sentencepiece model and verified below against
+# tokens.txt at fetch time.
 # keywords.txt is the runtime file the engine reads — edit it to change
 # the phrase without retraining. Line syntax: tokens plus optional
 # ":score" and "#threshold" suffixes (defaults keywordsScore 1.0 /
 # keywordsThreshold 0.25 apply when omitted); "@phrase" is only needed
 # when a keyword differs from its tokens, which is never the case here.
-# Acoustic candidate set for the one phrase (Nepali "ये कान्छी"). The
-# English-trained GigaSpeech decoder maps the user's Nepali phones to
-# its nearest English subword tokens, which vary (aspiration, vowel
-# quality, trailing iy) — so keywords.txt ships every plausible
-# tokenization instead of betting on one. The aspirated CH-H form is
-# included for completeness though it is essentially never emitted.
-# keywords.txt supports multiple keywords; all lines are verified below.
-KEYWORD_RAW="YEAH KANCHI
-YEAH KANCHIY
-YEAH KAHNCHI
-YEAH KAHNCHIY
-YEAH KUNCHI
-YEAH KUNCHIY
-YEAH KANCHHI
-YEAH KAHNCHHI"
-KEYWORD_TOKENS="▁YEAH ▁K AN CH I
-▁YEAH ▁K AN CH I Y
-▁YEAH ▁K A H N CH I
-▁YEAH ▁K A H N CH I Y
-▁YEAH ▁K UN CH I
-▁YEAH ▁K UN CH I Y
-▁YEAH ▁K AN CH H I
-▁YEAH ▁K A H N CH H I"
+#
+# 2026-09-08 wake-word fix (measured, see
+# ios/ElderlyAssistantTests/Services/Voice/WakeWordUserRecordingProbeTests.swift):
+# the previous set — romanized "YEAH KANCHHI" guesses
+# ("▁YEAH ▁K AN CH H I" etc.) — NEVER fired on the user's three real
+# "ये कान्छी" recordings. A whole-vocab spotter reveal + ASR transcript
+# of the same recordings showed why: the English GigaSpeech decoder does
+# not hear the user's Nepali-accented phrase as YEAH-K-AN-CH-I. Its
+# keyword-biased decode locks the "कान्छी" syllable as "GUNCI"
+# ("▁GU N CI") on every take, and take 1's whole phrase as
+# "IT CAN SEE" ("▁IT ▁CAN ▁SEE"); the leading "ये" maps inconsistently
+# (IT / A / nothing), so no single keyword covers the whole phrase.
+# The lines below are the DECODE-DERIVED set, each verified to fire on
+# the user's own recordings through the real engine path at the shipped
+# threshold 0.25 (recording 1: "IT CAN SEE" 3/3 utterances; recordings
+# 2-3: GUNCI-family 2-3/3). Honest limits remain: coverage is not 100%
+# per utterance and ambient speech false-positive risk is unmeasured —
+# the GigaSpeech-English model on Nepali speech is inherently lossy (no
+# Nepali KWS model exists; research docs/speaker-fingerprint.md §5).
+KEYWORD_RAW="IT CAN SEE
+GUNCI
+A GUNCI"
+KEYWORD_TOKENS="▁IT ▁CAN ▁SEE
+▁GU N CI
+▁A ▁GU N CI"
 
 if [ -d "$DEST/$MODEL" ]; then
   echo "  ✓ $MODEL already present — skipping"
