@@ -76,6 +76,9 @@ final class AppCoordinator: ObservableObject {
         // Voice-OS shell v1: the briefing composes in the app language,
         // same injection pattern as every other locale-aware service.
         morningBriefing?.locale = activeLocale
+        // [NEWS-READER] (2026-09-08) The news digest composes in the app
+        // language too — same injection pattern.
+        newsReader?.locale = activeLocale
     }
 
     /// First-run onboarding progress (spec §4.2). Persisted per step.
@@ -572,6 +575,7 @@ final class AppCoordinator: ObservableObject {
     private var speakQueue: SpeakQueue?
     private var speechSourceRegistry: SpeechSourceRegistry?
     private var morningBriefing: MorningBriefing?
+    private var newsReader: NewsReader?
     private var notificationFacade: NotificationFacade?
     private var shellCardCancellable: AnyCancellable?
 
@@ -590,6 +594,27 @@ final class AppCoordinator: ObservableObject {
     /// Drives the Today's-briefing Home widget presence and the briefing
     /// leaf; the leaf's "Speak again" replays this stored text.
     @Published private(set) var todayBriefing: StoredBriefing?
+    // Feed agent (feed-agent task, 2026-09-08): the feed's composition
+    // root lives here like every other store/service — the Settings leaf
+    // edits through the coordinator's mutation methods, the Feed leaf
+    // renders the published state, and the service itself publishes
+    // nothing (its results forward through `refreshFeed()`).
+    private let feedSettingsStore: FeedSettingsStore
+    private let feedService: FeedService
+
+    /// The configured feed sources — the Settings leaf's list (published
+    /// so add/remove re-renders it live).
+    @Published private(set) var feedSources: [FeedSource] = []
+    /// The configured topic keywords — same contract as `feedSources`.
+    @Published private(set) var feedTopics: [String] = []
+    /// The composed feed items (newest first).
+    @Published private(set) var feedItems: [FeedItem] = []
+    /// The Feed leaf's load state (idle/loading/loaded/failed).
+    @Published private(set) var feedLoadState: FeedLoadState = .idle
+    /// Source display names that failed the last refresh (honest partial
+    /// failure caption; empty = all sources reached).
+    @Published private(set) var feedFailedSourceNames: [String] = []
+
 
     /// Voice-session derivation state (spec §3.3): the last pipeline state
     /// plus how many `speak()` calls are currently in flight. `speaking`
@@ -686,6 +711,15 @@ final class AppCoordinator: ObservableObject {
     /// the top of `init`, long before any voice turn can record one, and
     /// `start()` injects it into the `CommandRouter` it builds.
     private(set) lazy var localToolLogStore = LocalToolLogStore(storage: storage)
+
+    /// [NEWS-READER] (2026-09-08) Configured news sources + curated
+    /// defaults (REPLACE rule — configured sources are THE news) for the
+    /// voice digest, and the store the feeds-settings agent's Settings →
+    /// Feeds editor binds to. Same Keychain `EncryptedLocalStorage`
+    /// pattern and lazy timing as `localToolLogStore` above: `storage` is
+    /// assigned at the top of `init`, long before any voice turn can
+    /// read it.
+    private(set) lazy var newsSourceStore = NewsSourceStore(storage: storage)
 
     /// Persisted "listen for ये कान्छी" UI preference — UserDefaults
     /// (not a secret), same shape as `sttModelPreference` /
@@ -943,6 +977,19 @@ final class AppCoordinator: ObservableObject {
         let briefingStore = MorningBriefingStore(storage: storage)
         self.morningBriefingStore = briefingStore
         self.todayBriefing = briefingStore.todaysBriefing(now: Date())
+        // Feed agent (feed-agent task, 2026-09-08) — encrypted config
+        // (sources + topics) like the stores above, loaded immediately
+        // so the published lists start populated, and the bounded-fetch
+        // service (TTL cache, per-source timeout, PII-free logging).
+        // Created after the bus exists, same as every bus consumer.
+        let feedSettingsStore = FeedSettingsStore(storage: storage)
+        self.feedSettingsStore = feedSettingsStore
+        let feedConfig = feedSettingsStore.load()
+        self.feedSources = feedConfig.sources
+        self.feedTopics = feedConfig.topics
+        self.feedService = FeedService(settings: feedSettingsStore,
+                                       transport: URLSession.shared,
+                                       observability: bus)
 
         // Calendar auto-add toggle (medical task, 2026-09-07) — default
         // ON when no value was ever stored. This is the property's ONLY
@@ -1332,6 +1379,13 @@ final class AppCoordinator: ObservableObject {
         guard !started else { return }
         started = true
 
+        // News reader editor seam (news-reader task, 2026-09-08):
+        // the Feeds settings leaf hosts the news-source editor through
+        // this static hook — assigned once the store exists.
+        NewsSourceEditorSeam.makeEditor = { [newsSourceStore] in
+            AnyView(NewsSourcesSettingsView(store: newsSourceStore))
+        }
+
         // Restore the persisted conversation history (local-cache-chat
         // task, 2026-09-06). Nothing records a turn before this point —
         // the router that calls recordTranscript/noteAssistantSpoke is
@@ -1467,9 +1521,22 @@ final class AppCoordinator: ObservableObject {
             briefingStore: morningBriefingStore,
             locale: activeLocale
         )
+        // [NEWS-READER] (2026-09-08) The news digest source: same shell
+        // queue + observability bus, the Keychain source store (REPLACE
+        // rule), and the shared bounded-fetch seam (URLSession — 8 s
+        // per source). Fired by the router's deterministic news stage via
+        // `fireNewsReader()` below.
+        let newsReader = NewsReader(
+            queue: queue,
+            observability: observabilityBus,
+            store: newsSourceStore,
+            transport: URLSession.shared,
+            locale: activeLocale
+        )
         let registry = SpeechSourceRegistry(observabilityBus: observabilityBus)
         registry.register(notificationReader)
         registry.register(briefing)
+        registry.register(newsReader)
         // Single UNUserNotificationCenter delegate (design §2 confirmed
         // decision — verified no other object in the app owns this slot).
         let facade = NotificationFacade(handlers: [notificationReader],
@@ -1479,6 +1546,7 @@ final class AppCoordinator: ObservableObject {
         self.speechSourceRegistry = registry
         self.notificationFacade = facade
         self.morningBriefing = briefing
+        self.newsReader = newsReader
         // Push-speech cards surface through the EXISTING Home outcome-card
         // presentation (speech + card, spec §4.6). Interactive replies
         // carry nil cards and never touch this outcome. The card persists
@@ -4691,6 +4759,18 @@ extension AppCoordinator: VoiceCommandCoordinating {
             await MainActor.run { self.refreshTodayBriefing() }
         }
     }
+
+    /// [NEWS-READER] (2026-09-08) The router's "read me the news" hook.
+    /// The reader announces its checking line, fetches and speaks the
+    /// digest — all through the shell's speak queue, with its own card.
+    /// On-demand: no once-per-day budget; the reader's own in-flight
+    /// guard makes a repeat command an honest "already fetching" line.
+    func fireNewsReader() {
+        guard let newsReader else { return }
+        Task {
+            await newsReader.fire()
+        }
+    }
 }
 
 // MARK: - Voice-OS shell v1: push-speech card presentation
@@ -4747,6 +4827,87 @@ fileprivate final class SpeechNoteForwarder: Speaker {
 
     func cancel() {
         inner.cancel()
+    }
+}
+
+// MARK: - [FEED-AGENT] Feed agent (feed leaf + Settings → Feeds)
+
+extension AppCoordinator {
+
+    /// Full refresh WITH the loading state (feed-agent task, 2026-09-08)
+    /// — the Refresh/Retry buttons, where the user asked for a fetch and
+    /// deserves the visible "loading" feedback.
+    func refreshFeed() async {
+        guard feedLoadState != .loading else { return }
+        feedLoadState = .loading
+        await performFeedRefresh()
+    }
+
+    /// Refresh-on-appear with TTL: the leaf's `.task` calls this so the
+    /// service can serve its cache while fresh — the network is never
+    /// thrashed by re-entry, and the loading card only shows for the
+    /// FIRST load (re-appearing with content on screen refreshes
+    /// silently behind the existing cards).
+    func refreshFeedIfNeeded() async {
+        guard feedLoadState != .loading else { return }
+        if feedLoadState == .idle {
+            feedLoadState = .loading
+        }
+        await performFeedRefresh()
+    }
+
+    /// The shared fetch + state mapping. Post-await published updates
+    /// hop to the main actor so SwiftUI observes them coherently (the
+    /// house `refreshTodayBriefing` pattern).
+    private func performFeedRefresh() async {
+        let result = await feedService.refresh()
+        await MainActor.run { [self] in
+            feedItems = result.items
+            feedFailedSourceNames = result.failedSourceNames
+            // Honest state mapping: empty + failures = the failed card
+            // (something is wrong); empty + clean = the honest
+            // "nothing here" empty state.
+            feedLoadState = result.items.isEmpty && !result.failedSourceNames.isEmpty
+                ? .failed : .loaded
+        }
+    }
+
+    /// Adds a feed source (Settings → Feeds). False keeps the form's
+    /// draft on screen (duplicate/invalid/cap/storage failure — the
+    /// store is the gate; nothing is claimed that didn't happen).
+    @discardableResult
+    func addFeedSource(name: String, urlString: String) -> Bool {
+        let added = feedSettingsStore.addSource(name: name, urlString: urlString)
+        reloadFeedConfig()
+        return added
+    }
+
+    func removeFeedSource(id: String) {
+        feedSettingsStore.removeSource(id: id)
+        reloadFeedConfig()
+    }
+
+    /// Adds a topic keyword. Same honest-false contract as the source
+    /// add (duplicate/cap/empty rejected by the store).
+    @discardableResult
+    func addFeedTopic(_ topic: String) -> Bool {
+        let added = feedSettingsStore.addTopic(topic)
+        reloadFeedConfig()
+        return added
+    }
+
+    func removeFeedTopic(_ topic: String) {
+        feedSettingsStore.removeTopic(topic)
+        reloadFeedConfig()
+    }
+
+    /// Re-reads the store into the published lists after any mutation —
+    /// the single path both the Settings leaf and the next refresh's
+    /// config read through, so UI and service can never disagree.
+    private func reloadFeedConfig() {
+        let config = feedSettingsStore.load()
+        feedSources = config.sources
+        feedTopics = config.topics
     }
 }
 
