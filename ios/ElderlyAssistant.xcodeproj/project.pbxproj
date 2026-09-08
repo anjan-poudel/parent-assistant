@@ -83,22 +83,16 @@
 		38EA930604B28AB2BF63DF05 /* WakeWordEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AFE0B77607ED7DA0553D6F0 /* WakeWordEngine.swift */; };
 		39F0DBE85A418FEFC103B2E7 /* LocalBrainChainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C9FD745CF7B00B908EC011D /* LocalBrainChainTests.swift */; };
 		3ADB4A7E4AD571AE1F92BEC0 /* InAppNavigationSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA32A5EBA667F71F5A20570 /* InAppNavigationSessionTests.swift */; };
-<<<<<<< HEAD
-		3FD95D764BB31845246A8AF9 /* FeedService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66F3BB83B97E3D6844BA7A8E /* FeedService.swift */; };
-=======
 		3F1C61FED2AAE23C0E05635A /* SpeakerEmbedderSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 497AAD45CC04D1C886C8CB8F /* SpeakerEmbedderSelectionTests.swift */; };
->>>>>>> task/voice-fingerprint
+		3FD95D764BB31845246A8AF9 /* FeedService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66F3BB83B97E3D6844BA7A8E /* FeedService.swift */; };
 		3FE394412AC1FB089526F43C /* ModelStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F9D2C931DA6AAFA3A23B6C /* ModelStoreTests.swift */; };
 		408C22DF6353AF02C3CF6A5B /* LogSanitiser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8ACA4236E037E41C5E53D9 /* LogSanitiser.swift */; };
 		40AFC5EDD350771A3502BC47 /* YouTubeRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0652FB21764B59981D57FCB2 /* YouTubeRoute.swift */; };
 		420C766EA0E0E9CB7570BC42 /* DialectIdentifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A637CDE29D21A19F799F38D /* DialectIdentifier.swift */; };
 		42673604BD8123502A1BAA16 /* ApplianceOverlayMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86426A990357C000AE3B0E24 /* ApplianceOverlayMapper.swift */; };
 		436C2714E2A7AA920F24367F /* BikramSambat.swift in Sources */ = {isa = PBXBuildFile; fileRef = 554AF94D862908C8F1136741 /* BikramSambat.swift */; };
-<<<<<<< HEAD
 		44FB120026F61E48780B01A2 /* NewsReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43861FE6D6DC9284BF1B2693 /* NewsReader.swift */; };
-=======
 		4502FA0BFE72C7581C0C9C93 /* MFCCSpeakerEmbedder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EF07F35D85FF48137E1273D /* MFCCSpeakerEmbedder.swift */; };
->>>>>>> task/voice-fingerprint
 		45686202C9EDDAD0C3DFCEC1 /* ApplianceStepCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = D80A1E3F1D3D05689F2B2BEF /* ApplianceStepCards.swift */; };
 		460092DA5C44FA202CEA6973 /* RoutinePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A7DB532BF6505FE842CF0B1 /* RoutinePlugin.swift */; };
 		468152C77EFAAB9D98084D78 /* DirectionsRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E074CE1003F9A67C40FE030 /* DirectionsRoute.swift */; };
@@ -195,11 +189,8 @@
 		86D9766B54FB879CF5598BDF /* NewsSourceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EA479C2E31FF808BB947EC1 /* NewsSourceStore.swift */; };
 		87598E19C4A09950A64200FD /* QuickAccessAppsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B38179627F576D83778149A9 /* QuickAccessAppsView.swift */; };
 		877A9EAB9ADF74AF1E7DC12B /* VoiceSessionBindingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CD2468FE69CCF128862DE28 /* VoiceSessionBindingTests.swift */; };
-<<<<<<< HEAD
-		888BA488B660C4ED4965639B /* FeedServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D65E8998862E0AA099490B22 /* FeedServiceTests.swift */; };
-=======
 		885F7C76D4D119170AAC5990 /* SpeakerEmbeddingMathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88744E66A3C35EEEBB4B1079 /* SpeakerEmbeddingMathTests.swift */; };
->>>>>>> task/voice-fingerprint
+		888BA488B660C4ED4965639B /* FeedServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D65E8998862E0AA099490B22 /* FeedServiceTests.swift */; };
 		88AB55B2E56480BD97A927CC /* SwitchableCommandInterpreterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBF8D15A8CBEB370AE0487CE /* SwitchableCommandInterpreterTests.swift */; };
 		8AEC5C227EB62AA27FC8C122 /* UpdatesCompositionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28CB8973EC37B1905B744CD8 /* UpdatesCompositionTests.swift */; };
 		8AF68E439B2A89EC176E6163 /* SilenceEndpointTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C0116811841F930B56970DE /* SilenceEndpointTests.swift */; };
@@ -311,11 +302,8 @@
 		CF1D61DC1AE25927611816F8 /* MedicationSchedulerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = A97FCC20DC139A6F36EF5884 /* MedicationSchedulerProtocol.swift */; };
 		CF856CC96F2004DA2DD53E5E /* GeminiClient+Vision.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8D11805F08657DA0E36E4CA /* GeminiClient+Vision.swift */; };
 		D0B6412C394AFDFACC01762B /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = 9DBFB1B9C8D62BE5420E62FB /* WhisperKit */; };
-<<<<<<< HEAD
-		D15571A9BCE29B217CBB97A8 /* SpeakerEmbedding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16E375BD4379ABC10604A941 /* SpeakerEmbedding.swift */; };
-=======
 		D1005221E0A40AB2BDA40547 /* SpectralGateDenoiserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 188867411842BB910CE614E1 /* SpectralGateDenoiserTests.swift */; };
->>>>>>> task/noise-filter-frontend
+		D15571A9BCE29B217CBB97A8 /* SpeakerEmbedding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16E375BD4379ABC10604A941 /* SpeakerEmbedding.swift */; };
 		D198F3FBC006A1F667C0F4A0 /* FamilyContactStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1681B7F77E2119291C04249C /* FamilyContactStore.swift */; };
 		D23BC4A3757DE9536B84FAB7 /* ApplianceHelperSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68D7D69AE19ABBDEC9CFD14E /* ApplianceHelperSessionTests.swift */; };
 		D25226FBA87296456ABC9189 /* ChannelPreferenceStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA1BC834698BEAECE250B34D /* ChannelPreferenceStoreTests.swift */; };
@@ -367,11 +355,8 @@
 		F5667293263F3664F7E6BAC4 /* ExternalCalendarServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59D8463A0D3314A2C9CE1E72 /* ExternalCalendarServiceTests.swift */; };
 		F5B6567562467C3A100334C3 /* FacebookArchiveParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F06203E2B2091AEFC198603 /* FacebookArchiveParserTests.swift */; };
 		F5F45F00A4E7C75F5C12E419 /* VoiceContactSearchRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48272FA061C2AED41E6DED18 /* VoiceContactSearchRoute.swift */; };
-<<<<<<< HEAD
 		F74DC13B4F2FC0E7C438E308 /* FeedSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8B1E9DA123D48A9E809C5F4 /* FeedSettingsStore.swift */; };
-=======
 		F781C582029881C36805C77C /* NoiseSuppressor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B14AE626EC916455B15F1D2 /* NoiseSuppressor.swift */; };
->>>>>>> task/noise-filter-frontend
 		F7C0DC7D97D42F9BA667CFAF /* AlarmTimersServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64434D83C703F46957997EA8 /* AlarmTimersServiceTests.swift */; };
 		F806FC4A13EA91D39F9E8A54 /* SherpaKWSWakeWordEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A40C7536D29F558009CF964 /* SherpaKWSWakeWordEngine.swift */; };
 		F9759C4788A37E452F0F3DC0 /* SavedPlaceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B35345F0DD8F3C301B818B2 /* SavedPlaceStore.swift */; };
@@ -472,11 +457,8 @@
 		2C428541C59D186425D9D393 /* IntentLogReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentLogReviewView.swift; sourceTree = "<group>"; };
 		2CA1D94894BBEEB22126873C /* MemoryProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryProbe.swift; sourceTree = "<group>"; };
 		2D13B4C9A755A315518548D7 /* IntentToolWebSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentToolWebSearchTests.swift; sourceTree = "<group>"; };
-<<<<<<< HEAD
-		2EF07F35D85FF48137E1273D /* MFCCSpeakerEmbedder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MFCCSpeakerEmbedder.swift; sourceTree = "<group>"; };
-=======
 		2DC508286C13358F995C8CEA /* SpectralGateCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpectralGateCoreTests.swift; sourceTree = "<group>"; };
->>>>>>> task/noise-filter-frontend
+		2EF07F35D85FF48137E1273D /* MFCCSpeakerEmbedder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MFCCSpeakerEmbedder.swift; sourceTree = "<group>"; };
 		2F4098459DFF8C5CD563A22B /* ApplianceHelperSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceHelperSession.swift; sourceTree = "<group>"; };
 		3594E79FEA1BABFE0B7C332A /* ApplianceHelperPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceHelperPluginTests.swift; sourceTree = "<group>"; };
 		35DEBB0320FDD95210E5B784 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
@@ -552,11 +534,8 @@
 		5F36E75710CF97719072E1C0 /* ExternalNotificationFireDateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalNotificationFireDateTests.swift; sourceTree = "<group>"; };
 		5F383092EDDE12BB83A67E16 /* FestivalCalendarServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FestivalCalendarServiceTests.swift; sourceTree = "<group>"; };
 		6049FE3C4BC8944626675C41 /* GeminiCommandInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiCommandInterpreter.swift; sourceTree = "<group>"; };
-<<<<<<< HEAD
-		61EB76C3EA9117E3B7E31002 /* NewsFeedParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsFeedParser.swift; sourceTree = "<group>"; };
-=======
 		615F49AFAA87F9DB2AC21C78 /* SpeakerVerifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerVerifierTests.swift; sourceTree = "<group>"; };
->>>>>>> task/voice-fingerprint
+		61EB76C3EA9117E3B7E31002 /* NewsFeedParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsFeedParser.swift; sourceTree = "<group>"; };
 		62207A3FA5B741491AA5C0D6 /* ExternalCalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalCalendarService.swift; sourceTree = "<group>"; };
 		6226BBFD8D3BB806CD262458 /* Announcement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Announcement.swift; sourceTree = "<group>"; };
 		62505895EDDF79ED720171BE /* InputSanitiserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSanitiserTests.swift; sourceTree = "<group>"; };
@@ -564,11 +543,8 @@
 		62FF5D6C4374911BDBFB167D /* CallLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLinks.swift; sourceTree = "<group>"; };
 		642BBCC5D826EEA1C51DC2AE /* TopicPreAnswer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TopicPreAnswer.swift; sourceTree = "<group>"; };
 		64434D83C703F46957997EA8 /* AlarmTimersServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmTimersServiceTests.swift; sourceTree = "<group>"; };
-<<<<<<< HEAD
-		66F3BB83B97E3D6844BA7A8E /* FeedService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedService.swift; sourceTree = "<group>"; };
-=======
 		658450D38DE958E25EB1100E /* SpectralGateDenoiser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpectralGateDenoiser.swift; sourceTree = "<group>"; };
->>>>>>> task/noise-filter-frontend
+		66F3BB83B97E3D6844BA7A8E /* FeedService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedService.swift; sourceTree = "<group>"; };
 		675C9C0F0CE04315DB7E4104 /* SpeakQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakQueueTests.swift; sourceTree = "<group>"; };
 		680AAA1A7F05226F9618CE82 /* VoicePipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePipeline.swift; sourceTree = "<group>"; };
 		68D7D69AE19ABBDEC9CFD14E /* ApplianceHelperSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceHelperSessionTests.swift; sourceTree = "<group>"; };
@@ -721,16 +697,7 @@
 		D5BAF4F68264CEB596D17165 /* ApplianceCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceCache.swift; sourceTree = "<group>"; };
 		D5D597BE53A1783851BFAEED /* UnifiedContactSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedContactSearch.swift; sourceTree = "<group>"; };
 		D63F2DFCD9600AEF6746584B /* UnifiedContactSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedContactSearchTests.swift; sourceTree = "<group>"; };
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 		D65E8998862E0AA099490B22 /* FeedServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedServiceTests.swift; sourceTree = "<group>"; };
-=======
->>>>>>> task/accent-adaptation
-=======
->>>>>>> task/voice-fingerprint
-=======
->>>>>>> task/noise-filter-frontend
 		D7FBBDBAAA31C9B9B395000B /* WakeWordAcousticSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeWordAcousticSmokeTests.swift; sourceTree = "<group>"; };
 		D80A1E3F1D3D05689F2B2BEF /* ApplianceStepCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceStepCards.swift; sourceTree = "<group>"; };
 		D81DC4E1BE69187C2BFCB3D0 /* ApplianceGuidancePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceGuidancePolicy.swift; sourceTree = "<group>"; };
@@ -805,28 +772,12 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		01B0649D321E434818B7B9D6 /* Alarms alarms-timers */ = {
-			isa = PBXGroup;
-			children = (
-				38BC144A26799A51DF8A675E /* ios */,
-			);
-			path = "Alarms alarms-timers";
-			sourceTree = "<group>";
-		};
 		0AB357A8026C942C15CAC805 /* Theme */ = {
 			isa = PBXGroup;
 			children = (
 				35DEBB0320FDD95210E5B784 /* AppTheme.swift */,
 			);
 			path = Theme;
-			sourceTree = "<group>";
-		};
-		0CE31B93F9223F188B385FD9 /* Services */ = {
-			isa = PBXGroup;
-			children = (
-				01B0649D321E434818B7B9D6 /* Alarms alarms-timers */,
-			);
-			path = Services;
 			sourceTree = "<group>";
 		};
 		1B29DE634D16120E129D68A0 /* Observability */ = {
@@ -845,14 +796,6 @@
 				F033B332A7A3656A8728AB13 /* NotificationBellButton.swift */,
 			);
 			path = Widgets;
-			sourceTree = "<group>";
-		};
-		1C4148E30013A5AB8D7F2F5D /* Services */ = {
-			isa = PBXGroup;
-			children = (
-				C1C53E14E047CF1C43B01A6B /* Medical alarms-timers */,
-			);
-			path = Services;
 			sourceTree = "<group>";
 		};
 		1C72CEAE97AC2317DC63E872 /* Gemini */ = {
@@ -874,14 +817,6 @@
 				0B7F3ACF982A3974B735CF9E /* LiveCallDetectorTests.swift */,
 			);
 			path = History;
-			sourceTree = "<group>";
-		};
-		236EC8990836C92A3BDE315A /* ElderlyAssistantTests */ = {
-			isa = PBXGroup;
-			children = (
-				1C4148E30013A5AB8D7F2F5D /* Services */,
-			);
-			path = ElderlyAssistantTests;
 			sourceTree = "<group>";
 		};
 		2F659B577EF239ADC6BACFE6 /* Navigation */ = {
@@ -911,14 +846,6 @@
 			path = Notifications;
 			sourceTree = "<group>";
 		};
-		38BC144A26799A51DF8A675E /* ios */ = {
-			isa = PBXGroup;
-			children = (
-				91C44EBD23A3B818EDC29027 /* ElderlyAssistantTests */,
-			);
-			path = ios;
-			sourceTree = "<group>";
-		};
 		40CC8CA21FCFF12AF85C1E59 /* Alarms */ = {
 			isa = PBXGroup;
 			children = (
@@ -945,14 +872,6 @@
 				8680FE2847368F1B8EAD81DD /* SwiftWhisper */,
 			);
 			name = Packages;
-			sourceTree = "<group>";
-		};
-		4F333F990203B6F68DBADAE3 /* Medical medical-appointments */ = {
-			isa = PBXGroup;
-			children = (
-				5B34818AF2D0A749C77662D7 /* ios */,
-			);
-			path = "Medical medical-appointments";
 			sourceTree = "<group>";
 		};
 		528CAE486C9D93AA442FC217 /* Plugins */ = {
@@ -1006,14 +925,6 @@
 				D8D1AA77BFD311CCC4C8875E /* SavedPlaceStoreTests.swift */,
 			);
 			path = Storage;
-			sourceTree = "<group>";
-		};
-		5B34818AF2D0A749C77662D7 /* ios */ = {
-			isa = PBXGroup;
-			children = (
-				236EC8990836C92A3BDE315A /* ElderlyAssistantTests */,
-			);
-			path = ios;
 			sourceTree = "<group>";
 		};
 		5BDC95CF7558F90FBF6F3CF9 /* Intents */ = {
@@ -1111,14 +1022,6 @@
 			path = ElderlyAssistant;
 			sourceTree = "<group>";
 		};
-		7F68D952F1C499D6CAB844C5 /* ios */ = {
-			isa = PBXGroup;
-			children = (
-				EEBABA56558D5E55259AF682 /* ElderlyAssistant */,
-			);
-			path = ios;
-			sourceTree = "<group>";
-		};
 		80D5FA1EA39B1A919E442D76 /* Apps */ = {
 			isa = PBXGroup;
 			children = (
@@ -1135,14 +1038,6 @@
 				28CB8973EC37B1905B744CD8 /* UpdatesCompositionTests.swift */,
 			);
 			path = Widgets;
-			sourceTree = "<group>";
-		};
-		91C44EBD23A3B818EDC29027 /* ElderlyAssistantTests */ = {
-			isa = PBXGroup;
-			children = (
-				CD62A370452AC7196FF5CE0C /* Services */,
-			);
-			path = ElderlyAssistantTests;
 			sourceTree = "<group>";
 		};
 		933D20AA23A788790BFBF3D0 = {
@@ -1213,13 +1108,6 @@
 				0BB723279F0EDC2B3C5D91F0 /* DevanagariNumeralsTests.swift */,
 			);
 			path = Appliance;
-			sourceTree = "<group>";
-		};
-		9956EE1491B92FB253667847 /* Alarms */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Alarms;
 			sourceTree = "<group>";
 		};
 		9E701634E7E75769DB3D33CE /* ModelStore */ = {
@@ -1376,14 +1264,6 @@
 			path = Feeds;
 			sourceTree = "<group>";
 		};
-		C1C53E14E047CF1C43B01A6B /* Medical alarms-timers */ = {
-			isa = PBXGroup;
-			children = (
-				7F68D952F1C499D6CAB844C5 /* ios */,
-			);
-			path = "Medical alarms-timers";
-			sourceTree = "<group>";
-		};
 		C5C1ECD0CD5E084615C26023 /* Appliance */ = {
 			isa = PBXGroup;
 			children = (
@@ -1428,14 +1308,6 @@
 			path = Intents;
 			sourceTree = "<group>";
 		};
-		CD62A370452AC7196FF5CE0C /* Services */ = {
-			isa = PBXGroup;
-			children = (
-				9956EE1491B92FB253667847 /* Alarms */,
-			);
-			path = Services;
-			sourceTree = "<group>";
-		};
 		CD858715B4AA04346AEF2620 /* MedicationScheduler */ = {
 			isa = PBXGroup;
 			children = (
@@ -1473,7 +1345,6 @@
 				E0067981706DE4B20ECD8065 /* History */,
 				CB103D833B0E35C1D49D7552 /* Intents */,
 				EE79F1893FF9AAB85AE3FF23 /* Medical */,
-				4F333F990203B6F68DBADAE3 /* Medical medical-appointments */,
 				F6A2FD0A446F342EF8783A8E /* MedicationScheduler */,
 				9E701634E7E75769DB3D33CE /* ModelStore */,
 				2F659B577EF239ADC6BACFE6 /* Navigation */,
@@ -1587,11 +1458,8 @@
 				5ADF9F6FEB0C43083BE7BBFB /* CloudFallbackTests.swift */,
 				AA5EF8A3254973EE565E766B /* CommandRouterReplySafetyTests.swift */,
 				4FF305EE75985E7F2B131DD2 /* CommandRouterTests.swift */,
-<<<<<<< HEAD
 				596B301FB35D36850CFCC5F9 /* CommandRouterYouTubeTests.swift */,
-=======
 				A6F2CD3D7E944D60A5771D4E /* DialectBiasComposerTests.swift */,
->>>>>>> task/accent-adaptation
 				3CB3AD6F21BA98B0881ADE43 /* DialectIdentifierTests.swift */,
 				B18F505EBF654FD94D49D706 /* DirectionsRouteTests.swift */,
 				4099370DD1353BABBAF99588 /* EnergyVADTests.swift */,
@@ -1628,10 +1496,7 @@
 				5037C77CFB1853F53CE7B8B6 /* TranscriptSanityGuardTests.swift */,
 				7D17FB967866B52C19FAC054 /* VoiceBiometricStoreTests.swift */,
 				F3A37D8E7B43E99DFFE84993 /* VoiceContactSearchRouteTests.swift */,
-<<<<<<< HEAD
-=======
 				39F0853BA91DD0A796F579B6 /* VoicePipelineNoiseFilterSeamTests.swift */,
->>>>>>> task/noise-filter-frontend
 				D7FBBDBAAA31C9B9B395000B /* WakeWordAcousticSmokeTests.swift */,
 				C3C9242954AB514718F74083 /* WakeWordConfigTests.swift */,
 				11921491FCE83D110C69A282 /* WakeWordUserRecordingProbeTests.swift */,
@@ -1660,14 +1525,6 @@
 				9D894F3D84DC53283DD84064 /* MedicalAppointmentParser.swift */,
 			);
 			path = Medical;
-			sourceTree = "<group>";
-		};
-		EEBABA56558D5E55259AF682 /* ElderlyAssistant */ = {
-			isa = PBXGroup;
-			children = (
-				0CE31B93F9223F188B385FD9 /* Services */,
-			);
-			path = ElderlyAssistant;
 			sourceTree = "<group>";
 		};
 		F14AAEC9342C8782C099A199 /* CalendarSync */ = {
@@ -2015,14 +1872,11 @@
 				A84AB33D542782731A889494 /* NepaliFestival.swift in Sources */,
 				943F8EA95365206425FDF63D /* NepaliTextNormalizer.swift in Sources */,
 				1E4E2CACAEA900314E8D7026 /* NepaliTimeParser.swift in Sources */,
-<<<<<<< HEAD
 				D473155BB24472EA9111CD30 /* NewsFeedParser.swift in Sources */,
 				44FB120026F61E48780B01A2 /* NewsReader.swift in Sources */,
 				86D9766B54FB879CF5598BDF /* NewsSourceStore.swift in Sources */,
 				2B75D1C4589D63AA210BFAD8 /* NewsSourcesSettingsView.swift in Sources */,
-=======
 				F781C582029881C36805C77C /* NoiseSuppressor.swift in Sources */,
->>>>>>> task/noise-filter-frontend
 				E80E059DA46D767C750A5DCC /* NotificationBellButton.swift in Sources */,
 				832475F2D98C3F665C961223 /* NotificationFacade.swift in Sources */,
 				0D78E2E8D49D7B2B4FB475E8 /* NotificationReader.swift in Sources */,
@@ -2049,15 +1903,12 @@
 				7A821335546B5C53D68FD5C0 /* SileroVAD.swift in Sources */,
 				91C93F0B04F466469982B33F /* SpeakQueue.swift in Sources */,
 				B970107BCCDA8472F0BCA767 /* Speaker.swift in Sources */,
-<<<<<<< HEAD
 				0E78EC26A885731D3A023FA6 /* SpeakerBiometricService.swift in Sources */,
 				46E82F0A86FF84212F6B8E5B /* SpeakerEmbedder.swift in Sources */,
 				D15571A9BCE29B217CBB97A8 /* SpeakerEmbedding.swift in Sources */,
 				7464B974CE82762DC07D0124 /* SpeakerVerifier.swift in Sources */,
-=======
 				56ADBBCF6C6B937083785B83 /* SpectralGateCore.swift in Sources */,
 				E84DDE71DBC9B8C510899E70 /* SpectralGateDenoiser.swift in Sources */,
->>>>>>> task/noise-filter-frontend
 				5707C48E2D863D068ADDB5E0 /* SpeechRecognizer.swift in Sources */,
 				C264393841D6669A9D2026C6 /* SpeechSource.swift in Sources */,
 				5D81FBD14362148284553655 /* SpokenTime.swift in Sources */,
@@ -2226,12 +2077,9 @@
 				3F1C61FED2AAE23C0E05635A /* SpeakerEmbedderSelectionTests.swift in Sources */,
 				885F7C76D4D119170AAC5990 /* SpeakerEmbeddingMathTests.swift in Sources */,
 				FD0C74053396420771C700C1 /* SpeakerTests.swift in Sources */,
-<<<<<<< HEAD
 				8EC100443CD244C99A070480 /* SpeakerVerifierTests.swift in Sources */,
-=======
 				A4812ABA5D0877521D29B7A5 /* SpectralGateCoreTests.swift in Sources */,
 				D1005221E0A40AB2BDA40547 /* SpectralGateDenoiserTests.swift in Sources */,
->>>>>>> task/noise-filter-frontend
 				AE7264436B8E8190E740A2DE /* SpeechSourceRegistryTests.swift in Sources */,
 				CA5582BE53ECFDE1A238B8EA /* SpokenTimeTests.swift in Sources */,
 				D36A0FB8F8DC985B08BEEA8B /* StreamingCaptionTests.swift in Sources */,
