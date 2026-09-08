@@ -16,7 +16,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case appearance, language, calling, places, family, meds, manuals, calendar, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, youtube, quickApps, privacy, intentLog, toolLog
+        case appearance, language, calling, places, family, meds, manuals, calendar, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, youtube, feeds, quickApps, privacy, intentLog, toolLog
 
         var id: String {
             switch self {
@@ -35,6 +35,7 @@ struct SettingsView: View {
             case .ttsVoices: return "ttsVoices"
             case .webSearch: return "webSearch"
             case .youtube: return "youtube"
+            case .feeds: return "feeds"
             case .quickApps: return "quickApps"
             case .privacy: return "privacy"
             case .intentLog: return "intentLog"
@@ -97,6 +98,7 @@ struct SettingsView: View {
                         // voice command opens YouTube search directly).
                         sectionRow(.youtube, icon: "play.rectangle.fill",
                                    titleKey: "youtubeSettings.title")
+                        sectionRow(.feeds, icon: "rectangle.stack.fill", titleKey: "settings.feeds.title")
                         sectionRow(.quickApps, icon: "square.grid.2x2.fill", titleKey: "settings.quickApps.title")
                         sectionRow(.family, icon: "person.2.fill", titleKey: "settings.family.title")
                         sectionRow(.meds, icon: "pills.fill", titleKey: "settings.meds.title")
@@ -156,6 +158,7 @@ struct SettingsView: View {
             case .ttsVoices: TTSVoicesSettingsView()
             case .webSearch: SearchSettingsView()
             case .youtube: YouTubeSettingsView()
+            case .feeds: FeedsSettingsView()
             case .quickApps: QuickAccessAppsView()
             case .privacy: PrivacySettingsView()
             case .intentLog: IntentLogReviewView()
