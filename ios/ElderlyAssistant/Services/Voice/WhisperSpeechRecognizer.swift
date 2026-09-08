@@ -299,6 +299,57 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         text.withCString { strdup($0) }
     }
 
+    /// [SCRIPT-REGRESSION] Language + prompt decisions for one attempt,
+    /// pure and Foundation-only so unit tests pin them without the
+    /// SwiftWhisper runtime. `runInference` applies the result to
+    /// `WhisperParams` verbatim:
+    /// - While a dialect-bias plan is ACTIVE the language is forced to
+    ///   "ne" regardless of model — the persisted dialect label means the
+    ///   user speaks Nepali, and the decoder must stay in
+    ///   Nepali-language mode so the Devanagari-only prompt gate holds.
+    ///   This is the whisper.cpp half of the roman-script drift fix: on
+    ///   stock multilingual models the old path ran language auto-detect
+    ///   next to a roman-biasing `initial_prompt`, which pulled
+    ///   transcripts into roman script.
+    /// - Inactive states preserve the existing model-based logic
+    ///   byte-identically (force "ne" on genuine Nepali fine-tunes only;
+    ///   auto-detect elsewhere — forcing "ne" on English/noise is how
+    ///   whisper hallucinates Devanagari garbage).
+    /// - The prompt text is attached only when it carries at least one
+    ///   Devanagari term (defence in depth; the composer already drops
+    ///   roman terms).
+    struct DecodeAdaptation: Equatable, Sendable {
+        let languageCode: String
+        let promptText: String?
+    }
+
+    static func decodeAdaptation(modelId: ModelID,
+                                 config: Config,
+                                 plan: DialectBiasPlan) -> DecodeAdaptation {
+        let languageCode: String
+        if plan.state == .active {
+            languageCode = "ne"
+        } else {
+            let usePrimary = (modelId == ModelCatalog.whisperLargeV3Nepali
+                              || modelId == ModelCatalog.whisperMediumFinetunedNepali
+                              || modelId == ModelCatalog.whisperFinetunedNepali
+                              || modelId == ModelCatalog.whisperSmallNepali)
+                && config.forcePrimaryLanguage
+            if usePrimary, let lang = config.primaryLanguage {
+                languageCode = lang
+            } else {
+                languageCode = "auto"
+            }
+        }
+        var promptText: String?
+        if plan.state == .active,
+           let text = plan.promptText, !text.isEmpty,
+           DialectBiasComposer.containsDevanagariTerm(text) {
+            promptText = text
+        }
+        return DecodeAdaptation(languageCode: languageCode, promptText: promptText)
+    }
+
     /// Attaches the prompt buffer to the in-flight attempt record (whose
     /// clean settle frees it; watchdog kills leak it deliberately).
     private func attachPromptBuffer(_ buffer: UnsafeMutablePointer<CChar>,
@@ -576,23 +627,38 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         //    mutated by other consumers, silently clobbering our language
         //    setting — always build a fresh WhisperParams.
         let params = WhisperParams(strategy: .greedy)
-        // Force `primaryLanguage` on the genuine Nepali fine-tunes
-        // (kiranpantha large-v3 and the distilled small — both
-        // standard tokenizer). The stock small multilingual runs
-        // with auto-detect: forcing "ne" on English/noise is exactly
-        // how Whisper hallucinates Devanagari garbage (gibberish
-        // plan §5.1). TranscriptSanityGuard stays as the downstream
-        // backstop. Toggle via `Config.forcePrimaryLanguage`.
-        let usePrimary = (modelId == ModelCatalog.whisperLargeV3Nepali
-                          || modelId == ModelCatalog.whisperMediumFinetunedNepali
-                          || modelId == ModelCatalog.whisperFinetunedNepali
-                          || modelId == ModelCatalog.whisperSmallNepali)
-            && config.forcePrimaryLanguage
+        // Language policy (see decodeAdaptation):
+        // - ACTIVE bias plan → force "ne" regardless of model
+        //   ([SCRIPT-REGRESSION]: keeps the decoder in Nepali-language
+        //   mode so the Devanagari-only prompt gate holds — the old
+        //   auto-detect + roman prompt path pulled transcripts into
+        //   roman script on stock multilingual models).
+        // - Otherwise the pre-existing model-based logic: force
+        //   `primaryLanguage` on the genuine Nepali fine-tunes
+        //   (kiranpantha large-v3 and the distilled small — both
+        //   standard tokenizer). The stock small multilingual runs
+        //   with auto-detect: forcing "ne" on English/noise is exactly
+        //   how Whisper hallucinates Devanagari garbage (gibberish
+        //   plan §5.1). TranscriptSanityGuard stays as the downstream
+        //   backstop. Toggle via `Config.forcePrimaryLanguage`.
+        let biasPlan = resolvedDialectBias()
+        let adaptation = Self.decodeAdaptation(modelId: modelId,
+                                               config: config,
+                                               plan: biasPlan)
         let langCode: String
-        if usePrimary, let lang = config.primaryLanguage {
-            params.language = WhisperLanguage(rawValue: lang) ?? .auto
-            langCode = (params.language == .auto) ? "auto" : lang
+        if adaptation.languageCode == "auto" {
+            params.language = .auto
+            langCode = "auto"
+        } else if let language = WhisperLanguage(rawValue: adaptation.languageCode) {
+            // WhisperParams owns the C string: the setter strdups
+            // (vendored WhisperParams.swift) and frees on deinit, and
+            // `Whisper` retains `params` for the lifetime of the context
+            // — unlike `initial_prompt`, no manual buffer ownership here.
+            params.language = language
+            langCode = adaptation.languageCode
         } else {
+            // Unknown code degrades to auto (same fallback as the old
+            // `WhisperLanguage(rawValue:) ?? .auto` path).
             params.language = .auto
             langCode = "auto"
         }
@@ -618,7 +684,7 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         }
         // [ACCENT-ADAPT] dialect-tagged prompt (doc accent-adaptation.md
         // P0.3, the whisper.cpp `--prompt` fallback path): whisper.cpp
-        // tokenizes `initial_prompt` itself (vendored whisper.cpp:4120)
+        // tokenizes `initial_prompt` itself (vendored whisper.cpp:4113)
         // and prepends it even with no_context = true (no_context only
         // clears the accumulated past-text context — whisper.cpp:4109).
         // The C string must outlive whisper_full → owned by the attempt
@@ -626,9 +692,12 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         // AttemptRecord.promptBuffer). Text-only path: the calibrated
         // centroid-token ids are WhisperKit-only and are reported as
         // unavailable here rather than silently dropped.
-        let biasPlan = resolvedDialectBias()
+        // [SCRIPT-REGRESSION] the prompt text comes from the gated
+        // `adaptation` above: a roman-only prompt never reaches
+        // whisper.cpp — it would bias the decoder toward roman-script
+        // transcripts.
         if biasPlan.state == .active {
-            if let text = biasPlan.promptText, !text.isEmpty {
+            if let text = adaptation.promptText {
                 if let buffer = Self.dupPromptCString(text) {
                     params.initial_prompt = UnsafePointer(buffer)
                     attachPromptBuffer(buffer, attemptID: attemptID)
@@ -637,8 +706,12 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
                 } else {
                     reportBiasUnavailableOnce(reason: "prompt_alloc_failed")
                 }
-            } else {
+            } else if biasPlan.promptText == nil || biasPlan.promptText!.isEmpty {
                 reportBiasUnavailableOnce(reason: "calibrated_ids_only_unsupported")
+            } else {
+                // Roman-only prompt text: refuse honestly rather than
+                // bias toward roman script.
+                reportBiasUnavailableOnce(reason: "non_devanagari_prompt")
             }
         } else if biasPlan.state == .disabledByUser {
             reportBiasDisabledOnce()

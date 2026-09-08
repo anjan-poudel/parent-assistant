@@ -272,14 +272,23 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
                     + "simulator=\(WhisperKit.isRunningOnSimulator)")
                 // Force Nepali transcription — auto language detection on
                 // short utterances produced English (translate-ish) output.
-                var options = DecodingOptions(task: .transcribe, language: "ne")
+                // [SCRIPT-REGRESSION] while a dialect-bias plan is active
+                // the forced "ne" is load-bearing: together with the
+                // Devanagari-only prompt gate it keeps the decoder in
+                // Nepali-language mode so transcripts stay Devanagari
+                // instead of drifting to roman script under prompt bias.
+                // The decision lives in `decodeLanguageCode` so tests can
+                // pin it without the WhisperKit runtime.
+                let biasPlan = resolvedDialectBias()
+                var options = DecodingOptions(
+                    task: .transcribe,
+                    language: Self.decodeLanguageCode(biasPlanState: biasPlan.state))
                 // [ACCENT-ADAPT] dialect-tagged prompt biasing (doc
                 // accent-adaptation.md P0.3): composed lexicon + profile
                 // terms + calibrated ids, capped at 100 tokens. A plan
                 // that applies nothing (default label, disabled, no
                 // material) leaves the options exactly as before — zero
                 // behaviour change.
-                let biasPlan = resolvedDialectBias()
                 if biasPlan.state == .active {
                     let tokenizer: ((String) -> [Int])? = kit.tokenizer.map {
                         tokenizer in { text in tokenizer.encode(text: text) }
@@ -383,6 +392,24 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         case notApplied(String)
     }
 
+    /// [SCRIPT-REGRESSION] Language code for the WhisperKit decode
+    /// options. Always "ne": while a dialect-bias plan is active the
+    /// decoder MUST stay in Nepali-language mode — together with the
+    /// Devanagari-only prompt gate this keeps transcripts Devanagari
+    /// instead of drifting to roman script under prompt bias. The
+    /// inactive states deliberately keep the pre-existing unconditional
+    /// "ne" force (auto language detection on short utterances produced
+    /// English output) — byte-identical to the pre-fix construction.
+    /// Static + Foundation-only so unit tests pin it without the runtime.
+    static func decodeLanguageCode(biasPlanState: DialectBiasPlan.State) -> String {
+        switch biasPlanState {
+        case .active:
+            return "ne"
+        case .disabledByUser, .defaultLabel, .noMaterial:
+            return "ne"
+        }
+    }
+
     /// Static + CoreML-free so the merge/fallback logic is unit-testable
     /// without a loaded model: tokenizes `promptText` through the given
     /// tokenizer (nil = no runtime tokenizer — degrade to calibrated ids
@@ -393,6 +420,18 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         guard plan.state == .active else { return .notApplied("inactive") }
         var tokenized: [Int] = []
         if let text = plan.promptText, !text.isEmpty {
+            // [SCRIPT-REGRESSION] script-consistency gate, defence in
+            // depth (the composer already drops roman terms): a prompt
+            // with no Devanagari term must never bias the decoder toward
+            // roman-script output, so a roman-only prompt degrades to
+            // calibrated ids or an honest refusal.
+            guard DialectBiasComposer.containsDevanagariTerm(text) else {
+                if plan.calibratedTokenIds.isEmpty {
+                    return .notApplied("non_devanagari_prompt")
+                }
+                return .applied(DialectBiasComposer.mergeTokenIDs(
+                    calibrated: plan.calibratedTokenIds, tokenized: []))
+            }
             guard let tokenizer else {
                 if plan.calibratedTokenIds.isEmpty {
                     return .notApplied("tokenizer_missing")

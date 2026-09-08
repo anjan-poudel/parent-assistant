@@ -26,6 +26,17 @@ import Foundation
 // - PII safety: profile terms come from an injected provider (default
 //   empty) and are sanitised + capped here; nothing leaves the device and
 //   nothing is persisted by this file.
+// - Script-consistency gate ([SCRIPT-REGRESSION]): only Devanagari-script
+//   terms may enter the prompt. Roman-script profile terms (contact/app/
+//   medication names as stored in the address book / app catalog) biased
+//   the whisper decoder toward roman-script transcripts after this layer
+//   merged (commit 30bf919) — the decoder is conditioned on the prompt,
+//   and a roman-heavy prompt pulls Nepali output into roman script. The
+//   gate drops such terms rather than transliterating: honest (they lose
+//   lexical biasing) until a future transliteration layer restores them
+//   (out of scope). The dialect tag line is bundled content and is not
+//   term-gated (a conditioning line may carry punctuation like ","; the
+//   shipped-artifact test pins the seed tag lines Devanagari).
 //
 // Prompt-token budget (research §4.1): biasing is a soft lexical lever,
 // effective at ~5–50 domain terms, degrading past ~200 shared-context
@@ -338,8 +349,42 @@ enum DialectBiasComposer {
 
     // MARK: Term sanitation (pure)
 
+    /// [SCRIPT-REGRESSION] Script-consistency gate: true only when `term`
+    /// carries at least one non-whitespace character and every one of its
+    /// non-whitespace characters is Devanagari (U+0900–U+097F, which
+    /// includes Nepali digits U+0966–U+096F). Latin-script terms — and
+    /// any term containing them, mixed or punctuation-bearing — are
+    /// rejected: a roman term in the decoder prompt biases whisper toward
+    /// roman-script transcripts. Pure and deterministic.
+    static func isDevanagariTerm(_ term: String) -> Bool {
+        var sawContent = false
+        for scalar in term.unicodeScalars {
+            if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                continue
+            }
+            guard (0x0900...0x097F).contains(scalar.value) else {
+                return false
+            }
+            sawContent = true
+        }
+        return sawContent
+    }
+
+    /// True when `text` contains at least one Devanagari-script term.
+    /// Shared by both recognizer seams as defence in depth: a prompt
+    /// whose text carries no Devanagari term must never bias the decoder
+    /// (the composer already drops roman terms — the seam guard is the
+    /// backstop for any plan that bypasses it).
+    static func containsDevanagariTerm(_ text: String) -> Bool {
+        text.split(whereSeparator: \.isWhitespace)
+            .contains { isDevanagariTerm(String($0)) }
+    }
+
     /// Trims/collapses whitespace, drops empty results, truncates long
-    /// terms, caps the count. Deterministic.
+    /// terms, drops non-Devanagari terms (script-consistency gate,
+    /// [SCRIPT-REGRESSION] — see `isDevanagariTerm`), caps the count.
+    /// Rejected terms do not consume cap slots: the cap counts what
+    /// actually enters the prompt. Deterministic.
     static func sanitizedTerms(_ terms: [String], maxCount: Int) -> [String] {
         var out: [String] = []
         for raw in terms {
@@ -348,7 +393,9 @@ enum DialectBiasComposer {
                 .split(whereSeparator: \.isWhitespace)
                 .joined(separator: " ")
             guard !collapsed.isEmpty else { continue }
-            out.append(String(collapsed.prefix(maxTermLength)))
+            let truncated = String(collapsed.prefix(maxTermLength))
+            guard isDevanagariTerm(truncated) else { continue }
+            out.append(truncated)
         }
         return out
     }

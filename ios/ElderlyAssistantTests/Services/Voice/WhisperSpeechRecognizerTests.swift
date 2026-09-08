@@ -450,6 +450,116 @@ final class WhisperSpeechRecognizerTests: XCTestCase {
         XCTAssertEqual(driverCalls, 2)
     }
 
+    // MARK: - [SCRIPT-REGRESSION] dialect-bias decode adaptation seam
+    //
+    // `decodeAdaptation` is the pure decision layer `runInference` applies
+    // to WhisperParams (language + gated prompt). Pinned here with the
+    // static-seam pattern this suite already uses for audioContextTokens —
+    // no SwiftWhisper runtime, no model store.
+
+    private func makeBiasPlan(state: DialectBiasPlan.State = .active,
+                              promptText: String?) -> DialectBiasPlan {
+        DialectBiasPlan(state: state,
+                        label: .doteli,
+                        promptText: promptText,
+                        calibratedTokenIds: [],
+                        lexiconPhraseCount: promptText == nil ? 0 : 1,
+                        contactCount: 0,
+                        medicationCount: 0,
+                        appCount: 0)
+    }
+
+    func testDecodeAdaptationForcesNepaliWhilePlanActiveRegardlessOfModel() {
+        // On stock models (base-en, small-multilingual) the pre-fix path
+        // ran language auto-detect next to a roman-biasing prompt — the
+        // roman-script drift path that regressed transcripts after
+        // 30bf919. An active plan must force "ne" on every model.
+        for modelId in [ModelCatalog.whisperBaseEn,
+                        ModelCatalog.whisperSmallMultilingual,
+                        ModelCatalog.whisperLargeV3Nepali] {
+            let plan = makeBiasPlan(promptText: "भया रह्याको")
+            let adaptation = WhisperSpeechRecognizer.decodeAdaptation(
+                modelId: modelId,
+                config: .default,
+                plan: plan)
+            XCTAssertEqual(adaptation.languageCode, "ne",
+                           "active plan must force ne on \(modelId.rawValue)")
+            XCTAssertEqual(adaptation.promptText, "भया रह्याको")
+        }
+    }
+
+    func testDecodeAdaptationInactivePreservesExistingLanguageLogic() {
+        // No active plan → the pre-fix model-based policy, byte-identical:
+        // genuine Nepali fine-tunes force "ne", stock models auto-detect,
+        // and forcePrimaryLanguage = false disables the force.
+        let inactive = makeBiasPlan(state: .defaultLabel, promptText: nil)
+        let config = WhisperSpeechRecognizer.Config.default
+        XCTAssertEqual(WhisperSpeechRecognizer.decodeAdaptation(
+            modelId: ModelCatalog.whisperLargeV3Nepali,
+            config: config, plan: inactive).languageCode, "ne")
+        XCTAssertEqual(WhisperSpeechRecognizer.decodeAdaptation(
+            modelId: ModelCatalog.whisperMediumFinetunedNepali,
+            config: config, plan: inactive).languageCode, "ne")
+        XCTAssertEqual(WhisperSpeechRecognizer.decodeAdaptation(
+            modelId: ModelCatalog.whisperSmallNepali,
+            config: config, plan: inactive).languageCode, "ne")
+        XCTAssertEqual(WhisperSpeechRecognizer.decodeAdaptation(
+            modelId: ModelCatalog.whisperSmallMultilingual,
+            config: config, plan: inactive).languageCode, "auto")
+        XCTAssertEqual(WhisperSpeechRecognizer.decodeAdaptation(
+            modelId: ModelCatalog.whisperBaseEn,
+            config: config, plan: inactive).languageCode, "auto")
+        let noForce = WhisperSpeechRecognizer.Config(primaryLanguage: "ne",
+                                                     fallbackLanguage: "en",
+                                                     maxUtteranceSeconds: 10,
+                                                     forcePrimaryLanguage: false,
+                                                     inferenceTimeoutSeconds: 180)
+        XCTAssertEqual(WhisperSpeechRecognizer.decodeAdaptation(
+            modelId: ModelCatalog.whisperLargeV3Nepali,
+            config: noForce, plan: inactive).languageCode, "auto")
+        XCTAssertNil(WhisperSpeechRecognizer.decodeAdaptation(
+            modelId: ModelCatalog.whisperLargeV3Nepali,
+            config: config, plan: inactive).promptText,
+            "inactive plans never attach a prompt")
+    }
+
+    func testDecodeAdaptationDropsRomanOnlyPromptWhileForcingNepali() {
+        // Defence in depth: even a plan bypassing the composer never
+        // hands whisper.cpp a roman prompt — it would bias the decoder
+        // toward roman-script output.
+        let plan = makeBiasPlan(promptText: "Sita WhatsApp")
+        let adaptation = WhisperSpeechRecognizer.decodeAdaptation(
+            modelId: ModelCatalog.whisperBaseEn,
+            config: .default,
+            plan: plan)
+        XCTAssertEqual(adaptation.languageCode, "ne")
+        XCTAssertNil(adaptation.promptText,
+                     "roman-only prompt text must be refused")
+    }
+
+    func testDecodeAdaptationComposedRomanProfileYieldsNoPromptMaterial() {
+        // End-to-end pin: composer gate + whisper.cpp glue. A roman-only
+        // profile composes to noMaterial — no prompt, and language stays
+        // on the pre-existing auto policy (nothing biases, nothing
+        // forces).
+        var profile = DialectBiasProfile()
+        profile.contactNames = ["Sita"]
+        profile.medicationNames = ["Metformin"]
+        let plan = DialectBiasComposer.plan(label: .doteli,
+                                            table: nil,
+                                            lexicon: nil,
+                                            profile: profile,
+                                            enabled: true)
+        XCTAssertEqual(plan.state, .noMaterial)
+        let adaptation = WhisperSpeechRecognizer.decodeAdaptation(
+            modelId: ModelCatalog.whisperBaseEn,
+            config: .default,
+            plan: plan)
+        XCTAssertEqual(adaptation.languageCode, "auto",
+                       "noMaterial must not force a language")
+        XCTAssertNil(adaptation.promptText)
+    }
+
     // MARK: - Helpers
 
     private func makePCMBuffer(samples: Int) -> AVAudioPCMBuffer {
