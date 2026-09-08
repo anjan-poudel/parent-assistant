@@ -149,6 +149,43 @@ def merge_adapter(model_dir: Path, merged_dir: Path, base_id: str) -> Path:
     return merged_dir
 
 
+def strip_oob_added_tokens(model_dir: Path) -> None:
+    """Drop tokenizer added tokens whose id >= vocab_size from a merged HF
+    dir before GGUF conversion (bake-off round 3, 2026-09-09).
+
+    llama.cpp's convert_hf_to_gguf asserts max(tokenizer.vocab.values()) <
+    vocab_size; transformers v5 loads tokenizer.json added_tokens into
+    .vocab, so gemma-3's multimodal placeholder <image_soft_token> (id
+    262144, one past a 262144 vocab) trips the assert. The token never
+    appears in text-only intent I/O and has no embedding row, so stripping
+    it is safe and makes the exported vocab 0..vocab_size-1. Idempotent:
+    re-running on an already-stripped dir is a no-op.
+    """
+    tj_path = model_dir / "tokenizer.json"
+    cfg_path = model_dir / "config.json"
+    if not (tj_path.exists() and cfg_path.exists()):
+        return
+    import json
+    with open(cfg_path, encoding="utf-8") as f:
+        vocab_size = int(json.load(f).get("vocab_size") or 0)
+    if not vocab_size:
+        return
+    with open(tj_path, encoding="utf-8") as f:
+        tj = json.load(f)
+    added = tj.get("added_tokens") or []
+    kept = [t for t in added if int(t.get("id", 0)) < vocab_size]
+    dropped = [t for t in added if int(t.get("id", 0)) >= vocab_size]
+    if dropped:
+        for t in dropped:
+            print(f"[export] drop tokenizer added token {t.get('content')!r} "
+                  f"(id {t.get('id')} >= vocab_size {vocab_size})")
+        tj["added_tokens"] = kept
+        tmp = Path(str(tj_path) + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(tj, f, ensure_ascii=False)
+        tmp.replace(tj_path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Merge LoRA adapter → base and export Q4_K_M GGUF (CPU only)")
@@ -201,6 +238,7 @@ def main() -> None:
     else:
         merge_src = model_dir  # already-merged full model dir
         print(f"[export] no adapter in {model_dir} — using it as the merged model")
+    strip_oob_added_tokens(merge_src)
 
     # --- convert HF -> f16 GGUF ---
     if f16_path.exists():
