@@ -14,6 +14,11 @@ struct LocalToolLogEntry: Codable, Equatable, Identifiable {
         case weather
         /// Live web search (`fireWebSearchIfDue`) — Google CSE round-trip.
         case search
+        /// Voice YouTube search/play ([YOUTUBE] 2026-09-08) — the Data
+        /// API top-result round-trip or the keyless search-deeplink
+        /// open. The `response` field is EMPTY for ok entries by design:
+        /// the title-bearing confirmation is spoken-only, never recorded.
+        case youtube
     }
 
     let id: UUID

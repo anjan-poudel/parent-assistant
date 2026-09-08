@@ -401,6 +401,17 @@ final class CommandRouter {
     private let searchTransport: LocalToolTransport?
     private let searchQuotaDefaults: UserDefaults
 
+    // [YOUTUBE] (2026-09-08) YouTube tool seams — every one defaults to
+    // dormant (nil), exactly like the search-tool seams above, so
+    // pre-existing router construction sites and every existing router
+    // test keep compiling and behaving as before: without a config
+    // store the keyed lookup can never fire, and without an opener the
+    // stage speaks the honest unavailable line and opens nothing. Only
+    // `AppCoordinator` (and scripted test routers) arm the seams.
+    private let youtubeConfigStore: YouTubeConfigStore?
+    private let youtubeTransport: LocalToolTransport?
+    private let youtubeLinkOpener: CallLinkOpening?
+
     /// [TOOL-DEBUG-LOG] (2026-09-07) Encrypted on-device debug log of
     /// every local-tool (weather/search) request + outcome — the store
     /// behind Settings → Tool requests. Nil = dormant (pre-existing
@@ -419,7 +430,10 @@ final class CommandRouter {
          weatherTransport: LocalToolTransport? = nil,
          searchTransport: LocalToolTransport? = nil,
          searchQuotaDefaults: UserDefaults = .standard,
-         localToolLogStore: LocalToolLogStore? = nil) {
+         localToolLogStore: LocalToolLogStore? = nil,
+         youtubeConfigStore: YouTubeConfigStore? = nil,
+         youtubeTransport: LocalToolTransport? = nil,
+         youtubeLinkOpener: CallLinkOpening? = nil) {
         self.coordinator = coordinator
         self.observabilityBus = observabilityBus
         self.speaker = speaker
@@ -432,6 +446,9 @@ final class CommandRouter {
         self.searchTransport = searchTransport
         self.searchQuotaDefaults = searchQuotaDefaults
         self.localToolLogStore = localToolLogStore
+        self.youtubeConfigStore = youtubeConfigStore
+        self.youtubeTransport = youtubeTransport
+        self.youtubeLinkOpener = youtubeLinkOpener
     }
 
     @discardableResult
@@ -692,6 +709,35 @@ final class CommandRouter {
         if Self.briefingPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
             coordinator?.fireMorningBriefing()
             emit(eventType: "morning_briefing_command", outcome: "success")
+            return .unrecognised(transcript: raw)
+        }
+
+        // [YOUTUBE] (2026-09-08) Deterministic voice YOUTUBE stage:
+        // "play bhajan on youtube", "youtube news", "search youtube for
+        // old songs", "युट्युबमा गीत चलाऊ", "युट्युबमा रामायण खोज".
+        // Marker-gated parsing (`YouTubeRoute`) — the same pre-route
+        // pattern as the contact-search / directions / alarms-timers
+        // stages: no model, no IntentPrompt tokens (the prompt budget
+        // is pinned by IntentPromptTests), so a YouTube request can
+        // never depend on interpreter availability or confidence. A
+        // bare "play" with no YouTube word never fires (`YouTubeRoute`
+        // vetoes it), so pre-existing play/music talk falls through
+        // unchanged.
+        //
+        // Placement: AFTER the safety net + confirmation flow + contact
+        // search + directions + alarms/timers + morning briefing —
+        // emergency / med-ack / yes-no / phone-search / navigation /
+        // alarm utterances win exactly as before — and BEFORE the topic
+        // table, so a greeting-prefixed request ("नमस्ते, युट्युबमा
+        // भजन चलाऊ") is a command, never small talk.
+        //
+        // The stage only DECIDES and executes the tool: with an API key
+        // configured it fetches the top result and opens the watch link
+        // (https fallback when the app is absent), without one it opens
+        // the SEARCH deeplink (the accepted search-only MVP); every
+        // failure speaks the honest localized fallback (`fireYouTubePlay`).
+        if case .play(let query) = YouTubeRoute.decide(transcript: raw) {
+            fireYouTubePlay(query: query)
             return .unrecognised(transcript: raw)
         }
 
@@ -1500,23 +1546,176 @@ final class CommandRouter {
                        durationMs: Self.elapsedMilliseconds(since: startedAt))
     }
 
+    // MARK: - [YOUTUBE] Voice YouTube search/play (youtube-plugin, 2026-09-08)
+
+    /// The YouTube stage's execution (see the stage comment in `route`).
+    /// Called only after `YouTubeRoute.decide` matched with an extracted
+    /// query. Two honest paths:
+    ///
+    ///   · API key configured: announce `youtube.looking`, fetch the TOP
+    ///     video from the YouTube Data API v3 (`LocalToolTransport` seam,
+    ///     8 s timeout — the weather/search budget), open
+    ///     `youtube://watch` (https fallback when the app is absent via
+    ///     the `CallLinkOpening` seam), and speak the title-bearing
+    ///     confirmation. The title goes through the SPOKEN path ONLY: no
+    ///     visible card, never into the observability bus or the debug
+    ///     log (the log entry for the success path carries the query +
+    ///     outcome, an EMPTY response by design — see `logToolRequest`).
+    ///   · No key: open the SEARCH deeplink directly
+    ///     (`youtube://www.youtube.com/results` → https fallback) and
+    ///     speak `youtube.openingSearch` — the user accepted
+    ///     search-only as the MVP, so this is the whole feature, not a
+    ///     degraded mode.
+    ///
+    ///   Every failure (no transport, no opener, network error, non-200
+    ///   quota/rate-limit, empty results, malformed payload) speaks an
+    ///   honest localized fallback — `youtube.notFound` for an empty
+    ///   result set, `youtube.unavailable` otherwise — never a
+    ///   fabricated title, never a dead end.
+    private func fireYouTubePlay(query: String) {
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let attemptStartedAt = Date()
+
+        // Keyless path — no network at all; the deeplink IS the
+        // feature. Synchronous: the confirmation is committed before
+        // this turn returns.
+        guard let apiKey = youtubeConfigStore?.apiKey else {
+            guard let opener = youtubeLinkOpener else {
+                deliverYouTubeFailure(locale: locale, query: query,
+                                      fallbackKey: "youtube.unavailable",
+                                      statusCode: nil, startedAt: attemptStartedAt)
+                return
+            }
+            let outcome = YouTubeTool.openSearch(query: query, opener: opener)
+            emitYouTube(eventType: "youtube_search",
+                        outcome: outcome == .openedApp ? "opened_app" : "opened_web")
+            let text = L10n.fmt("youtube.openingSearch", locale: locale, query)
+            speak(text: text, locale: locale)
+            // [TOOL-DEBUG-LOG] The spoken line embeds the query (the
+            // user's own words — already logged raw by the search tool's
+            // convention); response stays EMPTY on the ok path so the
+            // encrypted store never gains text the design keeps to
+            // speech.
+            logToolRequest(kind: .youtube, query: query, response: "", outcome: "ok",
+                           statusCode: nil,
+                           durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
+            return
+        }
+
+        // Keyed path — async Data API round-trip.
+        speak(key: "youtube.looking")
+        Task { [weak self] in
+            guard let self else { return }
+            guard let transport = self.youtubeTransport else {
+                await MainActor.run {
+                    self.deliverYouTubeFailure(locale: locale, query: query,
+                                               fallbackKey: "youtube.unavailable",
+                                               statusCode: nil, startedAt: attemptStartedAt)
+                }
+                return
+            }
+            do {
+                let top = try await YouTubeTool.fetchTopResult(query: query,
+                                                               apiKey: apiKey,
+                                                               transport: transport)
+                await MainActor.run {
+                    guard let opener = self.youtubeLinkOpener else {
+                        self.deliverYouTubeFailure(locale: locale, query: query,
+                                                   fallbackKey: "youtube.unavailable",
+                                                   statusCode: nil, startedAt: attemptStartedAt)
+                        return
+                    }
+                    let outcome = YouTubeTool.openWatch(videoID: top.videoID, opener: opener)
+                    self.emitYouTube(eventType: "youtube_play",
+                                     outcome: outcome == .openedApp ? "opened_app" : "opened_web")
+                    let text = L10n.fmt("youtube.playing", locale: locale, top.title)
+                    // Spoken path ONLY: the title-bearing confirmation
+                    // is never carded and never logged (the design's
+                    // "SPOKEN path only (no logs)" rule). The debug-log
+                    // entry below records the attempt with an EMPTY
+                    // response for exactly that reason.
+                    self.speak(text: text, locale: locale)
+                    self.logToolRequest(kind: .youtube, query: query, response: "",
+                                        outcome: "ok", statusCode: 200,
+                                        durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
+                }
+            } catch YouTubeTool.FetchError.noResults {
+                await MainActor.run {
+                    self.deliverYouTubeFailure(locale: locale, query: query,
+                                               fallbackKey: "youtube.notFound",
+                                               statusCode: 200, startedAt: attemptStartedAt)
+                }
+            } catch YouTubeTool.FetchError.invalidResponse(let statusCode) {
+                await MainActor.run {
+                    self.deliverYouTubeFailure(locale: locale, query: query,
+                                               fallbackKey: "youtube.unavailable",
+                                               statusCode: statusCode, startedAt: attemptStartedAt)
+                }
+            } catch {
+                await MainActor.run {
+                    self.deliverYouTubeFailure(locale: locale, query: query,
+                                               fallbackKey: "youtube.unavailable",
+                                               statusCode: nil, startedAt: attemptStartedAt)
+                }
+            }
+        }
+    }
+
+    /// Failure delivery for the YouTube stage — the honest localized
+    /// fallback line (`youtube.notFound` / `youtube.unavailable`), a
+    /// `youtube` component `fail` event, and one "fail" debug-log entry
+    /// carrying the line the user actually heard (never a title).
+    private func deliverYouTubeFailure(locale: Locale, query: String,
+                                       fallbackKey: String,
+                                       statusCode: Int?, startedAt: Date) {
+        emitYouTube(eventType: "youtube", outcome: "fail")
+        speakWithVisibleOutcome(key: fallbackKey)
+        let line = L10n.str(fallbackKey, locale: locale)
+        logToolRequest(kind: .youtube, query: query, response: line, outcome: "fail",
+                       statusCode: statusCode,
+                       durationMs: Self.elapsedMilliseconds(since: startedAt))
+    }
+
+    /// [YOUTUBE] (2026-09-08) `youtube` observability events — one per
+    /// YouTube turn. Component `youtube`, eventType
+    /// `youtube_search`/`youtube_play`/`youtube`, outcome
+    /// `opened_app`/`opened_web`/`fail`. No metadata keys are attached,
+    /// so nothing user-identifying (the query, the video ID, the title)
+    /// ever reaches the bus.
+    private func emitYouTube(eventType: String, outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "youtube",
+            eventType: eventType,
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+
     // MARK: - [TOOL-DEBUG-LOG] Local-tool request log
 
     /// [TOOL-DEBUG-LOG] (2026-09-07) One debug-log entry per local-tool
-    /// request (weather or search) — the helper behind every hook point
-    /// in the [LOCAL-TOOLS] section above. `query` was snapshotted
-    /// BEFORE the request went out; this call adds the outcome + what the
-    /// app answered on the completion path:
+    /// request (weather, search or youtube) — the helper behind every
+    /// hook point in the [LOCAL-TOOLS] section above and the [YOUTUBE]
+    /// stage. `query` was snapshotted BEFORE the request went out; this
+    /// call adds the outcome + what the app answered on the completion
+    /// path:
     ///
     ///   · ok — a live answer was delivered: the weather conditions
-    ///     sentence or the search summary (the spoken text),
+    ///     sentence, the search summary, or the YouTube confirmation
+    ///     (the spoken text). YouTube's ok entries carry an EMPTY
+    ///     response by design — the title-bearing confirmation is
+    ///     spoken-only and never recorded anywhere ([YOUTUBE]
+    ///     2026-09-08),
     ///   · fallback — weather only: the NAMED place failed to resolve
     ///     (geocode error/empty) and the live DEVICE reading answered
     ///     instead — still a live reading, but for the wrong place,
     ///   · cap — search only: quota exhausted before any request; the cap
     ///     line is the response,
-    ///   · fail — no live answer: the honest static weather no-data line
-    ///     or the generic search re-prompt was delivered.
+    ///   · fail — no live answer: the honest static weather no-data line,
+    ///     the generic search re-prompt, or the YouTube fallback line
+    ///     (never a title) was delivered.
     ///
     /// Scope note: the Gemini grounding path ([INTENT-TOOLS] — the cloud
     /// stack's search-grounded interpreter) is deliberately OUT of scope.

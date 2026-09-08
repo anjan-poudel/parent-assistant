@@ -12182,6 +12182,278 @@
           }
         }
       }
+    },
+    "youtube.looking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Let me look on YouTube…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "युट्युबमा खोज्दैछु…"
+          }
+        }
+      }
+    },
+    "youtube.playing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Playing %@ on YouTube."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "युट्युबमा %@ चलाउँदैछु।"
+          }
+        }
+      }
+    },
+    "youtube.openingSearch": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening YouTube search for %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "युट्युबमा %@ खोज्दैछु।"
+          }
+        }
+      }
+    },
+    "youtube.notFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I couldn't find a video for that on YouTube."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "युट्युबमा त्यसको भिडियो भेटिएन।"
+          }
+        }
+      }
+    },
+    "youtube.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YouTube isn't available right now. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले युट्युब उपलब्ध छैन। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "plugin.youtube.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YouTube"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "युट्युब"
+          }
+        }
+      }
+    },
+    "youtubeSettings.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YouTube"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "युट्युब"
+          }
+        }
+      }
+    },
+    "youtubeSettings.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A family member can add a YouTube Data API key so voice requests like \"play bhajan on youtube\" find and play the top video. Without a key, the request opens YouTube search directly."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "परिवारका सदस्यले YouTube Data API कुञ्जी थप्न सक्नुहुन्छ — त्यसपछि \"युट्युबमा भजन चलाऊ\" भन्दा उत्कृष्ट भिडियो खोजेर चलाउँछ। कुञ्जी नभए पनि युट्युबमा खोज सिधै खुल्छ।"
+          }
+        }
+      }
+    },
+    "youtubeSettings.apiKey": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YouTube Data API key"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YouTube Data API कुञ्जी"
+          }
+        }
+      }
+    },
+    "youtubeSettings.save": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुरक्षित गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "youtubeSettings.statusConnected": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जोडिएको"
+          }
+        }
+      }
+    },
+    "youtubeSettings.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove key"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कुञ्जी हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "youtubeSettings.removeConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove the YouTube API key? \"Play on YouTube\" will open YouTube search instead."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YouTube API कुञ्जी हटाउने हो? \"युट्युबमा चलाऊ\" ले भिडियो खोज्नुको सट्टा युट्युब खोज खोल्नेछ।"
+          }
+        }
+      }
+    },
+    "youtubeSettings.quotaNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Play requests use one YouTube Data API search. YouTube's free quota covers about 100 searches a day."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "चलाउने अनुरोधमा एक YouTube Data API खोज खर्च हुन्छ। युट्युबको निःशुल्क कोटाले दिनमा करिब १०० खोज पुग्छ।"
+          }
+        }
+      }
+    },
+    "youtubeSettings.privacy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What you say is sent to YouTube to find the video; nothing else is sent."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "भिडियो खोज्न तपाईंले भन्नुभएको कुरा युट्युबमा पठाइन्छ; अरू केही पठाइँदैन।"
+          }
+        }
+      }
+    },
+    "toolLog.kind.youtube": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "YouTube"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "युट्युब"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -670,6 +670,15 @@ final class AppCoordinator: ObservableObject {
     /// ever fire.
     let searchConfigStore: SearchConfigStore
 
+    /// [YOUTUBE] (2026-09-08) YouTube Data API v3 key for the voice
+    /// YouTube feature — the same Keychain `EncryptedLocalStorage`
+    /// pattern as `searchConfigStore`; a family member enters it via
+    /// Settings → YouTube. OPTIONAL: without it the voice command opens
+    /// the YouTube search deeplink instead of resolving + playing the
+    /// top result. Exposed for that Settings screen; `CommandRouter`
+    /// consults `apiKey` at stage time.
+    let youtubeConfigStore: YouTubeConfigStore
+
     /// [TOOL-DEBUG-LOG] (2026-09-07) Encrypted debug log of every
     /// local-tool (weather + web search) request and outcome — the store
     /// behind Settings → Tool requests (review + family export). Same
@@ -1076,6 +1085,12 @@ final class AppCoordinator: ObservableObject {
         // Deliberately created BEFORE the router below — the router must
         // receive the store (not nil) or the search hook stays dormant.
         self.searchConfigStore = SearchConfigStore(storage: storage)
+        // [YOUTUBE] (2026-09-08): YouTube Data API key for the voice
+        // YouTube feature (Settings → YouTube). Created BEFORE the plugin
+        // registry and the router below — the plugin and the router's
+        // YouTube stage both receive this store (never a private copy).
+        let youtubeConfigStore = YouTubeConfigStore(storage: storage)
+        self.youtubeConfigStore = youtubeConfigStore
 
         // Voice pipeline. Uses the sherpa-onnx KWS engine when the
         // Settings toggle is ON and the KWS model directory is bundled
@@ -1135,6 +1150,10 @@ final class AppCoordinator: ObservableObject {
         pluginRegistry.register(NepaliCalendarPlugin(storage: storage))
         pluginRegistry.register(ApplianceHelperPlugin(storage: storage))
         pluginRegistry.register(routinePlugin)
+        // [YOUTUBE] (2026-09-08) The interpreter-side twin of the
+        // router's deterministic YouTube stage — same `YouTubeTool`
+        // behavior (shared config store + transport + opener seams).
+        pluginRegistry.register(YouTubePlugin(configStore: youtubeConfigStore))
         self.pluginRegistry = pluginRegistry
 
         // Restore the persisted brain-model choice BEFORE the interpreter
@@ -1547,7 +1566,16 @@ final class AppCoordinator: ObservableObject {
             locationFetcherFactory: { LocationFetcher() },
             weatherTransport: URLSession.shared,
             searchTransport: URLSession.shared,
-            localToolLogStore: localToolLogStore
+            localToolLogStore: localToolLogStore,
+            // [YOUTUBE] (2026-09-08) YouTube stage seams: the Data API
+            // key store, URLSession for the lookup round-trip (the
+            // tool's request carries its own timeout), and the same
+            // call-link opener seam the call/message flows use for
+            // canOpenURL probing + opening (youtube:// → https
+            // fallback).
+            youtubeConfigStore: youtubeConfigStore,
+            youtubeTransport: URLSession.shared,
+            youtubeLinkOpener: SystemCallLinkOpener()
         )
         // Start with the fallback STT. Gemini is swapped in below once an
         // API key is configured.
