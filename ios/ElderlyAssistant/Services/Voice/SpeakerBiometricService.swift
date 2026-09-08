@@ -57,6 +57,11 @@ final class SpeakerBiometricService {
     /// disabled Null embedder).
     var isEnabled: Bool { embedder.isAvailable }
 
+    /// The embedder identity a stored template must match — exposed for
+    /// the Settings status seam (`VoiceBiometricStatusResolver`), which
+    /// needs the same truth the service scores against (doc §10).
+    var currentEmbedderID: String { embedder.embedderID }
+
     // MARK: - Enrollment
 
     /// Records `samples` (N ≥ 3 utterances at `sampleRate`, the pipeline's

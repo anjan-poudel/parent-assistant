@@ -2087,6 +2087,30 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    // MARK: - Enrollment sample capture ([VOICE-SETTINGS])
+
+    /// The press-to-record capture behind Voice personalization →
+    /// "Enroll voice": the SAME shared audio engine and session manager
+    /// as the pipeline and the search-phrase capture — one tap slot
+    /// doctrine, so `suspendForSampleCapture` (the `VoicePipelineSuspending`
+    /// conformance at the bottom of this file) must have run first;
+    /// `VoiceEnrollmentSession` enforces that order.
+    private lazy var enrollmentRecorder = VoiceEnrollmentRecorder(
+        audioEngine: audioEngine,
+        audioSession: audioSessionManager
+    )
+
+    /// The recorder the Voice personalization screen's enrollment
+    /// session captures through (see `VoiceEnrollmentSession`).
+    func makeEnrollmentSampleRecorder() -> VoiceEnrollmentRecorder {
+        enrollmentRecorder
+    }
+
+    /// True when we stopped a LIVE pipeline for an enrollment sample
+    /// that must be restarted once the sample is banked (parallel to
+    /// `voiceWasSuspendedForSearchCapture`).
+    private var voiceWasSuspendedForEnrollmentSample = false
+
     /// Called by `CommandRouter` when a speak begins/ends — drives the
     /// derived `speaking` state. Callers may be on any queue; mutations
     /// are pinned to main (H1).
@@ -5007,5 +5031,56 @@ final class ConsoleObservabilityBus: ObservabilityBus {
         let err = clean.errorCode.map { " errorCode=\($0)" } ?? ""
         let ts = Self.logFormatter.string(from: Date())
         print("[\(ts)][\(clean.component)] \(clean.eventType) outcome=\(clean.outcome)\(err) metadata=\(clean.metadata)")
+    }
+}
+
+// MARK: - Voice personalization seams ([VOICE-SETTINGS])
+
+/// Noise-filter toggle: the coordinator's `@Published noiseFilterEnabled`
+/// already persists the UserDefaults key AND hot-swaps the pipeline's
+/// `NoiseSuppressor` — the single writer the Voice personalization
+/// screen binds through.
+extension AppCoordinator: NoiseFilterPreferenceControlling {}
+
+/// Pipeline suspension around one enrollment sample: the same
+/// stop → capture → start cycle as `startSearchPhraseCapture`, minus
+/// the capture itself (the enrollment session owns that). Refuses while
+/// a talk cycle is mid-flight or the assistant is mid-reply — the same
+/// `.busy` reasoning as the search capture.
+extension AppCoordinator: VoicePipelineSuspending {
+
+    func suspendForSampleCapture() -> Bool {
+        guard let voicePipeline else { return true }
+        switch voicePipeline.state {
+        case .idle:
+            guard speakingCount == 0 else { return false }
+            voiceWasSuspendedForEnrollmentSample = true
+            voicePipeline.stop()
+            return true
+        case .capturingCommand, .processing, .routing:
+            return false
+        case .stopped, .error:
+            // Nothing to suspend, but stop anyway: a half-failed start
+            // (.error paths can leave the engine running with a tap
+            // installed) must never collide with the capture's own tap.
+            voiceWasSuspendedForEnrollmentSample = false
+            voicePipeline.stop()
+            return true
+        }
+    }
+
+    func resumeAfterSampleCapture() {
+        guard voiceWasSuspendedForEnrollmentSample else { return }
+        voiceWasSuspendedForEnrollmentSample = false
+        voicePipeline?.start { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.voiceState = .idle
+            case .failure(let err):
+                self.voiceError = "\(err)"
+                self.voiceState = .error("\(err)")
+            }
+        }
     }
 }

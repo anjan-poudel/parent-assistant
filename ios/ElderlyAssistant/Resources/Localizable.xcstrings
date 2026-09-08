@@ -744,7 +744,10 @@
       }
     },
     "appliance.manual.bundled": {
+<<<<<<< HEAD
       "extractionState": "manual",
+=======
+>>>>>>> task/voice-settings
       "localizations": {
         "en": {
           "stringUnit": {
@@ -758,10 +761,17 @@
             "value": "पूर्वनिर्धारित म्यानुअलहरू"
           }
         }
+<<<<<<< HEAD
       }
     },
     "appliance.manual.bundledEmpty": {
       "extractionState": "manual",
+=======
+      },
+      "extractionState": "manual"
+    },
+    "appliance.manual.bundledEmpty": {
+>>>>>>> task/voice-settings
       "localizations": {
         "en": {
           "stringUnit": {
@@ -775,7 +785,12 @@
             "value": "पूर्वनिर्धारित म्यानुअल उपलब्ध छैन।"
           }
         }
+<<<<<<< HEAD
       }
+=======
+      },
+      "extractionState": "manual"
+>>>>>>> task/voice-settings
     },
     "appliance.manual.cancel": {
       "extractionState": "manual",
@@ -10026,7 +10041,10 @@
       }
     },
     "settings.manuals.title": {
+<<<<<<< HEAD
       "extractionState": "manual",
+=======
+>>>>>>> task/voice-settings
       "localizations": {
         "en": {
           "stringUnit": {
@@ -10040,7 +10058,12 @@
             "value": "म्यानुअलहरू"
           }
         }
+<<<<<<< HEAD
       }
+=======
+      },
+      "extractionState": "manual"
+>>>>>>> task/voice-settings
     },
     "settings.meds.add": {
       "extractionState": "manual",
@@ -12299,6 +12322,788 @@
           "stringUnit": {
             "state": "translated",
             "value": "आवाज रिसेट गर्न थिचिराख्नुहोस्"
+          }
+        }
+      }
+    },
+    "voiceSettings.accent.caption": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When the assistant recognizes your dialect, it favors the words and names you are more likely to say. On by default and entirely on this device; it only applies once a dialect is detected."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायकले तपाईंको भाषिका चिनेपछि तपाईंले भन्ने सम्भावना बढी भएका शब्द र नामलाई प्राथमिकता दिन्छ। सुरुदेखि अन हुन्छ र सबै काम यही यन्त्रमै हुन्छ; भाषिका चिनिएपछि मात्र लागू हुन्छ।"
+          }
+        }
+      }
+    },
+    "voiceSettings.accent.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Help with my accent"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मेरो उच्चारणमा सहयोग"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.battery": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The microphone is used only while you are recording a sample."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माइक्रोफोन नमुना रेकर्ड गर्दा मात्र प्रयोग हुन्छ।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.done": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice saved"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज सुरक्षित भयो"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.failed.audioUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording could not start. Try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "रेकर्ड सुरु हुन सकेन। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.failed.busy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assistant is busy right now — wait a moment and try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायक अहिले व्यस्त छ — एकछिन पर्खेर फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.failed.disabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice fingerprinting is not available in this version."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो संस्करणमा आवाजको औंठाछाप उपलब्ध छैन।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.failed.inconsistent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sample %d sounded like a different speaker than the others — record that one again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नमुना %d अरूभन्दा फरक व्यक्तिको जस्तो सुनियो — त्यो फेरि रेकर्ड गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.failed.micDenied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Microphone access is off. Allow it to record your voice."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माइक्रोफोनको पहुँच बन्द छ। आवाज रेकर्ड गर्न अनुमति दिनुहोस्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.failed.noInput": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No microphone was found. Connect one and try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माइक्रोफोन भेटिएन। जोडेर फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.failed.processing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Something went wrong while checking your voice. Try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज जाँच्दा केही समस्या भयो। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.failed.save": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The voice could not be saved. Try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज सुरक्षित हुन सकेन। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.failed.speechTooShort": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sample %d was too short — record it again and keep speaking."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नमुना %d धेरै छोटो भयो — फेरि रेकर्ड गरेर बोलिरहनुहोस्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.failed.tooNoisy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sample %d had too much background noise — try a quieter place."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नमुना %d मा पछाडिको आवाज धेरै थियो — अलि शान्त ठाउँमा प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.failed.tooQuiet": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sample %d could not be heard — speak a little louder, closer to the phone."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नमुना %d सुनिएन — अलि ठूलो स्वरमा, फोन नजिक राखेर बोल्नुहोस्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Press the button, speak naturally for a few seconds, then press Stop. Do this three times."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बटन थिच्नुहोस्, केही सेकेन्ड सामान्य बोल्नुहोस्, अनि रोक्नुहोस् थिच्नुहोस्। यसरी तीन पटक गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.processing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking your voice samples…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंका आवाजका नमुना जाँच्दैछ…"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.progress": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice sample %d of %d"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज नमुना %d / %d"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.record": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Start recording"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "रेकर्ड सुरु गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.recordingHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Recording… press Stop when you finish speaking."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "रेकर्ड हुँदैछ… बोलिसकेपछि रोक्नुहोस् थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enroll.stop": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "रोक्नुहोस्"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.enrollButton": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Enroll voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज दर्ता गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.privacy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice recordings are used only to build or check the voice model, and they never leave this device. The voice model is kept in this device's secure storage."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंका आवाजका रेकर्डिङ आवाजको नमुना बनाउन वा जाँच्न मात्र प्रयोग हुन्छन्, र यन्त्रबाट कहिल्यै बाहिर जाँदैनन्। आवाजको नमुना यसै यन्त्रको सुरक्षित भण्डारमा रहन्छ।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.removeConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove the saved voice? You can record it again any time."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुरक्षित आवाज हटाउने हो? जतिबेला पनि फेरि रेकर्ड गर्न सकिन्छ।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.status.disabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not available in this version"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो संस्करणमा उपलब्ध छैन"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.status.disabled.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice fingerprinting is switched off in this build of the app."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो एपको यस संस्करणमा आवाजको औंठाछाप बन्द गरिएको छ।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.status.enrolled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice saved"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज सुरक्षित छ"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.status.enrolled.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d voice samples saved on this device."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d वटा आवाजका नमुना यही यन्त्रमा सुरक्षित छन्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.status.needsReenrollment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Needs re-recording"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फेरि रेकर्ड गर्नुपर्ने"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.status.needsReenrollment.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The saved voice was made by a different voice system, so it cannot be used anymore. Record your voice again to keep it working."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुरक्षित आवाज अर्कै आवाज प्रणालीबाट बनेकोले अब प्रयोग गर्न मिल्दैन। चालु राख्न आफ्नो आवाज फेरि रेकर्ड गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.status.notEnrolled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No voice saved yet"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिलेसम्म आवाज सुरक्षित छैन"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.status.notEnrolled.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your voice fingerprint is not set up yet. You can record it below — it stays on this device."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको आवाजको औंठाछाप अझै बनेको छैन। तल रेकर्ड गर्न सक्नुहुन्छ — यो यही यन्त्रमा रहन्छ।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.status.unreadable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Saved voice is unreadable"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुरक्षित आवाज पढ्न मिलेन"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.status.unreadable.detail": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The saved voice cannot be read on this device. Record it again — it cannot be recovered."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुरक्षित आवाज यस यन्त्रमा पढ्न सकिएन। फेरि रेकर्ड गर्नुहोस् — पुरानो फिर्ता हुँदैन।"
+          }
+        }
+      }
+    },
+    "voiceSettings.biometric.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice fingerprint"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाजको औंठाछाप"
+          }
+        }
+      }
+    },
+    "voiceSettings.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Control how the assistant hears you — background noise, your accent, and an optional voice fingerprint that stays on this device."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायकले तपाईंलाई कसरी सुन्छ नियन्त्रण गर्नुहोस् — पछाडिको आवाज, तपाईंको उच्चारण, र यही यन्त्रमा रहने वैकल्पिक आवाजको औंठाछाप।"
+          }
+        }
+      }
+    },
+    "voiceSettings.mic.allow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow microphone"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माइक्रोफोनलाई अनुमति दिनुहोस्"
+          }
+        }
+      }
+    },
+    "voiceSettings.mic.askBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The assistant records your voice for a few seconds at a time, three times, to learn how you sound. The recordings stay on this device."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायकले तपाईंको आवाज कस्तो छ भनेर सिक्न एक पटकमा केही सेकेन्ड गरी तीन पटक रेकर्ड गर्छ। रेकर्डिङ यही यन्त्रमै रहन्छन्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.mic.askTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow the microphone?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माइक्रोफोनको अनुमति दिने हो?"
+          }
+        }
+      }
+    },
+    "voiceSettings.mic.deniedBody": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The voice fingerprint cannot be recorded without it. Turn it on in the system Settings, then come back."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो बिना आवाजको औंठाछाप रेकर्ड गर्न सकिँदैन। प्रणालीको सेटिङ्समा गएर अन गर्नुहोस्, अनि फर्केर आउनुहोस्।"
+          }
+        }
+      }
+    },
+    "voiceSettings.mic.deniedTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Microphone access is off"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माइक्रोफोनको पहुँच बन्द छ"
+          }
+        }
+      }
+    },
+    "voiceSettings.noise.caption": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Softens steady background noise (fans, traffic) in what the assistant hears. Experimental and off by default. All processing happens on this device. It may not help in echoey rooms or with very loud speech."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायकले सुन्ने आवाजमा एकनासको पछाडिको आवाज (पङ्खा, गाडीको आवाज) नरम पार्छ। प्रयोगात्मक सुविधा हो, सुरुमा बन्द हुन्छ। सबै काम यही यन्त्रमै हुन्छ। प्रतिध्वनि भएको कोठा वा धेरै ठूलो आवाजमा फाइदा नहुन सक्छ।"
+          }
+        }
+      }
+    },
+    "voiceSettings.noise.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reduce background noise"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पछाडिको आवाज कम गर्ने"
+          }
+        }
+      }
+    },
+    "voiceSettings.privacy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The noise filter and accent help work entirely on this device. They do not change where your voice is sent when you talk to the assistant."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज फिल्टर र उच्चारण सहयोग पूरै यही यन्त्रमा चल्छन्। सहायकसँग बोल्दा तपाईंको आवाज कहाँ पठाइन्छ भन्ने यसले परिवर्तन गर्दैन।"
+          }
+        }
+      }
+    },
+    "voiceSettings.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice personalization"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज निजीकरण"
           }
         }
       }

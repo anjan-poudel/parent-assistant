@@ -16,7 +16,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case appearance, language, calling, places, family, meds, manuals, calendar, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, webSearch, youtube, feeds, quickApps, privacy, intentLog, toolLog
+        case appearance, language, calling, places, family, meds, manuals, calendar, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, voicePersonalization, webSearch, youtube, feeds, quickApps, privacy, intentLog, toolLog
 
         var id: String {
             switch self {
@@ -33,6 +33,7 @@ struct SettingsView: View {
             case .voiceEngine: return "voiceEngine"
             case .wakeWord: return "wakeWord"
             case .ttsVoices: return "ttsVoices"
+            case .voicePersonalization: return "voicePersonalization"
             case .webSearch: return "webSearch"
             case .youtube: return "youtube"
             case .feeds: return "feeds"
@@ -89,6 +90,11 @@ struct SettingsView: View {
                         voiceEngineSectionRow
                         wakeWordSectionRow
                         ttsVoicesSectionRow
+                        // Voice personalization ([VOICE-SETTINGS], 2026-09-08)
+                        // — noise filter, accent biasing, and the voice
+                        // fingerprint (enroll / status / remove).
+                        sectionRow(.voicePersonalization, icon: "waveform",
+                                   titleKey: "voiceSettings.title")
                         // [LOCAL-TOOLS] (2026-09-07) Web search — Google CSE
                         // credentials for the on-device stack's search tool.
                         sectionRow(.webSearch, icon: "magnifyingglass.circle.fill",
@@ -156,6 +162,7 @@ struct SettingsView: View {
             case .voiceEngine: VoiceEngineSettingsView()
             case .wakeWord: WakeWordSettingsView()
             case .ttsVoices: TTSVoicesSettingsView()
+            case .voicePersonalization: VoicePersonalizationSettingsView(coordinator: coordinator)
             case .webSearch: SearchSettingsView()
             case .youtube: YouTubeSettingsView()
             case .feeds: FeedsSettingsView()
