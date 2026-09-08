@@ -2,8 +2,9 @@ import XCTest
 @testable import ElderlyAssistant
 
 /// Unit tests for the sherpa-onnx wake-word engine (voice-personalisation
-/// P0 slice A) — selection order, honest unavailability, model-file
-/// resolution, and the ModelStore kws directory-install path.
+/// P0 slice A) — honest unavailability, model-file resolution, and the
+/// ModelStore kws directory-install path. (The pure selection decision
+/// table is covered in WakeWordConfigTests.)
 ///
 /// SAFETY INVARIANT: no test may hand a fake "complete" model directory
 /// (garbage .onnx bytes) to `SherpaKWSWakeWordEngine(...)`/`attempt(...)`
@@ -30,81 +31,6 @@ final class SherpaKWSWakeWordEngineTests: XCTestCase {
 
     private static var kwsEntry: ModelCatalogEntry {
         ModelCatalog.entry(for: ModelCatalog.sherpaKWSGigaSpeech)!
-    }
-
-    // MARK: - Selection order (WakeWordEngineSelection.make)
-
-    func testSelectionToggleOffSkipsSherpaCandidateEntirely() {
-        var sherpaCalls = 0
-        var buildCalls = 0
-        let engine = WakeWordEngineSelection.make(
-            toggleEnabled: false,
-            accessKey: "a-key",
-            keywordPath: "/a/ppn",
-            build: { _, _ in
-                buildCalls += 1
-                return WakeWordTestEngine()
-            },
-            sherpaCandidate: {
-                sherpaCalls += 1
-                return WakeWordTestEngine()
-            })
-        XCTAssertNil(engine)
-        XCTAssertEqual(sherpaCalls, 0,
-                       "the master toggle must be checked BEFORE any engine "
-                       + "is constructed — sherpa model load is not free")
-        XCTAssertEqual(buildCalls, 0)
-    }
-
-    func testSelectionPrefersSherpaEngineOverPorcupineChain() {
-        var buildCalls = 0
-        let sherpa = WakeWordTestEngine()
-        let engine = WakeWordEngineSelection.make(
-            toggleEnabled: true,
-            accessKey: "a-key",
-            keywordPath: "/a/ppn",
-            build: { _, _ in
-                buildCalls += 1
-                return WakeWordTestEngine()
-            },
-            sherpaCandidate: { sherpa })
-        XCTAssertTrue(engine === sherpa,
-                      "an installed sherpa model must win over Porcupine — "
-                      + "it needs no access key and no .ppn")
-        XCTAssertEqual(buildCalls, 0)
-    }
-
-    func testSelectionSherpaDeclinesFallsThroughToPorcupineChain() {
-        var buildCalls = 0
-        let porcupine = WakeWordTestEngine()
-        let engine = WakeWordEngineSelection.make(
-            toggleEnabled: true,
-            accessKey: "a-key",
-            keywordPath: "/a/ppn",
-            build: { _, _ in
-                buildCalls += 1
-                return porcupine
-            },
-            sherpaCandidate: { nil })
-        XCTAssertTrue(engine === porcupine,
-                      "candidate nil must leave the legacy chain exactly "
-                      + "as it was")
-        XCTAssertEqual(buildCalls, 1)
-    }
-
-    func testSelectionSherpaDeclinesAndPorcupineArtifactsMissingReturnsNil() {
-        var buildCalls = 0
-        let engine = WakeWordEngineSelection.make(
-            toggleEnabled: true,
-            accessKey: nil,
-            keywordPath: nil,
-            build: { _, _ in
-                buildCalls += 1
-                return WakeWordTestEngine()
-            },
-            sherpaCandidate: { nil })
-        XCTAssertNil(engine)
-        XCTAssertEqual(buildCalls, 0)
     }
 
     // MARK: - attempt() honest unavailability (never reaches C init)
@@ -251,7 +177,7 @@ final class SherpaKWSWakeWordEngineTests: XCTestCase {
                          atomically: true, encoding: .utf8)
         try "tokens".write(to: dir.appendingPathComponent("tokens.txt"),
                            atomically: true, encoding: .utf8)
-        try "▁HE Y ▁SA HA Y A K".write(to: dir.appendingPathComponent("keywords.txt"),
+        try "▁YEAH ▁K AN CH H I".write(to: dir.appendingPathComponent("keywords.txt"),
                                        atomically: true, encoding: .utf8)
         // The fp32 twins must NOT confuse resolution.
         try "enc".write(to: dir.appendingPathComponent("encoder-epoch-12-avg-2-chunk-16-left-64.onnx"),
@@ -401,15 +327,4 @@ final class SherpaKWSWakeWordEngineTests: XCTestCase {
                                                  withIntermediateDirectories: true)
         return Bundle(url: root)!
     }
-}
-
-/// Minimal protocol-conforming engine for selection identity checks (the
-/// sherpa/porcupine packages are never linked into the test target).
-private final class WakeWordTestEngine: WakeWordEngine {
-    let requiredSampleRate: Double = 16_000
-    let frameLength: Int = 512
-    var onDetection: (() -> Void)?
-    func start() throws {}
-    func stop() {}
-    func process(_ pcm: [Int16]) {}
 }

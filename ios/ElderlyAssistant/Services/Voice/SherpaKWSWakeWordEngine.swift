@@ -134,25 +134,29 @@ struct SherpaKWSModelFiles {
 ///     `.ppn` it replaces.
 ///  2. `SherpaKWSWakeWordEngine.attempt(...)` validates the files and
 ///     constructs the engine. Model load happens HERE (once per launch —
-///     the engine is fixed per launch, same as Porcupine), so `start()`
-///     cannot fail later and take the whole VoicePipeline down with it.
-///  3. Selection (`WakeWordEngineSelection.make`) prefers this engine
-///     whenever the toggle is ON and a model exists; otherwise the
-///     Porcupine/Null chain behaves exactly as before.
+///     the engine is fixed per launch), so `start()` cannot fail later
+///     and take the whole VoicePipeline down with it.
+///  3. Selection (`WakeWordEngineSelection.make`) returns this engine
+///     whenever the toggle is ON and a model exists; otherwise the caller
+///     falls back to `NullWakeWordEngine` (2026-09-08: the legacy
+///     Porcupine chain is gone — sherpa is the only real engine).
 ///
-/// Keyword: "HEY SAHAYAK" is read from the model directory's
-/// `keywords.txt` — one pre-tokenized BPE line written by the fetch script
-/// (the sherpa runtime does not tokenize raw text itself). Editing that
-/// file at runtime changes the wake phrase without retraining. Nepali
-/// caveat (honest gap, research §5): no Nepali KWS model exists anywhere;
-/// "HEY SAHAYAK" is English-phoneme and its trigger rate on Nepali-
-/// accented speech must be measured on-device before this is trusted
-/// (the zh-en phone-tokenized model is the accent-tolerant alternative).
+/// Keyword: the Nepali wake phrase "ये कान्छी" (romanized "YEAH KANCHHI")
+/// is read from the model directory's `keywords.txt` — one pre-tokenized
+/// BPE line written by the fetch script (the sherpa runtime does not
+/// tokenize raw text itself). "YEAH" is the closest English word-start
+/// tokenization of "ये" — the GigaSpeech English BPE vocabulary has no
+/// word-start "Y" token. Editing that file at runtime changes the wake
+/// phrase without retraining. Nepali caveat (honest gap, research §5):
+/// no Nepali KWS model exists anywhere; "YEAH KANCHHI" is
+/// English-phoneme and its trigger rate on Nepali-accented speech must
+/// be measured on-device before this is trusted (the zh-en
+/// phone-tokenized model is the accent-tolerant alternative).
 final class SherpaKWSWakeWordEngine: WakeWordEngine {
 
     /// The phrase this engine listens for. Mirrored in the keywords file
     /// by tools/fetch-kws-model.sh — keep the two in sync.
-    static let defaultKeyword = "HEY SAHAYAK"
+    static let defaultKeyword = "YEAH KANCHHI"
 
     let requiredSampleRate: Double = 16_000
     /// Feed granularity the VoicePipeline tap uses. sherpa accepts any

@@ -30,15 +30,17 @@ DEST="$(cd "$(dirname "$0")/.." && pwd)/ios/ElderlyAssistant/Resources/Models/kw
 # Keyword configuration. The sherpa KWS runtime does NOT tokenize raw
 # text (csrc/utils.cc EncodeKeywords): every space-separated token must
 # exist in the model's tokens.txt, so the phrase is pre-tokenized here
-# with the model's own sentencepiece model ("HEY SAHAYAK" →
-# "▁HE Y ▁SA HA Y A K", verified against tokens.txt on 2026-09-08).
+# with the model's own sentencepiece model (Nepali "ये कान्छी" romanized
+# "YEAH KANCHHI" → "▁YEAH ▁K AN CH H I", verified against tokens.txt on
+# 2026-09-08; "YEAH" is the closest English word-start tokenization of
+# "ये" — the GigaSpeech English BPE vocabulary has no word-start "Y").
 # keywords.txt is the runtime file the engine reads — edit it to change
 # the phrase without retraining. Line syntax: tokens plus optional
 # ":score" and "#threshold" suffixes (defaults keywordsScore 1.0 /
 # keywordsThreshold 0.25 apply when omitted); "@phrase" is only needed
 # when a keyword differs from its tokens, which is never the case here.
-KEYWORD_RAW="HEY SAHAYAK"
-KEYWORD_TOKENS="▁HE Y ▁SA HA Y A K"
+KEYWORD_RAW="YEAH KANCHHI"
+KEYWORD_TOKENS="▁YEAH ▁K AN CH H I"
 
 if [ -d "$DEST/$MODEL" ]; then
   echo "  ✓ $MODEL already present — skipping"
