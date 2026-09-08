@@ -1,10 +1,12 @@
 import XCTest
 @testable import ElderlyAssistant
 
-/// Unit tests for the wake-word ("Hey Sahayak") configuration surface —
-/// open item #4. Every type under test is deliberately FREE of Porcupine
-/// types (see Services/Voice/WakeWordConfig.swift), so the full decision
-/// table runs without the SPM package linked into the test target.
+/// Unit tests for the wake-word ("ये कान्छी") configuration surface —
+/// open item #4. Every type under test is deliberately FREE of engine
+/// types (see Services/Voice/WakeWordConfig.swift): the real sherpa
+/// engine arrives only as the selection's injected candidate closure, so
+/// the whole decision table runs without the sherpa-onnx SPM package
+/// linked into the test target.
 final class WakeWordConfigTests: XCTestCase {
 
     // MARK: - WakeWordPreferences (persisted toggle)
@@ -26,9 +28,9 @@ final class WakeWordConfigTests: XCTestCase {
     }
 
     func testToggleDefaultsOnWhenUnset() {
-        // 2026-09-06 rationale: ON is inert until the access key + .ppn
-        // exist (Null engine regardless), and means the wake word activates
-        // at the next launch once a family member completes the setup.
+        // 2026-09-08 rationale: ON is the shipped default — with the KWS
+        // model bundled, the wake word then listens from the next launch
+        // on; when the model is absent the engine is Null regardless.
         let prefs = WakeWordPreferences(defaults: defaults)
         XCTAssertTrue(prefs.isEnabled, "unset preference must default to ON")
     }
@@ -46,190 +48,41 @@ final class WakeWordConfigTests: XCTestCase {
         XCTAssertFalse(WakeWordPreferences(defaults: defaults).isEnabled)
     }
 
-    // MARK: - WakeWordAccessKeyStore (encrypted key, mirror of
-    // GeminiConfigStore)
-
-    func testKeyStoreStartsUnconfiguredWhenNothingStored() {
-        let store = WakeWordAccessKeyStore(storage: WakeWordInMemoryStorage())
-        XCTAssertFalse(store.isConfigured)
-        XCTAssertNil(store.accessKey)
-    }
-
-    func testKeyStoreSaveTrimsWhitespaceAndMarksConfigured() {
-        let store = WakeWordAccessKeyStore(storage: WakeWordInMemoryStorage())
-        store.save("  my-test-access-key  ")
-        XCTAssertTrue(store.isConfigured)
-        XCTAssertEqual(store.accessKey, "my-test-access-key")
-    }
-
-    func testKeyStoreSavingBlankClearsInsteadOfStoringEmpty() {
-        let store = WakeWordAccessKeyStore(storage: WakeWordInMemoryStorage())
-        store.save("real-key")
-        store.save("   ")
-        XCTAssertFalse(store.isConfigured)
-        XCTAssertNil(store.accessKey)
-    }
-
-    func testKeyStoreClearRemovesTheKey() {
-        let store = WakeWordAccessKeyStore(storage: WakeWordInMemoryStorage())
-        store.save("real-key")
-        store.clear()
-        XCTAssertFalse(store.isConfigured)
-        XCTAssertNil(store.accessKey)
-    }
-
-    func testKeyStorePersistsAcrossInstancesOverTheSameStorage() {
-        let storage = WakeWordInMemoryStorage()
-        WakeWordAccessKeyStore(storage: storage).save("persisted-key")
-        let reloaded = WakeWordAccessKeyStore(storage: storage)
-        XCTAssertTrue(reloaded.isConfigured)
-        XCTAssertEqual(reloaded.accessKey, "persisted-key")
-    }
-
-    // MARK: - resolvedAccessKey precedence (plist wins over stored)
-
-    func testResolvedAccessKeyPrefersPlistOverStored() {
-        XCTAssertEqual(
-            WakeWordAccessKeyStore.resolvedAccessKey(plistKey: "plist-key",
-                                                     storedKey: "stored-key"),
-            "plist-key")
-    }
-
-    func testResolvedAccessKeyFallsBackToStoredWhenPlistAbsent() {
-        XCTAssertEqual(
-            WakeWordAccessKeyStore.resolvedAccessKey(plistKey: nil,
-                                                     storedKey: "stored-key"),
-            "stored-key")
-    }
-
-    func testResolvedAccessKeyTreatsBlankPlistAsAbsent() {
-        XCTAssertEqual(
-            WakeWordAccessKeyStore.resolvedAccessKey(plistKey: "   ",
-                                                     storedKey: "stored-key"),
-            "stored-key")
-    }
-
-    func testResolvedAccessKeyNilWhenBothAbsent() {
-        XCTAssertNil(WakeWordAccessKeyStore.resolvedAccessKey(plistKey: nil,
-                                                              storedKey: nil))
-        XCTAssertNil(WakeWordAccessKeyStore.resolvedAccessKey(plistKey: " ",
-                                                              storedKey: ""))
-    }
-
-    func testResolvedAccessKeyTrimsBothSources() {
-        XCTAssertEqual(
-            WakeWordAccessKeyStore.resolvedAccessKey(plistKey: "  plist  ",
-                                                     storedKey: " stored "),
-            "plist")
-    }
-
     // MARK: - WakeWordEngineSelection (pure decision table)
 
-    func testSelectionReturnsNilWhenToggleOffEvenWithKeyAndModel() {
-        var buildCalls = 0
+    func testSelectionReturnsNilWhenToggleOffAndSkipsCandidate() {
+        // The master toggle is checked BEFORE any engine is constructed —
+        // the sherpa model load is not free, and disabled must behave
+        // exactly like today.
+        var candidateCalls = 0
         let engine = WakeWordEngineSelection.make(
             toggleEnabled: false,
-            accessKey: "a-key",
-            keywordPath: "/a/ppn",
-            build: { _, _ in
-                buildCalls += 1
+            sherpaCandidate: {
+                candidateCalls += 1
                 return WakeWordTestEngine()
             })
         XCTAssertNil(engine)
-        XCTAssertEqual(buildCalls, 0,
-                       "build must not run when the toggle is OFF — disabled "
-                       + "must behave exactly like today")
+        XCTAssertEqual(candidateCalls, 0,
+                       "candidate must not run when the toggle is OFF")
     }
 
-    func testSelectionReturnsNilWhenKeyMissing() {
-        var buildCalls = 0
-        let engine = WakeWordEngineSelection.make(
-            toggleEnabled: true,
-            accessKey: nil,
-            keywordPath: "/a/ppn",
-            build: { _, _ in
-                buildCalls += 1
-                return WakeWordTestEngine()
-            },
-            // No sherpa model (this pins the LEGACY Porcupine chain — the
-            // default candidate would consult the test host's bundle and
-            // make the test depend on whether fetch-kws-model.sh has run).
-            sherpaCandidate: { nil })
-        XCTAssertNil(engine)
-        XCTAssertEqual(buildCalls, 0)
-    }
-
-    func testSelectionReturnsNilWhenKeyBlank() {
-        var buildCalls = 0
-        let engine = WakeWordEngineSelection.make(
-            toggleEnabled: true,
-            accessKey: "   ",
-            keywordPath: "/a/ppn",
-            build: { _, _ in
-                buildCalls += 1
-                return WakeWordTestEngine()
-            },
-            // Legacy-chain pin — see the sibling test's comment.
-            sherpaCandidate: { nil })
-        XCTAssertNil(engine)
-        XCTAssertEqual(buildCalls, 0)
-    }
-
-    func testSelectionReturnsNilWhenKeywordPathMissing() {
-        var buildCalls = 0
-        let engine = WakeWordEngineSelection.make(
-            toggleEnabled: true,
-            accessKey: "a-key",
-            keywordPath: nil,
-            build: { _, _ in
-                buildCalls += 1
-                return WakeWordTestEngine()
-            },
-            // Legacy-chain pin — see the sibling test's comment.
-            sherpaCandidate: { nil })
-        XCTAssertNil(engine)
-        XCTAssertEqual(buildCalls, 0)
-    }
-
-    func testSelectionReturnsNilWhenBuilderFails() {
-        let engine = WakeWordEngineSelection.make(
-            toggleEnabled: true,
-            accessKey: "a-key",
-            keywordPath: "/a/ppn",
-            build: { _, _ in nil },
-            // Legacy-chain pin — see the sibling test's comment.
-            sherpaCandidate: { nil })
-        XCTAssertNil(engine, "a throwing Porcupine init must fall back to Null")
-    }
-
-    func testSelectionReturnsBuilderEngineWhenEverythingPresent() {
-        // The PORCUPINE chain, pinned without a sherpa model — the sherpa-
-        // first ordering is covered in SherpaKWSWakeWordEngineTests.
+    func testSelectionReturnsCandidateEngineWhenToggleOn() {
         let real = WakeWordTestEngine()
         let engine = WakeWordEngineSelection.make(
             toggleEnabled: true,
-            accessKey: "a-key",
-            keywordPath: "/a/ppn",
-            build: { _, _ in real },
-            sherpaCandidate: { nil })
+            sherpaCandidate: { real })
         XCTAssertTrue(engine === real,
-                      "the real engine must pass through untouched")
+                      "a live sherpa engine must pass through untouched")
     }
 
-    func testSelectionHandsNormalizedArgumentsToBuilder() {
-        var received: (accessKey: String, path: String)?
-        _ = WakeWordEngineSelection.make(
+    func testSelectionReturnsNilWhenCandidateDeclines() {
+        // No model in this build (or the runtime not linked): the honest
+        // result is nil and the caller falls back to NullWakeWordEngine —
+        // never a silent stub pretending to listen.
+        let engine = WakeWordEngineSelection.make(
             toggleEnabled: true,
-            accessKey: "  a-key  ",
-            keywordPath: "  /a/ppn  ",
-            build: { key, path in
-                received = (key, path)
-                return WakeWordTestEngine()
-            },
-            // Legacy-chain pin — see the sibling test's comment.
             sherpaCandidate: { nil })
-        XCTAssertEqual(received?.accessKey, "a-key")
-        XCTAssertEqual(received?.path, "/a/ppn")
+        XCTAssertNil(engine)
     }
 
     // MARK: - WakeWordStatusResolver (honest status derivation)
@@ -246,6 +99,8 @@ final class WakeWordConfigTests: XCTestCase {
     }
 
     func testStatusIsNeedsSetupWhenOnButNotProvisioned() {
+        // ON + no bundled KWS model (or no sherpa runtime): the engine is
+        // Null and the screen must say so instead of pretending.
         XCTAssertEqual(WakeWordStatusResolver.status(enabled: true,
                                                      isProvisioned: false,
                                                      realEngineAtLaunch: false),
@@ -320,10 +175,10 @@ final class WakeWordConfigTests: XCTestCase {
     }
 }
 
-// MARK: - Test doubles
+// MARK: - Test double
 
-/// Minimal protocol-conforming engine for identity checks. The Porcupine
-/// package is never linked into the test target, so the builder closure
+/// Minimal protocol-conforming engine for identity checks. The sherpa-onnx
+/// package is never linked into the test target, so the candidate closure
 /// fabricates this instead.
 private final class WakeWordTestEngine: WakeWordEngine {
     let requiredSampleRate: Double = 16_000
@@ -332,36 +187,4 @@ private final class WakeWordTestEngine: WakeWordEngine {
     func start() throws {}
     func stop() {}
     func process(_ pcm: [Int16]) {}
-}
-
-/// In-memory `EncryptedLocalStorage` — same double shape as
-/// `GeminiConfigStoreTests`; the real implementation is Keychain-backed and
-/// untestable without a device context.
-private final class WakeWordInMemoryStorage: EncryptedLocalStorage {
-    private var values: [String: Data] = [:]
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
-
-    func write<T: Encodable>(key: String, value: T) -> Result<Void, StorageError> {
-        do {
-            values[key] = try encoder.encode(value)
-            return .success(())
-        } catch {
-            return .failure(.encryptedWriteFailed)
-        }
-    }
-
-    func read<T: Decodable>(key: String, type: T.Type) -> Result<T, StorageError> {
-        guard let data = values[key] else { return .failure(.encryptedReadFailed) }
-        do {
-            return .success(try decoder.decode(type, from: data))
-        } catch {
-            return .failure(.encryptedReadFailed)
-        }
-    }
-
-    func delete(key: String) -> Result<Void, StorageError> {
-        values.removeValue(forKey: key)
-        return .success(())
-    }
 }
