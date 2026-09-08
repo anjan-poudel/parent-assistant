@@ -83,7 +83,7 @@ enum DesignTokens {
     /// rest never competes with a navy call tile — and `settings` now
     /// keeps its own purple instead of borrowing the voice-state palette.
     enum BadgeTint {
-        case meds, reminders, call, appliance, settings, apps, emergency, directions
+        case meds, reminders, call, appliance, settings, apps, feeds, emergency, directions
 
         var background: Color {
             switch self {
@@ -93,6 +93,8 @@ enum DesignTokens {
             case .appliance: return Color(red: 0.992, green: 0.945, blue: 0.890)  // #FDF1E3
             case .settings: return Color(red: 0.937, green: 0.918, blue: 0.965)  // #EFEAF6
             case .apps: return Color(red: 0.878, green: 0.941, blue: 0.949)      // #E0F0F2
+
+            case .feeds: return Color(red: 0.969, green: 0.914, blue: 0.949)      // #F7E9F2 — pale orchid
             case .emergency: return Color.white
             case .directions: return Color(red: 0.867, green: 0.945, blue: 0.969) // #DDF1F7
             }
@@ -109,6 +111,7 @@ enum DesignTokens {
             // must not silently track voice-state colors.
             case .settings: return Color(red: 0.361, green: 0.353, blue: 0.541)  // #5C5A8A
             case .apps: return Color(red: 0.122, green: 0.478, blue: 0.549)      // #1F7A8C
+            case .feeds: return Color(red: 0.557, green: 0.235, blue: 0.435)      // #8E3C6F
             case .emergency: return Color(red: 0.706, green: 0.251, blue: 0.118) // #B4401E
             // Directions/maps (2026-09-07): the one dock badge in the
             // blue-cyan family that reads "navigation" — lighter and

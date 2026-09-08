@@ -111,6 +111,14 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
     private struct AttemptRecord {
         let watchdog: DispatchWorkItem
         let completion: (Result<String, RecognitionError>) -> Void
+        /// strdup'd dialect `initial_prompt` text ([ACCENT-ADAPT], doc
+        /// accent-adaptation.md P0.3). whisper.cpp tokenizes it inside
+        /// `whisper_full`, so it must outlive the transcribe call: freed
+        /// on a clean settle, INTENTIONALLY LEAKED when the watchdog
+        /// kills a wedged attempt (a wedged whisper_full may still be
+        /// reading it; the leak is bounded at ≤ ~1 KB × 2 wedged
+        /// contexts, vs the ~500 MB contexts themselves).
+        var promptBuffer: UnsafeMutablePointer<CChar>?
     }
     private var attempts: [Int: AttemptRecord] = [:]
     /// SwiftWhisper context the current attempt is transcribing with —
@@ -139,6 +147,12 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
     /// exercises the watchdog. Never set in production.
     internal var inferenceDriverOverride: ((WhisperSpeechRecognizer,
                                             [Int16], Int) -> Void)?
+
+    /// Per-user decode-biasing terms (contact names, medication names,
+    /// app names) — injected by the coordinator, default empty. Called on
+    /// the attempt queue once per utterance; the composer caps and
+    /// sanitises whatever it returns. PII never leaves the device.
+    var biasProfileProvider: (() -> DialectBiasProfile)?
 
     /// User's STT model choice from the UI picker (nil = automatic).
     /// Set by AppCoordinator and persisted there across launches.
@@ -255,6 +269,99 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
             errorCode: nil,
             metadata: ["state": id?.rawValue ?? "none"]
         ))
+    }
+
+    // MARK: - Dialect bias seam ([ACCENT-ADAPT], doc accent-adaptation.md P0.3)
+    //
+    // The whisper.cpp `--prompt` fallback path of the shared
+    // `DialectBiasComposer` layer. Everything here is inert while the
+    // persisted label is `.default` (unknown/low-confidence dialect ID
+    // lands there) — existing STT behaviour is byte-identical in that
+    // state. Applied as text: whisper.cpp tokenizes `initial_prompt`
+    // itself, so the WhisperKit-only calibrated token ids are reported
+    // unavailable rather than silently dropped.
+
+    /// Once-per-session honesty flags (never spammed per utterance).
+    private var biasUnavailableReported = false
+    private var biasDisabledReported = false
+
+    /// Resolves the current adaptation (label + lexicon + profile terms +
+    /// calibrated ids) into a plan. Pure composition decides whether this
+    /// decode biases at all.
+    private func resolvedDialectBias() -> DialectBiasPlan {
+        let profile = biasProfileProvider?() ?? DialectBiasProfile()
+        return DialectBiasResolver.resolve(profile: profile)
+    }
+
+    /// strdup's the prompt text so whisper.cpp can read it across the
+    /// transcribe call. Internal static so the round-trip is unit-testable.
+    static func dupPromptCString(_ text: String) -> UnsafeMutablePointer<CChar>? {
+        text.withCString { strdup($0) }
+    }
+
+    /// Attaches the prompt buffer to the in-flight attempt record (whose
+    /// clean settle frees it; watchdog kills leak it deliberately).
+    private func attachPromptBuffer(_ buffer: UnsafeMutablePointer<CChar>,
+                                    attemptID: Int) {
+        stateLock.lock()
+        attempts[attemptID]?.promptBuffer = buffer
+        stateLock.unlock()
+    }
+
+    /// Per-utterance observability for an applied bias (PII-free: counts
+    /// and the label only, never term content).
+    private func emitBiasActive(_ plan: DialectBiasPlan,
+                                tokenCount: Int?,
+                                runtime: String) {
+        var metadata: [String: String] = [
+            "label": plan.label.rawValue,
+            "runtime": runtime,
+            "text_chars": "\(plan.promptText?.count ?? 0)",
+            "lexicon_phrases": "\(plan.lexiconPhraseCount)",
+            "contacts": "\(plan.contactCount)",
+            "medications": "\(plan.medicationCount)",
+            "apps": "\(plan.appCount)",
+            "calibrated_tokens": "\(plan.calibratedTokenIds.count)",
+        ]
+        if let tokenCount {
+            metadata["token_count"] = "\(tokenCount)"
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "dialect_id",
+            eventType: "dialect_bias_active",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: metadata
+        ))
+    }
+
+    private func reportBiasUnavailableOnce(reason: String) {
+        guard !biasUnavailableReported else { return }
+        biasUnavailableReported = true
+        observabilityBus.emit(ObservabilityEvent(
+            component: "dialect_id",
+            eventType: "dialect_bias_unavailable",
+            durationMs: nil,
+            outcome: "failure",
+            errorCode: reason,
+            metadata: [:]
+        ))
+        print("[dialect_id] dialect_bias_unavailable reason=\(reason)")
+    }
+
+    private func reportBiasDisabledOnce() {
+        guard !biasDisabledReported else { return }
+        biasDisabledReported = true
+        observabilityBus.emit(ObservabilityEvent(
+            component: "dialect_id",
+            eventType: "dialect_bias_disabled",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: "disabled_by_user",
+            metadata: [:]
+        ))
+        print("[dialect_id] dialect_bias_disabled reason=disabled_by_user")
     }
 
     // MARK: - SpeechRecognizerProtocol
@@ -509,6 +616,33 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
             print("[whisper_stt] attempt \(attemptID) window audio_ctx=\(params.audio_ctx) "
                 + "samples=\(pcm.count)")
         }
+        // [ACCENT-ADAPT] dialect-tagged prompt (doc accent-adaptation.md
+        // P0.3, the whisper.cpp `--prompt` fallback path): whisper.cpp
+        // tokenizes `initial_prompt` itself (vendored whisper.cpp:4120)
+        // and prepends it even with no_context = true (no_context only
+        // clears the accumulated past-text context — whisper.cpp:4109).
+        // The C string must outlive whisper_full → owned by the attempt
+        // record, freed on clean settle, leaked on watchdog kill (see
+        // AttemptRecord.promptBuffer). Text-only path: the calibrated
+        // centroid-token ids are WhisperKit-only and are reported as
+        // unavailable here rather than silently dropped.
+        let biasPlan = resolvedDialectBias()
+        if biasPlan.state == .active {
+            if let text = biasPlan.promptText, !text.isEmpty {
+                if let buffer = Self.dupPromptCString(text) {
+                    params.initial_prompt = UnsafePointer(buffer)
+                    attachPromptBuffer(buffer, attemptID: attemptID)
+                    emitBiasActive(biasPlan, tokenCount: nil,
+                                   runtime: "whisper_cpp")
+                } else {
+                    reportBiasUnavailableOnce(reason: "prompt_alloc_failed")
+                }
+            } else {
+                reportBiasUnavailableOnce(reason: "calibrated_ids_only_unsupported")
+            }
+        } else if biasPlan.state == .disabledByUser {
+            reportBiasDisabledOnce()
+        }
         let loadStart = CFAbsoluteTimeGetCurrent()
         let whisper = Whisper(fromFileURL: modelURL, withParams: params)
         let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
@@ -657,6 +791,12 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
             wedgedContextCount += 1
         } else {
             consecutiveTimeouts = 0
+            // Clean settle: whisper_full has returned, the prompt buffer
+            // is no longer readable. (Wedged kills intentionally leak it —
+            // see AttemptRecord.promptBuffer.)
+            if let promptBuffer = record.promptBuffer {
+                free(promptBuffer)
+            }
         }
         stateLock.unlock()
         record.watchdog.cancel()

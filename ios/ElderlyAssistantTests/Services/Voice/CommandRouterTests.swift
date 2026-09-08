@@ -553,6 +553,25 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
         return timerStartOutcome
     }
 
+    /// [ALARMS-TIMERS] (2026-09-08) Voice OFF/SNOOZE — protocol
+    /// requirements with an extension default of .noAlarm; these stored
+    /// vars satisfy them so the stage tests can script every outcome.
+    /// The DEFAULT of .noAlarm keeps pre-existing router tests (none of
+    /// which speak an off/snooze marker) on their historical path.
+    var alarmOffOutcome: AlarmOffOutcome = .noAlarm
+    private(set) var alarmOffRequestCount = 0
+    func requestAlarmOff() -> AlarmOffOutcome {
+        alarmOffRequestCount += 1
+        return alarmOffOutcome
+    }
+
+    var alarmSnoozeOutcome: AlarmSnoozeOutcome = .noAlarm
+    private(set) var alarmSnoozeRequests: [Int] = []
+    func requestAlarmSnooze(minutes: Int) -> AlarmSnoozeOutcome {
+        alarmSnoozeRequests.append(minutes)
+        return alarmSnoozeOutcome
+    }
+
     var pendingRephraseCommand: InterpretedCommand? { rephrasePended?.command }
     private(set) var rephrasePended: (command: InterpretedCommand, sourceTranscript: String?)?
     func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?) {
@@ -2129,7 +2148,12 @@ final class CommandRouterDirectionsTests: XCTestCase {
 /// happens BEFORE the topic table and interpreter; the coordinator
 /// receives the resolved request; the router speaks the
 /// outcome-dependent line; observability lands under component
-/// "alarms_timers" at resolution.
+/// "alarms_timers" at resolution. (2026-09-08) Plus the synchronous
+/// OFF/SNOOZE branches checked after the set parses: the coordinator
+/// receives the turn-off/snooze request, the router speaks the honest
+/// outcome (confirmation with the spoken time, the "no alarms" line, or
+/// the failure fallback), and unsanctioned shapes fall through with no
+/// "alarms_timers" events at all.
 final class CommandRouterAlarmTimerTests: XCTestCase {
 
     private func makeRouter(_ coordinator: MockVoiceCommandCoordinator)
@@ -2338,6 +2362,178 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
             $0.component == "alarms_timers" && $0.eventType == "timer_started"
                 && $0.outcome == "permission_denied"
         })
+    }
+
+    // MARK: - OFF + SNOOZE branches (2026-09-08)
+
+    private func enDate(_ hour: Int, _ minute: Int) -> Date {
+        Calendar.current.date(from: DateComponents(
+            year: 2026, month: 9, day: 7, hour: hour, minute: minute
+        ))!
+    }
+
+    func testEnglishAlarmOffRoutesToCoordinatorAndConfirms() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.alarmOffOutcome = .disabled(time: enDate(6, 0))
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "turn off the alarm")
+
+        XCTAssertEqual(result, .unrecognised(transcript: "turn off the alarm"))
+        XCTAssertEqual(coordinator.alarmOffRequestCount, 1)
+        XCTAssertTrue(coordinator.alarmSetRequests.isEmpty,
+                      "an OFF command must never SET an alarm")
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0 == "Alarm for 6 am is turned off."
+        }, "the confirmation names the alarm's spoken time, got \(coordinator.genericReplies)")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "alarm_off"
+                && $0.outcome == "success"
+        })
+    }
+
+    func testNepaliAlarmOffRoutesToCoordinator() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.alarmOffOutcome = .disabled(time: enDate(6, 0))
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "अलार्म बन्द गर")
+
+        XCTAssertEqual(coordinator.alarmOffRequestCount, 1)
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0.contains("अलार्म बन्द भयो")
+        })
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "alarm_off"
+                && $0.outcome == "success"
+        })
+    }
+
+    func testAlarmOffNoAlarmSpeaksTheNoAlarmsLine() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.alarmOffOutcome = .noAlarm
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "turn off the alarm")
+
+        XCTAssertEqual(coordinator.alarmOffRequestCount, 1)
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0 == "You don't have any alarms set."
+        })
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "alarm_off"
+                && $0.outcome == "no_alarm"
+        })
+    }
+
+    func testAlarmOffFailureSpeaksTheHonestFallback() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.alarmOffOutcome = .failed
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "turn off the alarm")
+
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0.hasPrefix("Sorry — I couldn't turn off the alarm")
+        })
+        XCTAssertFalse(coordinator.genericReplies.contains { $0.contains("turned off.") },
+                       "a failed off must never sound like a confirmation")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "alarm_off"
+                && $0.outcome == "failed"
+        })
+    }
+
+    func testTimeQualifiedCancellationFallsThroughTheStage() {
+        // "cancel the 6 am alarm" names a specific alarm — the off branch
+        // must not guess which one; the utterance falls through unchanged.
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "cancel the 6 am alarm")
+
+        XCTAssertEqual(coordinator.alarmOffRequestCount, 0)
+        XCTAssertFalse(bus.emittedEvents.contains { $0.component == "alarms_timers" })
+    }
+
+    func testSnoozeRoutesParsedMinutesAndConfirmsSpokenUntilTime() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.alarmSnoozeOutcome = .snoozed(until: enDate(10, 15))
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "snooze for 15 minutes")
+
+        XCTAssertEqual(result, .unrecognised(transcript: "snooze for 15 minutes"))
+        XCTAssertEqual(coordinator.alarmSnoozeRequests, [15])
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0 == "Snoozed until 10:15 am."
+        }, "the confirmation embeds the SPOKEN re-wake time, got \(coordinator.genericReplies)")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "alarm_snoozed"
+                && $0.outcome == "success"
+        })
+    }
+
+    func testBareSnoozeUsesTheParserDefaultMinutes() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "स्नुज गर")
+
+        XCTAssertEqual(coordinator.alarmSnoozeRequests, [10])
+    }
+
+    func testSnoozeNoAlarmSpeaksTheNoAlarmsLine() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.alarmSnoozeOutcome = .noAlarm
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "snooze")
+
+        XCTAssertEqual(coordinator.alarmSnoozeRequests, [10])
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0 == "You don't have any alarms set."
+        })
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "alarm_snoozed"
+                && $0.outcome == "no_alarm"
+        })
+    }
+
+    func testSnoozeFailureSpeaksTheHonestFallback() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.alarmSnoozeOutcome = .failed
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "snooze")
+
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0.hasPrefix("Sorry — I couldn't snooze the alarm")
+        })
+        XCTAssertFalse(coordinator.genericReplies.contains { $0.contains("Snoozed until") },
+                       "a failed snooze must never sound like a confirmation")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "alarm_snoozed"
+                && $0.outcome == "failed"
+        })
+    }
+
+    func testSnoozeTheTimerFallsThroughTheStage() {
+        // Timer business, not an alarm re-wake — the parser declines and
+        // the utterance falls through unchanged.
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "snooze the timer")
+
+        XCTAssertTrue(coordinator.alarmSnoozeRequests.isEmpty)
+        XCTAssertFalse(bus.emittedEvents.contains { $0.component == "alarms_timers" })
     }
 }
 

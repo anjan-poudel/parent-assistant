@@ -76,6 +76,9 @@ final class AppCoordinator: ObservableObject {
         // Voice-OS shell v1: the briefing composes in the app language,
         // same injection pattern as every other locale-aware service.
         morningBriefing?.locale = activeLocale
+        // [NEWS-READER] (2026-09-08) The news digest composes in the app
+        // language too — same injection pattern.
+        newsReader?.locale = activeLocale
     }
 
     /// First-run onboarding progress (spec §4.2). Persisted per step.
@@ -99,6 +102,7 @@ final class AppCoordinator: ObservableObject {
         }
     }
     private static let sttPreferenceKey = "sttModelPreference"
+    private static let noiseFilterEnabledKey = "noiseFilterEnabled"
 
     /// The app-wide background theme (skinnable home, 2026-09-07) — a UI
     /// preference, not a secret, persisted in UserDefaults the same way as
@@ -218,6 +222,26 @@ final class AppCoordinator: ObservableObject {
             guard voiceProcessingEnabled != oldValue else { return }
             audioSessionManager.voiceProcessingEnabled = voiceProcessingEnabled
             applyVoiceProcessingPresetChange()
+        }
+    }
+
+    /// Spectral-gate noise filter A/B gate ([NOISE-FILTER] P1 front-end,
+    /// 2026-09-08). ON = the voice pipeline's CAPTURE stream runs through
+    /// `SpectralGateDenoiser` — the model-free classic DSP spectral gate
+    /// (conservative stationary-noise suppression; NOT DeepFilterNet3 —
+    /// that needs model artifacts, P1 step 2 — see the gap note in
+    /// SpectralGateDenoiser). The VPIO session preset is untouched by
+    /// this toggle (independent A/B arms). Default OFF: the capture path
+    /// is byte-identical to today's. Unlike the VPIO preset, this stage
+    /// hot-swaps WITHOUT a pipeline recycle (`setNoiseSuppressor`).
+    /// Persisted under UserDefaults "noiseFilterEnabled" (a UI
+    /// preference, not a secret — house pattern).
+    @Published var noiseFilterEnabled: Bool {
+        didSet {
+            guard noiseFilterEnabled != oldValue else { return }
+            UserDefaults.standard.set(noiseFilterEnabled,
+                                      forKey: Self.noiseFilterEnabledKey)
+            applyNoiseFilterChange()
         }
     }
 
@@ -572,6 +596,7 @@ final class AppCoordinator: ObservableObject {
     private var speakQueue: SpeakQueue?
     private var speechSourceRegistry: SpeechSourceRegistry?
     private var morningBriefing: MorningBriefing?
+    private var newsReader: NewsReader?
     private var notificationFacade: NotificationFacade?
     private var shellCardCancellable: AnyCancellable?
 
@@ -590,6 +615,27 @@ final class AppCoordinator: ObservableObject {
     /// Drives the Today's-briefing Home widget presence and the briefing
     /// leaf; the leaf's "Speak again" replays this stored text.
     @Published private(set) var todayBriefing: StoredBriefing?
+    // Feed agent (feed-agent task, 2026-09-08): the feed's composition
+    // root lives here like every other store/service — the Settings leaf
+    // edits through the coordinator's mutation methods, the Feed leaf
+    // renders the published state, and the service itself publishes
+    // nothing (its results forward through `refreshFeed()`).
+    private let feedSettingsStore: FeedSettingsStore
+    private let feedService: FeedService
+
+    /// The configured feed sources — the Settings leaf's list (published
+    /// so add/remove re-renders it live).
+    @Published private(set) var feedSources: [FeedSource] = []
+    /// The configured topic keywords — same contract as `feedSources`.
+    @Published private(set) var feedTopics: [String] = []
+    /// The composed feed items (newest first).
+    @Published private(set) var feedItems: [FeedItem] = []
+    /// The Feed leaf's load state (idle/loading/loaded/failed).
+    @Published private(set) var feedLoadState: FeedLoadState = .idle
+    /// Source display names that failed the last refresh (honest partial
+    /// failure caption; empty = all sources reached).
+    @Published private(set) var feedFailedSourceNames: [String] = []
+
 
     /// Voice-session derivation state (spec §3.3): the last pipeline state
     /// plus how many `speak()` calls are currently in flight. `speaking`
@@ -670,6 +716,15 @@ final class AppCoordinator: ObservableObject {
     /// ever fire.
     let searchConfigStore: SearchConfigStore
 
+    /// [YOUTUBE] (2026-09-08) YouTube Data API v3 key for the voice
+    /// YouTube feature — the same Keychain `EncryptedLocalStorage`
+    /// pattern as `searchConfigStore`; a family member enters it via
+    /// Settings → YouTube. OPTIONAL: without it the voice command opens
+    /// the YouTube search deeplink instead of resolving + playing the
+    /// top result. Exposed for that Settings screen; `CommandRouter`
+    /// consults `apiKey` at stage time.
+    let youtubeConfigStore: YouTubeConfigStore
+
     /// [TOOL-DEBUG-LOG] (2026-09-07) Encrypted debug log of every
     /// local-tool (weather + web search) request and outcome — the store
     /// behind Settings → Tool requests (review + family export). Same
@@ -677,6 +732,15 @@ final class AppCoordinator: ObservableObject {
     /// the top of `init`, long before any voice turn can record one, and
     /// `start()` injects it into the `CommandRouter` it builds.
     private(set) lazy var localToolLogStore = LocalToolLogStore(storage: storage)
+
+    /// [NEWS-READER] (2026-09-08) Configured news sources + curated
+    /// defaults (REPLACE rule — configured sources are THE news) for the
+    /// voice digest, and the store the feeds-settings agent's Settings →
+    /// Feeds editor binds to. Same Keychain `EncryptedLocalStorage`
+    /// pattern and lazy timing as `localToolLogStore` above: `storage` is
+    /// assigned at the top of `init`, long before any voice turn can
+    /// read it.
+    private(set) lazy var newsSourceStore = NewsSourceStore(storage: storage)
 
     /// Persisted "listen for ये कान्छी" UI preference — UserDefaults
     /// (not a secret), same shape as `sttModelPreference` /
@@ -934,6 +998,19 @@ final class AppCoordinator: ObservableObject {
         let briefingStore = MorningBriefingStore(storage: storage)
         self.morningBriefingStore = briefingStore
         self.todayBriefing = briefingStore.todaysBriefing(now: Date())
+        // Feed agent (feed-agent task, 2026-09-08) — encrypted config
+        // (sources + topics) like the stores above, loaded immediately
+        // so the published lists start populated, and the bounded-fetch
+        // service (TTL cache, per-source timeout, PII-free logging).
+        // Created after the bus exists, same as every bus consumer.
+        let feedSettingsStore = FeedSettingsStore(storage: storage)
+        self.feedSettingsStore = feedSettingsStore
+        let feedConfig = feedSettingsStore.load()
+        self.feedSources = feedConfig.sources
+        self.feedTopics = feedConfig.topics
+        self.feedService = FeedService(settings: feedSettingsStore,
+                                       transport: URLSession.shared,
+                                       observability: bus)
 
         // Calendar auto-add toggle (medical task, 2026-09-07) — default
         // ON when no value was ever stored. This is the property's ONLY
@@ -1076,6 +1153,12 @@ final class AppCoordinator: ObservableObject {
         // Deliberately created BEFORE the router below — the router must
         // receive the store (not nil) or the search hook stays dormant.
         self.searchConfigStore = SearchConfigStore(storage: storage)
+        // [YOUTUBE] (2026-09-08): YouTube Data API key for the voice
+        // YouTube feature (Settings → YouTube). Created BEFORE the plugin
+        // registry and the router below — the plugin and the router's
+        // YouTube stage both receive this store (never a private copy).
+        let youtubeConfigStore = YouTubeConfigStore(storage: storage)
+        self.youtubeConfigStore = youtubeConfigStore
 
         // Voice pipeline. Uses the sherpa-onnx KWS engine when the
         // Settings toggle is ON and the KWS model directory is bundled
@@ -1127,6 +1210,33 @@ final class AppCoordinator: ObservableObject {
             whisperKitSpeechRecognizer.modelName = name
         }
 
+        // [ACCENT-ADAPT] per-user decode-biasing terms (doc
+        // accent-adaptation.md P0.3): contact names + medication names +
+        // supported app names compose into the dialect prompt once the
+        // user's dialect is identified (a `.default` label keeps STT
+        // byte-identical). Runs on the recognizer's inference/attempt
+        // queue, never main; `DialectBiasComposer` caps + sanitises.
+        // Contacts require permission — a denied/absent address book is
+        // an honest empty list, never a failure.
+        // NOTE: `[weak self]` capture is illegal during init (definite
+        // initialization) — capture a local alias of the already-
+        // initialized scheduler instead; it has the same lifetime as the
+        // coordinator and never references the coordinator back, so no
+        // retain cycle is possible.
+        let medicationScheduler = medicationScheduler
+        let biasProfileProvider: () -> DialectBiasProfile = { [weak medicationScheduler] in
+            var profile = DialectBiasProfile()
+            if let entries = try? AddressBookDirectory().allEntries() {
+                profile.contactNames = entries.map(\.name)
+            }
+            profile.medicationNames = medicationScheduler?.medicationEntries()
+                .map(\.medicationName) ?? []
+            profile.appNames = DialectBiasProfile.standardSupportedAppNames
+            return profile
+        }
+        whisperKitSpeechRecognizer.biasProfileProvider = biasProfileProvider
+        whisperSpeechRecognizer.biasProfileProvider = biasProfileProvider
+
         // Plugin registry (design: docs/superpowers/specs/
         // 2026-09-05-plugin-architecture-design.md). Built-ins are
         // registered here; both interpreters get it for prompt
@@ -1135,6 +1245,10 @@ final class AppCoordinator: ObservableObject {
         pluginRegistry.register(NepaliCalendarPlugin(storage: storage))
         pluginRegistry.register(ApplianceHelperPlugin(storage: storage))
         pluginRegistry.register(routinePlugin)
+        // [YOUTUBE] (2026-09-08) The interpreter-side twin of the
+        // router's deterministic YouTube stage — same `YouTubeTool`
+        // behavior (shared config store + transport + opener seams).
+        pluginRegistry.register(YouTubePlugin(configStore: youtubeConfigStore))
         self.pluginRegistry = pluginRegistry
 
         // Restore the persisted brain-model choice BEFORE the interpreter
@@ -1203,6 +1317,13 @@ final class AppCoordinator: ObservableObject {
         // `voiceEngineStack` above) — the pipeline's own start applies
         // the restored preset at launch.
         self.voiceProcessingEnabled = audioSessionManager.voiceProcessingEnabled
+
+        // Restore the persisted noise-filter A/B mirror ([NOISE-FILTER]
+        // P1 front-end — default OFF). This is the mirror's ONLY initial
+        // assignment (didSet does not fire here); the restored stage is
+        // attached to the pipeline at its construction below.
+        self.noiseFilterEnabled =
+            UserDefaults.standard.bool(forKey: Self.noiseFilterEnabledKey)
 
         // Restore the persisted quick-access favourites (quick-access-apps
         // task, 2026-09-06). Pure prune — dedupe, drop ids naming no
@@ -1312,6 +1433,13 @@ final class AppCoordinator: ObservableObject {
     func start() {
         guard !started else { return }
         started = true
+
+        // News reader editor seam (news-reader task, 2026-09-08):
+        // the Feeds settings leaf hosts the news-source editor through
+        // this static hook — assigned once the store exists.
+        NewsSourceEditorSeam.makeEditor = { [newsSourceStore] in
+            AnyView(NewsSourcesSettingsView(store: newsSourceStore))
+        }
 
         // Restore the persisted conversation history (local-cache-chat
         // task, 2026-09-06). Nothing records a turn before this point —
@@ -1448,9 +1576,22 @@ final class AppCoordinator: ObservableObject {
             briefingStore: morningBriefingStore,
             locale: activeLocale
         )
+        // [NEWS-READER] (2026-09-08) The news digest source: same shell
+        // queue + observability bus, the Keychain source store (REPLACE
+        // rule), and the shared bounded-fetch seam (URLSession — 8 s
+        // per source). Fired by the router's deterministic news stage via
+        // `fireNewsReader()` below.
+        let newsReader = NewsReader(
+            queue: queue,
+            observability: observabilityBus,
+            store: newsSourceStore,
+            transport: URLSession.shared,
+            locale: activeLocale
+        )
         let registry = SpeechSourceRegistry(observabilityBus: observabilityBus)
         registry.register(notificationReader)
         registry.register(briefing)
+        registry.register(newsReader)
         // Single UNUserNotificationCenter delegate (design §2 confirmed
         // decision — verified no other object in the app owns this slot).
         let facade = NotificationFacade(handlers: [notificationReader],
@@ -1460,6 +1601,7 @@ final class AppCoordinator: ObservableObject {
         self.speechSourceRegistry = registry
         self.notificationFacade = facade
         self.morningBriefing = briefing
+        self.newsReader = newsReader
         // Push-speech cards surface through the EXISTING Home outcome-card
         // presentation (speech + card, spec §4.6). Interactive replies
         // carry nil cards and never touch this outcome. The card persists
@@ -1547,7 +1689,16 @@ final class AppCoordinator: ObservableObject {
             locationFetcherFactory: { LocationFetcher() },
             weatherTransport: URLSession.shared,
             searchTransport: URLSession.shared,
-            localToolLogStore: localToolLogStore
+            localToolLogStore: localToolLogStore,
+            // [YOUTUBE] (2026-09-08) YouTube stage seams: the Data API
+            // key store, URLSession for the lookup round-trip (the
+            // tool's request carries its own timeout), and the same
+            // call-link opener seam the call/message flows use for
+            // canOpenURL probing + opening (youtube:// → https
+            // fallback).
+            youtubeConfigStore: youtubeConfigStore,
+            youtubeTransport: URLSession.shared,
+            youtubeLinkOpener: SystemCallLinkOpener()
         )
         // Start with the fallback STT. Gemini is swapped in below once an
         // API key is configured.
@@ -1561,6 +1712,9 @@ final class AppCoordinator: ObservableObject {
             router: router,
             observabilityBus: observabilityBus
         )
+        // [NOISE-FILTER] Attach the restored A/B stage (nil when OFF —
+        // the hot-swap seam emits the honest engine name either way).
+        voicePipeline?.setNoiseSuppressor(makeNoiseSuppressor())
         voiceStateCancellable = voicePipeline.$state
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
@@ -2170,6 +2324,24 @@ final class AppCoordinator: ObservableObject {
         } else {
             pendingVoiceProcessingPresetChange = true
         }
+    }
+
+    /// [NOISE-FILTER] Builds the denoising stage the A/B toggle selects:
+    /// nil (legacy capture path) when OFF, the spectral-gate denoiser
+    /// when ON. A DeepFilterNet3-class suppressor (P1 step 2 — model
+    /// artifacts + ModelStore delivery) would slot in here once it lands.
+    private func makeNoiseSuppressor() -> NoiseSuppressor? {
+        guard noiseFilterEnabled else { return nil }
+        return SpectralGateDenoiser(observabilityBus: observabilityBus)
+    }
+
+    /// [NOISE-FILTER] Applies the A/B toggle immediately: the stage is a
+    /// pipeline-level injection with its own hot-swap seam, so unlike the
+    /// VPIO preset this needs NO pipeline recycle — a mid-session flip
+    /// takes effect on the very next capture (the stage's streaming
+    /// state starts cold, warmup passthrough included).
+    private func applyNoiseFilterChange() {
+        voicePipeline?.setNoiseSuppressor(makeNoiseSuppressor())
     }
 
     /// Whether the on-device stack (Whisper STT + LLaMA interpreter) is
@@ -4592,6 +4764,29 @@ extension AppCoordinator {
         await alarmTimersService.startTimer(durationSeconds: durationSeconds, label: label)
     }
 
+    /// [ALARMS-TIMERS] (2026-09-08) Voice alarm OFF — resolves the most
+    /// recently rung enabled alarm and disables it (persist off, cancel
+    /// the pending daily + any snooze). Synchronous; the router speaks
+    /// the returned outcome. A nil target (no enabled alarms) reports
+    /// `.noAlarm` so the router speaks the honest "no alarms" line.
+    func requestAlarmOff() -> AlarmOffOutcome {
+        guard let target = alarmTimersService.mostRecentlyRungEnabledAlarm() else {
+            return .noAlarm
+        }
+        return alarmTimersService.disableAlarm(id: target.id)
+    }
+
+    /// [ALARMS-TIMERS] (2026-09-08) Voice SNOOZE — arms the one-shot
+    /// re-wake notification for the most recently rung enabled alarm
+    /// without touching its daily repeat. Same synchronous,
+    /// outcome-returning contract as `requestAlarmOff`.
+    func requestAlarmSnooze(minutes: Int) -> AlarmSnoozeOutcome {
+        guard let target = alarmTimersService.mostRecentlyRungEnabledAlarm() else {
+            return .noAlarm
+        }
+        return alarmTimersService.snoozeAlarm(id: target.id, minutes: minutes)
+    }
+
     /// Settings-leaf mutations (main-confined — the leaf's buttons run on
     /// main). Toggle re-arms/cancels the pending daily notification;
     /// remove/cancel persist the removal before cancelling the OS request.
@@ -4638,6 +4833,18 @@ extension AppCoordinator: VoiceCommandCoordinating {
             // day slot on Home right away (a same-day no-op re-reads the
             // earlier composition — never clobbers it).
             await MainActor.run { self.refreshTodayBriefing() }
+        }
+    }
+
+    /// [NEWS-READER] (2026-09-08) The router's "read me the news" hook.
+    /// The reader announces its checking line, fetches and speaks the
+    /// digest — all through the shell's speak queue, with its own card.
+    /// On-demand: no once-per-day budget; the reader's own in-flight
+    /// guard makes a repeat command an honest "already fetching" line.
+    func fireNewsReader() {
+        guard let newsReader else { return }
+        Task {
+            await newsReader.fire()
         }
     }
 }
@@ -4696,6 +4903,87 @@ fileprivate final class SpeechNoteForwarder: Speaker {
 
     func cancel() {
         inner.cancel()
+    }
+}
+
+// MARK: - [FEED-AGENT] Feed agent (feed leaf + Settings → Feeds)
+
+extension AppCoordinator {
+
+    /// Full refresh WITH the loading state (feed-agent task, 2026-09-08)
+    /// — the Refresh/Retry buttons, where the user asked for a fetch and
+    /// deserves the visible "loading" feedback.
+    func refreshFeed() async {
+        guard feedLoadState != .loading else { return }
+        feedLoadState = .loading
+        await performFeedRefresh()
+    }
+
+    /// Refresh-on-appear with TTL: the leaf's `.task` calls this so the
+    /// service can serve its cache while fresh — the network is never
+    /// thrashed by re-entry, and the loading card only shows for the
+    /// FIRST load (re-appearing with content on screen refreshes
+    /// silently behind the existing cards).
+    func refreshFeedIfNeeded() async {
+        guard feedLoadState != .loading else { return }
+        if feedLoadState == .idle {
+            feedLoadState = .loading
+        }
+        await performFeedRefresh()
+    }
+
+    /// The shared fetch + state mapping. Post-await published updates
+    /// hop to the main actor so SwiftUI observes them coherently (the
+    /// house `refreshTodayBriefing` pattern).
+    private func performFeedRefresh() async {
+        let result = await feedService.refresh()
+        await MainActor.run { [self] in
+            feedItems = result.items
+            feedFailedSourceNames = result.failedSourceNames
+            // Honest state mapping: empty + failures = the failed card
+            // (something is wrong); empty + clean = the honest
+            // "nothing here" empty state.
+            feedLoadState = result.items.isEmpty && !result.failedSourceNames.isEmpty
+                ? .failed : .loaded
+        }
+    }
+
+    /// Adds a feed source (Settings → Feeds). False keeps the form's
+    /// draft on screen (duplicate/invalid/cap/storage failure — the
+    /// store is the gate; nothing is claimed that didn't happen).
+    @discardableResult
+    func addFeedSource(name: String, urlString: String) -> Bool {
+        let added = feedSettingsStore.addSource(name: name, urlString: urlString)
+        reloadFeedConfig()
+        return added
+    }
+
+    func removeFeedSource(id: String) {
+        feedSettingsStore.removeSource(id: id)
+        reloadFeedConfig()
+    }
+
+    /// Adds a topic keyword. Same honest-false contract as the source
+    /// add (duplicate/cap/empty rejected by the store).
+    @discardableResult
+    func addFeedTopic(_ topic: String) -> Bool {
+        let added = feedSettingsStore.addTopic(topic)
+        reloadFeedConfig()
+        return added
+    }
+
+    func removeFeedTopic(_ topic: String) {
+        feedSettingsStore.removeTopic(topic)
+        reloadFeedConfig()
+    }
+
+    /// Re-reads the store into the published lists after any mutation —
+    /// the single path both the Settings leaf and the next refresh's
+    /// config read through, so UI and service can never disagree.
+    private func reloadFeedConfig() {
+        let config = feedSettingsStore.load()
+        feedSources = config.sources
+        feedTopics = config.topics
     }
 }
 

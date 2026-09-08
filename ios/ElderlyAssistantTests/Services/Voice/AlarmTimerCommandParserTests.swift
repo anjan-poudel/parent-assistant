@@ -5,7 +5,11 @@ import XCTest
 /// commands — en + ne grammar, next-occurrence resolution (pinned `now`),
 /// 12-hour period adjustment, the vetoes (questions / cancellations /
 /// third-person wake / countdown phrasings), the golden-corpus guard for
-/// bare "उठाउनु", and the label extraction.
+/// bare "उठाउनु", and the label extraction. (2026-09-08) Plus hour-unit
+/// + compound timer durations (one duration, never truncated, never
+/// merged across two commands) and the OFF/SNOOZE parsers — sanctioned
+/// shapes and their vetoes (time-qualified cancellations, clock-shaped
+/// snoozes, timer-worded snoozes).
 ///
 /// Time-of-day phrases only: `NepaliTimeParser` reads the real clock for
 /// its "अब"/relative-day paths, so those shapes are not pinned here.
@@ -239,6 +243,21 @@ final class AlarmTimerCommandParserTests: XCTestCase {
         XCTAssertEqual(timer?.durationSeconds, 30)
     }
 
+    func testEnglishHourUnitTimer() {
+        let timer = AlarmTimerCommandParser.parseTimer("1 hour timer")
+        XCTAssertEqual(timer?.durationSeconds, 3600)
+    }
+
+    func testCompoundDurationParsesIntoSingleTimer() {
+        // 2026-09-08: compound chains are ONE duration, confirmed whole
+        // — never truncated to the first unit.
+        let english = AlarmTimerCommandParser.parseTimer("set a timer for 1 hour 30 minutes")
+        XCTAssertEqual(english?.durationSeconds, 5400)
+        XCTAssertNil(english?.label)
+        let nepali = AlarmTimerCommandParser.parseTimer("टाइमर १ घण्टा ३० मिनेट")
+        XCTAssertEqual(nepali?.durationSeconds, 5400)
+    }
+
     func testTimerMinuteAbbreviation() {
         let timer = AlarmTimerCommandParser.parseTimer("timer 5 mins")
         XCTAssertEqual(timer?.durationSeconds, 300)
@@ -250,17 +269,20 @@ final class AlarmTimerCommandParserTests: XCTestCase {
         XCTAssertEqual(timer?.label, "boil eggs")
     }
 
-    func testCompoundDurationIsRejectedNotTruncated() {
-        // Honesty contract: never confirm only the first unit of "1 hour
-        // 30 minutes".
-        XCTAssertNil(AlarmTimerCommandParser.parseTimer("set a timer for 1 hour 30 minutes"))
+    func testTwoSeparateCommandsAreNeverMerged() {
+        // Honesty contract: two SEPARATE commands stay two commands —
+        // never silently merged into one timer.
         XCTAssertNil(AlarmTimerCommandParser.parseTimer(
             "set a timer for 5 minutes, then one for 3 minutes"))
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer(
+            "टाइमर ५ मिनेट, अनि अर्को ३ मिनेट"))
     }
 
     func testOutOfRangeDurationIsRejected() {
         XCTAssertNil(AlarmTimerCommandParser.parseTimer("timer 25 hours"))
         XCTAssertNil(AlarmTimerCommandParser.parseTimer("timer 0 minutes"))
+        // Compound totals obey the same bound: 25 h in two units is out.
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer("timer 1 hour 24 hours"))
     }
 
     func testTimerQuestionAndCancellationAreVetoed() {
@@ -277,6 +299,70 @@ final class AlarmTimerCommandParserTests: XCTestCase {
 
     func testAlarmPhrasingIsNeverATimer() {
         XCTAssertNil(AlarmTimerCommandParser.parseTimer("set an alarm for 6 am"))
+    }
+
+    // MARK: - parseAlarmOff
+
+    func testEnglishAlarmOffShapesParse() {
+        XCTAssertTrue(AlarmTimerCommandParser.parseAlarmOff("turn off the alarm"))
+        XCTAssertTrue(AlarmTimerCommandParser.parseAlarmOff("turn the alarm off"))
+        XCTAssertTrue(AlarmTimerCommandParser.parseAlarmOff("cancel my alarm"))
+        XCTAssertTrue(AlarmTimerCommandParser.parseAlarmOff("switch off the alarm"))
+    }
+
+    func testNepaliAlarmOffShapesParse() {
+        XCTAssertTrue(AlarmTimerCommandParser.parseAlarmOff("अलार्म बन्द गर"))
+        XCTAssertTrue(AlarmTimerCommandParser.parseAlarmOff("अलार्म बन्द गर्नुहोस्"))
+        XCTAssertTrue(AlarmTimerCommandParser.parseAlarmOff("अलार्म बन्द गरिदिनुहोस्"))
+        XCTAssertTrue(AlarmTimerCommandParser.parseAlarmOff("अलार्म बन्द गर्नुस्"))
+        XCTAssertTrue(AlarmTimerCommandParser.parseAlarmOff("अलार्म रद्द गर"))
+        XCTAssertTrue(AlarmTimerCommandParser.parseAlarmOff("अलार्म रद्द गर्नुहोस्"))
+    }
+
+    func testAlarmOffVetoes() {
+        // Time-qualified cancellations name a specific alarm — the off
+        // branch must not guess which one.
+        XCTAssertFalse(AlarmTimerCommandParser.parseAlarmOff("cancel the 6 am alarm"))
+        // Questions and negations are not off commands.
+        XCTAssertFalse(AlarmTimerCommandParser.parseAlarmOff("when is my alarm?"))
+        XCTAssertFalse(AlarmTimerCommandParser.parseAlarmOff("don't turn off the alarm"))
+        // "went off" is not a command — no verb token.
+        XCTAssertFalse(AlarmTimerCommandParser.parseAlarmOff("the alarm went off"))
+        // No alarm marker — timer/bare-off talk is not this command.
+        XCTAssertFalse(AlarmTimerCommandParser.parseAlarmOff("turn off the timer"))
+        XCTAssertFalse(AlarmTimerCommandParser.parseAlarmOff("turn off the light"))
+        // No off verb at all.
+        XCTAssertFalse(AlarmTimerCommandParser.parseAlarmOff("अलार्म बज्यो"))
+    }
+
+    // MARK: - parseAlarmSnooze
+
+    func testBareSnoozeParsesAsDefaultTenMinutes() {
+        XCTAssertEqual(AlarmTimerCommandParser.parseAlarmSnooze("snooze"), 10)
+        XCTAssertEqual(AlarmTimerCommandParser.parseAlarmSnooze("snooze the alarm"), 10)
+        XCTAssertEqual(AlarmTimerCommandParser.parseAlarmSnooze("स्नुज गर"), 10)
+    }
+
+    func testSnoozeWithMinutesParses() {
+        XCTAssertEqual(AlarmTimerCommandParser.parseAlarmSnooze("snooze for 15 minutes"), 15)
+        XCTAssertEqual(AlarmTimerCommandParser.parseAlarmSnooze("स्नुज १५ मिनेट"), 15)
+        XCTAssertEqual(AlarmTimerCommandParser.parseAlarmSnooze("snooze 5 mins"), 5)
+        // The maximum accepted delay.
+        XCTAssertEqual(AlarmTimerCommandParser.parseAlarmSnooze("snooze for 60 minutes"), 60)
+    }
+
+    func testSnoozeVetoes() {
+        // Hour/second durations are not "ring again in N minutes".
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarmSnooze("snooze for 2 hours"))
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarmSnooze("snooze for 30 seconds"))
+        // Out-of-range, multi-duration and clock-shaped snoozes.
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarmSnooze("snooze for 90 minutes"))
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarmSnooze("snooze 10 minutes 20 minutes"))
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarmSnooze("snooze until 6:15"))
+        // Questions, negations and timer business.
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarmSnooze("how long is the snooze?"))
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarmSnooze("don't snooze"))
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarmSnooze("snooze the timer"))
     }
 
     // MARK: - durationText

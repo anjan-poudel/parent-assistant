@@ -133,11 +133,19 @@ struct ToolLogReviewView: View {
         switch kind {
         case .weather: return "cloud.sun.fill"
         case .search: return "magnifyingglass"
+        // [YOUTUBE] (2026-09-08) Voice YouTube entries share the app's
+        // own play icon.
+        case .youtube: return "play.rectangle.fill"
         }
     }
 
     private func kindLabel(for kind: LocalToolLogEntry.Kind) -> String {
-        let key = kind == .weather ? "toolLog.kind.weather" : "toolLog.kind.search"
+        let key: String
+        switch kind {
+        case .weather: key = "toolLog.kind.weather"
+        case .search: key = "toolLog.kind.search"
+        case .youtube: key = "toolLog.kind.youtube"
+        }
         return L10n.str(key, locale: coordinator.activeLocale)
     }
 

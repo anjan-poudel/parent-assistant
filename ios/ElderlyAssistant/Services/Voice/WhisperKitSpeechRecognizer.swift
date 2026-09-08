@@ -273,11 +273,35 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
                 // Force Nepali transcription — auto language detection on
                 // short utterances produced English (translate-ish) output.
                 var options = DecodingOptions(task: .transcribe, language: "ne")
-                // Slice D: per-user dialect prompt-token biasing. nil (the
-                // .default label, or an honest no-tokens state) leaves the
-                // options exactly as before — zero behaviour change.
-                if let biasTokens = activeDialectPromptTokens() {
-                    options.promptTokens = biasTokens
+                // [ACCENT-ADAPT] dialect-tagged prompt biasing (doc
+                // accent-adaptation.md P0.3): composed lexicon + profile
+                // terms + calibrated ids, capped at 100 tokens. A plan
+                // that applies nothing (default label, disabled, no
+                // material) leaves the options exactly as before — zero
+                // behaviour change.
+                let biasPlan = resolvedDialectBias()
+                if biasPlan.state == .active {
+                    let tokenizer: ((String) -> [Int])? = kit.tokenizer.map {
+                        tokenizer in { text in tokenizer.encode(text: text) }
+                    }
+                    switch Self.promptTokens(for: biasPlan,
+                                             tokenizer: tokenizer) {
+                    case .applied(let tokens):
+                        options.promptTokens = tokens
+                        emitBiasActive(biasPlan, tokenCount: tokens.count,
+                                       runtime: "whisperkit")
+                    case .notApplied(let reason):
+                        reportDialectUnavailableOnce(
+                            &dialectBiasingUnavailableReported,
+                            event: "dialect_bias_unavailable",
+                            reason: reason)
+                    }
+                } else if biasPlan.state == .disabledByUser {
+                    reportDialectUnavailableOnce(
+                        &dialectBiasDisabledReported,
+                        event: "dialect_bias_disabled",
+                        reason: "disabled_by_user",
+                        outcome: "info")
                 }
                 let results = try await kit.transcribe(audioArrays: [audio],
                                                        decodeOptions: options)
@@ -311,52 +335,96 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     private func emit(_ eventType: String,
                       errorCode: String?,
                       component: String = "whisperkit_stt",
-                      metadata: [String: String] = [:]) {
+                      metadata: [String: String] = [:],
+                      outcome: String? = nil) {
         observabilityBus.emit(ObservabilityEvent(
             component: component,
             eventType: eventType,
             durationMs: nil,
-            outcome: errorCode == nil ? "info" : "failure",
+            outcome: outcome ?? (errorCode == nil ? "info" : "failure"),
             errorCode: errorCode,
             metadata: metadata
         ))
     }
 
-    // MARK: - Dialect ID seam + decode biasing (voice-personalisation P0, slice D)
+    // MARK: - Dialect ID seam + decode biasing
     //
-    // Seam contract (DialectIdentifier.swift / docs/voice-personalisation-p0-plan.md
-    // slice D): the *label + seam* are the deliverable; accent packs are server
-    // work. Everything here is inert while the persisted label is `.default` —
-    // existing STT behaviour is byte-identical in that state.
+    // Seam contract (DialectIdentifier.swift / DialectBiasComposer.swift /
+    // docs/research-sections/accent-adaptation.md §6 P0.3): the label +
+    // seam are the deliverable; accent packs are server work. Everything
+    // here is inert while the persisted label is `.default` — existing
+    // STT behaviour is byte-identical in that state. A non-default label
+    // biases the decode with the composed prompt (lexicon + profile terms
+    // + calibrated ids, ≤100 tokens).
 
     /// Once-per-session honesty flags: an unavailable dialect path is
     /// reported a single time, never spammed per utterance.
     private var dialectEmbeddingUnavailableReported = false
     private var dialectBiasingUnavailableReported = false
+    private var dialectBiasDisabledReported = false
 
-    /// Prompt-token bias for the user's persisted dialect label, resolved
-    /// from the bundled table's precomputed whisper BPE ids (≤100 tokens).
-    /// - nil when the label is `.default` (no biasing, unchanged behaviour)
-    ///   or when no trustworthy token set exists — the latter is reported
-    ///   honestly once per session, never silently ignored.
-    private func activeDialectPromptTokens() -> [Int]? {
-        let label = DialectPreference.persisted()
-        guard label.selectsPack else { return nil }
-        guard let table = DialectCentroidTable.bundledCached else {
-            reportDialectUnavailableOnce(&dialectBiasingUnavailableReported,
-                                         event: "dialect_biasing_empty",
-                                         reason: "centroid_table_missing")
-            return nil
+    /// Per-user decode-biasing terms (contact names, medication names,
+    /// app names) — injected by the coordinator, default empty. Called on
+    /// the inference queue once per utterance; the composer caps and
+    /// sanitises whatever it returns. PII never leaves the device.
+    var biasProfileProvider: (() -> DialectBiasProfile)?
+
+    /// Resolves the current adaptation (label + lexicon + profile terms +
+    /// calibrated ids) into a plan. Pure composition decides whether this
+    /// decode biases at all.
+    private func resolvedDialectBias() -> DialectBiasPlan {
+        let profile = biasProfileProvider?() ?? DialectBiasProfile()
+        return DialectBiasResolver.resolve(profile: profile)
+    }
+
+    /// Final prompt-token list for an active plan, or an honest refusal.
+    enum PromptTokenOutcome: Equatable, Sendable {
+        case applied([Int])
+        case notApplied(String)
+    }
+
+    /// Static + CoreML-free so the merge/fallback logic is unit-testable
+    /// without a loaded model: tokenizes `promptText` through the given
+    /// tokenizer (nil = no runtime tokenizer — degrade to calibrated ids
+    /// when present, else an honest refusal) and merges with the
+    /// calibrated table ids under the 100-token cap.
+    static func promptTokens(for plan: DialectBiasPlan,
+                             tokenizer: ((String) -> [Int])?) -> PromptTokenOutcome {
+        guard plan.state == .active else { return .notApplied("inactive") }
+        var tokenized: [Int] = []
+        if let text = plan.promptText, !text.isEmpty {
+            guard let tokenizer else {
+                if plan.calibratedTokenIds.isEmpty {
+                    return .notApplied("tokenizer_missing")
+                }
+                return .applied(DialectBiasComposer.mergeTokenIDs(
+                    calibrated: plan.calibratedTokenIds, tokenized: []))
+            }
+            tokenized = tokenizer(text)
         }
-        let tokens = table.promptTokenIds(for: label)
-        if tokens.isEmpty {
-            // Label set but the table carries no tokens for it (seed table,
-            // or table/label from different calibration runs). Honest no-op.
-            reportDialectUnavailableOnce(&dialectBiasingUnavailableReported,
-                                         event: "dialect_biasing_empty",
-                                         reason: "no_tokens_for_\(label.rawValue)")
-        }
-        return tokens.isEmpty ? nil : tokens
+        let merged = DialectBiasComposer.mergeTokenIDs(
+            calibrated: plan.calibratedTokenIds, tokenized: tokenized)
+        return merged.isEmpty ? .notApplied("merge_empty") : .applied(merged)
+    }
+
+    /// Per-utterance observability for an applied bias (PII-free: counts
+    /// and the label only, never term content).
+    private func emitBiasActive(_ plan: DialectBiasPlan,
+                                tokenCount: Int,
+                                runtime: String) {
+        emit("dialect_bias_active", errorCode: nil,
+             component: "dialect_id",
+             metadata: [
+                "label": plan.label.rawValue,
+                "runtime": runtime,
+                "token_count": "\(tokenCount)",
+                "text_chars": "\(plan.promptText?.count ?? 0)",
+                "lexicon_phrases": "\(plan.lexiconPhraseCount)",
+                "contacts": "\(plan.contactCount)",
+                "medications": "\(plan.medicationCount)",
+                "apps": "\(plan.appCount)",
+                "calibrated_tokens": "\(plan.calibratedTokenIds.count)",
+             ])
     }
 
     /// Enrolment seam (called by the future enrolment flow, one short sample
@@ -504,10 +572,12 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
 
     private func reportDialectUnavailableOnce(_ reported: inout Bool,
                                               event: String,
-                                              reason: String) {
+                                              reason: String,
+                                              outcome: String = "failure") {
         guard !reported else { return }
         reported = true
-        emit(event, errorCode: reason, component: "dialect_id")
-        print("[dialect_id] \(event) reason=\(reason)")
+        emit(event, errorCode: reason, component: "dialect_id",
+             outcome: outcome)
+        print("[dialect_id] \(event) reason=\(reason) outcome=\(outcome)")
     }
 }

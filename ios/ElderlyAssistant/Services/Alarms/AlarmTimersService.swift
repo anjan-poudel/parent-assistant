@@ -18,12 +18,21 @@ struct Alarm: Codable, Identifiable, Equatable {
     var time: Date
     var label: String?
     var isEnabled: Bool
+    /// Voice-snooze state (2026-09-08): the absolute re-wake instant of
+    /// the pending one-shot snooze notification, nil when none is
+    /// outstanding. Persisted so a snooze survives an app relaunch in
+    /// the record (the OS holds the armed one-shot itself) and so
+    /// disabling the alarm can clear it. `scheduleAll` deliberately does
+    /// NOT re-arm snoozes — they are ephemeral one-shots the OS keeps.
+    var snoozedUntil: Date?
 
-    init(id: UUID = UUID(), time: Date, label: String? = nil, isEnabled: Bool = true) {
+    init(id: UUID = UUID(), time: Date, label: String? = nil, isEnabled: Bool = true,
+         snoozedUntil: Date? = nil) {
         self.id = id
         self.time = time
         self.label = label
         self.isEnabled = isEnabled
+        self.snoozedUntil = snoozedUntil
     }
 }
 
@@ -60,6 +69,37 @@ enum AlarmTimerSetOutcome: Equatable {
     /// The store's cap is full (see `AlarmTimersStore`) — nothing stored.
     case atCapacity
     /// Persistence (or a defensive input guard) failed — nothing armed.
+    case failed
+}
+
+/// [ALARMS-TIMERS] (2026-09-08) Outcome of a voice alarm-OFF request
+/// ("turn off the alarm", "अलार्म बन्द गर"). `CommandRouter` maps it
+/// to the honest spoken line — the confirmation names the alarm's time,
+/// so a mis-target can never pass silently.
+enum AlarmOffOutcome: Equatable {
+    /// The alarm was disabled (persisted `enabled=false`) and its
+    /// pending daily + snooze notifications cancelled. `time` is its
+    /// time-of-day for the spoken confirmation.
+    case disabled(time: Date)
+    /// No enabled alarm existed to turn off — the list is empty, the
+    /// resolved target is unknown, or it was already off. The router
+    /// speaks the "no alarms" line.
+    case noAlarm
+    /// Persistence failed — nothing was cancelled.
+    case failed
+}
+
+/// [ALARMS-TIMERS] (2026-09-08) Outcome of a voice SNOOZE request
+/// ("snooze", "स्नुज गर"). Same honest-outcome contract as
+/// `AlarmOffOutcome`.
+enum AlarmSnoozeOutcome: Equatable {
+    /// A one-shot re-wake notification is armed `until` (now + minutes,
+    /// bounded 1…`AlarmTimersService.maxSnoozeMinutes`) and the
+    /// snooze-until marker persisted; the daily repeat is untouched.
+    case snoozed(until: Date)
+    /// No enabled alarm existed to snooze.
+    case noAlarm
+    /// Persistence failed — nothing armed.
     case failed
 }
 
@@ -240,6 +280,39 @@ final class AlarmScheduler {
         notifications.removePendingNotifications(withIdentifiers: [Self.alarmRequestID(id)])
     }
 
+    // MARK: Snooze — one-shot re-wake (2026-09-08)
+
+    /// Arms a ONE-SHOT snooze notification for `alarm` that rings
+    /// `timeInterval` seconds from arming. The daily repeat request is
+    /// untouched (it re-queues itself with the OS), and a repeat snooze
+    /// replaces the previous one in place (same identifier). The
+    /// interval (not an absolute date) is the seam so tests pin the
+    /// exact trigger with the service's injected clock.
+    func scheduleSnooze(for alarm: Alarm, timeInterval: TimeInterval) {
+        let content = UNMutableNotificationContent()
+        content.title = L10n.str("alarms.notification.title", locale: locale)
+        content.body = alarm.label ?? Self.timeText(alarm.time, locale: locale)
+        content.sound = .default
+        content.userInfo = ["kind": "alarm", "id": alarm.id.uuidString]
+
+        let request = UNNotificationRequest(
+            identifier: Self.alarmSnoozeRequestID(alarm.id),
+            content: content,
+            trigger: UNTimeIntervalNotificationTrigger(
+                timeInterval: max(timeInterval, 1), repeats: false
+            )
+        )
+        notifications.add(request) { error in
+            if let error {
+                print("[AlarmScheduler] Failed to arm snooze for alarm \(alarm.id): \(error)")
+            }
+        }
+    }
+
+    func cancelSnooze(id: UUID) {
+        notifications.removePendingNotifications(withIdentifiers: [Self.alarmSnoozeRequestID(id)])
+    }
+
     // MARK: Timers — one-shot completion
 
     /// Arms the one-shot completion notification for `timer` at its
@@ -276,6 +349,7 @@ final class AlarmScheduler {
     // MARK: Identifiers
 
     static func alarmRequestID(_ id: UUID) -> String { "alarm.\(id.uuidString)" }
+    static func alarmSnoozeRequestID(_ id: UUID) -> String { "alarm.snooze.\(id.uuidString)" }
     static func timerRequestID(_ id: UUID) -> String { "timer.\(id.uuidString)" }
 
     /// The alarm's time-of-day as a short locale string ("6:00 AM" /
@@ -361,6 +435,12 @@ final class AlarmTimersService: ObservableObject {
     /// enforces the same bound). Beyond a day a "timer" is really a
     /// scheduled event.
     static let maxTimerDurationSeconds = 86_400
+
+    /// Hard ceiling on one snooze delay, in minutes — mirrored by
+    /// `AlarmTimerCommandParser.maxSnoozeMinutes` (defensive; the
+    /// parser enforces the same bound). Beyond an hour a "snooze" is
+    /// really a timer or a schedule change.
+    static let maxSnoozeMinutes = 60
 
     private let store: AlarmTimersStore
     private let scheduler: AlarmScheduler
@@ -471,6 +551,86 @@ final class AlarmTimersService: ObservableObject {
         alarms.removeAll { $0.id == id }
         scheduler.cancelAlarm(id: id)
         emit("alarm_removed", outcome: "success", id: id)
+    }
+
+    // MARK: Voice alarm OFF + SNOOZE (2026-09-08)
+
+    /// The enabled alarm whose most recent ring is closest to `now` —
+    /// the target for the voice OFF/SNOOZE commands ("turn off the
+    /// alarm", "snooze"): when an alarm is ringing or just rang, that is
+    /// THE alarm the user means, and the confirmation always speaks its
+    /// time so a mis-target can never pass silently. Deterministic
+    /// under the injected `now` (tests pin it). Nil when no enabled
+    /// alarm exists.
+    func mostRecentlyRungEnabledAlarm() -> Alarm? {
+        let calendar = Calendar.current
+        let current = now()
+        return alarms
+            .filter(\.isEnabled)
+            .compactMap { alarm -> (alarm: Alarm, lastRing: Date)? in
+                let components = calendar.dateComponents([.hour, .minute], from: alarm.time)
+                guard let lastRing = calendar.nextDate(after: current,
+                                                       matching: components,
+                                                       matchingPolicy: .nextTime,
+                                                       direction: .backward) else { return nil }
+                return (alarm, lastRing)
+            }
+            .max(by: { $0.lastRing < $1.lastRing })?
+            .alarm
+    }
+
+    /// Voice-path alarm OFF. Persists `enabled=false` and clears any
+    /// snooze-until marker BEFORE cancelling the pending daily AND any
+    /// pending snooze notification (persist-then-arm house rule), then
+    /// reports the honest outcome. Main-confined (the coordinator's
+    /// voice path runs on main); the Settings toggle keeps using
+    /// `setAlarmEnabled`.
+    @discardableResult
+    func disableAlarm(id: UUID) -> AlarmOffOutcome {
+        guard let alarm = alarm(with: id), alarm.isEnabled else {
+            return .noAlarm
+        }
+        var updated = alarm
+        updated.isEnabled = false
+        updated.snoozedUntil = nil
+        guard store.saveAlarms(alarms.map { $0.id == id ? updated : $0 }) else {
+            emit("alarm_persistence_failed", outcome: "failed")
+            return .failed
+        }
+        if let index = alarms.firstIndex(where: { $0.id == id }) {
+            alarms[index] = updated
+        }
+        scheduler.cancelAlarm(id: id)
+        scheduler.cancelSnooze(id: id)
+        emit("alarm_disabled", outcome: "success", id: id)
+        return .disabled(time: alarm.time)
+    }
+
+    /// Voice-path SNOOZE. Persists the snooze-until marker first, then
+    /// arms a ONE-SHOT re-wake notification `minutes` from `now()` —
+    /// the daily repeat request is untouched, and a repeat snooze
+    /// replaces the previous one-shot in place. `minutes` is defensively
+    /// clamped to 1…`maxSnoozeMinutes` (the parser already enforces the
+    /// same bound). Main-confined.
+    @discardableResult
+    func snoozeAlarm(id: UUID, minutes: Int) -> AlarmSnoozeOutcome {
+        let bounded = min(max(minutes, 1), Self.maxSnoozeMinutes)
+        guard let alarm = alarm(with: id), alarm.isEnabled else {
+            return .noAlarm
+        }
+        let until = now().addingTimeInterval(TimeInterval(bounded * 60))
+        var updated = alarm
+        updated.snoozedUntil = until
+        guard store.saveAlarms(alarms.map { $0.id == id ? updated : $0 }) else {
+            emit("alarm_persistence_failed", outcome: "failed")
+            return .failed
+        }
+        if let index = alarms.firstIndex(where: { $0.id == id }) {
+            alarms[index] = updated
+        }
+        scheduler.scheduleSnooze(for: updated, timeInterval: TimeInterval(bounded * 60))
+        emit("alarm_snoozed", outcome: "success", id: id)
+        return .snoozed(until: until)
     }
 
     // MARK: Timer creation (voice + UI)
