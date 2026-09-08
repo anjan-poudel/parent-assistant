@@ -1189,6 +1189,33 @@ final class AppCoordinator: ObservableObject {
             whisperKitSpeechRecognizer.modelName = name
         }
 
+        // [ACCENT-ADAPT] per-user decode-biasing terms (doc
+        // accent-adaptation.md P0.3): contact names + medication names +
+        // supported app names compose into the dialect prompt once the
+        // user's dialect is identified (a `.default` label keeps STT
+        // byte-identical). Runs on the recognizer's inference/attempt
+        // queue, never main; `DialectBiasComposer` caps + sanitises.
+        // Contacts require permission — a denied/absent address book is
+        // an honest empty list, never a failure.
+        // NOTE: `[weak self]` capture is illegal during init (definite
+        // initialization) — capture a local alias of the already-
+        // initialized scheduler instead; it has the same lifetime as the
+        // coordinator and never references the coordinator back, so no
+        // retain cycle is possible.
+        let medicationScheduler = medicationScheduler
+        let biasProfileProvider: () -> DialectBiasProfile = { [weak medicationScheduler] in
+            var profile = DialectBiasProfile()
+            if let entries = try? AddressBookDirectory().allEntries() {
+                profile.contactNames = entries.map(\.name)
+            }
+            profile.medicationNames = medicationScheduler?.medicationEntries()
+                .map(\.medicationName) ?? []
+            profile.appNames = DialectBiasProfile.standardSupportedAppNames
+            return profile
+        }
+        whisperKitSpeechRecognizer.biasProfileProvider = biasProfileProvider
+        whisperSpeechRecognizer.biasProfileProvider = biasProfileProvider
+
         // Plugin registry (design: docs/superpowers/specs/
         // 2026-09-05-plugin-architecture-design.md). Built-ins are
         // registered here; both interpreters get it for prompt
