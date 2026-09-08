@@ -405,6 +405,32 @@ Build once, reuse for every phase:
 - **Gate semantics:** every phase ships only if all its exit criteria (§4)
   pass on device; results recorded as observability events for the field.
 
+## Implementation status (2026-09-08, branch task/noise-filter-frontend)
+
+P1 step 1 shipped as the NOISE-FILTER front-end — the `NoiseSuppressor`
+stage behind a protocol, injected at the single choke point
+(`VoicePipeline.feedCapture`, 16 kHz int16 post-conversion — the doc's
+sanctioned fallback placement), hot-swappable via
+`setNoiseSuppressor(_:)`, default OFF (nil stage = byte-identical legacy
+capture path). The VPIO session preset (P0 slice C) is untouched and
+independent.
+
+What runs when enabled: `SpectralGateDenoiser` — the model-free classic
+DSP spectral gate (Hann 50%-overlap STFT, per-bin gated minimum-tracking
+noise floor, Wiener-style gains with over-subtraction, −12/−20 dB
+attenuation floor presets). Constant 16 ms algorithmic delay; capture
+stream only — the idle/wake path stays raw until a wake-FRR measurement
+exists (open question 7). Per-utterance observability under component
+`noise_suppressor` (in/out RMS dBFS, suppression dB, engine name, model
+`none`).
+
+Documented gap vs this doc's P1 recommendation: DeepFilterNet3 (the
+preferred model) and RNNoise (the fallback) both need model artifacts +
+ModelStore delivery (P1 step 2) — out of scope for this task. The stage
+contract is model-agnostic: a DFN3 implementation slots in without
+pipeline changes. Babble/competing-speech separation remains P2's job
+(the spectral gate is stationary-noise only).
+
 ## 8. Open questions
 
 1. Barge-in: if P0 AEC works well, should the assistant listen during its own

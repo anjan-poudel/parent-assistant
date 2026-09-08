@@ -169,6 +169,12 @@ targets:
         # supplied artwork, 2026-09-08).
         ASSETCATALOG_COMPILER_APPICON_NAME: "AppIcon"
     dependencies:
+      # vDSP FFT for the spectral-gate denoiser ([NOISE-FILTER] P1
+      # front-end, Services/Voice/SpectralGateCore.swift). Declared
+      # explicitly rather than relied on transitively through WhisperKit.
+      # `sdk:` (not `framework:`) — a system SDK framework is linked, not
+      # embedded.
+      - sdk: Accelerate.framework
       - package: SwiftWhisper
       - package: LLM
         product: LLM
