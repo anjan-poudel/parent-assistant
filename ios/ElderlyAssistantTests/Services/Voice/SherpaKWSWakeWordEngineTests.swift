@@ -258,8 +258,9 @@ final class SherpaKWSWakeWordEngineTests: XCTestCase {
         let keywords = try String(contentsOf: dir.appendingPathComponent("keywords.txt"),
                                   encoding: .utf8)
         let lines = keywords.split(separator: "\n").map(String.init)
-        XCTAssertEqual(lines.count, 1,
-                       "the shipped file carries exactly the one wake phrase")
+        XCTAssertGreaterThanOrEqual(lines.count, 2,
+                       "the shipped file carries the acoustic candidate set "
+                       + "of the one wake phrase")
         let tokens = lines[0].split(separator: " ").map(String.init)
         XCTAssertFalse(tokens.isEmpty)
 
