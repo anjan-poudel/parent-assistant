@@ -89,6 +89,20 @@ final class AppCoordinator: ObservableObject {
     /// through `DispatchQueue.main.async` — review H1).
     let voiceSession = VoiceSessionStateMachine()
 
+    /// [STARTUP-PERF] Progressive startup progress — the Home spinner's
+    /// honest stage labels and failure degradation. Injected into the
+    /// environment by `ElderlyAssistantApp` next to `voiceSession`.
+    let startupBoot = StartupBoot()
+
+    /// [STARTUP-PERF] Serial queue for the heavy boot phases (keychain
+    /// store loads, first-run bundled-model installs). Every PUBLISHED
+    /// assignment still hops to main; this queue only carries
+    /// thread-safe store/file work. (The sherpa KWS build is deliberately
+    /// NOT here — the runtime segfaults off-main on the x86_64
+    /// simulator; see `bootPrepareVoiceEngine`.)
+    private let bootQueue = DispatchQueue(label: "senios.startup.boot",
+                                          qos: .userInitiated)
+
     /// User's STT model pick from the UI. Nil = automatic selection.
     /// Persisted in UserDefaults (a UI preference, not a secret) and
     /// pushed to WhisperSpeechRecognizer so it survives restarts.
@@ -578,9 +592,18 @@ final class AppCoordinator: ObservableObject {
     // Voice
     private let audioEngine: AVAudioEngine
     private let audioSessionManager: AudioSessionManager
-    private let wakeWordEngine: WakeWordEngine
+    /// [STARTUP-PERF] Starts as the honest Null engine; the real sherpa
+    /// engine (its ONNX load is the expensive part) is built AFTER first
+    /// paint when the Settings toggle is on, and swapped in BEFORE the
+    /// voice pipeline is constructed — behavior is identical to the old
+    /// eager construction, minus the pre-paint model load.
+    private var wakeWordEngine: WakeWordEngine
     private let voiceActivityDetector: VoiceActivityDetector
     private var voicePipeline: VoicePipeline!
+    /// [STARTUP-PERF] The `CommandRouter` built in `start()` — retained so
+    /// the boot's `.preparingVoice` phase can hand it to the pipeline it
+    /// constructs (the pipeline build moved out of `start()`'s tail).
+    private var commandRouter: CommandRouter?
     private var voiceStateCancellable: AnyCancellable?
     private var geminiSwapCancellable: AnyCancellable?
     private var speaker: Speaker?
@@ -766,11 +789,13 @@ final class AppCoordinator: ObservableObject {
     /// tap's processing queue — the lock lives inside the gate.
     private let wakeWordActivityGate = WakeWordActivityGate()
 
-    /// Whether the engine built in `init` is a REAL sherpa-onnx KWS engine
-    /// (vs the Null fallback). Recorded once so Settings → "Voice
-    /// activation" can truthfully distinguish active / needs-setup /
-    /// off-at-launch.
-    private let wakeWordEngineRealAtLaunch: Bool
+    /// Whether the engine built for THIS launch is a REAL sherpa-onnx KWS
+    /// engine (vs the Null fallback). [STARTUP-PERF] Assigned when the
+    /// boot's voice phase completes (background engine construction), so
+    /// Settings → "Voice activation" can truthfully distinguish active /
+    /// needs-setup / off-at-launch; published so the row re-renders when
+    /// the background build lands.
+    @Published private(set) var wakeWordEngineRealAtLaunch = false
 
     /// On-device LLaMA interpreter — the "LLaMA today" half of the local
     /// brain (spec 2026-09-05 §4.0): `LocalBrainChain`'s stand-in while
@@ -959,55 +984,59 @@ final class AppCoordinator: ObservableObject {
         self.storage = KeychainEncryptedStorage()
         self.observabilityBus = bus
         self.alarmScheduler = UNNotificationScheduler()
+        // [STARTUP-PERF] The keychain-backed stores below are CREATED
+        // here (cheap objects) but their loads moved to the background
+        // boot phase (`bootRestoreData`) — a dozen SecItemCopyMatching
+        // round-trips no longer sit between app launch and first paint.
+        // Published windows start empty and populate within the boot
+        // phase; the stores keep their self-heal/cap rules because the
+        // SAME `load()` calls run, just off-main.
         let contactStore = FamilyContactStore(storage: storage)
         self.familyContactStore = contactStore
-        let loadedContacts = contactStore.load()
-        self.familyContacts = loadedContacts
+        self.familyContacts = []
         self.familyNotifier = APNsFamilyNotifier(
-            contacts: Self.emergencyContacts(from: loadedContacts),
+            contacts: [],
             apnsProvider: APNsProvider()
         )
 
         // Saved navigation places (directions task, 2026-09-07) —
-        // encrypted like the contacts above; loaded immediately so the
-        // published list (Settings editor) and the router's candidate
-        // list start populated. The store self-heals legacy payloads on
-        // this read (hard default-home invariant).
+        // encrypted like the contacts above; the store self-heals legacy
+        // payloads on read (hard default-home invariant) — the read now
+        // happens in the boot phase.
         let placeStore = SavedPlaceStore(storage: storage)
         self.placeStore = placeStore
-        self.savedPlaces = placeStore.load()
+        self.savedPlaces = []
 
         // Doctor's appointments (medical task, 2026-09-07) — encrypted
-        // like the contacts above; loaded immediately so the published
-        // list (Medical leaf) starts populated. The store invokes the
+        // like the contacts above; loaded in the boot phase so the
+        // published list (Medical leaf) starts populated moments after
+        // first paint. The store invokes the
         // `MedicalAppointmentCalendarWriting` seam (calendar-2way) on
         // every save/remove when the toggle below is on; the shipped
         // Noop writer means nothing happens until the integrator swaps
         // in the EventKit backend.
         let appointmentStore = AppointmentStore(storage: storage)
         self.appointmentStore = appointmentStore
-        self.appointments = appointmentStore.load()
+        self.appointments = []
 
         // Morning-briefing day slot (briefing persistence task,
         // 2026-09-08) — encrypted like the stores above (the composed
-        // text embeds medication names and event titles). Loaded here so
-        // a relaunch mid-day still shows the day's stored briefing on
-        // Home; `MorningBriefing.fire()` writes through the same
-        // instance (passed in `start()`), and every activation + fire
-        // completion re-reads it into the published `todayBriefing`.
+        // text embeds medication names and event titles). Loaded in the
+        // boot phase so a relaunch mid-day still shows the day's stored
+        // briefing on Home; `MorningBriefing.fire()` writes through the
+        // same instance (passed in `start()`), and every activation +
+        // fire completion re-reads it into the published `todayBriefing`.
         let briefingStore = MorningBriefingStore(storage: storage)
         self.morningBriefingStore = briefingStore
-        self.todayBriefing = briefingStore.todaysBriefing(now: Date())
+
         // Feed agent (feed-agent task, 2026-09-08) — encrypted config
-        // (sources + topics) like the stores above, loaded immediately
-        // so the published lists start populated, and the bounded-fetch
-        // service (TTL cache, per-source timeout, PII-free logging).
-        // Created after the bus exists, same as every bus consumer.
+        // (sources + topics) like the stores above, loaded in the boot
+        // phase so the published lists start populated moments after
+        // first paint, and the bounded-fetch service (TTL cache,
+        // per-source timeout, PII-free logging). Created after the bus
+        // exists, same as every bus consumer.
         let feedSettingsStore = FeedSettingsStore(storage: storage)
         self.feedSettingsStore = feedSettingsStore
-        let feedConfig = feedSettingsStore.load()
-        self.feedSources = feedConfig.sources
-        self.feedTopics = feedConfig.topics
         self.feedService = FeedService(settings: feedSettingsStore,
                                        transport: URLSession.shared,
                                        observability: bus)
@@ -1172,9 +1201,14 @@ final class AppCoordinator: ObservableObject {
         // on (voice-personalisation P0, slice C).
         self.audioSessionManager = AudioSessionManager(observabilityBus: bus,
                                                        audioEngine: audioEngine)
-        let wakeWordLaunch = Self.makeWakeWordEngine(observabilityBus: bus)
-        self.wakeWordEngine = wakeWordLaunch.engine
-        self.wakeWordEngineRealAtLaunch = wakeWordLaunch.isReal
+        // [STARTUP-PERF] The sherpa KWS engine's ONNX load used to run
+        // here, BEFORE first paint. The Null stand-in keeps every
+        // honest-unavailable path identical until the boot's voice phase
+        // builds the real engine after first paint (Settings toggle on +
+        // model bundled — same decision as `makeWakeWordEngine` always
+        // made) and swaps it in before the pipeline is constructed.
+        self.wakeWordEngine = NullWakeWordEngine()
+        self.wakeWordEngineRealAtLaunch = false
         self.voiceActivityDetector = EnergyVAD()
         // Two STTs are constructed up-front:
         // - fallback (SFSpeechRecognizer, en-US) — used while Whisper is
@@ -1441,19 +1475,15 @@ final class AppCoordinator: ObservableObject {
             AnyView(NewsSourcesSettingsView(store: newsSourceStore))
         }
 
-        // Restore the persisted conversation history (local-cache-chat
-        // task, 2026-09-06). Nothing records a turn before this point —
-        // the router that calls recordTranscript/noteAssistantSpoke is
-        // only built below — so the window stays empty until the store
-        // has loaded. Corrupt or missing data loads as an empty history,
-        // never a crash.
-        chatHistoryStore.load()
-        conversationHistory = chatHistoryStore.recent()
-
-        // Activity history (call-history task, 2026-09-06): prime the
-        // leaf's window from disk — rows from previous launches must show
-        // even before anything new is recorded this session.
-        refreshRecentActivity()
+        // [STARTUP-PERF] Conversation + activity history, the keychain
+        // store loads, the KWS engine build and the bundled-model
+        // housekeeping moved OFF the main thread into the progressive
+        // boot below (`.restoringData` → `.preparingVoice` →
+        // `.finishingSetup` → `.ready`). The published windows stay empty
+        // until the boot's restore phase lands moments after first paint
+        // — corrupt or missing data still loads as empty, never a crash,
+        // because the same `load()`/`recent()`/`entries()` calls run, on
+        // the boot queue instead of main.
 
         // Live-call detection (call-history task, 2026-09-06): force the
         // lazy detector to construct + subscribe so `liveCallActive`
@@ -1472,21 +1502,6 @@ final class AppCoordinator: ObservableObject {
 
         // Register background tasks (iOS)
         registerBackgroundTasks()
-
-        // Repair encoder installs from older builds: the bundled-encoder
-        // copy step normally runs at download finalize, so models cached
-        // before a naming fix (or before the encoder existed) sit without
-        // one. Idempotent — no-op when the target already exists.
-        for entry in ModelCatalog.entries(kind: .whisperBase) {
-            modelStore.installBundledCoreMLEncoder(for: entry.id)
-            // Bundled ggml models (the default medium) install the same
-            // way — first run never downloads them.
-            modelStore.installBundledModel(for: entry.id)
-        }
-        // And the reverse: entries we no longer ship an encoder for
-        // (large-v3 — its CoreML path hangs on-device) get their stale
-        // encoder dir deleted, or whisper.cpp auto-loads it anyway.
-        modelStore.removeStaleCoreMLBundles()
 
         // Restore and re-arm any outstanding medication reminders
         medicationScheduler.scheduleAll()
@@ -1644,18 +1659,6 @@ final class AppCoordinator: ObservableObject {
         router3.cloudBrain = geminiInterpreter
         router3.cloudEnabled = (voiceEngineStack == .gemini)
         self.intentRouter = router3
-        // Interpreter-availability fix (2026-09-06): restore the
-        // assistant-brain model's one-time auto-download. The v2 pivot
-        // removed ALL first-run downloads, so the LLaMA stand-in that
-        // LocalBrainChain restores below (commit 13ded79) could never
-        // come online on a real device — the chain sat empty and every
-        // plain utterance fell through to the generic "didn't understand"
-        // re-prompt despite a correct transcript. `start()` is idempotent
-        // (onboarding wizard and Home both call it) and
-        // `ModelDownloadService.start` no-ops while a download is already
-        // in flight or completed, so this is safe to run on every launch;
-        // when the Gemini stack is live no download starts at all.
-        ensureAssistantBrainDownloadIfNeeded()
         // Collapse #1 (spec §4): when the Gemini recognizer is the active
         // STT, ONE understand call does STT + intent; the command half is
         // waiting in `intentRouter` when the transcript half routes.
@@ -1700,6 +1703,145 @@ final class AppCoordinator: ObservableObject {
             youtubeTransport: URLSession.shared,
             youtubeLinkOpener: SystemCallLinkOpener()
         )
+        // [STARTUP-PERF] Retained for the boot's pipeline build.
+        commandRouter = router
+        // Hot-swap trigger: as soon as a Gemini API key is saved (Settings
+        // or onboarding), swap the fallback SFSpeechRecognizer for the real
+        // recognizer without tearing down the wake-word loop. Attached here
+        // (like the router wiring above) so a key change can never race
+        // the boot's pipeline build.
+        geminiSwapCancellable = geminiConfigStore.$apiKey
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.trySwapToGemini()
+            }
+
+        // [STARTUP-PERF] The voice pipeline (which needs the KWS engine
+        // the boot builds off-main) is constructed and started in the
+        // boot's `.preparingVoice` phase. Everything above stays
+        // synchronous so `handleScenePhase`'s morning-briefing fire and
+        // the talk cycle see the same composition as before.
+        isInitialized = true
+        print("[AppCoordinator] Elderly AI Assistant started")
+
+        // Kick off the progressive boot. Phase 1 (store loads) starts on
+        // the boot queue; every published assignment hops back to main.
+        startupBoot.begin()
+        print("[AppCoordinator] startup boot begin — restoring data off-main")
+        // The lazy stores below are forced on main first (lazy
+        // initialization is not thread-safe); their LOADS run on the
+        // boot queue.
+        _ = chatHistoryStore
+        _ = activityLog
+        bootQueue.async { [weak self] in
+            self?.bootRestoreData()
+        }
+    }
+
+    // MARK: - Progressive startup boot (startup-perf task, 2026-09-09)
+
+    /// Phase 1 — restore persisted data on the boot queue: the keychain
+    /// stores + the conversation/activity windows. The stores are
+    /// thread-safe (each `load()` is an independent
+    /// `SecItemCopyMatching` + decode with empty-on-error semantics);
+    /// the published windows are assigned on main afterwards.
+    private func bootRestoreData() {
+        let batch = StartupDataBatch.load(
+            contactStore: familyContactStore,
+            placeStore: placeStore,
+            appointmentStore: appointmentStore,
+            briefingStore: morningBriefingStore,
+            feedSettingsStore: feedSettingsStore,
+            chatHistoryStore: chatHistoryStore,
+            activityLog: activityLog,
+            now: Date()
+        )
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.familyContacts = batch.contacts
+            self.familyNotifier.updateContacts(
+                Self.emergencyContacts(from: batch.contacts))
+            self.savedPlaces = batch.places
+            self.appointments = batch.appointments
+            self.todayBriefing = batch.briefing
+            self.feedSources = batch.feedSources
+            self.feedTopics = batch.feedTopics
+            self.conversationHistory = batch.history
+            self.recentActivity = batch.activity
+            self.startupBoot.advance(to: .preparingVoice)
+            // Phase 2 runs on MAIN (see bootPrepareVoiceEngine — the
+            // sherpa runtime segfaults off-main on the x86_64 simulator).
+            self.bootPrepareVoiceEngine()
+        }
+    }
+
+    /// Phase 2 — build the wake-word engine and construct + start the
+    /// voice pipeline, then hand the file-heavy phase 3 to the boot
+    /// queue. The sherpa ONNX load moved out of `init` (pre-paint) to
+    /// AFTER first paint — but it stays on the MAIN thread: the
+    /// sherpa-onnx/onnxruntime session creation segfaulted off-main on
+    /// the x86_64 simulator (EXC_BAD_ACCESS in ConstantFolding, crash
+    /// 2026-09-09 204647, faulting queue `senios.startup.boot`). The
+    /// spinner covers this phase honestly; a failed build keeps the
+    /// existing honest Null-engine behavior, and a failed pipeline start
+    /// surfaces exactly as it always did (voice error state) and is
+    /// recorded on the boot machine.
+    private func bootPrepareVoiceEngine() {
+        let wakeWordLaunch = Self.makeWakeWordEngine(observabilityBus: observabilityBus)
+        self.wakeWordEngine = wakeWordLaunch.engine
+        self.wakeWordEngineRealAtLaunch = wakeWordLaunch.isReal
+        self.buildAndStartVoicePipeline()
+        self.startupBoot.advance(to: .finishingSetup)
+        self.bootQueue.async { [weak self] in
+            self?.bootFinishSetup()
+        }
+    }
+
+    /// Phase 3 — file-heavy model housekeeping on the boot queue: the
+    /// bundled-encoder repair + bundled-model install (a FIRST-RUN copy
+    /// of the 586 MB default medium GGUF that used to freeze the main
+    /// thread for seconds) + stale-encoder cleanup. Then the gated
+    /// assistant-brain download check — still strictly after first
+    /// paint, still skipped on the Gemini stack / cached model, so no
+    /// new network activity happens at launch.
+    private func bootFinishSetup() {
+        // Repair encoder installs from older builds: the bundled-encoder
+        // copy step normally runs at download finalize, so models cached
+        // before a naming fix (or before the encoder existed) sit without
+        // one. Idempotent — no-op when the target already exists.
+        for entry in ModelCatalog.entries(kind: .whisperBase) {
+            modelStore.installBundledCoreMLEncoder(for: entry.id)
+            // Bundled ggml models (the default medium) install the same
+            // way — first run never downloads them.
+            modelStore.installBundledModel(for: entry.id)
+        }
+        // And the reverse: entries we no longer ship an encoder for
+        // (large-v3 — its CoreML path hangs on-device) get their stale
+        // encoder dir deleted, or whisper.cpp auto-loads it anyway.
+        modelStore.removeStaleCoreMLBundles()
+
+        // Interpreter-availability fix (2026-09-06): restore the
+        // assistant-brain model's one-time auto-download. `start()` is
+        // idempotent (onboarding wizard and Home both call it) and
+        // `ModelDownloadService.start` no-ops while a download is already
+        // in flight or completed, so this is safe to run on every launch;
+        // when the Gemini stack is live no download starts at all.
+        // [STARTUP-PERF] Runs at the END of the boot (idle after first
+        // paint) — same gate, later slot — and hops to main first:
+        // `ModelDownloadService`'s task bookkeeping stays main-confined
+        // exactly as it was when this ran inside `start()`.
+        DispatchQueue.main.async { [weak self] in
+            self?.ensureAssistantBrainDownloadIfNeeded()
+            self?.startupBoot.advance(to: .ready)
+            print("[AppCoordinator] startup boot complete — spinner dismissed")
+        }
+    }
+
+    /// Constructs + starts the voice pipeline (the old synchronous tail
+    /// of `start()`). Runs on main in the boot's `.preparingVoice` phase
+    /// so the engine swap above is visible before audio starts.
+    private func buildAndStartVoicePipeline() {
+        guard voicePipeline == nil, let router = commandRouter else { return }
         // Start with the fallback STT. Gemini is swapped in below once an
         // API key is configured.
         voicePipeline = VoicePipeline(
@@ -1743,20 +1885,50 @@ final class AppCoordinator: ObservableObject {
             case .failure(let err):
                 self.voiceError = "\(err)"
                 self.voiceState = .error("\(err)")
+                // Honest degradation: the spinner dismisses, the voice
+                // error caption tells the user exactly what happened.
+                self.startupBoot.recordFailure(.preparingVoice)
             }
         }
+    }
 
-        // Hot-swap trigger: as soon as a Gemini API key is saved (Settings
-        // or onboarding), swap the fallback SFSpeechRecognizer for the real
-        // recognizer without tearing down the wake-word loop.
-        geminiSwapCancellable = geminiConfigStore.$apiKey
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                self?.trySwapToGemini()
-            }
+    /// [STARTUP-PERF] The boot's phase-1 payload: every persisted window
+    /// the coordinator used to load synchronously (init + `start()`),
+    /// now read on the boot queue in one pass. Each store call is the
+    /// SAME call the old code made — empty-on-error semantics included —
+    /// so failure degrades honestly instead of crashing. Internal (not
+    /// private) so the seam is unit-testable off-main.
+    struct StartupDataBatch {
+        var contacts: [FamilyContact] = []
+        var places: [SavedPlace] = []
+        var appointments: [MedicalAppointment] = []
+        var briefing: StoredBriefing?
+        var feedSources: [FeedSource] = []
+        var feedTopics: [String] = []
+        var history: [Exchange] = []
+        var activity: [AppActivityEntry] = []
 
-        isInitialized = true
-        print("[AppCoordinator] Elderly AI Assistant started")
+        static func load(contactStore: FamilyContactStore,
+                         placeStore: SavedPlaceStore,
+                         appointmentStore: AppointmentStore,
+                         briefingStore: MorningBriefingStore,
+                         feedSettingsStore: FeedSettingsStore,
+                         chatHistoryStore: ChatHistoryStore,
+                         activityLog: AppActivityLog,
+                         now: Date) -> StartupDataBatch {
+            var batch = StartupDataBatch()
+            batch.contacts = contactStore.load()
+            batch.places = placeStore.load()
+            batch.appointments = appointmentStore.load()
+            batch.briefing = briefingStore.todaysBriefing(now: now)
+            let feedConfig = feedSettingsStore.load()
+            batch.feedSources = feedConfig.sources
+            batch.feedTopics = feedConfig.topics
+            chatHistoryStore.load()
+            batch.history = chatHistoryStore.recent()
+            batch.activity = activityLog.entries()
+            return batch
+        }
     }
 
     // MARK: - Voice session state (spec §3.3)

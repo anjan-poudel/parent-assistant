@@ -744,6 +744,7 @@
       }
     },
     "appliance.manual.bundled": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -757,10 +758,10 @@
             "value": "पूर्वनिर्धारित म्यानुअलहरू"
           }
         }
-      },
-      "extractionState": "manual"
+      }
     },
     "appliance.manual.bundledEmpty": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -774,10 +775,10 @@
             "value": "पूर्वनिर्धारित म्यानुअल उपलब्ध छैन।"
           }
         }
-      },
-      "extractionState": "manual"
+      }
     },
     "appliance.manual.cancel": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -791,10 +792,10 @@
             "value": "रद्द गर्नुहोस्"
           }
         }
-      },
-      "extractionState": "manual"
+      }
     },
     "appliance.manual.deleteA11y": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -808,10 +809,10 @@
             "value": "म्यानुअल मेट्नुहोस्"
           }
         }
-      },
-      "extractionState": "manual"
+      }
     },
     "appliance.manual.deleteAction": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -825,10 +826,10 @@
             "value": "मेटाउनुहोस्"
           }
         }
-      },
-      "extractionState": "manual"
+      }
     },
     "appliance.manual.deleteConfirmMessage": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -842,10 +843,10 @@
             "value": "यसको बचत गरिएको फोटो र चरणहरू हटाइनेछन्।"
           }
         }
-      },
-      "extractionState": "manual"
+      }
     },
     "appliance.manual.deleteConfirmTitle": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -859,10 +860,10 @@
             "value": "यो म्यानुअल मेट्ने हो?"
           }
         }
-      },
-      "extractionState": "manual"
+      }
     },
     "appliance.manual.empty": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -876,10 +877,10 @@
             "value": "अहिलेसम्म कुनै म्यानुअल बचत भएको छैन। कुनै उपकरणको फोटो खिच्नुहोस् — यसको गाइड यहाँ बचत हुनेछ।"
           }
         }
-      },
-      "extractionState": "manual"
+      }
     },
     "appliance.manual.noResults": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -893,10 +894,10 @@
             "value": "तपाईंको खोजीसँग मेल खाने कुनै म्यानुअल छैन"
           }
         }
-      },
-      "extractionState": "manual"
+      }
     },
     "appliance.manual.openFailedMessage": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -910,10 +911,10 @@
             "value": "यो मेटिएको हुन सक्छ। सूची नयाँ गरिएको छ।"
           }
         }
-      },
-      "extractionState": "manual"
+      }
     },
     "appliance.manual.openFailedTitle": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -927,10 +928,10 @@
             "value": "यो म्यानुअल खोल्न सकिएन"
           }
         }
-      },
-      "extractionState": "manual"
+      }
     },
     "appliance.manual.openHint": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -944,10 +945,10 @@
             "value": "तपाईंका उपकरणका बचत गरिएका गाइडहरू"
           }
         }
-      },
-      "extractionState": "manual"
+      }
     },
     "appliance.manual.searchPlaceholder": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -961,10 +962,10 @@
             "value": "म्यानुअल खोज्नुहोस्"
           }
         }
-      },
-      "extractionState": "manual"
+      }
     },
     "appliance.manual.title": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -978,8 +979,7 @@
             "value": "म्यानुअलहरू"
           }
         }
-      },
-      "extractionState": "manual"
+      }
     },
     "appliance.retake": {
       "extractionState": "manual",
@@ -10026,6 +10026,7 @@
       }
     },
     "settings.manuals.title": {
+      "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
@@ -10039,8 +10040,7 @@
             "value": "म्यानुअलहरू"
           }
         }
-      },
-      "extractionState": "manual"
+      }
     },
     "settings.meds.add": {
       "extractionState": "manual",
@@ -11194,6 +11194,91 @@
           "stringUnit": {
             "state": "translated",
             "value": "यो आवाजमा बदल्नुअघि पुष्टि माग्छ।"
+          }
+        }
+      }
+    },
+    "startup.degraded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Some features are running with reduced functionality"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "केही सुविधा कम क्षमतामा चलिरहेका छन्"
+          }
+        }
+      }
+    },
+    "startup.finishingSetup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Finishing setup…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सेटअप पूरा हुँदैछ…"
+          }
+        }
+      }
+    },
+    "startup.preparingVoice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preparing voice…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज तयार हुँदैछ…"
+          }
+        }
+      }
+    },
+    "startup.ready": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तयार"
+          }
+        }
+      }
+    },
+    "startup.restoringData": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Loading your data…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको डाटा लोड हुँदैछ…"
           }
         }
       }
