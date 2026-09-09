@@ -47,12 +47,11 @@ struct ContentView: View {
         .sheet(item: $coordinator.pendingNavigationPresentation) { presentation in
             InAppNavigationView(session: presentation.session)
         }
-        // [STARTUP-PERF] The progressive-boot spinner: a small capsule
-        // row listing what is loading (Nepali + English), dismissed when
-        // the background boot completes. Hosted here so it covers the
-        // onboarding wizard AND Home.
-        .overlay(alignment: .top) {
-            StartupProgressOverlay()
-        }
+        // [STARTUP-PERF] The progressive-boot spinner (a small capsule
+        // listing what is loading) now lives INSIDE HomeView, anchored
+        // above the speak button ([SPINNER-PLACEMENT]) — hosting it as a
+        // top overlay here put the capsule over the top bar's calendar
+        // date line. Boot only starts once onboarding finishes, so the
+        // wizard never showed it anyway.
     }
 }

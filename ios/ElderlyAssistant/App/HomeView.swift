@@ -50,6 +50,9 @@ enum LeafDestination: Identifiable {
 struct HomeView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @EnvironmentObject var session: VoiceSessionStateMachine
+    /// [SPINNER-PLACEMENT] Read so the container can animate the talk
+    /// hero's settle when the boot spinner's flow slot collapses.
+    @EnvironmentObject private var boot: StartupBoot
 
     @State private var showWizard = false
     @State private var showHistory = false
@@ -84,6 +87,15 @@ struct HomeView: View {
                     if !coordinator.favoriteApps.isEmpty {
                         quickAccessRow
                     }
+                    // [SPINNER-PLACEMENT] The startup spinner lives ABOVE
+                    // the speak button: a flow slot between quick access
+                    // and the talk stage. It used to be a ContentView top
+                    // overlay, where the capsule covered the top bar's
+                    // calendar date line — the complaint — so it now sits
+                    // here, never covering the calendar. The slot
+                    // collapses when the boot reaches `.ready` (and the
+                    // overlay renders zero-height while nothing shows).
+                    StartupProgressOverlay()
                     // The talk stage is FIXED chrome (home-redesign v3):
                     // hero + the small status/rotating texts under it sit
                     // between the top bar and the outcome region, so the
@@ -112,6 +124,11 @@ struct HomeView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
+                // [SPINNER-PLACEMENT] When the boot finishes the spinner
+                // slot collapses and everything below it rises — ease the
+                // whole settle (hero included) instead of a snap, matching
+                // the overlay's own 0.2s ease.
+                .animation(.easeInOut(duration: 0.2), value: boot.spinnerVisible)
             }
             // Dock pinned to the bottom edge (home-redesign 2026-09-08):
             // previously the dock was the last child of the fixed VStack,
