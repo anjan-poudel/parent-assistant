@@ -13968,6 +13968,57 @@
           }
         }
       }
+    },
+    "settings.manuals.userManual": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "User manual"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "प्रयोगकर्ता पुस्तिका"
+          }
+        }
+      }
+    },
+    "settings.manuals.userManualHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The full guide to Sahayak — every screen, command and setting explained."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायकको पूरा गाइड — हरेक स्क्रिन, आदेश र सेटिङको व्याख्या।"
+          }
+        }
+      }
+    },
+    "manual.userManual.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The user manual isn't included in this build. Ask a family member to rebuild the app with it."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो संस्करणमा प्रयोगकर्ता पुस्तिका छैन। परिवारको कसैलाई पुस्तिकासहित एप फेरि बनाउन भन्नुहोस्।"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
