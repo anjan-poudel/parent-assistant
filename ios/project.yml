@@ -118,6 +118,14 @@ targets:
       # resource.
       - path: ElderlyAssistant/Resources/AppIcons.xcassets
         buildPhase: resources
+      # [LAUNCH-SCREEN] The pre-first-paint launch screen. Info.plist
+      # already sets UILaunchStoryboardName=LaunchScreen; without this
+      # resource entry the storyboard never lands in the bundle and iOS
+      # renders pure black during the pre-paint phase. Same single-file
+      # pattern as the entries above (Resources is excluded from the
+      # source glob). Base.lproj is the standard launch-screen slot.
+      - path: ElderlyAssistant/Resources/Base.lproj/LaunchScreen.storyboard
+        buildPhase: resources
       # Bundled medium Nepali model — installed into the ModelStore on
       # first launch (no download). The .bin itself is gitignored
       # (*.bin); re-fetch from the models release v3 to rebuild locally.

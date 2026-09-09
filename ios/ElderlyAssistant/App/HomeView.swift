@@ -120,10 +120,12 @@ struct HomeView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
-                // [BOOT-LATENCY] When the boot finishes the spinner
-                // inside the talk stage collapses and everything below it
-                // rises — ease the whole settle (hero included) instead
-                // of a snap, matching the overlay's own 0.2s ease.
+                // [BOOT-LATENCY → LAUNCH-SCREEN] The hero-branch spinner
+                // is an overlay now (no flow shift when it collapses),
+                // but the confirmation-chips branch still hosts it as a
+                // flow element — keep the whole-settle ease so the chips
+                // rise gently instead of snapping, matching the overlay's
+                // own 0.2s ease.
                 .animation(.easeInOut(duration: 0.2), value: boot.spinnerVisible)
             }
             // Dock pinned to the bottom edge (home-redesign 2026-09-08):
@@ -453,16 +455,15 @@ struct HomeView: View {
                 // below the button; the hints describe the button right
                 // below them, so they must hug it).
                 //
-                // [BOOT-LATENCY] The startup spinner is the stage's
-                // FIRST element, 4pt above the hero's top edge: it reads
-                // as "just above the speak button" instead of floating
-                // near the top bar (the previous slot sat between quick
-                // access and the stage — with no favourites configured
-                // the capsule hugged the top bar and read as "at the
-                // top"). It renders zero-height once boot completes, and
-                // the stage collapses with the container's 0.2s ease.
+                // [BOOT-LATENCY → LAUNCH-SCREEN] The startup spinner is
+                // anchored DIRECTLY above the hero disc (an overlay on
+                // the disc's top edge inside `TalkButton`), NOT a flow
+                // element here: as a flow element at the stage top it
+                // rendered near the calendar header, far from the speak
+                // button. Anchored to the disc it always hugs the hero
+                // — at every ring/halo state — and takes no flow space,
+                // so nothing below it shifts when it collapses.
                 VStack(spacing: 4) {
-                    StartupProgressOverlay()
                     TalkButton(session: session,
                                onTap: {
                                    switch session.state {
@@ -843,6 +844,19 @@ struct TalkButton: View {
                             }
                             .foregroundColor(.white)
                         )
+                        // [LAUNCH-SCREEN] The startup spinner is anchored
+                        // to the DISC itself (8pt above its top edge), not
+                        // the surrounding ZStack: ring/halo sizes vary by
+                        // state (the idle rings breathe out to +130pt), so
+                        // any container-relative anchor would drift. The
+                        // disc is the state-independent landmark — the
+                        // capsule always hugs the speak button. It renders
+                        // zero-height once boot completes; the offset
+                        // never affects the stage's flow.
+                        .overlay(alignment: .bottom) {
+                            StartupProgressOverlay()
+                                .offset(y: -(DesignTokens.talkButtonDiameter + 8))
+                        }
                     if isPressingForReset {
                         resetProgressRing
                     }
