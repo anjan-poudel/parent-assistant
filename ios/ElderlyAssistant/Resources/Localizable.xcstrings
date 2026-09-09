@@ -4245,6 +4245,23 @@
         }
       }
     },
+    "feeds.showOriginal": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show original"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मूल देखाउनुहोस्"
+          }
+        }
+      }
+    },
     "feeds.title": {
       "extractionState": "manual",
       "localizations": {
@@ -4258,6 +4275,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "फिड"
+          }
+        }
+      }
+    },
+    "feeds.translate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translate"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवाद गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "feeds.translatedByAI": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI translated"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "AI अनुवादित"
+          }
+        }
+      }
+    },
+    "feeds.translationUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translation unavailable"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवाद उपलब्ध छैन"
           }
         }
       }
@@ -5431,6 +5499,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "नेपाली"
+          }
+        }
+      }
+    },
+    "manual.userManual.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The user manual isn't included in this build. Ask a family member to rebuild the app with it."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो संस्करणमा प्रयोगकर्ता पुस्तिका छैन। परिवारको कसैलाई पुस्तिकासहित एप फेरि बनाउन भन्नुहोस्।"
           }
         }
       }
@@ -10042,6 +10127,40 @@
         }
       }
     },
+    "settings.manuals.userManual": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "User manual"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "प्रयोगकर्ता पुस्तिका"
+          }
+        }
+      }
+    },
+    "settings.manuals.userManualHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The full guide to Sahayak — every screen, command and setting explained."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायकको पूरा गाइड — हरेक स्क्रिन, आदेश र सेटिङको व्याख्या।"
+          }
+        }
+      }
+    },
     "settings.meds.add": {
       "extractionState": "manual",
       "localizations": {
@@ -11279,6 +11398,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "तपाईंको डाटा लोड हुँदैछ…"
+          }
+        }
+      }
+    },
+    "startup.warmingEngines": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Warming up voice…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज पहिल्यै लोड गर्दै…"
           }
         }
       }
@@ -13170,6 +13306,40 @@
         }
       }
     },
+    "voiceSettings.warmStart.caption": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Preloads the speech and reply-voice models during startup, so the first conversation starts sooner. Uses some extra memory and battery for a short while after each launch. Applies from the next launch."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सुरुवातमा नै बोली र उत्तर दिने आवाजका मोडेल पहिल्यै लोड गर्छ, जसले गर्दा पहिलो कुराकानी छिटो सुरु हुन्छ। प्रत्येक पटक खोल्दा केही बेर थोरै बढी मेमोरी र ब्याट्री खर्च हुन्छ। अर्को पटक खोल्दादेखि लागू हुन्छ।"
+          }
+        }
+      }
+    },
+    "voiceSettings.warmStart.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Faster first conversation"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पहिलो कुराकानी छिटो"
+          }
+        }
+      }
+    },
     "wakeWord.active.detail": {
       "extractionState": "manual",
       "localizations": {
@@ -13982,125 +14152,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "युट्युब"
-          }
-        }
-      }
-    },
-    "feeds.translate": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Translate"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "अनुवाद गर्नुहोस्"
-          }
-        }
-      }
-    },
-    "feeds.showOriginal": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Show original"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "मूल देखाउनुहोस्"
-          }
-        }
-      }
-    },
-    "feeds.translationUnavailable": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Translation unavailable"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "अनुवाद उपलब्ध छैन"
-          }
-        }
-      }
-    },
-    "feeds.translatedByAI": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "AI translated"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "AI अनुवादित"
-          }
-        }
-      }
-    },
-    "settings.manuals.userManual": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "User manual"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "प्रयोगकर्ता पुस्तिका"
-          }
-        }
-      }
-    },
-    "settings.manuals.userManualHint": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The full guide to Sahayak — every screen, command and setting explained."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "सहायकको पूरा गाइड — हरेक स्क्रिन, आदेश र सेटिङको व्याख्या।"
-          }
-        }
-      }
-    },
-    "manual.userManual.unavailable": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The user manual isn't included in this build. Ask a family member to rebuild the app with it."
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "यो संस्करणमा प्रयोगकर्ता पुस्तिका छैन। परिवारको कसैलाई पुस्तिकासहित एप फेरि बनाउन भन्नुहोस्।"
           }
         }
       }

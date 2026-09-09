@@ -11,6 +11,8 @@ final class PiperVoiceSpeakerTests: XCTestCase {
         var calls: [(text: String, dir: URL, speed: Float, speakerID: Int)] = []
         var fail = false
         var secondsOfAudio: AVAudioFrameCount = 2_205   // 0.1 s @ 22.05 kHz
+        var warmCalls: [URL] = []
+        var warmError: Error?
 
         func synthesize(_ text: String, voiceDirectory dir: URL, speed: Float,
                         speakerID: Int = 0) throws -> URL {
@@ -28,6 +30,10 @@ final class PiperVoiceSpeakerTests: XCTestCase {
             return url
         }
         func cancelSynthesis() {}
+        func warm(voiceDirectory: URL) throws {
+            warmCalls.append(voiceDirectory)
+            if let warmError { throw warmError }
+        }
     }
 
     private var tempRoot: URL!
@@ -134,6 +140,44 @@ final class PiperVoiceSpeakerTests: XCTestCase {
         XCTAssertEqual(call.speakerID, 0,
                        "no voice selected — the default google-medium speaker 0 must be used")
         XCTAssertTrue(bus.emittedEvents.map(\.eventType).contains("speak"))
+    }
+
+    // MARK: - Warm-start seam (boot warm phase)
+
+    func testWarmPreloadsInstalledVoice() throws {
+        try installFakeVoice(ModelCatalog.piperNepali)
+
+        var result: WarmStartEngineResult?
+        speaker.warm(voiceID: ModelCatalog.piperNepali) { result = $0 }
+
+        XCTAssertEqual(result, .ready)
+        XCTAssertEqual(engine.warmCalls.count, 1)
+        XCTAssertTrue(engine.warmCalls[0].path.contains("ne_NP-google-medium-int8"),
+                      "the warm must construct the engine for the INSTALLED voice directory")
+        XCTAssertTrue(engine.calls.isEmpty,
+                      "warm must never synthesize audio")
+    }
+
+    func testWarmInstallsBundledVoiceLikeSpeakPath() throws {
+        // An EMPTY bundle installs nothing — the bundled-install branch
+        // of warm degrades exactly like speak's (voice_missing).
+        var result: WarmStartEngineResult?
+        speaker.warm(voiceID: ModelCatalog.piperEnglishUS) { result = $0 }
+
+        XCTAssertEqual(result, .failed(reason: "voice_missing"))
+        XCTAssertTrue(engine.warmCalls.isEmpty,
+                      "the engine must not be constructed for a voice that cannot resolve")
+    }
+
+    func testWarmEngineFailureFailsHonestly() throws {
+        try installFakeVoice(ModelCatalog.piperNepali)
+        engine.warmError = TTSEngineError.engineInitFailed(URL(fileURLWithPath: "/fake"))
+
+        var result: WarmStartEngineResult?
+        speaker.warm(voiceID: ModelCatalog.piperNepali) { result = $0 }
+
+        XCTAssertEqual(result, .failed(reason: "engine_init_failed"))
+        XCTAssertEqual(engine.warmCalls.count, 1)
     }
 
     // MARK: - Cancel

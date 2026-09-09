@@ -791,6 +791,21 @@ final class AppCoordinator: ObservableObject {
     }
     private let wakeWordPreferences = WakeWordPreferences()
 
+    /// [WARM-START] Persisted warm-start preference — Settings → Voice
+    /// personalization, UserDefaults "warmStartEngines", default ON: the
+    /// boot's `.warmingEngines` phase preloads the speech + reply-voice
+    /// models so the first conversation starts fast. didSet persists; the
+    /// init-time restore assigns directly (house pattern — didSet does
+    /// not fire there). Warm runs only during boot, so a flip applies
+    /// from the next launch (the Settings copy says so).
+    @Published var warmStartEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(warmStartEnabled,
+                                      forKey: Self.warmStartEnginesKey)
+        }
+    }
+    private static let warmStartEnginesKey = "warmStartEngines"
+
     /// Consulted by the voice pipeline for every idle-state audio chunk
     /// and inbound wake detection: closed while the assistant's own TTS is
     /// playing (self-hearing mitigation — see `WakeWordActivityGate`) or
@@ -1393,6 +1408,16 @@ final class AppCoordinator: ObservableObject {
         // here (same rule as `voiceEngineStack` above) — the live audio
         // gate is synced explicitly instead, or a stored OFF would sit on
         // the gate's default ON until the first Settings toggle.
+        // Restore the warm-start preference (default ON — see the
+        // property). The property's ONLY initial assignment, so its
+        // didSet does not fire here (same rule as `voiceEngineStack`
+        // above); the boot's warm phase reads the restored value. Must
+        // land before the wake-word restore below, which reads `self`.
+        self.warmStartEnabled =
+            UserDefaults.standard.object(forKey: Self.warmStartEnginesKey) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: Self.warmStartEnginesKey)
+
         self.wakeWordEnabled = wakeWordPreferences.isEnabled
         wakeWordActivityGate.setEnabled(wakeWordEnabled)
 
@@ -1807,11 +1832,125 @@ final class AppCoordinator: ObservableObject {
         self.wakeWordEngine = wakeWordLaunch.engine
         self.wakeWordEngineRealAtLaunch = wakeWordLaunch.isReal
         self.buildAndStartVoicePipeline()
+        // [WARM-START] Phase 2.5 — preload the engines the first
+        // conversation needs, on a dedicated background queue so the
+        // boot machine can always move forward (watchdog below). Phase 3
+        // now starts when the warm phase settles instead of directly
+        // here.
+        self.startBootWarmPhase()
+    }
+
+    // MARK: - Boot phase 2.5 — engine warm-start ([WARM-START])
+
+    /// Seconds the warm phase may hold the boot before the watchdog
+    /// settles it as failed and boot moves on. Generous for a first-run
+    /// CoreML specialization (~30 s); the detached warm keeps running and
+    /// still caches the loaded model for the first utterance.
+    private static let warmWatchdogSeconds: TimeInterval = 45
+
+    /// Main-confined flag: the warm phase settled (finished or watchdog)
+    /// — guards the two completion paths against double-advancing boot.
+    private var warmPhaseSettled = false
+    private var warmWatchdogWork: DispatchWorkItem?
+
+    /// Plans the warm from live config (resolved HERE on main), reports
+    /// the plan's progress through the spinner's `.warmingEngines` stage,
+    /// and hands execution to `WarmStartRunner` on its own queue.
+    private func startBootWarmPhase() {
+        warmPhaseSettled = false
+        let config = WarmStartConfig(
+            enabled: warmStartEnabled,
+            stack: voiceEngineStack,
+            whisperKitAvailable: whisperKitSpeechRecognizer.isAvailable,
+            whisperCppAvailable: whisperSpeechRecognizer.isAvailable,
+            availableTTSVoices: Self.availableWarmTTSVoices(modelStore: modelStore,
+                                                            bundle: .main),
+            selectedNepaliVoiceID: ResponseVoiceSelection.persisted()?.voiceID
+                ?? ModelCatalog.piperNepali,
+            wakeWordEnabled: wakeWordEnabled,
+            isSimulator: Self.isSimulator
+        )
+        let plan = WarmStartPlanner.plan(for: config)
+        guard !plan.isEmpty else {
+            // Nothing to warm (preference off) — skip the stage entirely
+            // so the spinner never flashes it.
+            advancePastWarmPhase()
+            return
+        }
+        self.startupBoot.advance(to: .warmingEngines)
+        let runner = WarmStartRunner(
+            stt: whisperKitSpeechRecognizer,
+            tts: speaker as? TTSVoiceWarming,
+            observabilityBus: observabilityBus)
+        runner.run(plan: plan) { [weak self] outcomes in
+            DispatchQueue.main.async {
+                guard let self, !self.warmPhaseSettled else { return }
+                if outcomes.contains(where: {
+                    if case .failed = $0.result { return true }
+                    return false
+                }) {
+                    // Honest degradation — a failed warm means the first
+                    // conversation pays the load, i.e. today's behavior.
+                    self.startupBoot.recordFailure(.warmingEngines)
+                }
+                self.advancePastWarmPhase()
+            }
+        }
+        // The watchdog: a hung warm must never hold the spinner forever
+        // (the startup-perf contract — failures never halt boot).
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.warmPhaseSettled else { return }
+            print("[AppCoordinator] warm-start watchdog — boot continues; warm finishes detached")
+            self.startupBoot.recordFailure(.warmingEngines)
+            self.advancePastWarmPhase()
+        }
+        warmWatchdogWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.warmWatchdogSeconds,
+                                      execute: work)
+    }
+
+    /// Settles the warm phase exactly once and hands phase 3 to the boot
+    /// queue. Main-confined.
+    private func advancePastWarmPhase() {
+        warmPhaseSettled = true
+        warmWatchdogWork?.cancel()
+        warmWatchdogWork = nil
         self.startupBoot.advance(to: .finishingSetup)
         self.bootQueue.async { [weak self] in
             self?.bootFinishSetup()
         }
     }
+
+    /// TTS voice ids the warm seam can actually load: the directory is
+    /// installed, or the bundled resource is present (the warm seam
+    /// installs it idempotently — the same lazy install the speak path
+    /// performs, so warm works on first run too).
+    private static func availableWarmTTSVoices(modelStore: ModelStore,
+                                               bundle: Bundle) -> Set<ModelID> {
+        var ids: Set<ModelID> = []
+        for id in [ModelCatalog.piperNepali,
+                   ModelCatalog.piperNepaliChitwan,
+                   ModelCatalog.piperEnglishUS] {
+            if modelStore.ttsVoiceDirectory(for: id) != nil {
+                ids.insert(id)
+                continue
+            }
+            guard let entry = ModelCatalog.entry(for: id),
+                  let name = entry.bundledResourceName,
+                  bundle.url(forResource: name, withExtension: nil,
+                             subdirectory: "tts") != nil else { continue }
+            ids.insert(id)
+        }
+        return ids
+    }
+
+    private static let isSimulator: Bool = {
+        #if targetEnvironment(simulator)
+        return true
+        #else
+        return false
+        #endif
+    }()
 
     /// Phase 3 — file-heavy model housekeeping on the boot queue: the
     /// bundled-encoder repair + bundled-model install (a FIRST-RUN copy
@@ -5276,6 +5415,11 @@ final class ConsoleObservabilityBus: ObservabilityBus {
 /// `NoiseSuppressor` — the single writer the Voice personalization
 /// screen binds through.
 extension AppCoordinator: NoiseFilterPreferenceControlling {}
+
+// [WARM-START] The coordinator owns the warm-start preference (persists
+// the UserDefaults key AND is the value the boot's warm phase reads) —
+// the Settings model only forwards, exactly like the noise toggle.
+extension AppCoordinator: WarmStartPreferenceControlling {}
 
 /// Pipeline suspension around one enrollment sample: the same
 /// stop → capture → start cycle as `startSearchPhraseCapture`, minus

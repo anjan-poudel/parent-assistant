@@ -50,15 +50,31 @@ final class VoiceSettingsModel: ObservableObject {
         }
     }
 
+    /// [WARM-START] Persisted through the coordinator (UserDefaults
+    /// "warmStartEngines", default ON — see AppCoordinator.warmStartEnabled):
+    /// the boot's warm phase preloads the speech + reply-voice models so
+    /// the first conversation starts fast. Warm runs only during boot, so
+    /// a flip applies from the next launch (the card's copy says so).
+    @Published var warmStartEnabled: Bool {
+        didSet {
+            guard warmStartEnabled != oldValue else { return }
+            warmStartController.warmStartEnabled = warmStartEnabled
+        }
+    }
+
     private let noiseFilterController: NoiseFilterPreferenceControlling
+    private let warmStartController: WarmStartPreferenceControlling
     private let defaults: UserDefaults
 
     init(noiseFilterController: NoiseFilterPreferenceControlling,
+         warmStartController: WarmStartPreferenceControlling,
          defaults: UserDefaults = .standard) {
         self.noiseFilterController = noiseFilterController
+        self.warmStartController = warmStartController
         self.defaults = defaults
         self.noiseFilterEnabled = noiseFilterController.noiseFilterEnabled
         self.accentBiasEnabled = DialectBiasSettings.isEnabled(defaults: defaults)
+        self.warmStartEnabled = warmStartController.warmStartEnabled
     }
 }
 
