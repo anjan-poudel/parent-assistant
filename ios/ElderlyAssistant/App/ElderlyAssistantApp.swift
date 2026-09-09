@@ -19,6 +19,9 @@ struct ElderlyAssistantApp: App {
             .environmentObject(appCoordinator)
             .environmentObject(appCoordinator.voiceSession)
             .environmentObject(appCoordinator.modelDownloadService)
+            // [STARTUP-PERF] Progressive boot progress — the spinner
+            // overlay reads this (stage labels + honest failures).
+            .environmentObject(appCoordinator.startupBoot)
             // Spec §3.2: AppLanguage drives `.locale` directly at the
             // root. Every Text/catalog lookup, date, and number
             // formatter below this point follows it automatically.
