@@ -1,24 +1,32 @@
 import Foundation
 
-// MARK: - Feed translation (feed translation task, 2026-09-08)
+// MARK: - Feed translation (feed translation task, 2026-09-09 — progressive)
 
-/// Per-item, ON-ASK translation of feed content into the app's active
-/// language. The Feed screen shows items in their ORIGINAL language by
-/// default — "single language" means the app chrome (already locale-
-/// driven) never mixes; CONTENT is translated only when the user taps a
-/// card's Translate button, never automatically.
+/// PROGRESSIVE translation of feed content into the app's active
+/// language: when the locale is Nepali, fallback-language (English)
+/// items translate AUTOMATICALLY as they load — the cards render the
+/// ORIGINAL text immediately (with a subtle "translating…" state), and
+/// each translation swaps in when it lands. No per-item button is
+/// needed for that anymore; the card's button is now the toggle to the
+/// original plus the per-item retry/on-demand path.
 ///
-/// Pipeline: card tap → `AppCoordinator.translateFeedItem` →
-/// `FeedTranslator.translate` → the app's existing cloud provider path
-/// (`GeminiClient.send` — its fail-fast `.notConfigured`/`.dailyCapReached`
-/// states map to the honest `.unavailable` below) → cached under the item
-/// id (session scope, capped) → the card shows the translation in place;
-/// the same button toggles back to the original (a second tap reverts —
-/// the cached translation makes the toggle free).
+/// Pipeline: every refresh publishes the composed (original-language)
+/// items FIRST, then `AppCoordinator.translateVisibleFeedItems` runs —
+/// ONE batched JSON-mode provider call for the first `batchSize`
+/// untranslated Latin-script items (the visible page, cheaper than
+/// per-item calls) through the app's existing cloud path
+/// (`GeminiClient.generateJSON` → `send`, whose fail-fast
+/// `.notConfigured`/`.dailyCapReached` states map to the honest
+/// `.unavailable` below, and whose shared cost governor caps spend as
+/// today). If the batch shape fails, the proven per-item path takes
+/// over for the same items (resilience, same budget); per-item failures
+/// keep the original + the honest caption (`feeds.translationUnavailable`).
+/// Results cache under the item id (session scope, capped).
 ///
-/// Failures never fabricate and never block the feed: the original text
-/// stays and the card shows the small honest caption
-/// (`feeds.translationUnavailable`).
+/// English locale: nothing translates, nothing changes.
+///
+/// Failures never fabricate and never block the feed: the original
+/// text stays visible through every failure state.
 
 /// One item's translated text, cached under the item id.
 struct FeedTranslation: Equatable {
@@ -35,10 +43,34 @@ enum FeedTranslationError: Error, Equatable {
     case invalidResponse
 }
 
+/// One item's outcome inside a progressive batch — per-item granularity
+/// (a partial batch never blanks the rest).
+enum FeedTranslationOutcome: Equatable {
+    case success(FeedTranslation)
+    case failure
+}
+
+/// One entry of the batch reply's promised JSON shape (validated per
+/// entry after decode — an empty title is invalid and that item fails
+/// alone).
+struct FeedBatchEntry: Decodable, Equatable {
+    let title: String
+    let summary: String
+}
+
+/// The batch reply envelope: `{"translations":[...]}`.
+private struct FeedBatchResponse: Decodable {
+    let translations: [FeedBatchEntry]
+}
+
 /// The provider seam `FeedTranslator` speaks to. The app's `GeminiClient`
 /// conforms below; tests inject a stub.
 protocol FeedTranslationClient {
+    /// Plain-text reply (the per-item path).
     func completeText(prompt: String) async throws -> String
+    /// JSON-mode reply (`responseMimeType: application/json`) — the
+    /// cheaper single-call batch path for the visible page.
+    func completeJSON(prompt: String) async throws -> String
 }
 
 extension GeminiClient: FeedTranslationClient {
@@ -55,6 +87,22 @@ extension GeminiClient: FeedTranslationClient {
                 generationConfig: nil
             )
             return try await send(request)
+        } catch let error as GeminiClient.GeminiClientError {
+            switch error {
+            case .notConfigured, .dailyCapReached:
+                throw FeedTranslationError.unavailable
+            default:
+                throw error
+            }
+        }
+    }
+
+    /// Sends a JSON-mode prompt through the EXISTING `generateJSON` path
+    /// (same cost governor, same fail-fast states — mapped identically
+    /// to `completeText`).
+    func completeJSON(prompt: String) async throws -> String {
+        do {
+            return try await generateJSON(prompt: prompt)
         } catch let error as GeminiClient.GeminiClientError {
             switch error {
             case .notConfigured, .dailyCapReached:
@@ -82,6 +130,13 @@ final class FeedTranslator {
     /// grapheme cluster).
     static let maxTitleChars = 300
     static let maxSummaryChars = 700
+
+    /// Items per progressive pass — the visible page. ONE batched
+    /// provider call covers this many untranslated fallback-language
+    /// items per refresh; later batches follow on later passes (the
+    /// item-id cache skips what is done), and the per-item path covers
+    /// anything the user asks for explicitly.
+    static let batchSize = 8
 
     private let client: any FeedTranslationClient
     private let observability: ObservabilityBus
@@ -116,6 +171,108 @@ final class FeedTranslator {
             emit(outcome: "failure", errorCode: errorCode(for: error), start: start)
             throw error
         }
+    }
+
+    // MARK: - Progressive batch (one call for the visible page)
+
+    /// Translates the visible page in ONE batched call; falls back to
+    /// the proven per-item path when the batch shape fails. Returns one
+    /// outcome per item (same order) — a partial batch never blanks
+    /// the rest.
+    func translateBatch(_ items: [FeedItem], language: AppLanguage)
+        async -> [(item: FeedItem, outcome: FeedTranslationOutcome)] {
+        guard !items.isEmpty else { return [] }
+        let start = Date()
+        do {
+            let response = try await client.completeJSON(
+                prompt: Self.batchPrompt(items: items, language: language))
+            guard let aligned = Self.parseBatch(response: response,
+                                                count: items.count) else {
+                throw FeedTranslationError.invalidResponse
+            }
+            let results = zip(items, aligned).map { item, entry
+                -> (item: FeedItem, outcome: FeedTranslationOutcome) in
+                guard let entry else { return (item, .failure) }
+                return (item, .success(FeedTranslation(title: entry.title,
+                                                       summary: entry.summary)))
+            }
+            let succeeded = aligned.compactMap(\.self).count
+            emitBatch(outcome: "success", entryCount: succeeded,
+                      errorCode: succeeded == items.count ? nil : "partial",
+                      start: start)
+            return results
+        } catch let error as FeedTranslationError where error == .unavailable {
+            // No cloud: the per-item path would fail identically for
+            // every item — mark all failed WITHOUT a per-item storm
+            // (the fail-fast is free; N fail-fast calls are not).
+            emitBatch(outcome: "failure", entryCount: nil,
+                      errorCode: "unavailable", start: start)
+            return items.map { ($0, .failure) }
+        } catch {
+            // Batch shape failed (provider/transport): fall back to the
+            // proven per-item path — resilience, bounded by the shared
+            // cost governor exactly like every other path.
+            emitBatch(outcome: "failure", entryCount: nil,
+                      errorCode: "fallback_per_item", start: start)
+            var results: [(item: FeedItem, outcome: FeedTranslationOutcome)] = []
+            for item in items {
+                do {
+                    let translation = try await translate(title: item.title,
+                                                          summary: item.summary,
+                                                          language: language)
+                    results.append((item, .success(translation)))
+                } catch {
+                    results.append((item, .failure))
+                }
+            }
+            return results
+        }
+    }
+
+    /// The batch prompt: numbered items, strict JSON contract. Content
+    /// bounded exactly like the per-item prompt (Character-safe).
+    static func batchPrompt(items: [FeedItem], language: AppLanguage) -> String {
+        let target = language == .nepali ? "Nepali" : "English"
+        let numbered = items.enumerated().map { index, item in
+            let title = String(item.title.prefix(maxTitleChars))
+            let summary = String(item.summary.prefix(maxSummaryChars))
+            return """
+            \(index + 1). Headline: \(title)
+               Summary: \(summary)
+            """
+        }.joined(separator: "\n")
+        return """
+        Translate these \(items.count) news headlines and summaries into \(target). \
+        Reply with ONLY a JSON object of the form \
+        {"translations":[{"title":"...","summary":"..."}]} — exactly one entry \
+        per item, in the same order, with no text outside the JSON. Use an \
+        empty string for a missing summary.
+
+        \(numbered)
+        """
+    }
+
+    /// Parses the batch reply into `count` aligned slots: index-aligned
+    /// entries, nil for a missing/invalid entry (that item fails alone —
+    /// never fabricated), extra entries ignored. nil overall when the
+    /// reply is not the promised JSON shape (the caller falls back to
+    /// per-item). An empty entry list for a non-empty batch is ALSO
+    /// invalid — the model did not comply.
+    static func parseBatch(response: String, count: Int) -> [FeedBatchEntry?]? {
+        guard let data = response.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(FeedBatchResponse.self,
+                                                      from: data) else {
+            return nil
+        }
+        guard !decoded.translations.isEmpty || count == 0 else { return nil }
+        var aligned: [FeedBatchEntry?] = Array(repeating: nil, count: count)
+        for (index, entry) in decoded.translations.enumerated() where index < count {
+            let title = entry.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { continue }   // invalid entry stays nil
+            aligned[index] = FeedBatchEntry(title: title,
+                                            summary: entry.summary)
+        }
+        return aligned
     }
 
     // MARK: - Pure helpers (pinned by tests)
@@ -201,6 +358,24 @@ final class FeedTranslator {
             outcome: outcome,
             errorCode: errorCode,
             metadata: [:]
+        ))
+    }
+
+    /// Batch-level event (counts only — PII-free like every other
+    /// feed event).
+    private func emitBatch(outcome: String, entryCount: Int?, errorCode: String?,
+                           start: Date) {
+        var metadata: [String: String] = [:]
+        if let entryCount {
+            metadata["entry_count"] = String(entryCount)
+        }
+        observability.emit(ObservabilityEvent(
+            component: "feed",
+            eventType: "feed.translate_batch",
+            durationMs: Int(Date().timeIntervalSince(start) * 1000),
+            outcome: outcome,
+            errorCode: errorCode,
+            metadata: metadata
         ))
     }
 }

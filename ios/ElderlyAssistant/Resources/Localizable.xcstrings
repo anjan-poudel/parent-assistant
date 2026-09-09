@@ -14138,6 +14138,23 @@
           }
         }
       }
+    },
+    "feeds.translating": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translating…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवाद हुँदैछ…"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
