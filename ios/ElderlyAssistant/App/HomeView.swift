@@ -582,7 +582,7 @@ struct HomeView: View {
     // per tile) and labels wrap when they must.
 
     private var dock: some View {
-        VStack(spacing: 2) {
+        VStack(spacing: 10) {
             // Top row (the user's ordering, calendar-display task):
             // appliance helper, directions, feeds.
             HStack(spacing: 2) {
@@ -607,9 +607,9 @@ struct HomeView: View {
                           tint: DesignTokens.BadgeTint, titleKey: String) -> some View {
         NavigationLink(value: destination) {
             VStack(spacing: 4) {
-                IconBadge(systemImage: icon, tint: tint, diameter: 36)
+                IconBadge(systemImage: icon, tint: tint, diameter: 42)
                 Text(LocalizedStringKey(titleKey))
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
             }
             .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
@@ -623,12 +623,12 @@ struct HomeView: View {
         NavigationLink(value: LeafDestination.call) {
             VStack(spacing: 4) {
                 if let first = coordinator.familyContacts.first {
-                    FaceAvatar(name: first.name, diameter: 36)
+                    FaceAvatar(name: first.name, diameter: 42)
                 } else {
-                    IconBadge(systemImage: "phone.fill", tint: .call, diameter: 36)
+                    IconBadge(systemImage: "phone.fill", tint: .call, diameter: 42)
                 }
                 Text(LocalizedStringKey("home.hub.call"))
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
             }
             .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
