@@ -28,6 +28,7 @@
 		0C7E861E00E55C4732966C2B /* SpeakerEmbedding.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAFAA5EEF7BAFA884F059F6E /* SpeakerEmbedding.swift */; };
 		0E255A46ACA15B61C189716B /* DoubleDoseDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 029572625927FA28AB472E38 /* DoubleDoseDetectorTests.swift */; };
 		0EFFF9E695C8F3159509D8C2 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 375D810EE613E93BB5E56717 /* HomeView.swift */; };
+		0FA93A213F311EA549C821C6 /* FeedLanguageSorter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A170EB33621E742BD2C2BF /* FeedLanguageSorter.swift */; };
 		0FC766991BD9A0254F9879CE /* GeminiClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C49429A6D0922ACF3ED8872C /* GeminiClientTests.swift */; };
 		1053D099D25570A1AA356933 /* AppIcons.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 17293525E4065C56C776628C /* AppIcons.xcassets */; };
 		131CEF7228370D168FC31C9F /* ApplianceHelperView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAC3AD46468610B5F17EA5F3 /* ApplianceHelperView.swift */; };
@@ -194,6 +195,7 @@
 		8F80BE33478C5C1AF4CCA78B /* CallLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF94EF103968B07445324A94 /* CallLinks.swift */; };
 		8F8D38392071EB681655CDE1 /* ReplySanityGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E1D65BC1DE8E3579F552844 /* ReplySanityGateTests.swift */; };
 		915E4D8D8BC9AADB6693AE1F /* ChatHistoryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F77AAE8D39CC0556C033AF7 /* ChatHistoryStoreTests.swift */; };
+		916DEEB02831B7415BFB307F /* HomeDateLineComposerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C4AC460804A8612A110725E /* HomeDateLineComposerTests.swift */; };
 		92711539C51D3E40C85DC8A0 /* ExternalReminder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D76F628ABCC9C5E3E82F35F9 /* ExternalReminder.swift */; };
 		92B4B84F981F1E9B0DBB02E0 /* ApplianceStepCards.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7C332411D8CB3EFC6988286 /* ApplianceStepCards.swift */; };
 		92BC5D586D06BA458383DF8D /* RoutineSchedulerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B086AE6FA931E2E4FE4EBCC /* RoutineSchedulerTests.swift */; };
@@ -245,6 +247,7 @@
 		ABCE1D7CB2B0B75A90F1371F /* NepaliTextNormalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02B49CE098CF265F2E49046B /* NepaliTextNormalizerTests.swift */; };
 		ACDE59D994E9EC7497DE6454 /* SpeechSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 469503800F9E5EA3670000F6 /* SpeechSource.swift */; };
 		AD5FA3246B87BF77C80DA90E /* WakeWordConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26BCEDA5523CAA502571199D /* WakeWordConfigTests.swift */; };
+		AD78AFD3687B8A018AFA72C6 /* FeedLanguageSorterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94AADCCE85785009089CFC07 /* FeedLanguageSorterTests.swift */; };
 		AE34C146E699A32FC17F8EBB /* ResponseVoiceSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1FDEF634A12A4E179A53F21 /* ResponseVoiceSelectionTests.swift */; };
 		AE6778AE48C116BEC75A9C41 /* ModelCatalogSTTNamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B8D7DEC413B2AB3DF3B0511 /* ModelCatalogSTTNamingTests.swift */; };
 		AF589ADE0665DD8433BCC200 /* StartupDataBatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4565222B482D35D3233C2498 /* StartupDataBatchTests.swift */; };
@@ -306,6 +309,7 @@
 		CFC10AF90AED3B0DA5834916 /* IdHashing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7D8A76CCE745FEED78269EC /* IdHashing.swift */; };
 		D04AF7E3BC73170DA9484CE6 /* VoiceBiometricStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AD22F253FD8BA87501C3442 /* VoiceBiometricStoreTests.swift */; };
 		D0793871C836D0C5BA592E8B /* ModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 553B22C3EBAF6EEA126300DA /* ModelCatalog.swift */; };
+		D0EE39ACE349FF9690B9C5C8 /* HomeDateLineComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40FA3780DF1A872699A610BC /* HomeDateLineComposer.swift */; };
 		D276DF9E37893F5A48C07847 /* FestivalCalendarServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20090654EB2D4E0183CF8609 /* FestivalCalendarServiceTests.swift */; };
 		D4175E7CBA4AF5F86F7464B3 /* TranscriptSanityGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E873864734A0F0500AE4D63 /* TranscriptSanityGuard.swift */; };
 		D591B79C10F7D608353FA1F7 /* WhisperSpeechRecognizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E3EEA3E69C5ECA0B8EE1DBA /* WhisperSpeechRecognizerTests.swift */; };
@@ -427,6 +431,7 @@
 		0BA65C9612E3B29D1B74E2FE /* NepaliCalendarPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliCalendarPluginTests.swift; sourceTree = "<group>"; };
 		0BB5C4A4994FE6A86DB2CFA5 /* GeminiSpeechRecognizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiSpeechRecognizerTests.swift; sourceTree = "<group>"; };
 		0BC86AD5E0D8C9FE1AAE7633 /* WhisperKitSpeechRecognizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperKitSpeechRecognizerTests.swift; sourceTree = "<group>"; };
+		0C4AC460804A8612A110725E /* HomeDateLineComposerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeDateLineComposerTests.swift; sourceTree = "<group>"; };
 		0C756153BE3609C46F69716B /* FacebookArchiveParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FacebookArchiveParserTests.swift; sourceTree = "<group>"; };
 		0D17744ACF2633AFD36C8AF8 /* GuidePluginDispatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuidePluginDispatchTests.swift; sourceTree = "<group>"; };
 		0D5E46F84DD8C7E7CE2161C5 /* PluginRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginRegistry.swift; sourceTree = "<group>"; };
@@ -505,8 +510,10 @@
 		3F4B490AD8898085B8F0895A /* GoldenCorpus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoldenCorpus.swift; sourceTree = "<group>"; };
 		3F51FE529AAB1FD6F057801F /* ApplianceHelperPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceHelperPluginTests.swift; sourceTree = "<group>"; };
 		3F56D48FD8A88A77B1D58B2B /* SherpaTTSEngineSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SherpaTTSEngineSmokeTests.swift; sourceTree = "<group>"; };
+		40FA3780DF1A872699A610BC /* HomeDateLineComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeDateLineComposer.swift; sourceTree = "<group>"; };
 		4110ED5F9481C973A164A54B /* NavigationGeocoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationGeocoder.swift; sourceTree = "<group>"; };
 		41A5BF7EE5015880880D3DB7 /* FeedComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedComposer.swift; sourceTree = "<group>"; };
+		42A170EB33621E742BD2C2BF /* FeedLanguageSorter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedLanguageSorter.swift; sourceTree = "<group>"; };
 		42D1318C2E8379EE03ECD6A1 /* AppActivityLogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppActivityLogTests.swift; sourceTree = "<group>"; };
 		42F00905A16D9B2FA337352A /* NewsReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsReaderTests.swift; sourceTree = "<group>"; };
 		439F72865EC41F1531C39803 /* AppearanceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsView.swift; sourceTree = "<group>"; };
@@ -640,6 +647,7 @@
 		9343373A38D6137D52284887 /* FeedTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedTransport.swift; sourceTree = "<group>"; };
 		940ADBAE2E5A811B03503971 /* VoiceContactSearchRouteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceContactSearchRouteTests.swift; sourceTree = "<group>"; };
 		941D0495DF6D75A7B90FBC15 /* DevanagariNumerals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevanagariNumerals.swift; sourceTree = "<group>"; };
+		94AADCCE85785009089CFC07 /* FeedLanguageSorterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedLanguageSorterTests.swift; sourceTree = "<group>"; };
 		94D7ADDAA39AFD2E93356DB3 /* ApplianceOverlayMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceOverlayMapper.swift; sourceTree = "<group>"; };
 		953034AEF26B09C5F6DE6F36 /* FeedSettingsStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedSettingsStoreTests.swift; sourceTree = "<group>"; };
 		95B1A31135ADCA1E08B5A0E9 /* FeedMediaResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedMediaResolverTests.swift; sourceTree = "<group>"; };
@@ -963,6 +971,7 @@
 			isa = PBXGroup;
 			children = (
 				4E7DA8692AB6754133C2645C /* FeedComposerTests.swift */,
+				94AADCCE85785009089CFC07 /* FeedLanguageSorterTests.swift */,
 				95B1A31135ADCA1E08B5A0E9 /* FeedMediaResolverTests.swift */,
 				E9F53CDCA36D08D00282449F /* FeedRSSParserTests.swift */,
 				573576FF9D08E597CC160495 /* FeedServiceTests.swift */,
@@ -988,6 +997,7 @@
 			children = (
 				6AF3598EAF1A8C6F07910D97 /* BikramSambat.swift */,
 				90391AA61F888C033874331E /* FestivalCalendarService.swift */,
+				40FA3780DF1A872699A610BC /* HomeDateLineComposer.swift */,
 				1E8F8D8770B2D5FCD7040516 /* NepaliFestival.swift */,
 				5752A2A6EEC2DE266A00DAC2 /* TithiCalculator.swift */,
 			);
@@ -1444,6 +1454,7 @@
 			isa = PBXGroup;
 			children = (
 				41A5BF7EE5015880880D3DB7 /* FeedComposer.swift */,
+				42A170EB33621E742BD2C2BF /* FeedLanguageSorter.swift */,
 				C162389E74311BF3301489B1 /* FeedMediaResolver.swift */,
 				55896246FC287039698A984D /* FeedModels.swift */,
 				A8FA47F7A0D9CE57DDA4E731 /* FeedRSSParser.swift */,
@@ -1462,6 +1473,7 @@
 			children = (
 				52E4CCCF6D6BB25C0D834A57 /* BikramSambatTests.swift */,
 				20090654EB2D4E0183CF8609 /* FestivalCalendarServiceTests.swift */,
+				0C4AC460804A8612A110725E /* HomeDateLineComposerTests.swift */,
 				269C71573D21DF9EAFB68405 /* TithiCalculatorTests.swift */,
 			);
 			path = Calendar;
@@ -1966,6 +1978,7 @@
 				DAEA587FE999D1C75F5F813C /* FamilyContactStore.swift in Sources */,
 				535BD7B71EF639F3992769F8 /* FamilyNotifier.swift in Sources */,
 				C8A8CA7157D8BF31DE472BA2 /* FeedComposer.swift in Sources */,
+				0FA93A213F311EA549C821C6 /* FeedLanguageSorter.swift in Sources */,
 				BD2315D81F3F042A819A5420 /* FeedMediaResolver.swift in Sources */,
 				C6414E412BD964D2A9F889A1 /* FeedModels.swift in Sources */,
 				2974487C9103C49E7E59DAB5 /* FeedRSSParser.swift in Sources */,
@@ -1985,6 +1998,7 @@
 				4F8B730BB851DB8B746771F2 /* GeminiCostGovernor.swift in Sources */,
 				DB04BEBC845CD0671CCD6C88 /* GeminiSpeechRecognizer.swift in Sources */,
 				69AD511344E22C6011A06FA4 /* HistoryView.swift in Sources */,
+				D0EE39ACE349FF9690B9C5C8 /* HomeDateLineComposer.swift in Sources */,
 				0EFFF9E695C8F3159509D8C2 /* HomeView.swift in Sources */,
 				B0E7FB06E4B5F6028742BFAB /* HomeWidget.swift in Sources */,
 				CFC10AF90AED3B0DA5834916 /* IdHashing.swift in Sources */,
@@ -2153,6 +2167,7 @@
 				00AF1FF44C91255BB4847E03 /* FacebookArchiveParserTests.swift in Sources */,
 				C56EE736BFF37DF4ED0D4D27 /* FamilyContactStoreTests.swift in Sources */,
 				B61227989DA694D409BFD635 /* FeedComposerTests.swift in Sources */,
+				AD78AFD3687B8A018AFA72C6 /* FeedLanguageSorterTests.swift in Sources */,
 				4586041EE6BEA53E4559EB83 /* FeedMediaResolverTests.swift in Sources */,
 				EABEBA02EC1662F75408A348 /* FeedRSSParserTests.swift in Sources */,
 				4CFBAB72E6DD1CF440157E1D /* FeedServiceTests.swift in Sources */,
@@ -2171,6 +2186,7 @@
 				793688206E4EA4FAD936B6EC /* GoldenCorpusTests.swift in Sources */,
 				EE315CDFC9C22D92690442DA /* GuidePluginDispatchTests.swift in Sources */,
 				4B1186A99DD1B243EAD5F19D /* HistoryTimeFormatTests.swift in Sources */,
+				916DEEB02831B7415BFB307F /* HomeDateLineComposerTests.swift in Sources */,
 				6EBC86F77CF0346E38A75FA5 /* HomeWidgetRegistryTests.swift in Sources */,
 				090F94B2C3D159992225B40C /* HomeWidgetTestSupport.swift in Sources */,
 				815471BF3F0560582E1D0B16 /* InAppNavigationSessionTests.swift in Sources */,

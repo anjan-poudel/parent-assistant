@@ -5243,6 +5243,55 @@ extension AppCoordinator {
             feedLoadState = result.items.isEmpty && !result.failedSourceNames.isEmpty
                 ? .failed : .loaded
         }
+        // Progressive translation (feed translation task, 2026-09-09):
+        // the items above published FIRST — cards always render the
+        // original text immediately — and this pass then translates the
+        // visible batch of fallback-language items in the background;
+        // each translation swaps in when it lands. Nepali locale only
+        // (gated inside); an English locale translates nothing.
+        if appLanguage == .nepali {
+            await translateVisibleFeedItems()
+        }
+    }
+
+    /// Progressive translation pass (feed translation task, 2026-09-09):
+    /// ONE batched provider call for the first `FeedTranslator.batchSize`
+    /// NOT-yet-translated Latin-script items of the composed feed — the
+    /// visible page — run automatically after every refresh on a Nepali
+    /// locale. Later batches follow on later passes (the item-id cache
+    /// skips what is done, so repeated leaf visits converge the whole
+    /// bottom group). Per-item failures keep the original + the honest
+    /// caption; the per-item retry path (`translateFeedItem`) covers
+    /// anything the user asks for explicitly.
+    private func translateVisibleFeedItems() async {
+        let candidates: [FeedItem] = await MainActor.run {
+            let selected = Array(feedItems.filter { item in
+                FeedLanguageDetector.language(of: item) == .latin
+                    && feedTranslations[item.id] == nil
+                    && !feedTranslatingIDs.contains(item.id)
+            }.prefix(FeedTranslator.batchSize))
+            for item in selected {
+                feedTranslatingIDs.insert(item.id)
+                feedTranslationFailedIDs.remove(item.id)
+            }
+            return selected
+        }
+        guard !candidates.isEmpty else { return }
+        let results = await feedTranslator.translateBatch(candidates,
+                                                          language: .nepali)
+        await MainActor.run { [self] in
+            for (item, outcome) in results {
+                switch outcome {
+                case .success(let translation):
+                    feedTranslations[item.id] = translation
+                    feedTranslationFailedIDs.remove(item.id)
+                case .failure:
+                    feedTranslationFailedIDs.insert(item.id)
+                }
+                feedTranslatingIDs.remove(item.id)
+            }
+            feedTranslations = FeedTranslator.trimmed(feedTranslations)
+        }
     }
 
     /// Adds a feed source (Settings → Feeds). False keeps the form's

@@ -208,7 +208,9 @@ struct FeedsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             captionRow(item)
-            if coordinator.feedTranslationFailed(for: item), !display.hasTranslation {
+            if coordinator.isFeedItemTranslating(item), !display.hasTranslation {
+                translatingCaption
+            } else if coordinator.feedTranslationFailed(for: item), !display.hasTranslation {
                 translationUnavailableCaption
             }
             HStack(spacing: 10) {
@@ -296,7 +298,9 @@ struct FeedsView: View {
                     .lineLimit(2)
             }
             captionRow(item)
-            if coordinator.feedTranslationFailed(for: item), !display.hasTranslation {
+            if coordinator.isFeedItemTranslating(item), !display.hasTranslation {
+                translatingCaption
+            } else if coordinator.feedTranslationFailed(for: item), !display.hasTranslation {
                 translationUnavailableCaption
             }
             HStack(spacing: 10) {
@@ -385,6 +389,23 @@ struct FeedsView: View {
         .accessibilityLabel(Text("feeds.translatedByAI"))
     }
 
+    /// Subtle in-flight state (feed translation task, 2026-09-09): the
+    /// card renders the ORIGINAL text immediately and shows this small
+    /// caption while its translation is on its way (progressive batch or
+    /// per-item ask); the translation swaps in when it lands. Never
+    /// shown alongside the failure caption (mutually exclusive).
+    private var translatingCaption: some View {
+        HStack(spacing: 6) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(DesignTokens.textSecondary)
+            Text("feeds.translating")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+        }
+        .foregroundColor(DesignTokens.textSecondary)
+        .accessibilityElement(children: .combine)
+    }
+
     /// Honest failure caption (feed translation task): the item's
     /// translation could not be fetched (no cloud configured, daily cap
     /// reached, or provider failure) — the original text stays and this
@@ -402,14 +423,16 @@ struct FeedsView: View {
         .accessibilityElement(children: .combine)
     }
 
-    /// The per-item Translate affordance (feed translation task): one
-    /// tap asks the cloud provider for a translation of the item's
-    /// title+summary into the app's active language; once the
-    /// translation is cached the SAME button toggles back to the
-    /// original (the spec's "second tap reverts" — the cached
-    /// translation makes the toggle free). While the request is in
-    /// flight the button shows a spinner and ignores taps. The feed
-    /// never translates by itself.
+    /// The per-item Translate affordance (feed translation task,
+    /// 2026-09-09 — progressive): translation is now AUTOMATIC on a
+    /// Nepali locale, so this button is (a) the toggle — once a
+    /// translation exists the same button flips between the translation
+    /// and the original (the cached translation makes the revert free),
+    /// and (b) the retry/on-demand ask when no translation exists yet
+    /// (a failed batch item or an item beyond the current batch). While
+    /// a request is in flight the button shows a spinner and ignores
+    /// taps. English locale: the button still toggles/asks, but the
+    /// automatic pass never runs.
     private func translateButton(_ item: FeedItem) -> some View {
         let display = display(for: item)
         let translating = coordinator.isFeedItemTranslating(item)
