@@ -25,12 +25,11 @@ import Foundation
 //    can never dominate the spinner). A step still running when the
 //    budget expires finishes DETACHED: boot advances, the warm
 //    continues and still caches its engine for the first talk.
-//  - `.postBoot` steps — the secondary English voice, and on the
-//    simulator the TTS warms too (their measured multi-second sherpa
-//    engine constructions are sim-only costs with no user value) — run
-//    AFTER `.ready` on the same serial warm queue, gated by the same
-//    settings. They are deferred, never skipped because of the slot:
-//    only the timing moved, so they can never delay boot.
+//  - `.postBoot` steps — the secondary English voice — run AFTER `.ready`
+//    on the same serial warm queue, gated by the same settings. On the
+//    simulator TTS warms are SKIPPED entirely (see `ttsSteps`): they
+//    are deferred, never skipped because of the slot: only the timing
+//    moved, so they can never delay boot.
 //
 // Honest limits (documented, not worked around):
 //  - whisper.cpp (SwiftWhisper) is NEVER warmed: its design loads a FRESH
@@ -181,37 +180,53 @@ enum WarmStartPlanner {
     /// voice the next reply will actually use. The secondary English
     /// voice defers to the post-boot slot (same settings gates, same
     /// warm — only the timing moved so it can't delay `.ready`). On the
-    /// simulator the primary TTS warm defers too: the measured sherpa
-    /// engine constructions are sim-only costs (up to ~9 s) with no
-    /// user value, and the simulator's first conversation happily pays
-    /// the load. When the selected voice IS the English voice, it is
+    /// simulator the TTS warms are SKIPPED outright (reason
+    /// "simulator"): the measured sherpa engine constructions are
+    /// sim-only costs (up to ~9 s) with no user value, and [VAD-
+    /// REGRESSION] (2026-09-10) they were proven actively harmful
+    /// there — every launch's warm held the serial TTS engine queue for
+    /// ~9 s (delaying the morning briefing's first synthesis) and the
+    /// off-main sherpa VITS session creation is the onnxruntime
+    /// segfault class that killed launches (7 crash reports; see
+    /// `SherpaTTSEngine.engine(for:)`). The simulator's first
+    /// conversation happily pays the load — exactly the pre-warm
+    /// behavior. When the selected voice IS the English voice, it is
     /// warmed once as the primary — never twice.
     private static func ttsSteps(for config: WarmStartConfig) -> [WarmStartStep] {
         let primary = config.selectedNepaliVoiceID
         let primaryPhase: WarmStartPhase = config.isSimulator ? .postBoot : .boot
+        let simOverride: WarmStartAction? = config.isSimulator
+            ? .skip(reason: "simulator") : nil
         var steps: [WarmStartStep] = [
             ttsStep(voiceID: primary,
                     available: config.availableTTSVoices,
-                    phase: primaryPhase)
+                    phase: primaryPhase,
+                    forcedAction: simOverride)
         ]
         let secondary = ModelCatalog.piperEnglishUS
         guard secondary != primary else { return steps }
         steps.append(ttsStep(voiceID: secondary,
                              available: config.availableTTSVoices,
-                             phase: .postBoot))
+                             phase: .postBoot,
+                             forcedAction: simOverride))
         return steps
     }
 
     private static func ttsStep(voiceID: ModelID,
                                 available: Set<ModelID>,
-                                phase: WarmStartPhase) -> WarmStartStep {
-        available.contains(voiceID)
-            ? WarmStartStep(engine: .ttsVoice(voiceID),
-                            action: .warm,
-                            phase: phase)
-            : WarmStartStep(engine: .ttsVoice(voiceID),
-                            action: .skip(reason: "voice_missing"),
-                            phase: phase)
+                                phase: WarmStartPhase,
+                                forcedAction: WarmStartAction? = nil) -> WarmStartStep {
+        let action: WarmStartAction
+        if let forcedAction {
+            action = forcedAction
+        } else {
+            action = available.contains(voiceID)
+                ? .warm
+                : .skip(reason: "voice_missing")
+        }
+        return WarmStartStep(engine: .ttsVoice(voiceID),
+                             action: action,
+                             phase: phase)
     }
 }
 

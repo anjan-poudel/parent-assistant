@@ -98,6 +98,17 @@ final class VoicePipeline {
     /// Held only during the VAD-gated capture phase — how far past silence
     /// onset we've counted before firing `finish()`.
     private var silenceCounter: Int = 0
+    /// [VAD-REGRESSION] True once the current capture's VAD has ever
+    /// reported speech. A capture that ends without it (STT timeout or
+    /// the wedge guard) means the capture stream never crossed the VAD's
+    /// speech threshold — the "stuck in LISTENING, end of talk never
+    /// detected" signature — and the completion tail emits an honest
+    /// `capture_ended_no_vad_speech` event so the failure can be told
+    /// apart from a slow recognizer without a device in hand. Written by
+    /// the VAD's speech-state callback (processing queue) and read on
+    /// main at the capture's completion tail — a benign cross-queue
+    /// Bool whose worst race is one capture's misattribution.
+    private var vadHeardSpeech = false
     /// Capture-generation guard (TALK-CRASH-FIX, 2026-09-07).
     ///
     /// Every capture start — and every `stop()` — advances this counter.
@@ -194,6 +205,13 @@ final class VoicePipeline {
         // superseded capture can never act on a newer one.
         guard let vad else { return }
         let generation = captureGeneration
+        // [VAD-REGRESSION] Record whether the capture ever contained
+        // detectable speech — see `vadHeardSpeech` for the honest-event
+        // contract.
+        vad.onSpeechStateChange = { [weak self] speaking in
+            guard speaking else { return }
+            self?.vadHeardSpeech = true
+        }
         vad.onEndOfUtterance = { [weak self] in
             guard let self else { return }
             // The VAD calls this from the pipeline's processing queue
@@ -507,6 +525,7 @@ final class VoicePipeline {
         state = .capturingCommand
         pcmBuffer.removeAll()
         silenceCounter = 0
+        vadHeardSpeech = false
         // [NOISE-FILTER] Capture bookend (start) — see
         // `beginNoiseFilterCapture` for the contract.
         beginNoiseFilterCapture()
@@ -581,6 +600,17 @@ final class VoicePipeline {
             // dropped whole: stop() already reset the VAD/state, or a
             // newer capture owns the tail.
             guard self.captureGeneration == generation else { return }
+            // [VAD-REGRESSION] Honest diagnostic: this capture ended (STT
+            // timeout or cancellation) without the VAD ever detecting
+            // speech. That is exactly the "stuck in LISTENING, end of
+            // talk never detected" signature — emit it so the difference
+            // between a quiet capture stream and a slow recognizer is
+            // visible in the console without a device in hand. Only when
+            // a VAD is actually configured (nil VAD = owned-tap legacy,
+            // no endpointing expected).
+            if self.vad != nil, !self.vadHeardSpeech {
+                self.emit("capture_ended_no_vad_speech", outcome: "info")
+            }
             // [TURN-TIMING] Recognition settled (success OR failure) —
             // the ASR span closes here.
             self.turnTracer?.mark("asr_done")

@@ -218,16 +218,53 @@ final class SherpaTTSEngine: TTSEngine {
         )
         let modelCfg = sherpaOnnxOfflineTtsModelConfig(vits: vits, numThreads: 2, debug: 0)
         var cfg = sherpaOnnxOfflineTtsConfig(model: modelCfg)
+        // [VAD-REGRESSION] (2026-09-10): the sherpa VITS session creation
+        // SEGFAULTS onnxruntime when it runs OFF-MAIN on the x86_64
+        // simulator — the same crash class as the KWS engine's documented
+        // off-main segfault (crash 204647, EXC_BAD_ACCESS in
+        // ConstantFolding). Seven crash reports from one morning
+        // (2026-09-10 02:21–06:14) all fault on `tts.sherpa.engine` inside
+        // `onnxruntime::InferenceSession::Initialize` /
+        // `DataTypeImpl::GetDataType` / `OpSchema` teardown; the
+        // [WARM-START] boot warms made this construction run at every
+        // launch, so every launch — and every first reply — became a
+        // crash lottery on the sim, and each crash relaunched the app
+        // into a fresh boot (the reported endless spinner + re-read
+        // briefing + never-completing voice cycles). The project's
+        // proven workaround for this class is session creation ON MAIN
+        // (that is how the KWS engine has run since crash 204647).
+        // Synthesis stays on this queue; only the one-time construction
+        // hops — and only on the simulator (the crash class is x86_64-
+        // sim-specific; device builds construct exactly as before). The
+        // isMainThread guard keeps a hypothetical main-queue caller from
+        // deadlocking on main.sync.
         // [TURN-TIMING] Engine load is the expensive one-time part of the
         // first synthesis — measure it for the `tts_voice_loaded` stage.
-        let loadStart = CFAbsoluteTimeGetCurrent()
-        let tts = SherpaOnnxOfflineTtsWrapper(config: &cfg)
-        let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
-        guard tts.sampleRate > 0 else {
-            throw TTSEngineError.engineInitFailed(dir)
+        func construct() -> Result<SherpaOnnxOfflineTtsWrapper, Error> {
+            Result {
+                let loadStart = CFAbsoluteTimeGetCurrent()
+                let tts = SherpaOnnxOfflineTtsWrapper(config: &cfg)
+                let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
+                guard tts.sampleRate > 0 else {
+                    throw TTSEngineError.engineInitFailed(dir)
+                }
+                onEngineCreated?(loadMs)
+                return tts
+            }
         }
+        let tts: SherpaOnnxOfflineTtsWrapper
+        #if targetEnvironment(simulator)
+        if Thread.isMainThread {
+            tts = try construct().get()
+        } else {
+            tts = try DispatchQueue.main.sync(execute: construct).get()
+        }
+        #else
+        // Device: construct on the calling queue (engineQueue) — the
+        // pre-[VAD-REGRESSION] behavior, byte-identical.
+        tts = try construct().get()
+        #endif
         engines[dir] = tts
-        onEngineCreated?(loadMs)
         return tts
     }
 }
