@@ -236,6 +236,34 @@ final class ApplianceManualLibraryTests: XCTestCase {
         XCTAssertEqual(jpegFilesOnDisk(), 1)
     }
 
+    // MARK: - User manual row visibility (user-manual-in-app task)
+
+    func testUserManualRowIsVisibleWithoutAQuery() {
+        XCTAssertTrue(ApplianceManualLibraryModel.isUserManualVisible(
+            query: "", locale: Locale(identifier: "en-US")))
+        XCTAssertTrue(ApplianceManualLibraryModel.isUserManualVisible(
+            query: "", locale: Locale(identifier: "ne-NP")))
+    }
+
+    func testUserManualRowIsSearchableInBothLanguages() {
+        let en = Locale(identifier: "en-US")
+        let ne = Locale(identifier: "ne-NP")
+        // Title matches.
+        XCTAssertTrue(ApplianceManualLibraryModel.isUserManualVisible(query: "manual", locale: en))
+        XCTAssertTrue(ApplianceManualLibraryModel.isUserManualVisible(query: "पुस्तिका", locale: ne))
+        // Hint matches (the second searchable field).
+        XCTAssertTrue(ApplianceManualLibraryModel.isUserManualVisible(query: "sahayak", locale: en))
+        XCTAssertTrue(ApplianceManualLibraryModel.isUserManualVisible(query: "सहायक", locale: ne))
+    }
+
+    func testUserManualRowHidesForNonMatchingQueries() {
+        let en = Locale(identifier: "en-US")
+        let ne = Locale(identifier: "ne-NP")
+        XCTAssertFalse(ApplianceManualLibraryModel.isUserManualVisible(query: "youtube", locale: en))
+        XCTAssertFalse(ApplianceManualLibraryModel.isUserManualVisible(query: "youtube", locale: ne))
+        XCTAssertFalse(ApplianceManualLibraryModel.isUserManualVisible(query: "zzz", locale: en))
+    }
+
     // MARK: - Fixture
 
     private func manual(id: UUID = UUID(), title: String = "d",

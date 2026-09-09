@@ -36,10 +36,19 @@ final class UserManualCatalogTests: XCTestCase {
     private func sectionJSON(id: String,
                              titleEn: String, titleNe: String,
                              paragraphsEn: [String],
-                             paragraphsNe: [String]) -> [String: Any] {
+                             paragraphsNe: [String],
+                             images: [String] = []) -> [String: Any] {
         ["id": id,
          "titleEn": titleEn, "titleNe": titleNe,
-         "paragraphsEn": paragraphsEn, "paragraphsNe": paragraphsNe]
+         "paragraphsEn": paragraphsEn, "paragraphsNe": paragraphsNe,
+         "images": images]
+    }
+
+    /// A minimal valid 1×1 PNG — enough for `UIImage(contentsOfFile:)`
+    /// to decode, with no rendering dependencies in the tests.
+    private var tinyPNGData: Data {
+        Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=")!
     }
 
     private func writeSections(_ sections: [[String: Any]]) throws -> URL {
@@ -58,7 +67,8 @@ final class UserManualCatalogTests: XCTestCase {
                         titleNe: "यो पुस्तिकाबारे",
                         paragraphsEn: ["Plain paragraph one.",
                                        "• Bullet paragraph two."],
-                        paragraphsNe: ["सादा अनुच्छेद।", "• बुँदा अनुच्छेद।"]),
+                        paragraphsNe: ["सादा अनुच्छेद।", "• बुँदा अनुच्छेद।"],
+                        images: ["diagram-one.png", "diagram-two.png"]),
             sectionJSON(id: "troubleshooting",
                         titleEn: "Troubleshooting",
                         titleNe: "समस्या समाधान",
@@ -76,7 +86,28 @@ final class UserManualCatalogTests: XCTestCase {
         XCTAssertEqual(first.paragraphsEn,
                        ["Plain paragraph one.", "• Bullet paragraph two."])
         XCTAssertEqual(first.paragraphsNe, ["सादा अनुच्छेद।", "• बुँदा अनुच्छेद।"])
+        XCTAssertEqual(first.images, ["diagram-one.png", "diagram-two.png"])
+        // Sections without the images key decode to [] — a text-only
+        // section is a normal state, not an error.
+        XCTAssertEqual(sections?.last?.images, [])
         XCTAssertEqual(sections?.last?.id, "troubleshooting")
+    }
+
+    func testSectionsWithoutImagesKeyDecodeToEmpty() throws {
+        // A payload omitting the images key entirely (pre-diagram content)
+        // must still decode — the field defaults to [].
+        let url = try writeSections([
+            sectionJSON(id: "a", titleEn: "T", titleNe: "श",
+                        paragraphsEn: ["x"], paragraphsNe: ["य"],
+                        images: [])
+        ])
+        var raw = try String(contentsOf: url, encoding: .utf8)
+        raw = raw.replacingOccurrences(of: ",\"images\":[]", with: "")
+        let stripped = tempDir.appendingPathComponent("userManual-stripped.json")
+        try raw.data(using: .utf8)!.write(to: stripped)
+
+        let sections = UserManualCatalog.loadSections(from: stripped)
+        XCTAssertEqual(sections?.first?.images, [])
     }
 
     func testLoadSectionsReturnsNilForMalformedPayloads() throws {
@@ -106,6 +137,32 @@ final class UserManualCatalogTests: XCTestCase {
         let sections = UserManualCatalog.loadSections(from: data)
         XCTAssertEqual(sections?.count, 1)
         XCTAssertEqual(sections?.first?.id, "glossary")
+    }
+
+    // MARK: - Diagram images (injectable folder seam)
+
+    func testImageLoadsFromAnImagesFolder() throws {
+        let folder = tempDir.appendingPathComponent("images", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder,
+                                                withIntermediateDirectories: true)
+        try tinyPNGData.write(to: folder.appendingPathComponent("diagram.png"))
+
+        XCTAssertNotNil(UserManualCatalog.image(named: "diagram.png",
+                                                imagesFolder: folder))
+    }
+
+    func testImageReturnsNilForMissingFilesAndFolders() throws {
+        let folder = tempDir.appendingPathComponent("images", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder,
+                                                withIntermediateDirectories: true)
+        // Missing file in an existing folder.
+        XCTAssertNil(UserManualCatalog.image(named: "absent.png",
+                                             imagesFolder: folder))
+        // Missing folder entirely — the bundle seam degrades the same way
+        // (the viewer skips decorative images, never errors).
+        XCTAssertNil(UserManualCatalog.image(
+            named: "diagram.png",
+            imagesFolder: tempDir.appendingPathComponent("nope", isDirectory: true)))
     }
 
     // MARK: - Locale resolution (the viewer's language rule)
@@ -227,6 +284,21 @@ final class UserManualCatalogTests: XCTestCase {
             XCTAssertTrue(ids.contains(required),
                           "the manual must keep its \(required) section")
         }
+
+        // Every DECLARED diagram resolves in the shipped bundle — a
+        // section that names an image must ship it (the viewer renders
+        // only what resolves, but shipped content must be complete).
+        var declared = 0
+        for section in sections {
+            for name in section.images {
+                declared += 1
+                XCTAssertNotNil(UserManualCatalog.image(named: name),
+                                "\(section.id): declared diagram \(name) "
+                                + "must ship in ManualText/images")
+            }
+        }
+        XCTAssertGreaterThan(declared, 0,
+                             "the shipped manual must carry diagram sections")
     }
 
     // MARK: - Catalog keys (the browse view's row + the empty state)
