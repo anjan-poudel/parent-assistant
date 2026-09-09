@@ -46,12 +46,27 @@ Guards (spec §9 / §10):
 # BUT 0 ack_med rows (seed taxonomy never defined the intent — round-1
 # ack gates failed because ack was never taught; data/edge_cases.jsonl
 # supplies them, always kept, exempt from clean-bucket sampling).
+#
+# Round 3 findings (bake-off iteration-3, 2026-09-09) → ANCHORED DRAW
+# (bake-off iteration-4, 2026-09-09): the rng(seed) whole-pool shuffle +
+# slice draw made every selection step a function of pool LENGTH — the
+# RNG stream position at each draw depends on all earlier draws' sizes,
+# so any pool growth (a new gen/noise run appends rows) silently re-drew
+# ~1000 of 2827 rows between builds, old rows swapped for other old rows
+# by lottery. Iteration deltas were therefore not interpretable.
+#
+# All draws now use CONTENT-ADDRESSED keys (draw_key): a pure function of
+# (mixture.seed, namespace, row bytes). Identical inputs rebuild a
+# byte-identical dataset, and append-only pool growth can only move a
+# selection boundary by the share of genuinely new rows — an existing row
+# never changes key, so it is never re-drawn out in favor of another old
+# row. No RNG stream is consumed anywhere, so no draw can shift another.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
-import random
 import re
 import string
 import unicodedata
@@ -103,6 +118,24 @@ def lossless_key(text: str) -> str:
     nfc = unicodedata.normalize("NFC", text).translate(DEV_DIGITS).casefold()
     stripped = re.sub(r"[" + re.escape(string.punctuation) + r"॥।\s]+", " ", nfc)
     return " ".join(stripped.split())
+
+
+def draw_key(row: dict, seed, namespace: str) -> bytes:
+    """Content-addressed selection key (iteration-4 anchored draw).
+
+    Pure function of (mixture.seed, namespace, row bytes) — NOT of file
+    order, pool length or RNG stream position. Consequences:
+      * identical inputs → identical keys → byte-identical rebuilds;
+      * append-only pool growth never reshuffles existing rows: a row
+        keeps its key forever and can only leave a take by being pushed
+        past the boundary by genuinely new rows whose keys sort in;
+      * no shared RNG stream, so no draw's size can shift another draw.
+    Keys are 64-bit blake2b digests of the full row JSON, so two rows
+    that differ in ANY field (label, slots, source, register) draw
+    independently."""
+    content = json.dumps(row, sort_keys=True, ensure_ascii=False)
+    return hashlib.blake2b(f"{seed}|{namespace}|{content}".encode("utf-8"),
+                           digest_size=8).digest()
 
 
 def valid_row(row: dict) -> bool:
@@ -170,15 +203,20 @@ def main() -> None:
             continue
         buckets[bucket].append(row)
 
-    rng = random.Random(int(cfg["mixture.seed"]))
+    # Draw anchor: mixture.seed from config.yaml. draw_key() is a pure
+    # function of this seed — no RNG object is used anywhere below.
+    seed = cfg["mixture.seed"]
 
-    # Per-bucket label-conflict guard + dedupe (lossless key, first wins
-    # after a deterministic shuffle). CONFLICT GUARD FIRST: when several
-    # copies of the SAME utterance disagree on the action, every copy is
-    # dropped — teaching one arbitrary label for a text that occurs with
-    # two is noise (measured: 703 noised keys carry contradictory labels;
-    # the two whisper variants of different parents collapse onto one
-    # transcript). Only then dedupe within the surviving rows.
+    # Per-bucket label-conflict guard + dedupe (lossless key, anchored
+    # winner). CONFLICT GUARD FIRST: when several copies of the SAME
+    # utterance disagree on the action, every copy is dropped — teaching
+    # one arbitrary label for a text that occurs with two is noise
+    # (measured: 703 noised keys carry contradictory labels; the two
+    # whisper variants of different parents collapse onto one
+    # transcript). Only then dedupe within the surviving rows: which copy
+    # of a duplicate survives is the one with the smallest draw_key —
+    # content-addressed, so pool growth can never flip an old duplicate
+    # pair (round-3 shuffle made the winner a function of pool length).
     kept: dict[str, list[dict]] = {}
     for bucket in BUCKET_NAMES:
         rows = list(buckets[bucket])
@@ -187,11 +225,11 @@ def main() -> None:
             by_action.setdefault(lossless_key(row["utterance"]), set()).add(row["action"])
         conflict_keys = {k for k, acts in by_action.items() if len(acts) > 1}
         rows = [r for r in rows if lossless_key(r["utterance"]) not in conflict_keys]
-        rng.shuffle(rows)
-        by_key: dict[str, dict] = {}
-        for row in rows:
-            by_key.setdefault(lossless_key(row["utterance"]), row)
-        kept[bucket] = list(by_key.values())
+        keyed = sorted((draw_key(r, seed, f"dedupe-{bucket}"), r) for r in rows)
+        best: dict[str, dict] = {}
+        for _, r in keyed:  # ascending key → smallest key wins per lossless key
+            best.setdefault(lossless_key(r["utterance"]), r)
+        kept[bucket] = [best[k] for k in sorted(best)]
         if conflict_keys:
             print(f"[build] {bucket}: dropped {len(conflict_keys)} "
                   "conflicting-label keys")
@@ -212,7 +250,9 @@ def main() -> None:
     # the clean buckets are sampled toward their §9.2 share, capped by
     # supply. edge_cases rows are always kept (priority) — they carry the
     # round-2 intent fixes (ack_med/refusal/bare-emergency) and must not
-    # be sampled away.
+    # be sampled away. The take is the `take` rows with the smallest
+    # draw_key (anchored — see module docstring): pool growth admits only
+    # the boundary share of genuinely new rows, never old-for-old churn.
     n_noised = len(kept["stt_noised"])
     total = math.ceil(n_noised / frac["stt_noised"])
     targets = {"clean_devanagari": round(total * frac["clean_devanagari"]),
@@ -222,17 +262,21 @@ def main() -> None:
     for bucket, target in targets.items():
         rows = list(kept[bucket])
         priority = [r for r in rows if (r.get("source") or "").startswith(EDGE_SOURCES)]
-        pool = [r for r in rows if r not in priority]
-        rng.shuffle(pool)
+        pool = sorted((r for r in rows if r not in priority),
+                      key=lambda r: draw_key(r, seed, f"mix-{bucket}"))
         take = max(0, target - len(priority))
         if len(pool) < take:
             supply_capped.append(bucket)
             take = len(pool)
         selected[bucket] = priority + pool[:take]
 
-    train_pool = selected["stt_noised"] + selected["clean_devanagari"] \
-        + selected["romanized_codeswitched"]
-    rng.shuffle(train_pool)
+    # Train/valid split: first n_valid rows of the keyed total order
+    # (5% over the whole mixture, as before) — anchored like every other
+    # draw, so a rebuild only moves the split boundary where membership
+    # itself changed.
+    train_pool = sorted(selected["stt_noised"] + selected["clean_devanagari"]
+                        + selected["romanized_codeswitched"],
+                        key=lambda r: draw_key(r, seed, "split"))
     n_valid = max(1, int(len(train_pool) * float(cfg["mixture.valid_fraction"])))
     valid, train = train_pool[:n_valid], train_pool[n_valid:]
 
