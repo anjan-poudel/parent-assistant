@@ -187,12 +187,36 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     /// Preloads the model off the critical path: call at hot-swap time so
     /// the first utterance doesn't pay the load + CoreML specialization.
     func prepare() {
+        warm()
+    }
+
+    /// Warm-start seam (`STTModelWarming`): preloads the model weights +
+    /// CoreML specialization in the background and reports the outcome.
+    /// `completion` (when given) is called on an arbitrary queue — never
+    /// assumed main. Failures are honest and never throw: a missing
+    /// model, a missing runtime, or a failed load are `.failed(reason)`
+    /// results the boot's warm phase records (and moves past).
+    func warm(completion: ((WarmStartEngineResult) -> Void)? = nil) {
         #if canImport(WhisperKit)
-        guard let (descriptor, config) = loadDescriptor() else { return }
-        Task { [weak self] in
-            guard let self else { return }
-            _ = try? await self.loadKit(descriptor: descriptor, config: config)
+        guard let (descriptor, config) = loadDescriptor() else {
+            completion?(.failed(reason: "no_model_path"))
+            return
         }
+        Task { [weak self] in
+            guard let self else {
+                completion?(.failed(reason: "deallocated"))
+                return
+            }
+            do {
+                _ = try await self.loadKit(descriptor: descriptor, config: config)
+                completion?(.ready)
+            } catch {
+                print("[whisperkit_stt] warm failed: \(error)")
+                completion?(.failed(reason: "load_failed"))
+            }
+        }
+        #else
+        completion?(.failed(reason: "runtime_missing"))
         #endif
     }
 
@@ -620,3 +644,10 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         print("[dialect_id] \(event) reason=\(reason) outcome=\(outcome)")
     }
 }
+
+// MARK: - Warm-start seam (boot warm phase)
+
+/// WhisperKit is the one whisper runtime that can be warmed: `loadKit`
+/// caches the instance for the first utterance, unlike the whisper.cpp
+/// recognizer's per-attempt fresh contexts.
+extension WhisperKitSpeechRecognizer: STTModelWarming {}

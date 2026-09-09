@@ -21,6 +21,11 @@ import SwiftUI
 enum StartupBootStage: String, CaseIterable, Equatable {
     case restoringData
     case preparingVoice
+    /// [WARM-START] Preloads the speech + reply-voice models in the
+    /// background so the first conversation doesn't pay the cold-engine
+    /// loads. A slow warm is bounded by the coordinator's watchdog —
+    /// failures NEVER halt boot, exactly like every other stage.
+    case warmingEngines
     case finishingSetup
     case ready
 
@@ -34,8 +39,9 @@ enum StartupBootStage: String, CaseIterable, Equatable {
         switch self {
         case .restoringData: return 0
         case .preparingVoice: return 1
-        case .finishingSetup: return 2
-        case .ready: return 3
+        case .warmingEngines: return 2
+        case .finishingSetup: return 3
+        case .ready: return 4
         }
     }
 }

@@ -132,6 +132,13 @@ protocol TTSEngine {
 
     /// Stops any in-flight synthesis as soon as possible.
     func cancelSynthesis()
+
+    /// Warm-start seam: preloads the engine instance for
+    /// `voiceDirectory` (model.onnx load + espeak-ng data) so the first
+    /// synthesis skips engine construction. Throws exactly like the
+    /// construction inside `synthesize` would. The default is a no-op so
+    /// fakes and the non-sherpa stub build inherit it without change.
+    func warm(voiceDirectory: URL) throws
 }
 
 extension TTSEngine {
@@ -139,6 +146,8 @@ extension TTSEngine {
     func synthesize(_ text: String, voiceDirectory: URL, speed: Float) throws -> URL {
         try synthesize(text, voiceDirectory: voiceDirectory, speed: speed, speakerID: 0)
     }
+
+    func warm(voiceDirectory: URL) throws {}
 }
 
 enum TTSEngineError: Error {
@@ -180,6 +189,14 @@ final class SherpaTTSEngine: TTSEngine {
         // PiperVoiceSpeaker.cancel). Nothing to do here.
     }
 
+    func warm(voiceDirectory: URL) throws {
+        // Same serialization as synthesis: engine construction is not
+        // re-entrant, and the warm must not race a live synthesize.
+        try engineQueue.sync {
+            _ = try engine(for: voiceDirectory)
+        }
+    }
+
     private func engine(for dir: URL) throws -> SherpaOnnxOfflineTtsWrapper {
         if let cached = engines[dir] { return cached }
         let fm = FileManager.default
@@ -215,6 +232,11 @@ final class SherpaTTSEngine: TTSEngine {
         throw TTSEngineError.engineInitFailed(voiceDirectory)
     }
     func cancelSynthesis() {}
+    /// Honest refusal (the protocol's default no-op would claim a warm
+    /// that can never help — synthesis fails in this build regardless).
+    func warm(voiceDirectory: URL) throws {
+        throw TTSEngineError.engineInitFailed(voiceDirectory)
+    }
 }
 #endif
 
@@ -375,6 +397,30 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         }
     }
 
+    // MARK: - Warm-start seam (boot warm phase)
+
+    /// Preloads one catalog voice's sherpa engine so the first reply
+    /// doesn't pay engine construction. Resolves the directory exactly
+    /// like `speak` (installed, else bundled install — idempotent), then
+    /// warms the engine for it. One engine instance serves every speaker
+    /// of the voice (the sid tensor is per-call), so warming the
+    /// directory covers all sids. Synchronous on the caller's queue;
+    /// completion is called inline.
+    func warm(voiceID: ModelID, completion: (WarmStartEngineResult) -> Void) {
+        guard let dir = modelStore.ttsVoiceDirectory(for: voiceID)
+                ?? modelStore.installBundledTTSVoice(for: voiceID, bundle: bundle) else {
+            completion(.failed(reason: "voice_missing"))
+            return
+        }
+        do {
+            try engine.warm(voiceDirectory: dir)
+            completion(.ready)
+        } catch {
+            print("[speaker] warm failed for \(voiceID.rawValue): \(error)")
+            completion(.failed(reason: "engine_init_failed"))
+        }
+    }
+
     // MARK: - Playback
 
     private func play(_ wav: URL, text: String, locale: Locale) async {
@@ -437,3 +483,9 @@ extension PiperVoiceSpeaker: AVAudioPlayerDelegate {
         settlePlayback()
     }
 }
+
+// MARK: - Warm-start seam (boot warm phase)
+
+/// PiperVoiceSpeaker is the production speaker, so it is the TTS warm
+/// seam the boot's warm phase constructs the sherpa engines through.
+extension PiperVoiceSpeaker: TTSVoiceWarming {}

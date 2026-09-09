@@ -45,6 +45,40 @@ final class StartupBootTests: XCTestCase {
         XCTAssertTrue(boot.isComplete)
     }
 
+    func testWarmStartStageSitsBetweenVoiceAndSetup() {
+        let boot = StartupBoot()
+        boot.begin()
+        boot.advance(to: .preparingVoice)
+        boot.advance(to: .warmingEngines)
+        XCTAssertEqual(boot.stage, .warmingEngines)
+        XCTAssertTrue(boot.spinnerVisible,
+                      "the warm phase is honest boot work — the spinner stays up")
+
+        boot.advance(to: .finishingSetup)
+        boot.advance(to: .ready)
+        XCTAssertTrue(boot.isComplete)
+
+        // Rank order pinned: a monotonic machine's stages must never
+        // allow the warm stage to rewind past voice-prep or skip ahead
+        // of setup.
+        XCTAssertLessThan(StartupBootStage.preparingVoice.rank,
+                          StartupBootStage.warmingEngines.rank)
+        XCTAssertLessThan(StartupBootStage.warmingEngines.rank,
+                          StartupBootStage.finishingSetup.rank)
+        XCTAssertLessThan(StartupBootStage.finishingSetup.rank,
+                          StartupBootStage.ready.rank)
+    }
+
+    func testWarmPhaseFailureDegradesWithoutHalting() {
+        let boot = StartupBoot()
+        boot.recordFailure(.warmingEngines)
+        XCTAssertEqual(boot.failedStages, [.warmingEngines])
+        boot.advance(to: .warmingEngines)
+        boot.advance(to: .ready)
+        XCTAssertTrue(boot.isComplete,
+                      "a failed warm means the first conversation pays the load — today's behavior, never a blocked boot")
+    }
+
     func testBackwardAdvanceIsANoOp() {
         let boot = StartupBoot()
         boot.advance(to: .finishingSetup)
@@ -113,6 +147,8 @@ final class StartupBootTests: XCTestCase {
                        "तपाईंको डाटा लोड हुँदैछ…")
         XCTAssertEqual(L10n.str(StartupBootStage.preparingVoice.labelKey, locale: ne),
                        "आवाज तयार हुँदैछ…")
+        XCTAssertEqual(L10n.str(StartupBootStage.warmingEngines.labelKey, locale: ne),
+                       "आवाज पहिल्यै लोड गर्दै…")
         XCTAssertEqual(L10n.str(StartupBootStage.finishingSetup.labelKey, locale: ne),
                        "सेटअप पूरा हुँदैछ…")
         XCTAssertEqual(L10n.str(StartupBootStage.ready.labelKey, locale: ne), "तयार")
@@ -123,6 +159,8 @@ final class StartupBootTests: XCTestCase {
                        "Loading your data…")
         XCTAssertEqual(L10n.str(StartupBootStage.preparingVoice.labelKey, locale: en),
                        "Preparing voice…")
+        XCTAssertEqual(L10n.str(StartupBootStage.warmingEngines.labelKey, locale: en),
+                       "Warming up voice…")
         XCTAssertEqual(L10n.str(StartupBootStage.finishingSetup.labelKey, locale: en),
                        "Finishing setup…")
         XCTAssertEqual(L10n.str(StartupBootStage.ready.labelKey, locale: en), "Ready")
