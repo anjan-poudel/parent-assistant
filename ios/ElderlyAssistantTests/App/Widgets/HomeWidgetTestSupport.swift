@@ -21,6 +21,11 @@ final class StubHomeWidgetDataSource: UpdatesDataProviding {
     /// The live conversation window the Updates leaf's Activity section
     /// logs (oldest → newest, as the coordinator publishes it).
     var conversationHistory: [ChatHistoryStore.Exchange] = []
+    /// Alarm/timer lists for the Updates leaf's Alarms section
+    /// (updates-alarms task, 2026-09-10) — empty by default, so the
+    /// section stays hidden unless a test arms something.
+    var alarms: [Alarm] = []
+    var activeTimers: [TimerItem] = []
     /// Stub backing for `medicationName(for:)` (the coordinator resolves
     /// entry IDs against the medication store).
     var medicationNames: [UUID: String] = [:]

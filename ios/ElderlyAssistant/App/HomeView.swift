@@ -25,6 +25,10 @@ enum LeafDestination: Identifiable {
     /// The mixed content feed (feed-agent task, 2026-09-08) — docked
     /// last so the five pre-existing tiles keep their positions.
     case feed
+    /// Alarms & timers management (updates-alarms task, 2026-09-10):
+    /// pushed from the Updates leaf's Alarms-section rows — one tap
+    /// from the glance to the Settings leaf that manages it.
+    case alarms
 
     var id: String {
         switch self {
@@ -38,6 +42,7 @@ enum LeafDestination: Identifiable {
         case .briefing: return "briefing"
         case .updates: return "updates"
         case .feed: return "feed"
+        case .alarms: return "alarms"
         }
     }
 }
@@ -707,6 +712,11 @@ struct HomeView: View {
         case .feed:
             // The Feed leaf (feed-agent task, 2026-09-08).
             FeedsView()
+        case .alarms:
+            // The Alarms & timers Settings leaf (updates-alarms task,
+            // 2026-09-10): the Updates Alarms rows push it. It reads
+            // the coordinator from the environment — no init params.
+            AlarmsTimersSettingsView()
         }
     }
 
