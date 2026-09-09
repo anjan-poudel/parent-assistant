@@ -20,6 +20,11 @@ struct FeedsView: View {
     /// The item whose play sheet is open (audio or video), nil = closed.
     @State private var playingItem: FeedItem?
 
+    /// Per-card toggle state (feed translation task, 2026-09-08): ids
+    /// the user reverted to the ORIGINAL after a translation was shown —
+    /// the "second tap reverts" half of the Translate button.
+    @State private var showingOriginalIDs: Set<String> = []
+
     var body: some View {
         LeafScreen(titleKey: "feeds.title") {
             VStack(spacing: 12) {
@@ -181,16 +186,21 @@ struct FeedsView: View {
     }
 
     /// Text card: title, a few lines of summary, source + time caption,
-    /// and the single "Read aloud" action. SpeakQueue speech via the
-    /// coordinator's canonical path (BriefingView precedent) — the
-    /// `.interactive` lane, no card, no AVSpeech.
+    /// and two actions — "Translate" (feed translation task) and
+    /// "Read aloud" (SpeakQueue via the coordinator's canonical path,
+    /// the BriefingView precedent — no AVSpeech). The AI-translated
+    /// marker shows only while the translation is displayed.
     private func textCard(_ item: FeedItem) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(item.title)
+        let display = display(for: item)
+        return VStack(alignment: .leading, spacing: 10) {
+            if display.isShowingTranslation {
+                translatedMarker
+            }
+            Text(display.title)
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                 .foregroundColor(DesignTokens.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            if let summary = cardSummary(item) {
+            if let summary = displaySummary(display) {
                 Text(summary)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textPrimary)
@@ -198,18 +208,13 @@ struct FeedsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             captionRow(item)
-            Button {
-                readAloud(item)
-            } label: {
-                Label("feeds.readAloud", systemImage: "speaker.wave.2.fill")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 18)
-                    .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(Capsule())
+            if coordinator.feedTranslationFailed(for: item), !display.hasTranslation {
+                translationUnavailableCaption
             }
-            .buttonStyle(.plain)
+            HStack(spacing: 10) {
+                translateButton(item)
+                readAloudButton(item)
+            }
         }
         .padding(18)
         .frame(maxWidth: .infinity)
@@ -262,44 +267,56 @@ struct FeedsView: View {
         .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
     }
 
-    /// Audio/video card: kind badge, title, source caption, and the
-    /// single "Play" action presenting the shared AVKit sheet. Disabled
-    /// (honest dead control) when the item has no playable URL — the
-    /// resolver only produces media kinds WITH a URL, so this is a
+    /// Audio/video card: kind badge, title, source caption, and two
+    /// actions — "Play" (presenting the shared AVKit sheet) and
+    /// "Translate" (feed translation task). Play is disabled (honest
+    /// dead control) when the item has no playable URL — the resolver
+    /// only produces media kinds WITH a URL, so this is a
     /// defensive-only state.
     private func mediaCard(_ item: FeedItem) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let display = display(for: item)
+        return VStack(alignment: .leading, spacing: 10) {
+            if display.isShowingTranslation {
+                translatedMarker
+            }
             HStack(spacing: 10) {
                 Image(systemName: item.kind == .audio
                       ? "speaker.wave.2.fill" : "play.rectangle.fill")
                     .font(.system(size: 22))
                     .foregroundColor(DesignTokens.accent)
-                Text(item.title)
+                Text(display.title)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(DesignTokens.textPrimary)
                     .lineLimit(3)
             }
-            if let summary = cardSummary(item) {
+            if let summary = displaySummary(display) {
                 Text(summary)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textPrimary)
                     .lineLimit(2)
             }
             captionRow(item)
-            Button {
-                playingItem = item
-            } label: {
-                Label("feeds.play", systemImage: "play.fill")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 18)
-                    .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(Capsule())
+            if coordinator.feedTranslationFailed(for: item), !display.hasTranslation {
+                translationUnavailableCaption
             }
-            .buttonStyle(.plain)
-            .disabled(item.mediaURL == nil)
-            .opacity(item.mediaURL == nil ? 0.5 : 1)
+            HStack(spacing: 10) {
+                Button {
+                    playingItem = item
+                } label: {
+                    Label("feeds.play", systemImage: "play.fill")
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 18)
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
+                        .background(DesignTokens.accent)
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(item.mediaURL == nil)
+                .opacity(item.mediaURL == nil ? 0.5 : 1)
+                translateButton(item)
+            }
         }
         .padding(18)
         .frame(maxWidth: .infinity)
@@ -329,20 +346,142 @@ struct FeedsView: View {
         }
     }
 
+    /// The card's current display text — the ONE resolution both the
+    /// render and the read-aloud path read, so the voice can never read
+    /// different text than the card shows (feed translation task).
+    private func display(for item: FeedItem) -> FeedCardDisplayResolver.Display {
+        FeedCardDisplayResolver.resolve(
+            item: item,
+            translation: coordinator.feedTranslation(for: item),
+            showingOriginal: showingOriginalIDs.contains(item.id))
+    }
+
     /// Sanitized summary for display (shared with the TTS path — one
     /// sanitizer, so the card and the voice can never disagree on what
-    /// the item says). nil when there is nothing to show.
-    private func cardSummary(_ item: FeedItem) -> String? {
-        let cleaned = FeedSpeechSanitizer.stripped(item.summary)
+    /// the item says). Translations arrive as plain text; originals may
+    /// carry markup — both go through the same strip. nil when there is
+    /// nothing to show.
+    private func displaySummary(_ display: FeedCardDisplayResolver.Display) -> String? {
+        let cleaned = FeedSpeechSanitizer.stripped(display.summary)
         return cleaned.isEmpty ? nil : cleaned
     }
 
-    /// Read-aloud: sanitized title + summary through the SpeakQueue
-    /// (coordinator.speak — the app's single speech path). An item with
-    /// nothing speakable is never enqueued.
+    /// The AI-translated marker (feed translation task): a small
+    /// house-style chip with the sparkles glyph, shown ONLY while the
+    /// card displays the translation — originals never carry it.
+    private var translatedMarker: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "sparkles")
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+            Text("feeds.translatedByAI")
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+        }
+        .foregroundColor(DesignTokens.accent)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(DesignTokens.accent.opacity(0.12))
+        .clipShape(Capsule())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("feeds.translatedByAI"))
+    }
+
+    /// Honest failure caption (feed translation task): the item's
+    /// translation could not be fetched (no cloud configured, daily cap
+    /// reached, or provider failure) — the original text stays and this
+    /// small caption says so. Shown only for items whose last attempt
+    /// failed and have no cached translation; a successful retry clears
+    /// it.
+    private var translationUnavailableCaption: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+            Text("feeds.translationUnavailable")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+        }
+        .foregroundColor(DesignTokens.textSecondary)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The per-item Translate affordance (feed translation task): one
+    /// tap asks the cloud provider for a translation of the item's
+    /// title+summary into the app's active language; once the
+    /// translation is cached the SAME button toggles back to the
+    /// original (the spec's "second tap reverts" — the cached
+    /// translation makes the toggle free). While the request is in
+    /// flight the button shows a spinner and ignores taps. The feed
+    /// never translates by itself.
+    private func translateButton(_ item: FeedItem) -> some View {
+        let display = display(for: item)
+        let translating = coordinator.isFeedItemTranslating(item)
+        return Button {
+            translateTapped(item, display: display)
+        } label: {
+            Group {
+                if translating {
+                    ProgressView()
+                        .tint(DesignTokens.accent)
+                } else {
+                    Label(LocalizedStringKey(display.isShowingTranslation
+                                             ? "feeds.showOriginal" : "feeds.translate"),
+                          systemImage: display.isShowingTranslation
+                          ? "arrow.uturn.backward" : "character.bubble.fill")
+                }
+            }
+            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+            .foregroundColor(DesignTokens.accent)
+            .padding(.horizontal, 18)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .background(DesignTokens.background)
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(DesignTokens.accent.opacity(0.4), lineWidth: 1.5))
+        }
+        .buttonStyle(.plain)
+        .disabled(translating)
+    }
+
+    /// Translate-button tap: cached translation → free toggle between
+    /// translation and original; no translation yet → the on-ask cloud
+    /// request (its success/failure lands via the coordinator's
+    /// published state and re-renders this card).
+    private func translateTapped(_ item: FeedItem,
+                                 display: FeedCardDisplayResolver.Display) {
+        if display.hasTranslation {
+            if showingOriginalIDs.contains(item.id) {
+                showingOriginalIDs.remove(item.id)
+            } else {
+                showingOriginalIDs.insert(item.id)
+            }
+        } else {
+            Task { await coordinator.translateFeedItem(item) }
+        }
+    }
+
+    /// Read-aloud button — speaks EXACTLY what the card currently
+    /// displays: the translation when it is showing, the original
+    /// otherwise (feed translation task). Sanitized through the shared
+    /// TTS-friendly path either way; an item with nothing speakable is
+    /// never enqueued.
+    private func readAloudButton(_ item: FeedItem) -> some View {
+        Button {
+            readAloud(item)
+        } label: {
+            Label("feeds.readAloud", systemImage: "speaker.wave.2.fill")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 18)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.accent)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func readAloud(_ item: FeedItem) {
-        let text = FeedSpeechSanitizer.speechText(title: item.title,
-                                                  summary: item.summary)
+        let display = display(for: item)
+        let text = FeedSpeechSanitizer.speechText(title: display.title,
+                                                  summary: display.summary)
         guard !text.isEmpty else { return }
         coordinator.speak(text: text)
     }

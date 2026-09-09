@@ -635,6 +635,16 @@ final class AppCoordinator: ObservableObject {
     /// Source display names that failed the last refresh (honest partial
     /// failure caption; empty = all sources reached).
     @Published private(set) var feedFailedSourceNames: [String] = []
+    // Feed translation (feed translation task, 2026-09-08) — per-item,
+    // ON ASK only (a card's Translate button; the feed never translates
+    // automatically). `feedTranslations` is the item-id cache AND the
+    // single source the cards read; the other two sets drive the card's
+    // in-flight spinner and its honest-failure caption.
+    private let feedTranslator: FeedTranslator
+    @Published private(set) var feedTranslations: [String: FeedTranslation] = [:]
+    @Published private(set) var feedTranslatingIDs: Set<String> = []
+    @Published private(set) var feedTranslationFailedIDs: Set<String> = []
+
 
 
     /// Voice-session derivation state (spec §3.3): the last pipeline state
@@ -1147,6 +1157,12 @@ final class AppCoordinator: ObservableObject {
         self.geminiClient = GeminiClient(configStore: geminiConfig, observabilityBus: bus,
                                          costGovernor: costGovernor)
         self.geminiSpeechRecognizer = GeminiSpeechRecognizer(client: geminiClient, observabilityBus: bus)
+        // Feed translation (feed translation task, 2026-09-08): the
+        // on-ask translator rides the SAME geminiClient (and therefore
+        // the same cost governor and fail-fast no-key state) as voice
+        // and vision — no parallel provider path, no separate budget.
+        self.feedTranslator = FeedTranslator(client: geminiClient,
+                                             observability: bus)
 
         // [LOCAL-TOOLS] (2026-09-07): Google Custom Search credentials for
         // the on-device-stack web-search tool (Settings → Web search).
@@ -5008,6 +5024,53 @@ extension AppCoordinator {
         let config = feedSettingsStore.load()
         feedSources = config.sources
         feedTopics = config.topics
+    }
+
+    // MARK: Feed translation (on-ask, feed translation task 2026-09-08)
+
+    /// The cached translation for an item (nil = not translated in this
+    /// session) — the card's display resolution and toggle read this.
+    func feedTranslation(for item: FeedItem) -> FeedTranslation? {
+        feedTranslations[item.id]
+    }
+
+    /// True while the item's Translate request is in flight — the card's
+    /// button shows a spinner and ignores taps.
+    func isFeedItemTranslating(_ item: FeedItem) -> Bool {
+        feedTranslatingIDs.contains(item.id)
+    }
+
+    /// True when the item's last Translate attempt FAILED — the card's
+    /// honest caption (`feeds.translationUnavailable`); the original
+    /// text stays visible.
+    func feedTranslationFailed(for item: FeedItem) -> Bool {
+        feedTranslationFailedIDs.contains(item.id)
+    }
+
+    /// Translate-on-ask: the card's Translate button is the ONLY trigger
+    /// (no auto-translation anywhere in the refresh path). Success
+    /// caches under the item id (session scope, capped); failure
+    /// records the item so the card shows the honest caption and a tap
+    /// retries. Either way the ORIGINAL text stays on screen until a
+    /// real translation exists — nothing is ever fabricated.
+    func translateFeedItem(_ item: FeedItem) async {
+        guard !feedTranslatingIDs.contains(item.id) else { return }
+        feedTranslatingIDs.insert(item.id)
+        feedTranslationFailedIDs.remove(item.id)
+        do {
+            let translation = try await feedTranslator.translate(
+                title: item.title, summary: item.summary, language: appLanguage)
+            await MainActor.run { [self] in
+                feedTranslations[item.id] = translation
+                feedTranslations = FeedTranslator.trimmed(feedTranslations)
+                feedTranslatingIDs.remove(item.id)
+            }
+        } catch {
+            await MainActor.run { [self] in
+                feedTranslationFailedIDs.insert(item.id)
+                feedTranslatingIDs.remove(item.id)
+            }
+        }
     }
 }
 
