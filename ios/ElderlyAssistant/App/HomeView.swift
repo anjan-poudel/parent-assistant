@@ -171,21 +171,50 @@ struct HomeView: View {
                 // 2026-09-06).
                 ConversationHistorySheet(coordinator: coordinator)
             }
+            // The top-bar date line refreshes on appear and again just
+            // after each midnight while Home stays open (calendar-display
+            // task, 2026-09-09): no TimelineView, no timer object — the
+            // clock left the top bar entirely (the phone shows the time),
+            // so one sleep-until-midnight loop is all the day rollover
+            // needs. Foreground refreshes ride
+            // AppCoordinator.handleScenePhase, setting changes ride the
+            // calendar-display didSets.
+            .task {
+                coordinator.refreshHomeCalendarLineIfNeeded()
+                while !Task.isCancelled {
+                    let now = Date()
+                    guard let nextMidnight = Calendar.current.nextDate(
+                        after: now,
+                        matching: DateComponents(hour: 0, minute: 0),
+                        matchingPolicy: .nextTime) else { break }
+                    let interval = nextMidnight.timeIntervalSince(now)
+                    guard interval > 0 else { continue }
+                    do {
+                        try await Task.sleep(
+                            nanoseconds: UInt64(interval * 1_000_000_000))
+                        guard !Task.isCancelled else { break }
+                        coordinator.refreshHomeCalendarLineIfNeeded()
+                    } catch {
+                        break
+                    }
+                }
+            }
         }
     }
 
     // MARK: - Top bar (redesign spec §3.1)
 
     private var topBar: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
             // Settings stays in the top bar, LEFT-anchored at the leading
-            // edge with the greeting centered between it and the emergency
-            // button, so the gear can never be confused with emergency
-            // (2026-09-07). Still exactly one entry point, by voice or by
-            // touch. Equal-width 44pt containers on both sides keep the
-            // greeting visually centered — the notifications bell joined
-            // the trailing cluster (home-redesign 2026-09-08), so a
-            // balancing invisible 44pt sits beside settings.
+            // edge with the date line centered between it and the
+            // emergency button, so the gear can never be confused with
+            // emergency (2026-09-07). Still exactly one entry point, by
+            // voice or by touch. Equal-width 44pt containers on both
+            // sides keep the date line visually centered — the
+            // notifications bell joined the trailing cluster
+            // (home-redesign 2026-09-08), so a balancing invisible 44pt
+            // sits beside settings.
             NavigationLink(value: LeafDestination.settings) {
                 IconBadge(systemImage: "gearshape.fill", tint: .settings, diameter: 32)
             }
@@ -193,36 +222,30 @@ struct HomeView: View {
             .accessibilityLabel(Text(LocalizedStringKey("home.hub.settings")))
             .frame(width: 44, alignment: .leading)
             Color.clear.frame(width: 44, height: 44)
-            Spacer()
-            // The date/greeting area doubles as the calendar's entry
-            // point (2026-09-06: calendar lives ON the home screen via
-            // this tap target, NOT as a dock item; settings moved to the
-            // top bar the same day). The dock's own item count changed
-            // since — meds, reminders, call, appliance, directions
-            // (2026-09-07) — so no count claim lives in this comment; the
-            // authoritative list is `dock` below.
+            Spacer(minLength: 4)
+            // The date area doubles as the calendar's entry point
+            // (2026-09-06: calendar lives ON the home screen via this
+            // tap target, NOT as a dock item; settings moved to the top
+            // bar the same day). The greeting + live clock are GONE
+            // (calendar-display task, 2026-09-09): the phone already
+            // shows the time, and the local date + holiday overlay is
+            // the thing that is genuinely useful here — composed from
+            // the Calendar display settings (default calendar + the BS
+            // and tithi overlays) by `HomeDateLineComposer` and
+            // refreshed on appear, at midnight and on foreground.
             NavigationLink(value: LeafDestination.calendar) {
-                // Live clock (greeting-clock fix, 2026-09-07): the shown
-                // time used to freeze at launch because `greetingText`
-                // read `Date()` once per body evaluation and nothing ever
-                // re-evaluated it. TimelineView re-evaluates its content
-                // every minute with `context.date` as the tick's instant —
-                // no manual Timer object, no re-render churn on Home.
-                TimelineView(.periodic(from: .now, by: 60)) { context in
-                    Text(greetingText(at: context.date))
-                        .font(DesignTokens.greetingFont(size: 22))
-                        .foregroundColor(DesignTokens.textPrimary)
-                        .multilineTextAlignment(.leading)
-                }
+                homeDateLineView
             }
+            .buttonStyle(.plain)
             .accessibilityLabel(Text("home.hub.calendar"))
-            Spacer()
+            .accessibilityValue(Text(coordinator.homeCalendarLine ?? ""))
+            Spacer(minLength: 4)
             // The ONE notifications affordance (home-redesign v3,
             // 2026-09-08): a bell with the active-panel badge in the top
             // bar — the "notifications live here" spot every phone has
             // taught, and the badge count always matches what the Updates
             // leaf lists (same registry instance). Bell sits between the
-            // greeting and emergency, keeping emergency at the far edge
+            // date line and emergency, keeping emergency at the far edge
             // exactly where it always was. Tap PUSHES the Updates leaf
             // (home-redesign v3): the pushed leaf replaced the drawer
             // sheet, so no sheet machinery lives on Home anymore.
@@ -233,6 +256,32 @@ struct HomeView: View {
                 .frame(width: 44, alignment: .trailing)
         }
         .padding(.top, 8)
+    }
+
+    /// Today's date, composed from the calendar display settings: the
+    /// primary date (default calendar) on the greeting font, the enabled
+    /// overlays joined beneath it in caption size. Empty until the
+    /// coordinator's first offline composition lands (one launch frame).
+    @ViewBuilder
+    private var homeDateLineView: some View {
+        if let line = coordinator.homeDateLine {
+            VStack(alignment: .center, spacing: 2) {
+                Text(line.primary)
+                    .font(DesignTokens.greetingFont(size: 18))
+                    .foregroundColor(DesignTokens.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                if !line.overlays.isEmpty {
+                    Text(line.overlays.joined(separator: " • "))
+                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                                   weight: .medium))
+                        .foregroundColor(DesignTokens.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                }
+            }
+        }
     }
 
     /// The Home widget registry (rendering v2, home-redesign 2026-09-08):
@@ -290,24 +339,21 @@ struct HomeView: View {
     /// system is a separate concern (documented in the task design). The
     /// trailing plus tile opens Settings → Quick apps, where the
     /// favourites are managed; the whole row renders only while at least
-    /// one favourite exists.
+    /// one favourite exists. No "Quick access" caption (calendar-display
+    /// task, 2026-09-09): the row of app tiles is self-evident — the
+    /// caption read as clutter, so the tiles + plus stand alone.
     private var quickAccessRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("home.quickAccess.caption")
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundColor(DesignTokens.textSecondary)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 12) {
-                    ForEach(coordinator.favoriteApps) { app in
-                        quickAccessTile(app)
-                    }
-                    NavigationLink(value: LeafDestination.settings) {
-                        quickAccessAddTile
-                    }
-                    .buttonStyle(.plain)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(coordinator.favoriteApps) { app in
+                    quickAccessTile(app)
                 }
-                .padding(.vertical, 2)
+                NavigationLink(value: LeafDestination.settings) {
+                    quickAccessAddTile
+                }
+                .buttonStyle(.plain)
             }
+            .padding(.vertical, 2)
         }
     }
 
@@ -526,21 +572,30 @@ struct HomeView: View {
     }
 
     // MARK: - Dock (redesign spec §3.1 — replaces the 2×2 hub grid; Home
-    // is the only screen that shows it). Items share width equally
-    // (`frame(maxWidth: .infinity)` per tile) and labels wrap when they
-    // must, so the five tiles — medical (the renamed meds tile, medical
-    // task 2026-09-07), reminders, call, appliance, directions
-    // (directions-screen task, 2026-09-07) — fit one row at the standard
-    // widths the surrounding screens were tuned at.
+    // is the only screen that shows it). Six tiles in TWO rows of three
+    // (calendar-display task, 2026-09-09): one row of six read as a
+    // cluttered shelf, so the user asked for two rows — top: appliance
+    // helper, directions, feeds; bottom: the rest (meds, reminders,
+    // call). Same `dockItem` components, same ≥44pt targets, same
+    // material card, same accessibility labels — only the layout
+    // changed. Items share width equally (`frame(maxWidth: .infinity)`
+    // per tile) and labels wrap when they must.
 
     private var dock: some View {
-        HStack(spacing: 2) {
-            dockItem(.meds, icon: "pills.fill", tint: .meds, titleKey: "home.hub.meds")
-            dockItem(.reminders, icon: "clock.fill", tint: .reminders, titleKey: "home.hub.reminders")
-            dockCallItem
-            dockApplianceItem
-            dockDirectionsItem
-            dockItem(.feed, icon: "rectangle.stack.fill", tint: .feeds, titleKey: "home.hub.feeds")
+        VStack(spacing: 2) {
+            // Top row (the user's ordering, calendar-display task):
+            // appliance helper, directions, feeds.
+            HStack(spacing: 2) {
+                dockApplianceItem
+                dockDirectionsItem
+                dockItem(.feed, icon: "rectangle.stack.fill", tint: .feeds, titleKey: "home.hub.feeds")
+            }
+            // Bottom row: the rest — meds, reminders, call.
+            HStack(spacing: 2) {
+                dockItem(.meds, icon: "pills.fill", tint: .meds, titleKey: "home.hub.meds")
+                dockItem(.reminders, icon: "clock.fill", tint: .reminders, titleKey: "home.hub.reminders")
+                dockCallItem
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 10)
@@ -638,26 +693,7 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Greeting text (spec §4.1.1)
-
-    /// Greeting salutation + clock time, both resolved from ONE instant
-    /// (2026-09-07): topBar calls this with the TimelineView context date,
-    /// so the salutation and the shown time can never disagree and the
-    /// clock ticks every minute with no manual Timer. Single render site
-    /// (topBar), so there is no Date()-based convenience overload.
-    private func greetingText(at date: Date) -> String {
-        let time = date.formatted(date: .omitted, time: .shortened)
-        let hour = Calendar.current.component(.hour, from: date)
-        let locale = coordinator.appLanguage.locale
-        switch hour {
-        case 5..<12:
-            return "\(L10n.str("home.greeting.morning", locale: locale)), \(time)"
-        case 12..<17:
-            return L10n.fmt("home.greeting.time", locale: locale, time)
-        default:
-            return "\(L10n.str("home.greeting.night", locale: locale)), \(time)"
-        }
-    }
+    // MARK: - Setup strip text
 
     private var remainingText: String {
         L10n.fmt("home.setupRemaining", locale: coordinator.appLanguage.locale,
