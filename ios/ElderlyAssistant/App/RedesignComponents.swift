@@ -605,6 +605,19 @@ struct ConversationHistorySheet: View {
             Text(exchange.timestamp.formatted(date: .omitted, time: .shortened))
                 .font(.system(size: DesignTokens.minCaptionPointSize))
                 .foregroundColor(DesignTokens.textSecondary)
+            // [TURN-TIMING] Per-stage timing caption under the assistant's
+            // reply — shown only when the Voice personalization "Show
+            // conversation timing" toggle is ON, and only under the row
+            // the caption belongs to (the latest finalized turn).
+            if coordinator.voiceTimingDebugEnabled,
+               exchange.role == .assistant,
+               exchange.id == coordinator.lastTurnTimingExchangeID,
+               let caption = coordinator.lastTurnTimingCaption {
+                Text(caption)
+                    .font(.system(size: DesignTokens.minCaptionPointSize, design: .monospaced))
+                    .foregroundColor(DesignTokens.textSecondary.opacity(0.75))
+                    .padding(.top, 2)
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

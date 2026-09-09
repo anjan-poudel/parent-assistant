@@ -350,6 +350,9 @@ final class CommandRouter {
     private let observabilityBus: ObservabilityBus
     private let speaker: Speaker?
     private let interpreter: CommandInterpreter
+    /// [TURN-TIMING] Turn-scoped stage tracer (nil = timing off — tests
+    /// and any construction site that does not opt in).
+    private let turnTracer: VoiceTurnLatencyTracer?
 
     /// [REST-DIP-FIX] (2026-09-08) Turn-scoped "async reply pending"
     /// token. Set while `route()` has handed the turn to an ASYNC
@@ -446,11 +449,13 @@ final class CommandRouter {
          localToolLogStore: LocalToolLogStore? = nil,
          youtubeConfigStore: YouTubeConfigStore? = nil,
          youtubeTransport: LocalToolTransport? = nil,
-         youtubeLinkOpener: CallLinkOpening? = nil) {
+         youtubeLinkOpener: CallLinkOpening? = nil,
+         turnTracer: VoiceTurnLatencyTracer? = nil) {
         self.coordinator = coordinator
         self.observabilityBus = observabilityBus
         self.speaker = speaker
         self.interpreter = interpreter
+        self.turnTracer = turnTracer
         self.pluginRegistry = pluginRegistry
         self.geminiClient = geminiClient
         self.searchConfigStore = searchConfigStore
@@ -927,8 +932,15 @@ final class CommandRouter {
             // its return to idle until the completion below resolves the
             // token — AFTER the reply speech was committed.
             markTurnReplyPending()
+            // [TURN-TIMING] The LLM round-trip starts here — on-device
+            // llama.cpp or the cloud interpreter (whose collapsed call
+            // may have resolved from the ASR preparse slot, making this
+            // span ~0 ms — both are honest).
+            turnTracer?.mark("llm_start")
             interpreter.interpret(transcript: raw, context: context) { [weak self] command in
                 guard let self else { return }
+                // [TURN-TIMING] The model answered (or abstained).
+                self.turnTracer?.mark("llm_done")
                 if let command = command {
                     // REPHRASE band (spec §4, decision #6): a mid-band
                     // tier-`free` command becomes a yes/no question rather
@@ -954,6 +966,9 @@ final class CommandRouter {
                 // This runs AFTER the commit, so the reply's speech-start
                 // hop is enqueued before the pipeline's deferred idle hop.
                 self.resolveTurnReplyPending()
+                // [TURN-TIMING] Dispatch resolved — the tracer finalizes
+                // now or once the reply speech finishes.
+                self.turnTracer?.endTurn()
             }
             // We can't return a synchronous result once the LLM path fires;
             // report the transcript as "handled asynchronously".
@@ -1834,10 +1849,14 @@ final class CommandRouter {
             coordinator?.noteAssistantSpoke(line)
         }
         coordinator?.noteSpeakingStarted()
+        // [TURN-TIMING] Same speak bookends as `speak(text:)` — one
+        // queued entry for the whole sequence.
+        turnTracer?.noteSpeakQueued()
         Task {
             for line in lines {
                 await speaker.speak(line, locale: locale)
             }
+            self.turnTracer?.noteSpeakFinished()
             coordinator?.noteSpeakingEnded()
         }
     }
@@ -2263,11 +2282,16 @@ final class CommandRouter {
         let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         coordinator?.noteAssistantSpoke(text)
         coordinator?.noteSpeakingStarted()
+        // [TURN-TIMING] The reply utterance is handed to the speaker.
+        turnTracer?.noteSpeakQueued()
         Task {
             await speaker.speak(text, locale: locale)
             #if DEBUG
             print("[command_router][DEBUG] speaker.speak() returned (finished or cancelled)")
             #endif
+            // [TURN-TIMING] Reply speech finished — the last one
+            // finalizes the turn.
+            self.turnTracer?.noteSpeakFinished()
             coordinator?.noteSpeakingEnded()
         }
     }

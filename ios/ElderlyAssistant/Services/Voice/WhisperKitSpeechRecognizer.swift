@@ -19,6 +19,10 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
 
     private let modelStore: ModelStore?
     private let observabilityBus: ObservabilityBus
+    /// [TURN-TIMING] Turn-scoped stage tracer, property-injected by the
+    /// coordinator (nil = timing off). Marks `asr_loaded` with the
+    /// measured load ms when a model loads mid-turn.
+    var turnTracer: VoiceTurnLatencyTracer?
 
     /// Which catalog artifact (a directory) to load in normal mode.
     private let preferredModelID: ModelID
@@ -239,6 +243,9 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         kitInstance = created
         loadedDescriptor = descriptor
         emit("model_loaded", errorCode: nil)
+        // [TURN-TIMING] Model ready — the load ms rides as a point entry
+        // when this load happened inside a live turn.
+        turnTracer?.mark("asr_loaded", elapsedMs: loadMs)
         print("[whisperkit_stt] model_loaded \(descriptor) load_ms=\(loadMs)")
         // What hardware the components will actually run on.
         // NE = Neural Engine (ANE). The simulator forces

@@ -56,6 +56,10 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
 
     private let modelStore: ModelStore
     private let observabilityBus: ObservabilityBus
+    /// [TURN-TIMING] Turn-scoped stage tracer, property-injected by the
+    /// coordinator (nil = timing off). Marks `asr_loaded` with the
+    /// measured load ms when a model loads mid-turn.
+    var turnTracer: VoiceTurnLatencyTracer?
     private let config: Config
 
     /// Held during a single utterance. int16 PCM at 16 kHz mono.
@@ -719,6 +723,9 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         let loadStart = CFAbsoluteTimeGetCurrent()
         let whisper = Whisper(fromFileURL: modelURL, withParams: params)
         let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
+        // [TURN-TIMING] Model ready — the load ms rides as a point entry
+        // when this load happened inside a live turn.
+        turnTracer?.mark("asr_loaded", elapsedMs: loadMs)
         // `backend` is the whisper.cpp-side decision on where the encoder
         // runs. whisper.cpp only auto-loads a sibling `-encoder.mlmodelc`
         // for models whose dims exactly match a stock OpenAI arch (see

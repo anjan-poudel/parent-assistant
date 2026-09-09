@@ -14104,6 +14104,40 @@
           }
         }
       }
+    },
+    "voiceSettings.timing.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show conversation timing"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कुराकानीको समय देखाऊ"
+          }
+        }
+      }
+    },
+    "voiceSettings.timing.caption": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows how long each step of a voice reply took (listening, thinking, speaking) under the assistant's reply in the conversation. For diagnosing slow replies only — these timings stay on this device and are never sent anywhere."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहायकको जवाफमुनि आवाजको जवाफका हरेक चरण (सुन्ने, सोच्ने, बोल्ने) लाई कति समय लाग्यो भन्ने देखाउँछ। ढिलो जवाफ जाँच्नका लागि मात्र — यी समयहरू यही यन्त्रमै बस्छन्, कतै पठाइँदैनन्।"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

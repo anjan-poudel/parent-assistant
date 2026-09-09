@@ -50,6 +50,21 @@ final class VoiceSettingsModel: ObservableObject {
         }
     }
 
+    /// [TURN-TIMING] Persisted under "voiceTimingDebug" (default OFF) —
+    /// diagnostics-only: shows a per-stage timing caption under the
+    /// assistant's reply in the conversation transcript. One writer =
+    /// this model; `AppCoordinator` reads the key when rendering the
+    /// caption. The `voice_turn_timing` console event itself fires
+    /// regardless of this toggle (remote debugging evidence).
+    @Published var timingDebugEnabled: Bool {
+        didSet {
+            guard timingDebugEnabled != oldValue else { return }
+            defaults.set(timingDebugEnabled, forKey: Self.timingDebugKey)
+        }
+    }
+
+    static let timingDebugKey = "voiceTimingDebug"
+
     private let noiseFilterController: NoiseFilterPreferenceControlling
     private let defaults: UserDefaults
 
@@ -59,6 +74,7 @@ final class VoiceSettingsModel: ObservableObject {
         self.defaults = defaults
         self.noiseFilterEnabled = noiseFilterController.noiseFilterEnabled
         self.accentBiasEnabled = DialectBiasSettings.isEnabled(defaults: defaults)
+        self.timingDebugEnabled = defaults.bool(forKey: Self.timingDebugKey)
     }
 }
 

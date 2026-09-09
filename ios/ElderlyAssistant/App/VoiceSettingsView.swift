@@ -91,6 +91,7 @@ struct VoicePersonalizationSettingsView: View {
 
                     noiseFilterCard
                     accentBiasCard
+                    timingDebugCard
                     biometricSection
 
                     Text("voiceSettings.privacy")
@@ -161,6 +162,27 @@ struct VoicePersonalizationSettingsView: View {
             .tint(DesignTokens.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Text("voiceSettings.accent.caption")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundColor(DesignTokens.textSecondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    // MARK: - Conversation timing (diagnostics, default OFF)
+
+    private var timingDebugCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: $settings.timingDebugEnabled) {
+                Text("voiceSettings.timing.title")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundColor(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            Text("voiceSettings.timing.caption")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
                 .foregroundColor(DesignTokens.textSecondary)
         }

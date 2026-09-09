@@ -65,6 +65,9 @@ final class VoicePipeline {
     private var noiseSuppressor: NoiseSuppressor?
     private let router: CommandRouter
     private let observabilityBus: ObservabilityBus
+    /// [TURN-TIMING] Turn-scoped stage tracer (nil = timing off — tests
+    /// and any construction site that does not opt in).
+    private let turnTracer: VoiceTurnLatencyTracer?
 
     private let audioEngine: AVAudioEngine
     private let processingQueue = DispatchQueue(label: "voice.pipeline.processing",
@@ -157,7 +160,8 @@ final class VoicePipeline {
          voiceActivityDetector: VoiceActivityDetector? = nil,
          noiseSuppressor: NoiseSuppressor? = nil,
          router: CommandRouter,
-         observabilityBus: ObservabilityBus) {
+         observabilityBus: ObservabilityBus,
+         turnTracer: VoiceTurnLatencyTracer? = nil) {
         self.audioSession = audioSession
         self.audioEngine = audioEngine
         self.wakeWordEngine = wakeWordEngine
@@ -167,6 +171,7 @@ final class VoicePipeline {
         self.noiseSuppressor = noiseSuppressor
         self.router = router
         self.observabilityBus = observabilityBus
+        self.turnTracer = turnTracer
 
         self.wakeWordEngine.onDetection = { [weak self] in
             self?.handleWakeDetected()
@@ -203,6 +208,8 @@ final class VoicePipeline {
                 guard let self, self.captureGeneration == generation,
                       self.state == .capturingCommand else { return }
                 self.emit("vad_end_of_utterance", outcome: "success")
+                // [TURN-TIMING] The user stopped speaking — capture ends.
+                self.turnTracer?.mark("vad_end")
                 self.speechRecognizer.finish()
             }
         }
@@ -294,11 +301,23 @@ final class VoicePipeline {
         audioSession.deactivate()
         state = .stopped
         emit("pipeline_stopped", outcome: "success")
+        // [TURN-TIMING] A cancelled capture's turn is abandoned — no
+        // evidence to report.
+        turnTracer?.cancelTurn()
     }
 
     /// Debug entry point.
     func simulateWakeWordDetection() {
         handleWakeDetected()
+    }
+
+    /// [TURN-TIMING] Internal for the seam tests (no audio hardware
+    /// involved — `start()` is unreachable there, see the noise-filter
+    /// seam's inputNode-abort doctrine): flips the pipeline to `.idle`
+    /// so a full capture → route → reply turn can be driven through the
+    /// real `handleWakeDetected` path via `simulateWakeWordDetection()`.
+    func debugEnterIdleForTesting() {
+        state = .idle
     }
 
     // MARK: - Tap installation
@@ -492,6 +511,8 @@ final class VoicePipeline {
         // `beginNoiseFilterCapture` for the contract.
         beginNoiseFilterCapture()
         emit("wake_word_detected", outcome: "success")
+        // [TURN-TIMING] One voice turn starts here.
+        turnTracer?.beginTurn()
 
         if speechRecognizer.ownsAudioCapture {
             // Legacy path: STT owns the input node. Tear down our tap and
@@ -560,6 +581,9 @@ final class VoicePipeline {
             // dropped whole: stop() already reset the VAD/state, or a
             // newer capture owns the tail.
             guard self.captureGeneration == generation else { return }
+            // [TURN-TIMING] Recognition settled (success OR failure) —
+            // the ASR span closes here.
+            self.turnTracer?.mark("asr_done")
             self.vad?.stop()
             // [NOISE-FILTER] Capture bookend (end) — see
             // `endNoiseFilterCapture` for the contract.
@@ -583,11 +607,15 @@ final class VoicePipeline {
             switch result {
             case .success(let transcript):
                 _ = self.router.route(transcript: transcript)
+                // [TURN-TIMING] The router's synchronous decision is made.
+                self.turnTracer?.mark("router_done")
             case .failure(let err):
                 self.emit("recognition_failed", outcome: "failure",
                           errorCode: String(describing: err))
                 let msg = "STT: \(err)"
                 DispatchQueue.main.async { self.onSTTError?(msg) }
+                // [TURN-TIMING] No reply can exist — close the turn.
+                self.turnTracer?.endTurn()
             }
             if self.router.isTurnReplyPending {
                 // The route handed the turn to an async dispatch whose
@@ -598,8 +626,13 @@ final class VoicePipeline {
                 // today's behavior — instead of dropping to rest for the
                 // beat before the reply starts (the reported rest dip).
                 self.holdIdleForTurnReply(generation: generation)
+                // The async LLM dispatch ends the turn (after the reply
+                // speech finishes) — see CommandRouter's interpret path.
             } else {
                 self.resumeWakeListening()
+                // [TURN-TIMING] Synchronous turn — the dispatch already
+                // resolved; finalizes now or after pending speech.
+                self.turnTracer?.endTurn()
             }
         }
     }
