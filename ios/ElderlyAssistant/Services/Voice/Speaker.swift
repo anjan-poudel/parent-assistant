@@ -167,6 +167,10 @@ import SherpaOnnx
 final class SherpaTTSEngine: TTSEngine {
     private var engines: [URL: SherpaOnnxOfflineTtsWrapper] = [:]
     private let engineQueue = DispatchQueue(label: "tts.sherpa.engine", qos: .userInitiated)
+    /// [TURN-TIMING] Fired once per NEW engine creation with the load ms
+    /// (cached engines do not fire) — the `tts_voice_loaded` stage
+    /// boundary, wired by PiperVoiceSpeaker to the turn tracer.
+    var onEngineCreated: ((_ loadMs: Int) -> Void)?
 
     func synthesize(_ text: String, voiceDirectory: URL, speed: Float,
                     speakerID: Int = 0) throws -> URL {
@@ -214,11 +218,16 @@ final class SherpaTTSEngine: TTSEngine {
         )
         let modelCfg = sherpaOnnxOfflineTtsModelConfig(vits: vits, numThreads: 2, debug: 0)
         var cfg = sherpaOnnxOfflineTtsConfig(model: modelCfg)
+        // [TURN-TIMING] Engine load is the expensive one-time part of the
+        // first synthesis — measure it for the `tts_voice_loaded` stage.
+        let loadStart = CFAbsoluteTimeGetCurrent()
         let tts = SherpaOnnxOfflineTtsWrapper(config: &cfg)
+        let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
         guard tts.sampleRate > 0 else {
             throw TTSEngineError.engineInitFailed(dir)
         }
         engines[dir] = tts
+        onEngineCreated?(loadMs)
         return tts
     }
 }
@@ -227,6 +236,9 @@ final class SherpaTTSEngine: TTSEngine {
 /// PiperVoiceSpeaker falls back to system speech. Keeps the app
 /// compilable in minimal configurations.
 final class SherpaTTSEngine: TTSEngine {
+    /// [TURN-TIMING] Never fires in this configuration (no engine is ever
+    /// created) — declared so PiperVoiceSpeaker's wiring compiles both ways.
+    var onEngineCreated: ((_ loadMs: Int) -> Void)?
     func synthesize(_ text: String, voiceDirectory: URL, speed: Float,
                     speakerID: Int = 0) throws -> URL {
         throw TTSEngineError.engineInitFailed(voiceDirectory)
@@ -260,6 +272,8 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     private let modelStore: ModelStore
     private let engine: TTSEngine
     private let bundle: Bundle
+    /// [TURN-TIMING] Turn-scoped stage tracer (nil = timing off).
+    private let turnTracer: VoiceTurnLatencyTracer?
 
     /// Elderly-friendly pace: 5% slower than the voice's natural rate.
     static let defaultSpeed: Float = 0.95
@@ -274,12 +288,20 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
          modelStore: ModelStore,
          engine: TTSEngine? = nil,
          silenceFallback: Speaker = NullSpeaker(),
-         bundle: Bundle = .main) {
+         bundle: Bundle = .main,
+         turnTracer: VoiceTurnLatencyTracer? = nil) {
         self.fallback = fallback
         self.silenceFallback = silenceFallback
         self.observabilityBus = observabilityBus
         self.modelStore = modelStore
-        self.engine = engine ?? SherpaTTSEngine()
+        self.turnTracer = turnTracer
+        let sherpa = SherpaTTSEngine()
+        // [TURN-TIMING] Voice engine ready — the load ms rides as a point
+        // entry when a fresh engine loads inside a live turn.
+        sherpa.onEngineCreated = { loadMs in
+            turnTracer?.mark("tts_voice_loaded", elapsedMs: loadMs)
+        }
+        self.engine = engine ?? sherpa
         self.bundle = bundle
         super.init()
     }
@@ -371,6 +393,9 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         }
         generationTask = task
         let wav = await task.value
+        // [TURN-TIMING] Synthesis finished (voice load + generation) —
+        // playback starts next. No-op outside a live turn.
+        turnTracer?.mark("tts_done")
         guard let wav, !cancelled else {
             if wav == nil && !cancelled {
                 emit("tts_synthesis_failed_fallback", locale: spec.locale)

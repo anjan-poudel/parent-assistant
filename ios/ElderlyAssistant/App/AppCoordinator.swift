@@ -311,6 +311,17 @@ final class AppCoordinator: ObservableObject {
     /// `livePartialTranscript ?? lastTranscript`.
     @Published var livePartialTranscript: String?
 
+    /// [TURN-TIMING] Compact per-stage timing caption for the LATEST
+    /// turn (`"asr 120ms · llm 2.4s · tts 310ms"`), set by the tracer's
+    /// finalize callback. Nil until a turn finalizes, and nil again when
+    /// a turn produced no measurable reply speech. Diagnostics only —
+    /// shown under the assistant reply in the transcript when
+    /// `voiceTimingDebugEnabled` is ON.
+    @Published private(set) var lastTurnTimingCaption: String?
+    /// The assistant exchange the caption belongs to — the transcript
+    /// sheet renders the caption only under this row.
+    @Published private(set) var lastTurnTimingExchangeID: UUID?
+
     // MARK: - Conversation history & outcome (redesign spec §3.1, §5)
 
     /// The persisted exchange model lives in `ChatHistoryStore`
@@ -517,6 +528,10 @@ final class AppCoordinator: ObservableObject {
 
     private let storage: EncryptedLocalStorage
     private let observabilityBus: ObservabilityBus
+    /// [TURN-TIMING] Turn-scoped stage tracer — created in init (after
+    /// the bus) and injected into the pipeline/router/speaker composition
+    /// in `start()` and the recognizers below.
+    private let turnTracer: VoiceTurnLatencyTracer
     private let medicationScheduler: MedicationScheduler
     private let alarmScheduler: UNNotificationScheduler
     private let familyNotifier: APNsFamilyNotifier
@@ -1008,6 +1023,12 @@ final class AppCoordinator: ObservableObject {
         let bus = ConsoleObservabilityBus(sanitiser: LogSanitiser())
         self.storage = KeychainEncryptedStorage()
         self.observabilityBus = bus
+        // [TURN-TIMING] The turn tracer lives as long as the app: every
+        // voice component (pipeline, router, speaker, recognizers) shares
+        // it. Its finalize callback (the transcript caption) is wired in
+        // `start()` — a self-capturing closure cannot be assigned before
+        // init finishes (definite-initialization).
+        self.turnTracer = VoiceTurnLatencyTracer(observabilityBus: bus)
         self.alarmScheduler = UNNotificationScheduler()
         // [STARTUP-PERF] The keychain-backed stores below are CREATED
         // here (cheap objects) but their loads moved to the background
@@ -1282,6 +1303,10 @@ final class AppCoordinator: ObservableObject {
             observabilityBus: bus,
             modelStore: modelStore
         )
+        // [TURN-TIMING] Both whisper recognizers mark `asr_loaded` with
+        // their measured load ms when a load happens inside a live turn.
+        self.whisperSpeechRecognizer.turnTracer = turnTracer
+        self.whisperKitSpeechRecognizer.turnTracer = turnTracer
         // Bench hook (debug): point the ANE runtime at a sideloaded model
         // folder or a WhisperKit-named model via scheme env vars —
         // WHISPERKIT_MODEL_FOLDER / WHISPERKIT_MODEL_NAME. Production
@@ -1614,10 +1639,18 @@ final class AppCoordinator: ObservableObject {
         // VITS via sherpa-onnx (Nepali + English voices bundled), with
         // SystemSpeechSpeaker as the automatic fallback whenever a voice
         // is not installed — see docs/tts-implementation-plan.md.
+        // [TURN-TIMING] Finalize callback → transcript caption. Wired
+        // here (not in init): a self-capturing closure assigned during
+        // init is rejected by definite-initialization, and the caption
+        // only matters once the voice composition exists anyway.
+        turnTracer.onTurnFinalized = { [weak self] stages, _ in
+            DispatchQueue.main.async { self?.applyTurnTimingCaption(stages) }
+        }
         let speaker: Speaker = PiperVoiceSpeaker(
             fallback: systemSpeaker,
             observabilityBus: observabilityBus,
-            modelStore: modelStore
+            modelStore: modelStore,
+            turnTracer: turnTracer
         )
         self.speaker = speaker
         // The registry is built in init but the speaker only exists now —
@@ -1761,7 +1794,8 @@ final class AppCoordinator: ObservableObject {
             // fallback).
             youtubeConfigStore: youtubeConfigStore,
             youtubeTransport: URLSession.shared,
-            youtubeLinkOpener: SystemCallLinkOpener()
+            youtubeLinkOpener: SystemCallLinkOpener(),
+            turnTracer: turnTracer
         )
         // [STARTUP-PERF] Retained for the boot's pipeline build.
         commandRouter = router
@@ -2026,7 +2060,8 @@ final class AppCoordinator: ObservableObject {
             speechRecognizer: fallbackSpeechRecognizer,
             voiceActivityDetector: voiceActivityDetector,
             router: router,
-            observabilityBus: observabilityBus
+            observabilityBus: observabilityBus,
+            turnTracer: turnTracer
         )
         // [NOISE-FILTER] Attach the restored A/B stage (nil when OFF —
         // the hot-swap seam emits the honest engine name either way).
@@ -2526,6 +2561,32 @@ final class AppCoordinator: ObservableObject {
             self?.lastAssistantReply = text
             self?.appendHistory(.assistant, text)
         }
+    }
+
+    // MARK: - Turn timing ([TURN-TIMING], 2026-09-09)
+
+    /// Whether the transcript shows the per-stage timing caption. Read
+    /// live from UserDefaults (the Voice personalization toggle's key) so
+    /// the sheet always sees the current setting.
+    var voiceTimingDebugEnabled: Bool {
+        UserDefaults.standard.bool(forKey: VoiceSettingsModel.timingDebugKey)
+    }
+
+    /// Main-queue entry point of the tracer's finalize callback: derives
+    /// the compact caption and pins it to the newest assistant exchange.
+    private func applyTurnTimingCaption(_ stages: [VoiceTurnLatencyTracer.StageTiming]) {
+        let caption = VoiceTurnLatencyTracer.caption(stages: stages)
+        guard !caption.isEmpty else {
+            lastTurnTimingCaption = nil
+            lastTurnTimingExchangeID = nil
+            return
+        }
+        lastTurnTimingCaption = caption
+        // The turn's reply is the newest assistant exchange by the time
+        // the turn finalizes (speech finished — every reply line was
+        // already appended by `noteAssistantSpoke`).
+        lastTurnTimingExchangeID = conversationHistory
+            .last(where: { $0.role == .assistant })?.id
     }
 
     /// Speaks a catalog key in the active language (used by the yes/no
