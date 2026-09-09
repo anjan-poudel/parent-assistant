@@ -837,14 +837,6 @@
 			path = Observability;
 			sourceTree = "<group>";
 		};
-		04FF527FC79AD0730178FEB9 /* Services */ = {
-			isa = PBXGroup;
-			children = (
-				C6B60BFD0118593572368075 /* Alarms */,
-			);
-			path = Services;
-			sourceTree = "<group>";
-		};
 		058C5BAC89ECA72222E6FA65 /* Plugins */ = {
 			isa = PBXGroup;
 			children = (
@@ -871,14 +863,6 @@
 				2DCCAEADA0E629BF122A901D /* NativeCalendarScanning.swift */,
 			);
 			path = ExternalCalendar;
-			sourceTree = "<group>";
-		};
-		10A0DC889A3FEECCEF7170B2 /* Medical medical-appointments */ = {
-			isa = PBXGroup;
-			children = (
-				AFC6DE75399EA632233EF5FE /* ios */,
-			);
-			path = "Medical medical-appointments";
 			sourceTree = "<group>";
 		};
 		11787E1E93605DB453F56F21 /* Storage */ = {
@@ -1085,14 +1069,6 @@
 				9AA00B88AADB64F15A1BC85C /* whisper-medium-ne-q5_1.bin */,
 			);
 			path = Models;
-			sourceTree = "<group>";
-		};
-		4901F038FCD8B9EB77C5964A /* ElderlyAssistant */ = {
-			isa = PBXGroup;
-			children = (
-				DDE3E88BA2FF62CE59031467 /* Services */,
-			);
-			path = ElderlyAssistant;
 			sourceTree = "<group>";
 		};
 		4A039879108CB7AD37A136B8 /* CalendarSync */ = {
@@ -1331,7 +1307,6 @@
 				5F24DE49A503125691ED421C /* History */,
 				A6C72F1FF037EB0AEE8F6FE1 /* Intents */,
 				00C6953E936B73FA7DBE2624 /* Medical */,
-				10A0DC889A3FEECCEF7170B2 /* Medical medical-appointments */,
 				516D8D3E5BED77105E778CE8 /* MedicationScheduler */,
 				5F2E9C5870D733A5D81877EB /* ModelStore */,
 				95A546E65612930092FFF468 /* Navigation */,
@@ -1410,22 +1385,6 @@
 				FE6F005DCBC13E2264470750 /* Widgets */,
 			);
 			path = App;
-			sourceTree = "<group>";
-		};
-		8EA6CADC252440295A376985 /* Services */ = {
-			isa = PBXGroup;
-			children = (
-				B536A3A24617555EA45305BF /* Medical alarms-timers */,
-			);
-			path = Services;
-			sourceTree = "<group>";
-		};
-		90A69DB890F44045C5942992 /* ElderlyAssistantTests */ = {
-			isa = PBXGroup;
-			children = (
-				04FF527FC79AD0730178FEB9 /* Services */,
-			);
-			path = ElderlyAssistantTests;
 			sourceTree = "<group>";
 		};
 		95A546E65612930092FFF468 /* Navigation */ = {
@@ -1525,28 +1484,12 @@
 			path = CalendarSync;
 			sourceTree = "<group>";
 		};
-		AFC6DE75399EA632233EF5FE /* ios */ = {
-			isa = PBXGroup;
-			children = (
-				FB25B35EB1435237DB6070EF /* ElderlyAssistantTests */,
-			);
-			path = ios;
-			sourceTree = "<group>";
-		};
 		B26870B316F0C29E3B02D2FB /* Theme */ = {
 			isa = PBXGroup;
 			children = (
 				44C19F8493D2084A32B36889 /* AppTheme.swift */,
 			);
 			path = Theme;
-			sourceTree = "<group>";
-		};
-		B536A3A24617555EA45305BF /* Medical alarms-timers */ = {
-			isa = PBXGroup;
-			children = (
-				C1D69CCB92C9A183CB12B77E /* ios */,
-			);
-			path = "Medical alarms-timers";
 			sourceTree = "<group>";
 		};
 		B79CCE984491227F35678935 /* Medical */ = {
@@ -1578,14 +1521,6 @@
 			path = Appliance;
 			sourceTree = "<group>";
 		};
-		C1D69CCB92C9A183CB12B77E /* ios */ = {
-			isa = PBXGroup;
-			children = (
-				4901F038FCD8B9EB77C5964A /* ElderlyAssistant */,
-			);
-			path = ios;
-			sourceTree = "<group>";
-		};
 		C4A83FDCCD371CE04E17C791 /* ModelStore */ = {
 			isa = PBXGroup;
 			children = (
@@ -1595,13 +1530,6 @@
 				2DB7A838F1F21B8B1915EC98 /* TTSVoiceInstallTests.swift */,
 			);
 			path = ModelStore;
-			sourceTree = "<group>";
-		};
-		C6B60BFD0118593572368075 /* Alarms */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Alarms;
 			sourceTree = "<group>";
 		};
 		CB538703F727B267754E33F0 /* Products */ = {
@@ -1695,14 +1623,6 @@
 			path = Voice;
 			sourceTree = "<group>";
 		};
-		DDE3E88BA2FF62CE59031467 /* Services */ = {
-			isa = PBXGroup;
-			children = (
-				FB0A88604B00F702626A0819 /* Alarms alarms-timers */,
-			);
-			path = Services;
-			sourceTree = "<group>";
-		};
 		E03596829BECC3B1CF7B15C7 /* ElderlyAssistant */ = {
 			isa = PBXGroup;
 			children = (
@@ -1719,30 +1639,6 @@
 				E77347DCEDAB4A20CDB51D3E /* NotificationFacadeTests.swift */,
 			);
 			path = Notifications;
-			sourceTree = "<group>";
-		};
-		F8D450C9C4005BC2DBBA80DA /* ios */ = {
-			isa = PBXGroup;
-			children = (
-				90A69DB890F44045C5942992 /* ElderlyAssistantTests */,
-			);
-			path = ios;
-			sourceTree = "<group>";
-		};
-		FB0A88604B00F702626A0819 /* Alarms alarms-timers */ = {
-			isa = PBXGroup;
-			children = (
-				F8D450C9C4005BC2DBBA80DA /* ios */,
-			);
-			path = "Alarms alarms-timers";
-			sourceTree = "<group>";
-		};
-		FB25B35EB1435237DB6070EF /* ElderlyAssistantTests */ = {
-			isa = PBXGroup;
-			children = (
-				8EA6CADC252440295A376985 /* Services */,
-			);
-			path = ElderlyAssistantTests;
 			sourceTree = "<group>";
 		};
 		FE6F005DCBC13E2264470750 /* Widgets */ = {
