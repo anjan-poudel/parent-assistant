@@ -1880,35 +1880,45 @@ final class AppCoordinator: ObservableObject {
     /// existing honest Null-engine behavior, and a failed pipeline start
     /// surfaces exactly as it always did (voice error state) and is
     /// recorded on the boot machine.
+    ///
+    /// [BOOT-LATENCY] Phase 2.5 (the warm) starts BEFORE the KWS build:
+    /// it runs on its own background queue and needs nothing the KWS
+    /// build produces, so the main-thread sherpa construction can never
+    /// gate `.ready` — boot advances, and `kws_engine_ready` arrives
+    /// when it arrives.
     private func bootPrepareVoiceEngine() {
+        self.startBootWarmPhase()
         let wakeWordLaunch = Self.makeWakeWordEngine(observabilityBus: observabilityBus)
         self.wakeWordEngine = wakeWordLaunch.engine
         self.wakeWordEngineRealAtLaunch = wakeWordLaunch.isReal
         self.buildAndStartVoicePipeline()
-        // [WARM-START] Phase 2.5 — preload the engines the first
-        // conversation needs, on a dedicated background queue so the
-        // boot machine can always move forward (watchdog below). Phase 3
-        // now starts when the warm phase settles instead of directly
-        // here.
-        self.startBootWarmPhase()
     }
 
     // MARK: - Boot phase 2.5 — engine warm-start ([WARM-START])
-
-    /// Seconds the warm phase may hold the boot before the watchdog
-    /// settles it as failed and boot moves on. Generous for a first-run
-    /// CoreML specialization (~30 s); the detached warm keeps running and
-    /// still caches the loaded model for the first utterance.
-    private static let warmWatchdogSeconds: TimeInterval = 45
 
     /// Main-confined flag: the warm phase settled (finished or watchdog)
     /// — guards the two completion paths against double-advancing boot.
     private var warmPhaseSettled = false
     private var warmWatchdogWork: DispatchWorkItem?
+    /// ONE runner for both warm slices: a post-boot warm dispatched
+    /// while a boot warm is still finishing queues BEHIND it on the
+    /// same serial queue — two engine constructions never overlap, so
+    /// the memory spike stays bounded (the runner's own contract).
+    private lazy var warmRunner = WarmStartRunner(
+        stt: whisperKitSpeechRecognizer,
+        tts: speaker as? TTSVoiceWarming,
+        observabilityBus: observabilityBus)
+    /// The plan slice deferred past `.ready` (secondary voices,
+    /// simulator TTS warms). Consumed exactly once — boot runs once per
+    /// launch.
+    private var postBootWarmSteps: [WarmStartStep] = []
 
-    /// Plans the warm from live config (resolved HERE on main), reports
-    /// the plan's progress through the spinner's `.warmingEngines` stage,
-    /// and hands execution to `WarmStartRunner` on its own queue.
+    /// Plans the warm from live config (resolved HERE on main), splits
+    /// the plan on its lifecycle slots, reports the boot slice's
+    /// progress through the spinner's `.warmingEngines` stage, and hands
+    /// execution to `WarmStartRunner` on its own queue. The post-boot
+    /// slice runs after `.ready` (`startDetachedPostBootWarm`) — same
+    /// settings gates, only the slot moved, so it can never delay boot.
     private func startBootWarmPhase() {
         warmPhaseSettled = false
         let config = WarmStartConfig(
@@ -1924,18 +1934,17 @@ final class AppCoordinator: ObservableObject {
             isSimulator: Self.isSimulator
         )
         let plan = WarmStartPlanner.plan(for: config)
-        guard !plan.isEmpty else {
-            // Nothing to warm (preference off) — skip the stage entirely
-            // so the spinner never flashes it.
+        let bootPlan = plan.filter { $0.phase == .boot }
+        postBootWarmSteps = plan.filter { $0.phase == .postBoot }
+        guard !bootPlan.isEmpty else {
+            // Nothing warms during boot (preference off, or the whole
+            // plan deferred — the simulator defers every TTS warm) —
+            // skip the stage entirely so the spinner never flashes it.
             advancePastWarmPhase()
             return
         }
         self.startupBoot.advance(to: .warmingEngines)
-        let runner = WarmStartRunner(
-            stt: whisperKitSpeechRecognizer,
-            tts: speaker as? TTSVoiceWarming,
-            observabilityBus: observabilityBus)
-        runner.run(plan: plan) { [weak self] outcomes in
+        warmRunner.run(plan: bootPlan) { [weak self] outcomes in
             DispatchQueue.main.async {
                 guard let self, !self.warmPhaseSettled else { return }
                 if outcomes.contains(where: {
@@ -1949,17 +1958,20 @@ final class AppCoordinator: ObservableObject {
                 self.advancePastWarmPhase()
             }
         }
-        // The watchdog: a hung warm must never hold the spinner forever
-        // (the startup-perf contract — failures never halt boot).
+        // The budget watchdog: a warm that outlives the short boot
+        // budget must never hold the spinner (the startup-perf contract
+        // — failures never halt boot). Boot advances; the warm finishes
+        // detached on the warm queue and still caches its engine.
         let work = DispatchWorkItem { [weak self] in
             guard let self, !self.warmPhaseSettled else { return }
-            print("[AppCoordinator] warm-start watchdog — boot continues; warm finishes detached")
+            print("[AppCoordinator] warm-start budget reached — boot advances; warm finishes detached")
             self.startupBoot.recordFailure(.warmingEngines)
             self.advancePastWarmPhase()
         }
         warmWatchdogWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.warmWatchdogSeconds,
-                                      execute: work)
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + WarmStartPlanner.bootWarmBudgetSeconds,
+            execute: work)
     }
 
     /// Settles the warm phase exactly once and hands phase 3 to the boot
@@ -2041,7 +2053,27 @@ final class AppCoordinator: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             self?.ensureAssistantBrainDownloadIfNeeded()
             self?.startupBoot.advance(to: .ready)
+            // [BOOT-LATENCY] Deferred warm slice: secondary voices (and
+            // every TTS warm on the simulator) run NOW — detached,
+            // post-spinner, gated by the same settings the boot slice
+            // used. They never delay `.ready`.
+            self?.startDetachedPostBootWarm()
             print("[AppCoordinator] startup boot complete — spinner dismissed")
+        }
+    }
+
+    /// Runs the deferred warm slice after the boot completes: detached
+    /// on the same serial warm queue, same settings gates — only the
+    /// slot moved, so these steps can never delay `.ready`. A boot warm
+    /// that outlived the budget is already running on the shared queue,
+    /// so these steps queue behind it instead of overlapping it.
+    private func startDetachedPostBootWarm() {
+        let steps = postBootWarmSteps
+        postBootWarmSteps = []
+        guard !steps.isEmpty else { return }
+        warmRunner.run(plan: steps) { _ in
+            // Detached by design: the runner reports each engine's
+            // outcome on the ObservabilityBus; nothing gates on them.
         }
     }
 

@@ -55,8 +55,8 @@ enum LeafDestination: Identifiable {
 struct HomeView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @EnvironmentObject var session: VoiceSessionStateMachine
-    /// [SPINNER-PLACEMENT] Read so the container can animate the talk
-    /// hero's settle when the boot spinner's flow slot collapses.
+    /// [BOOT-LATENCY] Read so the container can animate the talk hero's
+    /// settle when the boot spinner collapses inside the talk stage.
     @EnvironmentObject private var boot: StartupBoot
 
     @State private var showWizard = false
@@ -92,15 +92,6 @@ struct HomeView: View {
                     if !coordinator.favoriteApps.isEmpty {
                         quickAccessRow
                     }
-                    // [SPINNER-PLACEMENT] The startup spinner lives ABOVE
-                    // the speak button: a flow slot between quick access
-                    // and the talk stage. It used to be a ContentView top
-                    // overlay, where the capsule covered the top bar's
-                    // calendar date line — the complaint — so it now sits
-                    // here, never covering the calendar. The slot
-                    // collapses when the boot reaches `.ready` (and the
-                    // overlay renders zero-height while nothing shows).
-                    StartupProgressOverlay()
                     // The talk stage is FIXED chrome (home-redesign v3):
                     // hero + the small status/rotating texts under it sit
                     // between the top bar and the outcome region, so the
@@ -129,10 +120,10 @@ struct HomeView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
-                // [SPINNER-PLACEMENT] When the boot finishes the spinner
-                // slot collapses and everything below it rises — ease the
-                // whole settle (hero included) instead of a snap, matching
-                // the overlay's own 0.2s ease.
+                // [BOOT-LATENCY] When the boot finishes the spinner
+                // inside the talk stage collapses and everything below it
+                // rises — ease the whole settle (hero included) instead
+                // of a snap, matching the overlay's own 0.2s ease.
                 .animation(.easeInOut(duration: 0.2), value: boot.spinnerVisible)
             }
             // Dock pinned to the bottom edge (home-redesign 2026-09-08):
@@ -447,14 +438,31 @@ struct HomeView: View {
     private var talkStage: some View {
         Group {
             if stageVisuals.isConfirmation {
-                ConfirmationChips(titleKey: stageVisuals.captionKey)
+                // [BOOT-LATENCY] The spinner is an element of the stage
+                // itself — above whatever the stage currently shows —
+                // so it stays anchored to the speak area even in the
+                // chips branch.
+                VStack(spacing: 4) {
+                    StartupProgressOverlay()
+                    ConfirmationChips(titleKey: stageVisuals.captionKey)
+                }
             } else {
                 // The stage reads as ONE unit: hero, its status line and
                 // the hint carousel each sit ≤4pt apart (visual-polish
                 // 2026-09-08 — at the old gaps the texts floated loose
                 // below the button; the hints describe the button right
                 // below them, so they must hug it).
+                //
+                // [BOOT-LATENCY] The startup spinner is the stage's
+                // FIRST element, 4pt above the hero's top edge: it reads
+                // as "just above the speak button" instead of floating
+                // near the top bar (the previous slot sat between quick
+                // access and the stage — with no favourites configured
+                // the capsule hugged the top bar and read as "at the
+                // top"). It renders zero-height once boot completes, and
+                // the stage collapses with the container's 0.2s ease.
                 VStack(spacing: 4) {
+                    StartupProgressOverlay()
                     TalkButton(session: session,
                                onTap: {
                                    switch session.state {

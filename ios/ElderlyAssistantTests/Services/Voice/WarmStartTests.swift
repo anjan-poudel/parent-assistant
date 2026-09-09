@@ -70,19 +70,38 @@ final class WarmStartTests: XCTestCase {
                                      action: .skip(reason: "gemini_stack")),
                        "the Gemini STT stack must never warm an on-device whisper runtime")
         XCTAssertTrue(plan.contains(WarmStartStep(engine: .ttsVoice(ModelCatalog.piperNepali),
-                                                  action: .warm)),
-                      "TTS warm is stack-independent — the reply voice is always on-device Piper")
+                                                  action: .warm,
+                                                  phase: .boot)),
+                      "TTS warm is stack-independent — the reply voice is always on-device Piper, and the primary warms in the boot slot")
         XCTAssertTrue(plan.contains(WarmStartStep(engine: .ttsVoice(ModelCatalog.piperEnglishUS),
-                                                  action: .warm)))
+                                                  action: .warm,
+                                                  phase: .postBoot)),
+                      "the secondary English voice still warms — deferred past boot, not skipped")
     }
 
-    func testDefaultConfigWarmsWhisperKitAndBothVoices() {
+    func testDefaultConfigBootSlotWarmsWhisperKitAndPrimaryVoiceOnly() {
         let plan = WarmStartPlanner.plan(for: defaultConfig())
+        // [BOOT-LATENCY] The boot slot carries the whisper model + ONLY
+        // the primary reply voice (whisper first — the biggest load).
+        // The secondary English voice defers to the post-boot slot so it
+        // can never delay `.ready`.
         XCTAssertEqual(plan, [
-            WarmStartStep(engine: .whisperKit, action: .warm),
-            WarmStartStep(engine: .ttsVoice(ModelCatalog.piperNepali), action: .warm),
-            WarmStartStep(engine: .ttsVoice(ModelCatalog.piperEnglishUS), action: .warm)
-        ], "defaults → whisper + both TTS voices, in that order (whisper first — the biggest load)")
+            WarmStartStep(engine: .whisperKit, action: .warm, phase: .boot),
+            WarmStartStep(engine: .ttsVoice(ModelCatalog.piperNepali), action: .warm, phase: .boot),
+            WarmStartStep(engine: .ttsVoice(ModelCatalog.piperEnglishUS), action: .warm, phase: .postBoot)
+        ], "defaults → boot: whisper + primary voice; post-boot: secondary voice")
+    }
+
+    func testSecondaryVoiceIsDeferredNotSkipped() {
+        let plan = WarmStartPlanner.plan(for: defaultConfig())
+        let bootEngines = plan.filter { $0.phase == .boot }.map(\.engine)
+        XCTAssertEqual(bootEngines, [.whisperKit, .ttsVoice(ModelCatalog.piperNepali)],
+                       "the boot slot warms ONLY the primary reply voice (+ whisper)")
+        let deferred = plan.filter { $0.phase == .postBoot }
+        XCTAssertEqual(deferred, [WarmStartStep(engine: .ttsVoice(ModelCatalog.piperEnglishUS),
+                                                action: .warm,
+                                                phase: .postBoot)],
+                       "the secondary voice is DEFERRED, not dropped — same settings gates, only the slot moved")
     }
 
     func testWhisperCppOnlyIsSkippedWithPerAttemptReason() {
@@ -139,10 +158,12 @@ final class WarmStartTests: XCTestCase {
         let plan = WarmStartPlanner.plan(for: config)
 
         XCTAssertTrue(plan.contains(WarmStartStep(engine: .ttsVoice(ModelCatalog.piperEnglishUS),
-                                                  action: .skip(reason: "voice_missing"))))
+                                                  action: .skip(reason: "voice_missing"),
+                                                  phase: .postBoot)),
+                      "a missing secondary voice is skipped in its own slot — the deferral never papers over an honest skip")
     }
 
-    func testSimulatorSkipsWhisperWarmButKeepsTTS() {
+    func testSimulatorSkipsWhisperAndDefersEveryTTSWarm() {
         var config = defaultConfig()
         config.isSimulator = true
         let plan = WarmStartPlanner.plan(for: config)
@@ -151,9 +172,47 @@ final class WarmStartTests: XCTestCase {
                        WarmStartStep(engine: .whisperKit,
                                      action: .skip(reason: "simulator")),
                        "WhisperKit is CPU-only on the simulator — the warm could outlive boot without ever helping")
+        // [BOOT-LATENCY] On the simulator NO TTS warm runs in the boot
+        // slot: the measured sherpa engine constructions cost up to ~9 s
+        // there — a sim-only cost with no user value — so the primary
+        // defers alongside the secondary. Boot then has an empty warm
+        // slice and the spinner never flashes the warm stage.
         XCTAssertTrue(plan.contains(WarmStartStep(engine: .ttsVoice(ModelCatalog.piperNepali),
-                                                  action: .warm)),
-                      "TTS warm is cheap and works on the simulator")
+                                                  action: .warm,
+                                                  phase: .postBoot)),
+                      "the primary TTS warm is DEFERRED on the simulator, not skipped")
+        XCTAssertTrue(plan.contains(WarmStartStep(engine: .ttsVoice(ModelCatalog.piperEnglishUS),
+                                                  action: .warm,
+                                                  phase: .postBoot)))
+        XCTAssertTrue(plan.allSatisfy { $0.phase != .boot || $0.action != WarmStartAction.warm },
+                      "no warm step may occupy the boot slot on the simulator — the boot warm slice is empty")
+    }
+
+    func testSelectedEnglishVoiceIsWarmedOnceAsPrimary() {
+        // When the persisted reply voice IS the English voice, it is the
+        // primary (boot slot, device) — never warmed twice.
+        var config = defaultConfig()
+        config.selectedNepaliVoiceID = ModelCatalog.piperEnglishUS
+        let plan = WarmStartPlanner.plan(for: config)
+
+        let englishSteps = plan.filter { $0.engine == .ttsVoice(ModelCatalog.piperEnglishUS) }
+        XCTAssertEqual(englishSteps, [
+            WarmStartStep(engine: .ttsVoice(ModelCatalog.piperEnglishUS),
+                          action: .warm,
+                          phase: .boot)
+        ], "one warm for the English voice when it IS the primary — no duplicate post-boot step")
+    }
+
+    func testBootWarmBudgetIsShort() {
+        // [BOOT-LATENCY] The boot-warm contribution is capped at a short
+        // budget (the coordinator's watchdog consumes this constant): a
+        // primary warm that outlives it finishes detached and boot
+        // advances — the spinner must never wait on a multi-second
+        // engine construction.
+        XCTAssertEqual(WarmStartPlanner.bootWarmBudgetSeconds, 4.0,
+                       "the boot warm budget pins at 4 s — the spinner's target ceiling")
+        XCTAssertLessThanOrEqual(WarmStartPlanner.bootWarmBudgetSeconds, 5,
+                                 "boot must reach .ready inside the latency target")
     }
 
     func testWakeWordPreferenceDoesNotGateWarming() {
