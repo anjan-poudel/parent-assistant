@@ -57,9 +57,24 @@ final class NewsReaderTests: XCTestCase {
     private final class StubTransport: LocalToolTransport {
         /// Scripted per-request behavior; nil = throw (a dead feed).
         var handler: ((URLRequest) async throws -> (Data, URLResponse))?
-        private(set) var requests: [URLRequest] = []
+        /// [REGRESSION-AUDIT] (2026-09-10) The NewsReader fetches every
+        /// source CONCURRENTLY (`withTaskGroup`), so the old bare
+        /// `requests.append` ran on N threads at once — a heap-corrupting
+        /// race that crashed the full unit gate
+        /// (testObservabilityNeverCarriesHeadlines, SIGABRT inside
+        /// Array.append → malloc_report, 2026-09-10 run). The lock makes
+        /// recording thread-safe; order is feed order.
+        private let requestsLock = NSLock()
+        private var _requests: [URLRequest] = []
+        var requests: [URLRequest] {
+            requestsLock.lock()
+            defer { requestsLock.unlock() }
+            return _requests
+        }
         func fetchData(for request: URLRequest) async throws -> (Data, URLResponse) {
-            requests.append(request)
+            requestsLock.lock()
+            _requests.append(request)
+            requestsLock.unlock()
             guard let handler else { throw URLError(.cannotConnectToHost) }
             return try await handler(request)
         }
@@ -364,6 +379,36 @@ final class NewsReaderTests: XCTestCase {
         let delivered = newsEvents.first { $0.eventType == "news_digest_delivered" }
         XCTAssertEqual(delivered?.metadata["source_count"], "6" as String?)
         XCTAssertEqual(delivered?.metadata["headline_count"], "12" as String?)
+    }
+
+    /// [REGRESSION-AUDIT] (2026-09-10) Pin for the concurrent-fetch crash:
+    /// `testObservabilityNeverCarriesHeadlines` SIGABRT'd at the a74f8d5
+    /// full gate because StubTransport recorded requests with a bare
+    /// array append while the reader's `withTaskGroup` fetched every
+    /// source in parallel — heap corruption inside Array.append. The stub
+    /// is now lock-protected; this stress fire (many sources, slow
+    /// handler, concurrent group) crashes or corrupts the request log on
+    /// the broken stub and passes with the lock.
+    func testConcurrentSourceFetchesNeverCorruptTheRequestRecorder() async {
+        let harness = Harness()
+        var sources: [NewsSource] = []
+        for i in 0..<64 {
+            sources.append(source("S\(i)", url: "https://example.com/feed\(i).xml"))
+        }
+        harness.transport.handler = { request in
+            // Force overlap: every fetch waits a beat, so the whole task
+            // group is in flight at once when it records.
+            try await Task.sleep(nanoseconds: 20_000_000)
+            return self.http(request, status: 200, body: self.rss(["Headline"]))
+        }
+        let reader = harness.reader(configured: sources)
+        await reader.fire()
+
+        XCTAssertEqual(harness.transport.requests.count, sources.count,
+                       "every source's fetch must be recorded exactly once")
+        let distinctURLs = Set(harness.transport.requests.compactMap { $0.url?.absoluteString })
+        XCTAssertEqual(distinctURLs.count, sources.count,
+                       "the recorder must not lose or duplicate requests under concurrency")
     }
 
     func testSourceResultEventsCarryCountsAndTagsOnly() async {

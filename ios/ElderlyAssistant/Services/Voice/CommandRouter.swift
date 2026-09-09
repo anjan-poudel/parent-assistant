@@ -1000,6 +1000,14 @@ final class CommandRouter {
             Calendar.current.dateComponents([.hour, .minute], from: time),
             locale: locale
         )
+        // [REGRESSION-AUDIT] (2026-09-10) The permission round-trip is an
+        // ASYNC dispatch — mark the turn reply-pending exactly like the
+        // LLM path so the pipeline holds idle until the reply commits
+        // (without this the pipeline resumed wake listening while the
+        // notification dialog was still up, and the reply speech could
+        // collide with a new capture). Broken since the alarms stage
+        // landed (3b6c9a9) — see testAlarmRoutingSurvivesTimingHooks.
+        markTurnReplyPending()
         Task { [weak self] in
             guard let self else { return }
             let outcome = await self.coordinator?.requestAlarmSet(at: time, label: label)
@@ -1020,6 +1028,11 @@ final class CommandRouter {
                 self.emitAlarmTimers(eventType: "alarm_set", outcome: "failed")
                 self.speakWithVisibleOutcome(key: "alarms.setFailed")
             }
+            // [REGRESSION-AUDIT] Resolve AFTER the commit (speech-start
+            // hop precedes the pipeline's deferred idle hop) and finalize
+            // the turn tracer, mirroring the LLM dispatch completion.
+            self.resolveTurnReplyPending()
+            self.turnTracer?.endTurn()
         }
     }
 
@@ -1032,6 +1045,9 @@ final class CommandRouter {
             return
         }
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        // [REGRESSION-AUDIT] (2026-09-10) Same reply-pending hold as the
+        // alarm set path — see handleAlarmSetCommand.
+        markTurnReplyPending()
         Task { [weak self] in
             guard let self else { return }
             let outcome = await self.coordinator?.requestTimerStart(
@@ -1056,6 +1072,10 @@ final class CommandRouter {
                 self.emitAlarmTimers(eventType: "timer_started", outcome: "failed")
                 self.speakWithVisibleOutcome(key: "timers.setFailed")
             }
+            // [REGRESSION-AUDIT] Resolve after the commit + finalize the
+            // tracer, mirroring the alarm set path.
+            self.resolveTurnReplyPending()
+            self.turnTracer?.endTurn()
         }
     }
 

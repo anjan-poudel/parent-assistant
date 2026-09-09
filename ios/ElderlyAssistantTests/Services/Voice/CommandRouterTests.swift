@@ -2165,6 +2165,37 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
         return (router, bus)
     }
 
+    /// [REGRESSION-AUDIT] (2026-09-10) Bounded WAIT (1 ms poll, ≤5 s)
+    /// for the alarm/timer permission round-trip to commit its reply.
+    /// The set handlers dispatch a non-isolated Task whose `await` on
+    /// the async coordinator protocol is a two-hop executor chain — a
+    /// single `Task.yield()` (or even 500 bare yields, which complete in
+    /// under the handler's ~100 µs round trip on this simulator) returns
+    /// before the commit, which is why six routing + permission-fallback
+    /// tests failed deterministically at the a74f8d5 gate (born with the
+    /// alarms stage in 3b6c9a9 — the handlers are byte-identical across
+    /// the whole turn-timing / script-regression window, so those hooks
+    /// did not cause it). Assertions in each test are unchanged; only
+    /// the await is disciplined.
+    private func awaitReplyCommit(
+        _ router: CommandRouter,
+        _ coordinator: MockVoiceCommandCoordinator,
+        file: StaticString = #filePath, line: UInt = #line
+    ) async {
+        var waited: UInt64 = 0
+        while (coordinator.genericReplies.isEmpty || router.isTurnReplyPending)
+            && waited < 5_000_000_000 {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+            waited += 1_000_000
+        }
+        XCTAssertFalse(coordinator.genericReplies.isEmpty,
+                       "the alarm/timer reply never committed",
+                       file: file, line: line)
+        XCTAssertFalse(router.isTurnReplyPending,
+                       "the turn resolved only after the reply was committed",
+                       file: file, line: line)
+    }
+
     private var en: Locale { Locale(identifier: "en-US") }
 
     func testEnglishAlarmCommandReachesCoordinatorAndConfirms() async {
@@ -2173,7 +2204,7 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
         let (router, bus) = makeRouter(coordinator)
 
         let result = router.route(transcript: "set an alarm for 6 am")
-        await Task.yield()
+        await awaitReplyCommit(router, coordinator)
 
         XCTAssertEqual(result, .unrecognised(transcript: "set an alarm for 6 am"))
         XCTAssertEqual(coordinator.alarmSetRequests.count, 1)
@@ -2195,7 +2226,7 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
         let (router, _) = makeRouter(coordinator)
 
         _ = router.route(transcript: "set an alarm for 8 in the evening")
-        await Task.yield()
+        await awaitReplyCommit(router, coordinator)
 
         XCTAssertEqual(coordinator.alarmSetRequests.count, 1)
         let components = Calendar.current.dateComponents(
@@ -2209,7 +2240,7 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
         let (router, _) = makeRouter(coordinator)
 
         _ = router.route(transcript: "बिहान ६ बजे उठाउनुहोस्")
-        await Task.yield()
+        await awaitReplyCommit(router, coordinator)
 
         XCTAssertEqual(coordinator.alarmSetRequests.count, 1)
         let components = Calendar.current.dateComponents(
@@ -2263,7 +2294,7 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
         let (router, bus) = makeRouter(coordinator)
 
         _ = router.route(transcript: "set an alarm for 6 am")
-        await Task.yield()
+        await awaitReplyCommit(router, coordinator)
 
         XCTAssertTrue(coordinator.genericReplies.contains {
             $0.hasPrefix("Notifications are off")
@@ -2282,7 +2313,7 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
         let (router, _) = makeRouter(coordinator)
 
         _ = router.route(transcript: "set an alarm for 6 am")
-        await Task.yield()
+        await awaitReplyCommit(router, coordinator)
 
         XCTAssertTrue(coordinator.genericReplies.contains { $0.hasPrefix("Too many alarms") })
     }
@@ -2292,7 +2323,7 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
         let (router, bus) = makeRouter(coordinator)
 
         let result = router.route(transcript: "टाइमर ५ मिनेट")
-        await Task.yield()
+        await awaitReplyCommit(router, coordinator)
 
         XCTAssertEqual(result, .unrecognised(transcript: "टाइमर ५ मिनेट"))
         XCTAssertEqual(coordinator.timerStartRequests.count, 1)
@@ -2312,12 +2343,12 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
         let (router, _) = makeRouter(coordinator)
 
         _ = router.route(transcript: "set a timer for 10 minutes")
-        await Task.yield()
+        await awaitReplyCommit(router, coordinator)
 
         XCTAssertEqual(coordinator.timerStartRequests.count, 1)
         XCTAssertEqual(coordinator.timerStartRequests[0].durationSeconds, 600)
         XCTAssertTrue(coordinator.timerStartRequests[0].label == nil)
-        XCTAssertTrue(coordinator.genericReplies.contains { $0 == "Timer started for 10 minutes" })
+        XCTAssertTrue(coordinator.genericReplies.contains { $0 == "Timer started for 10 minutes." })
     }
 
     func testCountdownPhraseNeverBecomesAnAlarm() async {
@@ -2353,7 +2384,7 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
         let (router, bus) = makeRouter(coordinator)
 
         _ = router.route(transcript: "टाइमर ५ मिनेट")
-        await Task.yield()
+        await awaitReplyCommit(router, coordinator)
 
         XCTAssertTrue(coordinator.genericReplies.contains {
             $0.hasPrefix("Notifications are off")
@@ -2534,6 +2565,96 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
 
         XCTAssertTrue(coordinator.alarmSnoozeRequests.isEmpty)
         XCTAssertFalse(bus.emittedEvents.contains { $0.component == "alarms_timers" })
+    }
+
+    // MARK: - REGRESSION-AUDIT (2026-09-10): async-dispatch reply hold
+
+    /// Six routing + permission-fallback tests above failed
+    /// deterministically at the a74f8d5 full gate: the alarm/timer set
+    /// handlers dispatched a non-isolated Task and never marked the turn
+    /// reply-pending, so `route()` returned with the pipeline free to
+    /// resume wake listening while the notification-permission round-trip
+    /// was still in flight (born with the alarms stage in 3b6c9a9 — the
+    /// handlers are byte-identical across the turn-timing / script-
+    /// regression window, so those hooks were innocent). The fix holds
+    /// the turn exactly like the LLM path. This test pins it and FAILS
+    /// on the broken commit (`isTurnReplyPending` was false at return).
+    func testAlarmRoutingSurvivesTimingHooks() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        let bus = MockObservabilityBus()
+        // Constructed WITH the turn-timing tracer: the hooks must be
+        // inert for routing (the original suspicion was the TURN-TIMING
+        // commit's hooks — they are nil-safe and did not cause the six
+        // failures).
+        let tracer = VoiceTurnLatencyTracer(observabilityBus: bus)
+        let router = CommandRouter(coordinator: coordinator,
+                                   observabilityBus: bus,
+                                   speaker: MockSpeaker(),
+                                   turnTracer: tracer)
+
+        let result = router.route(transcript: "set an alarm for 6 am")
+
+        XCTAssertEqual(result, .unrecognised(transcript: "set an alarm for 6 am"))
+        XCTAssertTrue(router.isTurnReplyPending,
+                      "the alarm round-trip must hold the pipeline like the LLM path")
+        await awaitReplyCommit(router, coordinator)
+
+        XCTAssertEqual(coordinator.alarmSetRequests.count, 1)
+        XCTAssertTrue(coordinator.genericReplies.contains { $0 == "Alarm set for 6 am." })
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "alarm_set"
+                && $0.outcome == "success"
+        })
+        XCTAssertFalse(router.isTurnReplyPending,
+                       "the turn resolves only after the reply was committed")
+    }
+
+    /// The timer twin of `testAlarmRoutingSurvivesTimingHooks` — including
+    /// the permission-denied path (the "permission fallbacks" half of the
+    /// a74f8d5 incident).
+    func testTimerRoutingSurvivesTimingHooksIncludingDenial() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.timerStartOutcome = .permissionDenied
+        let bus = MockObservabilityBus()
+        let tracer = VoiceTurnLatencyTracer(observabilityBus: bus)
+        let router = CommandRouter(coordinator: coordinator,
+                                   observabilityBus: bus,
+                                   speaker: MockSpeaker(),
+                                   turnTracer: tracer)
+
+        let result = router.route(transcript: "टाइमर ५ मिनेट")
+
+        XCTAssertEqual(result, .unrecognised(transcript: "टाइमर ५ मिनेट"))
+        XCTAssertTrue(router.isTurnReplyPending)
+        await awaitReplyCommit(router, coordinator)
+
+        XCTAssertEqual(coordinator.timerStartRequests.count, 1)
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0.hasPrefix("Notifications are off")
+        })
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_started"
+                && $0.outcome == "permission_denied"
+        })
+        XCTAssertFalse(router.isTurnReplyPending)
+    }
+
+    /// The synchronous off/snooze branches commit inside `route()` and
+    /// must never hold the token — the fix must not leak the pending
+    /// hold into the synchronous handlers.
+    func testAlarmOffAndSnoozeRemainSynchronousAndNeverHoldTheTurn() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.alarmOffOutcome = .disabled(time: enDate(6, 0))
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "turn off the alarm")
+
+        XCTAssertEqual(coordinator.alarmOffRequestCount, 1)
+        XCTAssertFalse(router.isTurnReplyPending,
+                       "off is synchronous — the turn must not stay pending")
     }
 }
 
