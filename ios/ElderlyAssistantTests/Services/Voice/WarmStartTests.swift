@@ -163,7 +163,7 @@ final class WarmStartTests: XCTestCase {
                       "a missing secondary voice is skipped in its own slot — the deferral never papers over an honest skip")
     }
 
-    func testSimulatorSkipsWhisperAndDefersEveryTTSWarm() {
+    func testSimulatorSkipsWhisperAndSkipsEveryTTSWarm() {
         var config = defaultConfig()
         config.isSimulator = true
         let plan = WarmStartPlanner.plan(for: config)
@@ -172,17 +172,19 @@ final class WarmStartTests: XCTestCase {
                        WarmStartStep(engine: .whisperKit,
                                      action: .skip(reason: "simulator")),
                        "WhisperKit is CPU-only on the simulator — the warm could outlive boot without ever helping")
-        // [BOOT-LATENCY] On the simulator NO TTS warm runs in the boot
-        // slot: the measured sherpa engine constructions cost up to ~9 s
-        // there — a sim-only cost with no user value — so the primary
-        // defers alongside the secondary. Boot then has an empty warm
-        // slice and the spinner never flashes the warm stage.
+        // [VAD-REGRESSION] On the simulator TTS warms are SKIPPED, not
+        // deferred: the measured sherpa engine constructions cost up to
+        // ~9 s there, hold the serial TTS engine queue (delaying the
+        // morning briefing's first synthesis), and the off-main session
+        // creation is the onnxruntime segfault class that crashed
+        // launches (7 crash reports 2026-09-10). The sim's first
+        // conversation pays the load — the pre-warm behavior.
         XCTAssertTrue(plan.contains(WarmStartStep(engine: .ttsVoice(ModelCatalog.piperNepali),
-                                                  action: .warm,
+                                                  action: .skip(reason: "simulator"),
                                                   phase: .postBoot)),
-                      "the primary TTS warm is DEFERRED on the simulator, not skipped")
+                      "the primary TTS warm is SKIPPED on the simulator, never constructed")
         XCTAssertTrue(plan.contains(WarmStartStep(engine: .ttsVoice(ModelCatalog.piperEnglishUS),
-                                                  action: .warm,
+                                                  action: .skip(reason: "simulator"),
                                                   phase: .postBoot)))
         XCTAssertTrue(plan.allSatisfy { $0.phase != .boot || $0.action != WarmStartAction.warm },
                       "no warm step may occupy the boot slot on the simulator — the boot warm slice is empty")

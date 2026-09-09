@@ -306,4 +306,36 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
         XCTAssertTrue(h.bus.turnTimingEvents.isEmpty,
                       "a cancelled capture's turn is abandoned, never emitted")
     }
+
+    // MARK: - Honest no-speech diagnostic ([VAD-REGRESSION])
+
+    /// A capture that ends (STT completion) without the VAD ever reporting
+    /// speech must emit `capture_ended_no_vad_speech` — the console
+    /// signature that separates "the capture stream never crossed the VAD
+    /// speech threshold" (environment/mic) from "the recognizer is slow"
+    /// (code/network).
+    func testCaptureEndingWithoutVadSpeechEmitsHonestEvent() {
+        let h = Harness()
+        h.pipeline.debugEnterIdleForTesting()
+        h.pipeline.simulateWakeWordDetection()
+        h.recognizer.complete(with: .failure(.timedOut))
+
+        XCTAssertTrue(h.bus.events.contains { $0.component == "voice_pipeline"
+                && $0.eventType == "capture_ended_no_vad_speech" },
+                      "a capture with a VAD that never detected speech emits the honest diagnostic")
+    }
+
+    /// The positive twin: once the VAD has reported speech, the same
+    /// capture end must NOT emit the no-speech diagnostic.
+    func testCaptureWithVadSpeechDoesNotEmitNoSpeechEvent() {
+        let h = Harness()
+        h.pipeline.debugEnterIdleForTesting()
+        h.pipeline.simulateWakeWordDetection()
+        h.vad.onSpeechStateChange?(true)  // the VAD heard the user
+        h.recognizer.complete(with: .failure(.timedOut))
+
+        XCTAssertFalse(h.bus.events.contains { $0.component == "voice_pipeline"
+                && $0.eventType == "capture_ended_no_vad_speech" },
+                       "speech was detected — the no-speech diagnostic must stay silent")
+    }
 }
