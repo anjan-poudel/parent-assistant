@@ -1,0 +1,11 @@
+Direct use of automatic function calling (AFC) in Models.generate_content is not recommended. Instead, we recommend to use AFC in Chat.send_message. Similarly, direct use of AFC in Models.generate_content_stream is not recommended. Instead, we recommend to use AFC in Chat.send_message_stream.
+[gen_teacher] 87 jobs, 16138 rows written, 1150 calls already done
+[gen_teacher] 25/87 jobs, 591 rows written, 0 rejected
+[gen_teacher] job 28/romanized failed: Unterminated string starting at: line 3 column 18 (char 23) — continuing
+[gen_teacher] job 45/elder_fragmented failed: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}} — continuing
+[gen_teacher] job 46/code_switched failed: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}} — continuing
+[gen_teacher] job 47/elder_fragmented failed: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}} — continuing
+[gen_teacher] 50/87 jobs, 1138 rows written, 0 rejected
+[gen_teacher] 75/87 jobs, 1701 rows written, 0 rejected
+[gen_teacher] job 86/romanized failed: Unterminated string starting at: line 3 column 18 (char 23) — continuing
+[gen_teacher] done: 1868 new rows, 0 rejected → /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/data/teacher.jsonl

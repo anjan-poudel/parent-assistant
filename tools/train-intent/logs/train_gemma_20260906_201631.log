@@ -1,0 +1,58 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[train] 14748 train / 776 valid rows, base=gemma
+Loading weights:   0%|          | 0/340 [00:00<?, ?it/s]Loading weights:   5%|▌         | 17/340 [00:00<00:01, 168.27it/s]Loading weights:  51%|█████     | 172/340 [00:00<00:00, 967.56it/s]Loading weights:  95%|█████████▌| 323/340 [00:00<00:00, 1211.43it/s]Loading weights: 100%|██████████| 340/340 [00:00<00:00, 1085.58it/s]
+Map:   0%|          | 0/14748 [00:00<?, ? examples/s]Map:   7%|▋         | 1000/14748 [00:00<00:05, 2594.44 examples/s]Map:  14%|█▎        | 2000/14748 [00:00<00:03, 3456.82 examples/s]Map:  20%|██        | 3000/14748 [00:00<00:02, 4034.71 examples/s]Map:  27%|██▋       | 4000/14748 [00:01<00:02, 4320.90 examples/s]Map:  34%|███▍      | 5000/14748 [00:01<00:02, 4474.90 examples/s]Map:  41%|████      | 6000/14748 [00:01<00:01, 4561.11 examples/s]Map:  47%|████▋     | 7000/14748 [00:01<00:01, 4675.24 examples/s]Map:  54%|█████▍    | 8000/14748 [00:01<00:01, 4721.64 examples/s]Map:  61%|██████    | 9000/14748 [00:02<00:01, 4734.93 examples/s]Map:  68%|██████▊   | 10000/14748 [00:02<00:01, 4747.58 examples/s]Map:  75%|███████▍  | 11000/14748 [00:02<00:00, 4792.83 examples/s]Map:  81%|████████▏ | 12000/14748 [00:02<00:00, 4787.32 examples/s]Map:  88%|████████▊ | 13000/14748 [00:02<00:00, 4794.16 examples/s]Map:  95%|█████████▍| 14000/14748 [00:03<00:00, 4731.02 examples/s]Map: 100%|██████████| 14748/14748 [00:03<00:00, 4703.80 examples/s]Map: 100%|██████████| 14748/14748 [00:03<00:00, 4508.61 examples/s]
+Map:   0%|          | 0/776 [00:00<?, ? examples/s]Map: 100%|██████████| 776/776 [00:00<00:00, 2630.11 examples/s]Map: 100%|██████████| 776/776 [00:00<00:00, 2571.06 examples/s]
+  0%|          | 0/1383 [00:00<?, ?it/s]/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:632: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. In version 2.5 we will raise an exception if use_reentrant is not passed. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+Traceback (most recent call last):
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/src/train_qlora.py", line 150, in <module>
+    main()
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/src/train_qlora.py", line 141, in main
+    trainer.train(resume_from_checkpoint=resume)
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/trainer.py", line 1458, in train
+    return inner_training_loop(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/trainer.py", line 1540, in _inner_training_loop
+    self._run_epoch(
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/trainer.py", line 1768, in _run_epoch
+    tr_loss_step = self.training_step(model, inputs, num_items_in_batch)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/trainer.py", line 1940, in training_step
+    loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/trainer.py", line 2014, in compute_loss
+    outputs = model(**inputs)
+              ^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1736, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1747, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/accelerate/utils/operations.py", line 943, in forward
+    return model_forward(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/accelerate/utils/operations.py", line 931, in __call__
+    return convert_to_fp32(self.model_forward(*args, **kwargs))
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/torch/amp/autocast_mode.py", line 44, in decorate_autocast
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/utils/generic.py", line 939, in wrapper
+    output = func(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/models/gemma3/modeling_gemma3.py", line 651, in forward
+    loss = self.loss_function(logits, labels, self.vocab_size, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/loss/loss_utils.py", line 70, in ForCausalLMLoss
+    loss = fixed_cross_entropy(logits, shift_labels, num_items_in_batch, ignore_index, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/loss/loss_utils.py", line 40, in fixed_cross_entropy
+    loss = nn.functional.cross_entropy(source, target, ignore_index=ignore_index, reduction=reduction)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/torch/nn/functional.py", line 3479, in cross_entropy
+    return torch._C._nn.cross_entropy_loss(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 8.00 GiB. GPU 0 has a total capacity of 23.56 GiB of which 7.16 GiB is free. Including non-PyTorch memory, this process has 16.35 GiB memory in use. Of the allocated memory 15.11 GiB is allocated by PyTorch, and 959.88 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+  0%|          | 0/1383 [00:01<?, ?it/s]

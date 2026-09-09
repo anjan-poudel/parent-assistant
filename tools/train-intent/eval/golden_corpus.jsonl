@@ -1,0 +1,20 @@
+{"id": "gc-call-001", "utterance": "माइयालाई फोन गर", "script": "devanagari", "intent": "call", "slots": {"contact": "माइया", "callType": null, "requestedApp": null}, "notes": "canonical bare call — resolver chain picks the default method"}
+{"id": "gc-call-002", "utterance": "maiya lai phone gara", "script": "latin", "intent": "call", "slots": {"contact": "maiya", "callType": null, "requestedApp": null}, "notes": "romanized twin of gc-call-001"}
+{"id": "gc-call-003", "utterance": "छोरालाई वाट्सएपमा कल गर", "script": "devanagari", "intent": "call", "slots": {"contact": "छोरा", "callType": null, "requestedApp": "whatsapp"}, "notes": "relationship + explicit app"}
+{"id": "gc-call-004", "utterance": "सुनितालाई भिडियो कल गर्नुहोस्", "script": "devanagari", "intent": "call", "slots": {"contact": "सुनिता", "callType": "video", "requestedApp": null}, "notes": "explicit video"}
+{"id": "gc-call-005", "utterance": "didi lai facetime ma call gara na", "script": "code_switched", "intent": "call", "slots": {"contact": "didi", "callType": null, "requestedApp": "facetime"}, "notes": "code-switched with particle"}
+{"id": "gc-emergency-001", "utterance": "मद्दत गर्नुहोस्", "script": "devanagari", "intent": "emergency", "slots": {}, "notes": "canonical plea"}
+{"id": "gc-emergency-002", "utterance": "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ", "script": "devanagari", "intent": "emergency", "slots": {}, "notes": "THE boundary case — plea+pain is emergency, NOT health_query (live Gemini failure, 2026-09-04)"}
+{"id": "gc-emergency-003", "utterance": "म लडेँ, उठ्न सकिन", "script": "devanagari", "intent": "emergency", "slots": {}, "notes": "fall + inability"}
+{"id": "gc-health-001", "utterance": "मेरो रक्तचाप कस्तो हुनुपर्छ", "script": "devanagari", "intent": "health_query", "slots": {}, "notes": "calm health question — the other half of the boundary pair"}
+{"id": "gc-health-002", "utterance": "मिर्गौला दुख्दा के खानु हुन्न", "script": "devanagari", "intent": "health_query", "slots": {}, "notes": "pain mentioned but NO plea — must not fire emergency"}
+{"id": "gc-ack-001", "utterance": "औषधि खाएँ", "script": "devanagari", "intent": "ack_med", "slots": {}, "notes": "canonical ack"}
+{"id": "gc-ack-002", "utterance": "औषधि खाएको छैन", "script": "devanagari", "intent": "none", "slots": {}, "notes": "REFUSAL — खाए sits inside खाएको छैन; must never parse as ack_med"}
+{"id": "gc-reminder-001", "utterance": "बिहान ८ बजे औषधि खान सम्झाउनु", "script": "devanagari", "intent": "set_reminder", "slots": {"time": "बिहान ८ बजे", "medication": "औषधि"}, "notes": "Devanagari digit in time expression"}
+{"id": "gc-reminder-002", "utterance": "साढे ७ बजे हिँड्न सम्झाउनुहोस्", "script": "devanagari", "intent": "set_reminder", "slots": {"time": "साढे ७ बजे", "medication": null}, "notes": "साढे half-past"}
+{"id": "gc-message-001", "utterance": "सुनितालाई आज भेट्नुहोस् भनेर मेसेज पठाउ", "script": "devanagari", "intent": "send_message", "slots": {"contact": "सुनिता", "message": "आज भेट्नुहोस्"}, "notes": "dictated body"}
+{"id": "gc-music-001", "utterance": "भजन बजाउनुस्", "script": "devanagari", "intent": "music", "slots": {}, "notes": ""}
+{"id": "gc-music-002", "utterance": "bhajan bajau na", "script": "code_switched", "intent": "music", "slots": {}, "notes": ""}
+{"id": "gc-guide-001", "utterance": "माइक्रोवेभमा चिया कसरी तताउने", "script": "devanagari", "intent": "guide", "slots": {"topic": "माइक्रोवेभ"}, "notes": "guide class — steps are spoken, never executed"}
+{"id": "gc-query-001", "utterance": "भोलि मौसम कस्तो हुन्छ", "script": "devanagari", "intent": "query", "slots": {}, "notes": ""}
+{"id": "gc-none-001", "utterance": "ऊ त्यो के भनें कुन्नि", "script": "devanagari", "intent": "none", "slots": {}, "notes": "fragmented elder speech — abstain (low confidence)"}

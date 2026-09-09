@@ -1,0 +1,27 @@
+Direct use of automatic function calling (AFC) in Models.generate_content is not recommended. Instead, we recommend to use AFC in Chat.send_message. Similarly, direct use of AFC in Models.generate_content_stream is not recommended. Instead, we recommend to use AFC in Chat.send_message_stream.
+[gen_teacher] 220 jobs, 10014 rows written, 0 calls already done
+[gen_teacher] 25/220 jobs, 584 rows written, 0 rejected
+[gen_teacher] job 42/romanized failed: Invalid control character at: line 48 column 5572 (char 6747) — continuing
+[gen_teacher] 50/220 jobs, 1143 rows written, 0 rejected
+[gen_teacher] 75/220 jobs, 1719 rows written, 0 rejected
+[gen_teacher] job 77/romanized failed: Unterminated string starting at: line 3 column 18 (char 23) — continuing
+[gen_teacher] 100/220 jobs, 2258 rows written, 0 rejected
+[gen_teacher] job 121/devanagari failed: Invalid control character at: line 63 column 43 (char 1443) — continuing
+[gen_teacher] 125/220 jobs, 2777 rows written, 0 rejected
+[gen_teacher] job 138/devanagari failed: Unterminated string starting at: line 18 column 18 (char 405) — continuing
+[gen_teacher] 150/220 jobs, 3321 rows written, 0 rejected
+[gen_teacher] job 174/code_switched failed: Invalid control character at: line 3 column 14403 (char 14408) — continuing
+[gen_teacher] job 174/elder_fragmented failed: Invalid control character at: line 3 column 13626 (char 13631) — continuing
+[gen_teacher] 175/220 jobs, 3830 rows written, 0 rejected
+[gen_teacher] job 185/romanized failed: Unterminated string starting at: line 3 column 18 (char 23) — continuing
+[gen_teacher] job 185/elder_fragmented failed: Invalid control character at: line 3 column 13410 (char 13415) — continuing
+[gen_teacher] job 186/elder_fragmented failed: Unterminated string starting at: line 18 column 18 (char 366) — continuing
+[gen_teacher] 200/220 jobs, 4294 rows written, 1 rejected
+[gen_teacher] job 201/romanized failed: Unterminated string starting at: line 78 column 18 (char 1693) — continuing
+[gen_teacher] job 209/devanagari failed: Unterminated string starting at: line 3 column 18 (char 23) — continuing
+[gen_teacher] job 212/elder_fragmented failed: Unterminated string starting at: line 3 column 18 (char 23) — continuing
+[gen_teacher] job 214/romanized failed: Unterminated string starting at: line 3 column 18 (char 23) — continuing
+[gen_teacher] job 214/code_switched failed: Unterminated string starting at: line 3 column 18 (char 23) — continuing
+[gen_teacher] job 214/elder_fragmented failed: Unterminated string starting at: line 3 column 18 (char 23) — continuing
+[gen_teacher] job 218/romanized failed: Unterminated string starting at: line 3 column 18 (char 23) — continuing
+[gen_teacher] done: 4647 new rows, 1 rejected → /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/data/teacher.jsonl

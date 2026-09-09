@@ -1,0 +1,5 @@
+[seq] qwen leg exited Mon Sep  7 06:48:09 PM AEST 2026
+[seq] ASR v5 launched pid 3235731
+/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/models/intent-ne-gemma-q4_k_m.gguf exists — skipping
+/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/models/intent-ne-qwen-q4_k_m.gguf exists — skipping
+[seq] export chain done Mon Sep  7 06:48:10 PM AEST 2026

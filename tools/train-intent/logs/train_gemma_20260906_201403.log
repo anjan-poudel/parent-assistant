@@ -1,0 +1,27 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[train] 14748 train / 776 valid rows, base=gemma
+Loading weights:   0%|          | 0/340 [00:00<?, ?it/s]Loading weights:   5%|▌         | 17/340 [00:00<00:01, 167.27it/s]Loading weights:  50%|█████     | 170/340 [00:00<00:00, 962.56it/s]Loading weights:  93%|█████████▎| 317/340 [00:00<00:00, 1187.37it/s]Loading weights: 100%|██████████| 340/340 [00:00<00:00, 1082.01it/s]
+Map:   0%|          | 0/14748 [00:00<?, ? examples/s]Map:   7%|▋         | 1000/14748 [00:00<00:05, 2516.22 examples/s]Map:  14%|█▎        | 2000/14748 [00:00<00:03, 3386.29 examples/s]Map:  20%|██        | 3000/14748 [00:00<00:02, 3975.84 examples/s]Map:  27%|██▋       | 4000/14748 [00:01<00:02, 4260.75 examples/s]Map:  34%|███▍      | 5000/14748 [00:01<00:02, 4454.18 examples/s]Map:  41%|████      | 6000/14748 [00:01<00:01, 4538.27 examples/s]Map:  47%|████▋     | 7000/14748 [00:01<00:01, 4684.23 examples/s]Map:  54%|█████▍    | 8000/14748 [00:01<00:01, 4717.17 examples/s]Map:  61%|██████    | 9000/14748 [00:02<00:01, 4741.56 examples/s]Map:  68%|██████▊   | 10000/14748 [00:02<00:00, 4764.43 examples/s]Map:  75%|███████▍  | 11000/14748 [00:02<00:00, 4831.70 examples/s]Map:  81%|████████▏ | 12000/14748 [00:02<00:00, 4836.67 examples/s]Map:  88%|████████▊ | 13000/14748 [00:02<00:00, 4805.96 examples/s]Map:  95%|█████████▍| 14000/14748 [00:03<00:00, 4745.14 examples/s]Map: 100%|██████████| 14748/14748 [00:03<00:00, 4708.42 examples/s]Map: 100%|██████████| 14748/14748 [00:03<00:00, 4486.89 examples/s]
+Map:   0%|          | 0/776 [00:00<?, ? examples/s]Map: 100%|██████████| 776/776 [00:00<00:00, 2648.32 examples/s]Map: 100%|██████████| 776/776 [00:00<00:00, 2587.35 examples/s]
+  0%|          | 0/1383 [00:00<?, ?it/s]/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/torch/_dynamo/eval_frame.py:632: UserWarning: torch.utils.checkpoint: the use_reentrant parameter should be passed explicitly. In version 2.5 we will raise an exception if use_reentrant is not passed. use_reentrant=False is recommended, but if you need to preserve the current default behavior, you can pass use_reentrant=True. Refer to docs for more details on the differences between the two variants.
+  return fn(*args, **kwargs)
+Traceback (most recent call last):
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/src/train_qlora.py", line 147, in <module>
+    main()
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/src/train_qlora.py", line 138, in main
+    trainer.train(resume_from_checkpoint=resume)
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/trainer.py", line 1458, in train
+    return inner_training_loop(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/trainer.py", line 1540, in _inner_training_loop
+    self._run_epoch(
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/trainer.py", line 1768, in _run_epoch
+    tr_loss_step = self.training_step(model, inputs, num_items_in_batch)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/trainer.py", line 1940, in training_step
+    loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/trainer.py", line 2042, in compute_loss
+    raise ValueError(
+ValueError: The model did not return a loss from the inputs, only the following keys: logits. For reference, the inputs it received are input_ids,attention_mask.
+  0%|          | 0/1383 [00:01<?, ?it/s]

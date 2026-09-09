@@ -1,0 +1,19 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[train] 14748 train / 776 valid rows, base=gemma
+Loading weights:   0%|          | 0/340 [00:00<?, ?it/s]Loading weights:   5%|▍         | 16/340 [00:00<00:02, 158.01it/s]Loading weights:  47%|████▋     | 161/340 [00:00<00:00, 904.92it/s]Loading weights:  92%|█████████▏| 313/340 [00:00<00:00, 1182.11it/s]Loading weights: 100%|██████████| 340/340 [00:00<00:00, 1056.28it/s]
+Map:   0%|          | 0/14748 [00:00<?, ? examples/s]Map:   7%|▋         | 1000/14748 [00:00<00:06, 2112.71 examples/s]Map:  14%|█▎        | 2000/14748 [00:00<00:04, 2890.53 examples/s]Map:  20%|██        | 3000/14748 [00:00<00:03, 3401.40 examples/s]Map:  27%|██▋       | 4000/14748 [00:01<00:02, 3647.63 examples/s]Map:  34%|███▍      | 5000/14748 [00:01<00:02, 3786.82 examples/s]Map:  41%|████      | 6000/14748 [00:01<00:02, 3848.18 examples/s]Map:  47%|████▋     | 7000/14748 [00:01<00:01, 4022.85 examples/s]Map:  54%|█████▍    | 8000/14748 [00:02<00:01, 4055.57 examples/s]Map:  61%|██████    | 9000/14748 [00:02<00:01, 4051.98 examples/s]Map:  68%|██████▊   | 10000/14748 [00:02<00:01, 4043.38 examples/s]Map:  75%|███████▍  | 11000/14748 [00:02<00:00, 4089.37 examples/s]Map:  81%|████████▏ | 12000/14748 [00:03<00:00, 4104.84 examples/s]Map:  88%|████████▊ | 13000/14748 [00:03<00:00, 4093.98 examples/s]Map:  95%|█████████▍| 14000/14748 [00:03<00:00, 4064.94 examples/s]Map: 100%|██████████| 14748/14748 [00:03<00:00, 4064.15 examples/s]Map: 100%|██████████| 14748/14748 [00:03<00:00, 3840.93 examples/s]
+Map:   0%|          | 0/776 [00:00<?, ? examples/s]Map: 100%|██████████| 776/776 [00:00<00:00, 2172.54 examples/s]Map: 100%|██████████| 776/776 [00:00<00:00, 2121.82 examples/s]
+[train] resuming from: /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/checkpoints/gemma/checkpoint-250
+Traceback (most recent call last):
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/src/train_qlora.py", line 154, in <module>
+    main()
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/src/train_qlora.py", line 145, in main
+    trainer.train(resume_from_checkpoint=resume)
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/trainer.py", line 1446, in train
+    self._load_from_checkpoint(resume_from_checkpoint)
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/trainer.py", line 3462, in _load_from_checkpoint
+    load_result = load_sharded_checkpoint(model, resume_from_checkpoint, strict=is_sagemaker_mp_enabled())
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/lib/python3.12/site-packages/transformers/trainer_utils.py", line 1089, in load_sharded_checkpoint
+    raise ValueError(f"Can't find a checkpoint index ({' or '.join(filenames)}) in {folder}.")
+ValueError: Can't find a checkpoint index (pytorch_model.bin.index.json or model.safetensors.index.json) in /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/checkpoints/gemma/checkpoint-250.

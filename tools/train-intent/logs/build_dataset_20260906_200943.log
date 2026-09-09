@@ -1,0 +1,4 @@
+[build] kept 15524 rows (train 14748, valid 776)
+[build] dropped: {'schema': 12, 'dup': 28417, 'leak': 12}
+[build] mixture by source: {'teacher': 13367, 'stt_noise': 2157}
+[build] NOTE: leakage rows were REFUSED — investigate gen_teacher overlap with the golden corpus

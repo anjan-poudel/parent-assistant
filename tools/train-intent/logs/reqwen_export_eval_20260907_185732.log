@@ -1,0 +1,2201 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[export] merge: Qwen/Qwen3-1.7B + /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/checkpoints/qwen-final
+Loading weights:   0%|          | 0/311 [00:00<?, ?it/s]Loading weights:  21%|██        | 64/311 [00:00<00:00, 616.44it/s]Loading weights:  41%|████      | 126/311 [00:00<00:00, 577.24it/s]Loading weights:  59%|█████▉    | 184/311 [00:00<00:00, 509.55it/s]Loading weights:  76%|███████▌  | 236/311 [00:00<00:00, 482.17it/s]Loading weights:  92%|█████████▏| 286/311 [00:00<00:00, 482.74it/s]Loading weights: 100%|██████████| 311/311 [00:00<00:00, 516.89it/s]
+Writing model shards:   0%|          | 0/1 [00:00<?, ?it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  1.06it/s]Writing model shards: 100%|██████████| 1/1 [00:00<00:00,  1.06it/s]
+INFO:hf-to-gguf:Loading model: qwen-merged
+INFO:hf-to-gguf:Model architecture: Qwen3ForCausalLM
+INFO:hf-to-gguf:gguf: indexing model part 'model.safetensors'
+INFO:gguf.gguf_writer:gguf: This GGUF file is for Little Endian only
+INFO:hf-to-gguf:Exporting model...
+INFO:hf-to-gguf:token_embd.weight,         torch.float16 --> F16, shape = {2048, 151936}
+INFO:hf-to-gguf:blk.0.attn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.0.ffn_down.weight,     torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.0.ffn_gate.weight,     torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.0.ffn_up.weight,       torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.0.ffn_norm.weight,     torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.0.attn_k_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.0.attn_k.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.0.attn_output.weight,  torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.0.attn_q_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.0.attn_q.weight,       torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.0.attn_v.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.1.attn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.1.ffn_down.weight,     torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.1.ffn_gate.weight,     torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.1.ffn_up.weight,       torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.1.ffn_norm.weight,     torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.1.attn_k_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.1.attn_k.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.1.attn_output.weight,  torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.1.attn_q_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.1.attn_q.weight,       torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.1.attn_v.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.10.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.10.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.10.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.10.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.10.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.10.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.10.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.10.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.10.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.10.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.10.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.11.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.11.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.11.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.11.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.11.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.11.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.11.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.11.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.11.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.11.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.11.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.12.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.12.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.12.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.12.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.12.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.12.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.12.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.12.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.12.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.12.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.12.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.13.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.13.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.13.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.13.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.13.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.13.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.13.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.13.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.13.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.13.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.13.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.14.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.14.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.14.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.14.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.14.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.14.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.14.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.14.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.14.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.14.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.14.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.15.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.15.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.15.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.15.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.15.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.15.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.15.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.15.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.15.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.15.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.15.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.16.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.16.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.16.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.16.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.16.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.16.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.16.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.16.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.16.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.16.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.16.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.17.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.17.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.17.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.17.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.17.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.17.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.17.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.17.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.17.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.17.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.17.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.18.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.18.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.18.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.18.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.18.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.18.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.18.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.18.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.18.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.18.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.18.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.19.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.19.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.19.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.19.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.19.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.19.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.19.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.19.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.19.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.19.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.19.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.2.attn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.2.ffn_down.weight,     torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.2.ffn_gate.weight,     torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.2.ffn_up.weight,       torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.2.ffn_norm.weight,     torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.2.attn_k_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.2.attn_k.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.2.attn_output.weight,  torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.2.attn_q_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.2.attn_q.weight,       torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.2.attn_v.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.20.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.20.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.20.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.20.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.20.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.20.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.20.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.20.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.20.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.20.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.20.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.21.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.21.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.21.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.21.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.21.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.21.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.21.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.21.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.21.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.21.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.21.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.22.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.22.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.22.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.22.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.22.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.22.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.22.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.22.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.22.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.22.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.22.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.23.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.23.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.23.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.23.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.23.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.23.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.23.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.23.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.23.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.23.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.23.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.24.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.24.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.24.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.24.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.24.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.24.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.24.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.24.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.24.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.24.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.24.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.25.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.25.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.25.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.25.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.25.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.25.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.25.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.25.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.25.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.25.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.25.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.26.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.26.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.26.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.26.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.26.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.26.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.26.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.26.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.26.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.26.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.26.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.27.attn_norm.weight,   torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.27.ffn_down.weight,    torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.27.ffn_gate.weight,    torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.27.ffn_up.weight,      torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.27.ffn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.27.attn_k_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.27.attn_k.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.27.attn_output.weight, torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.27.attn_q_norm.weight, torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.27.attn_q.weight,      torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.27.attn_v.weight,      torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.3.attn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.3.ffn_down.weight,     torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.3.ffn_gate.weight,     torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.3.ffn_up.weight,       torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.3.ffn_norm.weight,     torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.3.attn_k_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.3.attn_k.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.3.attn_output.weight,  torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.3.attn_q_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.3.attn_q.weight,       torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.3.attn_v.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.4.attn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.4.ffn_down.weight,     torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.4.ffn_gate.weight,     torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.4.ffn_up.weight,       torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.4.ffn_norm.weight,     torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.4.attn_k_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.4.attn_k.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.4.attn_output.weight,  torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.4.attn_q_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.4.attn_q.weight,       torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.4.attn_v.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.5.attn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.5.ffn_down.weight,     torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.5.ffn_gate.weight,     torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.5.ffn_up.weight,       torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.5.ffn_norm.weight,     torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.5.attn_k_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.5.attn_k.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.5.attn_output.weight,  torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.5.attn_q_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.5.attn_q.weight,       torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.5.attn_v.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.6.attn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.6.ffn_down.weight,     torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.6.ffn_gate.weight,     torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.6.ffn_up.weight,       torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.6.ffn_norm.weight,     torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.6.attn_k_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.6.attn_k.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.6.attn_output.weight,  torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.6.attn_q_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.6.attn_q.weight,       torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.6.attn_v.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.7.attn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.7.ffn_down.weight,     torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.7.ffn_gate.weight,     torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.7.ffn_up.weight,       torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.7.ffn_norm.weight,     torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.7.attn_k_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.7.attn_k.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.7.attn_output.weight,  torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.7.attn_q_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.7.attn_q.weight,       torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.7.attn_v.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.8.attn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.8.ffn_down.weight,     torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.8.ffn_gate.weight,     torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.8.ffn_up.weight,       torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.8.ffn_norm.weight,     torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.8.attn_k_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.8.attn_k.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.8.attn_output.weight,  torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.8.attn_q_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.8.attn_q.weight,       torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.8.attn_v.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.9.attn_norm.weight,    torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.9.ffn_down.weight,     torch.float16 --> F16, shape = {6144, 2048}
+INFO:hf-to-gguf:blk.9.ffn_gate.weight,     torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.9.ffn_up.weight,       torch.float16 --> F16, shape = {2048, 6144}
+INFO:hf-to-gguf:blk.9.ffn_norm.weight,     torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:blk.9.attn_k_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.9.attn_k.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:blk.9.attn_output.weight,  torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.9.attn_q_norm.weight,  torch.float16 --> F32, shape = {128}
+INFO:hf-to-gguf:blk.9.attn_q.weight,       torch.float16 --> F16, shape = {2048, 2048}
+INFO:hf-to-gguf:blk.9.attn_v.weight,       torch.float16 --> F16, shape = {2048, 1024}
+INFO:hf-to-gguf:output_norm.weight,        torch.float16 --> F32, shape = {2048}
+INFO:hf-to-gguf:Set meta model
+INFO:hf-to-gguf:Set model parameters
+INFO:hf-to-gguf:gguf: context length = 40960
+INFO:hf-to-gguf:gguf: embedding length = 2048
+INFO:hf-to-gguf:gguf: feed forward length = 6144
+INFO:hf-to-gguf:gguf: head count = 16
+INFO:hf-to-gguf:gguf: key-value head count = 8
+WARNING:hf-to-gguf:Unknown RoPE type: default
+INFO:hf-to-gguf:gguf: rope scaling type = NONE
+INFO:hf-to-gguf:gguf: rope theta = 1000000
+INFO:hf-to-gguf:gguf: rms norm epsilon = 1e-06
+INFO:hf-to-gguf:gguf: file type = 1
+INFO:hf-to-gguf:Set model quantization version
+INFO:hf-to-gguf:Set model tokenizer
+INFO:gguf.vocab:Adding 151387 merge(s).
+INFO:gguf.vocab:Setting special token type eos to 151645
+INFO:gguf.vocab:Setting special token type pad to 151643
+INFO:gguf.vocab:Setting special token type bos to 151643
+INFO:gguf.vocab:Setting chat_template to {%- if tools %}
+    {{- '<|im_start|>system\n' }}
+    {%- if messages[0].role == 'system' %}
+        {{- messages[0].content + '\n\n' }}
+    {%- endif %}
+    {{- "# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>" }}
+    {%- for tool in tools %}
+        {{- "\n" }}
+        {{- tool | tojson }}
+    {%- endfor %}
+    {{- "\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n" }}
+{%- else %}
+    {%- if messages[0].role == 'system' %}
+        {{- '<|im_start|>system\n' + messages[0].content + '<|im_end|>\n' }}
+    {%- endif %}
+{%- endif %}
+{%- set ns = namespace(multi_step_tool=true, last_query_index=messages|length - 1) %}
+{%- for message in messages[::-1] %}
+    {%- set index = (messages|length - 1) - loop.index0 %}
+    {%- if ns.multi_step_tool and message.role == "user" and message.content is string and not(message.content.startswith('<tool_response>') and message.content.endswith('</tool_response>')) %}
+        {%- set ns.multi_step_tool = false %}
+        {%- set ns.last_query_index = index %}
+    {%- endif %}
+{%- endfor %}
+{%- for message in messages %}
+    {%- if message.content is string %}
+        {%- set content = message.content %}
+    {%- else %}
+        {%- set content = '' %}
+    {%- endif %}
+    {%- if (message.role == "user") or (message.role == "system" and not loop.first) %}
+        {{- '<|im_start|>' + message.role + '\n' + content + '<|im_end|>' + '\n' }}
+    {%- elif message.role == "assistant" %}
+        {%- set reasoning_content = '' %}
+        {%- if message.reasoning_content is string %}
+            {%- set reasoning_content = message.reasoning_content %}
+        {%- else %}
+            {%- if '</think>' in content %}
+                {%- set reasoning_content = content.split('</think>')[0].rstrip('\n').split('<think>')[-1].lstrip('\n') %}
+                {%- set content = content.split('</think>')[-1].lstrip('\n') %}
+            {%- endif %}
+        {%- endif %}
+        {%- if loop.index0 > ns.last_query_index %}
+            {%- if loop.last or (not loop.last and reasoning_content) %}
+                {{- '<|im_start|>' + message.role + '\n<think>\n' + reasoning_content.strip('\n') + '\n</think>\n\n' + content.lstrip('\n') }}
+            {%- else %}
+                {{- '<|im_start|>' + message.role + '\n' + content }}
+            {%- endif %}
+        {%- else %}
+            {{- '<|im_start|>' + message.role + '\n' + content }}
+        {%- endif %}
+        {%- if message.tool_calls %}
+            {%- for tool_call in message.tool_calls %}
+                {%- if (loop.first and content) or (not loop.first) %}
+                    {{- '\n' }}
+                {%- endif %}
+                {%- if tool_call.function %}
+                    {%- set tool_call = tool_call.function %}
+                {%- endif %}
+                {{- '<tool_call>\n{"name": "' }}
+                {{- tool_call.name }}
+                {{- '", "arguments": ' }}
+                {%- if tool_call.arguments is string %}
+                    {{- tool_call.arguments }}
+                {%- else %}
+                    {{- tool_call.arguments | tojson }}
+                {%- endif %}
+                {{- '}\n</tool_call>' }}
+            {%- endfor %}
+        {%- endif %}
+        {{- '<|im_end|>\n' }}
+    {%- elif message.role == "tool" %}
+        {%- if loop.first or (messages[loop.index0 - 1].role != "tool") %}
+            {{- '<|im_start|>user' }}
+        {%- endif %}
+        {{- '\n<tool_response>\n' }}
+        {{- content }}
+        {{- '\n</tool_response>' }}
+        {%- if loop.last or (messages[loop.index0 + 1].role != "tool") %}
+            {{- '<|im_end|>\n' }}
+        {%- endif %}
+    {%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+    {{- '<|im_start|>assistant\n' }}
+    {%- if enable_thinking is defined and enable_thinking is false %}
+        {{- '<think>\n\n</think>\n\n' }}
+    {%- endif %}
+{%- endif %}
+INFO:gguf.gguf_writer:Writing the following files:
+INFO:gguf.gguf_writer:/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/models/intent-ne-qwen.f16.gguf: n_tensors = 310, total_size = 3.4G
+Writing:   0%|          | 0.00/3.44G [00:00<?, ?byte/s]Writing:  18%|█▊        | 622M/3.44G [00:00<00:01, 2.05Gbyte/s]Writing:  25%|██▍       | 849M/3.44G [00:00<00:01, 2.04Gbyte/s]Writing:  31%|███       | 1.08G/3.44G [00:00<00:01, 2.07Gbyte/s]Writing:  38%|███▊      | 1.30G/3.44G [00:00<00:01, 2.03Gbyte/s]Writing:  44%|████▍     | 1.51G/3.44G [00:00<00:00, 2.00Gbyte/s]Writing:  50%|████▉     | 1.72G/3.44G [00:00<00:00, 2.02Gbyte/s]Writing:  56%|█████▌    | 1.93G/3.44G [00:00<00:00, 2.03Gbyte/s]Writing:  62%|██████▏   | 2.13G/3.44G [00:01<00:00, 1.99Gbyte/s]Writing:  69%|██████▊   | 2.36G/3.44G [00:01<00:00, 2.06Gbyte/s]Writing:  76%|███████▌  | 2.61G/3.44G [00:01<00:00, 2.13Gbyte/s]Writing:  82%|████████▏ | 2.82G/3.44G [00:01<00:00, 2.03Gbyte/s]Writing:  88%|████████▊ | 3.03G/3.44G [00:01<00:00, 2.02Gbyte/s]Writing:  95%|█████████▍| 3.27G/3.44G [00:01<00:00, 2.07Gbyte/s]Writing: 100%|██████████| 3.44G/3.44G [00:01<00:00, 2.05Gbyte/s]
+INFO:hf-to-gguf:Model successfully exported to /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/models/intent-ne-qwen.f16.gguf
+version: 0.4.0-dev (build 1, commit 9e0e220)
+built with GNU 13.3.0 for Linux x86_64
+llama_quantize: quantizing '/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/models/intent-ne-qwen.f16.gguf' to '/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/models/intent-ne-qwen-q4_k_m.gguf.tmp' as Q4_K_M
+llama_model_loader: loaded meta data with 28 key-value pairs and 310 tensors from /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/models/intent-ne-qwen.f16.gguf (version GGUF V3 (latest))
+llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
+llama_model_loader: - kv   0:                       general.architecture str              = qwen3
+llama_model_loader: - kv   1:                               general.type str              = model
+llama_model_loader: - kv   2:                     general.sampling.top_k i32              = 20
+llama_model_loader: - kv   3:                     general.sampling.top_p f32              = 0.950000
+llama_model_loader: - kv   4:                      general.sampling.temp f32              = 0.600000
+llama_model_loader: - kv   5:                               general.name str              = Qwen Merged
+llama_model_loader: - kv   6:                         general.size_label str              = 1.7B
+llama_model_loader: - kv   7:                          qwen3.block_count u32              = 28
+llama_model_loader: - kv   8:                       qwen3.context_length u32              = 40960
+llama_model_loader: - kv   9:                     qwen3.embedding_length u32              = 2048
+llama_model_loader: - kv  10:                  qwen3.feed_forward_length u32              = 6144
+llama_model_loader: - kv  11:                 qwen3.attention.head_count u32              = 16
+llama_model_loader: - kv  12:              qwen3.attention.head_count_kv u32              = 8
+llama_model_loader: - kv  13:                       qwen3.rope.freq_base f32              = 1000000.000000
+llama_model_loader: - kv  14:     qwen3.attention.layer_norm_rms_epsilon f32              = 0.000001
+llama_model_loader: - kv  15:                 qwen3.attention.key_length u32              = 128
+llama_model_loader: - kv  16:               qwen3.attention.value_length u32              = 128
+llama_model_loader: - kv  17:                          general.file_type u32              = 1
+llama_model_loader: - kv  18:               general.quantization_version u32              = 2
+llama_model_loader: - kv  19:                       tokenizer.ggml.model str              = gpt2
+llama_model_loader: - kv  20:                         tokenizer.ggml.pre str              = qwen2
+llama_model_loader: - kv  21:                      tokenizer.ggml.tokens arr[str,151936]  = ["!", "\"", "#", "$", "%", "&", "'", ...
+llama_model_loader: - kv  22:                  tokenizer.ggml.token_type arr[i32,151936]  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ...
+llama_model_loader: - kv  23:                      tokenizer.ggml.merges arr[str,151387]  = ["Ġ Ġ", "ĠĠ ĠĠ", "i n", "Ġ t",...
+llama_model_loader: - kv  24:                tokenizer.ggml.eos_token_id u32              = 151645
+llama_model_loader: - kv  25:            tokenizer.ggml.padding_token_id u32              = 151643
+llama_model_loader: - kv  26:                tokenizer.ggml.bos_token_id u32              = 151643
+llama_model_loader: - kv  27:                    tokenizer.chat_template str              = {%- if tools %}\n    {{- '<|im_start|>...
+llama_model_loader: - type  f32:  113 tensors
+llama_model_loader: - type  f16:  197 tensors
+[   1/ 310] output_norm.weight                   - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[   2/ 310] token_embd.weight                    - [  2048, 151936,      1,      1], type =    f16, converting to q6_K .. size =   593.50 MiB ->   243.43 MiB
+[   3/ 310] blk.0.attn_k.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[   4/ 310] blk.0.attn_k_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[   5/ 310] blk.0.attn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[   6/ 310] blk.0.attn_output.weight             - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[   7/ 310] blk.0.attn_q.weight                  - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[   8/ 310] blk.0.attn_q_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[   9/ 310] blk.0.attn_v.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q6_K .. size =     4.00 MiB ->     1.64 MiB
+[  10/ 310] blk.0.ffn_down.weight                - [  6144,   2048,      1,      1], type =    f16, converting to q6_K .. size =    24.00 MiB ->     9.84 MiB
+[  11/ 310] blk.0.ffn_gate.weight                - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  12/ 310] blk.0.ffn_norm.weight                - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  13/ 310] blk.0.ffn_up.weight                  - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  14/ 310] blk.1.attn_k.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[  15/ 310] blk.1.attn_k_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  16/ 310] blk.1.attn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  17/ 310] blk.1.attn_output.weight             - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  18/ 310] blk.1.attn_q.weight                  - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  19/ 310] blk.1.attn_q_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  20/ 310] blk.1.attn_v.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q6_K .. size =     4.00 MiB ->     1.64 MiB
+[  21/ 310] blk.1.ffn_down.weight                - [  6144,   2048,      1,      1], type =    f16, converting to q6_K .. size =    24.00 MiB ->     9.84 MiB
+[  22/ 310] blk.1.ffn_gate.weight                - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  23/ 310] blk.1.ffn_norm.weight                - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  24/ 310] blk.1.ffn_up.weight                  - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  25/ 310] blk.2.attn_k.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[  26/ 310] blk.2.attn_k_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  27/ 310] blk.2.attn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  28/ 310] blk.2.attn_output.weight             - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  29/ 310] blk.2.attn_q.weight                  - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  30/ 310] blk.2.attn_q_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  31/ 310] blk.2.attn_v.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q6_K .. size =     4.00 MiB ->     1.64 MiB
+[  32/ 310] blk.2.ffn_down.weight                - [  6144,   2048,      1,      1], type =    f16, converting to q6_K .. size =    24.00 MiB ->     9.84 MiB
+[  33/ 310] blk.2.ffn_gate.weight                - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  34/ 310] blk.2.ffn_norm.weight                - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  35/ 310] blk.2.ffn_up.weight                  - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  36/ 310] blk.3.attn_k.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[  37/ 310] blk.3.attn_k_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  38/ 310] blk.3.attn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  39/ 310] blk.3.attn_output.weight             - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  40/ 310] blk.3.attn_q.weight                  - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  41/ 310] blk.3.attn_q_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  42/ 310] blk.3.attn_v.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[  43/ 310] blk.3.ffn_down.weight                - [  6144,   2048,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  44/ 310] blk.3.ffn_gate.weight                - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  45/ 310] blk.3.ffn_norm.weight                - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  46/ 310] blk.3.ffn_up.weight                  - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  47/ 310] blk.4.attn_k.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[  48/ 310] blk.4.attn_k_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  49/ 310] blk.4.attn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  50/ 310] blk.4.attn_output.weight             - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  51/ 310] blk.4.attn_q.weight                  - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  52/ 310] blk.4.attn_q_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  53/ 310] blk.4.attn_v.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[  54/ 310] blk.4.ffn_down.weight                - [  6144,   2048,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  55/ 310] blk.4.ffn_gate.weight                - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  56/ 310] blk.4.ffn_norm.weight                - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  57/ 310] blk.4.ffn_up.weight                  - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  58/ 310] blk.5.attn_k.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[  59/ 310] blk.5.attn_k_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  60/ 310] blk.5.attn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  61/ 310] blk.5.attn_output.weight             - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  62/ 310] blk.5.attn_q.weight                  - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  63/ 310] blk.5.attn_q_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  64/ 310] blk.5.attn_v.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q6_K .. size =     4.00 MiB ->     1.64 MiB
+[  65/ 310] blk.5.ffn_down.weight                - [  6144,   2048,      1,      1], type =    f16, converting to q6_K .. size =    24.00 MiB ->     9.84 MiB
+[  66/ 310] blk.5.ffn_gate.weight                - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  67/ 310] blk.5.ffn_norm.weight                - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  68/ 310] blk.5.ffn_up.weight                  - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  69/ 310] blk.6.attn_k.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[  70/ 310] blk.6.attn_k_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  71/ 310] blk.6.attn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  72/ 310] blk.6.attn_output.weight             - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  73/ 310] blk.6.attn_q.weight                  - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  74/ 310] blk.6.attn_q_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  75/ 310] blk.6.attn_v.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[  76/ 310] blk.6.ffn_down.weight                - [  6144,   2048,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  77/ 310] blk.6.ffn_gate.weight                - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  78/ 310] blk.6.ffn_norm.weight                - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  79/ 310] blk.6.ffn_up.weight                  - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  80/ 310] blk.7.attn_k.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[  81/ 310] blk.7.attn_k_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  82/ 310] blk.7.attn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  83/ 310] blk.7.attn_output.weight             - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  84/ 310] blk.7.attn_q.weight                  - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  85/ 310] blk.7.attn_q_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  86/ 310] blk.7.attn_v.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[  87/ 310] blk.7.ffn_down.weight                - [  6144,   2048,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  88/ 310] blk.7.ffn_gate.weight                - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  89/ 310] blk.7.ffn_norm.weight                - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  90/ 310] blk.7.ffn_up.weight                  - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[  91/ 310] blk.8.attn_k.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[  92/ 310] blk.8.attn_k_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  93/ 310] blk.8.attn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[  94/ 310] blk.8.attn_output.weight             - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  95/ 310] blk.8.attn_q.weight                  - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[  96/ 310] blk.8.attn_q_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[  97/ 310] blk.8.attn_v.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q6_K .. size =     4.00 MiB ->     1.64 MiB
+[  98/ 310] blk.8.ffn_down.weight                - [  6144,   2048,      1,      1], type =    f16, converting to q6_K .. size =    24.00 MiB ->     9.84 MiB
+[  99/ 310] blk.8.ffn_gate.weight                - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 100/ 310] blk.8.ffn_norm.weight                - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 101/ 310] blk.8.ffn_up.weight                  - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 102/ 310] blk.9.attn_k.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 103/ 310] blk.9.attn_k_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 104/ 310] blk.9.attn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 105/ 310] blk.9.attn_output.weight             - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 106/ 310] blk.9.attn_q.weight                  - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 107/ 310] blk.9.attn_q_norm.weight             - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 108/ 310] blk.9.attn_v.weight                  - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 109/ 310] blk.9.ffn_down.weight                - [  6144,   2048,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 110/ 310] blk.9.ffn_gate.weight                - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 111/ 310] blk.9.ffn_norm.weight                - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 112/ 310] blk.9.ffn_up.weight                  - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 113/ 310] blk.10.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 114/ 310] blk.10.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 115/ 310] blk.10.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 116/ 310] blk.10.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 117/ 310] blk.10.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 118/ 310] blk.10.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 119/ 310] blk.10.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 120/ 310] blk.10.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 121/ 310] blk.10.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 122/ 310] blk.10.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 123/ 310] blk.10.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 124/ 310] blk.11.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 125/ 310] blk.11.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 126/ 310] blk.11.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 127/ 310] blk.11.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 128/ 310] blk.11.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 129/ 310] blk.11.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 130/ 310] blk.11.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q6_K .. size =     4.00 MiB ->     1.64 MiB
+[ 131/ 310] blk.11.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q6_K .. size =    24.00 MiB ->     9.84 MiB
+[ 132/ 310] blk.11.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 133/ 310] blk.11.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 134/ 310] blk.11.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 135/ 310] blk.12.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 136/ 310] blk.12.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 137/ 310] blk.12.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 138/ 310] blk.12.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 139/ 310] blk.12.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 140/ 310] blk.12.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 141/ 310] blk.12.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 142/ 310] blk.12.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 143/ 310] blk.12.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 144/ 310] blk.12.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 145/ 310] blk.12.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 146/ 310] blk.13.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 147/ 310] blk.13.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 148/ 310] blk.13.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 149/ 310] blk.13.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 150/ 310] blk.13.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 151/ 310] blk.13.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 152/ 310] blk.13.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 153/ 310] blk.13.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 154/ 310] blk.13.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 155/ 310] blk.13.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 156/ 310] blk.13.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 157/ 310] blk.14.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 158/ 310] blk.14.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 159/ 310] blk.14.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 160/ 310] blk.14.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 161/ 310] blk.14.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 162/ 310] blk.14.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 163/ 310] blk.14.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q6_K .. size =     4.00 MiB ->     1.64 MiB
+[ 164/ 310] blk.14.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q6_K .. size =    24.00 MiB ->     9.84 MiB
+[ 165/ 310] blk.14.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 166/ 310] blk.14.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 167/ 310] blk.14.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 168/ 310] blk.15.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 169/ 310] blk.15.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 170/ 310] blk.15.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 171/ 310] blk.15.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 172/ 310] blk.15.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 173/ 310] blk.15.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 174/ 310] blk.15.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 175/ 310] blk.15.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 176/ 310] blk.15.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 177/ 310] blk.15.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 178/ 310] blk.15.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 179/ 310] blk.16.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 180/ 310] blk.16.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 181/ 310] blk.16.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 182/ 310] blk.16.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 183/ 310] blk.16.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 184/ 310] blk.16.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 185/ 310] blk.16.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 186/ 310] blk.16.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 187/ 310] blk.16.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 188/ 310] blk.16.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 189/ 310] blk.16.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 190/ 310] blk.17.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 191/ 310] blk.17.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 192/ 310] blk.17.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 193/ 310] blk.17.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 194/ 310] blk.17.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 195/ 310] blk.17.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 196/ 310] blk.17.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q6_K .. size =     4.00 MiB ->     1.64 MiB
+[ 197/ 310] blk.17.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q6_K .. size =    24.00 MiB ->     9.84 MiB
+[ 198/ 310] blk.17.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 199/ 310] blk.17.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 200/ 310] blk.17.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 201/ 310] blk.18.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 202/ 310] blk.18.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 203/ 310] blk.18.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 204/ 310] blk.18.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 205/ 310] blk.18.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 206/ 310] blk.18.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 207/ 310] blk.18.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 208/ 310] blk.18.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 209/ 310] blk.18.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 210/ 310] blk.18.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 211/ 310] blk.18.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 212/ 310] blk.19.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 213/ 310] blk.19.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 214/ 310] blk.19.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 215/ 310] blk.19.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 216/ 310] blk.19.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 217/ 310] blk.19.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 218/ 310] blk.19.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 219/ 310] blk.19.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 220/ 310] blk.19.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 221/ 310] blk.19.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 222/ 310] blk.19.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 223/ 310] blk.20.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 224/ 310] blk.20.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 225/ 310] blk.20.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 226/ 310] blk.20.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 227/ 310] blk.20.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 228/ 310] blk.20.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 229/ 310] blk.20.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q6_K .. size =     4.00 MiB ->     1.64 MiB
+[ 230/ 310] blk.20.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q6_K .. size =    24.00 MiB ->     9.84 MiB
+[ 231/ 310] blk.20.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 232/ 310] blk.20.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 233/ 310] blk.20.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 234/ 310] blk.21.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 235/ 310] blk.21.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 236/ 310] blk.21.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 237/ 310] blk.21.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 238/ 310] blk.21.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 239/ 310] blk.21.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 240/ 310] blk.21.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 241/ 310] blk.21.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 242/ 310] blk.21.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 243/ 310] blk.21.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 244/ 310] blk.21.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 245/ 310] blk.22.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 246/ 310] blk.22.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 247/ 310] blk.22.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 248/ 310] blk.22.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 249/ 310] blk.22.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 250/ 310] blk.22.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 251/ 310] blk.22.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 252/ 310] blk.22.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 253/ 310] blk.22.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 254/ 310] blk.22.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 255/ 310] blk.22.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 256/ 310] blk.23.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 257/ 310] blk.23.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 258/ 310] blk.23.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 259/ 310] blk.23.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 260/ 310] blk.23.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 261/ 310] blk.23.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 262/ 310] blk.23.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q6_K .. size =     4.00 MiB ->     1.64 MiB
+[ 263/ 310] blk.23.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q6_K .. size =    24.00 MiB ->     9.84 MiB
+[ 264/ 310] blk.23.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 265/ 310] blk.23.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 266/ 310] blk.23.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 267/ 310] blk.24.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 268/ 310] blk.24.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 269/ 310] blk.24.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 270/ 310] blk.24.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 271/ 310] blk.24.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 272/ 310] blk.24.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 273/ 310] blk.24.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q6_K .. size =     4.00 MiB ->     1.64 MiB
+[ 274/ 310] blk.24.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q6_K .. size =    24.00 MiB ->     9.84 MiB
+[ 275/ 310] blk.24.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 276/ 310] blk.24.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 277/ 310] blk.24.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 278/ 310] blk.25.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 279/ 310] blk.25.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 280/ 310] blk.25.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 281/ 310] blk.25.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 282/ 310] blk.25.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 283/ 310] blk.25.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 284/ 310] blk.25.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q6_K .. size =     4.00 MiB ->     1.64 MiB
+[ 285/ 310] blk.25.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q6_K .. size =    24.00 MiB ->     9.84 MiB
+[ 286/ 310] blk.25.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 287/ 310] blk.25.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 288/ 310] blk.25.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 289/ 310] blk.26.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 290/ 310] blk.26.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 291/ 310] blk.26.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 292/ 310] blk.26.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 293/ 310] blk.26.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 294/ 310] blk.26.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 295/ 310] blk.26.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q6_K .. size =     4.00 MiB ->     1.64 MiB
+[ 296/ 310] blk.26.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q6_K .. size =    24.00 MiB ->     9.84 MiB
+[ 297/ 310] blk.26.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 298/ 310] blk.26.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 299/ 310] blk.26.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 300/ 310] blk.27.attn_k.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q4_K .. size =     4.00 MiB ->     1.12 MiB
+[ 301/ 310] blk.27.attn_k_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 302/ 310] blk.27.attn_norm.weight              - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 303/ 310] blk.27.attn_output.weight            - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 304/ 310] blk.27.attn_q.weight                 - [  2048,   2048,      1,      1], type =    f16, converting to q4_K .. size =     8.00 MiB ->     2.25 MiB
+[ 305/ 310] blk.27.attn_q_norm.weight            - [   128,      1,      1,      1], type =    f32, size =    0.000 MiB
+[ 306/ 310] blk.27.attn_v.weight                 - [  2048,   1024,      1,      1], type =    f16, converting to q6_K .. size =     4.00 MiB ->     1.64 MiB
+[ 307/ 310] blk.27.ffn_down.weight               - [  6144,   2048,      1,      1], type =    f16, converting to q6_K .. size =    24.00 MiB ->     9.84 MiB
+[ 308/ 310] blk.27.ffn_gate.weight               - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+[ 309/ 310] blk.27.ffn_norm.weight               - [  2048,      1,      1,      1], type =    f32, size =    0.008 MiB
+[ 310/ 310] blk.27.ffn_up.weight                 - [  2048,   6144,      1,      1], type =    f16, converting to q4_K .. size =    24.00 MiB ->     6.75 MiB
+llama_model_quantize_impl: model size  =  3281.97 MiB (16.00 BPW)
+llama_model_quantize_impl: quant size  =  1050.43 MiB (5.12 BPW)
+
+llama_quantize: quantize time = 10031.45 ms
+llama_quantize:    total time = 10031.45 ms
+[export] merged → /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/checkpoints/qwen-merged
+[export] convert /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/checkpoints/qwen-merged → f16 GGUF
+[export] quantize → Q4_K_M
+exported: /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/models/intent-ne-qwen-q4_k_m.gguf (1107408576 bytes)
+sha256:   e4e8b748f9dde83327cc5325b674057891d176ef05472fb4ffb44d25a2fc64c9
+llama.cpp SHA: 9e0e220594af405a62835dc3a27495729fd8506b (/home/anjan/llama.cpp)
+next: .venv/bin/python src/eval_golden.py --backend gguf --model-path /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/models/intent-ne-qwen-q4_k_m.gguf --label qwen
+llama_model_loader: loaded meta data with 28 key-value pairs and 310 tensors from models/intent-ne-qwen-q4_k_m.gguf (version GGUF V3 (latest))
+llama_model_loader: Dumping metadata keys/values. Note: KV overrides do not apply in this output.
+llama_model_loader: - kv   0:                       general.architecture str              = qwen3
+llama_model_loader: - kv   1:                               general.type str              = model
+llama_model_loader: - kv   2:                     general.sampling.top_k i32              = 20
+llama_model_loader: - kv   3:                     general.sampling.top_p f32              = 0.950000
+llama_model_loader: - kv   4:                      general.sampling.temp f32              = 0.600000
+llama_model_loader: - kv   5:                               general.name str              = Qwen Merged
+llama_model_loader: - kv   6:                         general.size_label str              = 1.7B
+llama_model_loader: - kv   7:                          qwen3.block_count u32              = 28
+llama_model_loader: - kv   8:                       qwen3.context_length u32              = 40960
+llama_model_loader: - kv   9:                     qwen3.embedding_length u32              = 2048
+llama_model_loader: - kv  10:                  qwen3.feed_forward_length u32              = 6144
+llama_model_loader: - kv  11:                 qwen3.attention.head_count u32              = 16
+llama_model_loader: - kv  12:              qwen3.attention.head_count_kv u32              = 8
+llama_model_loader: - kv  13:                       qwen3.rope.freq_base f32              = 1000000.000000
+llama_model_loader: - kv  14:     qwen3.attention.layer_norm_rms_epsilon f32              = 0.000001
+llama_model_loader: - kv  15:                 qwen3.attention.key_length u32              = 128
+llama_model_loader: - kv  16:               qwen3.attention.value_length u32              = 128
+llama_model_loader: - kv  17:                       tokenizer.ggml.model str              = gpt2
+llama_model_loader: - kv  18:                         tokenizer.ggml.pre str              = qwen2
+llama_model_loader: - kv  19:                      tokenizer.ggml.tokens arr[str,151936]  = ["!", "\"", "#", "$", "%", "&", "'", ...
+llama_model_loader: - kv  20:                  tokenizer.ggml.token_type arr[i32,151936]  = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, ...
+llama_model_loader: - kv  21:                      tokenizer.ggml.merges arr[str,151387]  = ["Ġ Ġ", "ĠĠ ĠĠ", "i n", "Ġ t",...
+llama_model_loader: - kv  22:                tokenizer.ggml.eos_token_id u32              = 151645
+llama_model_loader: - kv  23:            tokenizer.ggml.padding_token_id u32              = 151643
+llama_model_loader: - kv  24:                tokenizer.ggml.bos_token_id u32              = 151643
+llama_model_loader: - kv  25:                    tokenizer.chat_template str              = {%- if tools %}\n    {{- '<|im_start|>...
+llama_model_loader: - kv  26:               general.quantization_version u32              = 2
+llama_model_loader: - kv  27:                          general.file_type u32              = 15
+llama_model_loader: - type  f32:  113 tensors
+llama_model_loader: - type q4_K:  168 tensors
+llama_model_loader: - type q6_K:   29 tensors
+print_info: file format = GGUF V3 (latest)
+print_info: file type   = Q4_K - Medium
+print_info: file size   = 1.03 GiB (5.12 BPW) 
+init_tokenizer: initializing tokenizer for type 2
+load: 0 unused tokens
+load: control token: 151660 '<|fim_middle|>' is not marked as EOG
+load: control token: 151659 '<|fim_prefix|>' is not marked as EOG
+load: control token: 151653 '<|vision_end|>' is not marked as EOG
+load: control token: 151648 '<|box_start|>' is not marked as EOG
+load: control token: 151646 '<|object_ref_start|>' is not marked as EOG
+load: control token: 151649 '<|box_end|>' is not marked as EOG
+load: control-looking token: 128247 '</s>' was not control-type; this is probably a bug in the model. its type will be overridden
+load: control token: 151655 '<|image_pad|>' is not marked as EOG
+load: control token: 151651 '<|quad_end|>' is not marked as EOG
+load: control token: 151647 '<|object_ref_end|>' is not marked as EOG
+load: control token: 151652 '<|vision_start|>' is not marked as EOG
+load: control token: 151654 '<|vision_pad|>' is not marked as EOG
+load: control token: 151656 '<|video_pad|>' is not marked as EOG
+load: control token: 151644 '<|im_start|>' is not marked as EOG
+load: control token: 151661 '<|fim_suffix|>' is not marked as EOG
+load: control token: 151650 '<|quad_start|>' is not marked as EOG
+load: printing all EOG tokens:
+load:   - 128247 ('</s>')
+load:   - 151643 ('<|endoftext|>')
+load:   - 151645 ('<|im_end|>')
+load:   - 151662 ('<|fim_pad|>')
+load:   - 151663 ('<|repo_name|>')
+load:   - 151664 ('<|file_sep|>')
+load: special tokens cache size = 27
+load: token to piece cache size = 0.9311 MB
+print_info: arch                  = qwen3
+print_info: vocab_only            = 0
+print_info: no_alloc              = 0
+print_info: n_ctx_train           = 40960
+print_info: n_embd_inp            = 2048
+print_info: n_embd                = 2048
+print_info: n_embd_out            = 2048
+print_info: n_layer               = 28
+print_info: n_layer_all           = 28
+print_info: n_head                = 16
+print_info: n_head_kv             = 8
+print_info: n_rot                 = 128
+print_info: n_swa                 = 0
+print_info: is_swa_any            = 0
+print_info: n_embd_head_k         = 128
+print_info: n_embd_head_v         = 128
+print_info: n_gqa                 = 2
+print_info: n_embd_k_gqa          = 1024
+print_info: n_embd_v_gqa          = 1024
+print_info: f_norm_eps            = 0.0e+00
+print_info: f_norm_rms_eps        = 1.0e-06
+print_info: f_clamp_kqv           = 0.0e+00
+print_info: f_max_alibi_bias      = 0.0e+00
+print_info: f_logit_scale         = 0.0e+00
+print_info: f_attn_scale          = 0.0e+00
+print_info: f_attn_value_scale    = 0.0000
+print_info: n_ff                  = 6144
+print_info: n_expert              = 0
+print_info: n_expert_used         = 0
+print_info: n_expert_groups       = 0
+print_info: n_group_used          = 0
+print_info: causal attn           = 1
+print_info: pooling type          = -1
+print_info: rope type             = 2
+print_info: rope scaling          = linear
+print_info: freq_base_train       = 1000000.0
+print_info: freq_scale_train      = 1
+print_info: n_ctx_orig_yarn       = 40960
+print_info: rope_yarn_log_mul     = 0.0000
+print_info: rope_finetuned        = unknown
+print_info: model type            = 1.7B
+print_info: model params          = 1.72 B
+print_info: general.name          = Qwen Merged
+print_info: vocab type            = BPE
+print_info: n_vocab               = 151936
+print_info: n_merges              = 151387
+print_info: BOS token             = 151643 '<|endoftext|>'
+print_info: EOS token             = 151645 '<|im_end|>'
+print_info: EOT token             = 151645 '<|im_end|>'
+print_info: PAD token             = 151643 '<|endoftext|>'
+print_info: LF token              = 198 'Ċ'
+print_info: FIM PRE token         = 151659 '<|fim_prefix|>'
+print_info: FIM SUF token         = 151661 '<|fim_suffix|>'
+print_info: FIM MID token         = 151660 '<|fim_middle|>'
+print_info: FIM PAD token         = 151662 '<|fim_pad|>'
+print_info: FIM REP token         = 151663 '<|repo_name|>'
+print_info: FIM SEP token         = 151664 '<|file_sep|>'
+print_info: EOG token             = 128247 '</s>'
+print_info: EOG token             = 151643 '<|endoftext|>'
+print_info: EOG token             = 151645 '<|im_end|>'
+print_info: EOG token             = 151662 '<|fim_pad|>'
+print_info: EOG token             = 151663 '<|repo_name|>'
+print_info: EOG token             = 151664 '<|file_sep|>'
+print_info: max token length      = 256
+load_tensors: loading model tensors, this can take a while... (load_mode = mmap)
+load_tensors: layer   0 assigned to device CPU, is_swa = 0
+load_tensors: layer   1 assigned to device CPU, is_swa = 0
+load_tensors: layer   2 assigned to device CPU, is_swa = 0
+load_tensors: layer   3 assigned to device CPU, is_swa = 0
+load_tensors: layer   4 assigned to device CPU, is_swa = 0
+load_tensors: layer   5 assigned to device CPU, is_swa = 0
+load_tensors: layer   6 assigned to device CPU, is_swa = 0
+load_tensors: layer   7 assigned to device CPU, is_swa = 0
+load_tensors: layer   8 assigned to device CPU, is_swa = 0
+load_tensors: layer   9 assigned to device CPU, is_swa = 0
+load_tensors: layer  10 assigned to device CPU, is_swa = 0
+load_tensors: layer  11 assigned to device CPU, is_swa = 0
+load_tensors: layer  12 assigned to device CPU, is_swa = 0
+load_tensors: layer  13 assigned to device CPU, is_swa = 0
+load_tensors: layer  14 assigned to device CPU, is_swa = 0
+load_tensors: layer  15 assigned to device CPU, is_swa = 0
+load_tensors: layer  16 assigned to device CPU, is_swa = 0
+load_tensors: layer  17 assigned to device CPU, is_swa = 0
+load_tensors: layer  18 assigned to device CPU, is_swa = 0
+load_tensors: layer  19 assigned to device CPU, is_swa = 0
+load_tensors: layer  20 assigned to device CPU, is_swa = 0
+load_tensors: layer  21 assigned to device CPU, is_swa = 0
+load_tensors: layer  22 assigned to device CPU, is_swa = 0
+load_tensors: layer  23 assigned to device CPU, is_swa = 0
+load_tensors: layer  24 assigned to device CPU, is_swa = 0
+load_tensors: layer  25 assigned to device CPU, is_swa = 0
+load_tensors: layer  26 assigned to device CPU, is_swa = 0
+load_tensors: layer  27 assigned to device CPU, is_swa = 0
+load_tensors: layer  28 assigned to device CPU, is_swa = 0
+create_tensor: loading tensor token_embd.weight
+create_tensor: loading tensor output_norm.weight
+create_tensor: loading tensor output.weight
+create_tensor: loading tensor token_embd.weight
+create_tensor: loading tensor cls.output.weight
+create_tensor: loading tensor blk.0.attn_norm.weight
+create_tensor: loading tensor blk.0.attn_qkv.weight
+create_tensor: loading tensor blk.0.attn_q.weight
+create_tensor: loading tensor blk.0.attn_k.weight
+create_tensor: loading tensor blk.0.attn_v.weight
+create_tensor: loading tensor blk.0.attn_q.bias
+create_tensor: loading tensor blk.0.attn_k.bias
+create_tensor: loading tensor blk.0.attn_v.bias
+create_tensor: loading tensor blk.0.attn_output.weight
+create_tensor: loading tensor blk.0.attn_k_norm.weight
+create_tensor: loading tensor blk.0.attn_q_norm.weight
+create_tensor: loading tensor blk.0.ffn_norm.weight
+create_tensor: loading tensor blk.0.ffn_gate.weight
+create_tensor: loading tensor blk.0.ffn_down.weight
+create_tensor: loading tensor blk.0.ffn_up.weight
+create_tensor: loading tensor blk.1.attn_norm.weight
+create_tensor: loading tensor blk.1.attn_qkv.weight
+create_tensor: loading tensor blk.1.attn_q.weight
+create_tensor: loading tensor blk.1.attn_k.weight
+create_tensor: loading tensor blk.1.attn_v.weight
+create_tensor: loading tensor blk.1.attn_q.bias
+create_tensor: loading tensor blk.1.attn_k.bias
+create_tensor: loading tensor blk.1.attn_v.bias
+create_tensor: loading tensor blk.1.attn_output.weight
+create_tensor: loading tensor blk.1.attn_k_norm.weight
+create_tensor: loading tensor blk.1.attn_q_norm.weight
+create_tensor: loading tensor blk.1.ffn_norm.weight
+create_tensor: loading tensor blk.1.ffn_gate.weight
+create_tensor: loading tensor blk.1.ffn_down.weight
+create_tensor: loading tensor blk.1.ffn_up.weight
+create_tensor: loading tensor blk.2.attn_norm.weight
+create_tensor: loading tensor blk.2.attn_qkv.weight
+create_tensor: loading tensor blk.2.attn_q.weight
+create_tensor: loading tensor blk.2.attn_k.weight
+create_tensor: loading tensor blk.2.attn_v.weight
+create_tensor: loading tensor blk.2.attn_q.bias
+create_tensor: loading tensor blk.2.attn_k.bias
+create_tensor: loading tensor blk.2.attn_v.bias
+create_tensor: loading tensor blk.2.attn_output.weight
+create_tensor: loading tensor blk.2.attn_k_norm.weight
+create_tensor: loading tensor blk.2.attn_q_norm.weight
+create_tensor: loading tensor blk.2.ffn_norm.weight
+create_tensor: loading tensor blk.2.ffn_gate.weight
+create_tensor: loading tensor blk.2.ffn_down.weight
+create_tensor: loading tensor blk.2.ffn_up.weight
+create_tensor: loading tensor blk.3.attn_norm.weight
+create_tensor: loading tensor blk.3.attn_qkv.weight
+create_tensor: loading tensor blk.3.attn_q.weight
+create_tensor: loading tensor blk.3.attn_k.weight
+create_tensor: loading tensor blk.3.attn_v.weight
+create_tensor: loading tensor blk.3.attn_q.bias
+create_tensor: loading tensor blk.3.attn_k.bias
+create_tensor: loading tensor blk.3.attn_v.bias
+create_tensor: loading tensor blk.3.attn_output.weight
+create_tensor: loading tensor blk.3.attn_k_norm.weight
+create_tensor: loading tensor blk.3.attn_q_norm.weight
+create_tensor: loading tensor blk.3.ffn_norm.weight
+create_tensor: loading tensor blk.3.ffn_gate.weight
+create_tensor: loading tensor blk.3.ffn_down.weight
+create_tensor: loading tensor blk.3.ffn_up.weight
+create_tensor: loading tensor blk.4.attn_norm.weight
+create_tensor: loading tensor blk.4.attn_qkv.weight
+create_tensor: loading tensor blk.4.attn_q.weight
+create_tensor: loading tensor blk.4.attn_k.weight
+create_tensor: loading tensor blk.4.attn_v.weight
+create_tensor: loading tensor blk.4.attn_q.bias
+create_tensor: loading tensor blk.4.attn_k.bias
+create_tensor: loading tensor blk.4.attn_v.bias
+create_tensor: loading tensor blk.4.attn_output.weight
+create_tensor: loading tensor blk.4.attn_k_norm.weight
+create_tensor: loading tensor blk.4.attn_q_norm.weight
+create_tensor: loading tensor blk.4.ffn_norm.weight
+create_tensor: loading tensor blk.4.ffn_gate.weight
+create_tensor: loading tensor blk.4.ffn_down.weight
+create_tensor: loading tensor blk.4.ffn_up.weight
+create_tensor: loading tensor blk.5.attn_norm.weight
+create_tensor: loading tensor blk.5.attn_qkv.weight
+create_tensor: loading tensor blk.5.attn_q.weight
+create_tensor: loading tensor blk.5.attn_k.weight
+create_tensor: loading tensor blk.5.attn_v.weight
+create_tensor: loading tensor blk.5.attn_q.bias
+create_tensor: loading tensor blk.5.attn_k.bias
+create_tensor: loading tensor blk.5.attn_v.bias
+create_tensor: loading tensor blk.5.attn_output.weight
+create_tensor: loading tensor blk.5.attn_k_norm.weight
+create_tensor: loading tensor blk.5.attn_q_norm.weight
+create_tensor: loading tensor blk.5.ffn_norm.weight
+create_tensor: loading tensor blk.5.ffn_gate.weight
+create_tensor: loading tensor blk.5.ffn_down.weight
+create_tensor: loading tensor blk.5.ffn_up.weight
+create_tensor: loading tensor blk.6.attn_norm.weight
+create_tensor: loading tensor blk.6.attn_qkv.weight
+create_tensor: loading tensor blk.6.attn_q.weight
+create_tensor: loading tensor blk.6.attn_k.weight
+create_tensor: loading tensor blk.6.attn_v.weight
+create_tensor: loading tensor blk.6.attn_q.bias
+create_tensor: loading tensor blk.6.attn_k.bias
+create_tensor: loading tensor blk.6.attn_v.bias
+create_tensor: loading tensor blk.6.attn_output.weight
+create_tensor: loading tensor blk.6.attn_k_norm.weight
+create_tensor: loading tensor blk.6.attn_q_norm.weight
+create_tensor: loading tensor blk.6.ffn_norm.weight
+create_tensor: loading tensor blk.6.ffn_gate.weight
+create_tensor: loading tensor blk.6.ffn_down.weight
+create_tensor: loading tensor blk.6.ffn_up.weight
+create_tensor: loading tensor blk.7.attn_norm.weight
+create_tensor: loading tensor blk.7.attn_qkv.weight
+create_tensor: loading tensor blk.7.attn_q.weight
+create_tensor: loading tensor blk.7.attn_k.weight
+create_tensor: loading tensor blk.7.attn_v.weight
+create_tensor: loading tensor blk.7.attn_q.bias
+create_tensor: loading tensor blk.7.attn_k.bias
+create_tensor: loading tensor blk.7.attn_v.bias
+create_tensor: loading tensor blk.7.attn_output.weight
+create_tensor: loading tensor blk.7.attn_k_norm.weight
+create_tensor: loading tensor blk.7.attn_q_norm.weight
+create_tensor: loading tensor blk.7.ffn_norm.weight
+create_tensor: loading tensor blk.7.ffn_gate.weight
+create_tensor: loading tensor blk.7.ffn_down.weight
+create_tensor: loading tensor blk.7.ffn_up.weight
+create_tensor: loading tensor blk.8.attn_norm.weight
+create_tensor: loading tensor blk.8.attn_qkv.weight
+create_tensor: loading tensor blk.8.attn_q.weight
+create_tensor: loading tensor blk.8.attn_k.weight
+create_tensor: loading tensor blk.8.attn_v.weight
+create_tensor: loading tensor blk.8.attn_q.bias
+create_tensor: loading tensor blk.8.attn_k.bias
+create_tensor: loading tensor blk.8.attn_v.bias
+create_tensor: loading tensor blk.8.attn_output.weight
+create_tensor: loading tensor blk.8.attn_k_norm.weight
+create_tensor: loading tensor blk.8.attn_q_norm.weight
+create_tensor: loading tensor blk.8.ffn_norm.weight
+create_tensor: loading tensor blk.8.ffn_gate.weight
+create_tensor: loading tensor blk.8.ffn_down.weight
+create_tensor: loading tensor blk.8.ffn_up.weight
+create_tensor: loading tensor blk.9.attn_norm.weight
+create_tensor: loading tensor blk.9.attn_qkv.weight
+create_tensor: loading tensor blk.9.attn_q.weight
+create_tensor: loading tensor blk.9.attn_k.weight
+create_tensor: loading tensor blk.9.attn_v.weight
+create_tensor: loading tensor blk.9.attn_q.bias
+create_tensor: loading tensor blk.9.attn_k.bias
+create_tensor: loading tensor blk.9.attn_v.bias
+create_tensor: loading tensor blk.9.attn_output.weight
+create_tensor: loading tensor blk.9.attn_k_norm.weight
+create_tensor: loading tensor blk.9.attn_q_norm.weight
+create_tensor: loading tensor blk.9.ffn_norm.weight
+create_tensor: loading tensor blk.9.ffn_gate.weight
+create_tensor: loading tensor blk.9.ffn_down.weight
+create_tensor: loading tensor blk.9.ffn_up.weight
+create_tensor: loading tensor blk.10.attn_norm.weight
+create_tensor: loading tensor blk.10.attn_qkv.weight
+create_tensor: loading tensor blk.10.attn_q.weight
+create_tensor: loading tensor blk.10.attn_k.weight
+create_tensor: loading tensor blk.10.attn_v.weight
+create_tensor: loading tensor blk.10.attn_q.bias
+create_tensor: loading tensor blk.10.attn_k.bias
+create_tensor: loading tensor blk.10.attn_v.bias
+create_tensor: loading tensor blk.10.attn_output.weight
+create_tensor: loading tensor blk.10.attn_k_norm.weight
+create_tensor: loading tensor blk.10.attn_q_norm.weight
+create_tensor: loading tensor blk.10.ffn_norm.weight
+create_tensor: loading tensor blk.10.ffn_gate.weight
+create_tensor: loading tensor blk.10.ffn_down.weight
+create_tensor: loading tensor blk.10.ffn_up.weight
+create_tensor: loading tensor blk.11.attn_norm.weight
+create_tensor: loading tensor blk.11.attn_qkv.weight
+create_tensor: loading tensor blk.11.attn_q.weight
+create_tensor: loading tensor blk.11.attn_k.weight
+create_tensor: loading tensor blk.11.attn_v.weight
+create_tensor: loading tensor blk.11.attn_q.bias
+create_tensor: loading tensor blk.11.attn_k.bias
+create_tensor: loading tensor blk.11.attn_v.bias
+create_tensor: loading tensor blk.11.attn_output.weight
+create_tensor: loading tensor blk.11.attn_k_norm.weight
+create_tensor: loading tensor blk.11.attn_q_norm.weight
+create_tensor: loading tensor blk.11.ffn_norm.weight
+create_tensor: loading tensor blk.11.ffn_gate.weight
+create_tensor: loading tensor blk.11.ffn_down.weight
+create_tensor: loading tensor blk.11.ffn_up.weight
+create_tensor: loading tensor blk.12.attn_norm.weight
+create_tensor: loading tensor blk.12.attn_qkv.weight
+create_tensor: loading tensor blk.12.attn_q.weight
+create_tensor: loading tensor blk.12.attn_k.weight
+create_tensor: loading tensor blk.12.attn_v.weight
+create_tensor: loading tensor blk.12.attn_q.bias
+create_tensor: loading tensor blk.12.attn_k.bias
+create_tensor: loading tensor blk.12.attn_v.bias
+create_tensor: loading tensor blk.12.attn_output.weight
+create_tensor: loading tensor blk.12.attn_k_norm.weight
+create_tensor: loading tensor blk.12.attn_q_norm.weight
+create_tensor: loading tensor blk.12.ffn_norm.weight
+create_tensor: loading tensor blk.12.ffn_gate.weight
+create_tensor: loading tensor blk.12.ffn_down.weight
+create_tensor: loading tensor blk.12.ffn_up.weight
+create_tensor: loading tensor blk.13.attn_norm.weight
+create_tensor: loading tensor blk.13.attn_qkv.weight
+create_tensor: loading tensor blk.13.attn_q.weight
+create_tensor: loading tensor blk.13.attn_k.weight
+create_tensor: loading tensor blk.13.attn_v.weight
+create_tensor: loading tensor blk.13.attn_q.bias
+create_tensor: loading tensor blk.13.attn_k.bias
+create_tensor: loading tensor blk.13.attn_v.bias
+create_tensor: loading tensor blk.13.attn_output.weight
+create_tensor: loading tensor blk.13.attn_k_norm.weight
+create_tensor: loading tensor blk.13.attn_q_norm.weight
+create_tensor: loading tensor blk.13.ffn_norm.weight
+create_tensor: loading tensor blk.13.ffn_gate.weight
+create_tensor: loading tensor blk.13.ffn_down.weight
+create_tensor: loading tensor blk.13.ffn_up.weight
+create_tensor: loading tensor blk.14.attn_norm.weight
+create_tensor: loading tensor blk.14.attn_qkv.weight
+create_tensor: loading tensor blk.14.attn_q.weight
+create_tensor: loading tensor blk.14.attn_k.weight
+create_tensor: loading tensor blk.14.attn_v.weight
+create_tensor: loading tensor blk.14.attn_q.bias
+create_tensor: loading tensor blk.14.attn_k.bias
+create_tensor: loading tensor blk.14.attn_v.bias
+create_tensor: loading tensor blk.14.attn_output.weight
+create_tensor: loading tensor blk.14.attn_k_norm.weight
+create_tensor: loading tensor blk.14.attn_q_norm.weight
+create_tensor: loading tensor blk.14.ffn_norm.weight
+create_tensor: loading tensor blk.14.ffn_gate.weight
+create_tensor: loading tensor blk.14.ffn_down.weight
+create_tensor: loading tensor blk.14.ffn_up.weight
+create_tensor: loading tensor blk.15.attn_norm.weight
+create_tensor: loading tensor blk.15.attn_qkv.weight
+create_tensor: loading tensor blk.15.attn_q.weight
+create_tensor: loading tensor blk.15.attn_k.weight
+create_tensor: loading tensor blk.15.attn_v.weight
+create_tensor: loading tensor blk.15.attn_q.bias
+create_tensor: loading tensor blk.15.attn_k.bias
+create_tensor: loading tensor blk.15.attn_v.bias
+create_tensor: loading tensor blk.15.attn_output.weight
+create_tensor: loading tensor blk.15.attn_k_norm.weight
+create_tensor: loading tensor blk.15.attn_q_norm.weight
+create_tensor: loading tensor blk.15.ffn_norm.weight
+create_tensor: loading tensor blk.15.ffn_gate.weight
+create_tensor: loading tensor blk.15.ffn_down.weight
+create_tensor: loading tensor blk.15.ffn_up.weight
+create_tensor: loading tensor blk.16.attn_norm.weight
+create_tensor: loading tensor blk.16.attn_qkv.weight
+create_tensor: loading tensor blk.16.attn_q.weight
+create_tensor: loading tensor blk.16.attn_k.weight
+create_tensor: loading tensor blk.16.attn_v.weight
+create_tensor: loading tensor blk.16.attn_q.bias
+create_tensor: loading tensor blk.16.attn_k.bias
+create_tensor: loading tensor blk.16.attn_v.bias
+create_tensor: loading tensor blk.16.attn_output.weight
+create_tensor: loading tensor blk.16.attn_k_norm.weight
+create_tensor: loading tensor blk.16.attn_q_norm.weight
+create_tensor: loading tensor blk.16.ffn_norm.weight
+create_tensor: loading tensor blk.16.ffn_gate.weight
+create_tensor: loading tensor blk.16.ffn_down.weight
+create_tensor: loading tensor blk.16.ffn_up.weight
+create_tensor: loading tensor blk.17.attn_norm.weight
+create_tensor: loading tensor blk.17.attn_qkv.weight
+create_tensor: loading tensor blk.17.attn_q.weight
+create_tensor: loading tensor blk.17.attn_k.weight
+create_tensor: loading tensor blk.17.attn_v.weight
+create_tensor: loading tensor blk.17.attn_q.bias
+create_tensor: loading tensor blk.17.attn_k.bias
+create_tensor: loading tensor blk.17.attn_v.bias
+create_tensor: loading tensor blk.17.attn_output.weight
+create_tensor: loading tensor blk.17.attn_k_norm.weight
+create_tensor: loading tensor blk.17.attn_q_norm.weight
+create_tensor: loading tensor blk.17.ffn_norm.weight
+create_tensor: loading tensor blk.17.ffn_gate.weight
+create_tensor: loading tensor blk.17.ffn_down.weight
+create_tensor: loading tensor blk.17.ffn_up.weight
+create_tensor: loading tensor blk.18.attn_norm.weight
+create_tensor: loading tensor blk.18.attn_qkv.weight
+create_tensor: loading tensor blk.18.attn_q.weight
+create_tensor: loading tensor blk.18.attn_k.weight
+create_tensor: loading tensor blk.18.attn_v.weight
+create_tensor: loading tensor blk.18.attn_q.bias
+create_tensor: loading tensor blk.18.attn_k.bias
+create_tensor: loading tensor blk.18.attn_v.bias
+create_tensor: loading tensor blk.18.attn_output.weight
+create_tensor: loading tensor blk.18.attn_k_norm.weight
+create_tensor: loading tensor blk.18.attn_q_norm.weight
+create_tensor: loading tensor blk.18.ffn_norm.weight
+create_tensor: loading tensor blk.18.ffn_gate.weight
+create_tensor: loading tensor blk.18.ffn_down.weight
+create_tensor: loading tensor blk.18.ffn_up.weight
+create_tensor: loading tensor blk.19.attn_norm.weight
+create_tensor: loading tensor blk.19.attn_qkv.weight
+create_tensor: loading tensor blk.19.attn_q.weight
+create_tensor: loading tensor blk.19.attn_k.weight
+create_tensor: loading tensor blk.19.attn_v.weight
+create_tensor: loading tensor blk.19.attn_q.bias
+create_tensor: loading tensor blk.19.attn_k.bias
+create_tensor: loading tensor blk.19.attn_v.bias
+create_tensor: loading tensor blk.19.attn_output.weight
+create_tensor: loading tensor blk.19.attn_k_norm.weight
+create_tensor: loading tensor blk.19.attn_q_norm.weight
+create_tensor: loading tensor blk.19.ffn_norm.weight
+create_tensor: loading tensor blk.19.ffn_gate.weight
+create_tensor: loading tensor blk.19.ffn_down.weight
+create_tensor: loading tensor blk.19.ffn_up.weight
+create_tensor: loading tensor blk.20.attn_norm.weight
+create_tensor: loading tensor blk.20.attn_qkv.weight
+create_tensor: loading tensor blk.20.attn_q.weight
+create_tensor: loading tensor blk.20.attn_k.weight
+create_tensor: loading tensor blk.20.attn_v.weight
+create_tensor: loading tensor blk.20.attn_q.bias
+create_tensor: loading tensor blk.20.attn_k.bias
+create_tensor: loading tensor blk.20.attn_v.bias
+create_tensor: loading tensor blk.20.attn_output.weight
+create_tensor: loading tensor blk.20.attn_k_norm.weight
+create_tensor: loading tensor blk.20.attn_q_norm.weight
+create_tensor: loading tensor blk.20.ffn_norm.weight
+create_tensor: loading tensor blk.20.ffn_gate.weight
+create_tensor: loading tensor blk.20.ffn_down.weight
+create_tensor: loading tensor blk.20.ffn_up.weight
+create_tensor: loading tensor blk.21.attn_norm.weight
+create_tensor: loading tensor blk.21.attn_qkv.weight
+create_tensor: loading tensor blk.21.attn_q.weight
+create_tensor: loading tensor blk.21.attn_k.weight
+create_tensor: loading tensor blk.21.attn_v.weight
+create_tensor: loading tensor blk.21.attn_q.bias
+create_tensor: loading tensor blk.21.attn_k.bias
+create_tensor: loading tensor blk.21.attn_v.bias
+create_tensor: loading tensor blk.21.attn_output.weight
+create_tensor: loading tensor blk.21.attn_k_norm.weight
+create_tensor: loading tensor blk.21.attn_q_norm.weight
+create_tensor: loading tensor blk.21.ffn_norm.weight
+create_tensor: loading tensor blk.21.ffn_gate.weight
+create_tensor: loading tensor blk.21.ffn_down.weight
+create_tensor: loading tensor blk.21.ffn_up.weight
+create_tensor: loading tensor blk.22.attn_norm.weight
+create_tensor: loading tensor blk.22.attn_qkv.weight
+create_tensor: loading tensor blk.22.attn_q.weight
+create_tensor: loading tensor blk.22.attn_k.weight
+create_tensor: loading tensor blk.22.attn_v.weight
+create_tensor: loading tensor blk.22.attn_q.bias
+create_tensor: loading tensor blk.22.attn_k.bias
+create_tensor: loading tensor blk.22.attn_v.bias
+create_tensor: loading tensor blk.22.attn_output.weight
+create_tensor: loading tensor blk.22.attn_k_norm.weight
+create_tensor: loading tensor blk.22.attn_q_norm.weight
+create_tensor: loading tensor blk.22.ffn_norm.weight
+create_tensor: loading tensor blk.22.ffn_gate.weight
+create_tensor: loading tensor blk.22.ffn_down.weight
+create_tensor: loading tensor blk.22.ffn_up.weight
+create_tensor: loading tensor blk.23.attn_norm.weight
+create_tensor: loading tensor blk.23.attn_qkv.weight
+create_tensor: loading tensor blk.23.attn_q.weight
+create_tensor: loading tensor blk.23.attn_k.weight
+create_tensor: loading tensor blk.23.attn_v.weight
+create_tensor: loading tensor blk.23.attn_q.bias
+create_tensor: loading tensor blk.23.attn_k.bias
+create_tensor: loading tensor blk.23.attn_v.bias
+create_tensor: loading tensor blk.23.attn_output.weight
+create_tensor: loading tensor blk.23.attn_k_norm.weight
+create_tensor: loading tensor blk.23.attn_q_norm.weight
+create_tensor: loading tensor blk.23.ffn_norm.weight
+create_tensor: loading tensor blk.23.ffn_gate.weight
+create_tensor: loading tensor blk.23.ffn_down.weight
+create_tensor: loading tensor blk.23.ffn_up.weight
+create_tensor: loading tensor blk.24.attn_norm.weight
+create_tensor: loading tensor blk.24.attn_qkv.weight
+create_tensor: loading tensor blk.24.attn_q.weight
+create_tensor: loading tensor blk.24.attn_k.weight
+create_tensor: loading tensor blk.24.attn_v.weight
+create_tensor: loading tensor blk.24.attn_q.bias
+create_tensor: loading tensor blk.24.attn_k.bias
+create_tensor: loading tensor blk.24.attn_v.bias
+create_tensor: loading tensor blk.24.attn_output.weight
+create_tensor: loading tensor blk.24.attn_k_norm.weight
+create_tensor: loading tensor blk.24.attn_q_norm.weight
+create_tensor: loading tensor blk.24.ffn_norm.weight
+create_tensor: loading tensor blk.24.ffn_gate.weight
+create_tensor: loading tensor blk.24.ffn_down.weight
+create_tensor: loading tensor blk.24.ffn_up.weight
+create_tensor: loading tensor blk.25.attn_norm.weight
+create_tensor: loading tensor blk.25.attn_qkv.weight
+create_tensor: loading tensor blk.25.attn_q.weight
+create_tensor: loading tensor blk.25.attn_k.weight
+create_tensor: loading tensor blk.25.attn_v.weight
+create_tensor: loading tensor blk.25.attn_q.bias
+create_tensor: loading tensor blk.25.attn_k.bias
+create_tensor: loading tensor blk.25.attn_v.bias
+create_tensor: loading tensor blk.25.attn_output.weight
+create_tensor: loading tensor blk.25.attn_k_norm.weight
+create_tensor: loading tensor blk.25.attn_q_norm.weight
+create_tensor: loading tensor blk.25.ffn_norm.weight
+create_tensor: loading tensor blk.25.ffn_gate.weight
+create_tensor: loading tensor blk.25.ffn_down.weight
+create_tensor: loading tensor blk.25.ffn_up.weight
+create_tensor: loading tensor blk.26.attn_norm.weight
+create_tensor: loading tensor blk.26.attn_qkv.weight
+create_tensor: loading tensor blk.26.attn_q.weight
+create_tensor: loading tensor blk.26.attn_k.weight
+create_tensor: loading tensor blk.26.attn_v.weight
+create_tensor: loading tensor blk.26.attn_q.bias
+create_tensor: loading tensor blk.26.attn_k.bias
+create_tensor: loading tensor blk.26.attn_v.bias
+create_tensor: loading tensor blk.26.attn_output.weight
+create_tensor: loading tensor blk.26.attn_k_norm.weight
+create_tensor: loading tensor blk.26.attn_q_norm.weight
+create_tensor: loading tensor blk.26.ffn_norm.weight
+create_tensor: loading tensor blk.26.ffn_gate.weight
+create_tensor: loading tensor blk.26.ffn_down.weight
+create_tensor: loading tensor blk.26.ffn_up.weight
+create_tensor: loading tensor blk.27.attn_norm.weight
+create_tensor: loading tensor blk.27.attn_qkv.weight
+create_tensor: loading tensor blk.27.attn_q.weight
+create_tensor: loading tensor blk.27.attn_k.weight
+create_tensor: loading tensor blk.27.attn_v.weight
+create_tensor: loading tensor blk.27.attn_q.bias
+create_tensor: loading tensor blk.27.attn_k.bias
+create_tensor: loading tensor blk.27.attn_v.bias
+create_tensor: loading tensor blk.27.attn_output.weight
+create_tensor: loading tensor blk.27.attn_k_norm.weight
+create_tensor: loading tensor blk.27.attn_q_norm.weight
+create_tensor: loading tensor blk.27.ffn_norm.weight
+create_tensor: loading tensor blk.27.ffn_gate.weight
+create_tensor: loading tensor blk.27.ffn_down.weight
+create_tensor: loading tensor blk.27.ffn_up.weight
+create_tensor: loading tensor blk.0.attn_q.scale
+create_tensor: loading tensor blk.0.attn_k.scale
+create_tensor: loading tensor blk.0.attn_v.scale
+create_tensor: loading tensor blk.0.attn_output.scale
+create_tensor: loading tensor blk.0.ffn_gate.scale
+create_tensor: loading tensor blk.0.ffn_down.scale
+create_tensor: loading tensor blk.0.ffn_up.scale
+create_tensor: loading tensor blk.0.attn_q.input_scale
+create_tensor: loading tensor blk.0.attn_k.input_scale
+create_tensor: loading tensor blk.0.attn_v.input_scale
+create_tensor: loading tensor blk.0.attn_output.input_scale
+create_tensor: loading tensor blk.0.ffn_gate.input_scale
+create_tensor: loading tensor blk.0.ffn_down.input_scale
+create_tensor: loading tensor blk.0.ffn_up.input_scale
+create_tensor: loading tensor blk.1.attn_q.scale
+create_tensor: loading tensor blk.1.attn_k.scale
+create_tensor: loading tensor blk.1.attn_v.scale
+create_tensor: loading tensor blk.1.attn_output.scale
+create_tensor: loading tensor blk.1.ffn_gate.scale
+create_tensor: loading tensor blk.1.ffn_down.scale
+create_tensor: loading tensor blk.1.ffn_up.scale
+create_tensor: loading tensor blk.1.attn_q.input_scale
+create_tensor: loading tensor blk.1.attn_k.input_scale
+create_tensor: loading tensor blk.1.attn_v.input_scale
+create_tensor: loading tensor blk.1.attn_output.input_scale
+create_tensor: loading tensor blk.1.ffn_gate.input_scale
+create_tensor: loading tensor blk.1.ffn_down.input_scale
+create_tensor: loading tensor blk.1.ffn_up.input_scale
+create_tensor: loading tensor blk.2.attn_q.scale
+create_tensor: loading tensor blk.2.attn_k.scale
+create_tensor: loading tensor blk.2.attn_v.scale
+create_tensor: loading tensor blk.2.attn_output.scale
+create_tensor: loading tensor blk.2.ffn_gate.scale
+create_tensor: loading tensor blk.2.ffn_down.scale
+create_tensor: loading tensor blk.2.ffn_up.scale
+create_tensor: loading tensor blk.2.attn_q.input_scale
+create_tensor: loading tensor blk.2.attn_k.input_scale
+create_tensor: loading tensor blk.2.attn_v.input_scale
+create_tensor: loading tensor blk.2.attn_output.input_scale
+create_tensor: loading tensor blk.2.ffn_gate.input_scale
+create_tensor: loading tensor blk.2.ffn_down.input_scale
+create_tensor: loading tensor blk.2.ffn_up.input_scale
+create_tensor: loading tensor blk.3.attn_q.scale
+create_tensor: loading tensor blk.3.attn_k.scale
+create_tensor: loading tensor blk.3.attn_v.scale
+create_tensor: loading tensor blk.3.attn_output.scale
+create_tensor: loading tensor blk.3.ffn_gate.scale
+create_tensor: loading tensor blk.3.ffn_down.scale
+create_tensor: loading tensor blk.3.ffn_up.scale
+create_tensor: loading tensor blk.3.attn_q.input_scale
+create_tensor: loading tensor blk.3.attn_k.input_scale
+create_tensor: loading tensor blk.3.attn_v.input_scale
+create_tensor: loading tensor blk.3.attn_output.input_scale
+create_tensor: loading tensor blk.3.ffn_gate.input_scale
+create_tensor: loading tensor blk.3.ffn_down.input_scale
+create_tensor: loading tensor blk.3.ffn_up.input_scale
+create_tensor: loading tensor blk.4.attn_q.scale
+create_tensor: loading tensor blk.4.attn_k.scale
+create_tensor: loading tensor blk.4.attn_v.scale
+create_tensor: loading tensor blk.4.attn_output.scale
+create_tensor: loading tensor blk.4.ffn_gate.scale
+create_tensor: loading tensor blk.4.ffn_down.scale
+create_tensor: loading tensor blk.4.ffn_up.scale
+create_tensor: loading tensor blk.4.attn_q.input_scale
+create_tensor: loading tensor blk.4.attn_k.input_scale
+create_tensor: loading tensor blk.4.attn_v.input_scale
+create_tensor: loading tensor blk.4.attn_output.input_scale
+create_tensor: loading tensor blk.4.ffn_gate.input_scale
+create_tensor: loading tensor blk.4.ffn_down.input_scale
+create_tensor: loading tensor blk.4.ffn_up.input_scale
+create_tensor: loading tensor blk.5.attn_q.scale
+create_tensor: loading tensor blk.5.attn_k.scale
+create_tensor: loading tensor blk.5.attn_v.scale
+create_tensor: loading tensor blk.5.attn_output.scale
+create_tensor: loading tensor blk.5.ffn_gate.scale
+create_tensor: loading tensor blk.5.ffn_down.scale
+create_tensor: loading tensor blk.5.ffn_up.scale
+create_tensor: loading tensor blk.5.attn_q.input_scale
+create_tensor: loading tensor blk.5.attn_k.input_scale
+create_tensor: loading tensor blk.5.attn_v.input_scale
+create_tensor: loading tensor blk.5.attn_output.input_scale
+create_tensor: loading tensor blk.5.ffn_gate.input_scale
+create_tensor: loading tensor blk.5.ffn_down.input_scale
+create_tensor: loading tensor blk.5.ffn_up.input_scale
+create_tensor: loading tensor blk.6.attn_q.scale
+create_tensor: loading tensor blk.6.attn_k.scale
+create_tensor: loading tensor blk.6.attn_v.scale
+create_tensor: loading tensor blk.6.attn_output.scale
+create_tensor: loading tensor blk.6.ffn_gate.scale
+create_tensor: loading tensor blk.6.ffn_down.scale
+create_tensor: loading tensor blk.6.ffn_up.scale
+create_tensor: loading tensor blk.6.attn_q.input_scale
+create_tensor: loading tensor blk.6.attn_k.input_scale
+create_tensor: loading tensor blk.6.attn_v.input_scale
+create_tensor: loading tensor blk.6.attn_output.input_scale
+create_tensor: loading tensor blk.6.ffn_gate.input_scale
+create_tensor: loading tensor blk.6.ffn_down.input_scale
+create_tensor: loading tensor blk.6.ffn_up.input_scale
+create_tensor: loading tensor blk.7.attn_q.scale
+create_tensor: loading tensor blk.7.attn_k.scale
+create_tensor: loading tensor blk.7.attn_v.scale
+create_tensor: loading tensor blk.7.attn_output.scale
+create_tensor: loading tensor blk.7.ffn_gate.scale
+create_tensor: loading tensor blk.7.ffn_down.scale
+create_tensor: loading tensor blk.7.ffn_up.scale
+create_tensor: loading tensor blk.7.attn_q.input_scale
+create_tensor: loading tensor blk.7.attn_k.input_scale
+create_tensor: loading tensor blk.7.attn_v.input_scale
+create_tensor: loading tensor blk.7.attn_output.input_scale
+create_tensor: loading tensor blk.7.ffn_gate.input_scale
+create_tensor: loading tensor blk.7.ffn_down.input_scale
+create_tensor: loading tensor blk.7.ffn_up.input_scale
+create_tensor: loading tensor blk.8.attn_q.scale
+create_tensor: loading tensor blk.8.attn_k.scale
+create_tensor: loading tensor blk.8.attn_v.scale
+create_tensor: loading tensor blk.8.attn_output.scale
+create_tensor: loading tensor blk.8.ffn_gate.scale
+create_tensor: loading tensor blk.8.ffn_down.scale
+create_tensor: loading tensor blk.8.ffn_up.scale
+create_tensor: loading tensor blk.8.attn_q.input_scale
+create_tensor: loading tensor blk.8.attn_k.input_scale
+create_tensor: loading tensor blk.8.attn_v.input_scale
+create_tensor: loading tensor blk.8.attn_output.input_scale
+create_tensor: loading tensor blk.8.ffn_gate.input_scale
+create_tensor: loading tensor blk.8.ffn_down.input_scale
+create_tensor: loading tensor blk.8.ffn_up.input_scale
+create_tensor: loading tensor blk.9.attn_q.scale
+create_tensor: loading tensor blk.9.attn_k.scale
+create_tensor: loading tensor blk.9.attn_v.scale
+create_tensor: loading tensor blk.9.attn_output.scale
+create_tensor: loading tensor blk.9.ffn_gate.scale
+create_tensor: loading tensor blk.9.ffn_down.scale
+create_tensor: loading tensor blk.9.ffn_up.scale
+create_tensor: loading tensor blk.9.attn_q.input_scale
+create_tensor: loading tensor blk.9.attn_k.input_scale
+create_tensor: loading tensor blk.9.attn_v.input_scale
+create_tensor: loading tensor blk.9.attn_output.input_scale
+create_tensor: loading tensor blk.9.ffn_gate.input_scale
+create_tensor: loading tensor blk.9.ffn_down.input_scale
+create_tensor: loading tensor blk.9.ffn_up.input_scale
+create_tensor: loading tensor blk.10.attn_q.scale
+create_tensor: loading tensor blk.10.attn_k.scale
+create_tensor: loading tensor blk.10.attn_v.scale
+create_tensor: loading tensor blk.10.attn_output.scale
+create_tensor: loading tensor blk.10.ffn_gate.scale
+create_tensor: loading tensor blk.10.ffn_down.scale
+create_tensor: loading tensor blk.10.ffn_up.scale
+create_tensor: loading tensor blk.10.attn_q.input_scale
+create_tensor: loading tensor blk.10.attn_k.input_scale
+create_tensor: loading tensor blk.10.attn_v.input_scale
+create_tensor: loading tensor blk.10.attn_output.input_scale
+create_tensor: loading tensor blk.10.ffn_gate.input_scale
+create_tensor: loading tensor blk.10.ffn_down.input_scale
+create_tensor: loading tensor blk.10.ffn_up.input_scale
+create_tensor: loading tensor blk.11.attn_q.scale
+create_tensor: loading tensor blk.11.attn_k.scale
+create_tensor: loading tensor blk.11.attn_v.scale
+create_tensor: loading tensor blk.11.attn_output.scale
+create_tensor: loading tensor blk.11.ffn_gate.scale
+create_tensor: loading tensor blk.11.ffn_down.scale
+create_tensor: loading tensor blk.11.ffn_up.scale
+create_tensor: loading tensor blk.11.attn_q.input_scale
+create_tensor: loading tensor blk.11.attn_k.input_scale
+create_tensor: loading tensor blk.11.attn_v.input_scale
+create_tensor: loading tensor blk.11.attn_output.input_scale
+create_tensor: loading tensor blk.11.ffn_gate.input_scale
+create_tensor: loading tensor blk.11.ffn_down.input_scale
+create_tensor: loading tensor blk.11.ffn_up.input_scale
+create_tensor: loading tensor blk.12.attn_q.scale
+create_tensor: loading tensor blk.12.attn_k.scale
+create_tensor: loading tensor blk.12.attn_v.scale
+create_tensor: loading tensor blk.12.attn_output.scale
+create_tensor: loading tensor blk.12.ffn_gate.scale
+create_tensor: loading tensor blk.12.ffn_down.scale
+create_tensor: loading tensor blk.12.ffn_up.scale
+create_tensor: loading tensor blk.12.attn_q.input_scale
+create_tensor: loading tensor blk.12.attn_k.input_scale
+create_tensor: loading tensor blk.12.attn_v.input_scale
+create_tensor: loading tensor blk.12.attn_output.input_scale
+create_tensor: loading tensor blk.12.ffn_gate.input_scale
+create_tensor: loading tensor blk.12.ffn_down.input_scale
+create_tensor: loading tensor blk.12.ffn_up.input_scale
+create_tensor: loading tensor blk.13.attn_q.scale
+create_tensor: loading tensor blk.13.attn_k.scale
+create_tensor: loading tensor blk.13.attn_v.scale
+create_tensor: loading tensor blk.13.attn_output.scale
+create_tensor: loading tensor blk.13.ffn_gate.scale
+create_tensor: loading tensor blk.13.ffn_down.scale
+create_tensor: loading tensor blk.13.ffn_up.scale
+create_tensor: loading tensor blk.13.attn_q.input_scale
+create_tensor: loading tensor blk.13.attn_k.input_scale
+create_tensor: loading tensor blk.13.attn_v.input_scale
+create_tensor: loading tensor blk.13.attn_output.input_scale
+create_tensor: loading tensor blk.13.ffn_gate.input_scale
+create_tensor: loading tensor blk.13.ffn_down.input_scale
+create_tensor: loading tensor blk.13.ffn_up.input_scale
+create_tensor: loading tensor blk.14.attn_q.scale
+create_tensor: loading tensor blk.14.attn_k.scale
+create_tensor: loading tensor blk.14.attn_v.scale
+create_tensor: loading tensor blk.14.attn_output.scale
+create_tensor: loading tensor blk.14.ffn_gate.scale
+create_tensor: loading tensor blk.14.ffn_down.scale
+create_tensor: loading tensor blk.14.ffn_up.scale
+create_tensor: loading tensor blk.14.attn_q.input_scale
+create_tensor: loading tensor blk.14.attn_k.input_scale
+create_tensor: loading tensor blk.14.attn_v.input_scale
+create_tensor: loading tensor blk.14.attn_output.input_scale
+create_tensor: loading tensor blk.14.ffn_gate.input_scale
+create_tensor: loading tensor blk.14.ffn_down.input_scale
+create_tensor: loading tensor blk.14.ffn_up.input_scale
+create_tensor: loading tensor blk.15.attn_q.scale
+create_tensor: loading tensor blk.15.attn_k.scale
+create_tensor: loading tensor blk.15.attn_v.scale
+create_tensor: loading tensor blk.15.attn_output.scale
+create_tensor: loading tensor blk.15.ffn_gate.scale
+create_tensor: loading tensor blk.15.ffn_down.scale
+create_tensor: loading tensor blk.15.ffn_up.scale
+create_tensor: loading tensor blk.15.attn_q.input_scale
+create_tensor: loading tensor blk.15.attn_k.input_scale
+create_tensor: loading tensor blk.15.attn_v.input_scale
+create_tensor: loading tensor blk.15.attn_output.input_scale
+create_tensor: loading tensor blk.15.ffn_gate.input_scale
+create_tensor: loading tensor blk.15.ffn_down.input_scale
+create_tensor: loading tensor blk.15.ffn_up.input_scale
+create_tensor: loading tensor blk.16.attn_q.scale
+create_tensor: loading tensor blk.16.attn_k.scale
+create_tensor: loading tensor blk.16.attn_v.scale
+create_tensor: loading tensor blk.16.attn_output.scale
+create_tensor: loading tensor blk.16.ffn_gate.scale
+create_tensor: loading tensor blk.16.ffn_down.scale
+create_tensor: loading tensor blk.16.ffn_up.scale
+create_tensor: loading tensor blk.16.attn_q.input_scale
+create_tensor: loading tensor blk.16.attn_k.input_scale
+create_tensor: loading tensor blk.16.attn_v.input_scale
+create_tensor: loading tensor blk.16.attn_output.input_scale
+create_tensor: loading tensor blk.16.ffn_gate.input_scale
+create_tensor: loading tensor blk.16.ffn_down.input_scale
+create_tensor: loading tensor blk.16.ffn_up.input_scale
+create_tensor: loading tensor blk.17.attn_q.scale
+create_tensor: loading tensor blk.17.attn_k.scale
+create_tensor: loading tensor blk.17.attn_v.scale
+create_tensor: loading tensor blk.17.attn_output.scale
+create_tensor: loading tensor blk.17.ffn_gate.scale
+create_tensor: loading tensor blk.17.ffn_down.scale
+create_tensor: loading tensor blk.17.ffn_up.scale
+create_tensor: loading tensor blk.17.attn_q.input_scale
+create_tensor: loading tensor blk.17.attn_k.input_scale
+create_tensor: loading tensor blk.17.attn_v.input_scale
+create_tensor: loading tensor blk.17.attn_output.input_scale
+create_tensor: loading tensor blk.17.ffn_gate.input_scale
+create_tensor: loading tensor blk.17.ffn_down.input_scale
+create_tensor: loading tensor blk.17.ffn_up.input_scale
+create_tensor: loading tensor blk.18.attn_q.scale
+create_tensor: loading tensor blk.18.attn_k.scale
+create_tensor: loading tensor blk.18.attn_v.scale
+create_tensor: loading tensor blk.18.attn_output.scale
+create_tensor: loading tensor blk.18.ffn_gate.scale
+create_tensor: loading tensor blk.18.ffn_down.scale
+create_tensor: loading tensor blk.18.ffn_up.scale
+create_tensor: loading tensor blk.18.attn_q.input_scale
+create_tensor: loading tensor blk.18.attn_k.input_scale
+create_tensor: loading tensor blk.18.attn_v.input_scale
+create_tensor: loading tensor blk.18.attn_output.input_scale
+create_tensor: loading tensor blk.18.ffn_gate.input_scale
+create_tensor: loading tensor blk.18.ffn_down.input_scale
+create_tensor: loading tensor blk.18.ffn_up.input_scale
+create_tensor: loading tensor blk.19.attn_q.scale
+create_tensor: loading tensor blk.19.attn_k.scale
+create_tensor: loading tensor blk.19.attn_v.scale
+create_tensor: loading tensor blk.19.attn_output.scale
+create_tensor: loading tensor blk.19.ffn_gate.scale
+create_tensor: loading tensor blk.19.ffn_down.scale
+create_tensor: loading tensor blk.19.ffn_up.scale
+create_tensor: loading tensor blk.19.attn_q.input_scale
+create_tensor: loading tensor blk.19.attn_k.input_scale
+create_tensor: loading tensor blk.19.attn_v.input_scale
+create_tensor: loading tensor blk.19.attn_output.input_scale
+create_tensor: loading tensor blk.19.ffn_gate.input_scale
+create_tensor: loading tensor blk.19.ffn_down.input_scale
+create_tensor: loading tensor blk.19.ffn_up.input_scale
+create_tensor: loading tensor blk.20.attn_q.scale
+create_tensor: loading tensor blk.20.attn_k.scale
+create_tensor: loading tensor blk.20.attn_v.scale
+create_tensor: loading tensor blk.20.attn_output.scale
+create_tensor: loading tensor blk.20.ffn_gate.scale
+create_tensor: loading tensor blk.20.ffn_down.scale
+create_tensor: loading tensor blk.20.ffn_up.scale
+create_tensor: loading tensor blk.20.attn_q.input_scale
+create_tensor: loading tensor blk.20.attn_k.input_scale
+create_tensor: loading tensor blk.20.attn_v.input_scale
+create_tensor: loading tensor blk.20.attn_output.input_scale
+create_tensor: loading tensor blk.20.ffn_gate.input_scale
+create_tensor: loading tensor blk.20.ffn_down.input_scale
+create_tensor: loading tensor blk.20.ffn_up.input_scale
+create_tensor: loading tensor blk.21.attn_q.scale
+create_tensor: loading tensor blk.21.attn_k.scale
+create_tensor: loading tensor blk.21.attn_v.scale
+create_tensor: loading tensor blk.21.attn_output.scale
+create_tensor: loading tensor blk.21.ffn_gate.scale
+create_tensor: loading tensor blk.21.ffn_down.scale
+create_tensor: loading tensor blk.21.ffn_up.scale
+create_tensor: loading tensor blk.21.attn_q.input_scale
+create_tensor: loading tensor blk.21.attn_k.input_scale
+create_tensor: loading tensor blk.21.attn_v.input_scale
+create_tensor: loading tensor blk.21.attn_output.input_scale
+create_tensor: loading tensor blk.21.ffn_gate.input_scale
+create_tensor: loading tensor blk.21.ffn_down.input_scale
+create_tensor: loading tensor blk.21.ffn_up.input_scale
+create_tensor: loading tensor blk.22.attn_q.scale
+create_tensor: loading tensor blk.22.attn_k.scale
+create_tensor: loading tensor blk.22.attn_v.scale
+create_tensor: loading tensor blk.22.attn_output.scale
+create_tensor: loading tensor blk.22.ffn_gate.scale
+create_tensor: loading tensor blk.22.ffn_down.scale
+create_tensor: loading tensor blk.22.ffn_up.scale
+create_tensor: loading tensor blk.22.attn_q.input_scale
+create_tensor: loading tensor blk.22.attn_k.input_scale
+create_tensor: loading tensor blk.22.attn_v.input_scale
+create_tensor: loading tensor blk.22.attn_output.input_scale
+create_tensor: loading tensor blk.22.ffn_gate.input_scale
+create_tensor: loading tensor blk.22.ffn_down.input_scale
+create_tensor: loading tensor blk.22.ffn_up.input_scale
+create_tensor: loading tensor blk.23.attn_q.scale
+create_tensor: loading tensor blk.23.attn_k.scale
+create_tensor: loading tensor blk.23.attn_v.scale
+create_tensor: loading tensor blk.23.attn_output.scale
+create_tensor: loading tensor blk.23.ffn_gate.scale
+create_tensor: loading tensor blk.23.ffn_down.scale
+create_tensor: loading tensor blk.23.ffn_up.scale
+create_tensor: loading tensor blk.23.attn_q.input_scale
+create_tensor: loading tensor blk.23.attn_k.input_scale
+create_tensor: loading tensor blk.23.attn_v.input_scale
+create_tensor: loading tensor blk.23.attn_output.input_scale
+create_tensor: loading tensor blk.23.ffn_gate.input_scale
+create_tensor: loading tensor blk.23.ffn_down.input_scale
+create_tensor: loading tensor blk.23.ffn_up.input_scale
+create_tensor: loading tensor blk.24.attn_q.scale
+create_tensor: loading tensor blk.24.attn_k.scale
+create_tensor: loading tensor blk.24.attn_v.scale
+create_tensor: loading tensor blk.24.attn_output.scale
+create_tensor: loading tensor blk.24.ffn_gate.scale
+create_tensor: loading tensor blk.24.ffn_down.scale
+create_tensor: loading tensor blk.24.ffn_up.scale
+create_tensor: loading tensor blk.24.attn_q.input_scale
+create_tensor: loading tensor blk.24.attn_k.input_scale
+create_tensor: loading tensor blk.24.attn_v.input_scale
+create_tensor: loading tensor blk.24.attn_output.input_scale
+create_tensor: loading tensor blk.24.ffn_gate.input_scale
+create_tensor: loading tensor blk.24.ffn_down.input_scale
+create_tensor: loading tensor blk.24.ffn_up.input_scale
+create_tensor: loading tensor blk.25.attn_q.scale
+create_tensor: loading tensor blk.25.attn_k.scale
+create_tensor: loading tensor blk.25.attn_v.scale
+create_tensor: loading tensor blk.25.attn_output.scale
+create_tensor: loading tensor blk.25.ffn_gate.scale
+create_tensor: loading tensor blk.25.ffn_down.scale
+create_tensor: loading tensor blk.25.ffn_up.scale
+create_tensor: loading tensor blk.25.attn_q.input_scale
+create_tensor: loading tensor blk.25.attn_k.input_scale
+create_tensor: loading tensor blk.25.attn_v.input_scale
+create_tensor: loading tensor blk.25.attn_output.input_scale
+create_tensor: loading tensor blk.25.ffn_gate.input_scale
+create_tensor: loading tensor blk.25.ffn_down.input_scale
+create_tensor: loading tensor blk.25.ffn_up.input_scale
+create_tensor: loading tensor blk.26.attn_q.scale
+create_tensor: loading tensor blk.26.attn_k.scale
+create_tensor: loading tensor blk.26.attn_v.scale
+create_tensor: loading tensor blk.26.attn_output.scale
+create_tensor: loading tensor blk.26.ffn_gate.scale
+create_tensor: loading tensor blk.26.ffn_down.scale
+create_tensor: loading tensor blk.26.ffn_up.scale
+create_tensor: loading tensor blk.26.attn_q.input_scale
+create_tensor: loading tensor blk.26.attn_k.input_scale
+create_tensor: loading tensor blk.26.attn_v.input_scale
+create_tensor: loading tensor blk.26.attn_output.input_scale
+create_tensor: loading tensor blk.26.ffn_gate.input_scale
+create_tensor: loading tensor blk.26.ffn_down.input_scale
+create_tensor: loading tensor blk.26.ffn_up.input_scale
+create_tensor: loading tensor blk.27.attn_q.scale
+create_tensor: loading tensor blk.27.attn_k.scale
+create_tensor: loading tensor blk.27.attn_v.scale
+create_tensor: loading tensor blk.27.attn_output.scale
+create_tensor: loading tensor blk.27.ffn_gate.scale
+create_tensor: loading tensor blk.27.ffn_down.scale
+create_tensor: loading tensor blk.27.ffn_up.scale
+create_tensor: loading tensor blk.27.attn_q.input_scale
+create_tensor: loading tensor blk.27.attn_k.input_scale
+create_tensor: loading tensor blk.27.attn_v.input_scale
+create_tensor: loading tensor blk.27.attn_output.input_scale
+create_tensor: loading tensor blk.27.ffn_gate.input_scale
+create_tensor: loading tensor blk.27.ffn_down.input_scale
+create_tensor: loading tensor blk.27.ffn_up.input_scale
+done_getting_tensors: tensor 'token_embd.weight' (q6_K) (and 142 others) cannot be used with preferred buffer type CPU_REPACK, using CPU instead
+load_tensors:   CPU_Mapped model buffer size =  1043.68 MiB
+load_tensors:   CPU_REPACK model buffer size =   645.75 MiB
+................repack: repack tensor blk.0.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.0.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.0.attn_output.weight with q4_K_8x8
+.repack: repack tensor blk.0.ffn_gate.weight with q4_K_8x8
+repack: repack tensor blk.0.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.1.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.1.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.1.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.1.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.1.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.2.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.2.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.2.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.2.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.2.ffn_up.weight with q4_K_8x8
+repack: repack tensor blk.3.attn_q.weight with q4_K_8x8
+.repack: repack tensor blk.3.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.3.attn_v.weight with q4_K_8x8
+repack: repack tensor blk.3.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.3.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.3.ffn_down.weight with q4_K_8x8
+repack: repack tensor blk.3.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.4.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.4.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.4.attn_v.weight with q4_K_8x8
+repack: repack tensor blk.4.attn_output.weight with q4_K_8x8
+.repack: repack tensor blk.4.ffn_gate.weight with q4_K_8x8
+repack: repack tensor blk.4.ffn_down.weight with q4_K_8x8
+.repack: repack tensor blk.4.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.5.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.5.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.5.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.5.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.5.ffn_up.weight with q4_K_8x8
+repack: repack tensor blk.6.attn_q.weight with q4_K_8x8
+.repack: repack tensor blk.6.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.6.attn_v.weight with q4_K_8x8
+repack: repack tensor blk.6.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.6.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.6.ffn_down.weight with q4_K_8x8
+repack: repack tensor blk.6.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.7.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.7.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.7.attn_v.weight with q4_K_8x8
+repack: repack tensor blk.7.attn_output.weight with q4_K_8x8
+.repack: repack tensor blk.7.ffn_gate.weight with q4_K_8x8
+repack: repack tensor blk.7.ffn_down.weight with q4_K_8x8
+.repack: repack tensor blk.7.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.8.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.8.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.8.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.8.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.8.ffn_up.weight with q4_K_8x8
+repack: repack tensor blk.9.attn_q.weight with q4_K_8x8
+.repack: repack tensor blk.9.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.9.attn_v.weight with q4_K_8x8
+repack: repack tensor blk.9.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.9.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.9.ffn_down.weight with q4_K_8x8
+repack: repack tensor blk.9.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.10.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.10.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.10.attn_v.weight with q4_K_8x8
+repack: repack tensor blk.10.attn_output.weight with q4_K_8x8
+.repack: repack tensor blk.10.ffn_gate.weight with q4_K_8x8
+repack: repack tensor blk.10.ffn_down.weight with q4_K_8x8
+.repack: repack tensor blk.10.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.11.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.11.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.11.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.11.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.11.ffn_up.weight with q4_K_8x8
+repack: repack tensor blk.12.attn_q.weight with q4_K_8x8
+.repack: repack tensor blk.12.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.12.attn_v.weight with q4_K_8x8
+repack: repack tensor blk.12.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.12.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.12.ffn_down.weight with q4_K_8x8
+repack: repack tensor blk.12.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.13.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.13.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.13.attn_v.weight with q4_K_8x8
+repack: repack tensor blk.13.attn_output.weight with q4_K_8x8
+.repack: repack tensor blk.13.ffn_gate.weight with q4_K_8x8
+repack: repack tensor blk.13.ffn_down.weight with q4_K_8x8
+.repack: repack tensor blk.13.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.14.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.14.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.14.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.14.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.14.ffn_up.weight with q4_K_8x8
+repack: repack tensor blk.15.attn_q.weight with q4_K_8x8
+.repack: repack tensor blk.15.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.15.attn_v.weight with q4_K_8x8
+repack: repack tensor blk.15.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.15.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.15.ffn_down.weight with q4_K_8x8
+repack: repack tensor blk.15.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.16.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.16.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.16.attn_v.weight with q4_K_8x8
+repack: repack tensor blk.16.attn_output.weight with q4_K_8x8
+.repack: repack tensor blk.16.ffn_gate.weight with q4_K_8x8
+repack: repack tensor blk.16.ffn_down.weight with q4_K_8x8
+.repack: repack tensor blk.16.ffn_up.weight with q4_K_8x8
+repack: repack tensor blk.17.attn_q.weight with q4_K_8x8
+.repack: repack tensor blk.17.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.17.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.17.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.17.ffn_up.weight with q4_K_8x8
+repack: repack tensor blk.18.attn_q.weight with q4_K_8x8
+.repack: repack tensor blk.18.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.18.attn_v.weight with q4_K_8x8
+repack: repack tensor blk.18.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.18.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.18.ffn_down.weight with q4_K_8x8
+repack: repack tensor blk.18.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.19.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.19.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.19.attn_v.weight with q4_K_8x8
+repack: repack tensor blk.19.attn_output.weight with q4_K_8x8
+.repack: repack tensor blk.19.ffn_gate.weight with q4_K_8x8
+repack: repack tensor blk.19.ffn_down.weight with q4_K_8x8
+.repack: repack tensor blk.19.ffn_up.weight with q4_K_8x8
+repack: repack tensor blk.20.attn_q.weight with q4_K_8x8
+.repack: repack tensor blk.20.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.20.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.20.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.20.ffn_up.weight with q4_K_8x8
+repack: repack tensor blk.21.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.21.attn_k.weight with q4_K_8x8
+.repack: repack tensor blk.21.attn_v.weight with q4_K_8x8
+repack: repack tensor blk.21.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.21.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.21.ffn_down.weight with q4_K_8x8
+repack: repack tensor blk.21.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.22.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.22.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.22.attn_v.weight with q4_K_8x8
+repack: repack tensor blk.22.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.22.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.22.ffn_down.weight with q4_K_8x8
+.repack: repack tensor blk.22.ffn_up.weight with q4_K_8x8
+repack: repack tensor blk.23.attn_q.weight with q4_K_8x8
+.repack: repack tensor blk.23.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.23.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.23.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.23.ffn_up.weight with q4_K_8x8
+repack: repack tensor blk.24.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.24.attn_k.weight with q4_K_8x8
+.repack: repack tensor blk.24.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.24.ffn_gate.weight with q4_K_8x8
+repack: repack tensor blk.24.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.25.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.25.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.25.attn_output.weight with q4_K_8x8
+.repack: repack tensor blk.25.ffn_gate.weight with q4_K_8x8
+repack: repack tensor blk.25.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.26.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.26.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.26.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.26.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.26.ffn_up.weight with q4_K_8x8
+.repack: repack tensor blk.27.attn_q.weight with q4_K_8x8
+repack: repack tensor blk.27.attn_k.weight with q4_K_8x8
+repack: repack tensor blk.27.attn_output.weight with q4_K_8x8
+repack: repack tensor blk.27.ffn_gate.weight with q4_K_8x8
+.repack: repack tensor blk.27.ffn_up.weight with q4_K_8x8
+.
+llama_context: constructing llama_context
+llama_context: n_seq_max             = 1
+llama_context: n_ctx                 = 2048
+llama_context: n_ctx_seq             = 2048
+llama_context: n_batch               = 512
+llama_context: n_ubatch              = 512
+llama_context: causal_attn           = 1
+llama_context: flash_attn            = disabled
+llama_context: kv_unified            = false
+llama_context: freq_base             = 1000000.0
+llama_context: freq_scale            = 1
+llama_context: n_rs_seq              = 0
+llama_context: n_outputs_max         = 512
+llama_context: n_outputs_max_per_seq = 1
+llama_context: n_ctx_seq (2048) < n_ctx_train (40960) -- the full capacity of the model will not be utilized
+set_abort_callback: call
+llama_context:        CPU  output buffer size =     0.58 MiB
+llama_kv_cache: layer   0: dev = CPU
+llama_kv_cache: layer   1: dev = CPU
+llama_kv_cache: layer   2: dev = CPU
+llama_kv_cache: layer   3: dev = CPU
+llama_kv_cache: layer   4: dev = CPU
+llama_kv_cache: layer   5: dev = CPU
+llama_kv_cache: layer   6: dev = CPU
+llama_kv_cache: layer   7: dev = CPU
+llama_kv_cache: layer   8: dev = CPU
+llama_kv_cache: layer   9: dev = CPU
+llama_kv_cache: layer  10: dev = CPU
+llama_kv_cache: layer  11: dev = CPU
+llama_kv_cache: layer  12: dev = CPU
+llama_kv_cache: layer  13: dev = CPU
+llama_kv_cache: layer  14: dev = CPU
+llama_kv_cache: layer  15: dev = CPU
+llama_kv_cache: layer  16: dev = CPU
+llama_kv_cache: layer  17: dev = CPU
+llama_kv_cache: layer  18: dev = CPU
+llama_kv_cache: layer  19: dev = CPU
+llama_kv_cache: layer  20: dev = CPU
+llama_kv_cache: layer  21: dev = CPU
+llama_kv_cache: layer  22: dev = CPU
+llama_kv_cache: layer  23: dev = CPU
+llama_kv_cache: layer  24: dev = CPU
+llama_kv_cache: layer  25: dev = CPU
+llama_kv_cache: layer  26: dev = CPU
+llama_kv_cache: layer  27: dev = CPU
+llama_kv_cache:        CPU KV buffer size =   224.00 MiB
+llama_kv_cache: size =  224.00 MiB (  2048 cells,  28 layers,  1/1 seqs), K (f16):  112.00 MiB, V (f16):  112.00 MiB
+llama_kv_cache: attn_rot_k = 0, n_embd_head_k_all = 128
+llama_kv_cache: attn_rot_v = 0, n_embd_head_k_all = 128
+llama_context: enumerating backends
+llama_context: backend_ptrs.size() = 1
+sched_reserve: reserving ...
+sched_reserve: max_nodes = 2480
+sched_reserve: reserving full memory module
+sched_reserve: worst-case: n_tokens = 512, n_seqs = 1, n_outputs = 1
+resolve_fused_ops: resolving fused Gated Delta Net support:
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+resolve_fused_ops: fused Gated Delta Net (autoregressive) enabled
+graph_reserve: reserving a graph for ubatch with n_tokens =   16, n_seqs =  1, n_outputs =   16
+resolve_fused_ops: fused Gated Delta Net (chunked) enabled
+resolve_fused_ops: resolving fused Lightning Indexer support:
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+resolve_fused_ops: Lightning Indexer enabled
+resolve_fused_ops: resolving fused DeepSeek V4 HC support:
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+resolve_fused_ops: fused DeepSeek V4 HC pre enabled
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+resolve_fused_ops: fused DeepSeek V4 HC comb enabled
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+resolve_fused_ops: fused DeepSeek V4 HC post enabled
+graph_reserve: reserving a graph for ubatch with n_tokens =  512, n_seqs =  1, n_outputs =  512
+graph_reserve: reserving a graph for ubatch with n_tokens =    1, n_seqs =  1, n_outputs =    1
+graph_reserve: reserving a graph for ubatch with n_tokens =  512, n_seqs =  1, n_outputs =  512
+sched_reserve:        CPU compute buffer size =   304.75 MiB
+sched_reserve: graph nodes  = 1126
+sched_reserve: graph splits = 1
+sched_reserve: reserve took 3.00 ms, sched copies = 1
+CPU : SSE3 = 1 | SSSE3 = 1 | AVX = 1 | AVX2 = 1 | F16C = 1 | FMA = 1 | BMI2 = 1 | LLAMAFILE = 1 | OPENMP = 1 | REPACK = 1 | 
+Model metadata: {'general.file_type': '15', 'tokenizer.ggml.bos_token_id': '151643', 'tokenizer.ggml.padding_token_id': '151643', 'tokenizer.ggml.eos_token_id': '151645', 'qwen3.attention.value_length': '128', 'qwen3.attention.key_length': '128', 'qwen3.rope.freq_base': '1000000.000000', 'general.architecture': 'qwen3', 'tokenizer.chat_template': '{%- if tools %}\n    {{- \'<|im_start|>system\\n\' }}\n    {%- if messages[0].role == \'system\' %}\n        {{- messages[0].content + \'\\n\\n\' }}\n    {%- endif %}\n    {{- "# Tools\\n\\nYou may call one or more functions to assist with the user query.\\n\\nYou are provided with function signatures within <tools></tools> XML tags:\\n<tools>" }}\n    {%- for tool in tools %}\n        {{- "\\n" }}\n        {{- tool | tojson }}\n    {%- endfor %}\n    {{- "\\n</tools>\\n\\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\\n<tool_call>\\n{\\"name\\": <function-name>, \\"arguments\\": <args-json-object>}\\n</tool_call><|im_end|>\\n" }}\n{%- else %}\n    {%- if messages[0].role == \'system\' %}\n        {{- \'<|im_start|>system\\n\' + messages[0].content + \'<|im_end|>\\n\' }}\n    {%- endif %}\n{%- endif %}\n{%- set ns = namespace(multi_step_tool=true, last_query_index=messages|length - 1) %}\n{%- for message in messages[::-1] %}\n    {%- set index = (messages|length - 1) - loop.index0 %}\n    {%- if ns.multi_step_tool and message.role == "user" and message.content is string and not(message.content.startswith(\'<tool_response>\') and message.content.endswith(\'</tool_response>\')) %}\n        {%- set ns.multi_step_tool = false %}\n        {%- set ns.last_query_index = index %}\n    {%- endif %}\n{%- endfor %}\n{%- for message in messages %}\n    {%- if message.content is string %}\n        {%- set content = message.content %}\n    {%- else %}\n        {%- set content = \'\' %}\n    {%- endif %}\n    {%- if (message.role == "user") or (message.role == "system" and not loop.first) %}\n        {{- \'<|im_start|>\' + message.role + \'\\n\' + content + \'<|im_end|>\' + \'\\n\' }}\n    {%- elif message.role == "assistant" %}\n        {%- set reasoning_content = \'\' %}\n        {%- if message.reasoning_content is string %}\n            {%- set reasoning_content = message.reasoning_content %}\n        {%- else %}\n            {%- if \'</think>\' in content %}\n                {%- set reasoning_content = content.split(\'</think>\')[0].rstrip(\'\\n\').split(\'<think>\')[-1].lstrip(\'\\n\') %}\n                {%- set content = content.split(\'</think>\')[-1].lstrip(\'\\n\') %}\n            {%- endif %}\n        {%- endif %}\n        {%- if loop.index0 > ns.last_query_index %}\n            {%- if loop.last or (not loop.last and reasoning_content) %}\n                {{- \'<|im_start|>\' + message.role + \'\\n<think>\\n\' + reasoning_content.strip(\'\\n\') + \'\\n</think>\\n\\n\' + content.lstrip(\'\\n\') }}\n            {%- else %}\n                {{- \'<|im_start|>\' + message.role + \'\\n\' + content }}\n            {%- endif %}\n        {%- else %}\n            {{- \'<|im_start|>\' + message.role + \'\\n\' + content }}\n        {%- endif %}\n        {%- if message.tool_calls %}\n            {%- for tool_call in message.tool_calls %}\n                {%- if (loop.first and content) or (not loop.first) %}\n                    {{- \'\\n\' }}\n                {%- endif %}\n                {%- if tool_call.function %}\n                    {%- set tool_call = tool_call.function %}\n                {%- endif %}\n                {{- \'<tool_call>\\n{"name": "\' }}\n                {{- tool_call.name }}\n                {{- \'", "arguments": \' }}\n                {%- if tool_call.arguments is string %}\n                    {{- tool_call.arguments }}\n                {%- else %}\n                    {{- tool_call.arguments | tojson }}\n                {%- endif %}\n                {{- \'}\\n</tool_call>\' }}\n            {%- endfor %}\n        {%- endif %}\n        {{- \'<|im_end|>\\n\' }}\n    {%- elif message.role == "tool" %}\n        {%- if loop.first or (messages[loop.index0 - 1].role != "tool") %}\n            {{- \'<|im_start|>user\' }}\n        {%- endif %}\n        {{- \'\\n<tool_response>\\n\' }}\n        {{- content }}\n        {{- \'\\n</tool_response>\' }}\n        {%- if loop.last or (messages[loop.index0 + 1].role != "tool") %}\n            {{- \'<|im_end|>\\n\' }}\n        {%- endif %}\n    {%- endif %}\n{%- endfor %}\n{%- if add_generation_prompt %}\n    {{- \'<|im_start|>assistant\\n\' }}\n    {%- if enable_thinking is defined and enable_thinking is false %}\n        {{- \'<think>\\n\\n</think>\\n\\n\' }}\n    {%- endif %}\n{%- endif %}', 'qwen3.context_length': '40960', 'general.sampling.top_p': '0.950000', 'general.sampling.temp': '0.600000', 'tokenizer.ggml.pre': 'qwen2', 'general.name': 'Qwen Merged', 'qwen3.attention.layer_norm_rms_epsilon': '0.000001', 'general.type': 'model', 'general.size_label': '1.7B', 'qwen3.block_count': '28', 'general.sampling.top_k': '20', 'qwen3.embedding_length': '2048', 'general.quantization_version': '2', 'tokenizer.ggml.model': 'gpt2', 'qwen3.attention.head_count': '16', 'qwen3.feed_forward_length': '6144', 'qwen3.attention.head_count_kv': '8'}
+Available chat formats from metadata: chat_template.default
+Using gguf chat template: {%- if tools %}
+    {{- '<|im_start|>system\n' }}
+    {%- if messages[0].role == 'system' %}
+        {{- messages[0].content + '\n\n' }}
+    {%- endif %}
+    {{- "# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>" }}
+    {%- for tool in tools %}
+        {{- "\n" }}
+        {{- tool | tojson }}
+    {%- endfor %}
+    {{- "\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n" }}
+{%- else %}
+    {%- if messages[0].role == 'system' %}
+        {{- '<|im_start|>system\n' + messages[0].content + '<|im_end|>\n' }}
+    {%- endif %}
+{%- endif %}
+{%- set ns = namespace(multi_step_tool=true, last_query_index=messages|length - 1) %}
+{%- for message in messages[::-1] %}
+    {%- set index = (messages|length - 1) - loop.index0 %}
+    {%- if ns.multi_step_tool and message.role == "user" and message.content is string and not(message.content.startswith('<tool_response>') and message.content.endswith('</tool_response>')) %}
+        {%- set ns.multi_step_tool = false %}
+        {%- set ns.last_query_index = index %}
+    {%- endif %}
+{%- endfor %}
+{%- for message in messages %}
+    {%- if message.content is string %}
+        {%- set content = message.content %}
+    {%- else %}
+        {%- set content = '' %}
+    {%- endif %}
+    {%- if (message.role == "user") or (message.role == "system" and not loop.first) %}
+        {{- '<|im_start|>' + message.role + '\n' + content + '<|im_end|>' + '\n' }}
+    {%- elif message.role == "assistant" %}
+        {%- set reasoning_content = '' %}
+        {%- if message.reasoning_content is string %}
+            {%- set reasoning_content = message.reasoning_content %}
+        {%- else %}
+            {%- if '</think>' in content %}
+                {%- set reasoning_content = content.split('</think>')[0].rstrip('\n').split('<think>')[-1].lstrip('\n') %}
+                {%- set content = content.split('</think>')[-1].lstrip('\n') %}
+            {%- endif %}
+        {%- endif %}
+        {%- if loop.index0 > ns.last_query_index %}
+            {%- if loop.last or (not loop.last and reasoning_content) %}
+                {{- '<|im_start|>' + message.role + '\n<think>\n' + reasoning_content.strip('\n') + '\n</think>\n\n' + content.lstrip('\n') }}
+            {%- else %}
+                {{- '<|im_start|>' + message.role + '\n' + content }}
+            {%- endif %}
+        {%- else %}
+            {{- '<|im_start|>' + message.role + '\n' + content }}
+        {%- endif %}
+        {%- if message.tool_calls %}
+            {%- for tool_call in message.tool_calls %}
+                {%- if (loop.first and content) or (not loop.first) %}
+                    {{- '\n' }}
+                {%- endif %}
+                {%- if tool_call.function %}
+                    {%- set tool_call = tool_call.function %}
+                {%- endif %}
+                {{- '<tool_call>\n{"name": "' }}
+                {{- tool_call.name }}
+                {{- '", "arguments": ' }}
+                {%- if tool_call.arguments is string %}
+                    {{- tool_call.arguments }}
+                {%- else %}
+                    {{- tool_call.arguments | tojson }}
+                {%- endif %}
+                {{- '}\n</tool_call>' }}
+            {%- endfor %}
+        {%- endif %}
+        {{- '<|im_end|>\n' }}
+    {%- elif message.role == "tool" %}
+        {%- if loop.first or (messages[loop.index0 - 1].role != "tool") %}
+            {{- '<|im_start|>user' }}
+        {%- endif %}
+        {{- '\n<tool_response>\n' }}
+        {{- content }}
+        {{- '\n</tool_response>' }}
+        {%- if loop.last or (messages[loop.index0 + 1].role != "tool") %}
+            {{- '<|im_end|>\n' }}
+        {%- endif %}
+    {%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+    {{- '<|im_start|>assistant\n' }}
+    {%- if enable_thinking is defined and enable_thinking is false %}
+        {{- '<think>\n\n</think>\n\n' }}
+    {%- endif %}
+{%- endif %}
+Using chat eos_token: <|im_end|>
+Using chat bos_token: <|endoftext|>
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =   35091.53 ms /  1214 tokens (   28.91 ms per token,    34.60 tokens per second)
+llama_perf_context_print:        eval time =   33289.66 ms /   699 runs   (   47.62 ms per token,    21.00 tokens per second)
+llama_perf_context_print:       total time =   69068.24 ms /  1913 tokens
+llama_perf_context_print:    graphs reused =        695
+Llama.generate: 1198 prefix-match hit, remaining 8 prompt tokens to eval
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =   12923.79 ms /     8 tokens ( 1615.47 ms per token,     0.62 tokens per second)
+llama_perf_context_print:        eval time = 1276477.56 ms /   699 runs   ( 1826.15 ms per token,     0.55 tokens per second)
+llama_perf_context_print:       total time = 1290138.45 ms /   707 tokens
+llama_perf_context_print:    graphs reused =        695
+Llama.generate: 1198 prefix-match hit, remaining 23 prompt tokens to eval
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =   20369.70 ms /    23 tokens (  885.64 ms per token,     1.13 tokens per second)
+llama_perf_context_print:        eval time =  966656.61 ms /   699 runs   ( 1382.91 ms per token,     0.72 tokens per second)
+llama_perf_context_print:       total time =  987818.64 ms /   722 tokens
+llama_perf_context_print:    graphs reused =        695
+Llama.generate: 1198 prefix-match hit, remaining 29 prompt tokens to eval
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =   20328.97 ms /    29 tokens (  701.00 ms per token,     1.43 tokens per second)
+llama_perf_context_print:        eval time =  373317.69 ms /   699 runs   (  534.07 ms per token,     1.87 tokens per second)
+llama_perf_context_print:       total time =  394579.01 ms /   728 tokens
+llama_perf_context_print:    graphs reused =        695
+Llama.generate: 1198 prefix-match hit, remaining 12 prompt tokens to eval
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =   20229.75 ms /    12 tokens ( 1685.81 ms per token,     0.59 tokens per second)
+llama_perf_context_print:        eval time =  212158.72 ms /   699 runs   (  303.52 ms per token,     3.29 tokens per second)
+llama_perf_context_print:       total time =  233596.61 ms /   711 tokens
+llama_perf_context_print:    graphs reused =        695
+Llama.generate: 1198 prefix-match hit, remaining 16 prompt tokens to eval
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =   19456.48 ms /    16 tokens ( 1216.03 ms per token,     0.82 tokens per second)
+llama_perf_context_print:        eval time =  139796.15 ms /   699 runs   (  199.99 ms per token,     5.00 tokens per second)
+llama_perf_context_print:       total time =  160183.44 ms /   715 tokens
+llama_perf_context_print:    graphs reused =        695
+Llama.generate: 1213 prefix-match hit, remaining 24 prompt tokens to eval
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =   10863.92 ms /    24 tokens (  452.66 ms per token,     2.21 tokens per second)
+llama_perf_context_print:        eval time =   32952.58 ms /   699 runs   (   47.14 ms per token,    21.21 tokens per second)
+llama_perf_context_print:       total time =   44490.99 ms /   723 tokens
+llama_perf_context_print:    graphs reused =        695
+Llama.generate: 1199 prefix-match hit, remaining 16 prompt tokens to eval
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =    9614.29 ms /    16 tokens (  600.89 ms per token,     1.66 tokens per second)
+llama_perf_context_print:        eval time =   33242.15 ms /   700 runs   (   47.49 ms per token,    21.06 tokens per second)
+llama_perf_context_print:       total time =   43523.35 ms /   716 tokens
+llama_perf_context_print:    graphs reused =        696
+[gguf] NO-BRACE output for 'म लडेँ, उठ्न सकिन': '{"action": "emergency", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.9, "reply": "म तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ'
+Llama.generate: 1199 prefix-match hit, remaining 25 prompt tokens to eval
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =   10726.31 ms /    25 tokens (  429.05 ms per token,     2.33 tokens per second)
+llama_perf_context_print:        eval time =   32630.26 ms /   699 runs   (   46.68 ms per token,    21.42 tokens per second)
+llama_perf_context_print:       total time =   44043.28 ms /   724 tokens
+llama_perf_context_print:    graphs reused =        695
+Llama.generate: 1199 prefix-match hit, remaining 28 prompt tokens to eval
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =   17049.28 ms /    28 tokens (  608.90 ms per token,     1.64 tokens per second)
+llama_perf_context_print:        eval time =  227248.22 ms /   699 runs   (  325.10 ms per token,     3.08 tokens per second)
+llama_perf_context_print:       total time =  245389.46 ms /   727 tokens
+llama_perf_context_print:    graphs reused =        695
+Llama.generate: 1198 prefix-match hit, remaining 11 prompt tokens to eval
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =   17492.28 ms /    11 tokens ( 1590.21 ms per token,     0.63 tokens per second)
+llama_perf_context_print:        eval time =  216409.29 ms /   699 runs   (  309.60 ms per token,     3.23 tokens per second)
+llama_perf_context_print:       total time =  235053.55 ms /   710 tokens
+llama_perf_context_print:    graphs reused =        695
+Llama.generate: 1206 prefix-match hit, remaining 8 prompt tokens to eval
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =   21107.71 ms /     8 tokens ( 2638.46 ms per token,     0.38 tokens per second)
+llama_perf_context_print:        eval time =  196714.47 ms /   699 runs   (  281.42 ms per token,     3.55 tokens per second)
+llama_perf_context_print:       total time =  218932.77 ms /   707 tokens
+llama_perf_context_print:    graphs reused =        695
+Llama.generate: 1198 prefix-match hit, remaining 30 prompt tokens to eval
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =   17079.72 ms /    30 tokens (  569.32 ms per token,     1.76 tokens per second)
+llama_perf_context_print:        eval time =   32954.99 ms /   700 runs   (   47.08 ms per token,    21.24 tokens per second)
+llama_perf_context_print:       total time =   50723.93 ms /   730 tokens
+llama_perf_context_print:    graphs reused =        696
+Llama.generate: 1198 prefix-match hit, remaining 30 prompt tokens to eval
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =   10479.08 ms /    30 tokens (  349.30 ms per token,     2.86 tokens per second)
+llama_perf_context_print:        eval time =   33078.44 ms /   699 runs   (   47.32 ms per token,    21.13 tokens per second)
+llama_perf_context_print:       total time =   44246.88 ms /   729 tokens
+llama_perf_context_print:    graphs reused =        695
+Llama.generate: 1199 prefix-match hit, remaining 37 prompt tokens to eval
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =   10411.05 ms /    37 tokens (  281.38 ms per token,     3.55 tokens per second)
+llama_perf_context_print:        eval time =   33285.09 ms /   699 runs   (   47.62 ms per token,    21.00 tokens per second)
+llama_perf_context_print:       total time =   44368.75 ms /   736 tokens
+llama_perf_context_print:    graphs reused =        695
+Llama.generate: 1198 prefix-match hit, remaining 13 prompt tokens to eval
+llama_perf_context_print:        load time =   35092.09 ms
+llama_perf_context_print: prompt eval time =   10746.79 ms /    13 tokens (  826.68 ms per token,     1.21 tokens per second)
+llama_perf_context_print:        eval time =  190807.51 ms /   699 runs   (  272.97 ms per token,     3.66 tokens per second)
+llama_perf_context_print:       total time =  202288.44 ms /   712 tokens
+llama_perf_context_print:    graphs reused =        695
+Llama.generate: 1198 prefix-match hit, remaining 6 prompt tokens to eval

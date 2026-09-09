@@ -1,0 +1,61 @@
+EOS id: 151645 repr: b''
+=== gc-call-001 [call] 'माइयालाई फोन गर' toks=320 sec=19.2 echo=False
+  HEAD: '{"action": "call", "entryId": null, "contact": "माइया", "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.8, "rep'
+  TAIL: 'ps": null, "confidence": 0.8, "reply": "माइयालाई फोन गर्छु।"} \n\n{"action": "call", "entryId": null, "contact": "माइया", "time": null, "medication": null, "message": null, "callType'
+=== gc-call-002 [call] 'maiya lai phone gara' toks=320 sec=14.4 echo=False
+  HEAD: '{"action": "call", "entryId": null, "contact": "maiya", "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.85, "re'
+  TAIL: ' "reply": "मैयालाई फोन गर्छु।"} \n\n{"action": "call", "entryId": null, "contact": "maiya", "time": null, "medication": null, "message": null, "callType": "facetime", "requestedApp":'
+=== gc-call-003 [call] 'छोरालाई वाट्सएपमा कल गर' toks=320 sec=14.8 echo=False
+  HEAD: '{"action": "call", "entryId": null, "contact": "छोरा", "time": null, "medication": null, "message": null, "callType": null, "requestedApp": "वाट्सएप", "topic": null, "steps": null, "confidence": 0.8, '
+  TAIL: ' "छोरा", "time": null, "medication": null, "message": null, "callType": null, "requestedApp": "वाट्सएप", "topic": null, "steps": null, "confidence": 0.8, "reply": "ठीक छ, छोरालाई व'
+=== gc-call-004 [call] 'सुनितालाई भिडियो कल गर्नुह' toks=320 sec=14.5 echo=False
+  HEAD: '{"action": "call", "entryId": null, "contact": "सुनिता", "time": null, "medication": null, "message": null, "callType": "video", "requestedApp": null, "topic": null, "steps": null, "confidence": 0.8, '
+  TAIL: ' null, "steps": null, "confidence": 0.8, "reply": "भिडियो कल गर्दैछु।"} \n\n{"action": "call", "entryId": null, "contact": "सुनिता", "time": null, "medication": null, "message": null'
+=== gc-call-005 [call] 'didi lai facetime ma call ' toks=320 sec=14.4 echo=False
+  HEAD: '{"action": "call", "entryId": null, "contact": "didi", "time": null, "medication": null, "message": null, "callType": "facetime", "requestedApp": null, "topic": null, "steps": null, "confidence": 0.85'
+  TAIL: 'ction": "call", "entryId": null, "contact": "didi", "time": null, "medication": null, "message": null, "callType": "facetime", "requestedApp": null, "topic": null, "steps": null, "'
+=== gc-emergency-001 [emergency] 'मद्दत गर्नुहोस्' toks=320 sec=14.4 echo=False
+  HEAD: '{"action": "emergency", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.9, "r'
+  TAIL: 'learly expresses pain and a plea for help. The reply is a reassurance that help is being provided. The user is asking for help and is in pain, so "emergency" is the correct action.'
+=== gc-emergency-002 [emergency] 'मद्दत गर्नुहोस्, मलाई मिर्' toks=320 sec=14.4 echo=False
+  HEAD: '{"action": "emergency", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.95, "'
+  TAIL: 'y", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.95, "'
+=== gc-emergency-003 [emergency] 'म लडेँ, उठ्न सकिन' toks=320 sec=14.4 echo=False
+  HEAD: '{"action": "emergency", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.9, "r'
+  TAIL: ' चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्काल चाहिँ तत्क'
+=== gc-health-001 [health_query] 'मेरो रक्तचाप कस्तो हुनुपर्' toks=320 sec=14.7 echo=False
+  HEAD: '{"action": "query", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": "रक्तचाप", "steps": null, "confidence": 0.8, "'
+  TAIL: ': null, "message": null, "callType": null, "requestedApp": null, "topic": "रक्तचाप", "steps": null, "confidence": 0.8, "reply": "रक्तचापको ठिक चाप बताउनुहोस्।"} \n\n{"action": "query'
+=== gc-health-002 [health_query] 'मिर्गौला दुख्दा के खानु हु' toks=320 sec=13.6 echo=False
+  HEAD: '{"action": "query", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": "मिर्गौला दुख्दा", "steps": null, "confidence"'
+  TAIL: 'ull, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": "मिर्गौला दुख्दा", "steps": null, "confidence": 0.8, "reply": "मिर्गौला दुख'
+=== gc-ack-001 [ack_med] 'औषधि खाएँ' toks=321 sec=12.9 echo=False
+  HEAD: '{"action": "set_reminder", "entryId": null, "contact": null, "time": "७:३०", "medication": "औषधि", "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": '
+  TAIL: '": null, "time": "७:३०", "medication": "औषधि", "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.85, "reply": "ठिक छ, ७:३० मा औ'
+=== gc-ack-002 [none] 'औषधि खाएको छैन' toks=320 sec=13.3 echo=False
+  HEAD: '{"action": "none", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.3, "reply"'
+  TAIL: '"entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.3, "reply'
+=== gc-reminder-001 [set_reminder] 'बिहान ८ बजे औषधि खान सम्झा' toks=320 sec=13.2 echo=False
+  HEAD: '{"action": "set_reminder", "entryId": null, "contact": null, "time": "बिहान ८ बजे", "medication": "औषधि", "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confid'
+  TAIL: 'ull, "contact": null, "time": "बिहान ८ बजे", "medication": "औषधि", "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.85, "reply'
+=== gc-reminder-002 [set_reminder] 'साढे ७ बजे हिँड्न सम्झाउनु' toks=320 sec=13.5 echo=False
+  HEAD: '{"action": "set_reminder", "entryId": null, "contact": null, "time": "साढे ७ बजे", "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidenc'
+  TAIL: 'll, "time": "साढे ७ बजे", "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.85, "reply": "ठीक छ, साढे ७ बजे'
+=== gc-message-001 [send_message] 'सुनितालाई आज भेट्नुहोस् भन' toks=320 sec=13.7 echo=False
+  HEAD: '{"action": "send_message", "entryId": null, "contact": "सुनिता", "time": null, "medication": null, "message": "आज भेट्नुहोस्", "callType": null, "requestedApp": null, "topic": null, "steps": null, "co'
+  TAIL: 'ा", "time": null, "medication": null, "message": "आज भेट्नुहोस्", "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.85, "reply": "ठिक छ, मेसेज प'
+=== gc-music-001 [music] 'भजन बजाउनुस्' toks=320 sec=13.6 echo=False
+  HEAD: '{"action": "music", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.85, "repl'
+  TAIL: 'c", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.85, "'
+=== gc-music-002 [music] 'bhajan bajau na' toks=320 sec=13.5 echo=False
+  HEAD: '{"action": "music", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.85, "repl'
+  TAIL: 'भजन बजाउनुहुन्छ?"} \n\n{"action": "music", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null,'
+=== gc-guide-001 [guide] 'माइक्रोवेभमा चिया कसरी तता' toks=320 sec=13.6 echo=False
+  HEAD: '{"action": "query", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.3, "reply'
+  TAIL: ' null, "message": null, "callType": null, "requestedApp": null, "topic": {"type": "tv", "id": "tv remote"}, "steps": null, "confidence": 0.3, "reply": "tv remote कसरी चिया तताउने ब'
+=== gc-query-001 [query] 'भोलि मौसम कस्तो हुन्छ' toks=320 sec=13.6 echo=False
+  HEAD: '{"action": "query", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": "मौसम", "steps": null, "confidence": 0.85, "re'
+  TAIL: 'teps": null, "confidence": 0.85, "reply": "भोलि मौसम कस्तो हुन्छ?"} \n\n{"action": "query", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "call'
+=== gc-none-001 [none] 'ऊ त्यो के भनें कुन्नि' toks=320 sec=13.6 echo=False
+  HEAD: '{"action": "none", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "steps": null, "confidence": 0.3, "reply"'
+  TAIL: ' छ त?"}}, "confidence": 0.3, "reply": "के भन्नु छ त?"} \n\n{"action": "none", "entryId": null, "contact": null, "time": null, "medication": null, "message": null, "callType": null, "'

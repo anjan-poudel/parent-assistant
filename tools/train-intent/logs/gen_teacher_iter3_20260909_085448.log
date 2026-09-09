@@ -1,0 +1,7 @@
+Direct use of automatic function calling (AFC) in Models.generate_content is not recommended. Instead, we recommend to use AFC in Chat.send_message. Similarly, direct use of AFC in Models.generate_content_stream is not recommended. Instead, we recommend to use AFC in Chat.send_message_stream.
+[gen_teacher] 73 jobs, 14661 rows written, 864 calls already done
+[gen_teacher] 25/73 jobs, 571 rows written, 0 rejected
+[gen_teacher] 50/73 jobs, 1123 rows written, 0 rejected
+[gen_teacher] job 66/romanized failed: Unterminated string starting at: line 3 column 18 (char 23) — continuing
+[gen_teacher] job 67/elder_fragmented failed: Unterminated string starting at: line 66 column 18 (char 15382) — continuing
+[gen_teacher] done: 1477 new rows, 0 rejected → /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/data/teacher.jsonl
