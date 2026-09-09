@@ -5235,7 +5235,7 @@ extension AppCoordinator {
     private func performFeedRefresh() async {
         let result = await feedService.refresh()
         await MainActor.run { [self] in
-            feedItems = result.items
+            feedItems = FeedLanguageSorter.sort(result.items, app: appLanguage)
             feedFailedSourceNames = result.failedSourceNames
             // Honest state mapping: empty + failures = the failed card
             // (something is wrong); empty + clean = the honest
