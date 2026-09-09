@@ -48,6 +48,13 @@ training:
   bf16: true
   target_modules: all-linear
   max_seq_len: 1536  # template alone is 1201 tok (max row 1410); 1024 truncated every label
+  # Iteration-4 determinism (docs/iteration-4-determinism.md): the run
+  # seed root — eval_golden_k.py --k 3 trains seeds seed, seed+1, seed+2.
+  seed: 42
+  # hard = torch.use_deterministic_algorithms, startup-probe verified
+  # (auto-downgrades to soft if bf16/bnb cannot honor it); soft = cudnn
+  # flags + deterministic cublas reductions only; off = seeds only.
+  deterministic: hard
 
 export:
   # llama.cpp checkout used by src/export_gguf.py (convert_hf_to_gguf.py +

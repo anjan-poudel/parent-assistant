@@ -19,11 +19,24 @@ resumes from the latest checkpoint in checkpoints/<base-tag>/.
 
 GPU rule (monitor): never overlaps another GPU stage — launch only when
 the GPU is free.
+
+Determinism (bake-off iteration-4, 2026-09-09): every run seeds torch /
+numpy / random from config training.seed + --seed-offset BEFORE any
+model or adapter init (round-3 finding: peft drew LoRA init from an
+UNSEEDED torch RNG, so two same-data runs diverged at init), seeds
+dataloader shuffling via TrainingArguments(seed, data_seed), and — per
+config training.deterministic — either enforces torch deterministic
+algorithms after a startup probe proves the bf16 + bnb-4bit op families
+honor it (hard; auto-downgrades to soft if the probe fails, so a
+mid-run deterministic-mode RuntimeError can never waste hours) or only
+applies the cudnn/reduction flags (soft). Residual nondeterminism is
+documented honestly in docs/iteration-4-determinism.md.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from config import load_config
@@ -84,12 +97,98 @@ def latest_checkpoint(out_dir: Path) -> str | None:
     return str(checkpoints[-1]) if checkpoints else None
 
 
+def _probe_hard_determinism() -> tuple[bool, str]:
+    """Verify torch deterministic mode holds for the op families training
+    actually uses — bf16 matmul and a bitsandbytes 4-bit linear
+    (forward + backward). Under use_deterministic_algorithms(True) any op
+    without a deterministic implementation raises RuntimeError; catching
+    that HERE (milliseconds of GPU, right after the GPU-free gate)
+    instead of letting it abort a run hours in is the whole point.
+    Returns (ok, reason)."""
+    import torch
+
+    if not torch.cuda.is_available():
+        return True, "no cuda (nothing to probe)"
+    try:
+        from bitsandbytes import nn as bnn
+        a = torch.randn(512, 1024, dtype=torch.bfloat16, device="cuda")
+        b = torch.randn(1024, 512, dtype=torch.bfloat16, device="cuda")
+        (a @ b).sum()
+        del a, b
+        torch.cuda.empty_cache()
+        lin = bnn.Linear4bit(512, 512, compute_dtype=torch.bfloat16).to("cuda")
+        lin.weight.requires_grad_(True)
+        x = torch.randn(4, 512, dtype=torch.bfloat16, device="cuda",
+                        requires_grad=True)
+        lin(x).sum().backward()
+        torch.cuda.synchronize()
+        del lin, x
+        return True, ""
+    except RuntimeError as e:
+        msg = str(e).strip().splitlines()
+        return False, (msg[0] if msg else "RuntimeError")
+
+
+def _configure_determinism(seed: int, mode: str) -> str:
+    """Seed everything and apply deterministic-mode flags.
+
+    Seeds are ALWAYS applied (round-3 finding: adapter init ran on an
+    unseeded torch RNG). mode (config training.deterministic):
+      hard  → full enforcement; startup-probe guarded, auto-downgrades to
+              soft if bf16/bnb cannot honor deterministic algorithms
+      soft  → cudnn.deterministic + deterministic cublas reductions only;
+              no op ever raises, bf16/cublasLt keeps residual run-to-run
+              variance (documented in docs/iteration-4-determinism.md)
+      off   → seeds only (legacy comparison; not recommended)
+    Returns the effective mode — printed in the log so a k-run driver can
+    tell whether every run of a bake-off used the same mode.
+    """
+    import random
+    import numpy as np
+    import torch
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    if mode == "off":
+        return "off"
+
+    # cudnn-only flags are safe in every mode (no eager attention convs —
+    # they matter only if a future attn_implementation changes).
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    # Deterministic cublas reductions: halves/bf16 GEMMs accumulate in
+    # reduced precision by default (nondeterministic chunking); disabling
+    # it removes that variance class even in soft mode.
+    torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+    torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+    if mode != "hard":
+        return "soft"
+
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # pytorch-recommended
+    torch.use_deterministic_algorithms(True)
+    ok, why = _probe_hard_determinism()
+    if ok:
+        return "hard"
+    torch.use_deterministic_algorithms(False)
+    print("[train] WARNING: hard determinism unavailable under this "
+          f"torch/bnb build ({why}) — fell back to soft determinism "
+          "(cudnn flags + deterministic reductions only; residual "
+          "bf16/bnb run-to-run variance remains — see "
+          "docs/iteration-4-determinism.md)")
+    return "soft"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", required=True, choices=list(BASE_TAGS),
                         help="which base model to train (bake-off runs both)")
     parser.add_argument("--out", type=str, default="",
                         help="output dir tag (default: <base>)")
+    parser.add_argument("--seed-offset", type=int, default=0,
+                        help="run seed = config training.seed + offset "
+                             "(eval_golden_k.py runs offsets 0..k-1)")
     args, cfg = load_config(parser)
 
     import torch
@@ -98,6 +197,16 @@ def main() -> None:
     from transformers import (AutoModelForCausalLM, AutoTokenizer,
                               BitsAndBytesConfig, DataCollatorForLanguageModeling,
                               GenerationConfig, Trainer, TrainingArguments)
+
+    # ---- iteration-4 determinism: seed BEFORE any model/adapter init.
+    # peft draws LoRA init from the torch global RNG; transformers only
+    # reseeds at Trainer construction, which happens AFTER the adapter
+    # exists. eval_golden_k.py passes --seed-offset 0..k-1 for its
+    # consecutive-seed runs.
+    seed = int(cfg.get("training.seed", 42)) + args.seed_offset
+    mode = _configure_determinism(
+        seed, str(cfg.get("training.deterministic", "hard")).lower())
+    print(f"[train] seed={seed} determinism={mode} base={args.base}")
 
     tag = args.out or args.base
     out_dir = ROOT / "checkpoints" / tag
@@ -159,6 +268,11 @@ def main() -> None:
 
     targs = TrainingArguments(
         output_dir=str(out_dir),
+        # Iteration-4: seed + data_seed drive transformers' internal
+        # set_seed (again at Trainer construction) and the dataloader
+        # shuffling, so batch order is a pure function of the run seed.
+        seed=seed,
+        data_seed=seed,
         # Batch 8/accum 4 OOMs on the 24 GB 3090 with transformers v5: the
         # loss upcasts logits to fp32 (~8 GiB at seq 1024 / vocab 262k).
         # 4/8 keeps the same effective batch 32 — steps and recipe unchanged.
@@ -200,7 +314,7 @@ def main() -> None:
     final_dir = ROOT / "checkpoints" / f"{tag}-final"
     trainer.save_model(str(final_dir))
     tokenizer.save_pretrained(str(final_dir))
-    print(f"[train] done → {final_dir}")
+    print(f"[train] done → {final_dir} (seed={seed}, determinism={mode})")
 
 
 if __name__ == "__main__":
