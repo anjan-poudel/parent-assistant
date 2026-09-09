@@ -99,6 +99,11 @@ final class StartupBoot: ObservableObject {
 /// loading, dismissed when the background boot completes. When a stage
 /// failed (honest degradation) a short caption surfaces once boot
 /// finishes and auto-hides — the app stays fully usable either way.
+///
+/// [BOOT-LATENCY] Hosted as the talk stage's FIRST element (4pt above
+/// the speak hero — see `HomeView.talkStage`); the host owns the
+/// spacing, so this view carries no self-padding. Renders zero-height
+/// while nothing shows.
 struct StartupProgressOverlay: View {
     @EnvironmentObject private var boot: StartupBoot
     @State private var showDegradedNotice = false
@@ -122,7 +127,6 @@ struct StartupProgressOverlay: View {
                     Capsule().fill(.regularMaterial)
                         .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
                 )
-                .padding(.top, 6)
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(Text(LocalizedStringKey(boot.stage.labelKey)))
             } else if boot.hasFailures && showDegradedNotice {
@@ -135,7 +139,6 @@ struct StartupProgressOverlay: View {
                         Capsule().fill(.regularMaterial)
                             .shadow(color: .black.opacity(0.10), radius: 5, y: 2)
                     )
-                    .padding(.top, 6)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: boot.spinnerVisible)

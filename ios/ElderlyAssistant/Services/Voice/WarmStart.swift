@@ -5,18 +5,32 @@ import Foundation
 // Startup is instant (startup-perf task) but the FIRST conversation pays
 // the cold-engine loads: the WhisperKit model (weights + one-time CoreML
 // specialization) and the sherpa Piper TTS engine construction. Warm-start
-// preloads both during the boot's `.warmingEngines` phase on a background
-// queue, so the first Talk request skips the multi-second loads. The
-// decision and the execution are separate so the decision table is pure
-// and unit-testable:
+// preloads them so the first Talk request skips the multi-second loads.
+// The decision and the execution are separate so the decision table is
+// pure and unit-testable:
 //
-//   WarmStartPlanner.plan(for:)  — which engines to warm/skip and why,
-//                                  from settings + stack + availability.
+//   WarmStartPlanner.plan(for:)  — which engines to warm/skip, why, and
+//                                  WHICH lifecycle slot each step runs in
+//                                  (from settings + stack + availability).
 //   WarmStartRunner              — executes a plan against the two warm
 //                                  seams and reports `warm_start` events
 //                                  per engine (started/ready/skipped/
 //                                  failed with reason) on the
 //                                  ObservabilityBus.
+//
+// [BOOT-LATENCY] The boot warms ONLY the primary reply voice:
+//  - `.boot` steps run during the boot's `.warmingEngines` stage and are
+//    bounded by `WarmStartPlanner.bootWarmBudgetSeconds` (the
+//    coordinator's watchdog — a tight budget so the warm contribution
+//    can never dominate the spinner). A step still running when the
+//    budget expires finishes DETACHED: boot advances, the warm
+//    continues and still caches its engine for the first talk.
+//  - `.postBoot` steps — the secondary English voice, and on the
+//    simulator the TTS warms too (their measured multi-second sherpa
+//    engine constructions are sim-only costs with no user value) — run
+//    AFTER `.ready` on the same serial warm queue, gated by the same
+//    settings. They are deferred, never skipped because of the slot:
+//    only the timing moved, so they can never delay boot.
 //
 // Honest limits (documented, not worked around):
 //  - whisper.cpp (SwiftWhisper) is NEVER warmed: its design loads a FRESH
@@ -63,10 +77,28 @@ enum WarmStartAction: Equatable {
     case skip(reason: String)
 }
 
+/// Which lifecycle slot a warm step runs in. The planner is pure — it
+/// only DECIDES the slot; the coordinator splits the plan on this field
+/// and runs each slice at its slot. The runner is phase-agnostic: it
+/// executes any slice identically.
+enum WarmStartPhase: Equatable {
+    /// Runs during boot's `.warmingEngines` stage, bounded by
+    /// `WarmStartPlanner.bootWarmBudgetSeconds`; a step that outlives
+    /// the budget finishes detached (boot advances, warm continues).
+    case boot
+    /// Runs after boot completes (spinner dismissed), detached on the
+    /// warm queue — never delays `.ready`.
+    case postBoot
+}
+
 /// One engine's plan entry.
 struct WarmStartStep: Equatable {
     var engine: WarmStartEngine
     var action: WarmStartAction
+    /// Default `.boot` keeps hand-built runner plans unchanged; the
+    /// runner ignores the slot — only the coordinator's phase split
+    /// reads it.
+    var phase: WarmStartPhase = .boot
 }
 
 /// Pure inputs to the warm decision. All values are resolved by the
@@ -87,7 +119,8 @@ struct WarmStartConfig: Equatable {
     var availableTTSVoices: Set<ModelID>
     /// The Nepali reply voice in effect: the persisted choice, else the
     /// locale default (piperNepali). Warm warms THIS voice — the voice
-    /// the first Nepali reply will actually use.
+    /// the first Nepali reply will actually use — as the boot slot's
+    /// only TTS step (deferred to the post-boot slot on the simulator).
     var selectedNepaliVoiceID: ModelID
     /// "Listen for Hey Sahayak" preference. Kept in the config so tests
     /// pin that it does NOT gate STT/TTS warming (see the header).
@@ -101,6 +134,17 @@ struct WarmStartConfig: Equatable {
 /// The pure decision table behind the boot's warm phase. Gating tests
 /// live in WarmStartTests.
 enum WarmStartPlanner {
+
+    /// [BOOT-LATENCY] Seconds the boot's `.warmingEngines` stage may
+    /// hold the boot before the coordinator's watchdog settles it:
+    /// boot advances to `.finishingSetup` and the warm continues
+    /// detached, still caching its engine for the first talk. Short on
+    /// purpose — the boot-warm contribution must never dominate the
+    /// spinner (measured sherpa TTS engine constructions run ~3.7–9 s
+    /// on the simulator; a slow primary warm must not gate `.ready`
+    /// past this budget).
+    static let bootWarmBudgetSeconds: TimeInterval = 4.0
+
     static func plan(for config: WarmStartConfig) -> [WarmStartStep] {
         guard config.enabled else { return [] }
         var steps: [WarmStartStep] = [sttStep(for: config)]
@@ -133,21 +177,41 @@ enum WarmStartPlanner {
         }
     }
 
+    /// [BOOT-LATENCY] The boot warms ONLY the primary reply voice — the
+    /// voice the next reply will actually use. The secondary English
+    /// voice defers to the post-boot slot (same settings gates, same
+    /// warm — only the timing moved so it can't delay `.ready`). On the
+    /// simulator the primary TTS warm defers too: the measured sherpa
+    /// engine constructions are sim-only costs (up to ~9 s) with no
+    /// user value, and the simulator's first conversation happily pays
+    /// the load. When the selected voice IS the English voice, it is
+    /// warmed once as the primary — never twice.
     private static func ttsSteps(for config: WarmStartConfig) -> [WarmStartStep] {
-        [
-            ttsStep(voiceID: config.selectedNepaliVoiceID,
-                    available: config.availableTTSVoices),
-            ttsStep(voiceID: ModelCatalog.piperEnglishUS,
-                    available: config.availableTTSVoices)
+        let primary = config.selectedNepaliVoiceID
+        let primaryPhase: WarmStartPhase = config.isSimulator ? .postBoot : .boot
+        var steps: [WarmStartStep] = [
+            ttsStep(voiceID: primary,
+                    available: config.availableTTSVoices,
+                    phase: primaryPhase)
         ]
+        let secondary = ModelCatalog.piperEnglishUS
+        guard secondary != primary else { return steps }
+        steps.append(ttsStep(voiceID: secondary,
+                             available: config.availableTTSVoices,
+                             phase: .postBoot))
+        return steps
     }
 
     private static func ttsStep(voiceID: ModelID,
-                                available: Set<ModelID>) -> WarmStartStep {
+                                available: Set<ModelID>,
+                                phase: WarmStartPhase) -> WarmStartStep {
         available.contains(voiceID)
-            ? WarmStartStep(engine: .ttsVoice(voiceID), action: .warm)
+            ? WarmStartStep(engine: .ttsVoice(voiceID),
+                            action: .warm,
+                            phase: phase)
             : WarmStartStep(engine: .ttsVoice(voiceID),
-                            action: .skip(reason: "voice_missing"))
+                            action: .skip(reason: "voice_missing"),
+                            phase: phase)
     }
 }
 
