@@ -1138,6 +1138,25 @@ final class AppCoordinator: ObservableObject {
         self.appTheme = AppTheme(rawOrDefault:
             UserDefaults.standard.string(forKey: Self.themeKey))
 
+        // Calendar display (calendar-display task, 2026-09-09) — the
+        // default calendar + overlay toggles behind the Home top bar's
+        // date line. The store seeds the FIRST-EVER defaults from the app
+        // language's locale (Nepali → BS primary with both overlays ON;
+        // English → Gregorian with overlays OFF); after that the
+        // persisted user choices win, the locale never re-seeds. These
+        // are the properties' ONLY initial assignments, so their didSets
+        // do not fire here (house pattern) — nothing needs to react: the
+        // date line composes lazily on the first refresh.
+        let calendarDisplayStore = CalendarDisplaySettingsStore()
+        self.calendarDisplayStore = calendarDisplayStore
+        // AppLanguage.persisted() (not self.appLanguage) — init is
+        // not complete at this point, so the property read is illegal;
+        // the persisted value IS what the property will hold.
+        let calendarDisplay = calendarDisplayStore.load(locale: AppLanguage.persisted().locale)
+        self.calendarDisplayDefault = calendarDisplay.defaultCalendar
+        self.showBSOverlay = calendarDisplay.showBSOverlay
+        self.showTithiOverlay = calendarDisplay.showTithiOverlay
+
         // Default call channel (Phone-tab redesign, 2026-09-07) — restore
         // the persisted default call app; missing/unknown raw values fall
         // back to `.phone`, the zero-assumption channel that works for
@@ -3863,29 +3882,91 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    /// One line with today's Nepali (Bikram Sambat) and Hindu calendar
-    /// dates, for the Home top strip (2026-09-06). Fetched at most once
-    /// per calendar day via a single search-grounded call, cached in
-    /// UserDefaults (not secret); nil when unavailable, and the strip
-    /// simply hides.
-    @Published private(set) var homeCalendarLine: String?
-    private static let homeCalendarLineDefaultsKey = "homeCalendarLine.v1"
+    // MARK: - Calendar display (calendar-display task, 2026-09-09)
 
-    /// Refreshes `homeCalendarLine` — fully OFFLINE since the BS
-    /// calendar work (2026-09-06): BS date + tithi + any festival today,
-    /// computed locally (BikramSambat/TithiCalculator/FestivalCalendarService).
-    /// No network, no cache, no cost, correct every day. The previous
-    /// search-grounded answer was slower, cost a call a day, and couldn't
-    /// show tithi at all.
-    func refreshHomeCalendarLineIfNeeded() {
-        guard homeCalendarLine == nil else { return }
-        guard let overlay = festivalCalendar.todayOverlay() else { return }
-        var parts = ["\(overlay.weekdayNepali), \(BikramSambat.nepaliString(overlay.bsDate))"]
-        parts.append(overlay.tithi.displayNepali)
-        if let festival = overlay.festivals.first {
-            parts.append(festival.nameNepali)
+    /// The settings-driven "today" line for the Home top bar: the
+    /// default calendar's date plus the enabled overlays (BS date while
+    /// Gregorian is primary, tithi + paksha, and today's festival when
+    /// one falls). The pure composition lives in `HomeDateLineComposer`;
+    /// the coordinator publishes the composed result so the top bar and
+    /// the Updates leaf share ONE computation. Refreshed on appear, on
+    /// the day's rollover while Home is open, on foreground, and on
+    /// every calendar-display setting change — all through
+    /// `refreshHomeCalendarLineIfNeeded`, whose equality guard keeps the
+    /// repeated re-checks publish-free.
+    @Published private(set) var homeDateLine: HomeDateLineComposer.Line?
+
+    /// The single-string form ("Sun, Sep 6, 2026 • भदौ २२, २०८३ • दशमी
+    /// कृष्ण पक्ष") — the Updates leaf's Today row and
+    /// `HomeWidgetDataSource` read this, exactly as before.
+    var homeCalendarLine: String? { homeDateLine?.joined }
+
+    /// UserDefaults load + first-run locale seeding for the calendar
+    /// display settings (an injectable seam — see the store type).
+    private let calendarDisplayStore: CalendarDisplaySettingsStore
+
+    /// Which calendar the Home date line (and the calendar leaf's
+    /// default reading) leads with. A UI preference, not a secret —
+    /// house didSet persistence; a change recomposes the date line
+    /// immediately. The init-time restore assigns directly (house
+    /// pattern — didSet does not fire there).
+    @Published var calendarDisplayDefault: CalendarDisplayDefault {
+        didSet {
+            guard calendarDisplayDefault != oldValue else { return }
+            persistCalendarDisplaySettings()
+            refreshHomeCalendarLineIfNeeded()
         }
-        homeCalendarLine = parts.joined(separator: " • ")
+    }
+
+    /// "Nepali (BS) date overlay" toggle. Independent of the other two;
+    /// under a Nepali primary the composer skips it (the BS date already
+    /// IS the primary line — no duplicate). Same didSet contract as
+    /// `calendarDisplayDefault`.
+    @Published var showBSOverlay: Bool {
+        didSet {
+            guard showBSOverlay != oldValue else { return }
+            persistCalendarDisplaySettings()
+            refreshHomeCalendarLineIfNeeded()
+        }
+    }
+
+    /// "Hindu tithi overlay" toggle. Same didSet contract as
+    /// `calendarDisplayDefault`.
+    @Published var showTithiOverlay: Bool {
+        didSet {
+            guard showTithiOverlay != oldValue else { return }
+            persistCalendarDisplaySettings()
+            refreshHomeCalendarLineIfNeeded()
+        }
+    }
+
+    private func persistCalendarDisplaySettings() {
+        calendarDisplayStore.save(CalendarDisplaySettings(
+            defaultCalendar: calendarDisplayDefault,
+            showBSOverlay: showBSOverlay,
+            showTithiOverlay: showTithiOverlay))
+    }
+
+    /// Recomputes `homeDateLine` — fully OFFLINE (BikramSambat table +
+    /// TithiCalculator astronomy + festival catalog): no network, no
+    /// cost, correct every day. No-op while the composition is unchanged
+    /// (same day, same settings, same locale). Callers: Home on appear +
+    /// midnight rollover, Updates on appear, scene-foreground, and the
+    /// calendar-display didSets.
+    func refreshHomeCalendarLineIfNeeded() {
+        let now = Date()
+        let calendar = Calendar.current
+        let overlay = festivalCalendar.todayOverlay(on: now, calendar: calendar)
+        let settings = CalendarDisplaySettings(
+            defaultCalendar: calendarDisplayDefault,
+            showBSOverlay: showBSOverlay,
+            showTithiOverlay: showTithiOverlay)
+        let line = HomeDateLineComposer.line(
+            on: now, calendar: calendar, settings: settings,
+            locale: activeLocale,
+            festivalName: overlay?.festivals.first?.nameNepali)
+        guard line != homeDateLine else { return }
+        homeDateLine = line
     }
 
     /// A plugin-provided view awaiting presentation (`.plugin` intent,
@@ -4579,6 +4660,10 @@ final class AppCoordinator: ObservableObject {
         guard started else { return }   // start() already refreshes
         switch phase {
         case .active:
+            // The top-bar date line may be a day stale after a long
+            // background stretch — the offline recompose is cheap and
+            // its equality guard makes the everyday case a no-op.
+            refreshHomeCalendarLineIfNeeded()
             Task { await externalCalendar.startIfEnabled() }
             Task {
                 await calendarSync.reconcileNativeChanges(entries: routineScheduler.entries())

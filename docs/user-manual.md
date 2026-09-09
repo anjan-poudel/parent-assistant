@@ -89,8 +89,11 @@ From top to bottom:
 
 - **Top bar** — from left to right:
   - **Settings gear** — opens all settings.
-  - **Greeting and clock** ("Good morning, 8:05" / "शुभ प्रभात…") — taps into the
-    **Calendar** screen. The clock ticks every minute, live.
+  - **Today's date** — your chosen calendar's date, with the overlays you picked under
+    it — e.g. "भदौ २२, २०८३" with the tithi line beneath, or "Sun, Sep 6, 2026" with
+    the Nepali overlay. Taps into the **Calendar** screen. There is no greeting or
+    clock here — the phone already shows the time; which calendar leads and which
+    overlays show is set in Settings → **Calendar** → *Calendar display*.
   - **Bell** — opens **Updates**. A small number badge shows how many notification panels
     are waiting; it always matches what the Updates screen lists.
   - **Emergency triangle** — the red-edged warning triangle. It is on *every* screen, not
@@ -107,7 +110,9 @@ From top to bottom:
   seconds; tap it to reopen. Some actions show an **Undo** button.
 - **Conversation chip** — a small "Conversation" capsule above the dock opens the full
   history of what you and Sahayak have said (20 rows per page, tap *Show more* for older).
-- **The dock** — the six big buttons at the bottom edge:
+- **The dock** — the six big buttons at the bottom edge, in **two rows of three** so
+  each tile stays big and easy to read. Top row: **Show Me**, **Directions**,
+  **Feeds**. Bottom row: **Medication**, **Reminders**, **Call**.
   | Tile | Opens |
   |---|---|
   | **Medication** (pill icon) | Today's medicines + doctor's appointments |
@@ -125,8 +130,9 @@ heading:
 - **Notifications** — the currently active panels: today's morning briefing, medication
   status, and any other active notices. Tapping a row opens its screen (e.g. the briefing).
   If nothing is pending, it honestly says *"No notifications right now."*
-- **Today** — today's Nepali date, tithi and any festival, plus *"Next: <medicine name> at
-  <time>"* — the very next thing you must not miss today.
+- **Today** — today's date in your chosen calendar with the overlays you picked (the
+  Nepali date, tithi and any festival), plus *"Next: <medicine name> at <time>"* — the
+  very next thing you must not miss today.
 - **Activity** — a read-only log of your recent conversations with Sahayak, newest first,
   with the time of each exchange.
 
@@ -313,7 +319,8 @@ events from the iPhone Calendar app (beyond today). If more exist, a *Show more*
 opens the Calendar screen. This section only appears while the import toggle is on; if the
 import is denied or failing, it says so instead of pretending nothing is coming.
 
-**Settings → Calendar** hosts the three import/mirror switches (see 4c).
+**Settings → Calendar** hosts the calendar display choices (default calendar + overlays)
+and the three import/mirror switches (see 4c).
 
 **What it will never do:** write or change anything in your iPhone Calendar/Reminders apps
 through the import (strictly read-only); re-fire a late routine as if it were on time
@@ -322,7 +329,7 @@ safety-critical).
 
 ### 4c. Calendar — the Nepali calendar and the two-way mirror
 
-**What it does.** The Calendar screen (tap the greeting/clock at the top of Home) shows:
+**What it does.** The Calendar screen (tap today's date line at the top of Home) shows:
 
 - **Today in the Nepali calendar** — Bikram Sambat date in Nepali numerals (e.g.
   "आइतबार, भदौ २१, २०८३"), the **tithi** for every day, and the English date beneath.
@@ -338,18 +345,25 @@ safety-critical).
 important ones (Dashain, Tihar, Teej, Laxmi Puja, Chhath, New Year…) also notify N days
 early — N is set in Settings → Medication schedule → *Festival reminders* (0–7, default 2).
 
-**The calendar settings leaf** (Settings → **Calendar**) — three switches, each with an
-honest status line beneath it:
+**The calendar settings leaf** (Settings → **Calendar**) — the *Calendar display* card
+and three bridge switches, each with an honest status line beneath it:
 
-1. **Show in Calendar app** (mirror out) — copies your daily routine into the iPhone
+1. **Calendar display** — the **Default calendar** picker (Gregorian / Nepali BS) plus
+   two overlay toggles: **Nepali (BS) date overlay** and **Hindu tithi overlay**. The
+   top bar's date line shows this calendar first, then your chosen overlays. With
+   Nepali chosen as the language, the first-ever defaults are Nepali with both
+   overlays on; after that your choices stick and the language never overrides them.
+   Dates and tithis are computed on the phone (offline); the tithi may differ by a
+   day from a temple panchanga on transition days.
+2. **Show in Calendar app** (mirror out) — copies your daily routine into the iPhone
    Calendar app so the family can see it there. Calendar access is asked only when you
    switch it on; if denied, everything still works in-app and the status line says so.
-2. **Mirror routine changes both ways** (two-way, **off by default**) — mirrored routine
+3. **Mirror routine changes both ways** (two-way, **off by default**) — mirrored routine
    events live in a dedicated **"Sahayak" calendar** inside the Calendar app; edits made
    *there* (time changes, deletions) flow back into the app's routine. Needs full calendar
    access, asked only when switched on. This switch only works while mirroring itself is
    on.
-3. **Import from Calendar & Reminders** — reads your native events and due reminders into
+4. **Import from Calendar & Reminders** — reads your native events and due reminders into
    the app (today's lists + notifications), never writes back. When on, a stepper sets how
    many minutes early to notify (0–30); all-day items always announce at 8:00 AM.
 
@@ -624,7 +638,7 @@ Open Settings with the gear at the top-left of Home. In order:
 | 14 | **Family and friends** | The curated contact list (up to 12) with the 5-step add/edit wizard: search → relationship (+ emergency flag) → photo → Messenger username → nickname + home address. |
 | 15 | **Medication schedule** | Medicine names and times (duplicates refused), plus festival advance-reminder days (0–7, default 2). |
 | 16 | **Manuals** | The five bundled camera-free manuals (iPhone, Phone, Messages, Messenger, YouTube) in English + Nepali with zoomable annotated steps. |
-| 17 | **Calendar** | The three bridge switches: Show in Calendar app (mirror out), Mirror routine changes both ways (Sahayak calendar, off by default), Import from Calendar & Reminders (with notify-minutes-before stepper 0–30). |
+| 17 | **Calendar** | The *Calendar display* card (Default calendar Gregorian/Nepali BS + the Nepali-date and Hindu-tithi overlay toggles) plus the three bridge switches: Show in Calendar app (mirror out), Mirror routine changes both ways (Sahayak calendar, off by default), Import from Calendar & Reminders (with notify-minutes-before stepper 0–30). |
 | 18 | **Alarms & timers** | Every voice-set alarm (toggle/delete) and live countdown timer (cancel), a hand-set alarm form, and the honesty note about the Clock app. |
 | 19 | **Privacy** | The privacy statement and the app version number. |
 | 20 | **Assistant activity** | The intent log — confirmed/corrected commands; clear or export. |

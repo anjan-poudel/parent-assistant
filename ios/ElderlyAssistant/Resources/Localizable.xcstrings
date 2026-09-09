@@ -1763,6 +1763,108 @@
         }
       }
     },
+    "calendarDisplay.bsOverlay": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nepali (BS) date overlay"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नेपाली (वि.सं.) मिति ओभरले"
+          }
+        }
+      }
+    },
+    "calendarDisplay.default.gregorian": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gregorian"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ग्रेगोरियन"
+          }
+        }
+      }
+    },
+    "calendarDisplay.default.nepali": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nepali (BS)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नेपाली (वि.सं.)"
+          }
+        }
+      }
+    },
+    "calendarDisplay.offlineNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dates, tithis and festivals are computed on this phone from the Bikram Sambat calendar — no internet needed. The tithi may differ by a day from a temple panchanga on transition days."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मिति, तिथि र चाडपर्व यही फोनमा विक्रम संवत् पात्रोबाट गणना गरिन्छ — इन्टरनेट चाहिँदैन। सङ्क्रमणको दिनमा तिथि मन्दिरको पञ्चाङ्गसँग एक दिन फरक पर्न सक्छ।"
+          }
+        }
+      }
+    },
+    "calendarDisplay.sectionTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar display"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पात्रो प्रदर्शन"
+          }
+        }
+      }
+    },
+    "calendarDisplay.tithiOverlay": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hindu tithi overlay"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हिन्दू तिथि ओभरले"
+          }
+        }
+      }
+    },
     "calendarSync.statusDenied": {
       "extractionState": "manual",
       "localizations": {
@@ -4653,57 +4755,6 @@
         }
       }
     },
-    "home.greeting.morning": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Good morning"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "शुभ प्रभात"
-          }
-        }
-      }
-    },
-    "home.greeting.night": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Good evening"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "शुभ रात्री"
-          }
-        }
-      }
-    },
-    "home.greeting.time": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Hello, %@"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "नमस्ते, %@"
-          }
-        }
-      }
-    },
     "home.hint.call": {
       "extractionState": "manual",
       "localizations": {
@@ -5193,23 +5244,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "द्रुत एप थप्नुहोस्"
-          }
-        }
-      }
-    },
-    "home.quickAccess.caption": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Quick access"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "द्रुत पहुँच"
           }
         }
       }
