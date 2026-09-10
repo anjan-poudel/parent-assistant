@@ -437,6 +437,20 @@ struct HomeView: View {
         return coordinator.voiceResetNotice
     }
 
+    /// [P0-2] Manual Talk readiness — the shared `VoicePipelineReadiness`
+    /// contract the hero gates on (see `AppCoordinator.talkReadiness`).
+    private var talkReadiness: VoicePipelineReadiness { coordinator.talkReadiness }
+
+    /// [P0-2] Whether the boot capsule is hosted above the hero's disc.
+    /// The hero shows its OWN loading presentation while the pipeline
+    /// start is in flight; during boot's `preparingVoice` stage the
+    /// capsule would repeat that same message 8pt above the disc, so it
+    /// stands down for exactly that stage. Every other boot stage
+    /// (restoring data, warming engines, finishing setup) keeps it.
+    private var showsStartupCapsule: Bool {
+        !(talkReadiness.isLoading && boot.stage == .preparingVoice)
+    }
+
     private var talkStage: some View {
         Group {
             if stageVisuals.isConfirmation {
@@ -465,6 +479,13 @@ struct HomeView: View {
                 // so nothing below it shifts when it collapses.
                 VStack(spacing: 4) {
                     TalkButton(session: session,
+                               // [P0-2] Manual Talk readiness — the shared
+                               // `VoicePipelineReadiness` contract, driven
+                               // by the pipeline's own start callback. The
+                               // hero no longer reads the fold status
+                               // (`voiceReadinessStatus`) or
+                               // `TalkHeroGating`.
+                               readiness: talkReadiness,
                                onTap: {
                                    switch session.state {
                                    case .idle:
@@ -485,10 +506,18 @@ struct HomeView: View {
                                },
                                statusOverride: talkStatusLineOverride,
                                onLongPressReset: coordinator.resetVoiceActivation,
-                               // [STARTUP-R2] The hero is disabled with
-                               // the honest "Preparing voice…" label
-                               // until the voice stack reports ready.
-                               preparing: coordinator.voiceReadinessStatus == .preparing)
+                               // [P0-2] The ONE deterministic recovery for a
+                               // failed boot-time start: an explicit button
+                               // under the hero. Tapping the hero itself can
+                               // therefore never "recover" merely because
+                               // startup has not completed.
+                               onRecover: coordinator.recoverVoiceCycle,
+                               // [P0-2] The hero's own loading presentation
+                               // says "Starting voice…" inside the disc, so
+                               // the boot capsule stands down for the boot
+                               // stage whose label it would repeat; every
+                               // other boot stage keeps it.
+                               showsBootCapsule: showsStartupCapsule)
                     if stageVisuals.showsHintCarousel {
                         HintCarousel()
                     }
@@ -747,6 +776,14 @@ struct TalkButton: View {
     @ObservedObject var session: VoiceSessionStateMachine
     @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// [P0-2] Manual Talk readiness — the shared `VoicePipelineReadiness`
+    /// contract, and the hero's ONLY gate. `.loading` keeps the disc at
+    /// its final dimensions with a spinner inside it and disables
+    /// activation AND every recovery gesture (including the hold-to-reset);
+    /// `.failed` shows one explanation plus one deterministic recovery;
+    /// `.ready` is the normal hero. Wake-word status is deliberately not
+    /// consulted — a degraded KWS engine never takes manual Talk down.
+    let readiness: VoicePipelineReadiness
     let onTap: () -> Void
     /// Replaces the state-bound status line when set (used for the
     /// error state's failure-specific caption and the post-reset notice).
@@ -759,12 +796,15 @@ struct TalkButton: View {
     /// stays a plain tap target, and a long hold there still fires the
     /// tap on release exactly as it did before this feature.
     var onLongPressReset: (() -> Void)? = nil
-    /// [STARTUP-R2] True while the voice stack is still preparing — the
-    /// hero is disabled (dimmed) and its status line shows the honest
-    /// "Preparing voice…" label instead of the state's own text. The
-    /// preparing state never coexists with a reset hold (a disabled
-    /// button cannot hold), so the hold hint keeps its precedence.
-    var preparing: Bool = false
+    /// [P0-2] The ONE deterministic recovery a `.failed` boot-time start
+    /// offers — an explicit control under the hero, so the hero's own tap
+    /// can never double as an accidental recovery.
+    var onRecover: (() -> Void)? = nil
+    /// [P0-2] Whether the boot capsule is hosted above the disc. The
+    /// caller suppresses it for the boot stage whose label the hero's own
+    /// loading presentation already carries.
+    var showsBootCapsule: Bool = true
+
 
     @State private var breathe = false
     /// True while a hold that CAN reset is underway (touch down, past the
@@ -789,13 +829,31 @@ struct TalkButton: View {
 
     private var isBreathing: Bool { visuals.pulses && !reduceMotion }
 
-    /// The hold-to-reset affordance is live (reset-eligible state AND a
-    /// reset action was provided). The Home stage always supplies the
-    /// action, so this effectively means `supportsTalkReset` — kept
-    /// separate so a future reuse of TalkButton without a reset stays a
-    /// plain tap target.
+    /// [P0-2] The pipeline start is still in flight — the hero shows its
+    /// loading presentation and every activation/recovery affordance is
+    /// off.
+    private var isLoading: Bool { readiness.isLoading }
+
+    /// [P0-2] The pipeline's boot-time start failed; the hero shows one
+    /// explanation and one recovery.
+    private var failure: VoiceStartupFailure? { readiness.failure }
+
+    /// Disabled unless the pipeline's own start callback succeeded, plus
+    /// the chips' own case: while loading (or failed) the hero is inert —
+    /// the reset hold is not even attached, so a hold cannot reach the
+    /// reset path while the review's "cannot invoke recovery merely
+    /// because startup has not completed" rule applies.
+    private var isDisabled: Bool {
+        readiness != .ready || session.state == .awaitingConfirmation
+    }
+
+    /// The hold-to-reset affordance is live only in a reset-eligible state,
+    /// with a reset action provided AND a ready pipeline — a loading or
+    /// failed hero never offers it ([P0-2]).
     private var resetHoldable: Bool {
-        onLongPressReset != nil && session.state.supportsTalkReset
+        onLongPressReset != nil
+            && session.state.supportsTalkReset
+            && readiness == .ready
     }
 
     var body: some View {
@@ -814,10 +872,10 @@ struct TalkButton: View {
                 ZStack {
                     // While a reset hold is underway the breathing rings
                     // stand down (the arc below is the motion that
-                    // matters); they return on release. [STARTUP-R2]
-                    // they stand down while preparing too — a disabled
-                    // hero does not breathe.
-                    if isBreathing && !isPressingForReset && !preparing {
+                    // matters); they return on release. [P0-2] they stand
+                    // down unless the pipeline is ready too — a loading or
+                    // failed hero does not breathe.
+                    if isBreathing && !isPressingForReset && readiness == .ready {
                         breathingRings
                     }
                     if visuals.showsHalo && !isPressingForReset {
@@ -838,24 +896,15 @@ struct TalkButton: View {
                     // white glyphs hold ≥4.5:1 on every state color (unit
                     // tested). The breathing rings + halo + shadow carry
                     // the "alive" light in the state's own color family.
+                    // [P0-2] The disc's DIMENSIONS are readiness-independent
+                    // by construction (the frame below), so the hero keeps
+                    // its final size through loading and failure.
                     Circle()
                         .fill(visuals.tint)
                         .frame(width: DesignTokens.talkButtonDiameter,
                                height: DesignTokens.talkButtonDiameter)
                         .shadow(color: visuals.tint.opacity(0.4), radius: 10, y: 4)
-                        .overlay(
-                            VStack(spacing: 6) {
-                                Image(systemName: visuals.icon)
-                                    .font(.system(size: 32))
-                                Text(session.state.buttonText(locale: locale))
-                                    .font(DesignTokens.warmFont(size: 20, weight: .bold))
-                                    .multilineTextAlignment(.center)
-                                    .lineLimit(2)
-                                    .minimumScaleFactor(0.7)
-                                    .padding(.horizontal, 12)
-                            }
-                            .foregroundColor(.white)
-                        )
+                        .overlay(heroContent)
                         // [LAUNCH-SCREEN] The startup spinner is anchored
                         // to the DISC itself (8pt above its top edge), not
                         // the surrounding ZStack: ring/halo sizes vary by
@@ -864,10 +913,14 @@ struct TalkButton: View {
                         // disc is the state-independent landmark — the
                         // capsule always hugs the speak button. It renders
                         // zero-height once boot completes; the offset
-                        // never affects the stage's flow.
+                        // never affects the stage's flow. [P0-2] It is not
+                        // hosted at all while the hero carries its own
+                        // loading label for that boot stage.
                         .overlay(alignment: .bottom) {
-                            StartupProgressOverlay()
-                                .offset(y: -(DesignTokens.talkButtonDiameter + 8))
+                            if showsBootCapsule {
+                                StartupProgressOverlay()
+                                    .offset(y: -(DesignTokens.talkButtonDiameter + 8))
+                            }
                         }
                     if isPressingForReset {
                         resetProgressRing
@@ -875,19 +928,19 @@ struct TalkButton: View {
                 }
             }
             .buttonStyle(.plain)
-            // Enabled in every state except awaitingConfirmation (the
-            // yes/no chips own the UI): tapping mid-cycle is the manual
-            // recovery escape hatch, and tapping in error/stopped retries
-            // the failed boot-time pipeline start. [STARTUP-R2] plus
-            // disabled while the voice stack is preparing (plain button
+            // Enabled only once the pipeline's start callback succeeded
+            // (and not while the yes/no chips own the UI): a ready hero
+            // keeps every existing affordance — tapping mid-cycle cancels
+            // and recycles, tapping after a runtime error retries. [P0-2]
+            // While loading or failed the hero is disabled (plain button
             // style does not dim on its own — the opacity below is the
             // disabled appearance).
-            .disabled(preparing || session.state == .awaitingConfirmation)
-            .opacity(preparing ? 0.5 : 1.0)
-            .accessibilityLabel(Text(
-                preparing
-                    ? L10n.str("startup.preparingVoice", locale: locale)
-                    : session.state.buttonText(locale: locale)))
+            .disabled(isDisabled)
+            .opacity(isDisabled ? 0.5 : 1.0)
+            .accessibilityLabel(Text(TalkReadinessCopy.accessibilityLabel(
+                readiness,
+                stateLabel: session.state.buttonText(locale: locale),
+                locale: locale)))
             // The hold-to-reset gesture + VoiceOver hint exist ONLY in
             // reset-eligible states. An always-attached long press would
             // swallow the tap on holds ≥ `talkResetHoldSeconds` in
@@ -918,6 +971,14 @@ struct TalkButton: View {
                 .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .medium))
                 .foregroundColor(DesignTokens.textSecondary)
                 .multilineTextAlignment(.center)
+
+            // [P0-2] The ONE recovery a failed boot-time start offers —
+            // and only then. It replaces the old "tap the dead hero to
+            // retry" path, which could not distinguish "not ready yet"
+            // from "failed".
+            if failure != nil, let onRecover {
+                recoveryAction(onRecover)
+            }
         }
         .onAppear {
             guard !reduceMotion else { return }
@@ -927,20 +988,83 @@ struct TalkButton: View {
         }
     }
 
+    /// The disc's content ([P0-2]). While the pipeline start is in flight
+    /// the hero shows a `ProgressView` and the localized stage label
+    /// INSIDE the disc; otherwise it shows the live state's icon and
+    /// caption. Both branches sit inside the same fixed-size circle, so
+    /// the hero's final dimensions never move with readiness.
+    private var heroContent: some View {
+        VStack(spacing: 6) {
+            if isLoading {
+                ProgressView()
+                    .tint(.white)
+                // The stage label is essential localized text: it wraps
+                // rather than shrinking (≥18pt caption token, no
+                // `minimumScaleFactor`).
+                Text(loadingStageLabel)
+                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                                weight: .semibold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .padding(.horizontal, 12)
+            } else {
+                Image(systemName: visuals.icon)
+                    .font(.system(size: 32))
+                Text(session.state.buttonText(locale: locale))
+                    .font(DesignTokens.warmFont(size: 20, weight: .bold))
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+                    .padding(.horizontal, 12)
+            }
+        }
+        .foregroundStyle(.white)
+    }
+
+    /// [P0-2] The in-hero loading label for the current stage.
+    private var loadingStageLabel: String {
+        guard case .loading(let stage) = readiness else { return "" }
+        return TalkReadinessCopy.loadingLabel(stage, locale: locale)
+    }
+
+    /// [P0-2] The one deterministic recovery for a failed boot-time start:
+    /// a labeled control under the hero's status line, at the practical
+    /// ≥52pt target size this age group gets everywhere else on Home.
+    private func recoveryAction(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 18, weight: .semibold))
+                Text(TalkReadinessCopy.failureRecovery(locale: locale))
+                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                                weight: .semibold))
+            }
+            .foregroundStyle(DesignTokens.accent)
+            .padding(.horizontal, 18)
+            .frame(minHeight: 52)
+            .background(DesignTokens.card)
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
     /// Status line under the hero: the live hold hint while a reset
-    /// press is underway, else the honest "Preparing voice…" label while
-    /// the voice stack is still loading ([STARTUP-R2]), else the
-    /// caller's override (error caption / post-reset notice), else the
-    /// state's own status text. The hold hint wins over everything —
-    /// while the finger is down the line must say what the press will
-    /// DO (TALK-CRASH-FIX, 2026-09-07); a disabled preparing hero can
-    /// never hold, so the two never collide.
+    /// press is underway, else the ONE failure explanation while the
+    /// pipeline start failed, else EMPTY while it is still loading (the
+    /// stage label lives inside the disc — and the state's own text would
+    /// claim "I'm ready" before the callback says so), else the caller's
+    /// override (error caption / post-reset notice), else the state's own
+    /// status text. The hold hint wins over everything — while the finger
+    /// is down the line must say what the press will DO
+    /// (TALK-CRASH-FIX, 2026-09-07); a disabled hero can never hold, so
+    /// the two never collide.
     private var statusTextLine: String {
         if isPressingForReset {
             return L10n.str("voice.resetHold", locale: locale)
         }
-        if preparing {
-            return L10n.str("startup.preparingVoice", locale: locale)
+        if isLoading { return "" }
+        if let failure {
+            return TalkReadinessCopy.failureExplanation(failure, locale: locale)
         }
         return statusOverride ?? session.state.statusText(locale: locale)
     }
