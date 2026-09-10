@@ -2846,11 +2846,27 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
                                    speaker: MockSpeaker(),
                                    turnTracer: tracer)
 
+        // [FLAKE-PIN] (2026-09-11) The hold pin moved off the synchronous
+        // read of `isTurnReplyPending`. Reading the flag right after
+        // `route()` returned raced the handler's non-isolated Task: on
+        // iOS 18.3 the executor can run the mock round-trip to completion
+        // — committing the reply and clearing the flag — before the
+        // assert executes, so this test failed intermittently on 18.3
+        // while always passing on 26.5 (pre-existing on origin/master).
+        // The pin is unchanged — the turn is held during the alarm
+        // round-trip — but it is observed through the router's resolve
+        // callback, registered BEFORE `route()`: it fires only when a
+        // marked hold is released (`resolveTurnReplyPending`'s guard), so
+        // on the broken commit (no hold marked) it never fires and this
+        // test still fails. `awaitReplyCommit` keeps the bounded-wait
+        // poll of the flag itself (1 ms poll, ≤5 s) and pins that the
+        // turn resolved only after the reply was committed.
+        var turnWasHeld = false
+        router.onTurnReplyResolved = { turnWasHeld = true }
+
         let result = router.route(transcript: "set an alarm for 6 am")
 
         XCTAssertEqual(result, .unrecognised(transcript: "set an alarm for 6 am"))
-        XCTAssertTrue(router.isTurnReplyPending,
-                      "the alarm round-trip must hold the pipeline like the LLM path")
         await awaitReplyCommit(router, coordinator)
 
         XCTAssertEqual(coordinator.alarmSetRequests.count, 1)
@@ -2861,6 +2877,8 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
         })
         XCTAssertFalse(router.isTurnReplyPending,
                        "the turn resolves only after the reply was committed")
+        XCTAssertTrue(turnWasHeld,
+                      "the alarm round-trip must hold the pipeline like the LLM path")
     }
 
     /// The timer twin of `testAlarmRoutingSurvivesTimingHooks` — including
@@ -2877,10 +2895,23 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
                                    speaker: MockSpeaker(),
                                    turnTracer: tracer)
 
+        // [FLAKE-PIN] (2026-09-11) Same 18.3 executor race as its alarm
+        // twin `testAlarmRoutingSurvivesTimingHooks`: the synchronous
+        // `isTurnReplyPending` read raced the handler's non-isolated
+        // Task, which on iOS 18.3 can commit the reply and clear the
+        // flag before the assert runs (intermittent on 18.3, stable on
+        // 26.5). The hold pin is unchanged — the turn is held during the
+        // timer round-trip — but is observed through the router's resolve
+        // callback, registered BEFORE `route()`; it fires only when a
+        // marked hold is released, so the broken commit still fails.
+        // `awaitReplyCommit` keeps the bounded-wait flag poll (1 ms poll,
+        // ≤5 s) and pins that the turn resolved only after the commit.
+        var turnWasHeld = false
+        router.onTurnReplyResolved = { turnWasHeld = true }
+
         let result = router.route(transcript: "टाइमर ५ मिनेट")
 
         XCTAssertEqual(result, .unrecognised(transcript: "टाइमर ५ मिनेट"))
-        XCTAssertTrue(router.isTurnReplyPending)
         await awaitReplyCommit(router, coordinator)
 
         XCTAssertEqual(coordinator.timerStartRequests.count, 1)
@@ -2892,6 +2923,8 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
                 && $0.outcome == "permission_denied"
         })
         XCTAssertFalse(router.isTurnReplyPending)
+        XCTAssertTrue(turnWasHeld,
+                      "the timer round-trip must hold the pipeline like the LLM path")
     }
 
     /// The synchronous off/snooze branches commit inside `route()` and
