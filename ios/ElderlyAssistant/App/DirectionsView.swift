@@ -266,7 +266,10 @@ struct DirectionsView: View {
         let listening = micPhase == .listening
         return Button(action: micTapped) {
             Image(systemName: listening ? "stop.fill" : "mic.fill")
-                .font(.system(size: 17, weight: .semibold))
+                // Caption token (DESIGN-REVIEW): 18pt floor, Dynamic Type
+                // aware — the 30pt circle below grows with it via
+                // `minHeight`/`minWidth` so the glyph can never clip.
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                 .foregroundColor(listening ? .white : DesignTokens.accent)
                 .frame(width: 30, height: 30)
                 .background(listening ? DesignTokens.accent : DesignTokens.background)

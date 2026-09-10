@@ -322,7 +322,10 @@ struct VoicePersonalizationSettingsView: View {
             case .ready:
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 16))
+                        // Caption-token status glyph (DESIGN-REVIEW): 18pt
+                        // floor and Dynamic Type aware, like the label it
+                        // sits beside — was a fixed 16pt.
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
                         .foregroundColor(DesignTokens.accent)
                     Text("voiceSettings.biometric.enroll.done")
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
@@ -446,7 +449,8 @@ struct VoicePersonalizationSettingsView: View {
     private func failureLine(_ failure: VoiceEnrollmentSession.VoiceEnrollmentFailure) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 16))
+                // Caption-token failure glyph (DESIGN-REVIEW) — was 16pt.
+                .font(.system(size: DesignTokens.minCaptionPointSize))
                 .foregroundColor(DesignTokens.stateError)
             Text(failureText(failure))
                 .font(.system(size: DesignTokens.minCaptionPointSize))

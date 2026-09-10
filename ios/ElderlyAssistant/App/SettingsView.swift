@@ -131,8 +131,14 @@ struct SettingsView: View {
                         sectionRow(.toolLog, icon: "text.magnifyingglass",
                                    titleKey: "settings.toolLog.title")
                         Text("settings.ai.hiddenHint")
-                            .font(.system(size: 14))
-                            .foregroundColor(DesignTokens.textSecondary.opacity(0.6))
+                            // DESIGN-REVIEW: the one 14pt label left in
+                            // the app — a status caption, so it takes
+                            // the 18pt caption token (constitution
+                            // ≥18pt body floor) instead of its own size.
+                            .font(.system(size: DesignTokens.minCaptionPointSize))
+                            .foregroundStyle(DesignTokens.textSecondary.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity)
                             .padding(.top, 8)
                     }
@@ -1733,7 +1739,9 @@ private struct FamilyContactWizardSheet: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "person.crop.circle.badge.plus")
-                    .font(.system(size: 17, weight: .bold))
+                    // Caption token (DESIGN-REVIEW) — 18pt floor, Dynamic
+                    // Type aware; was a fixed 17pt.
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                 Text(LocalizedStringKey("family.addManually"))
             }
             .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
@@ -1796,7 +1804,8 @@ private struct FamilyContactWizardSheet: View {
     private var searchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 15))
+                // Caption token (DESIGN-REVIEW) — was a fixed 15pt.
+                .font(.system(size: DesignTokens.minCaptionPointSize))
                 .foregroundColor(DesignTokens.textSecondary)
             TextField(LocalizedStringKey("family.addSearch.placeholder"), text: $searchText)
                 .font(.system(size: DesignTokens.minBodyPointSize))
@@ -2044,7 +2053,9 @@ private struct FamilyContactWizardSheet: View {
                         Spacer(minLength: 8)
                         if relationshipOption == option {
                             Image(systemName: "checkmark")
-                                .font(.system(size: 15, weight: .bold))
+                                // Caption token (DESIGN-REVIEW) — was a
+                                // fixed 15pt.
+                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                                 .foregroundColor(DesignTokens.accent)
                         }
                     }
@@ -2072,7 +2083,9 @@ private struct FamilyContactWizardSheet: View {
             }
             Spacer()
             Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 13, weight: .semibold))
+                // Caption token (DESIGN-REVIEW) — the dropdown indicator
+                // was a fixed 13pt, the smallest glyph in the app.
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                 .foregroundColor(DesignTokens.textSecondary)
         }
         .padding(.horizontal, 14)
@@ -2259,7 +2272,8 @@ private struct FamilyContactWizardSheet: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 15, weight: .bold))
+                        // Caption token (DESIGN-REVIEW) — was a fixed 15pt.
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                     Text(LocalizedStringKey("common.back"))
                 }
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))

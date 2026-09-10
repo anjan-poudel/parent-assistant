@@ -19,7 +19,12 @@ struct NotificationBellButton: View {
                 IconBadge(systemImage: "bell.fill", tint: .reminders, diameter: 32)
                 if count > 0 {
                     Text("\(count)")
-                        .font(.system(size: 12, weight: .bold))
+                        // DESIGN-REVIEW: the count is real information, not
+                        // decoration — it takes the 18pt caption token (and
+                        // its Dynamic Type scaling) instead of a fixed 12pt,
+                        // and the capsule grows with it via minWidth/minHeight
+                        // instead of clipping the digits.
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)

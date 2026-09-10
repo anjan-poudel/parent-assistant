@@ -146,7 +146,9 @@ struct FeedsView: View {
     private var partialFailureCard: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.circle.fill")
-                .font(.system(size: 16))
+                // Caption-token status glyph (DESIGN-REVIEW) — 18pt floor,
+                // Dynamic Type aware; was a fixed 16pt.
+                .font(.system(size: DesignTokens.minCaptionPointSize))
                 .foregroundColor(DesignTokens.textSecondary)
                 .padding(.top, 2)
             Text(L10n.fmt("feeds.partialFailure", locale: coordinator.activeLocale,

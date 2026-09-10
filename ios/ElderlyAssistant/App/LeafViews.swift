@@ -1010,7 +1010,9 @@ struct CallView: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 15, weight: .semibold))
+                    // Caption-token glyph (DESIGN-REVIEW) beside the
+                    // button's 18pt title — scales with Dynamic Type.
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                     .foregroundColor(DesignTokens.accent)
                 Text(LocalizedStringKey(titleKey))
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
@@ -1072,7 +1074,10 @@ struct CallView: View {
         let listening = micPhase == .listening
         return Button(action: micTapped) {
             Image(systemName: listening ? "stop.fill" : "mic.fill")
-                .font(.system(size: 17, weight: .semibold))
+                // Caption token (DESIGN-REVIEW): 18pt floor, Dynamic Type
+                // aware — the circle below uses minWidth/minHeight so the
+                // glyph can never clip at Accessibility XXXL.
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                 .foregroundColor(listening ? .white : DesignTokens.accent)
                 .frame(width: 30, height: 30)
                 .background(listening ? DesignTokens.accent : DesignTokens.background)

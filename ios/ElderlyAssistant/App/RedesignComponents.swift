@@ -151,7 +151,11 @@ struct EmergencyIconButton: View {
     var body: some View {
         Button(action: trigger) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 17, weight: .bold))
+                // Emergency mark: caption token (DESIGN-REVIEW) — 18pt
+                // floor and Dynamic Type aware, was a fixed 17pt. The
+                // circle below it uses minWidth/minHeight so the glyph
+                // scales without clipping at Accessibility XXXL.
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                 .foregroundColor(DesignTokens.BadgeTint.emergency.tint)
                 .frame(width: 32, height: 32)
                 .background(DesignTokens.BadgeTint.emergency.background)
@@ -343,7 +347,10 @@ struct OutcomeCardView: View {
                 .frame(width: 40, height: 40)
                 .overlay(
                     Image(systemName: outcome.icon)
-                        .font(.system(size: 17, weight: .semibold))
+                        // Caption token (DESIGN-REVIEW) — was a fixed
+                        // 17pt; now on the 18pt floor and Dynamic Type
+                        // aware, in step with the outcome rows beside it.
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                         .foregroundColor(DesignTokens.accent)
                 )
             VStack(alignment: .leading, spacing: 6) {
@@ -400,7 +407,8 @@ struct OutcomeCardView: View {
                     .foregroundColor(DesignTokens.textPrimary)
                     .lineLimit(1)
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 15, weight: .bold))
+                    // Caption-token disclosure chevron (DESIGN-REVIEW).
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                     .foregroundColor(DesignTokens.textSecondary)
             }
             .padding(.horizontal, 14)
