@@ -28,6 +28,7 @@ final class VoicePipelineNoiseFilterSeamTests: XCTestCase {
                          options: AVAudioSession.CategoryOptions) throws {}
         func setActive(_ active: Bool,
                        options: AVAudioSession.SetActiveOptions) throws {}
+        func setMode(_ mode: AVAudioSession.Mode) throws {}
         func setVoiceProcessingEnabled(_ enabled: Bool) throws {}
     }
 

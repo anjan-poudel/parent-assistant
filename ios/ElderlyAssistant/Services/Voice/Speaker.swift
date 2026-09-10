@@ -12,6 +12,17 @@ protocol Speaker: AnyObject {
     func cancel()
 }
 
+/// [LOUD-TTS] Response-playback loudness seam: switches the shared audio
+/// session to `.voicePrompt` mode while the assistant speaks and restores
+/// the capture preset afterwards (see `AudioSessionManager`). A static
+/// seam — the same pattern as `NewsSourceEditorSeam` — installed by
+/// `AppCoordinator.start()`; the no-op default keeps speaker unit tests
+/// audio-free.
+enum ResponsePlaybackModeSeam {
+    static var begin: () -> Void = {}
+    static var end: () -> Void = {}
+}
+
 // MARK: - AVSpeechSynthesizer (default)
 
 final class SystemSpeechSpeaker: NSObject, Speaker {
@@ -37,6 +48,11 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
         utterance.volume = 1.0
         utterance.pitchMultiplier = 1.0
 
+        // [LOUD-TTS] Spoken responses get the loudness-optimized session
+        // mode for the duration of the utterance (restored by the
+        // delegate's finish/cancel below and by cancel()).
+        ResponsePlaybackModeSeam.begin()
+
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             currentContinuation = continuation
             synthesizer.speak(utterance)
@@ -48,6 +64,7 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
+        ResponsePlaybackModeSeam.end()
         if let cont = currentContinuation {
             currentContinuation = nil
             cont.resume()
@@ -84,6 +101,7 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
 extension SystemSpeechSpeaker: AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                            didFinish utterance: AVSpeechUtterance) {
+        ResponsePlaybackModeSeam.end()
         if let cont = currentContinuation {
             currentContinuation = nil
             cont.resume()
@@ -91,6 +109,7 @@ extension SystemSpeechSpeaker: AVSpeechSynthesizerDelegate {
     }
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                            didCancel utterance: AVSpeechUtterance) {
+        ResponsePlaybackModeSeam.end()
         if let cont = currentContinuation {
             currentContinuation = nil
             cont.resume()
@@ -452,6 +471,9 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         engine.cancelSynthesis()
         player?.stop()
         player = nil
+        // [LOUD-TTS] Restore the capture mode (a no-op when playback never
+        // began — the seam's depth guard handles it).
+        ResponsePlaybackModeSeam.end()
         fallback.cancel()
         if let cont = currentContinuation {
             currentContinuation = nil
@@ -491,6 +513,10 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
             self.player = player
             player.delegate = self
             player.prepareToPlay()
+            // [LOUD-TTS] Spoken responses get the loudness-optimized
+            // session mode for the duration of the playback (restored by
+            // settlePlayback and cancel() below).
+            ResponsePlaybackModeSeam.begin()
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                 currentContinuation = cont
                 player.play()
@@ -502,6 +528,7 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     }
 
     private func settlePlayback() {
+        ResponsePlaybackModeSeam.end()
         if let cont = currentContinuation {
             currentContinuation = nil
             cont.resume()

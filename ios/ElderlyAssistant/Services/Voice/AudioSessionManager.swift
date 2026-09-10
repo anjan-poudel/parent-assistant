@@ -24,6 +24,10 @@ protocol AudioSessionControlling: AnyObject {
                      options: AVAudioSession.CategoryOptions) throws
     func setActive(_ active: Bool,
                    options: AVAudioSession.SetActiveOptions) throws
+    /// Switches the session mode in place (category/options untouched) —
+    /// the [LOUD-TTS] response-playback seam uses this to move between the
+    /// capture preset and `.voicePrompt`.
+    func setMode(_ mode: AVAudioSession.Mode) throws
     /// Enables/disables Voice Processing I/O on the engine's input node
     /// (AVAudioIONode.setVoiceProcessingEnabled — iOS 13+; only while the
     /// engine is stopped, never in manual rendering mode). Throws when
@@ -79,6 +83,10 @@ private final class SystemAudioSessionController: AudioSessionControlling {
     func setActive(_ active: Bool,
                    options: AVAudioSession.SetActiveOptions) throws {
         try session.setActive(active, options: options)
+    }
+
+    func setMode(_ mode: AVAudioSession.Mode) throws {
+        try session.setMode(mode)
     }
 
     func setVoiceProcessingEnabled(_ enabled: Bool) throws {
@@ -158,6 +166,42 @@ final class AudioSessionManager {
     /// survives engine stop/start), while a plain OFF-from-launch lifetime
     /// never makes an extra call (the byte-identical guarantee).
     private var voiceProcessingEnabledInProcess = false
+
+    // MARK: - Response playback loudness ([LOUD-TTS], 2026-09-11)
+    //
+    // While the assistant SPEAKS, the session mode switches to
+    // `.voicePrompt` — Apple's mode for spoken responses: loudness-
+    // optimized playback for the app's own output while the mic keeps
+    // running, so replies are clearly audible instead of being routed
+    // through the capture-tuned `.measurement` mode at reduced presence.
+    // The capture preset (`.measurement` / `.voiceChat`) returns the
+    // moment playback settles, so wake-word quality never changes.
+    //
+    // Depth-counted, not stacked: Piper falling back to the system
+    // speaker nests begin/end, and only the OUTERMOST end restores the
+    // capture mode.
+
+    private var playbackModeDepth = 0
+
+    /// The mode the active capture preset uses — the value playback
+    /// restores to.
+    private var captureMode: AVAudioSession.Mode {
+        voiceProcessingEnabled ? Self.voiceProcessingMode : Self.measurementMode
+    }
+
+    func beginResponsePlayback() {
+        if playbackModeDepth == 0 {
+            try? session.setMode(.voicePrompt)
+        }
+        playbackModeDepth += 1
+    }
+
+    func endResponsePlayback() {
+        guard playbackModeDepth > 0 else { return }
+        playbackModeDepth -= 1
+        guard playbackModeDepth == 0 else { return }
+        try? session.setMode(captureMode)
+    }
 
     /// Today's (pre-A/B) session configuration — `.measurement` mode.
     private static let measurementCategory: AVAudioSession.Category = .playAndRecord

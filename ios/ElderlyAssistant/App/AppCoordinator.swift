@@ -1804,6 +1804,16 @@ final class AppCoordinator: ObservableObject {
         NewsSourceEditorSeam.makeEditor = { [newsSourceStore] in
             AnyView(NewsSourcesSettingsView(store: newsSourceStore))
         }
+        // [LOUD-TTS] Response-playback loudness seam: while the assistant
+        // speaks, the shared session switches to .voicePrompt (loud,
+        // speech-optimized playback) and returns to the capture preset
+        // the moment playback settles.
+        ResponsePlaybackModeSeam.begin = { [weak self] in
+            self?.audioSessionManager.beginResponsePlayback()
+        }
+        ResponsePlaybackModeSeam.end = { [weak self] in
+            self?.audioSessionManager.endResponsePlayback()
+        }
         // [BOOT-REVIEW, design item] The degraded-state recovery seam:
         // the persistent capability capsule's ONE button routes here, so
         // the recovery is owned by the coordinator (the only object that
