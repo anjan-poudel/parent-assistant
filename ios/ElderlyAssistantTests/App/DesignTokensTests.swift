@@ -55,7 +55,7 @@ final class DesignTokensTests: XCTestCase {
 // promise fails here without duplicated literals to drift.
 
 private extension DesignTokensTests {
-    struct RGBA { let r: Double; let g: Double; let b: Double }
+    struct RGBA: Equatable { let r: Double; let g: Double; let b: Double }
 
     func sRGB(_ color: Color) -> RGBA? {
         guard let converted = color.cgColor?.converted(
@@ -148,19 +148,82 @@ extension DesignTokensTests {
         assertPinned(DesignTokens.stateError, r: 0.753, g: 0.184, b: 0.165)
     }
 
-    /// The call badge left the blue family for warm vermilion #C2541F on
-    /// pale salmon #F9E2D5 (visual-polish 2026-09-08) — pinned, and ≥3:1
-    /// for the graphical icon per WCAG 1.4.11.
-    func testCallBadgeIsWarmVermilionAndContrastsItsBackground() {
-        let tint = DesignTokens.BadgeTint.call.tint
-        let background = DesignTokens.BadgeTint.call.background
-        assertPinned(tint, r: 0.761, g: 0.329, b: 0.122)
-        assertContrast(tint, background, atLeast: 3.0, "call tint vs badge background")
+    /// Every badge category, for the sweeps below.
+    private static let allBadgeTints: [DesignTokens.BadgeTint] = [
+        .meds, .reminders, .call, .appliance, .settings, .apps, .feeds, .emergency, .directions,
+    ]
+
+    /// The consolidation contract (design review 2026-09-10): nine
+    /// categories resolve onto exactly FOUR semantic roles. A fifth role
+    /// reappearing is the noise the review asked us to remove.
+    func testBadgePaletteHasExactlyFourRoles() {
+        XCTAssertEqual(DesignTokens.BadgeTint.Role.allCases.count, 4,
+                       "the badge palette is brand/action, voice state, emergency, neutral")
+        let used = Set(Self.allBadgeTints.map(\.role))
+        XCTAssertEqual(used.count, DesignTokens.BadgeTint.Role.allCases.count,
+                       "every declared role is worn by at least one category")
     }
 
-    /// Settings keeps its own purple (#5C5A8A) — decoupled from the voice
-    /// palette when understanding joined the amber ramp.
-    func testSettingsBadgeKeepsPurple() {
-        assertPinned(DesignTokens.BadgeTint.settings.tint, r: 0.361, g: 0.353, b: 0.541)
+    /// Categories that share a role share its colours exactly — that is
+    /// what "consolidated" means: `.feeds` and `.directions` must not
+    /// quietly grow distinct hues again.
+    func testCategoriesSharingARoleShareTheirColors() {
+        let byRole = Dictionary(grouping: Self.allBadgeTints, by: \.role)
+        for (role, tints) in byRole {
+            guard let first = tints.first else { continue }
+            for other in tints.dropFirst() {
+                XCTAssertEqual(sRGB(first.tint), sRGB(other.tint),
+                               "\(role): tint drifted between categories")
+                XCTAssertEqual(sRGB(first.background), sRGB(other.background),
+                               "\(role): background drifted between categories")
+            }
+        }
+    }
+
+    /// The role mapping itself is pinned, so a future edit that moves a
+    /// category between roles has to say so here.
+    func testBadgeRoleMapping() {
+        let expected: [(DesignTokens.BadgeTint, DesignTokens.BadgeTint.Role)] = [
+            (.meds, .brandAction), (.reminders, .brandAction), (.call, .brandAction),
+            (.apps, .voiceState),
+            (.emergency, .emergency),
+            (.appliance, .neutralCategory), (.settings, .neutralCategory),
+            (.feeds, .neutralCategory), (.directions, .neutralCategory),
+        ]
+        for (badge, role) in expected {
+            XCTAssertEqual(badge.role, role, "\(badge) role")
+        }
+    }
+
+    /// Every badge icon is a graphical object: its fill must hold ≥3:1
+    /// against the circle it sits on (WCAG 1.4.11).
+    func testEveryBadgeIconContrastsItsBackground() {
+        for badge in Self.allBadgeTints {
+            assertContrast(badge.tint, badge.background, atLeast: 3.0,
+                           "\(badge) (\(badge.role)) tint vs badge background")
+        }
+    }
+
+    /// Urgency stays unique: the emergency badge is the ONLY one wearing
+    /// `stateError`. Brand/action is the accent, the voice role is the
+    /// hero's rest blue, and the neutral role is the secondary text tone.
+    func testEmergencyIsTheOnlyStopRedBadge() {
+        let emergency = DesignTokens.BadgeTint.emergency
+        assertPinned(emergency.tint, r: 0.753, g: 0.184, b: 0.165)   // stateError
+        assertContrast(emergency.tint, emergency.background, atLeast: 4.5,
+                       "emergency glyph on its white circle")
+        for badge in Self.allBadgeTints where badge != .emergency {
+            XCTAssertNotEqual(sRGB(badge.tint), sRGB(DesignTokens.stateError),
+                              "\(badge) must not wear the emergency red")
+        }
+    }
+
+    /// The three persistent daily actions wear the brand accent, and the
+    /// neutral category stays on the warm secondary tone — pinned so the
+    /// consolidation cannot silently undo itself.
+    func testBrandActionAndNeutralRolesArePinned() {
+        assertPinned(DesignTokens.BadgeTint.meds.tint, r: 0.165, g: 0.498, b: 0.384)     // accent
+        assertPinned(DesignTokens.BadgeTint.settings.tint, r: 0.541, g: 0.459, b: 0.384) // textSecondary
+        assertPinned(DesignTokens.BadgeTint.apps.tint, r: 0.231, g: 0.431, b: 0.647)     // stateIdle
     }
 }
