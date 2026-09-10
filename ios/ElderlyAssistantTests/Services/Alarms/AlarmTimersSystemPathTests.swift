@@ -14,7 +14,7 @@ private final class FakeAlarmKitScheduler: AlarmKitTimerScheduling {
     private(set) var authorizationRequestCount = 0
     private(set) var scheduled: [(id: UUID, duration: TimeInterval, label: String?)] = []
     private(set) var cancelledIDs: [UUID] = []
-    private(set) var reportedSystemIDs: Set<UUID> = []
+    var reportedSystemIDs: Set<UUID> = []
 
     var authorizationState: AlarmKitTimerAuthorization { authorization }
 
@@ -43,7 +43,7 @@ private final class FakeAlarmKitScheduler: AlarmKitTimerScheduling {
 /// (the one in AlarmTimersServiceTests is file-private).
 private final class RecordingUNCenter: LocalNotificationScheduling {
     var authorizationGranted = true
-    private(set) var addedRequests: [UNNotificationRequest] = []
+    var addedRequests: [UNNotificationRequest] = []
     private(set) var removedIdentifiers: [String] = []
 
     func requestAuthorization() async -> Bool { authorizationGranted }
