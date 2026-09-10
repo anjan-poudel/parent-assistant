@@ -607,14 +607,46 @@ final class AppCoordinator: ObservableObject {
     // Voice
     private let audioEngine: AVAudioEngine
     private let audioSessionManager: AudioSessionManager
-    /// [STARTUP-PERF] Starts as the honest Null engine; the real sherpa
-    /// engine (its ONNX load is the expensive part) is built AFTER first
-    /// paint when the Settings toggle is on, and swapped in BEFORE the
-    /// voice pipeline is constructed — behavior is identical to the old
-    /// eager construction, minus the pre-paint model load.
+    /// [STARTUP-PERF → STARTUP-R2] Starts as the honest Null engine; the
+    /// real sherpa engine (its ONNX load is the expensive part) is built
+    /// AFTER first paint AND after the speak affordance is live (the
+    /// post-ready deferral in `scheduleDeferredKWSBuildIfNeeded`, main
+    /// thread — the ONNX runtime segfaults off-main on the x86_64
+    /// simulator), then hot-swapped into the running pipeline — the
+    /// pre-paint model load is gone and the build never contributes to
+    /// perceived startup.
     private var wakeWordEngine: WakeWordEngine
     private let voiceActivityDetector: VoiceActivityDetector
     private var voicePipeline: VoicePipeline!
+    /// [STARTUP-R2] The voice stack's readiness — the single published
+    /// source of truth the Talk hero binds to (disabled + honest
+    /// "Preparing voice…" label until ready). The tracker folds named
+    /// per-subsystem signals; the coordinator registers exactly one
+    /// source today ("pipeline" — voiceState == .idle ⇒ the stack is
+    /// live) and future subsystems attach with their own ids. The
+    /// published mirror below is what HomeView observes (same
+    /// forward-to-published pattern as the stores' windows).
+    let voiceReadiness = VoiceReadiness()
+    /// Published mirror of `voiceReadiness.status` — HomeView's
+    /// `TalkButton` binding. Assigned on main through the sink wired in
+    /// `init` (its ONLY writer outside `updateVoiceReadiness`'s latch).
+    @Published private(set) var voiceReadinessStatus: VoiceReadinessStatus = .preparing
+    private var voiceReadinessCancellable: AnyCancellable?
+    /// [STARTUP-R2] True once the pipeline source reached `.ready` —
+    /// from then on, runtime talk cycles (idle → capturing → routing →
+    /// idle) never re-gate the hero. A boot FAILURE does not settle:
+    /// the readiness stays `.degraded` (hero tappable — its tap is the
+    /// retry) and a later retry success upgrades degraded → ready.
+    private var voiceReadinessBootSettled = false
+    /// [STARTUP-R2] True once the deferred KWS build has been scheduled
+    /// (or run) this launch — the one-shot guard for the post-ready
+    /// wake-word build.
+    private var deferredKWSBuildScheduled = false
+    /// [STARTUP-R2] The short main-thread deferral between the speak
+    /// affordance going live and the sherpa KWS build starting — the
+    /// build never contributes to perceived startup; wake-word
+    /// detection arrives moments later (documented honest limit).
+    private static let deferredKWSBuildDelaySeconds: TimeInterval = 2.0
     /// [STARTUP-PERF] The `CommandRouter` built in `start()` — retained so
     /// the boot's `.preparingVoice` phase can hand it to the pipeline it
     /// constructs (the pipeline build moved out of `start()`'s tail).
@@ -1499,6 +1531,16 @@ final class AppCoordinator: ObservableObject {
         // language into services that build user-facing strings.
         syncServiceLocales()
 
+        // [STARTUP-R2] Forward the readiness tracker's folded status into
+        // the published mirror HomeView's TalkButton binds. Tracker
+        // updates are main-confined (the coordinator's own updates), the
+        // receive(on:) is the defensive marshal.
+        voiceReadinessCancellable = voiceReadiness.$status
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.voiceReadinessStatus = status
+            }
+
         // Fold today's medication reminders into the routine plugin's
         // "what are my reminders today" answer — the user's mental model
         // is ONE reminder list spanning both systems. Attached here (not
@@ -1869,29 +1911,101 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    /// Phase 2 — build the wake-word engine and construct + start the
-    /// voice pipeline, then hand the file-heavy phase 3 to the boot
-    /// queue. The sherpa ONNX load moved out of `init` (pre-paint) to
-    /// AFTER first paint — but it stays on the MAIN thread: the
-    /// sherpa-onnx/onnxruntime session creation segfaulted off-main on
-    /// the x86_64 simulator (EXC_BAD_ACCESS in ConstantFolding, crash
-    /// 2026-09-09 204647, faulting queue `senios.startup.boot`). The
-    /// spinner covers this phase honestly; a failed build keeps the
+    /// Phase 2 — construct + start the voice pipeline, then hand the
+    /// file-heavy phase 3 to the boot queue. The pipeline is constructed
+    /// with the honest `NullWakeWordEngine` — the sherpa KWS build (its
+    /// ONNX load is the expensive part) is DEFERRED until after the
+    /// speak affordance is live (`updateVoiceReadiness` schedules it
+    /// post-ready, still on MAIN: the sherpa-onnx/onnxruntime session
+    /// creation segfaulted off-main on the x86_64 simulator —
+    /// EXC_BAD_ACCESS in ConstantFolding, crash 2026-09-09 204647,
+    /// faulting queue `senios.startup.boot`). The real engine is then
+    /// hot-swapped into the running pipeline via
+    /// `VoicePipeline.setWakeWordEngine` — the two engine shapes share
+    /// the 16 kHz / 512-frame audio contract, so the installed mic tap
+    /// needs no reconfiguration. A failed deferred build keeps the
     /// existing honest Null-engine behavior, and a failed pipeline start
     /// surfaces exactly as it always did (voice error state) and is
     /// recorded on the boot machine.
     ///
-    /// [BOOT-LATENCY] Phase 2.5 (the warm) starts BEFORE the KWS build:
-    /// it runs on its own background queue and needs nothing the KWS
-    /// build produces, so the main-thread sherpa construction can never
+    /// [BOOT-LATENCY] Phase 2.5 (the warm) starts BEFORE the pipeline
+    /// build: it runs on its own background queue and needs nothing the
+    /// pipeline build produces, so neither it nor the KWS build can ever
     /// gate `.ready` — boot advances, and `kws_engine_ready` arrives
     /// when it arrives.
     private func bootPrepareVoiceEngine() {
         self.startBootWarmPhase()
-        let wakeWordLaunch = Self.makeWakeWordEngine(observabilityBus: observabilityBus)
-        self.wakeWordEngine = wakeWordLaunch.engine
-        self.wakeWordEngineRealAtLaunch = wakeWordLaunch.isReal
+        // Null engine by default: the real KWS engine is built AFTER the
+        // speak affordance goes live (see `scheduleDeferredKWSBuild`).
         self.buildAndStartVoicePipeline()
+    }
+
+    // MARK: - Voice readiness ([STARTUP-R2])
+
+    /// Pushes the voice stack's readiness into the tracker. Called from
+    /// `handlePipelineState` (every pipeline state change, main-
+    /// confined) and from the boot's pipeline-start completion. The
+    /// pipeline source is READY exactly when `voiceState == .idle` — the
+    /// pipeline-started-and-settled condition the Talk hero gates on.
+    ///
+    /// Latch: once ready, runtime cycles never re-gate the hero. A boot
+    /// failure (`.error` before the first ready) reports `.failed` —
+    /// the hero stays TAPPABLE there because the tap is the retry
+    /// (`recoverVoiceCycle`), and a retry success upgrades to ready.
+    private func updateVoiceReadiness() {
+        switch voiceState {
+        case .idle:
+            voiceReadiness.setSignal(id: "pipeline", .ready)
+            voiceReadinessBootSettled = true
+            print("[AppCoordinator] voice readiness ready — speak enabled")
+            scheduleDeferredKWSBuildIfNeeded()
+        case .error(let reason):
+            guard !voiceReadinessBootSettled else { return }
+            voiceReadiness.setSignal(id: "pipeline", .failed(reason: reason))
+        case .stopped, .capturingCommand, .processing, .routing:
+            guard !voiceReadinessBootSettled else { return }
+            voiceReadiness.setSignal(id: "pipeline", .preparing)
+        }
+    }
+
+    /// [STARTUP-R2] Schedules the sherpa KWS build on MAIN, a short
+    /// delay after the speak affordance first goes ready — the build
+    /// never contributes to perceived startup, and wake-word detection
+    /// arrives moments later (documented honest limit). One-shot per
+    /// launch. The guard re-checks at fire time: a pipeline that never
+    /// reached idle (boot start failure) never builds the engine, and a
+    /// hot-swap into a recycled pipeline re-starts the engine through
+    /// the swap itself.
+    private func scheduleDeferredKWSBuildIfNeeded() {
+        guard !deferredKWSBuildScheduled,
+              voiceReadiness.status == .ready else { return }
+        deferredKWSBuildScheduled = true
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.deferredKWSBuildDelaySeconds
+        ) { [weak self] in
+            self?.buildDeferredWakeWordEngine()
+        }
+    }
+
+    /// The deferred KWS build: same honest decision as the old eager
+    /// `bootPrepareVoiceEngine` call (`makeWakeWordEngine` — toggle on +
+    /// bundled sherpa model ⇒ real engine, else Null), executed after
+    /// the speak affordance is live and hot-swapped into the running
+    /// pipeline. `wakeWordEngineRealAtLaunch` is published here so the
+    /// Settings "Voice activation" status flips to "active" the moment
+    /// the real engine lands — no restart needed. The pipeline swap is
+    /// skipped when the pipeline is gone (recycled mid-build) or not
+    /// settled: the Null engine's no-op behavior then applies exactly
+    /// as it does pre-build.
+    private func buildDeferredWakeWordEngine() {
+        guard voicePipeline != nil else { return }
+        let launch = Self.makeWakeWordEngine(observabilityBus: observabilityBus)
+        self.wakeWordEngine = launch.engine
+        self.wakeWordEngineRealAtLaunch = launch.isReal
+        print("[AppCoordinator] deferred KWS build settled real=\(launch.isReal)")
+        guard launch.isReal,
+              voicePipeline?.state == .idle else { return }
+        voicePipeline?.setWakeWordEngine(launch.engine)
     }
 
     // MARK: - Boot phase 2.5 — engine warm-start ([WARM-START])
@@ -2016,6 +2130,35 @@ final class AppCoordinator: ObservableObject {
         return false
         #endif
     }()
+
+    /// [STARTUP-R2] Resolves the on-device stack's STT engine through
+    /// the pure selection table (see OnDeviceSTTSelection). Static +
+    /// parameterized so the decision is unit-tested without a
+    /// coordinator.
+    static func onDeviceSTTChoice(whisperKitAvailable: Bool,
+                                  whisperCppAvailable: Bool,
+                                  isSimulator: Bool = AppCoordinator.isSimulator)
+        -> OnDeviceSTTSelection.Choice {
+        OnDeviceSTTSelection.choose(
+            whisperKitAvailable: whisperKitAvailable,
+            whisperCppAvailable: whisperCppAvailable,
+            isSimulator: isSimulator)
+    }
+
+    /// Reports WHY the ANE/whisper path lost (PII-free, machine copy
+    /// only) — the selection table's honest reason string, mirroring
+    /// the warm plan's "simulator" skip event.
+    private static func emitSTTSelectionReason(_ reason: String,
+                                               bus: ObservabilityBus) {
+        bus.emit(ObservabilityEvent(
+            component: "stt_selection",
+            eventType: "engine_chosen",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: ["reason": reason]
+        ))
+    }
 
     /// Phase 3 — file-heavy model housekeeping on the boot queue: the
     /// bundled-encoder repair + bundled-model install (a FIRST-RUN copy
@@ -2180,6 +2323,9 @@ final class AppCoordinator: ObservableObject {
     private func handlePipelineState(_ state: VoicePipeline.State) {
         lastPipelineState = state
         voiceState = state
+        // [STARTUP-R2] Fold the new state into the voice readiness the
+        // Talk hero gates on (latching — see `updateVoiceReadiness`).
+        updateVoiceReadiness()
         guard voiceSession.state != .awaitingConfirmation else { return }
         switch state {
         case .stopped:
@@ -2733,24 +2879,35 @@ final class AppCoordinator: ObservableObject {
                     metadata: ["provider": cloudProvider.rawValue]
                 ))
             }
-            // Whisper if its model is actually cached and the runtime is
-            // linked; else the SFSpeechRecognizer fallback rather than
-            // silently doing nothing (spec §7: no dead-end states).
-            if whisperKitSpeechRecognizer.isAvailable {
-                // ANE WhisperKit first — the medium-class models are
-                // unusable on CPU (128 s for a 2.1 s clip, 2026-09-05)
-                // but conversational on ANE.
+            // Whisper engine selection is the pure table in
+            // `OnDeviceSTTSelection` ([STARTUP-R2]): devices favor ANE
+            // WhisperKit (the medium-class models are unusable on CPU —
+            // 128 s for a 2.1 s clip, 2026-09-05 — but conversational on
+            // ANE); the simulator forces the cheaper whisper.cpp path
+            // when its bundled model is available (reason "simulator":
+            // the CPU-only WhisperKit prepare is a minutes-scale load
+            // that never helps a sim conversation). whisper.cpp when its
+            // model is cached; else the SFSpeechRecognizer fallback
+            // rather than silently doing nothing (spec §7: no dead-end
+            // states).
+            switch Self.onDeviceSTTChoice(
+                whisperKitAvailable: whisperKitSpeechRecognizer.isAvailable,
+                whisperCppAvailable: whisperSpeechRecognizer.isAvailable
+            ) {
+            case .whisperKit:
                 voicePipeline?.setSpeechRecognizer(whisperKitSpeechRecognizer)
                 // Absorb model load + CoreML specialization now so the
-                // first utterance doesn't pay it.
-                whisperKitSpeechRecognizer.prepare()
-            } else {
-                // CPU whisper.cpp when its model is cached; else the
-                // SFSpeechRecognizer fallback rather than silently doing
-                // nothing (spec §7: no dead-end states).
-                voicePipeline?.setSpeechRecognizer(
-                    whisperSpeechRecognizer.isAvailable ? whisperSpeechRecognizer : fallbackSpeechRecognizer
-                )
+                // first utterance doesn't pay it. DEVICE ONLY — the sim
+                // prepare is skipped (see OnDeviceSTTSelection).
+                if OnDeviceSTTSelection.shouldPrepareWhisperKit(isSimulator: Self.isSimulator) {
+                    whisperKitSpeechRecognizer.prepare()
+                }
+            case .whisperCpp(let reason):
+                voicePipeline?.setSpeechRecognizer(whisperSpeechRecognizer)
+                Self.emitSTTSelectionReason(reason, bus: observabilityBus)
+            case .fallback(let reason):
+                voicePipeline?.setSpeechRecognizer(fallbackSpeechRecognizer)
+                Self.emitSTTSelectionReason(reason, bus: observabilityBus)
             }
             DispatchQueue.main.async { [weak self] in
                 self?.updateActiveSTTName()

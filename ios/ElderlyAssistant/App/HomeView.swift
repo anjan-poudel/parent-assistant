@@ -484,7 +484,11 @@ struct HomeView: View {
                                    }
                                },
                                statusOverride: talkStatusLineOverride,
-                               onLongPressReset: coordinator.resetVoiceActivation)
+                               onLongPressReset: coordinator.resetVoiceActivation,
+                               // [STARTUP-R2] The hero is disabled with
+                               // the honest "Preparing voice…" label
+                               // until the voice stack reports ready.
+                               preparing: coordinator.voiceReadinessStatus == .preparing)
                     if stageVisuals.showsHintCarousel {
                         HintCarousel()
                     }
@@ -755,6 +759,12 @@ struct TalkButton: View {
     /// stays a plain tap target, and a long hold there still fires the
     /// tap on release exactly as it did before this feature.
     var onLongPressReset: (() -> Void)? = nil
+    /// [STARTUP-R2] True while the voice stack is still preparing — the
+    /// hero is disabled (dimmed) and its status line shows the honest
+    /// "Preparing voice…" label instead of the state's own text. The
+    /// preparing state never coexists with a reset hold (a disabled
+    /// button cannot hold), so the hold hint keeps its precedence.
+    var preparing: Bool = false
 
     @State private var breathe = false
     /// True while a hold that CAN reset is underway (touch down, past the
@@ -804,8 +814,10 @@ struct TalkButton: View {
                 ZStack {
                     // While a reset hold is underway the breathing rings
                     // stand down (the arc below is the motion that
-                    // matters); they return on release.
-                    if isBreathing && !isPressingForReset {
+                    // matters); they return on release. [STARTUP-R2]
+                    // they stand down while preparing too — a disabled
+                    // hero does not breathe.
+                    if isBreathing && !isPressingForReset && !preparing {
                         breathingRings
                     }
                     if visuals.showsHalo && !isPressingForReset {
@@ -866,9 +878,16 @@ struct TalkButton: View {
             // Enabled in every state except awaitingConfirmation (the
             // yes/no chips own the UI): tapping mid-cycle is the manual
             // recovery escape hatch, and tapping in error/stopped retries
-            // the failed boot-time pipeline start.
-            .disabled(session.state == .awaitingConfirmation)
-            .accessibilityLabel(Text(session.state.buttonText(locale: locale)))
+            // the failed boot-time pipeline start. [STARTUP-R2] plus
+            // disabled while the voice stack is preparing (plain button
+            // style does not dim on its own — the opacity below is the
+            // disabled appearance).
+            .disabled(preparing || session.state == .awaitingConfirmation)
+            .opacity(preparing ? 0.5 : 1.0)
+            .accessibilityLabel(Text(
+                preparing
+                    ? L10n.str("startup.preparingVoice", locale: locale)
+                    : session.state.buttonText(locale: locale)))
             // The hold-to-reset gesture + VoiceOver hint exist ONLY in
             // reset-eligible states. An always-attached long press would
             // swallow the tap on holds ≥ `talkResetHoldSeconds` in
@@ -909,13 +928,19 @@ struct TalkButton: View {
     }
 
     /// Status line under the hero: the live hold hint while a reset
-    /// press is underway, else the caller's override (error caption /
-    /// post-reset notice), else the state's own status text. The hold
-    /// hint wins over everything — while the finger is down the line
-    /// must say what the press will DO (TALK-CRASH-FIX, 2026-09-07).
+    /// press is underway, else the honest "Preparing voice…" label while
+    /// the voice stack is still loading ([STARTUP-R2]), else the
+    /// caller's override (error caption / post-reset notice), else the
+    /// state's own status text. The hold hint wins over everything —
+    /// while the finger is down the line must say what the press will
+    /// DO (TALK-CRASH-FIX, 2026-09-07); a disabled preparing hero can
+    /// never hold, so the two never collide.
     private var statusTextLine: String {
         if isPressingForReset {
             return L10n.str("voice.resetHold", locale: locale)
+        }
+        if preparing {
+            return L10n.str("startup.preparingVoice", locale: locale)
         }
         return statusOverride ?? session.state.statusText(locale: locale)
     }
