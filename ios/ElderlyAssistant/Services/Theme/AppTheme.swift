@@ -11,7 +11,7 @@ import Foundation
 /// is pinned by AppThemeTests). A photo-picker background is a noted
 /// future option — preset colors only today.
 enum AppTheme: String, CaseIterable, Identifiable {
-    case cream, sage, sky, lavender, dusk
+    case cream, sage, sky, lavender, dusk, lightPink
 
     var id: String { rawValue }
 
@@ -26,6 +26,11 @@ enum AppTheme: String, CaseIterable, Identifiable {
         case .sky:      return (0.914, 0.941, 0.953)
         case .lavender: return (0.941, 0.925, 0.953)
         case .dusk:     return (0.855, 0.847, 0.820)   // muted warm night — see contrast note above
+        // [REBRAND] Very light pink — a light tint of the brand pink
+        // #C73D74 (the launch-screen artwork's background), so the
+        // skinnable background stays in the brand family. Green ≥ 0.9
+        // keeps the pastel-lightness pin (AppThemeTests).
+        case .lightPink: return (0.972, 0.905, 0.925)  // #F8E7EC
         }
     }
 

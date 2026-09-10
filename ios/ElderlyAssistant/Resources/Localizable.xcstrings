@@ -12597,6 +12597,24 @@
         }
       }
     },
+    "theme.lightPink" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Light pink"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "हल्का गुलाबी"
+          }
+        }
+      }
+    },
+
     "theme.sage" : {
       "extractionState" : "manual",
       "localizations" : {

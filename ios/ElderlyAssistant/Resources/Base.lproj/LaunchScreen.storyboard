@@ -1,28 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="23504" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" launchScreen="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="01J-lp-oVM">
-    <!-- [LAUNCH-SCREEN] The pre-first-paint launch screen (2026-09-10,
-         continuity pass 2026-09-10 — startup review §Design).
+    <!-- [REBRAND, 2026-09-11] The launch screen shows the OFFICIAL brand
+         artwork — assets/senios-brand.png, installed as
+         `AppIcons.xcassets/seniosBrand` — on the artwork's own background
+         color (brand pink #C73D74), so the image's baked-in background
+         blends seamlessly into the screen with no visible edges.
 
-         Home's first frame is CREAM (DesignTokens.background #FAF3E9)
-         with the blue Talk hero (#3B6EA5 = DesignTokens.stateIdle) in the
-         middle of the page. The previous launch screen was a full-screen
-         brand-green flash with the centered wordmark, so every launch
-         ended in a hard green→cream cut exactly where the product's
-         primary affordance belongs.
-
-         Now the launch screen paints Home's own background and the SAME
-         voice mark the live hero renders — the 132pt stateIdle disc
-         (`DesignTokens.talkButtonDiameter`) carrying the white mic, from
-         `AppIcons.xcassets/launchTalkMark` — centred at ~40% of the
-         screen height, which is where the live hero lands (top bar plus
-         the quick-access row sit above it). The live hero replaces the
-         mark with no colour flash and no jump; the wordmark below is the
-         brand line the hero's status text later occupies.
-
-         Minimal and offline by design: a background colour, one asset
-         (compiled into Assets.car, no network, no symbol lookup, no
-         custom font) and one system-font label — nothing that can fail to
-         load before first paint. -->
+         Minimal and offline by design: one background colour and one
+         asset (compiled into Assets.car — no network, no symbol lookup,
+         no custom font) — nothing that can fail to load before first
+         paint. -->
     <device id="retina6_12" orientation="portrait" appearance="light"/>
     <dependencies>
         <deployment identifier="iOS"/>
@@ -39,31 +26,24 @@
                         <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="launchTalkMark" translatesAutoresizingMaskIntoConstraints="NO" id="talk-mark">
-                                <rect key="frame" x="130.5" y="274.8" width="132" height="132"/>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" image="seniosBrand" translatesAutoresizingMaskIntoConstraints="NO" id="brand-mark">
+                                <rect key="frame" x="36.5" y="363.3" width="320" height="102"/>
                                 <constraints>
-                                    <constraint firstAttribute="width" constant="132" id="mark-width"/>
-                                    <constraint firstAttribute="height" constant="132" id="mark-height"/>
+                                    <!-- 812:258 native aspect → 320:102 -->
+                                    <constraint firstAttribute="width" constant="320" id="brand-width"/>
+                                    <constraint firstAttribute="height" constant="102" id="brand-height"/>
                                 </constraints>
                             </imageView>
-                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="seniOS" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" translatesAutoresizingMaskIntoConstraints="NO" id="brand-name-label">
-                                <rect key="frame" x="152" y="422.8" width="89" height="24"/>
-                                <fontDescription key="fontDescription" type="boldSystem" pointSize="20"/>
-                                <!-- Accent green #2A7F62 — DesignTokens.accent -->
-                                <color key="textColor" red="0.16470588235294117" green="0.49803921568627452" blue="0.3843137254901961" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
-                                <nil key="highlightedColor"/>
-                            </label>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="6Tk-OE-BBY"/>
-                        <!-- Home's cream #FAF3E9 — DesignTokens.background -->
-                        <color key="backgroundColor" red="0.98039215686274506" green="0.95294117647058818" blue="0.9137254901960784" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <!-- Brand pink #C73D74 — matches the artwork's own
+                             background so the image melts into the screen. -->
+                        <color key="backgroundColor" red="0.7803921568627451" green="0.23921568627450981" blue="0.4549019607843137" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                         <constraints>
-                            <constraint firstItem="talk-mark" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="mark-center-x"/>
-                            <constraint firstItem="talk-mark" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" multiplier="0.8" id="mark-center-y"/>
-                            <constraint firstItem="brand-name-label" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="ctr-x"/>
-                            <constraint firstItem="brand-name-label" firstAttribute="top" secondItem="talk-mark" secondAttribute="bottom" constant="16" id="label-top"/>
-                            <constraint firstItem="brand-name-label" firstAttribute="leading" relation="greaterThanOrEqual" secondItem="6Tk-OE-BBY" secondAttribute="leading" constant="24" id="min-leading"/>
-                            <constraint firstItem="6Tk-OE-BBY" firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="brand-name-label" secondAttribute="trailing" constant="24" id="min-trailing"/>
+                            <constraint firstItem="brand-mark" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="brand-center-x"/>
+                            <constraint firstItem="brand-mark" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" multiplier="0.9" id="brand-center-y"/>
+                            <constraint firstItem="brand-mark" firstAttribute="leading" relation="greaterThanOrEqual" secondItem="6Tk-OE-BBY" secondAttribute="leading" constant="24" id="brand-min-leading"/>
+                            <constraint firstItem="6Tk-OE-BBY" firstAttribute="trailing" relation="greaterThanOrEqual" secondItem="brand-mark" secondAttribute="trailing" constant="24" id="brand-min-trailing"/>
                         </constraints>
                     </view>
                 </viewController>
