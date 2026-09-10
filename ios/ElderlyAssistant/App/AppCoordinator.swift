@@ -2931,16 +2931,17 @@ final class AppCoordinator: ObservableObject {
     // MARK: - Voice cycle watchdog ("stuck in listening" guard)
 
     /// Arms a watchdog when a talk cycle starts. Its job is narrowly to
-    /// break a wedged *capture*: if the session is still `.listening` 15s
-    /// after the tap, the mic pipeline never moved on — recycle and
-    /// re-prompt. It deliberately does NOT fire on `.transcribing` or
-    /// `.understanding`: transcription of a long utterance on the
-    /// CPU-pinned distilled model takes well over 15s on device, and
-    /// recycling mid-flight there was exactly the "stuck/sorry-please-
-    /// say-again" failure this cycle guard was mis-firing on. Recovery for
-    /// a genuinely wedged transcription is owned by the STT layer (its own
-    /// 30s inference timeout + 2-strike throttle), and routing has its own
-    /// deadlines; those layers settle the cycle without this UI guard.
+    /// break a wedged *capture*: if the session is still `.listening`
+    /// `voiceWatchdogSeconds` (60 s since [VAD-TUNE]) after the tap, the
+    /// mic pipeline never moved on — recycle and re-prompt. It
+    /// deliberately does NOT fire on `.transcribing` or `.understanding`:
+    /// transcription of a long utterance on the CPU-pinned distilled
+    /// model takes well over 15 s on device, and recycling mid-flight
+    /// there was exactly the "stuck/sorry-please-say-again" failure this
+    /// cycle guard was mis-firing on. Recovery for a genuinely wedged
+    /// transcription is owned by the STT layer (its own 30 s inference
+    /// timeout + 2-strike throttle), and routing has its own deadlines;
+    /// those layers settle the cycle without this UI guard.
     /// MUST stay longer than (max speech capture time) + (GeminiClient's
     /// own HTTP timeout) — i.e. longer than the worst-case legitimate
     /// duration of a single turn — or this destructive watchdog (full
@@ -2960,7 +2961,16 @@ final class AppCoordinator: ObservableObject {
     /// `VoicePipeline`'s capture+wedge-guard window, and
     /// `GeminiClient.Config.timeoutSeconds`) are coupled and MUST be
     /// re-checked together any time one of them changes.
-    private static let voiceWatchdogSeconds: TimeInterval = 40
+    ///
+    /// [VAD-TUNE] Raised 40 -> 60 on 2026-09-11: the capture cap went
+    /// 8 -> 22 s (VoicePipeline.captureTimeoutSeconds), so the worst
+    /// legitimate turn is now 22 s capture + 25 s Gemini HTTP = 47 s —
+    /// above the old 40 s value, which would have recycled mid-turn.
+    /// 60 s = 47 s + 13 s margin. The pipeline's internal wedge guard
+    /// (22 + 25 = 47 s) still flips the session out of `.listening`
+    /// before this watchdog can fire on a capture that is merely slow,
+    /// not wedged.
+    private static let voiceWatchdogSeconds: TimeInterval = 60
 
     private func armVoiceWatchdog() {
         cancelVoiceWatchdog()

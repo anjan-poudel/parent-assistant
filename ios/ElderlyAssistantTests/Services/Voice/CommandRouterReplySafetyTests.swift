@@ -246,8 +246,8 @@ final class CommandRouterReplySafetyTests: XCTestCase {
         waitUntil { h.coordinator.genericReplies.count == 1 }
         XCTAssertEqual(h.coordinator.genericReplies, [text("router.modelReplyUnclear")],
                        "the honest fallback is carded — never the garbage")
-        waitUntil { !h.speaker.spoken.isEmpty }
-        XCTAssertEqual(h.speaker.spoken, [text("router.modelReplyUnclear")],
+        waitUntil { h.speaker.spoken.count == 2 }
+        XCTAssertEqual(h.speaker.spoken, [text("voiceAck.moment1"), text("router.modelReplyUnclear")],
                        "the honest fallback is spoken — never the garbage")
         let rejections = h.bus.events(named: "llama_response_rejected_sanity")
         XCTAssertEqual(rejections.count, 1)
@@ -266,8 +266,8 @@ final class CommandRouterReplySafetyTests: XCTestCase {
 
         waitUntil { h.coordinator.genericReplies.count == 1 }
         XCTAssertEqual(h.coordinator.genericReplies, [text("router.modelReplyUnclear")])
-        waitUntil { !h.speaker.spoken.isEmpty }
-        XCTAssertEqual(h.speaker.spoken, [text("router.modelReplyUnclear")])
+        waitUntil { h.speaker.spoken.count == 2 }
+        XCTAssertEqual(h.speaker.spoken, [text("voiceAck.moment1"), text("router.modelReplyUnclear")])
         XCTAssertEqual(h.bus.events(named: "llama_response_rejected_sanity").first?.errorCode,
                        "repetition")
     }
@@ -303,8 +303,8 @@ final class CommandRouterReplySafetyTests: XCTestCase {
 
         waitUntil { h.coordinator.genericReplies.count == 1 }
         XCTAssertEqual(h.coordinator.genericReplies, [answer])
-        waitUntil { !h.speaker.spoken.isEmpty }
-        XCTAssertEqual(h.speaker.spoken, [answer])
+        waitUntil { h.speaker.spoken.count == 2 }
+        XCTAssertEqual(h.speaker.spoken, [text("voiceAck.moment1"), answer])
         XCTAssertFalse(h.bus.contains("llama_response_rejected_sanity"),
                        "valid text must pass the gate untouched")
     }
@@ -325,8 +325,8 @@ final class CommandRouterReplySafetyTests: XCTestCase {
         waitUntil { h.coordinator.genericReplies.count == 1 }
         XCTAssertEqual(h.coordinator.genericReplies, [text("router.modelReplyUnclear")],
                        "repetition-loop guide steps must not be read aloud")
-        waitUntil { !h.speaker.spoken.isEmpty }
-        XCTAssertEqual(h.speaker.spoken, [text("router.modelReplyUnclear")])
+        waitUntil { h.speaker.spoken.count == 2 }
+        XCTAssertEqual(h.speaker.spoken, [text("voiceAck.moment1"), text("router.modelReplyUnclear")])
         XCTAssertEqual(h.bus.events(named: "llama_response_rejected_sanity").first?.errorCode,
                        "repetition")
     }
@@ -347,8 +347,8 @@ final class CommandRouterReplySafetyTests: XCTestCase {
         let joined = "पहिले ढक्कन खोल्नुहोस्. अनि बिजुली जोड्नुहोस्"
         waitUntil { h.coordinator.genericReplies.count == 1 }
         XCTAssertEqual(h.coordinator.genericReplies, [joined])
-        waitUntil { !h.speaker.spoken.isEmpty }
-        XCTAssertEqual(h.speaker.spoken, [joined])
+        waitUntil { h.speaker.spoken.count == 2 }
+        XCTAssertEqual(h.speaker.spoken, [text("voiceAck.moment1"), joined])
         XCTAssertFalse(h.bus.contains("llama_response_rejected_sanity"))
     }
 
@@ -363,8 +363,8 @@ final class CommandRouterReplySafetyTests: XCTestCase {
 
         waitUntil { h.coordinator.composeMessageRequests.count == 1 }
         XCTAssertEqual(h.coordinator.composeMessageRequests.first?.body, "नमस्ते दाई")
-        XCTAssertTrue(h.speaker.spoken.isEmpty,
-                      "the compose sheet is the visible outcome — a garbage ack is not spoken")
+        XCTAssertEqual(h.speaker.spoken, [text("voiceAck.moment1")],
+                       "the pre-ack is spoken; the garbage model ack never is")
         XCTAssertTrue(h.coordinator.genericReplies.isEmpty)
         let rejections = h.bus.events(named: "llama_response_rejected_sanity")
         XCTAssertEqual(rejections.count, 1)
@@ -381,8 +381,8 @@ final class CommandRouterReplySafetyTests: XCTestCase {
         // send_message path.
         _ = h.router.route(transcript: "छोरालाई एउटा सन्देश पठाउनुहोस्")
 
-        waitUntil { !h.speaker.spoken.isEmpty }
-        XCTAssertEqual(h.speaker.spoken, ["ठीक छ, सन्देश तयार छ।"])
+        waitUntil { h.speaker.spoken.count == 2 }
+        XCTAssertEqual(h.speaker.spoken, [text("voiceAck.moment1"), "ठीक छ, सन्देश तयार छ।"])
         XCTAssertFalse(h.bus.contains("llama_response_rejected_sanity"))
     }
 
@@ -397,8 +397,8 @@ final class CommandRouterReplySafetyTests: XCTestCase {
 
         _ = h.router.route(transcript: "केही राम्रो कुरा बताउनुस्")
 
-        waitUntil { !h.speaker.spoken.isEmpty }
-        XCTAssertEqual(h.speaker.spoken, [text("router.confirmationYes")],
+        waitUntil { h.speaker.spoken.count == 2 }
+        XCTAssertEqual(h.speaker.spoken, [text("voiceAck.moment1"), text("router.confirmationYes")],
                        "baseline ack speech, never the garbage override")
         XCTAssertEqual(h.bus.events(named: "llama_response_rejected_sanity").first?.errorCode,
                        "jsonRemnant")
@@ -415,8 +415,8 @@ final class CommandRouterReplySafetyTests: XCTestCase {
 
         _ = h.router.route(transcript: "केही राम्रो कुरा बताउनुस्")
 
-        waitUntil { !h.speaker.spoken.isEmpty }
-        XCTAssertEqual(h.speaker.spoken, [override])
+        waitUntil { h.speaker.spoken.count == 2 }
+        XCTAssertEqual(h.speaker.spoken, [text("voiceAck.moment1"), override])
         XCTAssertFalse(h.bus.contains("llama_response_rejected_sanity"))
     }
 }

@@ -13227,6 +13227,57 @@
         }
       }
     },
+    "voiceAck.moment1" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "one moment…"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "एक छिन…"
+          }
+        }
+      }
+    },
+    "voiceAck.moment2" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "just a moment…"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "एक छिन है…"
+          }
+        }
+      }
+    },
+    "voiceAck.moment3" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "okay, one moment…"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "हुन्छ, एकछिन…"
+          }
+        }
+      }
+    },
     "voiceSettings.accent.caption" : {
       "extractionState" : "manual",
       "localizations" : {

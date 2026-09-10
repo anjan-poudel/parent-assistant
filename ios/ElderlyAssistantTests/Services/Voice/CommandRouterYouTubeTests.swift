@@ -70,7 +70,9 @@ final class CommandRouterYouTubeTests: XCTestCase {
         XCTAssertEqual(opener.opened, [YouTubeTool.appSearchURL(query: "bhajan")],
                        "without a key the SEARCH deeplink is the whole feature")
         XCTAssertEqual(coordinator.assistantSpoken,
-                       [L10n.fmt("youtube.openingSearch", locale: ne, "bhajan")])
+                       [L10n.str("voiceAck.moment1", locale: ne),
+                        L10n.fmt("youtube.openingSearch", locale: ne, "bhajan")],
+                       "the YouTube stage is acked before its outcome line")
         XCTAssertTrue(bus.emittedEvents.contains {
             $0.component == "youtube" && $0.eventType == "youtube_search"
                 && $0.outcome == "opened_app"
@@ -99,7 +101,8 @@ final class CommandRouterYouTubeTests: XCTestCase {
 
         XCTAssertEqual(opener.opened, [YouTubeTool.appSearchURL(query: "गीत")])
         XCTAssertEqual(coordinator.assistantSpoken,
-                       [L10n.fmt("youtube.openingSearch", locale: ne, "गीत")])
+                       [L10n.str("voiceAck.moment1", locale: ne),
+                        L10n.fmt("youtube.openingSearch", locale: ne, "गीत")])
     }
 
     // MARK: - Keyed path (Data API top result → watch link)
@@ -121,7 +124,8 @@ final class CommandRouterYouTubeTests: XCTestCase {
         XCTAssertEqual(opener.opened, [YouTubeTool.appWatchURL(videoID: "abc123")],
                        "the resolved video opens through the native watch link")
         XCTAssertEqual(coordinator.assistantSpoken,
-                       [L10n.str("youtube.looking", locale: ne),
+                       [L10n.str("voiceAck.moment1", locale: ne),
+                        L10n.str("youtube.looking", locale: ne),
                         L10n.fmt("youtube.playing", locale: ne, "Bhajan Ganga")])
         XCTAssertTrue(coordinator.genericReplies.isEmpty,
                       "the title-bearing confirmation is SPOKEN ONLY — never carded")
@@ -184,7 +188,8 @@ final class CommandRouterYouTubeTests: XCTestCase {
         XCTAssertTrue(opener.opened.isEmpty, "a failed lookup must open nothing")
         let fallback = L10n.str("youtube.unavailable", locale: ne)
         XCTAssertEqual(coordinator.assistantSpoken,
-                       [L10n.str("youtube.looking", locale: ne), fallback])
+                       [L10n.str("voiceAck.moment1", locale: ne),
+                        L10n.str("youtube.looking", locale: ne), fallback])
         XCTAssertTrue(coordinator.genericReplies.contains(fallback),
                       "the honest fallback is also visible")
         XCTAssertTrue(bus.emittedEvents.contains {
@@ -238,7 +243,8 @@ final class CommandRouterYouTubeTests: XCTestCase {
         router.route(transcript: "play bhajan on youtube")
 
         let fallback = L10n.str("youtube.unavailable", locale: ne)
-        XCTAssertEqual(coordinator.assistantSpoken, [fallback])
+        XCTAssertEqual(coordinator.assistantSpoken,
+                       [L10n.str("voiceAck.moment1", locale: ne), fallback])
         XCTAssertTrue(bus.emittedEvents.contains {
             $0.component == "youtube" && $0.outcome == "fail"
         })

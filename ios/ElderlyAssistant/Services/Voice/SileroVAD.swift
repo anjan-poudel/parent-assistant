@@ -23,11 +23,29 @@ protocol VoiceActivityDetector: AnyObject {
     var onSpeechStateChange: ((Bool) -> Void)? { get set }
     /// Called once when trailing silence exceeds `endOfUtteranceMs`.
     var onEndOfUtterance: (() -> Void)? { get set }
+    /// Called once when the trailing-silence FORCE END trips instead of
+    /// the normal quiet-run end: the utterance contained speech, but no
+    /// end-of-utterance fired within the detector's force-end window
+    /// because post-speech noise kept every frame above the end line
+    /// (see `EnergyVAD.forceEndAfterSilenceMs`). Distinct from
+    /// `onEndOfUtterance` so callers can report an honest event
+    /// (`vad_force_end`) and tell a user-pause from a silence-detection.
+    var onForcedEndOfUtterance: (() -> Void)? { get set }
 
     func start(endOfUtteranceMs: Int)
     func stop()
     func reset()
     func process(_ pcm: [Int16])
+}
+
+extension VoiceActivityDetector {
+    /// Default no-op storage: implementations that never force-end
+    /// (`NullVAD`, the guarded Silero impl, test fakes) conform without
+    /// declaring the property.
+    var onForcedEndOfUtterance: (() -> Void)? {
+        get { nil }
+        set { }
+    }
 }
 
 // MARK: - Null implementation (fallback, tests)
@@ -102,11 +120,39 @@ final class NullVAD: VoiceActivityDetector {
 /// above the reference — clearly the user still talking — still resets
 /// the counter so a resumed utterance after a pause restarts the
 /// hangover cleanly.
+///
+/// TRAILING-SILENCE FORCE END ([VAD-TUNE], 2026-09-11): the hold band has
+/// one hole the 2026-09-07 design cannot close on its own. When speech
+/// stops and the remaining audio parks IN the band (post-speech noise at
+/// or above the end line — quiet elderly speech leaves `speechLevel` low,
+/// so `endLevel` sits near the `minSpeechThreshold` clamp, and the
+/// phone's input AGC keeps boosted room noise above it), the quiet
+/// counter never accrues and the utterance never ends. A third mechanism
+/// therefore runs alongside the hangover: a force-end timer counts frames
+/// since the last clear-speech frame (`rms >= speechLevel`). While it
+/// runs, the reference DECAY IS FROZEN — the reference must not sink
+/// toward the background, or band noise would cross it frame-by-frame and
+/// keep resetting the timer forever (the same chicken-and-egg the
+/// 2026-09-07 note describes). After `forceEndAfterSilenceMs` (7 s
+/// production) with no clear-speech frame, the utterance is force-ended
+/// via `onForcedEndOfUtterance` — VoicePipeline then emits `vad_force_end`
+/// and feeds the recognizer exactly like a normal end.
+///
+/// Trade-off (deliberate): a speaker who falls silent for the whole force
+/// window and THEN resumes — with the interim energy in the band — is cut
+/// at the force end. That is the same cut the recognizer's fixed capture
+/// cap used to impose at 8 s; the force end just moves it to speech-end +
+/// 7 s, keeps the audio (finish(), never cancel()), and reports honestly.
+/// The freeze also means a quieter continuation no longer re-anchors the
+/// reference by decay (the old ~1-2 s re-anchor path); it is held in the
+/// band until the force end. Energy at or above the reference still
+/// resets everything, so continuous speech keeps the utterance alive.
 final class EnergyVAD: VoiceActivityDetector {
     let requiredSampleRate: Double = 16_000
     let frameLength: Int = 512
     var onSpeechStateChange: ((Bool) -> Void)?
     var onEndOfUtterance: (() -> Void)?
+    var onForcedEndOfUtterance: (() -> Void)?
 
     /// Speech-start threshold = noiseFloor x this (before clamping).
     private let speechMultiplier: Float
@@ -138,6 +184,15 @@ final class EnergyVAD: VoiceActivityDetector {
     /// a silent room (floor ~ 0) and bounds it in a very loud one.
     private let minSpeechThreshold: Float
     private let maxSpeechThreshold: Float
+    /// Trailing-silence force-end window (see the class note): ms since
+    /// the last clear-speech frame (`rms >= speechLevel`) after which a
+    /// still-active utterance is force-ended. Must be well above
+    /// `endOfUtteranceMs` (the normal end always wins in real quiet) and
+    /// below the recognizer's total capture cap (22 s), which bounds the
+    /// no-speech and continuous-speech cases.
+    private let forceEndAfterSilenceMs: Int
+    /// `forceEndAfterSilenceMs` in 32 ms frames, precomputed.
+    private let forceEndAfterSilenceFrames: Int
     /// Ambient RMS estimate. Seeded low so first use is maximally
     /// sensitive. NOT reset per utterance — a property of the room.
     private var noiseFloor: Float
@@ -145,7 +200,9 @@ final class EnergyVAD: VoiceActivityDetector {
     /// Running speech-energy reference while `speechActive`: pulled UP by
     /// frames at/above it, otherwise decays only by time
     /// (`speechLevelReleaseDbPerSecond`) — never dragged toward a soft
-    /// frame or the ambient (2026-09-07). Reset per utterance.
+    /// frame or the ambient (2026-09-07). Reset per utterance. [VAD-TUNE]
+    /// The decay is FROZEN while the force-end timer is running
+    /// (`framesSinceClearSpeech > 0`) — see the class note.
     private var speechLevel: Float = 0
 
     private var running = false
@@ -153,6 +210,10 @@ final class EnergyVAD: VoiceActivityDetector {
     private var quietFrames = 0
     private var requiredQuietFrames = 8
     private var hasReportedEnd = false
+    /// [VAD-TUNE] Frames since the last clear-speech frame while
+    /// `speechActive` — the force-end timer. Reset by any frame at or
+    /// above the reference.
+    private var framesSinceClearSpeech = 0
 
     init(speechMultiplier: Float = 2.5,
          floorAlpha: Float = 0.08,
@@ -161,7 +222,8 @@ final class EnergyVAD: VoiceActivityDetector {
          speechLevelReleaseDbPerSecond: Float = 3.0,
          minSpeechThreshold: Float = 0.012,
          maxSpeechThreshold: Float = 0.10,
-         initialNoiseFloor: Float = 0.005) {
+         initialNoiseFloor: Float = 0.005,
+         forceEndAfterSilenceMs: Int = 7000) {
         self.speechMultiplier = speechMultiplier
         self.floorAlpha = floorAlpha
         self.dropRatio = dropRatio
@@ -175,6 +237,10 @@ final class EnergyVAD: VoiceActivityDetector {
         self.maxSpeechThreshold = maxSpeechThreshold
         self.initialNoiseFloor = initialNoiseFloor
         self.noiseFloor = initialNoiseFloor
+        self.forceEndAfterSilenceMs = forceEndAfterSilenceMs
+        self.forceEndAfterSilenceFrames = max(1, Int(ceil(
+            (Double(forceEndAfterSilenceMs) / 1000.0) /
+            (Double(frameLength) / requiredSampleRate))))
     }
 
     private var speechStartThreshold: Float {
@@ -197,6 +263,7 @@ final class EnergyVAD: VoiceActivityDetector {
         speechLevel = 0
         quietFrames = 0
         hasReportedEnd = false
+        framesSinceClearSpeech = 0
         // noiseFloor survives reset(): room calibration carries across
         // utterances within a capture session.
     }
@@ -210,6 +277,7 @@ final class EnergyVAD: VoiceActivityDetector {
                 speechActive = true
                 speechLevel = rms
                 quietFrames = 0
+                framesSinceClearSpeech = 0
                 onSpeechStateChange?(true)
             } else {
                 noiseFloor += floorAlpha * (rms - noiseFloor)
@@ -244,18 +312,40 @@ final class EnergyVAD: VoiceActivityDetector {
         // after a pause restarts the hangover cleanly.
         if rms >= speechLevel {
             quietFrames = 0
+            framesSinceClearSpeech = 0
             speechLevel += speechLevelAlpha * (rms - speechLevel)
             return
         }
 
         // Below the reference: it decays by time, never toward this frame
         // (a soft trailing word or ambient noise must not become the new
-        // reference; see above).
-        speechLevel *= releaseFactorPerFrame
+        // reference; see above). [VAD-TUNE] The decay is FROZEN while the
+        // force-end timer is running — decaying into band noise would let
+        // the noise cross the reference and reset the timer frame by
+        // frame, so the force end could never fire (see the class note).
+        if framesSinceClearSpeech == 0 {
+            speechLevel *= releaseFactorPerFrame
+        }
 
         let endLevel = max(minSpeechThreshold, speechLevel * dropRatio)
+
+        // Every below-reference frame — band OR quiet — is "not clear
+        // speech": accrue the force-end timer first. In production the
+        // normal hangover (0.9 s) always fires long before the force
+        // window (7 s) whenever real quiet exists; the force end only
+        // trips when noise parks in the band and the quiet counter never
+        // accrues.
+        framesSinceClearSpeech += 1
+        if framesSinceClearSpeech >= forceEndAfterSilenceFrames {
+            hasReportedEnd = true
+            speechActive = false
+            onSpeechStateChange?(false)
+            onForcedEndOfUtterance?()
+            return
+        }
+
         if rms >= endLevel {
-            // The band: hold the counter (see above) — this frame is
+            // The band: hold the quiet counter (see above) — this frame is
             // neither quiet enough to accrue nor loud enough to reset.
             return
         }

@@ -45,6 +45,9 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
         let ownsAudioCapture = false
         var isAvailable = true
         private(set) var startCalls = 0
+        /// [VAD-TUNE] Counts VAD-driven finish() calls (normal + forced
+        /// ends share the same pipeline hop).
+        private(set) var finishCalls = 0
         private var completion: ((Result<String, RecognitionError>) -> Void)?
 
         func requestAuthorization(_ callback: @escaping (Bool) -> Void) {
@@ -59,7 +62,7 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
 
         func feed(_ buffer: AVAudioPCMBuffer) {}
 
-        func finish() {}
+        func finish() { finishCalls += 1 }
 
         func cancel() {
             guard let completion else { return }
@@ -79,6 +82,9 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
         let frameLength = 512
         var onSpeechStateChange: ((Bool) -> Void)?
         var onEndOfUtterance: (() -> Void)?
+        /// [VAD-TUNE] Real storage (not the protocol's default no-op) so
+        /// the pipeline's forced-end wiring is reachable from tests.
+        var onForcedEndOfUtterance: (() -> Void)?
         func start(endOfUtteranceMs: Int) {}
         func stop() {}
         func reset() {}
@@ -258,15 +264,19 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
                        "exactly ONE voice_turn_timing event per turn")
         // Chronological: llm_start fires inside route() (before it
         // returns), so it precedes router_done; speak stages trail the
-        // async interpret completion.
+        // async interpret completion. [VOICE-ACK] The pre-ack's
+        // speak_queued commits BEFORE llm_start (it is spoken at route
+        // time), and the reply's speak_queued trails llm_done — two
+        // speak_queued/speak_finished pairs in one turn.
         XCTAssertEqual(h.stageNames(), [
-            "turn_start", "vad_end", "asr_done", "llm_start", "router_done",
-            "llm_done", "speak_queued", "speak_finished", "turn_end",
+            "turn_start", "vad_end", "asr_done", "speak_queued", "llm_start",
+            "router_done", "llm_done", "speak_queued", "speak_finished",
+            "speak_finished", "turn_end",
         ])
         XCTAssertEqual(h.bus.turnTimingEvents[0].outcome, "success")
         XCTAssertNotNil(h.bus.turnTimingEvents[0].durationMs)
-        XCTAssertEqual(h.speaker.spoken, ["सबै ठीक छ।"],
-                       "the seam must not alter what the turn speaks")
+        XCTAssertEqual(h.speaker.spoken, ["एक छिन…", "सबै ठीक छ।"],
+                       "the pre-ack precedes the model reply — the seam alters nothing else")
     }
 
     // MARK: - Deterministic (sync) path
@@ -338,5 +348,71 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
         XCTAssertFalse(h.bus.events.contains { $0.component == "voice_pipeline"
                 && $0.eventType == "capture_ended_no_vad_speech" },
                        "speech was detected — the no-speech diagnostic must stay silent")
+    }
+
+    // MARK: - VAD force end ([VAD-TUNE])
+
+    /// The trailing-silence force end ends the capture exactly like a
+    /// normal end — finish() feeds the recognizer — but emits the honest
+    /// `vad_force_end` event so device logs distinguish a noise-held
+    /// pause from a genuine silence-detection end.
+    func testForcedVADEndEmitsVadForceEndAndFinishesCapture() {
+        let h = Harness()
+        let finalized = expectation(description: "turn finalized")
+        h.tracer.onTurnFinalized = { _, _ in finalized.fulfill() }
+
+        h.pipeline.debugEnterIdleForTesting()
+        h.pipeline.simulateWakeWordDetection()
+        XCTAssertEqual(h.pipeline.state, .capturingCommand)
+
+        // The VAD's force end fires; its handler hops to main. The inner
+        // async is queued AFTER that hop, so it fulfills only once the
+        // forced end was actually processed.
+        let forcedEnd = expectation(description: "forced end processed")
+        DispatchQueue.main.async {
+            h.vad.onForcedEndOfUtterance?()
+            DispatchQueue.main.async { forcedEnd.fulfill() }
+        }
+        wait(for: [forcedEnd], timeout: 2)
+
+        XCTAssertEqual(h.recognizer.finishCalls, 1,
+                       "the forced end must finish the recognizer")
+        XCTAssertTrue(h.bus.events.contains { $0.component == "voice_pipeline"
+                && $0.eventType == "vad_force_end" },
+                      "the forced end emits the honest vad_force_end event")
+        XCTAssertFalse(h.bus.events.contains { $0.component == "voice_pipeline"
+                && $0.eventType == "vad_end_of_utterance" },
+                       "a forced end must not masquerade as a normal silence end")
+
+        // Emergency transcript: the deterministic net answers
+        // synchronously, so the turn finalizes without an LLM round-trip.
+        h.recognizer.complete(with: .success("मद्दत गर्नुहोस्"))
+        wait(for: [finalized], timeout: 2)
+
+        XCTAssertEqual(h.bus.turnTimingEvents.count, 1)
+        XCTAssertTrue(h.stageNames().contains("vad_end"),
+                      "the forced end marks vad_end like a normal end")
+    }
+
+    /// The normal silence-detection end keeps its existing event and
+    /// behavior — the forced-end wiring must not disturb it.
+    func testNormalVADEndEmitsVadEndOfUtteranceEvent() {
+        let h = Harness()
+        h.pipeline.debugEnterIdleForTesting()
+        h.pipeline.simulateWakeWordDetection()
+
+        let normalEnd = expectation(description: "normal end processed")
+        DispatchQueue.main.async {
+            h.vad.onEndOfUtterance?()
+            DispatchQueue.main.async { normalEnd.fulfill() }
+        }
+        wait(for: [normalEnd], timeout: 2)
+
+        XCTAssertEqual(h.recognizer.finishCalls, 1)
+        XCTAssertTrue(h.bus.events.contains { $0.component == "voice_pipeline"
+                && $0.eventType == "vad_end_of_utterance" })
+        XCTAssertFalse(h.bus.events.contains { $0.component == "voice_pipeline"
+                && $0.eventType == "vad_force_end" },
+                       "a normal end must not emit the forced-end event")
     }
 }
