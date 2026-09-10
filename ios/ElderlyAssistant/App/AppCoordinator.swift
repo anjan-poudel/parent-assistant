@@ -1813,6 +1813,15 @@ final class AppCoordinator: ObservableObject {
             self?.recoverDegradedCapability(capability)
         }
 
+        // [BOOT-REVIEW P0-1 fix] BGTaskScheduler REQUIRES every launch
+        // handler to be registered before the app finishes launching
+        // (platform contract — the deferred composition below tripped
+        // NSInternalInconsistencyException "All launch handlers must be
+        // registered before application finishes launching" in the unit
+        // test host). Registration is two cheap identifier calls and
+        // captures only; the expensive composition stays deferred.
+        registerBackgroundTasks()
+
         // [BOOT-REVIEW P0-1] Boot begins BEFORE the composition, so the
         // spinner's appearance delay is measured from the true start of
         // startup work.
@@ -1860,8 +1869,9 @@ final class AppCoordinator: ObservableObject {
         // nothing.
         _ = liveCallDetector
 
-        // Register background tasks (iOS)
-        registerBackgroundTasks()
+        // Background-task registration lives in `start()`'s synchronous
+        // section (platform contract: before launch finishes) — see the
+        // [BOOT-REVIEW P0-1 fix] note there.
 
         // [BOOT-REVIEW P1-7] Day rollover for the derived notification
         // count ("X of Y doses taken today" is date-dependent). Installed
