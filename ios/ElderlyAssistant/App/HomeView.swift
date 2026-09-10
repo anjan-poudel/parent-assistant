@@ -61,7 +61,6 @@ struct HomeView: View {
 
     @State private var showWizard = false
     @State private var showHistory = false
-    @State private var outcomeExpanded = true
     /// Programmatic push target for voice-driven contact search
     /// (voice-contact-search, 2026-09-07): the router's keyword pre-route
     /// publishes `pendingContactSearchRequest`; this onChange appends the
@@ -83,14 +82,29 @@ struct HomeView: View {
                 // today's DesignTokens.background; see `AppTheme`.
                 Color(theme: coordinator.appTheme).ignoresSafeArea()
                 VStack(spacing: 12) {
-                    topBar
+                    // [P1-7] Every section below is a real view with a
+                    // narrow, value-typed interface (`HomeSubviews.swift`)
+                    // applied with `.equatable()`. HomeView still observes
+                    // the coordinator — it is what BUILDS the models — but
+                    // an unrelated publish now stops at the section's own
+                    // `==`: the section compares equal and its body never
+                    // runs (see `HomePresentationState.swift`).
+                    HomeTopBar(dateLine: homePresentation.dateLine,
+                               calendarLine: coordinator.homeCalendarLine,
+                               notificationCount: homePresentation.notificationCount) {
+                        navPath.append(LeafDestination.updates)
+                    }
+                    .equatable()
                     // Quick access ABOVE the Talk hero (home-redesign v3,
                     // 2026-09-08): the favourites are one-tap launch
                     // tiles, not reading matter — the user asked for them
                     // above the hero, and they render only while at least
                     // one favourite exists.
-                    if !coordinator.favoriteApps.isEmpty {
-                        quickAccessRow
+                    if !homePresentation.favoriteApps.isEmpty {
+                        QuickAccessStrip(apps: homePresentation.favoriteApps) { app in
+                            coordinator.performAppLaunch(app)
+                        }
+                        .equatable()
                     }
                     // The talk stage is FIXED chrome (home-redesign v3):
                     // hero + the small status/rotating texts under it sit
@@ -98,6 +112,7 @@ struct HomeView: View {
                     // speak button is always in the viewport on every
                     // phone size.
                     talkStage
+                        .equatable()
                     // Everything BELOW the hero — the transient setup
                     // nudge (only while onboarding steps remain) and the
                     // live-caption/outcome text — is ONE scroll region.
@@ -108,14 +123,8 @@ struct HomeView: View {
                     // scrolls while the hero, chip and dock never leave
                     // the screen.
                     ScrollView(showsIndicators: false) {
-                        VStack(spacing: 12) {
-                            if !coordinator.onboardingState.pendingSteps.isEmpty {
-                                setupStrip
-                            }
-                            feedbackArea
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 4)
+                        feedbackRegion
+                            .equatable()
                     }
                 }
                 .padding(.horizontal, 20)
@@ -143,7 +152,10 @@ struct HomeView: View {
                     if showsPinnedHistoryChip {
                         historyChip
                     }
-                    dock
+                    HomeDock(contactName: homePresentation.primaryContactName) {
+                        coordinator.presentApplianceHelper(question: nil)
+                    }
+                    .equatable()
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 8)
@@ -217,86 +229,39 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - Top bar (redesign spec §3.1)
+    // MARK: - Presentation models ([P1-7] — narrow inputs for the split)
 
-    private var topBar: some View {
-        HStack(alignment: .center, spacing: 8) {
-            // Settings stays in the top bar, LEFT-anchored at the leading
-            // edge with the date line centered between it and the
-            // emergency button, so the gear can never be confused with
-            // emergency (2026-09-07). Still exactly one entry point, by
-            // voice or by touch. Equal-width 44pt containers on both
-            // sides keep the date line visually centered — the
-            // notifications bell joined the trailing cluster
-            // (home-redesign 2026-09-08), so a balancing invisible 44pt
-            // sits beside settings.
-            NavigationLink(value: LeafDestination.settings) {
-                IconBadge(systemImage: "gearshape.fill", tint: .settings, diameter: 32)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(LocalizedStringKey("home.hub.settings")))
-            .frame(width: 44, alignment: .leading)
-            Color.clear.frame(width: 44, height: 44)
-            Spacer(minLength: 4)
-            // The date area doubles as the calendar's entry point
-            // (2026-09-06: calendar lives ON the home screen via this
-            // tap target, NOT as a dock item; settings moved to the top
-            // bar the same day). The greeting + live clock are GONE
-            // (calendar-display task, 2026-09-09): the phone already
-            // shows the time, and the local date + holiday overlay is
-            // the thing that is genuinely useful here — composed from
-            // the Calendar display settings (default calendar + the BS
-            // and tithi overlays) by `HomeDateLineComposer` and
-            // refreshed on appear, at midnight and on foreground.
-            NavigationLink(value: LeafDestination.calendar) {
-                homeDateLineView
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("home.hub.calendar"))
-            .accessibilityValue(Text(coordinator.homeCalendarLine ?? ""))
-            Spacer(minLength: 4)
-            // The ONE notifications affordance (home-redesign v3,
-            // 2026-09-08): a bell with the active-panel badge in the top
-            // bar — the "notifications live here" spot every phone has
-            // taught, and the badge count always matches what the Updates
-            // leaf lists (same registry instance). Bell sits between the
-            // date line and emergency, keeping emergency at the far edge
-            // exactly where it always was. Tap PUSHES the Updates leaf
-            // (home-redesign v3): the pushed leaf replaced the drawer
-            // sheet, so no sheet machinery lives on Home anymore.
-            NotificationBellButton(count: activeNotificationCount) {
-                navPath.append(LeafDestination.updates)
-            }
-            EmergencyIconButton()
-                .frame(width: 44, alignment: .trailing)
-        }
-        .padding(.top, 8)
+    /// The Home chrome's inputs (top bar, quick-access row, setup strip),
+    /// assembled once per render and handed to the extracted views as
+    /// VALUES. Assembling them here — where the coordinator is already
+    /// observed — is what lets the sections below stop observing it.
+    private var homePresentation: HomePresentationState {
+        HomePresentationState(
+            dateLine: coordinator.homeDateLine,
+            notificationCount: activeNotificationCount,
+            favoriteApps: coordinator.favoriteApps,
+            primaryContactName: coordinator.familyContacts.first?.name,
+            setup: SetupPresentation(
+                pendingCount: coordinator.onboardingState.pendingSteps.count,
+                // Warning styling is reserved for a capability that is
+                // genuinely unavailable — never for "setup is not done"
+                // (design review: ready vs optional setup).
+                needsAttention: boot.hasFailures))
     }
 
-    /// Today's date, composed from the calendar display settings: the
-    /// primary date (default calendar) on the greeting font, the enabled
-    /// overlays joined beneath it in caption size. Empty until the
-    /// coordinator's first offline composition lands (one launch frame).
-    @ViewBuilder
-    private var homeDateLineView: some View {
-        if let line = coordinator.homeDateLine {
-            VStack(alignment: .center, spacing: 2) {
-                Text(line.primary)
-                    .font(DesignTokens.greetingFont(size: 18))
-                    .foregroundColor(DesignTokens.textPrimary)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
-                if !line.overlays.isEmpty {
-                    Text(line.overlays.joined(separator: " • "))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
-                                                   weight: .medium))
-                        .foregroundColor(DesignTokens.textSecondary)
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                }
-            }
-        }
+    /// The talk stage's [P0-2] readiness value plus its two derived labels.
+    private var voicePresentation: VoicePresentationState {
+        VoicePresentationState(
+            readiness: talkReadiness,
+            statusOverride: talkStatusLineOverride,
+            showsOpenSettings: stageVisuals.isError && coordinator.voiceErrorKind == .permission)
+    }
+
+    /// Boot state the stage renders.
+    private var startupPresentation: StartupState {
+        StartupState(spinnerVisible: boot.spinnerVisible,
+                     hasFailures: boot.hasFailures,
+                     showsCapsule: showsStartupCapsule)
     }
 
     /// The Home widget registry (rendering v2, home-redesign 2026-09-08):
@@ -309,111 +274,12 @@ struct HomeView: View {
     private let widgetRegistry = HomeWidgetRegistry()
 
     /// Bell badge derivation — the count of active notification panels,
-    /// straight from the registry rows the Updates leaf lists.
+    /// straight from the registry rows the Updates leaf lists. [P1-7] the
+    /// derivation itself must move off the render path (publish the count
+    /// only when reminder/briefing state changes); the extracted views
+    /// stop the result from fanning out to the sections in the meantime.
     private var activeNotificationCount: Int {
         widgetRegistry.activeNotificationCount(coordinator: coordinator)
-    }
-
-    /// Slim, dismissible-by-navigation strip (redesign spec §3.1) —
-    /// replaces the old full-width card so it doesn't compete with the
-    /// Talk hero for vertical space. Sits BELOW the hero inside the
-    /// outcome scroll region (home-redesign v3): the wizard only shows
-    /// while onboarding steps remain, and this strip is Home's only
-    /// resume affordance for it — but it is transient per-user and must
-    /// never push the hero off the viewport, so the region below the
-    /// hero owns it.
-    private var setupStrip: some View {
-        Button { showWizard = true } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(DesignTokens.accent)
-                // Short static catalog microcopy (visual-polish 2026-09-08):
-                // warm rounded, matching the sibling historyChip capsule.
-                Text(remainingText)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(DesignTokens.textSecondary)
-            }
-            .padding(.horizontal, 14)
-            .frame(height: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.setupReminder)
-            .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: - Quick access row (quick-access-apps task, 2026-09-06)
-
-    /// The user's favourite apps as one-tap launch tiles, right under the
-    /// setup strip. Deliberately an inline row, NOT a HomeWidget — the
-    /// row has no widget lifecycle needs and the home-screen widget
-    /// system is a separate concern (documented in the task design). The
-    /// trailing plus tile opens Settings → Quick apps, where the
-    /// favourites are managed; the whole row renders only while at least
-    /// one favourite exists. No "Quick access" caption (calendar-display
-    /// task, 2026-09-09): the row of app tiles is self-evident — the
-    /// caption read as clutter, so the tiles + plus stand alone.
-    private var quickAccessRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(coordinator.favoriteApps) { app in
-                    quickAccessTile(app)
-                }
-                NavigationLink(value: LeafDestination.settings) {
-                    quickAccessAddTile
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.vertical, 2)
-        }
-    }
-
-    /// 48pt badge + 12pt name on a 76pt-wide tile, ≥44pt tall — one
-    /// combined accessibility element ("WhatsApp, button"); tapping
-    /// launches through the coordinator, which probes the scheme again at
-    /// tap time and speaks honestly when the app has gone away.
-    private func quickAccessTile(_ app: AppLauncher.App) -> some View {
-        Button {
-            coordinator.performAppLaunch(app)
-        } label: {
-            VStack(spacing: 4) {
-                appGlyph(app, diameter: 56)
-                Text(LocalizedStringKey(app.nameKey))
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-            }
-            .frame(width: 92)
-            .frame(minHeight: DesignTokens.minTapTargetSize)
-            .accessibilityElement(children: .combine)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// The app's OFFICIAL multicolor logo on a white circle when the
-    /// catalog carries one (AppIcons.xcassets — Wikimedia Commons PNGs),
-    /// else the SF Symbol stand-in badge — Apple built-ins and IMO (no
-    /// official logo) keep the stand-in.
-    private func appGlyph(_ app: AppLauncher.App, diameter: CGFloat) -> some View {
-        AppGlyph(app: app, diameter: diameter)
-    }
-
-    /// The trailing plus tile → Settings (LeafDestination.settings), where
-    /// the Quick apps picker lives. 76pt-wide like the app tiles so the
-    /// row's rhythm stays even.
-    private var quickAccessAddTile: some View {
-        VStack(spacing: 4) {
-            IconBadge(systemImage: "plus", tint: .apps, diameter: 56)
-        }
-        .frame(width: 92)
-        .frame(minHeight: DesignTokens.minTapTargetSize)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("home.quickAccess.add"))
     }
 
     // MARK: - Talk stage (redesign spec §3.1)
@@ -451,83 +317,30 @@ struct HomeView: View {
         !(talkReadiness.isLoading && boot.stage == .preparingVoice)
     }
 
-    private var talkStage: some View {
-        Group {
-            if stageVisuals.isConfirmation {
-                // [BOOT-LATENCY] The spinner is an element of the stage
-                // itself — above whatever the stage currently shows —
-                // so it stays anchored to the speak area even in the
-                // chips branch.
-                VStack(spacing: 4) {
-                    StartupProgressOverlay()
-                    ConfirmationChips(titleKey: stageVisuals.captionKey)
-                }
-            } else {
-                // The stage reads as ONE unit: hero, its status line and
-                // the hint carousel each sit ≤4pt apart (visual-polish
-                // 2026-09-08 — at the old gaps the texts floated loose
-                // below the button; the hints describe the button right
-                // below them, so they must hug it).
-                //
-                // [BOOT-LATENCY → LAUNCH-SCREEN] The startup spinner is
-                // anchored DIRECTLY above the hero disc (an overlay on
-                // the disc's top edge inside `TalkButton`), NOT a flow
-                // element here: as a flow element at the stage top it
-                // rendered near the calendar header, far from the speak
-                // button. Anchored to the disc it always hugs the hero
-                // — at every ring/halo state — and takes no flow space,
-                // so nothing below it shifts when it collapses.
-                VStack(spacing: 4) {
-                    TalkButton(session: session,
-                               // [P0-2] Manual Talk readiness — the shared
-                               // `VoicePipelineReadiness` contract, driven
-                               // by the pipeline's own start callback. The
-                               // hero no longer reads the fold status
-                               // (`voiceReadinessStatus`) or
-                               // `TalkHeroGating`.
-                               readiness: talkReadiness,
-                               onTap: {
-                                   switch session.state {
-                                   case .idle:
-                                       coordinator.simulateWakeWordDetection()
-                                   case .listening, .transcribing, .understanding, .speaking:
-                                       // Manual escape hatch: tapping mid-cycle cancels
-                                       // and recycles the pipeline (the watchdog does
-                                       // the same automatically after 15s).
-                                       coordinator.recoverVoiceCycle()
-                                   case .error, .stopped:
-                                       // Boot-time start failed (mic denied, speech
-                                       // denied, no audio input) — tapping retries
-                                       // the pipeline start instead of staying dead.
-                                       coordinator.recoverVoiceCycle()
-                                   case .awaitingConfirmation:
-                                       break
-                                   }
-                               },
-                               statusOverride: talkStatusLineOverride,
-                               onLongPressReset: coordinator.resetVoiceActivation,
-                               // [P0-2] The ONE deterministic recovery for a
-                               // failed boot-time start: an explicit button
-                               // under the hero. Tapping the hero itself can
-                               // therefore never "recover" merely because
-                               // startup has not completed.
-                               onRecover: coordinator.recoverVoiceCycle,
-                               // [P0-2] The hero's own loading presentation
-                               // says "Starting voice…" inside the disc, so
-                               // the boot capsule stands down for the boot
-                               // stage whose label it would repeat; every
-                               // other boot stage keeps it.
-                               showsBootCapsule: showsStartupCapsule)
-                    if stageVisuals.showsHintCarousel {
-                        HintCarousel()
-                    }
-                    if stageVisuals.isError,
-                       coordinator.voiceErrorKind == .permission {
-                        openSettingsButton
-                    }
-                }
-            }
-        }
+    /// [P1-7] The extracted stage (`HomeSubviews.swift`). The tap switch
+    /// lives inside the stage itself, so the closures Home hands over are
+    /// the two coordinator calls the switch selects between — `onStart`
+    /// and `onRecover` — plus the hold-to-reset action. `state` travels
+    /// both here and inside the stage, where it is part of `==`.
+    private var talkStage: TalkStage {
+        TalkStage(state: session.state,
+                  session: session,
+                  voice: voicePresentation,
+                  startup: startupPresentation,
+                  onStart: coordinator.simulateWakeWordDetection,
+                  onRecover: coordinator.recoverVoiceCycle,
+                  onReset: coordinator.resetVoiceActivation)
+    }
+
+    /// [P1-7] The extracted feedback region (`HomeSubviews.swift`): the
+    /// optional-setup strip plus the live-caption/outcome surface.
+    private var feedbackRegion: FeedbackRegion {
+        FeedbackRegion(state: session.state,
+                       caption: coordinator.livePartialTranscript ?? coordinator.lastTranscript,
+                       outcome: coordinator.lastOutcome,
+                       setup: homePresentation.setup,
+                       onResumeSetup: { showWizard = true },
+                       onOpenHistory: { showHistory = true })
     }
 
     /// The error status line says what actually happened (spec §7) —
@@ -542,60 +355,6 @@ struct HomeView: View {
             return L10n.str("state.error.audio", locale: locale)
         case .other:
             return L10n.str("state.error.status", locale: locale)
-        }
-    }
-
-    private var openSettingsButton: some View {
-        Button {
-            if let url = URL(string: UIApplication.openSettingsURLString) {
-                UIApplication.shared.open(url)
-            }
-        } label: {
-            Label("state.error.openSettings", systemImage: "gear")
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.accent)
-                .padding(.horizontal, 16)
-                .frame(height: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: - Feedback area: live caption while capturing, outcome after
-    // (redesign spec §3.1, §6 — replaces the old always-visible
-    // conversation card entirely)
-
-    @ViewBuilder
-    private var feedbackArea: some View {
-        switch session.state {
-        case .listening, .transcribing, .understanding:
-            // The pill is a transcript surface — its header ("You're
-            // saying") plus the real words once STT lands. The capture
-            // stage's own phrase lives on the hero's status line; the
-            // pill used to repeat that same sentence inside the
-            // transcript slot, framed by the header as if it were the
-            // user's words ("You're saying: Go ahead, I'm listening")
-            // until the real transcript replaced it (call-UI fix,
-            // 2026-09-07).
-            LiveCaptionPill(transcript: coordinator.livePartialTranscript ?? coordinator.lastTranscript)
-        case .awaitingConfirmation:
-            // The confirmation chips in `talkStage` ARE the feedback — an
-            // earlier turn's outcome card underneath the yes/no question
-            // read as a stray second card (call-UI fix, 2026-09-07).
-            EmptyView()
-        default:
-            if let outcome = coordinator.lastOutcome {
-                OutcomeCardView(outcome: outcome, expanded: outcomeExpanded) {
-                    showHistory = true
-                }
-                .task(id: outcome.id) {
-                    outcomeExpanded = true
-                    try? await Task.sleep(nanoseconds: 6_000_000_000)
-                    guard !Task.isCancelled else { return }
-                    withAnimation(.easeInOut) { outcomeExpanded = false }
-                }
-            }
         }
     }
 
@@ -635,95 +394,6 @@ struct HomeView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Dock (redesign spec §3.1 — replaces the 2×2 hub grid; Home
-    // is the only screen that shows it). Six tiles in TWO rows of three
-    // (calendar-display task, 2026-09-09): one row of six read as a
-    // cluttered shelf, so the user asked for two rows — top: appliance
-    // helper, directions, feeds; bottom: the rest (meds, reminders,
-    // call). Same `dockItem` components, same ≥44pt targets, same
-    // material card, same accessibility labels — only the layout
-    // changed. Items share width equally (`frame(maxWidth: .infinity)`
-    // per tile) and labels wrap when they must.
-
-    private var dock: some View {
-        VStack(spacing: 10) {
-            // Top row (the user's ordering, calendar-display task):
-            // appliance helper, directions, feeds.
-            HStack(spacing: 2) {
-                dockApplianceItem
-                dockDirectionsItem
-                dockItem(.feed, icon: "rectangle.stack.fill", tint: .feeds, titleKey: "home.hub.feeds")
-            }
-            // Bottom row: the rest — meds, reminders, call.
-            HStack(spacing: 2) {
-                dockItem(.meds, icon: "pills.fill", tint: .meds, titleKey: "home.hub.meds")
-                dockItem(.reminders, icon: "clock.fill", tint: .reminders, titleKey: "home.hub.reminders")
-                dockCallItem
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 22))
-    }
-
-    private func dockItem(_ destination: LeafDestination, icon: String,
-                          tint: DesignTokens.BadgeTint, titleKey: String) -> some View {
-        NavigationLink(value: destination) {
-            VStack(spacing: 4) {
-                IconBadge(systemImage: icon, tint: tint, diameter: 42)
-                Text(LocalizedStringKey(titleKey))
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-            }
-            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Uses the top family contact's face instead of a generic phone icon
-    /// when one is configured (redesign spec §3.1/§3.2).
-    private var dockCallItem: some View {
-        NavigationLink(value: LeafDestination.call) {
-            VStack(spacing: 4) {
-                if let first = coordinator.familyContacts.first {
-                    FaceAvatar(name: first.name, diameter: 42)
-                } else {
-                    IconBadge(systemImage: "phone.fill", tint: .call, diameter: 42)
-                }
-                Text(LocalizedStringKey("home.hub.call"))
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-            }
-            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Appliance vision helper — the design §4 "Show Me" dock tile. A
-    /// Button, not a NavigationLink: it presents the camera surface
-    /// app-wide (via `pendingPluginPresentation`), same as the voice path.
-    private var dockApplianceItem: some View {
-        Button { coordinator.presentApplianceHelper(question: nil) } label: {
-            VStack(spacing: 4) {
-                IconBadge(systemImage: "camera.viewfinder", tint: .appliance, diameter: 36)
-                Text(LocalizedStringKey("plugin.applianceHelper.name"))
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-            }
-            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Directions (directions-screen task, 2026-09-07) — the map tile
-    /// docked right next to Appliance per the task brief. The map icon
-    /// reads "navigation" against the house/appliance row; it pushes the
-    /// Directions leaf like every other dock tile.
-    private var dockDirectionsItem: some View {
-        dockItem(.directions, icon: "map.fill", tint: .directions, titleKey: "home.hub.directions")
-    }
-
     // MARK: - Leaf routing
 
     @ViewBuilder
@@ -760,13 +430,6 @@ struct HomeView: View {
             // the coordinator from the environment — no init params.
             AlarmsTimersSettingsView()
         }
-    }
-
-    // MARK: - Setup strip text
-
-    private var remainingText: String {
-        L10n.fmt("home.setupRemaining", locale: coordinator.appLanguage.locale,
-                 coordinator.onboardingState.pendingSteps.count)
     }
 }
 
