@@ -12189,57 +12189,6 @@
         }
       }
     },
-    "timerAlarm.title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Timer finished"
-          }
-        },
-        "ne" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "टाइमर सकियो"
-          }
-        }
-      }
-    },
-    "timerAlarm.stop" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Stop"
-          }
-        },
-        "ne" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "रोक्नुहोस्"
-          }
-        }
-      }
-    },
-    "timerAlarm.ringingNote" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "The bell keeps ringing until you press Stop."
-          }
-        },
-        "ne" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "तपाईंले रोक्नुहोस् थिच्दासम्म घण्टी बजिरहन्छ।"
-          }
-        }
-      }
-    },
     "timerAlarm.backgroundNote" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12274,6 +12223,23 @@
         }
       }
     },
+    "timerAlarm.ringingNote" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The bell keeps ringing until you press Stop."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "तपाईंले रोक्नुहोस् थिच्दासम्म घण्टी बजिरहन्छ।"
+          }
+        }
+      }
+    },
     "timerAlarm.settingsCaption" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12287,6 +12253,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "टाइमरहरू साँचो अलार्म जस्तै बज्छन्। iOS 26 वा नयाँमा फोन आफैँले बजाउँछ — ठूलो स्वरमा, पूरा स्क्रिनमा, र साइलेन्ट मोडमा पनि, एप बन्द भए पनि। पुरानो iOS मा, एप खुला हुँदा टाइमर यही एपभित्र बज्छ; एप बन्द हुँदा एक पटक घण्टी बजेर सूचना देखिन्छ — रिङ भइरहेको स्क्रिन खोल्न सूचनालाई थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "timerAlarm.stop" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "रोक्नुहोस्"
+          }
+        }
+      }
+    },
+    "timerAlarm.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Timer finished"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "टाइमर सकियो"
           }
         }
       }
