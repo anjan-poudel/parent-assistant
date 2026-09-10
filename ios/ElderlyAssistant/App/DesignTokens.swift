@@ -162,6 +162,11 @@ enum DesignTokens {
     static var minCaptionPointSize: CGFloat { scaled(18) }
     static var titlePointSize: CGFloat { scaled(32) }
     static var greetingPointSize: CGFloat { scaled(33) }
+    /// [HOME-TIMER-CHIP] The ticking digits of the home timer chip — a
+    /// step above the body floor (elderly legibility: the remaining time
+    /// is the ONE number on Home that must be readable at a glance),
+    /// below the title sizes so the chip stays a chip.
+    static var homeTimerDigitPointSize: CGFloat { scaled(28) }
 
     private static func scaled(_ base: CGFloat) -> CGFloat {
         UIFontMetrics.default.scaledValue(for: base)

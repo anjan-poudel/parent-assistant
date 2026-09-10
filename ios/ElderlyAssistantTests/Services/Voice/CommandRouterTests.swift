@@ -572,6 +572,18 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
         return alarmSnoozeOutcome
     }
 
+    /// [HOME-TIMER-CHIP] (2026-09-11) Voice timer CANCEL — protocol
+    /// requirement with an extension default of .noActiveTimer; these
+    /// stored vars script every outcome. The default keeps pre-existing
+    /// router tests (none of which speak a timer-cancel shape) on their
+    /// historical path.
+    var timerCancelOutcome: TimerCancelOutcome = .noActiveTimer
+    private(set) var timerCancelRequestCount = 0
+    func requestTimerCancel() -> TimerCancelOutcome {
+        timerCancelRequestCount += 1
+        return timerCancelOutcome
+    }
+
     var pendingRephraseCommand: InterpretedCommand? { rephrasePended?.command }
     private(set) var rephrasePended: (command: InterpretedCommand, sourceTranscript: String?)?
     func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?) {
@@ -2690,6 +2702,121 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
         _ = router.route(transcript: "snooze the timer")
 
         XCTAssertTrue(coordinator.alarmSnoozeRequests.isEmpty)
+        XCTAssertFalse(bus.emittedEvents.contains { $0.component == "alarms_timers" })
+    }
+
+    // MARK: - Timer CANCEL branch ([HOME-TIMER-CHIP] 2026-09-11)
+
+    func testEnglishTimerCancelRoutesToCoordinatorAndConfirms() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.timerCancelOutcome = .cancelled
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "cancel the timer")
+
+        XCTAssertEqual(result, .unrecognised(transcript: "cancel the timer"))
+        XCTAssertEqual(coordinator.timerCancelRequestCount, 1)
+        XCTAssertTrue(coordinator.timerStartRequests.isEmpty,
+                      "a CANCEL command must never START a timer")
+        XCTAssertTrue(coordinator.genericReplies.contains { $0 == "Timer cancelled." },
+                      "the confirmation speaks, got \(coordinator.genericReplies)")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_cancel"
+                && $0.outcome == "success"
+        })
+    }
+
+    func testNepaliTimerCancelRoutesAndSpeaksTheConfirmation() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.timerCancelOutcome = .cancelled
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "टाइमर बन्द गर")
+
+        XCTAssertEqual(coordinator.timerCancelRequestCount, 1)
+        XCTAssertTrue(coordinator.genericReplies.contains { $0.contains("टाइमर बन्द भयो") },
+                      "the confirmation speaks, got \(coordinator.genericReplies)")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_cancel"
+                && $0.outcome == "success"
+        })
+    }
+
+    func testStopTheTimerRoutesAsCancelNotASet() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.timerCancelOutcome = .cancelled
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "stop the timer")
+
+        XCTAssertEqual(coordinator.timerCancelRequestCount, 1)
+        XCTAssertTrue(coordinator.timerStartRequests.isEmpty,
+                      "a stop shape must never become a set")
+    }
+
+    func testNepaliBareTimerBandRoutesAsCancel() {
+        // The bare-verb shape from the user's scope list: "टाइमर बन्द".
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.timerCancelOutcome = .cancelled
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "टाइमर बन्द")
+
+        XCTAssertEqual(coordinator.timerCancelRequestCount, 1)
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_cancel"
+        })
+    }
+
+    func testTimerCancelNoActiveTimerSpeaksTheHonestFallback() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.timerCancelOutcome = .noActiveTimer
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "cancel the timer")
+
+        XCTAssertEqual(coordinator.timerCancelRequestCount, 1)
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0 == "You don't have any timers running."
+        }, "the honest no-active-timer line speaks, got \(coordinator.genericReplies)")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_cancel"
+                && $0.outcome == "no_active_timer"
+        })
+    }
+
+    func testTimerCancelFailureSpeaksTheHonestFallback() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.timerCancelOutcome = .failed
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "cancel the timer")
+
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0.hasPrefix("Sorry — I couldn't cancel the timer")
+        })
+        XCTAssertFalse(coordinator.genericReplies.contains { $0.contains("cancelled.") },
+                       "a failed cancel must never sound like a confirmation")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_cancel"
+                && $0.outcome == "failed"
+        })
+    }
+
+    func testDurationQualifiedTimerCancelFallsThroughTheStage() {
+        // "cancel the 5 minute timer" names a specific timer — the
+        // cancel branch must not guess which one; the utterance falls
+        // through unchanged.
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "cancel the 5 minute timer")
+
+        XCTAssertEqual(coordinator.timerCancelRequestCount, 0)
         XCTAssertFalse(bus.emittedEvents.contains { $0.component == "alarms_timers" })
     }
 

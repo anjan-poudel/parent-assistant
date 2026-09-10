@@ -14959,6 +14959,108 @@
           }
         }
       }
+    },
+    "homeTimer.multiple" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld more"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld अरू"
+          }
+        }
+      }
+    },
+    "homeTimer.remaining" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remaining"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "बाँकी"
+          }
+        }
+      }
+    },
+    "homeTimer.stop" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop timer"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "टाइमर बन्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "timers.cancelFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sorry — I couldn't cancel the timer."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "माफ गर्नुहोस् — टाइमर रद्द गर्न सकिनँ।"
+          }
+        }
+      }
+    },
+    "timers.cancelled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Timer cancelled."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "टाइमर बन्द भयो।"
+          }
+        }
+      }
+    },
+    "timers.none" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You don't have any timers running."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "कुनै टाइमर चलिरहेको छैन।"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

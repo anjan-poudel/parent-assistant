@@ -6254,6 +6254,17 @@ extension AppCoordinator {
         return alarmTimersService.snoozeAlarm(id: target.id, minutes: minutes)
     }
 
+    /// [HOME-TIMER-CHIP] (2026-09-11) Voice timer CANCEL ("cancel the
+    /// timer", "टाइमर बन्द गर") — cancels the NEAREST running timer
+    /// (soonest deadline) through the existing cancel path: persist
+    /// removal, then cancel the pending notification and, when
+    /// system-managed, the AlarmKit timer. Synchronous, same
+    /// outcome-returning contract as `requestAlarmOff`; the router
+    /// speaks the returned outcome.
+    func requestTimerCancel() -> TimerCancelOutcome {
+        alarmTimersService.cancelNearestTimer()
+    }
+
     /// Settings-leaf mutations (main-confined — the leaf's buttons run on
     /// main). Toggle re-arms/cancels the pending daily notification;
     /// remove/cancel persist the removal before cancelling the OS request.
