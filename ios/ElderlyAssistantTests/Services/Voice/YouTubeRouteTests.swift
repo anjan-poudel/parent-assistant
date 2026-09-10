@@ -61,6 +61,29 @@ final class YouTubeRouteTests: XCTestCase {
                        .play("पुराना गीत"))
     }
 
+    func testNepaliLagauFamilyExtractsQueryDataDriven() {
+        // [YT-LAGAU] (2026-09-11) Device evidence: the user's natural verb
+        // for "play a video" is लगाऊ (Whisper nasalizes it to लगाउँ) —
+        // every लगाऊ-family form must route as .play with a clean query.
+        let lagauForms = [
+            "लगाऊ", "लगाउ", "लगाउँ", "लगाउनुहोस्", "लगाउनुस्",
+            "लगाइदिनुहोस्", "लगाइदिनुस्", "लगाइदिनु", "लगाइदेऊ", "लगाइदेउ"
+        ]
+        for form in lagauForms {
+            let phrase = "युट्युबमा नेपाली न्युज \(form)"
+            XCTAssertEqual(YouTubeRoute.decide(transcript: phrase),
+                           .play("नेपाली न्युज"),
+                           "लगाऊ-family form must extract the query for: \(phrase)")
+        }
+    }
+
+    func testDeviceTranscriptNepaliNewsLagauExtractsQuery() {
+        // The EXACT device transcript that motivated the family: nasalized
+        // लगाउँ after a two-word query.
+        XCTAssertEqual(YouTubeRoute.decide(transcript: "युट्युबमा नेपाली न्युज लगाउँ"),
+                       .play("नेपाली न्युज"))
+    }
+
     // MARK: - Vetoes (never hijack the ladder)
 
     func testBarePlayWithoutYouTubeWordNeverFires() {
@@ -75,6 +98,14 @@ final class YouTubeRouteTests: XCTestCase {
         XCTAssertEqual(YouTubeRoute.decide(transcript: "i watched youtube yesterday"),
                        .notYouTube)
         XCTAssertEqual(YouTubeRoute.decide(transcript: "what is youtube"), .notYouTube)
+    }
+
+    func testLagauWithoutYouTubeWordNeverFires() {
+        // [YT-LAGAU] Safety: the लगाऊ-family marker must not widen the
+        // gate — a YouTube word is still required, so alarm/timer business
+        // (which uses the same verb) stays on its own stage.
+        XCTAssertEqual(YouTubeRoute.decide(transcript: "अलार्म लगाऊ"), .notYouTube)
+        XCTAssertEqual(YouTubeRoute.decide(transcript: "पाँच मिनेटको टाइमर लगाउँ"), .notYouTube)
     }
 
     func testYouTubeWordAloneWithNoQueryFallsThrough() {
