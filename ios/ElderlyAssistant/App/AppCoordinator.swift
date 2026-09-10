@@ -643,6 +643,22 @@ final class AppCoordinator: ObservableObject {
     /// the readiness stays `.degraded` (hero tappable — its tap is the
     /// retry) and a later retry success upgrades degraded → ready.
     private var voiceReadinessBootSettled = false
+    /// [BOOT-REVIEW P0-2] MANUAL-TALK readiness — a stricter sibling of
+    /// `voiceReadinessStatus` above, on the contract the startup review
+    /// specifies: the hero renders it from the very first frame
+    /// (`.loading(.starting)`), it reaches `.ready` ONLY from a real
+    /// `voicePipeline.start` success callback, and a failure is NEVER
+    /// auto-recovered by a timer or another boot phase. Wake-word engine
+    /// state cannot move it in either direction (wake-word is a separate
+    /// capability; manual Talk must come up even when KWS degrades to the
+    /// Null engine).
+    ///
+    /// The state machine is a plain value type (`ManualTalkReadinessState`)
+    /// so its rules are unit-tested without a coordinator; the coordinator
+    /// is its only writer and publishes the value here.
+    @Published private(set) var voicePipelineReadiness: VoicePipelineReadiness =
+        ManualTalkReadinessState.initial
+    private var manualTalkReadiness = ManualTalkReadinessState()
     /// [STARTUP-R2] True once the deferred KWS build has been scheduled
     /// (or run) this launch — the one-shot guard for the post-ready
     /// wake-word build.
@@ -2001,6 +2017,116 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    // MARK: - Manual-Talk readiness ([BOOT-REVIEW P0-2])
+    //
+    // The four `voicePipeline.start` call sites funnel through these
+    // three helpers, so the published `voicePipelineReadiness` can only
+    // move along the contract's edges:
+    //
+    //   request  → stays `.loading` (a REQUEST is not a START),
+    //   success  → `.ready`            (the one and only path),
+    //   failure  → `.failed(reason)`   (persists until a real retry),
+    //
+    // and they carry the two voice signpost intervals the review asks
+    // for: `voice-pipeline-start-requested` (boot → request issued) and
+    // `voice-pipeline-callback-completed` (request → callback answered).
+
+    /// The pipeline-start REQUEST was just issued. Never moves a settled
+    /// value: `.ready` stays ready, `.failed` stays failed until the new
+    /// callback answers (the retry is honest).
+    private func noteVoicePipelineStartRequested() {
+        manualTalkReadiness.noteStartRequested()
+        StartupSignposts.end(.voicePipelineStartRequested, note: "request-issued")
+        StartupSignposts.begin(.voicePipelineCallbackCompleted)
+        publishManualTalkReadiness()
+    }
+
+    /// The pipeline-start callback SUCCEEDED — the contract's only path
+    /// to `.ready`, for the boot start and for every later recycle,
+    /// search-capture resume and enrollment resume alike (a retry that
+    /// works is genuinely ready again).
+    private func noteVoicePipelineStartSucceeded() {
+        manualTalkReadiness.noteStartSucceeded()
+        StartupSignposts.end(.voicePipelineCallbackCompleted, note: "success")
+        // [BOOT-REVIEW, design item] A capability that comes back
+        // DEGRADES no longer: the recorded boot failure is cleared by the
+        // success that proves it (never by a timer), so the persistent
+        // "Voice activation is unavailable" state disappears here.
+        startupBoot.clearFailure(.preparingVoice)
+        publishManualTalkReadiness()
+    }
+
+    /// The pipeline-start callback FAILED. The failure is sticky: it is
+    /// surfaced to the user (Talk hero + `startup.degraded.*` capability
+    /// state) and cleared only by a retry that actually succeeds.
+    private func noteVoicePipelineStartFailed(_ error: Error) {
+        manualTalkReadiness.noteStartFailed(reason: "\(error)")
+        StartupSignposts.end(.voicePipelineCallbackCompleted, note: "failure")
+        publishManualTalkReadiness()
+    }
+
+    /// Main-confined publish of the machine's value (the callbacks are
+    /// documented to arrive on main; the hop is the same defensive marshal
+    /// `updateVoiceReadiness`'s tracker uses).
+    private func publishManualTalkReadiness() {
+        let value = manualTalkReadiness.value
+        if Thread.isMainThread {
+            voicePipelineReadiness = value
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.voicePipelineReadiness = value
+            }
+        }
+    }
+
+    // MARK: - Degraded-capability recovery ([BOOT-REVIEW, design item])
+
+    /// The ONE recovery action each persistent `StartupDegradation` offers
+    /// — installed as `StartupDegradationRecoverySeam.perform` by
+    /// `start()`. Every branch retries the REAL work the failed boot stage
+    /// was doing, and the recorded failure is cleared by that work
+    /// actually succeeding (or by the voice callback's success above) —
+    /// never by a timer. The degraded capsule disappears because the
+    /// capability recovered.
+    ///
+    /// Main-confined (button tap path).
+    private func recoverDegradedCapability(_ capability: StartupDegradation.Capability) {
+        switch capability {
+        case .savedData:
+            // Re-run the restore batch off-main — the same call the boot
+            // makes, so self-heal/cap semantics are identical — then clear
+            // the failure once the published windows are repopulated.
+            bootQueue.async { [weak self] in
+                guard let self else { return }
+                self.bootRestoreData()
+                DispatchQueue.main.async {
+                    self.startupBoot.clearFailure(.restoringData)
+                }
+            }
+        case .voiceActivation:
+            // The Talk hero's own retry path: recycle the pipeline. The
+            // start callback settles both the readiness machine and the
+            // recorded failure (success clears it, failure re-records it).
+            recoverVoiceCycle()
+        case .speechEngineWarm:
+            // Re-plan and re-run the warm from LIVE config. The boot is
+            // already `.ready` here, so this cannot rewind a stage — and
+            // `advancePastWarmPhase` skips phase 3 for a post-boot warm.
+            startBootWarmPhase()
+        case .modelSetup:
+            // Re-run the file-heavy housekeeping phase, then clear the
+            // failure on completion. Idempotent by construction (the
+            // installs no-op when their target exists).
+            bootQueue.async { [weak self] in
+                guard let self else { return }
+                self.bootFinishSetup()
+                DispatchQueue.main.async {
+                    self.startupBoot.clearFailure(.finishingSetup)
+                }
+            }
+        }
+    }
+
     /// [STARTUP-R2] Schedules the sherpa KWS build on MAIN, a short
     /// delay after the speak affordance first goes ready — the build
     /// never contributes to perceived startup, and wake-word detection
@@ -2293,11 +2419,18 @@ final class AppCoordinator: ObservableObject {
             }
         }
         armVoiceStartWatchdog()
+        // [BOOT-REVIEW P0-2] The boot's start REQUEST: the published
+        // manual-Talk readiness stays `.loading` until the callback below
+        // answers — that callback, and only that callback, decides
+        // `.ready` / `.failed`.
+        noteVoicePipelineStartRequested()
         voicePipeline.start { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
                 self.voiceState = .idle
+                // [BOOT-REVIEW P0-2] The contract's single `.ready` path.
+                self.noteVoicePipelineStartSucceeded()
                 // One-shot at startup: puts the STT + interpreter in the
                 // state `voiceEngineStack` says they should be in (e.g. a
                 // Gemini key already saved, or the on-device stack picked
@@ -2306,6 +2439,9 @@ final class AppCoordinator: ObservableObject {
             case .failure(let err):
                 self.voiceError = "\(err)"
                 self.voiceState = .error("\(err)")
+                // [BOOT-REVIEW P0-2] Sticky failure — no timer, no other
+                // boot phase clears it; only a retry that succeeds does.
+                self.noteVoicePipelineStartFailed(err)
                 // Honest degradation: the spinner dismisses, the voice
                 // error caption tells the user exactly what happened.
                 self.startupBoot.recordFailure(.preparingVoice)
@@ -2482,14 +2618,20 @@ final class AppCoordinator: ObservableObject {
         print("[AppCoordinator] recycling voice pipeline")
         voicePipeline?.stop()
         armVoiceStartWatchdog()
+        // [BOOT-REVIEW P0-2] A RECYCLE is a retry: the readiness machine
+        // reports it honestly (either outcome), so a failed boot start
+        // upgrades to `.ready` the moment a real restart succeeds.
+        noteVoicePipelineStartRequested()
         voicePipeline?.start { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
                 self.voiceState = .idle
+                self.noteVoicePipelineStartSucceeded()
             case .failure(let err):
                 self.voiceError = "\(err)"
                 self.voiceState = .error("\(err)")
+                self.noteVoicePipelineStartFailed(err)
             }
             completion(result)
         }
@@ -2671,14 +2813,18 @@ final class AppCoordinator: ObservableObject {
     private func resumeVoiceAfterSearchCaptureIfNeeded() {
         guard voiceWasSuspendedForSearchCapture else { return }
         voiceWasSuspendedForSearchCapture = false
+        // [BOOT-REVIEW P0-2] Same honest reporting as the recycle above.
+        noteVoicePipelineStartRequested()
         voicePipeline?.start { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
                 self.voiceState = .idle
+                self.noteVoicePipelineStartSucceeded()
             case .failure(let err):
                 self.voiceError = "\(err)"
                 self.voiceState = .error("\(err)")
+                self.noteVoicePipelineStartFailed(err)
             }
         }
     }
@@ -5881,14 +6027,18 @@ extension AppCoordinator: VoicePipelineSuspending {
     func resumeAfterSampleCapture() {
         guard voiceWasSuspendedForEnrollmentSample else { return }
         voiceWasSuspendedForEnrollmentSample = false
+        // [BOOT-REVIEW P0-2] Same honest reporting as the recycle above.
+        noteVoicePipelineStartRequested()
         voicePipeline?.start { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
                 self.voiceState = .idle
+                self.noteVoicePipelineStartSucceeded()
             case .failure(let err):
                 self.voiceError = "\(err)"
                 self.voiceState = .error("\(err)")
+                self.noteVoicePipelineStartFailed(err)
             }
         }
     }
