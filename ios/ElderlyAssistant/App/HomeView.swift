@@ -671,14 +671,24 @@ struct TalkButton: View {
     private var heroContent: some View {
         VStack(spacing: 6) {
             if isLoading {
+                // [LOADING-CONTRAST] (2026-09-11) The loading disc is the
+                // SOLID rest blue (`discTint` above — the accepted darker-
+                // background fix for the "light grey speak button"
+                // feedback), so the spinner stays WHITE: white on
+                // `stateIdle` #3B6EA5 measures ≈5.3:1, while the dark
+                // `textPrimary` #3D2F24 would drop to ≈3.0:1. `.large`
+                // control size makes the spinner itself clearly visible
+                // instead of the default small wheel.
                 ProgressView()
                     .tint(.white)
+                    .controlSize(.large)
                 // The stage label is essential localized text: it wraps
                 // rather than shrinking (≥18pt caption token, no
-                // `minimumScaleFactor`).
+                // `minimumScaleFactor`), and bold keeps it clearly legible
+                // on the solid disc.
                 Text(loadingStageLabel)
                     .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
-                                                weight: .semibold))
+                                                weight: .bold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
                     .padding(.horizontal, 12)
