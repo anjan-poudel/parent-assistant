@@ -97,13 +97,36 @@ final class AlarmKitSystemScheduler: AlarmKitTimerScheduling {
     }
 
     func scheduleTimer(id: UUID, duration: TimeInterval, label: String?) async throws {
+        // SDK shape note (verified against iPhoneOS26.5):
+        // `AlarmPresentation.Alert.init(title:)` ships in 26.1; the
+        // 26.0 form requires an explicit stopButton (deprecated in 26.1
+        // because the SYSTEM now provides the stop affordance). Both
+        // branches build the same alert; the availability split exists
+        // purely to stay warning-free across 26.0–26.5.
+        let alert: AlarmPresentation.Alert
+        if #available(iOS 26.1, *) {
+            alert = AlarmPresentation.Alert(
+                title: LocalizedStringResource(
+                    stringLiteral: L10n.str("timerAlarm.title", locale: locale)
+                )
+            )
+        } else {
+            alert = AlarmPresentation.Alert(
+                title: LocalizedStringResource(
+                    stringLiteral: L10n.str("timerAlarm.title", locale: locale)
+                ),
+                stopButton: AlarmButton(
+                    text: LocalizedStringResource(
+                        stringLiteral: L10n.str("timerAlarm.stop", locale: locale)
+                    ),
+                    textColor: .white,
+                    systemImageName: "xmark"
+                )
+            )
+        }
         let attributes = AlarmAttributes<TimerAlarmSystemMetadata>(
             presentation: AlarmPresentation(
-                alert: AlarmPresentation.Alert(
-                    title: LocalizedStringResource(
-                        stringLiteral: L10n.str("timerAlarm.title", locale: locale)
-                    )
-                ),
+                alert: alert,
                 countdown: AlarmPresentation.Countdown(
                     title: LocalizedStringResource(
                         stringLiteral: label ?? L10n.str("timerAlarm.countdownTitle", locale: locale)
