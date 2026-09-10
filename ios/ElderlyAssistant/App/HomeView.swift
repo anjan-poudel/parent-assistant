@@ -106,6 +106,19 @@ struct HomeView: View {
                         }
                         .equatable()
                     }
+                    // [REBALANCE] One flexible spacer above the stage —
+                    // Home's only empty space. A VStack splits its
+                    // leftover height between flexible children, so this
+                    // spacer and the scroll region below share it and the
+                    // talk stage settles near the vertical centre of the
+                    // free area: the hero no longer clings to the top bar
+                    // (design review: "vertically center the Talk stage …
+                    // keep empty space for focus"). It is one flexible
+                    // Spacer, never a dashboard row, and it collapses to
+                    // its 8pt minimum on SE-sized screens, where the
+                    // scroll region then absorbs the overflow exactly as
+                    // before.
+                    Spacer(minLength: 8)
                     // The talk stage is FIXED chrome (home-redesign v3):
                     // hero + the small status/rotating texts under it sit
                     // between the top bar and the outcome region, so the

@@ -354,13 +354,30 @@ struct FeedbackRegion: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            if setup.isVisible {
+            // [REBALANCE] At most ONE contextual instruction/outcome line
+            // under the hero (design review): while a freshly-landed
+            // outcome card is EXPANDED it owns the region, and the
+            // optional-setup nudge waits its turn — it returns with the
+            // card's collapse (6s later). The stand-down is deliberately
+            // not permanent: `lastOutcome` is only ever set, never
+            // cleared, and this strip is Home's only way back into a
+            // half-finished setup, so keying visibility on "an outcome
+            // exists" would remove the affordance for the rest of the
+            // session. (Making it permanent needs an outcome-dismissal
+            // path in the coordinator — sibling-owned; see the review
+            // report.)
+            if setup.isVisible, !showsExpandedOutcome {
                 SetupStrip(setup: setup, action: onResumeSetup)
             }
             feedback
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 4)
+    }
+
+    /// A freshly-landed outcome card is on screen and expanded.
+    private var showsExpandedOutcome: Bool {
+        outcome != nil && outcomeExpanded
     }
 
     @ViewBuilder
