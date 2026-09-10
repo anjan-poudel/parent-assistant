@@ -519,10 +519,12 @@ struct TalkButton: View {
     /// flight (or it failed), the session state is `.stopped`, whose
     /// dimmed grey-blue tint reads as a light grey disc under white text
     /// — unreadable (user feedback, 2026-09-11). Loading and failed
-    /// render the SOLID rest blue instead, so the white glyphs keep their
-    /// contrast and the disc never flashes grey → blue at readiness.
+    /// render the SOLID brand pink instead — the artwork's own scheme
+    /// (pink disc, white spinner + label, like the logo) — so the white
+    /// glyphs keep their contrast and the disc never flashes grey → blue
+    /// at readiness.
     private var discTint: Color {
-        (isLoading || failure != nil) ? DesignTokens.stateIdle : visuals.tint
+        (isLoading || failure != nil) ? DesignTokens.brandPink : visuals.tint
     }
 
     /// The hold-to-reset affordance is live only in a reset-eligible state,

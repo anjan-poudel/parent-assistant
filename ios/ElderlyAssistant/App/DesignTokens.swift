@@ -30,6 +30,11 @@ enum DesignTokens {
     // Every fill keeps ≥4.5:1 white-glyph contrast (unit-tested in
     // DesignTokensTests) and ≥3:1 against the cream background.
     static let stateIdle = Color(red: 0.231, green: 0.431, blue: 0.647)      // #3B6EA5 — rest blue
+    /// [REBRAND] The seniOS brand pink (#C73D74) — the launch-screen and
+    /// app-icon artwork's background. The Talk hero's loading/failed disc
+    /// renders in it with white glyphs (the artwork's own scheme), so the
+    /// pre-readiness state reads as the brand mark.
+    static let brandPink = Color(red: 0.780, green: 0.239, blue: 0.455)      // #C73D74
     /// "Voice is off" (visual-polish 2026-09-08): the honest dimmed-blue
     /// sibling of `stateIdle` — same hue family, clearly darker, so an
     /// off/stopped hero never reads as an alarm (red is reserved for
