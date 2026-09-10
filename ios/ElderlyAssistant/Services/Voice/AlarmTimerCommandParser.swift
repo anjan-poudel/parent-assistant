@@ -32,16 +32,18 @@ import Foundation
 ///    ladder unchanged.
 ///  - Cancellations are NOT blanket-vetoed any more (2026-09-08): the
 ///    sanctioned shapes parse — `parseAlarmOff` ("turn off the alarm",
-///    "cancel my alarm", "अलार्म बन्द गर") and `parseAlarmSnooze`
-///    ("snooze", "snooze for 15 minutes", "स्नुज गर") — and the router
-///    checks them right after `parseAlarm` (the set parses win first;
-///    `parseAlarm`'s own cancel veto already returns nil for every OFF
-///    shape, so the order is safe). Shapes OUTSIDE the sanctioned set
+///    "cancel my alarm", "अलार्म बन्द गर"), `parseAlarmSnooze`
+///    ("snooze", "snooze for 15 minutes", "स्नुज गर") and, since
+///    2026-09-11 ([HOME-TIMER-CHIP]), `parseTimerCancel` ("cancel the
+///    timer", "stop the timer", "टाइमर बन्द गर", "टाइमर रोक") — and the
+///    router checks them right after `parseAlarm` (the set parses win
+///    first; `parseAlarm`'s own cancel veto already returns nil for every
+///    OFF shape, so the order is safe). Shapes OUTSIDE the sanctioned set
 ///    still return nil and fall through: time-qualified cancellations
 ///    ("cancel the 6 am alarm" — the off branch must not guess which
-///    alarm), TIMER cancellations ("cancel the timer" — there is no
-///    timer-off command yet, and the timer parser keeps its cancel veto)
-///    and timer-worded snoozes ("snooze the timer" — timer business,
+///    alarm), duration- or clock-qualified TIMER cancellations ("cancel
+///    the 5 minute timer" — the timer-cancel branch must not guess which
+///    one) and timer-worded snoozes ("snooze the timer" — timer business,
 ///    not an alarm re-wake).
 ///  - Deterministic: `parseAlarm` takes an injectable `now`/`calendar`;
 ///    `parseTimer` is pure. Time-of-day phrases resolve to the NEXT future
@@ -276,6 +278,57 @@ enum AlarmTimerCommandParser {
         if NepaliTimeParser.parse(cleaned) != nil { return nil }
         // Plain "snooze" — the fixed default.
         return Self.defaultSnoozeMinutes
+    }
+
+    /// [HOME-TIMER-CHIP] (2026-09-11) True when the utterance is a
+    /// sanctioned timer-CANCEL command: a timer marker PLUS a stop
+    /// phrasing — "cancel the timer", "stop the timer", "टाइमर बन्द गर",
+    /// "टाइमर रोक", "टाइमर रद्द गर", "टाइमर बन्द". The cancel branch
+    /// always means the NEAREST running timer, so qualified shapes must
+    /// NOT parse: a duration ("cancel the 5 minute timer") or a clock
+    /// phrase ("stop the 6 o'clock timer") names a specific timer and
+    /// falls through unchanged, exactly like `parseAlarmOff`'s
+    /// time-qualified rule. Questions and negations are vetoed. English
+    /// "cancel"/"stop" and the bare Nepali stop verbs are whole-token;
+    /// the imperative/honorific Nepali phrases match as substrings.
+    static func parseTimerCancel(_ text: String,
+                                 locale: Locale = AppLanguage.persisted().locale) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = NepaliTimeParser.normalise(trimmed)
+        guard !normalized.isEmpty else { return false }
+        // [NUMBER-WORDS] word amounts count as amounts here too: "पाँच
+        // मिनेटको टाइमर रद्द गर" is a duration-qualified cancellation
+        // and must not blank-cancel the nearest timer.
+        let cleaned = strippedOfEmphasisParticles(
+            NumberWordNormalizer.normalise(normalized, locale: locale))
+        guard timerMarkers.contains(where: { containsToken($0, in: cleaned) }) else {
+            return false
+        }
+        guard !vetoedAsQuestionOrNegation(cleaned) else { return false }
+        // A duration-qualified cancellation names a specific timer — with
+        // several timers the cancel branch must not guess which one; it
+        // falls through unchanged instead.
+        if countdownSeconds(in: cleaned) != nil { return false }
+        // Same rule for clock-shaped qualifications ("cancel the 6
+        // o'clock timer").
+        if NepaliTimeParser.parse(cleaned) != nil { return false }
+        return hasTimerStopPhrasing(cleaned)
+    }
+
+    /// Sanctioned timer-STOP verb phrasings. English "cancel"/"stop" and
+    /// the bare Nepali stop verbs (बन्द/रोक/रद्द — "टाइमर बन्द",
+    /// "टाइमर रोक") are whole-token: a token like "बन्दोबस्त" can never
+    /// trip them. The enumerated Nepali imperative/honorific गर/
+    /// गर्नुहोस्/रोक्नुहोस् forms match as substrings (the
+    /// grapheme-cluster hazard `parseAlarmOff` documents).
+    private static func hasTimerStopPhrasing(_ text: String) -> Bool {
+        if containsToken("cancel", in: text) { return true }
+        if containsToken("stop", in: text) { return true }
+        if containsToken("बन्द", in: text) { return true }
+        if containsToken("रोक", in: text) { return true }
+        if containsToken("रद्द", in: text) { return true }
+        if nepaliTimerStopPhrases.contains(where: { text.contains($0) }) { return true }
+        return false
     }
 
     /// Spoken duration for confirmations: "5 minutes" / "1 hour 30
@@ -539,6 +592,18 @@ enum AlarmTimerCommandParser {
     private static let nepaliOffPhrases = [
         "बन्द गर", "बन्द गर्नुहोस्", "बन्द गर्नुस्", "बन्द गरिदिनुहोस्", "बन्द गरिदेउ",
         "रद्द गर", "रद्द गर्नुहोस्", "रद्द गर्नुस्"
+    ]
+
+    /// [HOME-TIMER-CHIP] (2026-09-11) Sanctioned timer-STOP phrases —
+    /// the OFF phrases plus the timer-specific रोक (stop) forms. The
+    /// BARE verbs (बन्द/रोक/रद्द — "टाइमर बन्द", "टाइमर रोक") are
+    /// deliberately NOT here: `hasTimerStopPhrasing` matches them
+    /// whole-token only, so they cannot ride inside other words the way
+    /// the enumerated गर/गर्नुहोस् phrases safely can.
+    private static let nepaliTimerStopPhrases = [
+        "बन्द गर", "बन्द गर्नुहोस्", "बन्द गर्नुस्", "बन्द गरिदिनुहोस्", "बन्द गरिदेउ",
+        "रद्द गर", "रद्द गर्नुहोस्", "रद्द गर्नुस्",
+        "रोक्नुहोस्", "रोकिदिनुहोस्", "रोकिदेउ"
     ]
 
     private static func hasOffVerbPhrasing(_ text: String) -> Bool {

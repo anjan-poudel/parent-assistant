@@ -572,6 +572,18 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
         return alarmSnoozeOutcome
     }
 
+    /// [HOME-TIMER-CHIP] (2026-09-11) Voice timer CANCEL — protocol
+    /// requirement with an extension default of .noActiveTimer; these
+    /// stored vars script every outcome. The default keeps pre-existing
+    /// router tests (none of which speak a timer-cancel shape) on their
+    /// historical path.
+    var timerCancelOutcome: TimerCancelOutcome = .noActiveTimer
+    private(set) var timerCancelRequestCount = 0
+    func requestTimerCancel() -> TimerCancelOutcome {
+        timerCancelRequestCount += 1
+        return timerCancelOutcome
+    }
+
     var pendingRephraseCommand: InterpretedCommand? { rephrasePended?.command }
     private(set) var rephrasePended: (command: InterpretedCommand, sourceTranscript: String?)?
     func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?) {
@@ -2693,6 +2705,121 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
         XCTAssertFalse(bus.emittedEvents.contains { $0.component == "alarms_timers" })
     }
 
+    // MARK: - Timer CANCEL branch ([HOME-TIMER-CHIP] 2026-09-11)
+
+    func testEnglishTimerCancelRoutesToCoordinatorAndConfirms() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.timerCancelOutcome = .cancelled
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "cancel the timer")
+
+        XCTAssertEqual(result, .unrecognised(transcript: "cancel the timer"))
+        XCTAssertEqual(coordinator.timerCancelRequestCount, 1)
+        XCTAssertTrue(coordinator.timerStartRequests.isEmpty,
+                      "a CANCEL command must never START a timer")
+        XCTAssertTrue(coordinator.genericReplies.contains { $0 == "Timer cancelled." },
+                      "the confirmation speaks, got \(coordinator.genericReplies)")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_cancel"
+                && $0.outcome == "success"
+        })
+    }
+
+    func testNepaliTimerCancelRoutesAndSpeaksTheConfirmation() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.timerCancelOutcome = .cancelled
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "टाइमर बन्द गर")
+
+        XCTAssertEqual(coordinator.timerCancelRequestCount, 1)
+        XCTAssertTrue(coordinator.genericReplies.contains { $0.contains("टाइमर बन्द भयो") },
+                      "the confirmation speaks, got \(coordinator.genericReplies)")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_cancel"
+                && $0.outcome == "success"
+        })
+    }
+
+    func testStopTheTimerRoutesAsCancelNotASet() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.timerCancelOutcome = .cancelled
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "stop the timer")
+
+        XCTAssertEqual(coordinator.timerCancelRequestCount, 1)
+        XCTAssertTrue(coordinator.timerStartRequests.isEmpty,
+                      "a stop shape must never become a set")
+    }
+
+    func testNepaliBareTimerBandRoutesAsCancel() {
+        // The bare-verb shape from the user's scope list: "टाइमर बन्द".
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.timerCancelOutcome = .cancelled
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "टाइमर बन्द")
+
+        XCTAssertEqual(coordinator.timerCancelRequestCount, 1)
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_cancel"
+        })
+    }
+
+    func testTimerCancelNoActiveTimerSpeaksTheHonestFallback() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.timerCancelOutcome = .noActiveTimer
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "cancel the timer")
+
+        XCTAssertEqual(coordinator.timerCancelRequestCount, 1)
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0 == "You don't have any timers running."
+        }, "the honest no-active-timer line speaks, got \(coordinator.genericReplies)")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_cancel"
+                && $0.outcome == "no_active_timer"
+        })
+    }
+
+    func testTimerCancelFailureSpeaksTheHonestFallback() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = en
+        coordinator.timerCancelOutcome = .failed
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "cancel the timer")
+
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0.hasPrefix("Sorry — I couldn't cancel the timer")
+        })
+        XCTAssertFalse(coordinator.genericReplies.contains { $0.contains("cancelled.") },
+                       "a failed cancel must never sound like a confirmation")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_cancel"
+                && $0.outcome == "failed"
+        })
+    }
+
+    func testDurationQualifiedTimerCancelFallsThroughTheStage() {
+        // "cancel the 5 minute timer" names a specific timer — the
+        // cancel branch must not guess which one; the utterance falls
+        // through unchanged.
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "cancel the 5 minute timer")
+
+        XCTAssertEqual(coordinator.timerCancelRequestCount, 0)
+        XCTAssertFalse(bus.emittedEvents.contains { $0.component == "alarms_timers" })
+    }
+
     // MARK: - REGRESSION-AUDIT (2026-09-10): async-dispatch reply hold
 
     /// Six routing + permission-fallback tests above failed
@@ -2719,11 +2846,27 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
                                    speaker: MockSpeaker(),
                                    turnTracer: tracer)
 
+        // [FLAKE-PIN] (2026-09-11) The hold pin moved off the synchronous
+        // read of `isTurnReplyPending`. Reading the flag right after
+        // `route()` returned raced the handler's non-isolated Task: on
+        // iOS 18.3 the executor can run the mock round-trip to completion
+        // — committing the reply and clearing the flag — before the
+        // assert executes, so this test failed intermittently on 18.3
+        // while always passing on 26.5 (pre-existing on origin/master).
+        // The pin is unchanged — the turn is held during the alarm
+        // round-trip — but it is observed through the router's resolve
+        // callback, registered BEFORE `route()`: it fires only when a
+        // marked hold is released (`resolveTurnReplyPending`'s guard), so
+        // on the broken commit (no hold marked) it never fires and this
+        // test still fails. `awaitReplyCommit` keeps the bounded-wait
+        // poll of the flag itself (1 ms poll, ≤5 s) and pins that the
+        // turn resolved only after the reply was committed.
+        var turnWasHeld = false
+        router.onTurnReplyResolved = { turnWasHeld = true }
+
         let result = router.route(transcript: "set an alarm for 6 am")
 
         XCTAssertEqual(result, .unrecognised(transcript: "set an alarm for 6 am"))
-        XCTAssertTrue(router.isTurnReplyPending,
-                      "the alarm round-trip must hold the pipeline like the LLM path")
         await awaitReplyCommit(router, coordinator)
 
         XCTAssertEqual(coordinator.alarmSetRequests.count, 1)
@@ -2734,6 +2877,8 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
         })
         XCTAssertFalse(router.isTurnReplyPending,
                        "the turn resolves only after the reply was committed")
+        XCTAssertTrue(turnWasHeld,
+                      "the alarm round-trip must hold the pipeline like the LLM path")
     }
 
     /// The timer twin of `testAlarmRoutingSurvivesTimingHooks` — including
@@ -2750,10 +2895,23 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
                                    speaker: MockSpeaker(),
                                    turnTracer: tracer)
 
+        // [FLAKE-PIN] (2026-09-11) Same 18.3 executor race as its alarm
+        // twin `testAlarmRoutingSurvivesTimingHooks`: the synchronous
+        // `isTurnReplyPending` read raced the handler's non-isolated
+        // Task, which on iOS 18.3 can commit the reply and clear the
+        // flag before the assert runs (intermittent on 18.3, stable on
+        // 26.5). The hold pin is unchanged — the turn is held during the
+        // timer round-trip — but is observed through the router's resolve
+        // callback, registered BEFORE `route()`; it fires only when a
+        // marked hold is released, so the broken commit still fails.
+        // `awaitReplyCommit` keeps the bounded-wait flag poll (1 ms poll,
+        // ≤5 s) and pins that the turn resolved only after the commit.
+        var turnWasHeld = false
+        router.onTurnReplyResolved = { turnWasHeld = true }
+
         let result = router.route(transcript: "टाइमर ५ मिनेट")
 
         XCTAssertEqual(result, .unrecognised(transcript: "टाइमर ५ मिनेट"))
-        XCTAssertTrue(router.isTurnReplyPending)
         await awaitReplyCommit(router, coordinator)
 
         XCTAssertEqual(coordinator.timerStartRequests.count, 1)
@@ -2765,6 +2923,8 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
                 && $0.outcome == "permission_denied"
         })
         XCTAssertFalse(router.isTurnReplyPending)
+        XCTAssertTrue(turnWasHeld,
+                      "the timer round-trip must hold the pipeline like the LLM path")
     }
 
     /// The synchronous off/snooze branches commit inside `route()` and

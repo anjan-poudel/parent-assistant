@@ -255,6 +255,18 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// speaks the honest "snoozed until <spoken time>" line on success.
     func requestAlarmSnooze(minutes: Int) -> AlarmSnoozeOutcome
 
+    /// [HOME-TIMER-CHIP] (2026-09-11) Voice timer CANCEL ("cancel the
+    /// timer", "stop the timer", "टाइमर बन्द गर", "टाइमर रोक"):
+    /// cancels the NEAREST running timer (soonest deadline) through the
+    /// existing cancel path — persist removal, cancel the pending
+    /// notification and, when system-managed, the AlarmKit timer — and
+    /// returns the honest outcome so the router speaks the confirmation
+    /// ("Timer cancelled." / "टाइमर बन्द भयो।") or the "no timers
+    /// running" / failure fallback. SYNCHRONOUS (cancellation needs no
+    /// permission round-trip), main-confined like the service. Same
+    /// requirement-with-extension-default pattern as `requestAlarmOff`.
+    func requestTimerCancel() -> TimerCancelOutcome
+
     /// [ALARMKIT-ALARMS] (2026-09-10) The honest denial line when an
     /// alarm-set hits a permission denial — backend-specific copy:
     /// AlarmKit authorization on iOS 26+ (`alarmAlarmKit.permissionDenied`),
@@ -317,6 +329,13 @@ extension VoiceCommandCoordinating {
     // under test) makes the stage do anything.
     func requestAlarmOff() -> AlarmOffOutcome { .noAlarm }
     func requestAlarmSnooze(minutes: Int) -> AlarmSnoozeOutcome { .noAlarm }
+    // [HOME-TIMER-CHIP] (2026-09-11) Inert default — a conformer that
+    // does not opt in (mocks/doubles) reports .noActiveTimer, and the
+    // router stage speaks the honest "no timers running" line. Only a
+    // coordinator that explicitly implements the member
+    // (AppCoordinator, and the scripted mock under test) cancels
+    // anything.
+    func requestTimerCancel() -> TimerCancelOutcome { .noActiveTimer }
     // [ALARMKIT-ALARMS] (2026-09-10) Inert default — a conformer that
     // does not opt in (every mock/double) keeps the historical
     // notification-permission denial line. `AppCoordinator` overrides it
@@ -747,6 +766,21 @@ final class CommandRouter {
             handleAlarmSnoozeCommand(minutes: snoozeMinutes)
             return .unrecognised(transcript: raw)
         }
+        // [HOME-TIMER-CHIP] (2026-09-11) Timer CANCEL branch — checked
+        // after the set + off + snooze parses (a set command wins first)
+        // and before the briefing stage + topic table. Only the
+        // sanctioned shapes parse (see
+        // `AlarmTimerCommandParser.parseTimerCancel`); duration- or
+        // clock-qualified cancellations ("cancel the 5 minute timer")
+        // fall through unchanged — the cancel branch must not guess
+        // which timer. The stage only PARSES and hands off; the
+        // coordinator cancels the NEAREST active timer and returns the
+        // honest outcome this stage speaks. SYNCHRONOUS — no permission
+        // round-trip, so the reply is committed inside `route()` itself.
+        if AlarmTimerCommandParser.parseTimerCancel(raw, locale: stageLocale) {
+            handleTimerCancelCommand()
+            return .unrecognised(transcript: raw)
+        }
 
         // [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1: "read me my
         // briefing" — a deterministic pre-answer stage like the topic
@@ -1157,6 +1191,35 @@ final class CommandRouter {
         case .failed:
             emitAlarmTimers(eventType: "alarm_snoozed", outcome: "failed")
             speakWithVisibleOutcome(key: "alarms.snoozeFailed")
+        }
+    }
+
+    /// [HOME-TIMER-CHIP] (2026-09-11) Voice timer CANCEL handler — same
+    /// synchronous contract as the OFF handler: the coordinator cancels
+    /// the NEAREST active timer and returns the outcome this handler
+    /// speaks. `.cancelled` confirms ("Timer cancelled." / "टाइमर बन्द
+    /// भयो।"), `.noActiveTimer` speaks the honest "no timers running"
+    /// line, `.failed` the honest fallback. Observability is emitted at
+    /// resolution (component "alarms_timers", event "timer_cancel"),
+    /// never before.
+    private func handleTimerCancelCommand() {
+        guard coordinator != nil else {
+            speakWithVisibleOutcome(key: "timers.cancelFailed")
+            return
+        }
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        switch coordinator?.requestTimerCancel() ?? .noActiveTimer {
+        case .cancelled:
+            emitAlarmTimers(eventType: "timer_cancel", outcome: "success")
+            let text = L10n.str("timers.cancelled", locale: locale)
+            coordinator?.noteGenericReply(text)
+            speak(text: text, locale: locale)
+        case .noActiveTimer:
+            emitAlarmTimers(eventType: "timer_cancel", outcome: "no_active_timer")
+            speakWithVisibleOutcome(key: "timers.none")
+        case .failed:
+            emitAlarmTimers(eventType: "timer_cancel", outcome: "failed")
+            speakWithVisibleOutcome(key: "timers.cancelFailed")
         }
     }
 

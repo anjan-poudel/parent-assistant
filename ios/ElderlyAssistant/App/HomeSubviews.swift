@@ -312,6 +312,137 @@ extension TalkStage: Equatable {
     }
 }
 
+// MARK: - Home timer chip ([HOME-TIMER-CHIP] 2026-09-11)
+
+/// The active-timer chip in the hero's empty area: the NEAREST running
+/// timer's remaining time, ticking every second through the house
+/// `TimelineView` countdown pattern, plus a one-tap STOP. Renders nothing
+/// (no space taken) while no timer runs.
+///
+/// Honest limits (see `HomeTimerChipModel` for the full doctrine): the
+/// chip DERIVES remaining from the app-side record (`endsAt − now`) —
+/// the system countdown (Dynamic Island / Lock Screen widget for
+/// AlarmKit timers, the delivered one-shot for the UN path) is an
+/// independent rendering of the same timer, and pause is not modeled.
+///
+/// Stop is one tap with the same friction as every other timer surface
+/// (the Settings timer row's cancel, the alarm screen's STOP): cancelling
+/// a running timer is instantly redoable ("set a timer for 5 minutes"),
+/// not the irreversible class of destructive action the app's
+/// confirmation dialogs guard.
+struct HomeTimerChipView: View {
+    let service: AlarmTimersService
+    @Environment(\.locale) private var locale
+
+    @StateObject private var viewModel: HomeTimerChipViewModel
+
+    init(service: AlarmTimersService, onStop: @escaping (UUID) -> Void) {
+        self.service = service
+        _viewModel = StateObject(wrappedValue: HomeTimerChipViewModel(
+            rows: { service.timers },
+            stopTimer: onStop))
+    }
+
+    var body: some View {
+        Group {
+            if viewModel.isVisible {
+                chip
+            }
+        }
+        // The service publishes on create/cancel/expire; every publish
+        // recomputes the snapshot (visibility, nearest, count). The
+        // per-second ticking below is the display's own business.
+        //
+        // `receive(on:)` is load-bearing: `objectWillChange` fires during
+        // the service's `willSet` — BEFORE the mutation commits — so a
+        // synchronous refresh would read the STALE rows (a cancelled
+        // timer would linger until the next publish). The main-queue hop
+        // delivers the refresh in a later runloop turn, after the rows
+        // are already the new value.
+        .onReceive(service.objectWillChange.receive(on: DispatchQueue.main)) {
+            viewModel.refresh()
+        }
+    }
+
+    private var chip: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 14) {
+                Image(systemName: "timer")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(DesignTokens.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(LocalizedStringKey("homeTimer.remaining"))
+                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                                   weight: .medium))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                    Text(HomeTimerChipModel.countdownText(
+                        remaining: viewModel.snapshot.endsAt?.timeIntervalSince(context.date) ?? 0,
+                        isNepali: isNepali))
+                        .font(.system(size: DesignTokens.homeTimerDigitPointSize, weight: .bold))
+                        .foregroundStyle(DesignTokens.textPrimary)
+                        .monospacedDigit()
+                }
+                if let label = viewModel.snapshot.label {
+                    Text(label)
+                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                                   weight: .regular))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                if viewModel.snapshot.activeCount > 1 {
+                    multipleBadge
+                }
+                Button {
+                    viewModel.stopNearest()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 30))
+                        .foregroundStyle(DesignTokens.stateError)
+                        .frame(minWidth: DesignTokens.minTapTargetSize,
+                               minHeight: DesignTokens.minTapTargetSize)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(LocalizedStringKey("homeTimer.stop")))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+    }
+
+    /// "+N" when more than one timer runs — the chip shows the NEAREST,
+    /// this badge keeps the count honest ("+2" = two more running).
+    private var multipleBadge: some View {
+        let more = viewModel.snapshot.activeCount - 1
+        let text = HomeTimerChipModel.devanagari("+\(more)")
+        return Text(isNepali ? text : "+\(more)")
+            .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                        weight: .semibold))
+            .foregroundStyle(DesignTokens.accent)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(DesignTokens.accent.opacity(0.12))
+            .clipShape(Capsule())
+            .accessibilityLabel(Text(L10n.fmt("homeTimer.multiple", locale: locale, more)))
+    }
+
+    private var isNepali: Bool {
+        locale.language.languageCode?.identifier == "ne"
+    }
+}
+
+extension HomeTimerChipView: Equatable {
+    /// The service identity is the only datum — the rows reach the chip
+    /// through the view model's own subscription, and the stop closure is
+    /// deliberately out (the house equality rule).
+    static func == (lhs: HomeTimerChipView, rhs: HomeTimerChipView) -> Bool {
+        ObjectIdentifier(lhs.service) == ObjectIdentifier(rhs.service)
+    }
+}
+
 // MARK: - Feedback region: setup strip + live caption / outcome
 // (redesign spec §3.1, §6)
 
