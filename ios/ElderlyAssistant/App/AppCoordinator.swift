@@ -2217,11 +2217,63 @@ final class AppCoordinator: ObservableObject {
     /// skipped when the pipeline is gone (recycled mid-build) or not
     /// settled: the Null engine's no-op behavior then applies exactly
     /// as it does pre-build.
+    ///
+    /// [BOOT-REVIEW P0-4] WHERE the build runs is now platform-specific:
+    ///
+    ///  - OFF the main thread on a physical device, on this type's ONE
+    ///    dedicated serial executor (`wakeWordBuildQueue`). The KWS
+    ///    session build (model resolution + ONNX session/tokenizer
+    ///    construction) is CPU- and IO-heavy: on the main thread it is a
+    ///    visible hitch, and the whole point of the deferred slot was to
+    ///    keep wake-word work off the critical path. One SERIAL executor
+    ///    means two builds can never overlap (the shared model directory
+    ///    plus the memory spike are single-build resources).
+    ///
+    ///  - ON the main thread in the simulator ONLY, behind
+    ///    `#if targetEnvironment(simulator)`: the sherpa-onnx /
+    ///    onnxruntime session creation segfaults off-main on the x86_64
+    ///    simulator (EXC_BAD_ACCESS in ConstantFolding, crash 2026-09-09
+    ///    204647, faulting queue `senios.startup.boot`). That workaround
+    ///    is a SIMULATOR defect, so it is scoped to the simulator — a
+    ///    device build never takes the main-thread path.
+    ///
+    /// Only wake-word STATUS is gated on this build (`wakeWordEngine` /
+    /// `wakeWordEngineRealAtLaunch`, and the pipeline's engine swap when
+    /// it is still idle). Manual Talk readiness is deliberately NOT —
+    /// wake-word and manual Talk are separate capabilities.
     private func buildDeferredWakeWordEngine() {
         guard voicePipeline != nil else { return }
-        let launch = Self.makeWakeWordEngine(observabilityBus: observabilityBus)
+        #if targetEnvironment(simulator)
+        applyWakeWordEngine(Self.makeWakeWordEngine(observabilityBus: observabilityBus))
+        #else
+        wakeWordBuildQueue.async { [weak self] in
+            guard let self else { return }
+            let launch = Self.makeWakeWordEngine(observabilityBus: self.observabilityBus)
+            DispatchQueue.main.async {
+                self.applyWakeWordEngine(launch)
+            }
+        }
+        #endif
+    }
+
+    /// The KWS build's ONE dedicated serial executor ([BOOT-REVIEW
+    /// P0-4]): user-initiated QoS (the user is waiting on wake word at
+    /// most as a background affordance, never for a reply), serial so
+    /// builds queue instead of overlapping.
+    private let wakeWordBuildQueue = DispatchQueue(
+        label: "senios.startup.kws",
+        qos: .userInitiated
+    )
+
+    /// Main-confined landing of a finished KWS build: publishes the
+    /// honest engine status, tells the manual-Talk machine the wake-word
+    /// engine settled (deliberately a no-op there — see
+    /// `ManualTalkReadinessState.noteWakeWordEngineSettled`), and swaps
+    /// the engine into a still-idle pipeline.
+    private func applyWakeWordEngine(_ launch: (engine: WakeWordEngine, isReal: Bool)) {
         self.wakeWordEngine = launch.engine
         self.wakeWordEngineRealAtLaunch = launch.isReal
+        manualTalkReadiness.noteWakeWordEngineSettled(isReal: launch.isReal)
         print("[AppCoordinator] deferred KWS build settled real=\(launch.isReal)")
         guard launch.isReal,
               voicePipeline?.state == .idle else { return }
@@ -2304,7 +2356,7 @@ final class AppCoordinator: ObservableObject {
             guard let self, !self.warmPhaseSettled else { return }
             print("[AppCoordinator] warm-start budget reached — boot advances; warm finishes detached")
             self.startupBoot.recordFailure(.warmingEngines)
-            self.advancePastWarmPhase()
+            self.advancePastWarmPhase(outcome: "watchdog")
         }
         warmWatchdogWork = work
         DispatchQueue.main.asyncAfter(
