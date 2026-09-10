@@ -2519,6 +2519,29 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
         })
     }
 
+    func testLagauuTimerPhraseNeverFiresYouTubeStage() async {
+        // [YT-LAGAU2] Safety, end to end: adding the nasalized
+        // double-matra verb "लगाऊँ" to the YouTube marker family must
+        // never let an alarm/timer phrase reach the YouTube stage — the
+        // युट्युब gate holds, so the timer still routes as a timer and
+        // the bus never sees a youtube event.
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "पाँच मिनेटको टाइमर लगाऊँ")
+        await awaitReplyCommit(router, coordinator)
+
+        XCTAssertTrue(coordinator.alarmSetRequests.isEmpty)
+        XCTAssertEqual(coordinator.timerStartRequests.count, 1)
+        XCTAssertEqual(coordinator.timerStartRequests[0].durationSeconds, 300)
+        XCTAssertFalse(bus.emittedEvents.contains { $0.component == "youtube" },
+                       "a लगाऊँ timer phrase must never fire the YouTube stage")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_started"
+                && $0.outcome == "success"
+        })
+    }
+
     func testTimerPermissionDeniedSpeaksTheTimerFallback() async {
         let coordinator = MockVoiceCommandCoordinator()
         coordinator.localeOverride = en
