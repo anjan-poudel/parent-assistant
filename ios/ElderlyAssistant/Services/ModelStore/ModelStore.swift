@@ -444,9 +444,21 @@ final class ModelStore {
     // MARK: - Bundled models
 
     /// Copies an app-bundled model into place next to the ggml files.
-    /// Idempotent — no-op when the target already exists. Used for the
-    /// default medium model so first-run never downloads it.
-    func installBundledModel(for id: ModelID, bundle: Bundle = .main) -> URL? {
+    /// Idempotent — no-op when the target already exists.
+    ///
+    /// [BOOT-REVIEW P1-5] Called at FIRST USE of the stack that needs the
+    /// model, never at boot: the copy is a one-off hundreds-of-MB write,
+    /// so the caller owns WHEN it is worth paying. `progress` reports
+    /// determinate byte counts (first callback is `0 / total`, last is
+    /// `total / total`) so the model-specific UI can show a real
+    /// percentage instead of an indeterminate spinner.
+    ///
+    /// Failure leaves NOTHING behind — the partial file is removed before
+    /// returning nil, so a half-written artifact can never be mistaken
+    /// for an installed one by `isCached`/`path(for:)`.
+    func installBundledModel(for id: ModelID,
+                             bundle: Bundle = .main,
+                             progress: ((Int64, Int64) -> Void)? = nil) -> URL? {
         guard let entry = ModelCatalog.entry(for: id),
               let resourceName = entry.bundledResourceName,
               let source = bundle.url(forResource: resourceName,
@@ -457,18 +469,75 @@ final class ModelStore {
         if fileManager.fileExists(atPath: dest.path) {
             return dest
         }
+        let bundledBytes = (try? source.resourceValues(forKeys: [.fileSizeKey]))?
+            .fileSize
+        let total = bundledBytes.map(Int64.init) ?? Int64(entry.sizeBytes)
+        // Disk-space pre-flight (same volume query the download path uses):
+        // a 586 MB copy on a full device should fail fast and say why,
+        // not write for a minute and then run out.
+        if let free = try? URL(fileURLWithPath: NSHomeDirectory())
+            .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            .volumeAvailableCapacityForImportantUsage,
+           free < total {
+            emit("bundled_model_install_failed", outcome: "failure",
+                 modelId: id, errorCode: "disk_full")
+            return nil
+        }
         do {
             try ensureDirectory(dest.deletingLastPathComponent())
-            try fileManager.copyItem(at: source, to: dest)
+            try streamCopy(from: source, to: dest, total: total,
+                           progress: progress)
+            // Same Data Protection Complete + exclude-from-backup the
+            // download path applies (`finalize`) — a bundled copy is
+            // exactly as sensitive as a downloaded one.
+            try? fileManager.setAttributes(
+                [.protectionKey: FileProtectionType.complete],
+                ofItemAtPath: dest.path
+            )
+            var mutable = dest
+            var resource = URLResourceValues()
+            resource.isExcludedFromBackup = true
+            try? mutable.setResourceValues(resource)
             emit("bundled_model_installed", outcome: "success", modelId: id,
                  errorCode: nil)
             return dest
         } catch {
+            // Never leave a partial artifact where `isCached` would see it.
+            try? fileManager.removeItem(at: dest)
             emit("bundled_model_install_failed", outcome: "failure",
                  modelId: id, errorCode: "copy")
             return nil
         }
     }
+
+    /// Chunked copy so a long bundled install can report determinate
+    /// progress (the same 4 MB read the checksum pass uses, sized up so a
+    /// 586 MB model reports ~140 honest updates instead of thousands).
+    private func streamCopy(from source: URL, to dest: URL,
+                            total: Int64,
+                            progress: ((Int64, Int64) -> Void)?) throws {
+        let input = try FileHandle(forReadingFrom: source)
+        defer { try? input.close() }
+        guard fileManager.createFile(atPath: dest.path, contents: nil) else {
+            throw ModelStoreError.cacheDirectoryFailed(
+                CocoaError(.fileWriteUnknown))
+        }
+        let output = try FileHandle(forWritingTo: dest)
+        defer { try? output.close() }
+        progress?(0, total)
+        var written: Int64 = 0
+        while try autoreleasepool(invoking: { () throws -> Bool in
+            let chunk = input.readData(ofLength: Self.copyChunkBytes)
+            guard !chunk.isEmpty else { return false }
+            try output.write(contentsOf: chunk)
+            written += Int64(chunk.count)
+            progress?(written, total)
+            return true
+        }) {}
+    }
+
+    /// Chunk size for bundled installs (4 MB).
+    private static let copyChunkBytes = 4 * 1_048_576
 
     // MARK: - WhisperKit directory artifacts
 

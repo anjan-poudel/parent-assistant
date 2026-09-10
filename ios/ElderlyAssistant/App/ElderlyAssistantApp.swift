@@ -9,6 +9,18 @@ struct ElderlyAssistantApp: App {
     // honest per-feature status (unavailable/preparing/ready/failed).
     @StateObject private var readinessRegistry = ReadinessRegistry()
 
+    /// [BOOT-REVIEW, instrumentation 2/7] Opens the `first-meaningful-frame`
+    /// interval before anything else the app does. `@StateObject`'s
+    /// autoclosure means the coordinator is NOT built here — it is built at
+    /// first body evaluation — so this interval covers exactly the
+    /// composition + first-frame window the review wants measured
+    /// (bootstrap-init is a separate, nested interval opened inside
+    /// `AppCoordinator.init()`), and it is closed by the root view's
+    /// `onAppear` below.
+    init() {
+        StartupSignposts.begin(.firstMeaningfulFrame)
+    }
+
     var body: some Scene {
         WindowGroup {
             // NOTE: previously applied `.fontDesign(.rounded)` app-wide here
@@ -21,6 +33,15 @@ struct ElderlyAssistantApp: App {
             // choice. Revisit only after confirming full Devanagari
             // coverage under SF Rounded on the actual target OS versions.
             ContentView()
+            // [BOOT-REVIEW, instrumentation 2/7] The root view has
+            // appeared: its first view tree is being committed for
+            // display, which is the closest honest signal SwiftUI exposes
+            // for "a meaningful frame is on screen". `end` is a no-op if
+            // the interval is already closed (a second appearance after
+            // backgrounding does not open a new one).
+            .onAppear {
+                StartupSignposts.end(.firstMeaningfulFrame)
+            }
             .environmentObject(appCoordinator)
             .environmentObject(appCoordinator.voiceSession)
             .environmentObject(appCoordinator.modelDownloadService)

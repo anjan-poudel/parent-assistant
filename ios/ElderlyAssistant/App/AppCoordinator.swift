@@ -107,6 +107,19 @@ final class AppCoordinator: ObservableObject {
     private let bootQueue = DispatchQueue(label: "senios.startup.boot",
                                           qos: .userInitiated)
 
+    /// [BOOT-REVIEW P1-5] Utility-QoS serial queue for model
+    /// housekeeping — stale-encoder cleanup and the bundled STT model's
+    /// first-use install. Housekeeping is explicitly NOT user-blocking
+    /// work: it must never sit on the boot queue (which gates `.ready`)
+    /// or on main.
+    private let modelHousekeepingQueue = DispatchQueue(
+        label: "senios.models.housekeeping",
+        qos: .utility
+    )
+    /// One bundled-STT install at a time (the install is idempotent, but
+    /// re-entrancy would queue a second useless copy attempt).
+    private var bundledSTTInstallInFlight = false
+
     /// User's STT model pick from the UI. Nil = automatic selection.
     /// Persisted in UserDefaults (a UI preference, not a secret) and
     /// pushed to WhisperSpeechRecognizer so it survives restarts.
@@ -530,7 +543,20 @@ final class AppCoordinator: ObservableObject {
     /// `handleConfirmationResponse` or the session-machine timeout (C12).
     @Published var pendingConfirmationEntryId: UUID?
 
-    private let storage: EncryptedLocalStorage
+    /// [BOOT-REVIEW P1-6] The app's encrypted storage, routed per key by
+    /// `StoragePlacementPolicy`: small secrets (the Gemini/Search/YouTube
+    /// credentials, the chosen model) stay in the Keychain, and every
+    /// structured payload — contacts, places, appointments, briefing,
+    /// feed config, histories, reminder state, caches — lives in an
+    /// encrypted file under Application Support with Data Protection
+    /// Complete. Payloads written before the split are copied across on
+    /// first read, transactionally, by `MigratingEncryptedStorage`.
+    ///
+    /// The concrete type (not `EncryptedLocalStorage`) so the boot restore
+    /// can read the phase-1 keys through ONE store opening
+    /// (`withReadSnapshot`); every store still receives it as the protocol
+    /// and cannot tell which channel it is on.
+    private let storage: MigratingEncryptedStorage
     private let observabilityBus: ObservabilityBus
     /// [TURN-TIMING] Turn-scoped stage tracer — created in init (after
     /// the bus) and injected into the pipeline/router/speaker composition
@@ -647,6 +673,22 @@ final class AppCoordinator: ObservableObject {
     /// the readiness stays `.degraded` (hero tappable — its tap is the
     /// retry) and a later retry success upgrades degraded → ready.
     private var voiceReadinessBootSettled = false
+    /// [BOOT-REVIEW P0-2] MANUAL-TALK readiness — a stricter sibling of
+    /// `voiceReadinessStatus` above, on the contract the startup review
+    /// specifies: the hero renders it from the very first frame
+    /// (`.loading(.starting)`), it reaches `.ready` ONLY from a real
+    /// `voicePipeline.start` success callback, and a failure is NEVER
+    /// auto-recovered by a timer or another boot phase. Wake-word engine
+    /// state cannot move it in either direction (wake-word is a separate
+    /// capability; manual Talk must come up even when KWS degrades to the
+    /// Null engine).
+    ///
+    /// The state machine is a plain value type (`ManualTalkReadinessState`)
+    /// so its rules are unit-tested without a coordinator; the coordinator
+    /// is its only writer and publishes the value here.
+    @Published private(set) var voicePipelineReadiness: VoicePipelineReadiness =
+        ManualTalkReadinessState.initial
+    private var manualTalkReadiness = ManualTalkReadinessState()
     /// [STARTUP-R2] True once the deferred KWS build has been scheduled
     /// (or run) this launch — the one-shot guard for the post-ready
     /// wake-word build.
@@ -693,14 +735,32 @@ final class AppCoordinator: ObservableObject {
     /// `handleScenePhase`, and via `MainActor.run` after async fires).
     /// Drives the Today's-briefing Home widget presence and the briefing
     /// leaf; the leaf's "Speak again" replays this stored text.
-    @Published private(set) var todayBriefing: StoredBriefing?
+    /// [BOOT-REVIEW P1-7] A briefing landing/expiring is one of the two
+    /// inputs of the derived notification count, so it refreshes here —
+    /// and nowhere else in the publish path.
+    @Published private(set) var todayBriefing: StoredBriefing? {
+        didSet {
+            guard todayBriefing != oldValue else { return }
+            refreshActiveNotificationCount()
+        }
+    }
     // Feed agent (feed-agent task, 2026-09-08): the feed's composition
     // root lives here like every other store/service — the Settings leaf
     // edits through the coordinator's mutation methods, the Feed leaf
     // renders the published state, and the service itself publishes
     // nothing (its results forward through `refreshFeed()`).
-    private let feedSettingsStore: FeedSettingsStore
-    private let feedService: FeedService
+    ///
+    /// [BOOT-REVIEW P0-1] Both are built on FIRST USE. The feed is a
+    /// secondary capability: nothing on the first frame (Home, Settings,
+    /// Emergency) renders feed state, and the configuration these read
+    /// only arrives with the boot's restore phase — so neither object
+    /// needs to exist before first paint. `start()` touches both on main
+    /// before the off-main restore reads the store (lazy initialization
+    /// is not thread-safe).
+    private lazy var feedSettingsStore = FeedSettingsStore(storage: storage)
+    private lazy var feedService = FeedService(settings: feedSettingsStore,
+                                               transport: URLSession.shared,
+                                               observability: observabilityBus)
 
     /// The configured feed sources — the Settings leaf's list (published
     /// so add/remove re-renders it live).
@@ -719,7 +779,11 @@ final class AppCoordinator: ObservableObject {
     // automatically). `feedTranslations` is the item-id cache AND the
     // single source the cards read; the other two sets drive the card's
     // in-flight spinner and its honest-failure caption.
-    private let feedTranslator: FeedTranslator
+    /// [BOOT-REVIEW P0-1] FIRST USE (it rides `geminiClient`). A card's
+    /// Translate tap is the only entry point, and that is always long
+    /// after the first frame.
+    private lazy var feedTranslator = FeedTranslator(client: geminiClient,
+                                                     observability: observabilityBus)
     @Published private(set) var feedTranslations: [String: FeedTranslation] = [:]
     @Published private(set) var feedTranslatingIDs: Set<String> = []
     @Published private(set) var feedTranslationFailedIDs: Set<String> = []
@@ -764,27 +828,94 @@ final class AppCoordinator: ObservableObject {
     // Nothing in `start()` requires these anymore — the onboarding models
     // step no longer downloads anything by default (see
     // `OnboardingWizardView.ModelsStep`, repurposed for the Gemini API key).
-    let modelStore: ModelStore
-    let modelDownloadService: ModelDownloadService
-    private let whisperSpeechRecognizer: WhisperSpeechRecognizer
-    private let fallbackSpeechRecognizer: OnDeviceSpeechRecognizer
+    ///
+    /// [BOOT-REVIEW P0-1] Both are built on FIRST USE. `ModelStore.init`
+    /// resolves Application Support and prepares its directory tree —
+    /// filesystem work that must not sit between launch and the first
+    /// frame, and that nothing on the first frame needs: model paths are
+    /// only resolved by the boot's voice phase, the warm, and downloads.
+    lazy var modelStore: ModelStore = {
+        do {
+            return try ModelStore(observabilityBus: observabilityBus)
+        } catch {
+            fatalError("Cannot initialise ModelStore: \(error)")
+        }
+    }()
+    lazy var modelDownloadService = ModelDownloadService(
+        store: modelStore,
+        observabilityBus: observabilityBus
+    )
+    /// [BOOT-REVIEW P0-1] FIRST USE, not `init()`: constructing either
+    /// recognizer forces `modelStore` (filesystem) and, for WhisperKit,
+    /// the ANE model lookup. The boot's voice phase is what actually
+    /// needs them; the first frame does not. The factory attaches
+    /// `turnTracer` and the dialect-bias provider so the instance arrives
+    /// fully configured, exactly as the old init-time wiring did.
+    private lazy var whisperSpeechRecognizer: WhisperSpeechRecognizer = {
+        let recognizer = WhisperSpeechRecognizer(modelStore: modelStore,
+                                                 observabilityBus: observabilityBus)
+        recognizer.turnTracer = turnTracer
+        recognizer.biasProfileProvider = makeDialectBiasProfileProvider()
+        return recognizer
+    }()
+    private lazy var fallbackSpeechRecognizer = OnDeviceSpeechRecognizer(
+        audioEngine: audioEngine,
+        observabilityBus: observabilityBus,
+        pushMode: true
+    )
     /// ANE WhisperKit runtime (memory: ios-stt-runtime-decision). Preferred
     /// over the CPU whisper.cpp recognizer whenever its model artifact is
     /// installed (`ModelStore.directoryURL(for: .whisperKitNepali)`) or a
     /// bench override is set — same hot-swap mechanism, GPU/ANE compute.
-    private let whisperKitSpeechRecognizer: WhisperKitSpeechRecognizer
+    ///
+    /// [BOOT-REVIEW P0-1] FIRST USE, not `init()` (it forces `modelStore`,
+    /// and the bench env probe + tracer/bias wiring live in the factory
+    /// so the instance is fully configured on arrival).
+    private lazy var whisperKitSpeechRecognizer: WhisperKitSpeechRecognizer = {
+        let recognizer = WhisperKitSpeechRecognizer(
+            observabilityBus: observabilityBus,
+            modelStore: modelStore
+        )
+        // [TURN-TIMING] Both whisper recognizers mark `asr_loaded` with
+        // their measured load ms when a load happens inside a live turn.
+        recognizer.turnTracer = turnTracer
+        recognizer.biasProfileProvider = makeDialectBiasProfileProvider()
+        // Bench hook (debug): point the ANE runtime at a sideloaded model
+        // folder or a WhisperKit-named model via scheme env vars —
+        // WHISPERKIT_MODEL_FOLDER / WHISPERKIT_MODEL_NAME. Production
+        // selection uses the installed catalog artifact instead.
+        let wkEnv = ProcessInfo.processInfo.environment
+        if let folder = wkEnv["WHISPERKIT_MODEL_FOLDER"] {
+            recognizer.modelFolderURL = URL(fileURLWithPath: folder)
+        } else if let name = wkEnv["WHISPERKIT_MODEL_NAME"] {
+            recognizer.modelName = name
+        }
+        return recognizer
+    }()
 
     /// v2: the Gemini API key + client (see `GeminiConfigStore`,
     /// `GeminiClient`). `geminiConfigStore` is exposed for the Settings
     /// screen that lets a family member paste in the key.
-    let geminiConfigStore: GeminiConfigStore
-    /// Daily Gemini call budget (open item #5, 2026-09-06): the shared
-    /// per-day counter + family-editable soft cap wired into
-    /// `GeminiClient`. Exposed for the Settings → Gemini AI screen
-    /// (today's usage + cap editor).
-    let geminiCostGovernor: GeminiCostGovernor
-    private let geminiClient: GeminiClient
-    private let geminiSpeechRecognizer: GeminiSpeechRecognizer
+    ///
+    /// [BOOT-REVIEW P0-1] The four objects below are built on FIRST USE.
+    /// `GeminiCostGovernor.init` reads the persisted spend counters from
+    /// the Keychain (a real `SecItemCopyMatching` round-trip), and the
+    /// client/recognizer/translator are pure consumers of it — none of
+    /// them is reachable from the first frame. `start()` still kicks the
+    /// key restore on the boot queue (`loadPersistedValues`), which is
+    /// where the store's own read happens.
+    private(set) lazy var geminiConfigStore = GeminiConfigStore(storage: storage)
+    private(set) lazy var geminiCostGovernor = GeminiCostGovernor(
+        storage: storage,
+        observabilityBus: observabilityBus
+    )
+    private lazy var geminiClient = GeminiClient(configStore: geminiConfigStore,
+                                                 observabilityBus: observabilityBus,
+                                                 costGovernor: geminiCostGovernor)
+    private lazy var geminiSpeechRecognizer = GeminiSpeechRecognizer(
+        client: geminiClient,
+        observabilityBus: observabilityBus
+    )
 
     // MARK: - Wake phrase ("ये कान्छी", open item #4)
     //
@@ -803,7 +934,14 @@ final class AppCoordinator: ObservableObject {
     /// Settings → Web search. Exposed for that Settings screen;
     /// `CommandRouter` consults `isConfigured` before the search tool may
     /// ever fire.
-    let searchConfigStore: SearchConfigStore
+    ///
+    /// [BOOT-REVIEW P0-1] FIRST USE, not `init()`: the store's
+    /// constructor reads BOTH credentials from the Keychain (two
+    /// `SecItemCopyMatching` round-trips), which is exactly the kind of
+    /// pre-first-frame work that used to sit between launch and paint.
+    /// Nothing on the first frame reads a search credential — Settings
+    /// and the router (which is built post-first-frame in `start()`) do.
+    private(set) lazy var searchConfigStore = SearchConfigStore(storage: storage)
 
     /// [YOUTUBE] (2026-09-08) YouTube Data API v3 key for the voice
     /// YouTube feature — the same Keychain `EncryptedLocalStorage`
@@ -812,7 +950,11 @@ final class AppCoordinator: ObservableObject {
     /// the YouTube search deeplink instead of resolving + playing the
     /// top result. Exposed for that Settings screen; `CommandRouter`
     /// consults `apiKey` at stage time.
-    let youtubeConfigStore: YouTubeConfigStore
+    ///
+    /// [BOOT-REVIEW P0-1] FIRST USE, not `init()` — same reason as
+    /// `searchConfigStore` above (its constructor reads the key from the
+    /// Keychain).
+    private(set) lazy var youtubeConfigStore = YouTubeConfigStore(storage: storage)
 
     /// [TOOL-DEBUG-LOG] (2026-09-07) Encrypted debug log of every
     /// local-tool (weather + web search) request and outcome — the store
@@ -886,13 +1028,34 @@ final class AppCoordinator: ObservableObject {
     /// `LlamaCommandInterpreter.isAvailable`). When unavailable the
     /// chain's slot is simply empty and the router's cloud layer / keyword
     /// fallback carry the turn.
-    private let llamaCommandInterpreter: LlamaCommandInterpreter
+    ///
+    /// [BOOT-REVIEW P0-1] FIRST USE, not `init()`: both interpret the
+    /// user's commands, so the earliest they can be needed is the first
+    /// voice turn — far past the first frame — and constructing them
+    /// forces `modelStore` (filesystem) plus, transitively, the plugin
+    /// registry. `preferredBaseId` reads the RESTORED brain preference at
+    /// factory time, so a stored choice still wins over the default.
+    private lazy var llamaCommandInterpreter = LlamaCommandInterpreter(
+        modelStore: modelStore,
+        observabilityBus: observabilityBus,
+        preferredBaseId: resolvedBrainModelID,
+        config: LlamaCommandInterpreter.Config(confidenceThreshold: 0.4,
+                                               maxTokens: 128,
+                                               timeoutSeconds: 10),
+        pluginRegistry: pluginRegistry
+    )
     /// The fine-tuned intent model (spec 2026-09-05 §8) — the local brain
     /// `IntentRouter` prefers once its GGUF is cached (the preferred half
     /// of `LocalBrainChain`). Until the bake-off artifact ships,
     /// `isAvailable` is false and the chain delegates to the LLaMA
     /// stand-in, keeping an on-device interpretation path alive.
-    private let localIntentInterpreter: LocalIntentInterpreter
+    private lazy var localIntentInterpreter = LocalIntentInterpreter(
+        modelStore: modelStore,
+        observabilityBus: observabilityBus,
+        config: LocalIntentInterpreter.Config(confidenceThreshold: 0.4,
+                                              maxTokens: 192,
+                                              timeoutSeconds: 3)
+    )
     /// Set once in `start()`. `geminiCommandInterpreter` is the concrete
     /// Gemini-backed interpreter — one of the two optional BRAINS behind
     /// `intentRouter` (spec 2026-09-05 §4.0), never installed in the
@@ -949,7 +1112,14 @@ final class AppCoordinator: ObservableObject {
 
     /// The plugin registry backing `.plugin` intent dispatch and plugin
     /// prompt composition (design doc 2026-09-05).
-    private(set) var pluginRegistry: PluginRegistry!
+    ///
+    /// [BOOT-REVIEW P0-1] Built on FIRST USE, with every built-in
+    /// registered inside the factory — the appliance/calendar plugins
+    /// hold storage-backed state and the YouTube plugin holds the Keychain
+    /// config store, none of which the first frame touches. Construction
+    /// is forced by the interpreter/router composition in `start()`,
+    /// which hands the registry to each of them.
+    private(set) lazy var pluginRegistry = makePluginRegistry()
 
     /// The DEFAULT assistant-brain model `start()` auto-downloads when
     /// an interpreter is needed (interpreter-availability fix 2026-09-06):
@@ -1057,12 +1227,71 @@ final class AppCoordinator: ObservableObject {
         + ModelCatalog.availableBrainEntries.map(\.id)
         + [ModelCatalog.piperNepali]
 
+    // MARK: - First-use factories ([BOOT-REVIEW P0-1])
+
+    /// Builds the plugin registry WITH its built-ins registered (design:
+    /// docs/superpowers/specs/2026-09-05-plugin-architecture-design.md) —
+    /// the `.plugin` dispatch table and the interpreters' prompt
+    /// composition both read it. Kept out of `init()` because the
+    /// built-ins are storage-backed services the first frame never
+    /// touches; `routinePlugin` is constructed eagerly (safety-adjacent
+    /// reminders) and simply handed over here.
+    private func makePluginRegistry() -> PluginRegistry {
+        let registry = PluginRegistry(observabilityBus: observabilityBus)
+        registry.register(NepaliCalendarPlugin(storage: storage))
+        registry.register(ApplianceHelperPlugin(storage: storage))
+        registry.register(routinePlugin)
+        // [YOUTUBE] (2026-09-08) The interpreter-side twin of the
+        // router's deterministic YouTube stage — same `YouTubeTool`
+        // behavior (shared config store + transport + opener seams).
+        registry.register(YouTubePlugin(configStore: youtubeConfigStore))
+        return registry
+    }
+
+    /// [ACCENT-ADAPT] per-user decode-biasing terms (doc
+    /// accent-adaptation.md P0.3): contact names + medication names +
+    /// supported app names compose into the dialect prompt once the
+    /// user's dialect is identified (a `.default` label keeps STT
+    /// byte-identical). Runs on the recognizer's inference/attempt
+    /// queue, never main; `DialectBiasComposer` caps + sanitises.
+    /// Contacts require permission — a denied/absent address book is an
+    /// honest empty list, never a failure.
+    ///
+    /// Held WEAKLY on the scheduler: it outlives the coordinator and
+    /// never references it back, so no retain cycle is possible. The
+    /// factory runs at first recognizer use (post-`init`), so the
+    /// definite-initialization restriction that forced a local alias
+    /// inside `init` no longer applies.
+    private func makeDialectBiasProfileProvider() -> () -> DialectBiasProfile {
+        let scheduler = medicationScheduler
+        return { [weak scheduler] in
+            var profile = DialectBiasProfile()
+            if let entries = try? AddressBookDirectory().allEntries() {
+                profile.contactNames = entries.map(\.name)
+            }
+            profile.medicationNames = scheduler?.medicationEntries()
+                .map(\.medicationName) ?? []
+            profile.appNames = DialectBiasProfile.standardSupportedAppNames
+            return profile
+        }
+    }
+
     init() {
-        // Core infrastructure. Storage uses the Keychain (Data Protection class
-        // Complete, per constitution §Security). Observability goes through the
+        // [BOOT-REVIEW P0 item 1] `bootstrap-init` — the composition root's
+        // own cost, measured separately from every other startup metric:
+        // this is what runs before the app exists at all (the App struct's
+        // `@StateObject` initializer), so it can never include work that
+        // only happens after the first frame.
+        StartupSignposts.begin(.bootstrapInit)
+        // Core infrastructure. Storage is encrypted at rest at Data
+        // Protection class Complete, per constitution §Security — the
+        // Keychain for small secrets, encrypted files under Application
+        // Support for everything structured ([BOOT-REVIEW P1-6]; the
+        // routing + migration rules live in `StoragePlacementPolicy` and
+        // `MigratingEncryptedStorage`). Observability goes through the
         // log sanitiser so no PII leaks into device logs.
         let bus = ConsoleObservabilityBus(sanitiser: LogSanitiser())
-        self.storage = KeychainEncryptedStorage()
+        self.storage = MigratingEncryptedStorage()
         self.observabilityBus = bus
         // [TURN-TIMING] The turn tracer lives as long as the app: every
         // voice component (pipeline, router, speaker, recognizers) shares
@@ -1122,11 +1351,9 @@ final class AppCoordinator: ObservableObject {
         // first paint, and the bounded-fetch service (TTL cache,
         // per-source timeout, PII-free logging). Created after the bus
         // exists, same as every bus consumer.
-        let feedSettingsStore = FeedSettingsStore(storage: storage)
-        self.feedSettingsStore = feedSettingsStore
-        self.feedService = FeedService(settings: feedSettingsStore,
-                                       transport: URLSession.shared,
-                                       observability: bus)
+        // [BOOT-REVIEW P0-1] `feedSettingsStore` / `feedService` are NOT
+        // constructed here any more — both are first-use lazy (see their
+        // property docs); the boot's restore phase is their first reader.
 
         // Calendar auto-add toggle (medical task, 2026-09-07) — default
         // ON when no value was ever stored. This is the property's ONLY
@@ -1267,52 +1494,13 @@ final class AppCoordinator: ObservableObject {
             .string(forKey: Self.navigationMapAppKey)
             .flatMap(NavigationMapApp.init(rawValue:)) ?? .auto
 
-        // Model store + download service. First-run UI drives downloads
-        // via `modelDownloadService`; the coordinator watches state changes
-        // and hot-swaps Whisper into the voice pipeline when its model is
-        // ready.
-        do {
-            self.modelStore = try ModelStore(observabilityBus: bus)
-        } catch {
-            fatalError("Cannot initialise ModelStore: \(error)")
-        }
-        self.modelDownloadService = ModelDownloadService(
-            store: modelStore,
-            observabilityBus: bus
-        )
-
-        // v2 pivot: Gemini API key + client. The key is entered via
-        // Settings (or the repurposed onboarding "models" step) by a
-        // family member — see GeminiConfigStore's doc comment.
-        let geminiConfig = GeminiConfigStore(storage: storage)
-        self.geminiConfigStore = geminiConfig
-        // Cost governance (open item #5, 2026-09-06): ONE governor for
-        // every billable Gemini call in the app. Voice, plugins, and
-        // vision all share `geminiClient`, so they inherit the cap with
-        // no per-plugin special-casing.
-        let costGovernor = GeminiCostGovernor(storage: storage, observabilityBus: bus)
-        self.geminiCostGovernor = costGovernor
-        self.geminiClient = GeminiClient(configStore: geminiConfig, observabilityBus: bus,
-                                         costGovernor: costGovernor)
-        self.geminiSpeechRecognizer = GeminiSpeechRecognizer(client: geminiClient, observabilityBus: bus)
-        // Feed translation (feed translation task, 2026-09-08): the
-        // on-ask translator rides the SAME geminiClient (and therefore
-        // the same cost governor and fail-fast no-key state) as voice
-        // and vision — no parallel provider path, no separate budget.
-        self.feedTranslator = FeedTranslator(client: geminiClient,
-                                             observability: bus)
-
-        // [LOCAL-TOOLS] (2026-09-07): Google Custom Search credentials for
-        // the on-device-stack web-search tool (Settings → Web search).
-        // Deliberately created BEFORE the router below — the router must
-        // receive the store (not nil) or the search hook stays dormant.
-        self.searchConfigStore = SearchConfigStore(storage: storage)
-        // [YOUTUBE] (2026-09-08): YouTube Data API key for the voice
-        // YouTube feature (Settings → YouTube). Created BEFORE the plugin
-        // registry and the router below — the plugin and the router's
-        // YouTube stage both receive this store (never a private copy).
-        let youtubeConfigStore = YouTubeConfigStore(storage: storage)
-        self.youtubeConfigStore = youtubeConfigStore
+        // [BOOT-REVIEW P0-1] The model store + download service, the
+        // Gemini key/cost/client trio and the search + YouTube credential
+        // stores are ALL first-use lazy now (see their property docs):
+        // each of them either hits the filesystem or the Keychain, which
+        // is precisely the pre-first-frame work this item removes. They
+        // are forced on main by `start()` before the boot queue reads
+        // them (lazy initialization is not thread-safe).
 
         // Voice pipeline. Uses the sherpa-onnx KWS engine when the
         // Settings toggle is ON and the KWS model directory is bundled
@@ -1335,95 +1523,38 @@ final class AppCoordinator: ObservableObject {
         self.wakeWordEngine = NullWakeWordEngine()
         self.wakeWordEngineRealAtLaunch = false
         self.voiceActivityDetector = EnergyVAD()
-        // Two STTs are constructed up-front:
-        // - fallback (SFSpeechRecognizer, en-US) — used while Whisper is
-        //   downloading. PUSH MODE: audio arrives via feed() from the
-        //   pipeline's permanent tap. Owned-tap mode made the recognizer
-        //   tear down and reinstall the shared tap + restart the engine on
-        //   every utterance — that churn wedged the audio server and
-        //   AudioToolbox's _ReportRPCTimeout then ABORTED the process
-        //   (7 crash reports, 2026-09-02).
-        // - Whisper — used once its model is cached; push mode + VAD-gated.
-        self.fallbackSpeechRecognizer = OnDeviceSpeechRecognizer(
-            audioEngine: audioEngine,
-            observabilityBus: bus,
-            pushMode: true
-        )
-        self.whisperSpeechRecognizer = WhisperSpeechRecognizer(
-            modelStore: modelStore,
-            observabilityBus: bus
-        )
-        self.whisperKitSpeechRecognizer = WhisperKitSpeechRecognizer(
-            observabilityBus: bus,
-            modelStore: modelStore
-        )
-        // [TURN-TIMING] Both whisper recognizers mark `asr_loaded` with
-        // their measured load ms when a load happens inside a live turn.
-        self.whisperSpeechRecognizer.turnTracer = turnTracer
-        self.whisperKitSpeechRecognizer.turnTracer = turnTracer
-        // Bench hook (debug): point the ANE runtime at a sideloaded model
-        // folder or a WhisperKit-named model via scheme env vars —
-        // WHISPERKIT_MODEL_FOLDER / WHISPERKIT_MODEL_NAME. Production
-        // selection uses the installed catalog artifact instead.
-        let wkEnv = ProcessInfo.processInfo.environment
-        if let folder = wkEnv["WHISPERKIT_MODEL_FOLDER"] {
-            whisperKitSpeechRecognizer.modelFolderURL =
-                URL(fileURLWithPath: folder)
-        } else if let name = wkEnv["WHISPERKIT_MODEL_NAME"] {
-            whisperKitSpeechRecognizer.modelName = name
-        }
+        // [BOOT-REVIEW P0-1] The three STTs (fallback SFSpeechRecognizer +
+        // both Whisper paths) and the plugin registry are first-use lazy
+        // now — see their property docs. Construction is what forces
+        // `modelStore` (filesystem) and the registry's storage-backed
+        // plugins, and the boot's voice phase is the first thing that
+        // genuinely needs them. The recognizer factories carry the
+        // `turnTracer`, dialect-bias-provider and bench-env wiring that
+        // used to run here, so the instances arrive exactly as before.
+        //
+        // The fallback recognizer keeps its PUSH-MODE contract (audio
+        // arrives via feed() from the pipeline's permanent tap): owned-tap
+        // mode made the recognizer tear down and reinstall the shared tap
+        // + restart the engine on every utterance — that churn wedged the
+        // audio server and AudioToolbox's _ReportRPCTimeout then ABORTED
+        // the process (7 crash reports, 2026-09-02).
 
-        // [ACCENT-ADAPT] per-user decode-biasing terms (doc
-        // accent-adaptation.md P0.3): contact names + medication names +
-        // supported app names compose into the dialect prompt once the
-        // user's dialect is identified (a `.default` label keeps STT
-        // byte-identical). Runs on the recognizer's inference/attempt
-        // queue, never main; `DialectBiasComposer` caps + sanitises.
-        // Contacts require permission — a denied/absent address book is
-        // an honest empty list, never a failure.
-        // NOTE: `[weak self]` capture is illegal during init (definite
-        // initialization) — capture a local alias of the already-
-        // initialized scheduler instead; it has the same lifetime as the
-        // coordinator and never references the coordinator back, so no
-        // retain cycle is possible.
-        let medicationScheduler = medicationScheduler
-        let biasProfileProvider: () -> DialectBiasProfile = { [weak medicationScheduler] in
-            var profile = DialectBiasProfile()
-            if let entries = try? AddressBookDirectory().allEntries() {
-                profile.contactNames = entries.map(\.name)
-            }
-            profile.medicationNames = medicationScheduler?.medicationEntries()
-                .map(\.medicationName) ?? []
-            profile.appNames = DialectBiasProfile.standardSupportedAppNames
-            return profile
-        }
-        whisperKitSpeechRecognizer.biasProfileProvider = biasProfileProvider
-        whisperSpeechRecognizer.biasProfileProvider = biasProfileProvider
+        // [ACCENT-ADAPT] The per-user decode-biasing provider is attached
+        // by the recognizer factories above; its composition (contact
+        // names + medication names + supported app names → the dialect
+        // prompt, `.default` keeps STT byte-identical) lives in
+        // `makeDialectBiasProfileProvider()`.
 
-        // Plugin registry (design: docs/superpowers/specs/
-        // 2026-09-05-plugin-architecture-design.md). Built-ins are
-        // registered here; both interpreters get it for prompt
-        // composition, and CommandRouter gets it for .plugin dispatch.
-        let pluginRegistry = PluginRegistry(observabilityBus: bus)
-        pluginRegistry.register(NepaliCalendarPlugin(storage: storage))
-        pluginRegistry.register(ApplianceHelperPlugin(storage: storage))
-        pluginRegistry.register(routinePlugin)
-        // [YOUTUBE] (2026-09-08) The interpreter-side twin of the
-        // router's deterministic YouTube stage — same `YouTubeTool`
-        // behavior (shared config store + transport + opener seams).
-        pluginRegistry.register(YouTubePlugin(configStore: youtubeConfigStore))
-        self.pluginRegistry = pluginRegistry
-
-        // Restore the persisted brain-model choice BEFORE the interpreter
-        // is constructed so its base model is the live one from the very
-        // first inference. Unknown IDs (a model removed from the catalog,
-        // or a bad stored value) are ignored so a stale preference can't
-        // wedge the picker — same rule as `sttModelPreference` below.
-        // Resolved into a LOCAL: `resolvedBrainModelID` reads `self`,
-        // which init may not do before every stored property is set.
-        // Sampling is NOT configurable here — every on-device brain runs
-        // deterministic temp-0 + fixed-seed sampling through
-        // `OnDeviceSampling` ([NO-GIBBERISH] 2026-09-07).
+        // Restore the persisted brain-model choice BEFORE any interpreter
+        // can be constructed (the lazy factory reads
+        // `resolvedBrainModelID`) so its base model is the live one from
+        // the very first inference. Unknown IDs (a model removed from the
+        // catalog, or a bad stored value) are ignored so a stale
+        // preference can't wedge the picker — same rule as
+        // `sttModelPreference` below. Resolved into a LOCAL: `self` reads
+        // are illegal during init. Sampling is NOT configurable here —
+        // every on-device brain runs deterministic temp-0 + fixed-seed
+        // sampling through `OnDeviceSampling` ([NO-GIBBERISH] 2026-09-07).
         let restoredBrain: ModelID?
         if let raw = UserDefaults.standard.string(forKey: Self.brainPreferenceKey) {
             let stored = ModelID(rawValue: raw)
@@ -1434,23 +1565,6 @@ final class AppCoordinator: ObservableObject {
         if let restoredBrain {
             self.brainModelPreference = restoredBrain
         }
-
-        self.llamaCommandInterpreter = LlamaCommandInterpreter(
-            modelStore: modelStore,
-            observabilityBus: bus,
-            preferredBaseId: restoredBrain ?? Self.defaultBrainModelID,
-            config: LlamaCommandInterpreter.Config(confidenceThreshold: 0.4,
-                                                   maxTokens: 128,
-                                                   timeoutSeconds: 10),
-            pluginRegistry: pluginRegistry
-        )
-        self.localIntentInterpreter = LocalIntentInterpreter(
-            modelStore: modelStore,
-            observabilityBus: bus,
-            config: LocalIntentInterpreter.Config(confidenceThreshold: 0.4,
-                                                  maxTokens: 192,
-                                                  timeoutSeconds: 3)
-        )
 
         // Restore the persisted voice-engine stack choice (default: the
         // live v2 Gemini pivot, matching today's always-Gemini behavior for
@@ -1586,19 +1700,27 @@ final class AppCoordinator: ObservableObject {
         // Forward the external calendar service's publishes (Settings
         // status/lead, scan results reaching the Reminders + Calendar
         // leaves) — nested ObservableObject, see the property docs.
+        //
+        // [BOOT-REVIEW P1-7] Forwarded through the COALESCING seam, not
+        // straight to `objectWillChange`: a scan publishes per-item, and
+        // every forwarded publish invalidates every coordinator observer
+        // (HomeView included). One invalidation per main-runloop turn is
+        // the same information with a fraction of the fan-out — observers
+        // re-read current values, and the turn always completes before the
+        // next frame is rendered.
         externalCalendarCancellable = externalCalendar.objectWillChange
             .sink { [weak self] _ in
-                self?.objectWillChange.send()
+                self?.noteForwardedStateChanged()
             }
 
         // Forward the alarms/timers service's publishes ([ALARMS-TIMERS]
-        // 2026-09-07) — nested ObservableObject, same pattern as the
-        // external-calendar forwarding above: the Settings leaf observes
-        // the coordinator, so a toggle/delete/timer-start must invalidate
-        // it through this sink.
+        // 2026-09-07) — nested ObservableObject, same pattern (and the same
+        // coalescing seam) as the external-calendar forwarding above: the
+        // Settings leaf observes the coordinator, so a toggle/delete/
+        // timer-start must invalidate it through this sink.
         alarmTimersCancellable = alarmTimersService.objectWillChange
             .sink { [weak self] _ in
-                self?.objectWillChange.send()
+                self?.noteForwardedStateChanged()
             }
 
         // [TIMER-ALARM] (2026-09-10) Ring-start hook: the looping bell
@@ -1623,8 +1745,78 @@ final class AppCoordinator: ObservableObject {
             else { return nil }
             return timer
         }
+
+        // [BOOT-REVIEW P1-7] Coalescing seam for the two nested-object
+        // forwards above.
+        //
+        // The forwarded services publish once PER ITEM they mutate (a
+        // calendar scan walks N events, each one a separate
+        // `objectWillChange`), and a raw forward turns each of those into
+        // a full coordinator invalidation — every observer of the
+        // coordinator (HomeView's whole tree included) re-evaluates per
+        // item, for state that is only meaningful once the scan settles.
+        //
+        // The contract kept here: an observer that re-reads current
+        // values after any one invalidation sees the SAME state as after
+        // the last one, so collapsing a burst into a single invalidation
+        // is lossless — and the invalidation lands on the next main-run-
+        // loop turn, before SwiftUI renders the following frame.
+        //
+        // Deliberately NOT a timer/debounce: nothing is delayed past the
+        // current turn, so a single publish (a Settings toggle) still
+        // invalidates within the same frame as before. The seam itself
+        // (`noteForwardedStateChanged`) lives next to the init's closing
+        // brace, below.
+
+        // [BOOT-REVIEW P0 item 1] End of the composition root. [BOOT-REVIEW
+        // P0-1] Everything past this point — store loads, model paths, AI
+        // runtimes, second-frame composition — is first-use lazy or
+        // deferred to `start()`, so this interval stays short by
+        // construction.
+        StartupSignposts.end(.bootstrapInit)
     }
 
+    /// True while a coalesced forwarded invalidation is already queued for
+    /// this main-runloop turn.
+    private var forwardedInvalidationPending = false
+
+    /// One invalidation per main-runloop turn, no matter how many nested
+    /// publishes arrive ([BOOT-REVIEW P1-7]). Main-confined; off-main
+    /// callers hop first (Combine sinks can fire on the publisher's
+    /// thread, and the forwarded services are not main-only by contract).
+    private func noteForwardedStateChanged() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.noteForwardedStateChanged()
+            }
+            return
+        }
+        guard !forwardedInvalidationPending else { return }
+        forwardedInvalidationPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.forwardedInvalidationPending = false
+            self.objectWillChange.send()
+        }
+    }
+
+    /// Starts the app's post-first-frame composition. Called from
+    /// `ContentView.onAppear` (and from the onboarding wizard's finish
+    /// path); idempotent.
+    ///
+    /// [BOOT-REVIEW P0-1] This method is deliberately TINY. Everything it
+    /// used to do synchronously (live-call detector, background-task
+    /// registration, the safety-reminder re-arms, the whole voice +
+    /// speaker + briefing + router composition) now runs one main-actor
+    /// turn LATER, in `composePostFirstFrame()`. `onAppear` runs inside
+    /// the same update transaction that renders the first frame, so
+    /// synchronous work here delays the frame that is supposed to show
+    /// the loading state; yielding one turn first lets SwiftUI commit it.
+    ///
+    /// What stays: the boot machine's `begin()` (the spinner's appearance
+    /// window opens now, so an indicator appears only if work is genuinely
+    /// still running) and the two static seams the UI reaches through —
+    /// both are a handful of instructions.
     func start() {
         guard !started else { return }
         started = true
@@ -1635,7 +1827,37 @@ final class AppCoordinator: ObservableObject {
         NewsSourceEditorSeam.makeEditor = { [newsSourceStore] in
             AnyView(NewsSourcesSettingsView(store: newsSourceStore))
         }
+        // [BOOT-REVIEW, design item] The degraded-state recovery seam:
+        // the persistent capability capsule's ONE button routes here, so
+        // the recovery is owned by the coordinator (the only object that
+        // can retry the failed work) without HomeView needing a
+        // coordinator reference.
+        StartupDegradationRecoverySeam.perform = { [weak self] capability in
+            self?.recoverDegradedCapability(capability)
+        }
 
+        // [BOOT-REVIEW P0-1] Boot begins BEFORE the composition, so the
+        // spinner's appearance delay is measured from the true start of
+        // startup work.
+        startupBoot.begin()
+        // [BOOT-REVIEW P0 item 1] `safety-data-restored` opens here and
+        // closes when the restore batch is published.
+        StartupSignposts.begin(.safetyDataRestored)
+        print("[AppCoordinator] startup boot begin — restoring data off-main")
+
+        // [BOOT-REVIEW P0-1] Yield exactly one main-actor turn: SwiftUI
+        // commits the first frame (loading state included) before the
+        // synchronous composition below runs. Everything that follows is
+        // post-first-frame by construction.
+        DispatchQueue.main.async { [weak self] in
+            self?.composePostFirstFrame()
+        }
+    }
+
+    /// The synchronous composition `start()` used to run inline, now one
+    /// main-actor turn after the first frame ([BOOT-REVIEW P0-1]).
+    /// Main-confined; runs exactly once per launch (`start()`'s guard).
+    private func composePostFirstFrame() {
         // [STARTUP-PERF] Conversation + activity history, the keychain
         // store loads, the KWS engine build and the bundled-model
         // housekeeping moved OFF the main thread into the progressive
@@ -1663,6 +1885,12 @@ final class AppCoordinator: ObservableObject {
 
         // Register background tasks (iOS)
         registerBackgroundTasks()
+
+        // [BOOT-REVIEW P1-7] Day rollover for the derived notification
+        // count ("X of Y doses taken today" is date-dependent). Installed
+        // here — post-first-frame, like every other observer — not in
+        // `init()`.
+        observeCalendarDayChange()
 
         // Restore and re-arm any outstanding medication reminders
         medicationScheduler.scheduleAll()
@@ -1931,15 +2159,22 @@ final class AppCoordinator: ObservableObject {
         isInitialized = true
         print("[AppCoordinator] Elderly AI Assistant started")
 
-        // Kick off the progressive boot. Phase 1 (store loads) starts on
-        // the boot queue; every published assignment hops back to main.
-        startupBoot.begin()
-        print("[AppCoordinator] startup boot begin — restoring data off-main")
-        // The lazy stores below are forced on main first (lazy
-        // initialization is not thread-safe); their LOADS run on the
-        // boot queue.
+        // Hand phase 1 (store loads) to the boot queue; every published
+        // assignment hops back to main. The boot machine itself was begun
+        // in `start()` — before this composition, so its spinner window
+        // measures real startup work.
+        //
+        // [BOOT-REVIEW P0-1] The FIRST-USE LAZY stores/services the boot
+        // queue touches are forced to construct HERE, on main (lazy
+        // initialization is not thread-safe — the house rule every lazy
+        // store in this file already follows). Everything forced below is
+        // cheap by construction: the Gemini/config Keychain reads moved
+        // to the boot queue's own `load`, and the model store's paths are
+        // only resolved when a model is actually needed.
         _ = chatHistoryStore
         _ = activityLog
+        _ = feedSettingsStore
+        _ = modelStore
         // [BOOT-M1M2] Gemini key/model restore, same discipline: the
         // kick runs on MAIN here (the store's @Published values are
         // main-confined), the keychain reads run on the boot queue and
@@ -1966,6 +2201,7 @@ final class AppCoordinator: ObservableObject {
             feedSettingsStore: feedSettingsStore,
             chatHistoryStore: chatHistoryStore,
             activityLog: activityLog,
+            storage: storage,
             now: Date()
         )
         DispatchQueue.main.async { [weak self] in
@@ -1980,6 +2216,20 @@ final class AppCoordinator: ObservableObject {
             self.feedTopics = batch.feedTopics
             self.conversationHistory = batch.history
             self.recentActivity = batch.activity
+            // [BOOT-REVIEW P1-7] The restore moved both of the derived
+            // count's inputs (a stored briefing + today's restored dose
+            // list) — recompute once, here, instead of leaving the badge
+            // stale until the next reminder edit.
+            self.refreshActiveNotificationCount()
+            // [BOOT-REVIEW P0 item 1] Safety-critical data is live the
+            // moment these windows are published (contacts feed the
+            // emergency path, appointments/places the care flows); the
+            // interval ends HERE — after the restore, before the voice
+            // phase — so it measures restoration alone.
+            StartupSignposts.end(
+                .safetyDataRestored,
+                note: "contacts=\(batch.contacts.count) places=\(batch.places.count) appointments=\(batch.appointments.count)"
+            )
             self.startupBoot.advance(to: .preparingVoice)
             // Phase 2 runs on MAIN (see bootPrepareVoiceEngine — the
             // sherpa runtime segfaults off-main on the x86_64 simulator).
@@ -2010,6 +2260,11 @@ final class AppCoordinator: ObservableObject {
     /// gate `.ready` — boot advances, and `kws_engine_ready` arrives
     /// when it arrives.
     private func bootPrepareVoiceEngine() {
+        // [BOOT-REVIEW P0 item 1] `voice-pipeline-start-requested` spans
+        // the voice-prep phase up to the moment the start request is
+        // actually issued (`noteVoicePipelineStartRequested` ends it and
+        // opens the callback interval).
+        StartupSignposts.begin(.voicePipelineStartRequested)
         self.startBootWarmPhase()
         // Null engine by default: the real KWS engine is built AFTER the
         // speak affordance goes live (see `scheduleDeferredKWSBuild`).
@@ -2044,6 +2299,116 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    // MARK: - Manual-Talk readiness ([BOOT-REVIEW P0-2])
+    //
+    // The four `voicePipeline.start` call sites funnel through these
+    // three helpers, so the published `voicePipelineReadiness` can only
+    // move along the contract's edges:
+    //
+    //   request  → stays `.loading` (a REQUEST is not a START),
+    //   success  → `.ready`            (the one and only path),
+    //   failure  → `.failed(reason)`   (persists until a real retry),
+    //
+    // and they carry the two voice signpost intervals the review asks
+    // for: `voice-pipeline-start-requested` (boot → request issued) and
+    // `voice-pipeline-callback-completed` (request → callback answered).
+
+    /// The pipeline-start REQUEST was just issued. Never moves a settled
+    /// value: `.ready` stays ready, `.failed` stays failed until the new
+    /// callback answers (the retry is honest).
+    private func noteVoicePipelineStartRequested() {
+        manualTalkReadiness.noteStartRequested()
+        StartupSignposts.end(.voicePipelineStartRequested, note: "request-issued")
+        StartupSignposts.begin(.voicePipelineCallbackCompleted)
+        publishManualTalkReadiness()
+    }
+
+    /// The pipeline-start callback SUCCEEDED — the contract's only path
+    /// to `.ready`, for the boot start and for every later recycle,
+    /// search-capture resume and enrollment resume alike (a retry that
+    /// works is genuinely ready again).
+    private func noteVoicePipelineStartSucceeded() {
+        manualTalkReadiness.noteStartSucceeded()
+        StartupSignposts.end(.voicePipelineCallbackCompleted, note: "success")
+        // [BOOT-REVIEW, design item] A capability that comes back
+        // DEGRADES no longer: the recorded boot failure is cleared by the
+        // success that proves it (never by a timer), so the persistent
+        // "Voice activation is unavailable" state disappears here.
+        startupBoot.clearFailure(.preparingVoice)
+        publishManualTalkReadiness()
+    }
+
+    /// The pipeline-start callback FAILED. The failure is sticky: it is
+    /// surfaced to the user (Talk hero + `startup.degraded.*` capability
+    /// state) and cleared only by a retry that actually succeeds.
+    private func noteVoicePipelineStartFailed(_ error: Error) {
+        manualTalkReadiness.noteStartFailed(reason: "\(error)")
+        StartupSignposts.end(.voicePipelineCallbackCompleted, note: "failure")
+        publishManualTalkReadiness()
+    }
+
+    /// Main-confined publish of the machine's value (the callbacks are
+    /// documented to arrive on main; the hop is the same defensive marshal
+    /// `updateVoiceReadiness`'s tracker uses).
+    private func publishManualTalkReadiness() {
+        let value = manualTalkReadiness.value
+        if Thread.isMainThread {
+            voicePipelineReadiness = value
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.voicePipelineReadiness = value
+            }
+        }
+    }
+
+    // MARK: - Degraded-capability recovery ([BOOT-REVIEW, design item])
+
+    /// The ONE recovery action each persistent `StartupDegradation` offers
+    /// — installed as `StartupDegradationRecoverySeam.perform` by
+    /// `start()`. Every branch retries the REAL work the failed boot stage
+    /// was doing, and the recorded failure is cleared by that work
+    /// actually succeeding (or by the voice callback's success above) —
+    /// never by a timer. The degraded capsule disappears because the
+    /// capability recovered.
+    ///
+    /// Main-confined (button tap path).
+    private func recoverDegradedCapability(_ capability: StartupDegradation.Capability) {
+        switch capability {
+        case .savedData:
+            // Re-run the restore batch off-main — the same call the boot
+            // makes, so self-heal/cap semantics are identical — then clear
+            // the failure once the published windows are repopulated.
+            bootQueue.async { [weak self] in
+                guard let self else { return }
+                self.bootRestoreData()
+                DispatchQueue.main.async {
+                    self.startupBoot.clearFailure(.restoringData)
+                }
+            }
+        case .voiceActivation:
+            // The Talk hero's own retry path: recycle the pipeline. The
+            // start callback settles both the readiness machine and the
+            // recorded failure (success clears it, failure re-records it).
+            recoverVoiceCycle()
+        case .speechEngineWarm:
+            // Re-plan and re-run the warm from LIVE config. The boot is
+            // already `.ready` here, so this cannot rewind a stage — and
+            // `advancePastWarmPhase` skips phase 3 for a post-boot warm.
+            startBootWarmPhase()
+        case .modelSetup:
+            // Re-run the file-heavy housekeeping phase, then clear the
+            // failure on completion. Idempotent by construction (the
+            // installs no-op when their target exists).
+            bootQueue.async { [weak self] in
+                guard let self else { return }
+                self.bootFinishSetup()
+                DispatchQueue.main.async {
+                    self.startupBoot.clearFailure(.finishingSetup)
+                }
+            }
+        }
+    }
+
     /// [STARTUP-R2] Schedules the sherpa KWS build on MAIN, a short
     /// delay after the speak affordance first goes ready — the build
     /// never contributes to perceived startup, and wake-word detection
@@ -2073,11 +2438,63 @@ final class AppCoordinator: ObservableObject {
     /// skipped when the pipeline is gone (recycled mid-build) or not
     /// settled: the Null engine's no-op behavior then applies exactly
     /// as it does pre-build.
+    ///
+    /// [BOOT-REVIEW P0-4] WHERE the build runs is now platform-specific:
+    ///
+    ///  - OFF the main thread on a physical device, on this type's ONE
+    ///    dedicated serial executor (`wakeWordBuildQueue`). The KWS
+    ///    session build (model resolution + ONNX session/tokenizer
+    ///    construction) is CPU- and IO-heavy: on the main thread it is a
+    ///    visible hitch, and the whole point of the deferred slot was to
+    ///    keep wake-word work off the critical path. One SERIAL executor
+    ///    means two builds can never overlap (the shared model directory
+    ///    plus the memory spike are single-build resources).
+    ///
+    ///  - ON the main thread in the simulator ONLY, behind
+    ///    `#if targetEnvironment(simulator)`: the sherpa-onnx /
+    ///    onnxruntime session creation segfaults off-main on the x86_64
+    ///    simulator (EXC_BAD_ACCESS in ConstantFolding, crash 2026-09-09
+    ///    204647, faulting queue `senios.startup.boot`). That workaround
+    ///    is a SIMULATOR defect, so it is scoped to the simulator — a
+    ///    device build never takes the main-thread path.
+    ///
+    /// Only wake-word STATUS is gated on this build (`wakeWordEngine` /
+    /// `wakeWordEngineRealAtLaunch`, and the pipeline's engine swap when
+    /// it is still idle). Manual Talk readiness is deliberately NOT —
+    /// wake-word and manual Talk are separate capabilities.
     private func buildDeferredWakeWordEngine() {
         guard voicePipeline != nil else { return }
-        let launch = Self.makeWakeWordEngine(observabilityBus: observabilityBus)
+        #if targetEnvironment(simulator)
+        applyWakeWordEngine(Self.makeWakeWordEngine(observabilityBus: observabilityBus))
+        #else
+        wakeWordBuildQueue.async { [weak self] in
+            guard let self else { return }
+            let launch = Self.makeWakeWordEngine(observabilityBus: self.observabilityBus)
+            DispatchQueue.main.async {
+                self.applyWakeWordEngine(launch)
+            }
+        }
+        #endif
+    }
+
+    /// The KWS build's ONE dedicated serial executor ([BOOT-REVIEW
+    /// P0-4]): user-initiated QoS (the user is waiting on wake word at
+    /// most as a background affordance, never for a reply), serial so
+    /// builds queue instead of overlapping.
+    private let wakeWordBuildQueue = DispatchQueue(
+        label: "senios.startup.kws",
+        qos: .userInitiated
+    )
+
+    /// Main-confined landing of a finished KWS build: publishes the
+    /// honest engine status, tells the manual-Talk machine the wake-word
+    /// engine settled (deliberately a no-op there — see
+    /// `ManualTalkReadinessState.noteWakeWordEngineSettled`), and swaps
+    /// the engine into a still-idle pipeline.
+    private func applyWakeWordEngine(_ launch: (engine: WakeWordEngine, isReal: Bool)) {
         self.wakeWordEngine = launch.engine
         self.wakeWordEngineRealAtLaunch = launch.isReal
+        manualTalkReadiness.noteWakeWordEngineSettled(isReal: launch.isReal)
         print("[AppCoordinator] deferred KWS build settled real=\(launch.isReal)")
         guard launch.isReal,
               voicePipeline?.state == .idle else { return }
@@ -2134,6 +2551,10 @@ final class AppCoordinator: ObservableObject {
             return
         }
         self.startupBoot.advance(to: .warmingEngines)
+        // [BOOT-REVIEW P0 item 1] `warm-engines-completed` — begun with
+        // the real warm (not the skipped-plan path) and ended at settle,
+        // whichever path settles it.
+        StartupSignposts.begin(.warmEnginesCompleted)
         warmRunner.run(plan: bootPlan) { [weak self] outcomes in
             DispatchQueue.main.async {
                 guard let self, !self.warmPhaseSettled else { return }
@@ -2156,7 +2577,7 @@ final class AppCoordinator: ObservableObject {
             guard let self, !self.warmPhaseSettled else { return }
             print("[AppCoordinator] warm-start budget reached — boot advances; warm finishes detached")
             self.startupBoot.recordFailure(.warmingEngines)
-            self.advancePastWarmPhase()
+            self.advancePastWarmPhase(outcome: "watchdog")
         }
         warmWatchdogWork = work
         DispatchQueue.main.asyncAfter(
@@ -2166,11 +2587,19 @@ final class AppCoordinator: ObservableObject {
 
     /// Settles the warm phase exactly once and hands phase 3 to the boot
     /// queue. Main-confined.
-    private func advancePastWarmPhase() {
+    private func advancePastWarmPhase(outcome: String = "settled") {
         warmPhaseSettled = true
         warmWatchdogWork?.cancel()
         warmWatchdogWork = nil
+        // [BOOT-REVIEW P0 item 1] No-op when the warm plan was empty
+        // (nothing was begun) — the interval only ever covers real warm
+        // work.
+        StartupSignposts.end(.warmEnginesCompleted, note: outcome)
         self.startupBoot.advance(to: .finishingSetup)
+        // Phase 3 only exists while the boot is still running: a WARM
+        // RETRY after `.ready` (the degraded-state recovery action)
+        // settles the warm without re-running the model housekeeping.
+        guard !startupBoot.isComplete else { return }
         self.bootQueue.async { [weak self] in
             self?.bootFinishSetup()
         }
@@ -2244,20 +2673,28 @@ final class AppCoordinator: ObservableObject {
     /// paint, still skipped on the Gemini stack / cached model, so no
     /// new network activity happens at launch.
     private func bootFinishSetup() {
-        // Repair encoder installs from older builds: the bundled-encoder
-        // copy step normally runs at download finalize, so models cached
-        // before a naming fix (or before the encoder existed) sit without
-        // one. Idempotent — no-op when the target already exists.
-        for entry in ModelCatalog.entries(kind: .whisperBase) {
-            modelStore.installBundledCoreMLEncoder(for: entry.id)
-            // Bundled ggml models (the default medium) install the same
-            // way — first run never downloads them.
-            modelStore.installBundledModel(for: entry.id)
+        // [BOOT-REVIEW P1-5] The old per-entry `installBundledModel` +
+        // `installBundledCoreMLEncoder` loop is GONE from this slot. That
+        // loop copied the app-bundled 560 MB default ggml into Application
+        // Support on EVERY launch's boot ("first run never downloads it" —
+        // by copying hundreds of MB instead). Normal startup now copies
+        // nothing: the one bundled artifact the app can run (the default
+        // Nepali medium, `bundledResourceName != nil`) is installed only
+        // when the stack that needs it is actually selected, on the
+        // utility-QoS housekeeping queue (see
+        // `installBundledSTTModelIfNeeded`).
+        //
+        // What is left here is BOUNDED and idempotent: delete stale CoreML
+        // encoder directories (entries we no longer ship an encoder for —
+        // large-v3's CoreML path hangs on-device — would otherwise be
+        // auto-loaded by whisper.cpp). Every catalog entry currently
+        // declares `coreMLEncoderBundledName: nil`, so in this build the
+        // pass removes leftovers from older installs and nothing else.
+        // [BOOT-REVIEW P1-5] Runs at UTILITY QoS: this is housekeeping,
+        // not user-blocking work, and boot must never wait on it.
+        modelHousekeepingQueue.async { [weak self] in
+            self?.modelStore.removeStaleCoreMLBundles()
         }
-        // And the reverse: entries we no longer ship an encoder for
-        // (large-v3 — its CoreML path hangs on-device) get their stale
-        // encoder dir deleted, or whisper.cpp auto-loads it anyway.
-        modelStore.removeStaleCoreMLBundles()
 
         // Interpreter-availability fix (2026-09-06): restore the
         // assistant-brain model's one-time auto-download. `start()` is
@@ -2332,11 +2769,18 @@ final class AppCoordinator: ObservableObject {
             }
         }
         armVoiceStartWatchdog()
+        // [BOOT-REVIEW P0-2] The boot's start REQUEST: the published
+        // manual-Talk readiness stays `.loading` until the callback below
+        // answers — that callback, and only that callback, decides
+        // `.ready` / `.failed`.
+        noteVoicePipelineStartRequested()
         voicePipeline.start { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
                 self.voiceState = .idle
+                // [BOOT-REVIEW P0-2] The contract's single `.ready` path.
+                self.noteVoicePipelineStartSucceeded()
                 // One-shot at startup: puts the STT + interpreter in the
                 // state `voiceEngineStack` says they should be in (e.g. a
                 // Gemini key already saved, or the on-device stack picked
@@ -2345,6 +2789,9 @@ final class AppCoordinator: ObservableObject {
             case .failure(let err):
                 self.voiceError = "\(err)"
                 self.voiceState = .error("\(err)")
+                // [BOOT-REVIEW P0-2] Sticky failure — no timer, no other
+                // boot phase clears it; only a retry that succeeds does.
+                self.noteVoicePipelineStartFailed(err)
                 // Honest degradation: the spinner dismisses, the voice
                 // error caption tells the user exactly what happened.
                 self.startupBoot.recordFailure(.preparingVoice)
@@ -2375,7 +2822,54 @@ final class AppCoordinator: ObservableObject {
                          feedSettingsStore: FeedSettingsStore,
                          chatHistoryStore: ChatHistoryStore,
                          activityLog: AppActivityLog,
+                         storage: MigratingEncryptedStorage? = nil,
                          now: Date) -> StartupDataBatch {
+            // [BOOT-REVIEW P1-6] ONE transactional open/read of the file
+            // store for the whole batch: the snapshot above pays a single
+            // directory pass and one read per key, instead of each store
+            // opening the store again for its own read.
+            guard let storage else { return read(contactStore: contactStore,
+                                                 placeStore: placeStore,
+                                                 appointmentStore: appointmentStore,
+                                                 briefingStore: briefingStore,
+                                                 feedSettingsStore: feedSettingsStore,
+                                                 chatHistoryStore: chatHistoryStore,
+                                                 activityLog: activityLog,
+                                                 now: now) }
+            return storage.withReadSnapshot(keys: snapshotKeys) {
+                read(contactStore: contactStore,
+                     placeStore: placeStore,
+                     appointmentStore: appointmentStore,
+                     briefingStore: briefingStore,
+                     feedSettingsStore: feedSettingsStore,
+                     chatHistoryStore: chatHistoryStore,
+                     activityLog: activityLog,
+                     now: now)
+            }
+        }
+
+        /// The store keys phase 1 reads through the file store. Literals
+        /// because each store keeps its own key `private`; a drift here is
+        /// a missed optimization, never a correctness problem — a key that
+        /// is not snapshotted simply reads through normally.
+        static let snapshotKeys = [
+            "family.contacts",
+            "places.saved",
+            "medical.appointments",
+            "morningBriefing.current",
+            "feeds.config.v1",
+            "chat.history",
+            "app.activity.log",
+        ]
+
+        private static func read(contactStore: FamilyContactStore,
+                                 placeStore: SavedPlaceStore,
+                                 appointmentStore: AppointmentStore,
+                                 briefingStore: MorningBriefingStore,
+                                 feedSettingsStore: FeedSettingsStore,
+                                 chatHistoryStore: ChatHistoryStore,
+                                 activityLog: AppActivityLog,
+                                 now: Date) -> StartupDataBatch {
             var batch = StartupDataBatch()
             batch.contacts = contactStore.load()
             batch.places = placeStore.load()
@@ -2521,14 +3015,20 @@ final class AppCoordinator: ObservableObject {
         print("[AppCoordinator] recycling voice pipeline")
         voicePipeline?.stop()
         armVoiceStartWatchdog()
+        // [BOOT-REVIEW P0-2] A RECYCLE is a retry: the readiness machine
+        // reports it honestly (either outcome), so a failed boot start
+        // upgrades to `.ready` the moment a real restart succeeds.
+        noteVoicePipelineStartRequested()
         voicePipeline?.start { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
                 self.voiceState = .idle
+                self.noteVoicePipelineStartSucceeded()
             case .failure(let err):
                 self.voiceError = "\(err)"
                 self.voiceState = .error("\(err)")
+                self.noteVoicePipelineStartFailed(err)
             }
             completion(result)
         }
@@ -2710,14 +3210,18 @@ final class AppCoordinator: ObservableObject {
     private func resumeVoiceAfterSearchCaptureIfNeeded() {
         guard voiceWasSuspendedForSearchCapture else { return }
         voiceWasSuspendedForSearchCapture = false
+        // [BOOT-REVIEW P0-2] Same honest reporting as the recycle above.
+        noteVoicePipelineStartRequested()
         voicePipeline?.start { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
                 self.voiceState = .idle
+                self.noteVoicePipelineStartSucceeded()
             case .failure(let err):
                 self.voiceError = "\(err)"
                 self.voiceState = .error("\(err)")
+                self.noteVoicePipelineStartFailed(err)
             }
         }
     }
@@ -2988,7 +3492,89 @@ final class AppCoordinator: ObservableObject {
             DispatchQueue.main.async { [weak self] in
                 self?.updateActiveSTTName()
             }
+            // [BOOT-REVIEW P1-5] The on-device stack is live and
+            // whisper.cpp may be missing its one bundled model — install
+            // it NOW, at first use, instead of copying hundreds of MB
+            // during boot. Post-first-frame by construction: the stack is
+            // applied from the boot's voice-start callback (or a Settings
+            // toggle), never from `init`.
+            installBundledSTTModelIfNeeded()
         }
+    }
+
+    /// [BOOT-REVIEW P1-5] Installs the ONE app-bundled STT model (the
+    /// default Nepali medium — the only catalog entry with a
+    /// `bundledResourceName`) the first time the on-device stack actually
+    /// needs it, so a normal launch copies NOTHING. The old boot loop
+    /// copied the 586 MB ggml into Application Support on every launch,
+    /// gating `.ready` behind a multi-second disk write.
+    ///
+    /// Gates, in order:
+    ///  - the on-device stack is ACTIVE (a Gemini household never pays
+    ///    for a model it will not use),
+    ///  - whisper.cpp is what the pure selection table would pick once a
+    ///    model IS present (an ANE device with WhisperKit installed runs
+    ///    WhisperKit — no copy),
+    ///  - the model is genuinely absent (idempotent), no install already
+    ///    in flight.
+    ///
+    /// The copy runs at UTILITY QoS on `modelHousekeepingQueue` — never
+    /// on the boot queue, which gates `.ready`, and never on main — and
+    /// reports determinate byte progress through `ModelDownloadService`,
+    /// so the model-specific UI shows the same bar a download shows.
+    /// When it lands, the stack is re-applied so whisper.cpp takes over
+    /// from the SFSpeechRecognizer fallback the missing model forced.
+    private func installBundledSTTModelIfNeeded() {
+        guard voiceEngineStack == .onDevice else { return }
+        let bundled = ModelCatalog.whisperMediumFinetunedNepali
+        guard !modelStore.isCached(bundled),
+              !bundledSTTInstallInFlight,
+              bundledSTTModelIsTheNextChoice() else { return }
+        bundledSTTInstallInFlight = true
+        // Force both lazy services HERE, on main: the copy's progress
+        // callbacks fire on the housekeeping queue and must not touch an
+        // uninitialised `lazy var`.
+        let downloads = modelDownloadService
+        let store = modelStore
+        downloads.reportBundledInstallProgress(
+            bundled,
+            received: 0,
+            totalBytes: ModelCatalog.entry(for: bundled)?.sizeBytes ?? 0)
+        modelHousekeepingQueue.async { [weak self] in
+            let installed = store.installBundledModel(for: bundled) {
+                received, total in
+                downloads.reportBundledInstallProgress(
+                    bundled, received: received, totalBytes: total)
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.bundledSTTInstallInFlight = false
+                downloads.reportBundledInstallOutcome(
+                    bundled, installed: installed != nil)
+                guard installed != nil else {
+                    print("[AppCoordinator] bundled STT install failed")
+                    return
+                }
+                print("[AppCoordinator] bundled STT model installed — re-applying stack")
+                // The recognizer is only now `isAvailable`, so the table
+                // can finally choose whisper.cpp over SFSpeechRecognizer.
+                self.applyVoiceEngineStack()
+            }
+        }
+    }
+
+    /// True when granting whisper.cpp a usable model would make the pure
+    /// selection table pick it — i.e. the bundled copy is the engine this
+    /// device would actually run. Reuses the SAME table the live swap
+    /// consults (`applyVoiceEngineStack`), so the install gate and the
+    /// engine choice can never disagree.
+    private func bundledSTTModelIsTheNextChoice() -> Bool {
+        if case .whisperCpp = Self.onDeviceSTTChoice(
+            whisperKitAvailable: whisperKitSpeechRecognizer.isAvailable,
+            whisperCppAvailable: true) {
+            return true
+        }
+        return false
     }
 
     /// Re-applies the audio-session preset after `voiceProcessingEnabled`
@@ -4328,8 +4914,8 @@ final class AppCoordinator: ObservableObject {
     /// fails — callers must treat nil as "hide this", never show an
     /// error string for a decorative display.
     func nepaliCalendarAnswer(question: String) async -> String? {
-        guard let plugin = pluginRegistry?.plugin(handling: "nepali_calendar.query",
-                                                  locale: activeLocale),
+        guard let plugin = pluginRegistry.plugin(handling: "nepali_calendar.query",
+                                                 locale: activeLocale),
               geminiConfigStore.isConfigured else { return nil }
         let command = PluginCommand(actionName: "nepali_calendar.query",
                                     transcript: "",
@@ -4888,6 +5474,80 @@ final class AppCoordinator: ObservableObject {
             .medicationName ?? ""
     }
 
+    // MARK: - Derived notification count ([BOOT-REVIEW P1-7])
+
+    /// The bell badge's derived count — how many notification rows the
+    /// Updates leaf lists — published as STORED state.
+    ///
+    /// The row-presence inputs are exactly two (`HomeWidgetRegistry`'s
+    /// built-ins): `todayBriefing` (`TodayBriefingWidget`) and
+    /// `pendingReminders` (`MedsStatusWidget`, "X of Y doses taken
+    /// today"). The count is therefore recomputed ONLY from the seams that
+    /// move one of those — medication schedule edits, dose
+    /// acknowledgements, routine/native-calendar mutations, a stored
+    /// briefing landing, the boot restore, and the calendar-day rollover
+    /// ("today's doses" is date-dependent). It is deliberately NOT
+    /// recomputed on unrelated invalidations (feed translation, download
+    /// progress, voice timing, settings toggles), so a view that reads
+    /// this value does not re-filter/re-sort widget rows per render the
+    /// way a live computation must.
+    ///
+    /// The seam is `refreshActiveNotificationCount()`; nothing else writes
+    /// this property, and an unchanged recomputation does not publish.
+    @Published private(set) var activeNotificationCount: Int = 0
+
+    /// Registry used for the derivation. Stateless widgets — HomeView
+    /// keeps its own registry for the leaf's rows, and both derive the
+    /// same list from the same state.
+    private lazy var notificationCountRegistry = HomeWidgetRegistry()
+
+    /// Day-rollover observer: "today's doses" changes at midnight with no
+    /// mutation to hang off, so the derived count would otherwise go
+    /// stale until the next reminder edit.
+    private var dayChangeObserver: NSObjectProtocol?
+
+    /// Recomputes + publishes the derived count. Main-confined by
+    /// contract (it reads main-confined coordinator state and publishes);
+    /// callers on the voice/acknowledgement paths hop here first. An
+    /// unchanged result is a no-op, so repeated calls are free.
+    ///
+    /// The derivation itself lives on `HomeWidgetRegistry` and is
+    /// `@MainActor` (it builds view-facing rows) — one source of truth with
+    /// the Updates leaf, which is the whole point of this seam. Reaching it
+    /// from this nonisolated, main-confined method therefore costs ONE
+    /// main-actor turn: the count is derived UI state that nothing latches
+    /// on synchronously, and the mutation the call follows is already
+    /// published by the caller, so the badge simply lands in the same
+    /// frame's update cycle.
+    func refreshActiveNotificationCount() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.refreshActiveNotificationCount()
+            }
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let source: any HomeWidgetDataSource = self
+            let next = self.notificationCountRegistry.activeNotificationCount(
+                coordinator: source)
+            guard next != self.activeNotificationCount else { return }
+            self.activeNotificationCount = next
+        }
+    }
+
+    /// Installs the day-rollover refresh. Called from `start()` — never
+    /// from `init()` (a notification observer is startup work with no
+    /// first-frame value).
+    private func observeCalendarDayChange() {
+        guard dayChangeObserver == nil else { return }
+        dayChangeObserver = NotificationCenter.default.addObserver(
+            forName: .NSCalendarDayChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.refreshActiveNotificationCount()
+        }
+    }
+
     /// Adds or validates a medication schedule entry from the Settings
     /// editor. Returns a catalog key on validation failure, nil on success.
     /// Success persists via `loadSchedule` and re-arms alarms (spec §4.4.3).
@@ -4919,6 +5579,9 @@ final class AppCoordinator: ObservableObject {
         medicationScheduler.loadSchedule(entries: entries)
         medicationScheduler.scheduleAll()
         calendarSync.syncNow(entries: routineScheduler.entries())
+        // [BOOT-REVIEW P1-7] A schedule edit changes today's dose total —
+        // one of the count's two inputs.
+        refreshActiveNotificationCount()
         return nil
     }
 
@@ -4929,6 +5592,9 @@ final class AppCoordinator: ObservableObject {
         medicationScheduler.loadSchedule(entries: entries)
         medicationScheduler.scheduleAll()
         calendarSync.syncNow(entries: routineScheduler.entries())
+        // [BOOT-REVIEW P1-7] Removing an entry can empty today's doses —
+        // the row hides itself, so the count must follow.
+        refreshActiveNotificationCount()
     }
 
     // MARK: - Doctor's appointments (medical task, 2026-09-07)
@@ -5096,6 +5762,9 @@ final class AppCoordinator: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             self?.objectWillChange.send()
         }
+        // [BOOT-REVIEW P1-7] Native-calendar edits reach the app's
+        // reminder schedule, so the derived count follows them.
+        refreshActiveNotificationCount()
     }
 
     // MARK: - Read-only external Calendar/Reminders surface (2026-09-07)
@@ -5223,6 +5892,9 @@ final class AppCoordinator: ObservableObject {
     /// persists and re-arms through the scheduler.
     func setRoutineEntryEnabled(_ entryId: UUID, enabled: Bool) {
         routineScheduler.setEnabled(entryId, enabled: enabled)
+        // [BOOT-REVIEW P1-7] Routine mutations land in the same reminder
+        // surface the derived count reads.
+        refreshActiveNotificationCount()
     }
 
     /// Today's medication reminders as localized "name — time" lines for
@@ -5248,6 +5920,8 @@ final class AppCoordinator: ObservableObject {
     /// FR-D01 (challenge) and FR-D03 (double-dose check) actually run.
     func handleMedicationAcknowledgement(entryId: UUID) {
         _ = medicationScheduler.acknowledge(entryId: entryId, at: Date())
+        // [BOOT-REVIEW P1-7] Acknowledged doses move the derived count.
+        refreshActiveNotificationCount()
         // No undo here — the scheduler has no reversal operation for a
         // recorded dose, and faking one would be exactly the kind of mocked
         // affordance the redesign is trying to avoid (spec §6).
@@ -5262,6 +5936,8 @@ final class AppCoordinator: ObservableObject {
             at: Date(),
             confirmationResponse: response
         )
+        // [BOOT-REVIEW P1-7] Same count seam as the BASELINE ack above.
+        refreshActiveNotificationCount()
     }
 
     /// Dementia-aware voice ack: issues the FR-D01 confirmation challenge
@@ -5341,6 +6017,9 @@ final class AppCoordinator: ObservableObject {
             at: Date(),
             confirmationResponse: response
         )
+        // [BOOT-REVIEW P1-7] The voice confirmation's ack moves the
+        // derived count exactly like the BASELINE ack does.
+        refreshActiveNotificationCount()
         let name = medicationName(for: entryId)
         switch response {
         case .yes:
@@ -5471,17 +6150,26 @@ final class AppCoordinator: ObservableObject {
     /// engine's construction is sherpa-guarded, inside `attempt()`.
     private static func makeWakeWordEngine(observabilityBus: ObservabilityBus)
         -> (engine: WakeWordEngine, isReal: Bool) {
+        // [BOOT-REVIEW P0 item 1] The KWS interval spans exactly the
+        // expensive half: the bundled-model resolution + the sherpa
+        // session/tokenizer construction. It is begun here (not at the
+        // call site) because this factory is the one place both the
+        // simulator's main-thread path and the device's serial-executor
+        // path run through.
+        StartupSignposts.begin(.kwsSessionReady)
         guard let real = WakeWordEngineSelection.make(
             toggleEnabled: WakeWordPreferences().isEnabled,
             sherpaCandidate: {
                 SherpaKWSWakeWordEngine.attempt(observabilityBus: observabilityBus)
             }
         ) else {
+            StartupSignposts.end(.kwsSessionReady, note: "null-engine")
             print("[AppCoordinator] Wake-word engine: NullWakeWordEngine "
                   + "(toggle off or sherpa model missing) — "
                   + "Talk button + simulate path unchanged")
             return (NullWakeWordEngine(), false)
         }
+        StartupSignposts.end(.kwsSessionReady, note: "real-engine")
         return (real, true)
     }
 
@@ -5970,14 +6658,18 @@ extension AppCoordinator: VoicePipelineSuspending {
     func resumeAfterSampleCapture() {
         guard voiceWasSuspendedForEnrollmentSample else { return }
         voiceWasSuspendedForEnrollmentSample = false
+        // [BOOT-REVIEW P0-2] Same honest reporting as the recycle above.
+        noteVoicePipelineStartRequested()
         voicePipeline?.start { [weak self] result in
             guard let self else { return }
             switch result {
             case .success:
                 self.voiceState = .idle
+                self.noteVoicePipelineStartSucceeded()
             case .failure(let err):
                 self.voiceError = "\(err)"
                 self.voiceState = .error("\(err)")
+                self.noteVoicePipelineStartFailed(err)
             }
         }
     }

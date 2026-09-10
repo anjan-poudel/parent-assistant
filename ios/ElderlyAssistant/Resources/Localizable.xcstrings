@@ -11560,6 +11560,346 @@
         }
       }
     },
+    "startup.degraded.modelSetup.control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI models"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "एआई मोडेलहरू"
+          }
+        }
+      }
+    },
+    "startup.degraded.modelSetup.detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The app works; on-device answers and downloads may need a retry."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "एप काम गर्छ; उपकरणमै उत्तर र डाउनलोडका लागि फेरि प्रयास चाहिन सक्छ।"
+          }
+        }
+      }
+    },
+    "startup.degraded.modelSetup.diagnostic" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Models: the setup and housekeeping pass did not complete. No model data was changed."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "मोडेल: सेटअप र सफाई चरण पूरा भएन। कुनै मोडेल डाटा परिवर्तन भएको छैन।"
+          }
+        }
+      }
+    },
+    "startup.degraded.modelSetup.recovery" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check models"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "मोडेल जाँच्नुहोस्"
+          }
+        }
+      }
+    },
+    "startup.degraded.modelSetup.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On-device models need attention"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "उपकरणका मोडेलहरूमा ध्यान चाहिन्छ"
+          }
+        }
+      }
+    },
+    "startup.degraded.savedData.control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved contacts and appointments"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सुरक्षित सम्पर्क र भेटघाट"
+          }
+        }
+      }
+    },
+    "startup.degraded.savedData.detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Contacts, places and appointments are empty for now. Everything else works."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सम्पर्क, स्थान र भेटघाट अहिले खाली छन्। बाँकी सबै काम गर्छ।"
+          }
+        }
+      }
+    },
+    "startup.degraded.savedData.diagnostic" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved data: the on-device store could not be read at launch. Retrying reads it again; nothing was deleted."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सुरक्षित डाटा: सुरु गर्दा उपकरणको भण्डारण पढ्न सकिएन। फेरि प्रयास गर्दा पढिन्छ; केही मेटिएको छैन।"
+          }
+        }
+      }
+    },
+    "startup.degraded.savedData.recovery" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Load again"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "फेरि लोड गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "startup.degraded.savedData.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved details couldn't be loaded"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सुरक्षित विवरणहरू लोड हुन सकेनन्"
+          }
+        }
+      }
+    },
+    "startup.degraded.speechEngineWarm.control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reply voice"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "जवाफको आवाज"
+          }
+        }
+      }
+    },
+    "startup.degraded.speechEngineWarm.detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Everything works — the first reply just takes a moment longer."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सबै काम गर्छ — पहिलो जवाफ अलि ढिलो आउँछ।"
+          }
+        }
+      }
+    },
+    "startup.degraded.speechEngineWarm.diagnostic" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voice models: the background warm did not finish. Engines load on first use instead; nothing is missing."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आवाज मोडेल: पृष्ठभूमिको तयारी पूरा भएन। पहिलो प्रयोगमा इन्जिन लोड हुन्छ; केही हराएको छैन।"
+          }
+        }
+      }
+    },
+    "startup.degraded.speechEngineWarm.recovery" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Warm up now"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अहिल्यै तयार गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "startup.degraded.speechEngineWarm.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voice models are still loading"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आवाजका मोडेलहरू अझै लोड हुँदैछन्"
+          }
+        }
+      }
+    },
+    "startup.degraded.voiceActivation.control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Talk button"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "बोल्ने बटन"
+          }
+        }
+      }
+    },
+    "startup.degraded.voiceActivation.detail" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap the Talk button once to retry. Until then the app can't listen."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सुन्नका लागि बोल्ने बटन एक पटक थिच्नुहोस्। तबसम्म एपले सुन्न सक्दैन।"
+          }
+        }
+      }
+    },
+    "startup.degraded.voiceActivation.diagnostic" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voice: the speech pipeline did not report ready. Wake-word activation stays off; the Talk button retries the pipeline."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आवाज: वाणी पाइपलाइन तयार भएन। आवाजले आफै सुन्ने बन्द रहन्छ; बोल्ने बटनले फेरि प्रयास गर्छ।"
+          }
+        }
+      }
+    },
+    "startup.degraded.voiceActivation.recovery" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restart voice"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आवाज पुनः सुरु गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "startup.degraded.voiceActivation.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voice activation is unavailable"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आवाज सक्रियता उपलब्ध छैन"
+          }
+        }
+      }
+    },
     "startup.finishingSetup" : {
       "extractionState" : "manual",
       "localizations" : {
