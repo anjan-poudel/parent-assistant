@@ -1177,9 +1177,14 @@ final class AppCoordinator: ObservableObject {
         // BGTask re-queue; locale starts at the scheduler default and is
         // pushed to the service by `syncServiceLocales()` below (this
         // runs before the persisted app language is restored).
+        // [ALARMKIT-ALARMS] (2026-09-10) `makeDefault` picks the ALARM
+        // backend per runtime: AlarmKit system alarms on iOS 26+, the UN
+        // notification fallback before. Construction touches no
+        // permissions — the point-of-use ask still happens at the first
+        // alarm/timer creation.
         let alarmTimersService = AlarmTimersService(
             store: AlarmTimersStore(storage: storage),
-            scheduler: AlarmScheduler(
+            scheduler: AlarmScheduler.makeDefault(
                 notifications: UNNotificationCenterScheduler()
             ),
             observabilityBus: bus
@@ -5463,6 +5468,17 @@ extension AppCoordinator {
     var alarms: [Alarm] { alarmTimersService.alarms }
     var activeTimers: [TimerItem] { alarmTimersService.activeTimers }
 
+    /// [ALARMKIT-ALARMS] (2026-09-10) The backend arming alarms on THIS
+    /// device — AlarmKit system alarms on iOS 26+, UN notifications
+    /// before. The Settings leaf labels each alarm row from this.
+    var alarmSchedulingKind: AlarmBackendKind { alarmTimersService.alarmSchedulingKind }
+
+    /// [ALARMKIT-ALARMS] (2026-09-10) Alarm-permission status for the
+    /// Settings leaf — a `.denied` shows the honest caption.
+    var alarmAuthorizationStatus: AlarmAuthorizationStatus {
+        alarmTimersService.alarmAuthorizationStatus
+    }
+
     /// [ALARMS-TIMERS] (2026-09-07) Voice + UI alarm creation — the
     /// router's alarm stage and the Settings leaf both land here. The
     /// notification-permission round-trip happens at point of use inside
@@ -5470,6 +5486,18 @@ extension AppCoordinator {
     /// (and the leaf's error text).
     func requestAlarmSet(at time: Date, label: String?) async -> AlarmTimerSetOutcome {
         await alarmTimersService.addAlarm(at: time, label: label)
+    }
+
+    /// [ALARMKIT-ALARMS] (2026-09-10) The honest denial key when an
+    /// alarm-set hits a permission denial — AlarmKit-specific copy on
+    /// iOS 26+ (the system-alarm permission), the notification copy
+    /// before. `VoiceCommandCoordinating` requirement with the inert
+    /// default in the protocol extension, so mocks keep their historical
+    /// line; the router and the Settings leaf both resolve through this.
+    var alarmPermissionDeniedKey: String {
+        alarmSchedulingKind == .alarmKit
+            ? "alarmAlarmKit.permissionDenied"
+            : "alarms.permissionDenied"
     }
 
     /// [ALARMS-TIMERS] (2026-09-07) Voice + UI timer start — same

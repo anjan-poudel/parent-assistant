@@ -17,6 +17,57 @@
         }
       }
     },
+    "alarmAlarmKit.honestyNote" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alarms ring as real system alarms — they sound even in silent mode, and you can stop or snooze them from the Lock Screen."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अलार्म वास्तविक सिस्टम अलार्मका रूपमा बज्छन् — साइलेन्ट मोडमा पनि बज्नेछन्, र लक स्क्रिनबाटै बन्द वा स्नुज गर्न सकिन्छ।"
+          }
+        }
+      }
+    },
+    "alarmAlarmKit.permissionDenied" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alarm permission is off, so the alarm won't ring. You can turn it on in iPhone Settings."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अलार्मको अनुमति बन्द छ, त्यसैले अलार्म बज्ने छैन। तपाईं आइफोनको Settings मा गएर खोल्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "alarmAlarmKit.snoozeButton" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Snooze"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्नुज"
+          }
+        }
+      }
+    },
     "alarms.capacity" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -200,6 +251,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "सूचना बन्द छ, त्यसैले अलार्म बज्ने छैन। तपाईं Settings मा गएर खोल्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "alarms.rowStatus.appNotification" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App notification"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "एप सूचना"
+          }
+        }
+      }
+    },
+    "alarms.rowStatus.systemAlarm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System alarm"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सिस्टम अलार्म"
           }
         }
       }

@@ -8,9 +8,11 @@ import SwiftUI
 /// (DatePicker — a time already past today rolls to tomorrow at the same
 /// minute, matching the voice parser's next-occurrence rule).
 ///
-/// The caption below the lists is the platform-honesty note: iOS does not
-/// let third-party apps write into the built-in Clock app, so an alarm
-/// here rings as the app's own daily notification.
+/// The caption below the lists is the platform-honesty note — backend
+/// dependent since [ALARMKIT-ALARMS] (2026-09-10): on iOS 26+ alarms are
+/// real system alarms (AlarmKit); before that iOS does not let
+/// third-party apps write into the built-in Clock app, so an alarm rings
+/// as the app's own daily notification, and the note says exactly that.
 struct AlarmsTimersSettingsView: View {
     @EnvironmentObject var coordinator: AppCoordinator
 
@@ -41,11 +43,25 @@ struct AlarmsTimersSettingsView: View {
                     }
                 }
                 addForm
-                Text("alarms.honestyNote")
+                // [ALARMKIT-ALARMS] (2026-09-10) Honest platform copy:
+                // iOS 26+ alarms are REAL system alarms; before that the
+                // note says plainly they ring as the app's own
+                // notifications.
+                Text(honestyNoteKey)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary.opacity(0.8))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 8)
+                // [ALARMKIT-ALARMS] (2026-09-10) A denied alarm
+                // permission is surfaced, never hidden — nothing the
+                // user sets here can ring until they allow it.
+                if coordinator.alarmAuthorizationStatus == .denied {
+                    Text(coordinator.alarmPermissionDeniedKey)
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.stateError)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 8)
+                }
             }
         }
     }
@@ -70,6 +86,12 @@ struct AlarmsTimersSettingsView: View {
                         .foregroundColor(DesignTokens.textSecondary)
                         .lineLimit(2)
                 }
+                // [ALARMKIT-ALARMS] (2026-09-10) Honest per-row status:
+                // a real system alarm on iOS 26+ (AlarmKit), the app's
+                // own notification before.
+                Text(backendStatusKey)
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary.opacity(0.8))
             }
             Spacer()
             Toggle("", isOn: Binding(
@@ -189,19 +211,39 @@ struct AlarmsTimersSettingsView: View {
     private func saveNewAlarm() {
         Task {
             let outcome = await coordinator.requestAlarmSet(at: time, label: nil)
-            errorKey = Self.errorKey(for: outcome)
+            errorKey = Self.errorKey(for: outcome, deniedKey: coordinator.alarmPermissionDeniedKey)
         }
     }
 
     /// Outcome → honest inline error text (the voice path speaks these
-    /// lines; the leaf shows them under the form).
-    private static func errorKey(for outcome: AlarmTimerSetOutcome) -> String? {
+    /// lines; the leaf shows them under the form). [ALARMKIT-ALARMS] The
+    /// denial line is backend-aware (AlarmKit vs notifications).
+    private static func errorKey(for outcome: AlarmTimerSetOutcome,
+                                 deniedKey: String) -> String? {
         switch outcome {
         case .scheduled: return nil
-        case .permissionDenied: return "alarms.permissionDenied"
+        case .permissionDenied: return deniedKey
         case .atCapacity: return "alarms.capacity"
         case .failed: return "alarms.setFailed"
         }
+    }
+
+    // MARK: Backend-honesty keys ([ALARMKIT-ALARMS] 2026-09-10)
+
+    /// Per-row status: "System alarm" on the AlarmKit backend, "App
+    /// notification" before.
+    private var backendStatusKey: LocalizedStringKey {
+        coordinator.alarmSchedulingKind == .alarmKit
+            ? LocalizedStringKey("alarms.rowStatus.systemAlarm")
+            : LocalizedStringKey("alarms.rowStatus.appNotification")
+    }
+
+    /// The platform note under the lists — the AlarmKit reality on
+    /// iOS 26+, the notification fallback honesty before.
+    private var honestyNoteKey: LocalizedStringKey {
+        coordinator.alarmSchedulingKind == .alarmKit
+            ? LocalizedStringKey("alarmAlarmKit.honestyNote")
+            : LocalizedStringKey("alarms.honestyNote")
     }
 
     // MARK: Text helpers

@@ -205,112 +205,147 @@ final class UNNotificationCenterScheduler: LocalNotificationScheduling {
     }
 }
 
-// MARK: - AlarmScheduler (arms iOS local notifications)
+// MARK: - AlarmScheduler (alarm seam + timer notifications)
 
-/// [ALARMS-TIMERS] (2026-09-07) Arms alarms and timer completions as iOS
-/// local notifications through the `LocalNotificationScheduling` seam.
+/// [ALARMS-TIMERS] (2026-09-07) Arms alarms and timer completions.
 ///
-/// PLATFORM HONESTY — iOS does NOT let third-party apps create alarms in
-/// the built-in Clock app. Every alarm app (this one included) schedules
-/// its OWN repeating local notification instead, so an "alarm" here is a
-/// notification that repeats DAILY at the chosen time-of-day while the
-/// alarm is enabled (`UNCalendarNotificationTrigger(dateComponents:
-/// [.hour, .minute], repeats: true)`). The Settings leaf caption
-/// (`alarms.honestyNote`) and this doc say exactly that. Timers are fully
-/// in-app countdowns whose completion fires a one-shot notification at
-/// `endsAt`; while the app is foregrounded the presentation delegate
+/// [ALARMKIT-ALARMS] (2026-09-10) The ALARM side is now a seam over two
+/// backends (see `AlarmSchedulingBackend`):
+///  - `AlarmKitAlarmBackend` on iOS 26+ — REAL system alarms (ring
+///    through silent mode and Focus, Lock Screen stop/snooze alert, fire
+///    with the app terminated). Gated on AlarmKit authorization
+///    (`NSAlarmKitUsageDescription` + point-of-use ask).
+///  - `UNAlarmBackend` pre-26 — the historical daily-repeating local
+///    notification. PLATFORM HONESTY — iOS does NOT let third-party apps
+///    create alarms in the built-in Clock app, so an "alarm" there is the
+///    app's own notification repeating DAILY at the chosen time-of-day
+///    (`UNCalendarNotificationTrigger(dateComponents: [.hour, .minute],
+///    repeats: true)`). The Settings caption (`alarms.honestyNote`) says
+///    exactly that on those devices.
+///
+/// Timers are fully in-app countdowns whose completion fires a one-shot
+/// notification at `endsAt` (NOT part of the backend seam); while the app
+/// is foregrounded the presentation delegate
 /// (`AlarmTimerNotificationDelegate`) also speaks "Timer finished."
 final class AlarmScheduler {
     private let notifications: LocalNotificationScheduling
+    private let backend: AlarmSchedulingBackend
 
     /// Locale for notification titles/bodies; kept in sync by
-    /// `AppCoordinator` when the app language changes (spec §3.2). Content
-    /// is built per-call, so armed notifications keep the language they
-    /// were armed in until the next re-arm.
-    var locale: Locale
+    /// `AppCoordinator` when the app language changes (spec §3.2).
+    /// Forwarded to the backend, which builds all alarm content per-call
+    /// (armed notifications keep the language they were armed in until
+    /// the next re-arm).
+    var locale: Locale {
+        didSet { backend.locale = locale }
+    }
 
+    /// Explicit UN backend — the pre-26 production path AND the existing
+    /// test construction (`AlarmScheduler(notifications: center)`), so
+    /// every historical UN assertion keeps working unchanged.
     init(notifications: LocalNotificationScheduling,
          locale: Locale = Locale(identifier: "en")) {
         self.notifications = notifications
         self.locale = locale
+        self.backend = UNAlarmBackend(notifications: notifications, locale: locale)
     }
+
+    /// Explicit backend — tests inject fakes; `makeDefault` below is the
+    /// production entry point.
+    init(notifications: LocalNotificationScheduling,
+         locale: Locale = Locale(identifier: "en"),
+         backend: AlarmSchedulingBackend) {
+        self.notifications = notifications
+        self.locale = locale
+        self.backend = backend
+    }
+
+    /// [ALARMKIT-ALARMS] Production factory: the AlarmKit backend on
+    /// iOS 26+, the UN backend before (deployment target iOS 16).
+    static func makeDefault(notifications: LocalNotificationScheduling,
+                            locale: Locale = Locale(identifier: "en")) -> AlarmScheduler {
+        AlarmScheduler(notifications: notifications,
+                       locale: locale,
+                       backend: makeAlarmBackend(isAlarmKitAvailable: isAlarmKitAvailable,
+                                                 notifications: notifications,
+                                                 locale: locale))
+    }
+
+    /// Pure backend selection, isolated for tests: AlarmKit ONLY when the
+    /// runtime actually has it (the `#available` gate is what makes the
+    /// boolean honest on every simulator/device).
+    static func makeAlarmBackend(isAlarmKitAvailable: Bool,
+                                 notifications: LocalNotificationScheduling,
+                                 locale: Locale) -> AlarmSchedulingBackend {
+        if isAlarmKitAvailable, #available(iOS 26.0, *) {
+            return AlarmKitAlarmBackend(notifications: notifications, locale: locale)
+        }
+        return UNAlarmBackend(notifications: notifications, locale: locale)
+    }
+
+    private static var isAlarmKitAvailable: Bool {
+        if #available(iOS 26.0, *) { return true }
+        return false
+    }
+
+    // MARK: Backend state (Settings leaf honesty)
+
+    /// Which backend arms alarms on THIS device — the Settings leaf
+    /// labels each row "system alarm" vs "app notification" from this.
+    var alarmSchedulingKind: AlarmBackendKind { backend.kind }
+
+    /// Alarm-permission status in neutral terms (AlarmKit authorization
+    /// on iOS 26+, notification permission before) — a `.denied` shows
+    /// the honest caption in Settings.
+    var alarmAuthorizationStatus: AlarmAuthorizationStatus { backend.authorizationStatus }
 
     // MARK: Authorization (point of use)
 
-    /// Requests notification permission at POINT OF USE — the first alarm
-    /// or timer creation asks; every later call resolves the already-
-    /// determined status without re-prompting (meds request at launch in
-    /// `UNNotificationScheduler.init`; alarms/timers deliberately defer so
-    /// a user who never uses the feature is never asked).
+    /// Requests permission at POINT OF USE — the first alarm or timer
+    /// creation asks; every later call resolves the already-determined
+    /// status without re-prompting. On the AlarmKit backend the GATE is
+    /// AlarmKit authorization (UN permission is asked best-effort in the
+    /// same pass but never gates a system alarm).
     func requestAuthorizationIfNeeded() async -> Bool {
-        let granted = await notifications.requestAuthorization()
-        if !granted {
-            print("[AlarmScheduler] Notification authorization denied — alarms/timers will not ring.")
-        }
-        return granted
+        await backend.requestAuthorizationIfNeeded()
     }
 
-    // MARK: Alarms — daily repeat
+    // MARK: Alarms — backend-routed
 
-    /// Arms (or replaces, same id) the daily-repeating notification for
-    /// `alarm`. Only the hour/minute of `alarm.time` matter.
+    /// Arms (or replaces, same id) the alarm — a SYSTEM time-of-day
+    /// alarm on the AlarmKit backend, the daily-repeating notification on
+    /// the UN backend. Only the hour/minute of `alarm.time` matter.
     func scheduleAlarm(_ alarm: Alarm) {
-        let content = UNMutableNotificationContent()
-        content.title = L10n.str("alarms.notification.title", locale: locale)
-        content.body = alarm.label ?? Self.timeText(alarm.time, locale: locale)
-        content.sound = .default
-        content.userInfo = ["kind": "alarm", "id": alarm.id.uuidString]
-
-        let components = Calendar.current.dateComponents([.hour, .minute], from: alarm.time)
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: true)
-
-        let request = UNNotificationRequest(
-            identifier: Self.alarmRequestID(alarm.id),
-            content: content,
-            trigger: trigger
-        )
-        notifications.add(request) { error in
-            if let error {
-                print("[AlarmScheduler] Failed to arm alarm \(alarm.id): \(error)")
-            }
-        }
+        backend.scheduleAlarm(alarm)
     }
 
     func cancelAlarm(id: UUID) {
-        notifications.removePendingNotifications(withIdentifiers: [Self.alarmRequestID(id)])
+        backend.cancelAlarm(id: id)
     }
 
-    // MARK: Snooze — one-shot re-wake (2026-09-08)
+    // MARK: Snooze — backend-routed (2026-09-08 + [ALARMKIT-ALARMS])
 
-    /// Arms a ONE-SHOT snooze notification for `alarm` that rings
-    /// `timeInterval` seconds from arming. The daily repeat request is
-    /// untouched (it re-queues itself with the OS), and a repeat snooze
-    /// replaces the previous one in place (same identifier). The
-    /// interval (not an absolute date) is the seam so tests pin the
-    /// exact trigger with the service's injected clock.
+    /// Arms the app's own ONE-SHOT snooze notification for `alarm` that
+    /// rings `timeInterval` seconds from arming. The daily repeat is
+    /// untouched, and a repeat snooze replaces the previous one in place
+    /// (same identifier). The interval (not an absolute date) is the seam
+    /// so tests pin the exact trigger with the service's injected clock.
     func scheduleSnooze(for alarm: Alarm, timeInterval: TimeInterval) {
-        let content = UNMutableNotificationContent()
-        content.title = L10n.str("alarms.notification.title", locale: locale)
-        content.body = alarm.label ?? Self.timeText(alarm.time, locale: locale)
-        content.sound = .default
-        content.userInfo = ["kind": "alarm", "id": alarm.id.uuidString]
-
-        let request = UNNotificationRequest(
-            identifier: Self.alarmSnoozeRequestID(alarm.id),
-            content: content,
-            trigger: UNTimeIntervalNotificationTrigger(
-                timeInterval: max(timeInterval, 1), repeats: false
-            )
-        )
-        notifications.add(request) { error in
-            if let error {
-                print("[AlarmScheduler] Failed to arm snooze for alarm \(alarm.id): \(error)")
-            }
-        }
+        backend.scheduleSnooze(for: alarm, timeInterval: timeInterval)
     }
 
     func cancelSnooze(id: UUID) {
-        notifications.removePendingNotifications(withIdentifiers: [Self.alarmSnoozeRequestID(id)])
+        backend.cancelSnooze(id: id)
+    }
+
+    /// [ALARMKIT-ALARMS] Voice snooze → the system alarm where possible:
+    /// true when the backend handed the snooze to the system (the system
+    /// re-fires after the alarm's postAlert interval — only for the
+    /// DEFAULT snooze length). False — the caller arms the app's own
+    /// one-shot instead — for arbitrary-minute snoozes (the system
+    /// duration is fixed) and everywhere pre-26.
+    func snoozeViaSystem(id: UUID, minutes: Int) -> Bool {
+        backend.snoozeViaSystem(id: id, minutes: minutes)
     }
 
     // MARK: Timers — one-shot completion
@@ -351,18 +386,6 @@ final class AlarmScheduler {
     static func alarmRequestID(_ id: UUID) -> String { "alarm.\(id.uuidString)" }
     static func alarmSnoozeRequestID(_ id: UUID) -> String { "alarm.snooze.\(id.uuidString)" }
     static func timerRequestID(_ id: UUID) -> String { "timer.\(id.uuidString)" }
-
-    /// The alarm's time-of-day as a short locale string ("6:00 AM" /
-    /// "बिहान ६:०० बजे") — the notification body when the alarm has no
-    /// label.
-    private static func timeText(_ date: Date, locale: Locale) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = locale
-        formatter.timeZone = .current
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
 }
 
 // MARK: - Foreground presentation delegate
@@ -520,6 +543,16 @@ final class AlarmTimersService: ObservableObject {
         timers.filter { $0.isActive && $0.endsAt > now() }
     }
 
+    /// [ALARMKIT-ALARMS] (2026-09-10) The backend arming alarms on THIS
+    /// device — AlarmKit system alarms on iOS 26+, UN notifications
+    /// before. The Settings leaf labels each alarm row from this.
+    var alarmSchedulingKind: AlarmBackendKind { scheduler.alarmSchedulingKind }
+
+    /// [ALARMKIT-ALARMS] (2026-09-10) Alarm-permission status (AlarmKit
+    /// authorization on iOS 26+, notification permission before). A
+    /// `.denied` shows the honest caption in Settings.
+    var alarmAuthorizationStatus: AlarmAuthorizationStatus { scheduler.alarmAuthorizationStatus }
+
     func alarm(with id: UUID) -> Alarm? {
         alarms.first { $0.id == id }
     }
@@ -658,11 +691,20 @@ final class AlarmTimersService: ObservableObject {
     }
 
     /// Voice-path SNOOZE. Persists the snooze-until marker first, then
-    /// arms a ONE-SHOT re-wake notification `minutes` from `now()` —
-    /// the daily repeat request is untouched, and a repeat snooze
-    /// replaces the previous one-shot in place. `minutes` is defensively
-    /// clamped to 1…`maxSnoozeMinutes` (the parser already enforces the
-    /// same bound). Main-confined.
+    /// arms the re-wake `minutes` from `now()` — the daily repeat is
+    /// untouched, and a repeat snooze replaces the previous re-wake in
+    /// place. `minutes` is defensively clamped to
+    /// 1…`maxSnoozeMinutes` (the parser already enforces the same
+    /// bound). Main-confined.
+    ///
+    /// [ALARMKIT-ALARMS] System-first routing: a DEFAULT-length snooze
+    /// on the AlarmKit path hands off to the system alarm's own snooze
+    /// (`AlarmManager.countdown` — the system re-fires after the alarm's
+    /// postAlert, configured to the same default), so the re-wake is a
+    /// REAL system ring. The system duration is fixed, so
+    /// arbitrary-minute snoozes fall back to the app's own one-shot
+    /// notification (and the whole UN path pre-26) — `until` is honest
+    /// either way.
     @discardableResult
     func snoozeAlarm(id: UUID, minutes: Int) -> AlarmSnoozeOutcome {
         let bounded = min(max(minutes, 1), Self.maxSnoozeMinutes)
@@ -679,7 +721,9 @@ final class AlarmTimersService: ObservableObject {
         if let index = alarms.firstIndex(where: { $0.id == id }) {
             alarms[index] = updated
         }
-        scheduler.scheduleSnooze(for: updated, timeInterval: TimeInterval(bounded * 60))
+        if !scheduler.snoozeViaSystem(id: alarm.id, minutes: bounded) {
+            scheduler.scheduleSnooze(for: updated, timeInterval: TimeInterval(bounded * 60))
+        }
         emit("alarm_snoozed", outcome: "success", id: id)
         return .snoozed(until: until)
     }
