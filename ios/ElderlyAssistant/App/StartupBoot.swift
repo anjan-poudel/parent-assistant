@@ -9,13 +9,26 @@ import SwiftUI
 // machine; the sherpa KWS ONNX load is deferred to after first paint
 // (main thread — the runtime segfaults off-main on the x86_64
 // simulator). Home renders a spinner with the current stage's catalog
-// key (`startup.*` in Localizable.xcstrings, Nepali + English) and
-// dismisses it at `.ready`.
+// key (`startup.*` in Localizable.xcstrings, Nepali + English).
+//
+// [BOOT-REVIEW P0-3, 2026-09-10] Spinner timing is DELAYED APPEARANCE,
+// not a minimum-display floor. The old rule forced every boot to keep
+// the spinner up for `spinnerMinVisibleSeconds` (2.5 s) even after work
+// had finished, so a fast boot looked slow. Now:
+//
+//  - nothing shows for the first `spinnerAppearanceDelaySeconds`,
+//  - a boot that finishes inside that window NEVER shows a spinner,
+//  - once shown, it dismisses the moment boot reaches `.ready`,
+//  - the capsule keeps a fixed row height so appearance/removal does
+//    not resize the row itself.
 //
 // Failures NEVER halt boot: `failedStages` records the honest failure
 // and boot continues, so each affected feature degrades exactly as it
 // does today when its backing data/model is absent (empty lists, the
 // Null wake-word engine) instead of blocking first paint or crashing.
+// The user-facing projection of those failures is a PERSISTENT,
+// capability-specific state (`StartupDegradation`) with one recovery
+// action — never a transient generic capsule.
 
 /// The stages a boot progresses through, in order.
 enum StartupBootStage: String, CaseIterable, Equatable {
@@ -46,29 +59,28 @@ enum StartupBootStage: String, CaseIterable, Equatable {
     }
 }
 
-/// Pure timing model for the boot spinner's minimum-visibility floor
-/// ([LAUNCH-SCREEN], 2026-09-10): once the spinner first appears it must
-/// stay visible for at least `minVisibleSeconds` — a floor on DISMISSAL
-/// only. It never delays boot work: `.ready` is published the instant
-/// boot completes, and this model merely answers whether the spinner may
-/// collapse yet. Pure and clock-free so tests can drive it with injected
-/// dates.
-struct SpinnerVisibilityFloor {
-    let minVisibleSeconds: TimeInterval
+/// Pure timing model for the boot spinner's DELAYED APPEARANCE
+/// ([BOOT-REVIEW P0-3], 2026-09-10): the indicator must not appear for
+/// the first `delaySeconds` after a boot begins, so work that finishes
+/// quickly shows no spinner at all; work that is still running after the
+/// delay shows one. Pure and clock-free so tests drive it with injected
+/// dates (no real sleeps).
+struct SpinnerAppearanceDelay {
+    let delaySeconds: TimeInterval
 
-    /// Seconds the spinner has been visible.
-    func elapsed(firstVisibleAt: Date, now: Date) -> TimeInterval {
-        now.timeIntervalSince(firstVisibleAt)
+    /// Seconds elapsed since the boot began.
+    func elapsed(beganAt: Date, now: Date) -> TimeInterval {
+        now.timeIntervalSince(beganAt)
     }
 
-    /// True once the floor has passed — the spinner may dismiss.
-    func isElapsed(firstVisibleAt: Date, now: Date) -> Bool {
-        elapsed(firstVisibleAt: firstVisibleAt, now: now) >= minVisibleSeconds
+    /// True once the delay has passed — the spinner MAY appear.
+    func isElapsed(beganAt: Date, now: Date) -> Bool {
+        elapsed(beganAt: beganAt, now: now) >= delaySeconds
     }
 
-    /// Seconds until the floor passes (0 once elapsed).
-    func remaining(firstVisibleAt: Date, now: Date) -> TimeInterval {
-        max(0, minVisibleSeconds - elapsed(firstVisibleAt: firstVisibleAt, now: now))
+    /// Seconds until the delay passes (0 once elapsed).
+    func remaining(beganAt: Date, now: Date) -> TimeInterval {
+        max(0, delaySeconds - elapsed(beganAt: beganAt, now: now))
     }
 }
 
@@ -78,32 +90,32 @@ struct SpinnerVisibilityFloor {
 /// not `@MainActor` so it can be composed by the non-isolated
 /// coordinator).
 final class StartupBoot: ObservableObject {
-    /// [LAUNCH-SCREEN] Minimum seconds the spinner stays visible once
-    /// shown — a floor on dismissal only, so a fast boot still reads as
-    /// "the app is starting" instead of flashing for one frame. Boot
-    /// work is NEVER delayed: `.ready` publishes the moment boot
-    /// finishes; only the spinner's collapse waits for this floor.
-    static let spinnerMinVisibleSeconds: TimeInterval = 2.5
+    /// [BOOT-REVIEW P0-3] Seconds a boot must still be running before the
+    /// spinner is allowed to appear. Inside the review's 150–250 ms
+    /// window: long enough that an ordinary boot (first frame + cached
+    /// stores) never flashes an indicator, short enough that genuinely
+    /// slow work still tells the user something is happening.
+    static let spinnerAppearanceDelaySeconds: TimeInterval = 0.2
 
-    /// The pure floor model the dismissal gate evaluates against.
-    private static let visibilityFloor = SpinnerVisibilityFloor(
-        minVisibleSeconds: spinnerMinVisibleSeconds)
+    /// The pure delay model the appearance gate evaluates against.
+    private static let appearanceDelay = SpinnerAppearanceDelay(
+        delaySeconds: spinnerAppearanceDelaySeconds)
 
-    /// Wall-clock source — injectable so the floor logic is unit-tested
+    /// Wall-clock source — injectable so the delay logic is unit-tested
     /// with a fake clock instead of real sleeps.
     private let clock: () -> Date
-    /// When the CURRENT boot's spinner first became visible (nil until
-    /// it first shows).
-    private var spinnerFirstVisibleAt: Date?
-    /// Invalidates stale floor timers across restarts (same token
-    /// pattern as the overlay's degraded notice).
-    private var dismissalTimerToken = 0
+    /// When the CURRENT boot began (nil until `begin()`).
+    private var bootBeganAt: Date?
+    /// Invalidates stale appearance timers across restarts (same token
+    /// pattern the old dismissal floor used).
+    private var appearanceTimerToken = 0
 
     /// The stage currently loading. `.ready` = boot finished.
     @Published private(set) var stage: StartupBootStage = .restoringData
 
     /// Stages whose work failed; boot continued past them (honest
-    /// degradation). Each stage is recorded at most once.
+    /// degradation). Each stage is recorded at most once. The
+    /// user-facing projection is `degradations`.
     @Published private(set) var failedStages: [StartupBootStage] = []
 
     /// True once `begin()` was called. The spinner stays hidden until a

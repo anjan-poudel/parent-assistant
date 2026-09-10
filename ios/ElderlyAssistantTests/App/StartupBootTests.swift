@@ -8,11 +8,13 @@ import XCTest
 /// pattern as `VoiceSessionBindingTests` — a regression here shows
 /// English on the spinner while the rest of the app stays Nepali).
 ///
-/// [LAUNCH-SCREEN] Spinner dismissal now passes through the
-/// minimum-visibility floor (`StartupBoot.spinnerMinVisibleSeconds`, see
-/// `StartupBootSpinnerFloorTests`): tests asserting dismissal drive a
-/// fake clock (`TestClock`) past the floor first — the floor never
-/// delays boot work, only the spinner's collapse.
+/// [BOOT-REVIEW P0-3] Spinner visibility is DELAYED APPEARANCE, not a
+/// minimum-visibility floor (see `StartupBootSpinnerFloorTests`): nothing
+/// shows inside the first `StartupBoot.spinnerAppearanceDelaySeconds`, a
+/// boot that finishes inside that window never shows a spinner at all, and
+/// a boot that does show one dismisses it the moment `.ready` lands. Tests
+/// below therefore drive a fake clock (`TestClock`) past the appearance
+/// delay and call the reveal gate before asserting that the spinner is up.
 final class StartupBootTests: XCTestCase {
 
     // MARK: - Phase progression
@@ -29,7 +31,9 @@ final class StartupBootTests: XCTestCase {
 
         boot.begin()
         XCTAssertTrue(boot.hasStarted)
-        XCTAssertTrue(boot.spinnerVisible)
+        XCTAssertFalse(boot.spinnerVisible,
+                       "a boot that just began shows nothing for the first "
+                       + "appearance-delay window")
     }
 
     func testPhasesProgressForwardToReady() {
@@ -38,33 +42,35 @@ final class StartupBootTests: XCTestCase {
         boot.begin()
         boot.advance(to: .preparingVoice)
         XCTAssertEqual(boot.stage, .preparingVoice)
+
+        // Past the appearance delay: the work is genuinely slow, so the
+        // spinner is on screen for the rest of the boot.
+        clock.advance(by: StartupBoot.spinnerAppearanceDelaySeconds + 0.001)
+        boot.revealSpinnerIfNeeded()
         XCTAssertTrue(boot.spinnerVisible)
 
         boot.advance(to: .finishingSetup)
         XCTAssertEqual(boot.stage, .finishingSetup)
         XCTAssertTrue(boot.spinnerVisible)
 
-        // [LAUNCH-SCREEN] A fast boot reaches `.ready` before the
-        // minimum-visibility floor — boot is complete but the spinner
-        // stays perceivable until the floor passes.
+        // [BOOT-REVIEW P0-3] Readiness dismisses IMMEDIATELY — no
+        // minimum-display floor holds a finished boot's spinner up.
         boot.advance(to: .ready)
         XCTAssertEqual(boot.stage, .ready)
         XCTAssertTrue(boot.isComplete)
-        XCTAssertTrue(boot.spinnerVisible,
-                      "the 2.5 s floor holds the spinner past a fast .ready")
-
-        // Once the floor elapses the gate dismisses the spinner.
-        clock.advance(by: StartupBoot.spinnerMinVisibleSeconds + 0.5)
-        boot.dismissSpinnerIfFloorElapsed()
-        XCTAssertFalse(boot.spinnerVisible)
+        XCTAssertFalse(boot.spinnerVisible,
+                       "a shown spinner goes away the moment .ready lands")
     }
 
     func testWarmStartStageSitsBetweenVoiceAndSetup() {
-        let boot = StartupBoot()
+        let clock = TestClock()
+        let boot = StartupBoot(clock: clock.tick)
         boot.begin()
         boot.advance(to: .preparingVoice)
         boot.advance(to: .warmingEngines)
         XCTAssertEqual(boot.stage, .warmingEngines)
+        clock.advance(by: StartupBoot.spinnerAppearanceDelaySeconds + 0.001)
+        boot.revealSpinnerIfNeeded()
         XCTAssertTrue(boot.spinnerVisible,
                       "the warm phase is honest boot work — the spinner stays up")
 
@@ -119,12 +125,14 @@ final class StartupBootTests: XCTestCase {
         XCTAssertTrue(boot.hasFailures)
 
         // Boot keeps moving and completes; the degraded caption owns the
-        // user-facing honesty. ([LAUNCH-SCREEN]: the clock runs past the
-        // visibility floor — which starts at begin() — so the dismissal
+        // user-facing honesty. ([BOOT-REVIEW P0-3]: the clock runs past the
+        // appearance delay — which starts at begin() — so the dismissal
         // assertion stays meaningful; failures themselves never hold the
         // spinner.)
         boot.begin()
-        clock.advance(by: StartupBoot.spinnerMinVisibleSeconds + 0.5)
+        clock.advance(by: StartupBoot.spinnerAppearanceDelaySeconds + 0.001)
+        boot.revealSpinnerIfNeeded()
+        XCTAssertTrue(boot.spinnerVisible)
         boot.advance(to: .preparingVoice)
         boot.advance(to: .finishingSetup)
         boot.advance(to: .ready)
