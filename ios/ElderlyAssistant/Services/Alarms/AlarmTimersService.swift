@@ -841,12 +841,16 @@ final class AlarmTimersService: ObservableObject {
 
     /// Cancels a running timer (persist removal, then cancel the pending
     /// notification AND, when system-managed, the AlarmKit timer).
-    /// Main-confined (UI).
-    func cancelTimer(id: UUID) {
-        guard timer(with: id) != nil else { return }
+    /// [HOME-TIMER-CHIP] (2026-09-11) Returns true when the timer was
+    /// removed, false when the row does not exist or the removal could
+    /// not be persisted (nothing was cancelled) — the honest signal
+    /// `cancelNearestTimer` reports. Main-confined (UI).
+    @discardableResult
+    func cancelTimer(id: UUID) -> Bool {
+        guard timer(with: id) != nil else { return false }
         guard store.saveTimers(timers.filter { $0.id != id }) else {
             emit("timer_persistence_failed", outcome: "failed")
-            return
+            return false
         }
         timers.removeAll { $0.id == id }
         scheduler.cancelTimer(id: id)
@@ -854,6 +858,23 @@ final class AlarmTimersService: ObservableObject {
             systemScheduler?.cancelTimer(id: id)
         }
         emit("timer_cancelled", outcome: "success", id: id)
+        return true
+    }
+
+    /// [HOME-TIMER-CHIP] (2026-09-11) The chip's one-tap STOP and the
+    /// voice "cancel the timer" command both land here: cancels the
+    /// NEAREST running timer (soonest `endsAt`) through the existing
+    /// cancel path — persist removal, then cancel the pending
+    /// notification AND, when system-managed, the AlarmKit timer.
+    /// Deterministic under the injected `now` (tests pin it);
+    /// `.noActiveTimer` when none runs — the honest line the voice path
+    /// speaks. Main-confined.
+    @discardableResult
+    func cancelNearestTimer() -> TimerCancelOutcome {
+        guard let nearest = activeTimers.min(by: { $0.endsAt < $1.endsAt }) else {
+            return .noActiveTimer
+        }
+        return cancelTimer(id: nearest.id) ? .cancelled : .failed
     }
 
     /// [TIMER-ALARM] Cancels only the pending UN completion notification
