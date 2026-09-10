@@ -517,6 +517,68 @@ final class AlarmTimerCommandParserTests: XCTestCase {
             "timer for forty five minutes", locale: en))
     }
 
+    // MARK: - [NUMBER-WORDS] natural-speech surface (follow-up 2)
+
+    func testInformalSpellingsAndEmphasisParticlesParseDataDriven() {
+        // Data-driven over the natural-speech surface: every टाइमर
+        // spelling × every लगाऊ spelling × every emphasis particle
+        // (and none) must parse the same 5-minute timer with a clean
+        // label — the user's spoken form "पाँच मिनेट टाइमर लगाऊ त".
+        let timerSpellings = ["टाइमर", "टाइमअर", "टाइमेर"]
+        let verbSpellings = ["लगाऊ", "लगाउ", "लागू", "लागु", "लगाइदेऊ"]
+        let particles: [String?] = [nil, "त", "है", "नि", "ल"]
+        for timerSpelling in timerSpellings {
+            for verbSpelling in verbSpellings {
+                for particle in particles {
+                    let phrase = "पाँच मिनेट \(timerSpelling) \(verbSpelling)"
+                        + (particle.map { " \($0)" } ?? "")
+                    let timer = AlarmTimerCommandParser.parseTimer(phrase, locale: ne)
+                    XCTAssertEqual(timer?.durationSeconds, 300,
+                                   "failed for: \(phrase)")
+                    XCTAssertNil(timer?.label,
+                                 "label must stay clean for: \(phrase)")
+                }
+            }
+        }
+    }
+
+    func testGluedParticlesStripTokenBoundarySafe() {
+        // ASR sometimes glues the particle to the previous word — the
+        // strip peels it off only when the remainder is a known word.
+        for particle in ["त", "है", "नि", "ल"] {
+            let gluedMarker = AlarmTimerCommandParser.parseTimer(
+                "पाँच मिनेट टाइमर\(particle) लगाऊ", locale: ne)
+            XCTAssertEqual(gluedMarker?.durationSeconds, 300,
+                           "marker glued to \(particle)")
+            let gluedVerb = AlarmTimerCommandParser.parseTimer(
+                "पाँच मिनेट टाइमर लगाऊ\(particle)", locale: ne)
+            XCTAssertEqual(gluedVerb?.durationSeconds, 300,
+                           "verb glued to \(particle)")
+            XCTAssertNil(gluedVerb?.label)
+        }
+        // Token-boundary safety: a word-final "त" in real words is never
+        // eaten — "सात" stays 7 and "रात" survives as a label.
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "टाइमर सात मिनेट", locale: ne)?.durationSeconds, 420)
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "टाइमर ७ मिनेट रात", locale: ne)?.label, "रात")
+    }
+
+    func testParticlesKeepTheDoctrinePins() {
+        // Clock-alarm safety and snooze non-theft hold through particle
+        // handling.
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer(
+            "५ बजेको अलार्म लगाऊ त", locale: ne),
+            "a clock phrase with a particle stays an alarm, never a timer")
+        XCTAssertEqual(AlarmTimerCommandParser.parseAlarmSnooze(
+            "अलार्म स्नुज १५ मिनेट है", locale: ne), 15)
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer(
+            "अलार्म स्नुज १५ मिनेट है", locale: ne),
+            "snooze-worded durations stay snooze business")
+        XCTAssertTrue(AlarmTimerCommandParser.parseAlarmOff(
+            "अलार्म बन्द गर त", locale: ne))
+    }
+
     func testNumberWordNormalizerIsIdentityWithoutLexicon() {
         // A locale with no bundled lexicon degrades to the identity
         // transform — the utterance falls through exactly as before.
