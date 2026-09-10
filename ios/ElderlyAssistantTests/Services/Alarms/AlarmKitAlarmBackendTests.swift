@@ -27,6 +27,9 @@ private final class FakeAlarmKitManager: AlarmKitManaging {
 
     func requestAuthorization() async throws -> AlarmManager.AuthorizationState {
         authorizationRequestCount += 1
+        // The real manager's authorizationState reflects the resolved
+        // status after the ask — the fake mirrors that.
+        state = requestResult
         return requestResult
     }
 
