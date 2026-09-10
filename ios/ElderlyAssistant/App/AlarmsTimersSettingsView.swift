@@ -23,7 +23,7 @@ struct AlarmsTimersSettingsView: View {
                 if coordinator.alarms.isEmpty && coordinator.activeTimers.isEmpty {
                     Text("alarms.empty")
                         .font(.system(size: DesignTokens.minBodyPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundStyle(DesignTokens.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(32)
                         .frame(maxWidth: .infinity)
@@ -43,7 +43,7 @@ struct AlarmsTimersSettingsView: View {
                 addForm
                 Text("alarms.honestyNote")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary.opacity(0.8))
+                    .foregroundStyle(DesignTokens.textSecondary.opacity(0.8))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 8)
             }
@@ -58,16 +58,16 @@ struct AlarmsTimersSettingsView: View {
         HStack(spacing: 12) {
             Image(systemName: alarm.isEnabled ? "alarm.fill" : "alarm")
                 .font(.system(size: 22))
-                .foregroundColor(alarm.isEnabled ? DesignTokens.accent
+                .foregroundStyle(alarm.isEnabled ? DesignTokens.accent
                                                  : DesignTokens.textSecondary)
             VStack(alignment: .leading, spacing: 4) {
                 Text(timeText(alarm.time))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                 if let label = alarm.label {
                     Text(label)
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundStyle(DesignTokens.textSecondary)
                         .lineLimit(2)
                 }
             }
@@ -84,7 +84,7 @@ struct AlarmsTimersSettingsView: View {
             } label: {
                 Image(systemName: "trash.fill")
                     .font(.system(size: 22))
-                    .foregroundColor(DesignTokens.stateError)
+                    .foregroundStyle(DesignTokens.stateError)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }
@@ -105,16 +105,16 @@ struct AlarmsTimersSettingsView: View {
             HStack(spacing: 12) {
                 Image(systemName: "timer")
                     .font(.system(size: 22))
-                    .foregroundColor(DesignTokens.accent)
+                    .foregroundStyle(DesignTokens.accent)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(countdownText(remaining: timer.endsAt.timeIntervalSince(context.date)))
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundColor(DesignTokens.textPrimary)
+                        .foregroundStyle(DesignTokens.textPrimary)
                         .monospacedDigit()
                     if let label = timer.label {
                         Text(label)
                             .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundColor(DesignTokens.textSecondary)
+                            .foregroundStyle(DesignTokens.textSecondary)
                             .lineLimit(2)
                     }
                 }
@@ -124,7 +124,7 @@ struct AlarmsTimersSettingsView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 26))
-                        .foregroundColor(DesignTokens.stateError)
+                        .foregroundStyle(DesignTokens.stateError)
                         .frame(minWidth: DesignTokens.minTapTargetSize,
                                minHeight: DesignTokens.minTapTargetSize)
                 }
@@ -144,12 +144,12 @@ struct AlarmsTimersSettingsView: View {
         VStack(spacing: 10) {
             Text("alarms.new")
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundStyle(DesignTokens.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 12) {
                 Text("alarms.time")
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                 Spacer()
                 DatePicker("", selection: $time, displayedComponents: .hourAndMinute)
                     .labelsHidden()
@@ -167,7 +167,7 @@ struct AlarmsTimersSettingsView: View {
             if let errorKey {
                 Text(LocalizedStringKey(errorKey))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.stateError)
+                    .foregroundStyle(DesignTokens.stateError)
                     .multilineTextAlignment(.center)
             }
 
@@ -176,7 +176,7 @@ struct AlarmsTimersSettingsView: View {
             } label: {
                 Text("alarms.save")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     // DESIGN-REVIEW: minHeight + fixedSize (was a fixed
                     // 60pt chip) so the action label wraps/grows rather

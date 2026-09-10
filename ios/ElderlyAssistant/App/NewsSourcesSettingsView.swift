@@ -20,7 +20,7 @@ struct NewsSourcesSettingsView: View {
                 if store.configuredSources.isEmpty {
                     Text("settings.feeds.sourcesEmpty")
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundStyle(DesignTokens.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(16)
                         .background(DesignTokens.card)
@@ -31,10 +31,10 @@ struct NewsSourcesSettingsView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(source.name)
                                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                                    .foregroundColor(DesignTokens.textPrimary)
+                                    .foregroundStyle(DesignTokens.textPrimary)
                                 Text(source.urlString)
                                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                                    .foregroundColor(DesignTokens.textSecondary)
+                                    .foregroundStyle(DesignTokens.textSecondary)
                                     .lineLimit(2)
                             }
                             Spacer()
@@ -58,11 +58,11 @@ struct NewsSourcesSettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("settings.feeds.sourcesHint")
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundStyle(DesignTokens.textSecondary)
                     TextField("settings.feeds.sourcePlaceholder", text: $urlDraft)
                         .keyboardType(.URL)
                         .autocapitalization(.none)
-                        .disableAutocorrection(true)
+                        .autocorrectionDisabled()
                         .textFieldStyle(.roundedBorder)
                     HStack(spacing: 8) {
                         Button {
@@ -85,7 +85,7 @@ struct NewsSourcesSettingsView: View {
                         } label: {
                             Text("settings.feeds.addSource")
                                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                                .foregroundColor(.white)
+                                .foregroundStyle(.white)
                                 .frame(minHeight: DesignTokens.minTapTargetSize)
                                 .frame(maxWidth: .infinity)
                                 .background(DesignTokens.accent)
@@ -96,7 +96,7 @@ struct NewsSourcesSettingsView: View {
                     if addFailed {
                         Text("settings.feeds.addSourceFailed")
                             .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundColor(DesignTokens.stateError)
+                            .foregroundStyle(DesignTokens.stateError)
                     }
                 }
                 .padding(16)

@@ -61,11 +61,10 @@ struct HistoryView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(ActivityRowText.name(for: entry, locale: coordinator.activeLocale))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(DesignTokens.textPrimary)
-                    .lineLimit(1)
+                    .foregroundStyle(DesignTokens.textPrimary)
                 Text(caption(for: entry))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                     .lineLimit(2)
             }
             Spacer(minLength: 0)
@@ -91,7 +90,7 @@ struct HistoryView: View {
     private var dialerCircle: some View {
         Image(systemName: "phone.fill")
             .font(.system(size: 18, weight: .semibold))
-            .foregroundColor(.white)
+            .foregroundStyle(.white)
             .frame(minWidth: DesignTokens.minTapTargetSize,
                    minHeight: DesignTokens.minTapTargetSize)
             .background(DesignTokens.accent)
@@ -231,10 +230,10 @@ struct HistoryView: View {
         HStack(spacing: 10) {
             Image(systemName: "phone.fill")
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.BadgeTint.call.tint)
+                .foregroundStyle(DesignTokens.BadgeTint.call.tint)
             Text("history.liveCall")
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.BadgeTint.call.tint)
+                .foregroundStyle(DesignTokens.BadgeTint.call.tint)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
@@ -247,7 +246,7 @@ struct HistoryView: View {
     private var emptyStateCard: some View {
         Text(LocalizedStringKey("history.empty"))
             .font(.system(size: DesignTokens.minBodyPointSize))
-            .foregroundColor(DesignTokens.textSecondary)
+            .foregroundStyle(DesignTokens.textSecondary)
             .multilineTextAlignment(.center)
             .padding(32)
             .frame(maxWidth: .infinity)

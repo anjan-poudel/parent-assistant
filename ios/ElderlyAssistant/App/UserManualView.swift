@@ -119,10 +119,10 @@ struct UserManualView: View {
         VStack(spacing: 14) {
             Image(systemName: "book.closed")
                 .font(.system(size: 48))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
             Text("manual.userManual.unavailable")
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundStyle(DesignTokens.textPrimary)
                 .multilineTextAlignment(.center)
         }
         .padding(24)
@@ -146,14 +146,14 @@ struct UserManualView: View {
             Text(section.title(locale: locale))
                 .font(DesignTokens.greetingFont(
                     size: DesignTokens.minBodyPointSize + 2))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundStyle(DesignTokens.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             imagesBlock(section)
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
                     Text(paragraph)
                         .font(.system(size: DesignTokens.minBodyPointSize))
-                        .foregroundColor(DesignTokens.textPrimary)
+                        .foregroundStyle(DesignTokens.textPrimary)
                         .lineSpacing(4)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -194,7 +194,7 @@ struct UserManualView: View {
                 }
                 Text("manual.imageCaption")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }

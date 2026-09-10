@@ -25,7 +25,7 @@ struct NotificationBellButton: View {
                         // and the capsule grows with it via minWidth/minHeight
                         // instead of clipping the digits.
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                        .foregroundColor(.white)
+                        .foregroundStyle(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
                         .frame(minWidth: 22, minHeight: 22)

@@ -53,7 +53,7 @@ struct FeedsSettingsView: View {
             sectionHeader(key: "settings.feeds.sourcesSection")
             Text("settings.feeds.sourcesHint")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if coordinator.feedSources.isEmpty {
                 emptyLine(key: "settings.feeds.sourcesEmpty")
@@ -72,17 +72,16 @@ struct FeedsSettingsView: View {
                 HStack(spacing: 8) {
                     Text(source.name)
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundColor(DesignTokens.textPrimary)
-                        .lineLimit(1)
+                        .foregroundStyle(DesignTokens.textPrimary)
                     if source.isCuratedDefault {
                         Text("settings.feeds.defaultTag")
                             .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                            .foregroundColor(DesignTokens.accent)
+                            .foregroundStyle(DesignTokens.accent)
                     }
                 }
                 Text(source.urlString)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                     .lineLimit(2)
             }
             Spacer()
@@ -91,7 +90,7 @@ struct FeedsSettingsView: View {
             } label: {
                 Image(systemName: "trash.fill")
                     .font(.system(size: 20))
-                    .foregroundColor(DesignTokens.stateError)
+                    .foregroundStyle(DesignTokens.stateError)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }
@@ -122,7 +121,7 @@ struct FeedsSettingsView: View {
             if sourceAddFailed {
                 Text("settings.feeds.addSourceFailed")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.stateError)
+                    .foregroundStyle(DesignTokens.stateError)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
@@ -131,7 +130,7 @@ struct FeedsSettingsView: View {
             } label: {
                 Text("settings.feeds.addSource")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.accent)
@@ -173,7 +172,7 @@ struct FeedsSettingsView: View {
             sectionHeader(key: "settings.feeds.topicsSection")
             Text("settings.feeds.topicsHint")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if coordinator.feedTopics.isEmpty {
                 emptyLine(key: "settings.feeds.topicsEmpty")
@@ -190,14 +189,14 @@ struct FeedsSettingsView: View {
         HStack(spacing: 12) {
             Text(topic)
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundStyle(DesignTokens.textPrimary)
             Spacer()
             Button {
                 coordinator.removeFeedTopic(topic)
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 22))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }
@@ -224,7 +223,7 @@ struct FeedsSettingsView: View {
             } label: {
                 Text("settings.feeds.addTopic")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .padding(.horizontal, 16)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.accent)
@@ -259,15 +258,15 @@ struct FeedsSettingsView: View {
                     HStack(spacing: 14) {
                         Image(systemName: "newspaper.fill")
                             .font(.system(size: 26))
-                            .foregroundColor(DesignTokens.accent)
+                            .foregroundStyle(DesignTokens.accent)
                             .frame(width: 40)
                         Text("settings.feeds.newsManage")
                             .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                            .foregroundColor(DesignTokens.textPrimary)
+                            .foregroundStyle(DesignTokens.textPrimary)
                         Spacer()
                         Image(systemName: "chevron.right")
                             .font(.system(size: 20, weight: .bold))
-                            .foregroundColor(DesignTokens.textSecondary)
+                            .foregroundStyle(DesignTokens.textSecondary)
                     }
                     .padding(18)
                     .frame(maxWidth: .infinity)
@@ -286,7 +285,7 @@ struct FeedsSettingsView: View {
     private func sectionHeader(key: String) -> some View {
         Text(LocalizedStringKey(key))
             .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-            .foregroundColor(DesignTokens.textSecondary)
+            .foregroundStyle(DesignTokens.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 8)
     }
@@ -294,7 +293,7 @@ struct FeedsSettingsView: View {
     private func emptyLine(key: String) -> some View {
         Text(LocalizedStringKey(key))
             .font(.system(size: DesignTokens.minBodyPointSize))
-            .foregroundColor(DesignTokens.textSecondary)
+            .foregroundStyle(DesignTokens.textSecondary)
             .multilineTextAlignment(.leading)
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)

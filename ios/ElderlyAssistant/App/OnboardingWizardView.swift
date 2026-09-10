@@ -52,7 +52,7 @@ struct OnboardingWizardView: View {
             Button(action: goBack) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 26, weight: .bold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.card)
@@ -63,7 +63,7 @@ struct OnboardingWizardView: View {
             Button(action: skipCurrentStep) {
                 Text("onboarding.skip")
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                     .padding(.horizontal, 12)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
             }
@@ -146,11 +146,11 @@ private struct LanguageStep: View {
             VStack(spacing: 10) {
                 Text("onboarding.stepLanguage.title")
                     .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("onboarding.stepLanguage.body")
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                     .multilineTextAlignment(.center)
             }
             VStack(spacing: 12) {
@@ -173,12 +173,12 @@ private struct LanguageStep: View {
             HStack {
                 Text(LocalizedStringKey(language.displayNameKey))
                     .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 26))
-                        .foregroundColor(DesignTokens.accent)
+                        .foregroundStyle(DesignTokens.accent)
                 }
             }
             .padding(18)
@@ -211,7 +211,7 @@ private struct PermissionsStep: View {
             VStack(spacing: 10) {
                 Text("onboarding.stepPermissions.title")
                     .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                     .multilineTextAlignment(.center)
             }
             VStack(spacing: 16) {
@@ -242,17 +242,17 @@ private struct PermissionsStep: View {
             HStack(spacing: 10) {
                 Image(systemName: icon)
                     .font(.system(size: 24))
-                    .foregroundColor(DesignTokens.accent)
+                    .foregroundStyle(DesignTokens.accent)
                 Text(LocalizedStringKey(bodyKey))
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
             }
             switch status {
             case .notAsked:
                 Button(action: action) {
                     Text("onboarding.stepPermissions.allow")
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundColor(.white)
+                        .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: DesignTokens.chipHeight)
                         .fixedSize(horizontal: false, vertical: true)
@@ -263,11 +263,11 @@ private struct PermissionsStep: View {
             case .granted:
                 Label("model.ready", systemImage: "checkmark.circle.fill")
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.accent)
+                    .foregroundStyle(DesignTokens.accent)
             case .denied:
                 Text("onboarding.stepPermissions.deniedHint")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.stateError)
+                    .foregroundStyle(DesignTokens.stateError)
             }
         }
         .padding(16)
@@ -334,11 +334,11 @@ private struct FamilyContactStep: View {
             VStack(spacing: 10) {
                 Text("onboarding.stepFamily.title")
                     .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("onboarding.stepFamily.body")
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                     .multilineTextAlignment(.center)
             }
             VStack(spacing: 12) {
@@ -352,7 +352,7 @@ private struct FamilyContactStep: View {
                     .autocorrectionDisabled()
                 Text("onboarding.stepFamily.messengerHint")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
             }
@@ -371,7 +371,7 @@ private struct FamilyContactStep: View {
                 }
                 Text("onboarding.stepFamily.laterNote")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                     .multilineTextAlignment(.center)
             }
         }
@@ -402,18 +402,18 @@ private struct ModelsStep: View {
             VStack(spacing: 10) {
                 Text("onboarding.stepModels.title")
                     .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("onboarding.stepModels.body")
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                     .multilineTextAlignment(.center)
             }
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("settings.gemini.fieldLabel")
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                 SecureField("settings.gemini.fieldPlaceholder", text: $draftKey)
                     .font(.system(size: DesignTokens.minBodyPointSize, design: .monospaced))
                     .padding(14)
@@ -425,11 +425,11 @@ private struct ModelsStep: View {
                             .stroke(DesignTokens.textSecondary.opacity(0.25), lineWidth: 1)
                     )
                     .textInputAutocapitalization(.never)
-                    .disableAutocorrection(true)
+                    .autocorrectionDisabled()
                 if coordinator.geminiConfigStore.isConfigured {
                     Label("settings.gemini.statusConnected", systemImage: "checkmark.circle.fill")
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundColor(DesignTokens.accent)
+                        .foregroundStyle(DesignTokens.accent)
                 }
             }
             .padding(16)
@@ -454,7 +454,7 @@ private func primaryButton(key: String, action: @escaping () -> Void) -> some Vi
     Button(action: action) {
         Text(LocalizedStringKey(key))
             .font(.system(size: 22, weight: .bold))
-            .foregroundColor(.white)
+            .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .frame(minHeight: 64)
             .fixedSize(horizontal: false, vertical: true)

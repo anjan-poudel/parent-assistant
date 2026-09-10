@@ -426,7 +426,7 @@ struct UpdatesRowButton: View {
                 if let secondaryText = row.secondaryText {
                     Text(secondaryText)
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundStyle(DesignTokens.textSecondary)
                         .lineLimit(2)
                 }
             }
@@ -436,7 +436,7 @@ struct UpdatesRowButton: View {
                     // Caption-token disclosure chevron (DESIGN-REVIEW) —
                     // 18pt floor, Dynamic Type aware; was a fixed 15pt.
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
             }
         }
         .padding(.horizontal, 14)
@@ -453,7 +453,7 @@ struct UpdatesRowButton: View {
     private func primaryText(_ value: String, monospaced: Bool) -> some View {
         let base = Text(value)
             .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-            .foregroundColor(DesignTokens.textPrimary)
+            .foregroundStyle(DesignTokens.textPrimary)
             .multilineTextAlignment(.leading)
         if monospaced {
             base.monospacedDigit()
@@ -538,12 +538,12 @@ struct UpdatesScreen: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(LocalizedStringKey(section.titleKey))
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
             if section.rows.isEmpty {
                 if let emptyTextKey = section.emptyTextKey {
                     Text(LocalizedStringKey(emptyTextKey))
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundStyle(DesignTokens.textSecondary)
                         .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize,
                                alignment: .leading)
                 }
