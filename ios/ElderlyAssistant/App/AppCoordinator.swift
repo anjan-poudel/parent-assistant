@@ -539,7 +539,20 @@ final class AppCoordinator: ObservableObject {
     /// `handleConfirmationResponse` or the session-machine timeout (C12).
     @Published var pendingConfirmationEntryId: UUID?
 
-    private let storage: EncryptedLocalStorage
+    /// [BOOT-REVIEW P1-6] The app's encrypted storage, routed per key by
+    /// `StoragePlacementPolicy`: small secrets (the Gemini/Search/YouTube
+    /// credentials, the chosen model) stay in the Keychain, and every
+    /// structured payload — contacts, places, appointments, briefing,
+    /// feed config, histories, reminder state, caches — lives in an
+    /// encrypted file under Application Support with Data Protection
+    /// Complete. Payloads written before the split are copied across on
+    /// first read, transactionally, by `MigratingEncryptedStorage`.
+    ///
+    /// The concrete type (not `EncryptedLocalStorage`) so the boot restore
+    /// can read the phase-1 keys through ONE store opening
+    /// (`withReadSnapshot`); every store still receives it as the protocol
+    /// and cannot tell which channel it is on.
+    private let storage: MigratingEncryptedStorage
     private let observabilityBus: ObservabilityBus
     /// [TURN-TIMING] Turn-scoped stage tracer — created in init (after
     /// the bus) and injected into the pipeline/router/speaker composition
@@ -2008,6 +2021,7 @@ final class AppCoordinator: ObservableObject {
             feedSettingsStore: feedSettingsStore,
             chatHistoryStore: chatHistoryStore,
             activityLog: activityLog,
+            storage: storage,
             now: Date()
         )
         DispatchQueue.main.async { [weak self] in
@@ -2606,7 +2620,54 @@ final class AppCoordinator: ObservableObject {
                          feedSettingsStore: FeedSettingsStore,
                          chatHistoryStore: ChatHistoryStore,
                          activityLog: AppActivityLog,
+                         storage: MigratingEncryptedStorage? = nil,
                          now: Date) -> StartupDataBatch {
+            // [BOOT-REVIEW P1-6] ONE transactional open/read of the file
+            // store for the whole batch: the snapshot above pays a single
+            // directory pass and one read per key, instead of each store
+            // opening the store again for its own read.
+            guard let storage else { return read(contactStore: contactStore,
+                                                 placeStore: placeStore,
+                                                 appointmentStore: appointmentStore,
+                                                 briefingStore: briefingStore,
+                                                 feedSettingsStore: feedSettingsStore,
+                                                 chatHistoryStore: chatHistoryStore,
+                                                 activityLog: activityLog,
+                                                 now: now) }
+            return storage.withReadSnapshot(keys: snapshotKeys) {
+                read(contactStore: contactStore,
+                     placeStore: placeStore,
+                     appointmentStore: appointmentStore,
+                     briefingStore: briefingStore,
+                     feedSettingsStore: feedSettingsStore,
+                     chatHistoryStore: chatHistoryStore,
+                     activityLog: activityLog,
+                     now: now)
+            }
+        }
+
+        /// The store keys phase 1 reads through the file store. Literals
+        /// because each store keeps its own key `private`; a drift here is
+        /// a missed optimization, never a correctness problem — a key that
+        /// is not snapshotted simply reads through normally.
+        static let snapshotKeys = [
+            "family.contacts",
+            "places.saved",
+            "medical.appointments",
+            "morningBriefing.current",
+            "feeds.config.v1",
+            "chat.history",
+            "app.activity.log",
+        ]
+
+        private static func read(contactStore: FamilyContactStore,
+                                 placeStore: SavedPlaceStore,
+                                 appointmentStore: AppointmentStore,
+                                 briefingStore: MorningBriefingStore,
+                                 feedSettingsStore: FeedSettingsStore,
+                                 chatHistoryStore: ChatHistoryStore,
+                                 activityLog: AppActivityLog,
+                                 now: Date) -> StartupDataBatch {
             var batch = StartupDataBatch()
             batch.contacts = contactStore.load()
             batch.places = placeStore.load()
