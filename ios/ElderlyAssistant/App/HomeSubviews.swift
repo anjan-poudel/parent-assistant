@@ -90,8 +90,10 @@ struct HomeTopBar: View {
                     .font(DesignTokens.greetingFont(size: 18))
                     .foregroundColor(DesignTokens.textPrimary)
                     .multilineTextAlignment(.center)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.7)
+                    // [DESIGN-REVIEW] No minimumScaleFactor on essential
+                    // localized text — the date/greeting wraps instead
+                    // (Nepali at XXXL stays legible).
+                    .lineLimit(2)
                 if !line.overlays.isEmpty {
                     Text(line.overlays.joined(separator: " • "))
                         .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
@@ -155,10 +157,12 @@ struct QuickAccessStrip: View {
             VStack(spacing: 4) {
                 AppGlyph(app: app, diameter: 56)
                 Text(LocalizedStringKey(app.nameKey))
-                    .font(.system(size: 15, weight: .semibold))
+                    // [DESIGN-REVIEW] 18pt caption floor + wrapping —
+                    // no minimumScaleFactor on localized tile labels.
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
             }
             .frame(width: 92)
             .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -243,10 +247,7 @@ struct TalkStage: View {
                     TalkButton(session: session,
                                // [P0-2] Manual Talk readiness — the shared
                                // `VoicePipelineReadiness` contract, driven
-                               // by the pipeline's own start callback. The
-                               // hero no longer reads the fold status
-                               // (`voiceReadinessStatus`) or
-                               // `TalkHeroGating`.
+                               // by the pipeline's own start callback.
                                readiness: voice.readiness,
                                onTap: {
                                    switch state {
@@ -349,6 +350,8 @@ struct FeedbackRegion: View {
     let onResumeSetup: () -> Void
     /// Open the conversation-history sheet.
     let onOpenHistory: () -> Void
+    /// Dismiss the outcome card for good (coordinator's `dismissOutcome`).
+    let onDismissOutcome: () -> Void
 
     @State private var outcomeExpanded = true
 
@@ -358,14 +361,9 @@ struct FeedbackRegion: View {
             // under the hero (design review): while a freshly-landed
             // outcome card is EXPANDED it owns the region, and the
             // optional-setup nudge waits its turn — it returns with the
-            // card's collapse (6s later). The stand-down is deliberately
-            // not permanent: `lastOutcome` is only ever set, never
-            // cleared, and this strip is Home's only way back into a
-            // half-finished setup, so keying visibility on "an outcome
-            // exists" would remove the affordance for the rest of the
-            // session. (Making it permanent needs an outcome-dismissal
-            // path in the coordinator — sibling-owned; see the review
-            // report.)
+            // card's collapse (6s later). Dismissing the card (X) clears
+            // the coordinator's `lastOutcome`, so the stand-down ends
+            // permanently and the strip returns for the session.
             if setup.isVisible, !showsExpandedOutcome {
                 SetupStrip(setup: setup, action: onResumeSetup)
             }
@@ -398,9 +396,10 @@ struct FeedbackRegion: View {
             EmptyView()
         default:
             if let outcome {
-                OutcomeCardView(outcome: outcome, expanded: outcomeExpanded) {
-                    onOpenHistory()
-                }
+                OutcomeCardView(outcome: outcome,
+                                expanded: outcomeExpanded,
+                                onTapChip: onOpenHistory,
+                                onDismiss: onDismissOutcome)
                 .task(id: outcome.id) {
                     outcomeExpanded = true
                     try? await Task.sleep(nanoseconds: 6_000_000_000)

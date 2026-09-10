@@ -1,66 +1,13 @@
 import Foundation
 
-// MARK: - Manual Talk readiness (startup review P0-2, 2026-09-10)
+// MARK: - Talk-hero readiness copy (startup review P0-2, 2026-09-10)
 //
 // Home's hero consumes the SHARED CONTRACT TYPE `VoicePipelineReadiness`
 // (Services/Voice/VoicePipelineReadiness.swift) and nothing else: no fold
 // status, no `StartupBootStage`, no wake-word state. Manual Talk is gated
 // by the manual pipeline's own start callback — a degraded KWS engine must
-// never take the speak button down with it.
-//
-// ---------------------------------------------------------------------
-// TEMPORARY BRIDGE — DELETE ON MERGE
-// ---------------------------------------------------------------------
-// The contract's publisher (`AppCoordinator.voicePipelineReadiness`,
-// written only from `voicePipeline.start`'s completion callback) lands
-// from the sibling startup branch. Until it merges, this extension adapts
-// the coordinator's EXISTING published fold onto the same contract type,
-// so HomeView and TalkButton are already written against the final shape:
-//
-//   * `.ready`              → `.ready`
-//   * `.degraded(reason:)`  → `.failed(.pipelineStartFailed(reason:))`
-//   * `.preparing`          → `.loading(.starting)`
-//
-// POST-MERGE: delete this file and read
-// `coordinator.voicePipelineReadiness` directly in `HomeView`. The
-// branch-specific name below deliberately differs from the sibling's
-// property so the two never collide as redeclarations in the meantime.
-//
-// `voiceReadinessStatus` / `VoiceReadiness` / `TalkHeroGating` keep their
-// own callers and tests in `Services/Voice/VoiceReadiness.swift` (owned by
-// a sibling; post-merge cleanup removes them). After this change Home's
-// hero is no longer one of those callers.
-
-extension AppCoordinator {
-    /// Manual Talk readiness in the shared contract's shape — the value
-    /// `TalkButton` gates on.
-    var talkReadiness: VoicePipelineReadiness {
-        switch voiceReadinessStatus {
-        case .ready:
-            return .ready
-        case .degraded(let reason):
-            return .failed(.pipelineStartFailed(reason: reason))
-        case .preparing:
-            return .loading(.starting)
-        }
-    }
-}
-
-extension VoicePipelineReadiness {
-    /// True while the hero must show its own loading presentation
-    /// (spinner inside the disc, stage label, every activation and
-    /// recovery gesture disabled).
-    var isLoading: Bool {
-        if case .loading = self { return true }
-        return false
-    }
-
-    /// The named failure, when the pipeline's boot-time start failed.
-    var failure: VoiceStartupFailure? {
-        if case .failed(let failure) = self { return failure }
-        return nil
-    }
-}
+// never take the speak button down with it. This file holds the pure
+// stage/failure → localized-copy mapping for the hero.
 
 // MARK: - Hero copy (pure mapping)
 

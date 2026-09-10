@@ -274,7 +274,7 @@ struct HomeView: View {
     /// The talk stage's [P0-2] readiness value plus its two derived labels.
     private var voicePresentation: VoicePresentationState {
         VoicePresentationState(
-            readiness: talkReadiness,
+            readiness: heroReadiness,
             statusOverride: talkStatusLineOverride,
             showsOpenSettings: stageVisuals.isError && coordinator.voiceErrorKind == .permission)
     }
@@ -295,13 +295,12 @@ struct HomeView: View {
     /// and leaf rows can never disagree.
     private let widgetRegistry = HomeWidgetRegistry()
 
-    /// Bell badge derivation — the count of active notification panels,
-    /// straight from the registry rows the Updates leaf lists. [P1-7] the
-    /// derivation itself must move off the render path (publish the count
-    /// only when reminder/briefing state changes); the extracted views
-    /// stop the result from fanning out to the sections in the meantime.
+    /// Bell badge derivation — [P1-7] reads the coordinator's DEDUPED
+    /// published count (`AppCoordinator.activeNotificationCount`), which
+    /// is recomputed only when reminder/briefing state changes — never on
+    /// unrelated Home invalidations.
     private var activeNotificationCount: Int {
-        widgetRegistry.activeNotificationCount(coordinator: coordinator)
+        coordinator.activeNotificationCount
     }
 
     // MARK: - Talk stage (redesign spec §3.1)
@@ -326,8 +325,9 @@ struct HomeView: View {
     }
 
     /// [P0-2] Manual Talk readiness — the shared `VoicePipelineReadiness`
-    /// contract the hero gates on (see `AppCoordinator.talkReadiness`).
-    private var talkReadiness: VoicePipelineReadiness { coordinator.talkReadiness }
+    /// contract the hero gates on, published by the coordinator ONLY from
+    /// the real `voicePipeline.start` completion callback.
+    private var heroReadiness: VoicePipelineReadiness { coordinator.voicePipelineReadiness }
 
     /// [P0-2] Whether the boot capsule is hosted above the hero's disc.
     /// The hero shows its OWN loading presentation while the pipeline
@@ -336,7 +336,7 @@ struct HomeView: View {
     /// stands down for exactly that stage. Every other boot stage
     /// (restoring data, warming engines, finishing setup) keeps it.
     private var showsStartupCapsule: Bool {
-        !(talkReadiness.isLoading && boot.stage == .preparingVoice)
+        !(heroReadiness.isLoading && boot.stage == .preparingVoice)
     }
 
     /// [P1-7] The extracted stage (`HomeSubviews.swift`). The tap switch
@@ -362,7 +362,8 @@ struct HomeView: View {
                        outcome: coordinator.lastOutcome,
                        setup: homePresentation.setup,
                        onResumeSetup: { showWizard = true },
-                       onOpenHistory: { showHistory = true })
+                       onOpenHistory: { showHistory = true },
+                       onDismissOutcome: coordinator.dismissOutcome)
     }
 
     /// The error status line says what actually happened (spec §7) —
@@ -432,7 +433,12 @@ struct HomeView: View {
         case .history:
             HistoryView()
         case .settings:
+            // [BOOT-REVIEW P0-1] The model-download service is injected
+            // HERE (first relevance), not at the app root — Settings is
+            // where its UI lives, and the lazy service must not be forced
+            // before a download surface exists.
             SettingsView()
+                .environmentObject(coordinator.modelDownloadService)
         case .directions:
             DirectionsView()
         case .briefing:

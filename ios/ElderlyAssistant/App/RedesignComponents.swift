@@ -321,6 +321,9 @@ struct OutcomeCardView: View {
     let outcome: AppCoordinator.OutcomeSummary
     let expanded: Bool
     let onTapChip: () -> Void
+    /// Clears the outcome entirely (coordinator's `lastOutcome = nil`),
+    /// so the setup strip's stand-down can be PERMANENT once dismissed.
+    let onDismiss: () -> Void
 
     /// The card's text rows in display order (user transcript — when one
     /// was recorded — above the response).
@@ -387,6 +390,17 @@ struct OutcomeCardView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                    // Explicit dismissal (design review: make degraded/
+                    // stand-down states actionable — one recovery action,
+                    // nothing transient-only). Clears `lastOutcome` so the
+                    // setup strip returns for the rest of the session.
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                            .foregroundStyle(DesignTokens.textSecondary)
+                            .accessibilityLabel(Text("home.outcome.dismiss"))
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             Spacer(minLength: 0)

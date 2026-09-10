@@ -44,7 +44,11 @@ struct ElderlyAssistantApp: App {
             }
             .environmentObject(appCoordinator)
             .environmentObject(appCoordinator.voiceSession)
-            .environmentObject(appCoordinator.modelDownloadService)
+            // [BOOT-REVIEW P0-1] `modelDownloadService` is NOT injected
+            // at the root — the root-level environmentObject used to
+            // force the lazy service at first body evaluation, before
+            // any model UI existed. HomeView injects it where the
+            // download UI actually lives (first relevance).
             // [STARTUP-PERF] Progressive boot progress — the spinner
             // overlay reads this (stage labels + honest failures).
             .environmentObject(appCoordinator.startupBoot)

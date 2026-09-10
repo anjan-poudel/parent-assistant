@@ -5372,6 +5372,23 @@
         }
       }
     },
+    "home.outcome.dismiss" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close this message"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "यो सन्देश बन्द गर्नुहोस्"
+          }
+        }
+      }
+    },
     "home.outcome.undo" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5504,23 +5521,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "थिचेर सेटअप पूरा गर्नुहोस्"
-          }
-        }
-      }
-    },
-    "home.setupRemaining" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%lld setup steps left"
-          }
-        },
-        "ne" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "अझै %lld काम बाँकी"
           }
         }
       }
@@ -9346,6 +9346,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "कलिङ"
+          }
+        }
+      }
+    },
+    "settings.diagnostics.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostics"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "निदान"
           }
         }
       }

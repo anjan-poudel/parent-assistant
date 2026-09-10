@@ -14,7 +14,7 @@ import XCTest
 ///  - wake-word (KWS) engine state cannot move readiness in either
 ///    direction — manual Talk must come up when KWS degrades to Null.
 ///
-/// Same shape as `VoiceReadinessTests` (pure value transitions, no
+/// Pure value transitions, no
 /// coordinator, no queues, no clock).
 final class ManualTalkReadinessStateTests: XCTestCase {
 

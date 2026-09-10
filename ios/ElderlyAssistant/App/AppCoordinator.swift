@@ -462,6 +462,14 @@ final class AppCoordinator: ObservableObject {
 
     @Published var lastOutcome: OutcomeSummary?
 
+    /// [DESIGN-REVIEW] Explicit outcome dismissal — clears the published
+    /// outcome so Home's feedback region hands the strip back to the
+    /// optional-setup affordance for the rest of the session (the
+    /// stand-down is permanent, not timer-bound).
+    func dismissOutcome() {
+        lastOutcome = nil
+    }
+
     /// Records one turn in the persisted history and refreshes the
     /// published window. Always called on the main queue (the two callers
     /// dispatch to main first), so the store is only ever touched from
@@ -653,30 +661,9 @@ final class AppCoordinator: ObservableObject {
     private var wakeWordEngine: WakeWordEngine
     private let voiceActivityDetector: VoiceActivityDetector
     private var voicePipeline: VoicePipeline!
-    /// [STARTUP-R2] The voice stack's readiness — the single published
-    /// source of truth the Talk hero binds to (disabled + honest
-    /// "Preparing voice…" label until ready). The tracker folds named
-    /// per-subsystem signals; the coordinator registers exactly one
-    /// source today ("pipeline" — voiceState == .idle ⇒ the stack is
-    /// live) and future subsystems attach with their own ids. The
-    /// published mirror below is what HomeView observes (same
-    /// forward-to-published pattern as the stores' windows).
-    let voiceReadiness = VoiceReadiness()
-    /// Published mirror of `voiceReadiness.status` — HomeView's
-    /// `TalkButton` binding. Assigned on main through the sink wired in
-    /// `init` (its ONLY writer outside `updateVoiceReadiness`'s latch).
-    @Published private(set) var voiceReadinessStatus: VoiceReadinessStatus = .preparing
-    private var voiceReadinessCancellable: AnyCancellable?
-    /// [STARTUP-R2] True once the pipeline source reached `.ready` —
-    /// from then on, runtime talk cycles (idle → capturing → routing →
-    /// idle) never re-gate the hero. A boot FAILURE does not settle:
-    /// the readiness stays `.degraded` (hero tappable — its tap is the
-    /// retry) and a later retry success upgrades degraded → ready.
-    private var voiceReadinessBootSettled = false
-    /// [BOOT-REVIEW P0-2] MANUAL-TALK readiness — a stricter sibling of
-    /// `voiceReadinessStatus` above, on the contract the startup review
-    /// specifies: the hero renders it from the very first frame
-    /// (`.loading(.starting)`), it reaches `.ready` ONLY from a real
+    /// [BOOT-REVIEW P0-2] MANUAL-TALK readiness on the contract the
+    /// startup review specifies: the hero renders it from the very first
+    /// frame (`.loading(.starting)`), it reaches `.ready` ONLY from a real
     /// `voicePipeline.start` success callback, and a failure is NEVER
     /// auto-recovered by a timer or another boot phase. Wake-word engine
     /// state cannot move it in either direction (wake-word is a separate
@@ -1667,16 +1654,6 @@ final class AppCoordinator: ObservableObject {
         // language into services that build user-facing strings.
         syncServiceLocales()
 
-        // [STARTUP-R2] Forward the readiness tracker's folded status into
-        // the published mirror HomeView's TalkButton binds. Tracker
-        // updates are main-confined (the coordinator's own updates), the
-        // receive(on:) is the defensive marshal.
-        voiceReadinessCancellable = voiceReadiness.$status
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] status in
-                self?.voiceReadinessStatus = status
-            }
-
         // Fold today's medication reminders into the routine plugin's
         // "what are my reminders today" answer — the user's mental model
         // is ONE reminder list spanning both systems. Attached here (not
@@ -2277,25 +2254,16 @@ final class AppCoordinator: ObservableObject {
     /// `handlePipelineState` (every pipeline state change, main-
     /// confined) and from the boot's pipeline-start completion. The
     /// pipeline source is READY exactly when `voiceState == .idle` — the
-    /// pipeline-started-and-settled condition the Talk hero gates on.
-    ///
-    /// Latch: once ready, runtime cycles never re-gate the hero. A boot
-    /// failure (`.error` before the first ready) reports `.failed` —
-    /// the hero stays TAPPABLE there because the tap is the retry
-    /// (`recoverVoiceCycle`), and a retry success upgrades to ready.
+    /// The legacy fold tracker is gone ([BOOT-REVIEW] cleanup): the Talk
+    /// hero gates on the strict `voicePipelineReadiness` contract, and
+    /// this state hook now only drives the deferred KWS build — when the
+    /// pipeline first reaches `.idle`, the speak affordance is live and
+    /// the sherpa engine may be built off the critical path (one-shot
+    /// per launch — see `scheduleDeferredKWSBuildIfNeeded`).
     private func updateVoiceReadiness() {
-        switch voiceState {
-        case .idle:
-            voiceReadiness.setSignal(id: "pipeline", .ready)
-            voiceReadinessBootSettled = true
-            print("[AppCoordinator] voice readiness ready — speak enabled")
+        if case .idle = voiceState {
+            print("[AppCoordinator] voice pipeline idle — speak enabled")
             scheduleDeferredKWSBuildIfNeeded()
-        case .error(let reason):
-            guard !voiceReadinessBootSettled else { return }
-            voiceReadiness.setSignal(id: "pipeline", .failed(reason: reason))
-        case .stopped, .capturingCommand, .processing, .routing:
-            guard !voiceReadinessBootSettled else { return }
-            voiceReadiness.setSignal(id: "pipeline", .preparing)
         }
     }
 
@@ -2413,13 +2381,12 @@ final class AppCoordinator: ObservableObject {
     /// delay after the speak affordance first goes ready — the build
     /// never contributes to perceived startup, and wake-word detection
     /// arrives moments later (documented honest limit). One-shot per
-    /// launch. The guard re-checks at fire time: a pipeline that never
-    /// reached idle (boot start failure) never builds the engine, and a
-    /// hot-swap into a recycled pipeline re-starts the engine through
-    /// the swap itself.
+    /// launch. Called only from `updateVoiceReadiness` on `.idle`, so a
+    /// pipeline that never reaches idle (boot start failure) never
+    /// builds the engine; a hot-swap into a recycled pipeline re-starts
+    /// the engine through the swap itself.
     private func scheduleDeferredKWSBuildIfNeeded() {
-        guard !deferredKWSBuildScheduled,
-              voiceReadiness.status == .ready else { return }
+        guard !deferredKWSBuildScheduled else { return }
         deferredKWSBuildScheduled = true
         DispatchQueue.main.asyncAfter(
             deadline: .now() + Self.deferredKWSBuildDelaySeconds

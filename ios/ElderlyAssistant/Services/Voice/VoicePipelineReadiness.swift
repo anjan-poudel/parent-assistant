@@ -42,3 +42,19 @@ enum VoiceLoadingStage: Equatable {
 enum VoiceStartupFailure: Equatable {
     case pipelineStartFailed(reason: String)
 }
+
+extension VoicePipelineReadiness {
+    /// True while the hero must show its own loading presentation
+    /// (spinner inside the disc, stage label, every activation and
+    /// recovery gesture disabled).
+    var isLoading: Bool {
+        if case .loading = self { return true }
+        return false
+    }
+
+    /// The named failure, when the pipeline's boot-time start failed.
+    var failure: VoiceStartupFailure? {
+        if case .failed(let failure) = self { return failure }
+        return nil
+    }
+}

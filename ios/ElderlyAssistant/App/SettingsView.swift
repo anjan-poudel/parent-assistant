@@ -75,6 +75,13 @@ struct SettingsView: View {
 
                 ScrollView {
                     VStack(spacing: 12) {
+                        // [BOOT-REVIEW, design item] Capability
+                        // diagnostics live HERE, not in a transient
+                        // capsule: every failed boot capability is named,
+                        // its affected control named, and exactly one
+                        // recovery action offered — routed through the
+                        // same seam the coordinator installed.
+                        degradationDiagnosticsSection
                         // Skinnable app background (2026-09-07) — warm
                         // presets today; a photo-picker background is a
                         // noted future option.
@@ -187,6 +194,65 @@ struct SettingsView: View {
     /// this is load-bearing infrastructure in v2 (no key = no assistant),
     /// so it stays a normal, prominent row with a live status indicator.
     @EnvironmentObject private var coordinator: AppCoordinator
+    /// [BOOT-REVIEW, design item] Observed so the diagnostics card below
+    /// re-renders when a capability fails or (via recovery) comes back.
+    @EnvironmentObject private var boot: StartupBoot
+    @Environment(\.locale) private var locale
+
+    /// [BOOT-REVIEW, design item] Capability-specific diagnostics — the
+    /// review moves detailed failure information OUT of the transient
+    /// boot capsule and INTO Settings. Each failed capability is named,
+    /// its diagnostic detail shown, and exactly ONE recovery action
+    /// offered (routed through the coordinator's real retry seam). The
+    /// card disappears the moment every failure recovers.
+    @ViewBuilder
+    private var degradationDiagnosticsSection: some View {
+        let degradations = StartupDegradation.degradations(forFailedStages: boot.failedStages)
+        if !degradations.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(L10n.str("settings.diagnostics.title", locale: locale))
+                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                               weight: .bold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                ForEach(degradations) { degradation in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: DesignTokens.minCaptionPointSize,
+                                              weight: .bold))
+                                .foregroundStyle(DesignTokens.stateError)
+                            Text(L10n.str(degradation.titleKey, locale: locale))
+                                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                                           weight: .semibold))
+                                .foregroundStyle(DesignTokens.textPrimary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Button {
+                                StartupDegradationRecoverySeam.perform(degradation.capability)
+                            } label: {
+                                Text(L10n.str(degradation.recoveryKey, locale: locale))
+                                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                                               weight: .bold))
+                                    .foregroundStyle(DesignTokens.accent)
+                                    .frame(minHeight: DesignTokens.minTapTargetSize)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Text(L10n.str(degradation.diagnosticKey, locale: locale))
+                            .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                                       weight: .regular))
+                            .foregroundStyle(DesignTokens.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity)
+                    .background(DesignTokens.card)
+                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                }
+            }
+            .padding(.bottom, 4)
+        }
+    }
+
     private var geminiSectionRow: some View {
         NavigationLink(value: SettingsSection.geminiAI) {
             HStack(spacing: 14) {
