@@ -14381,6 +14381,23 @@
           }
         }
       }
+    },
+    "home.dock.more" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अरू"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

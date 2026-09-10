@@ -447,51 +447,78 @@ private struct SetupStrip: View {
 
 // MARK: - Dock (redesign spec §3.1)
 
-/// The shortcut dock — Home is the only screen that shows it. Two rows of
-/// three tiles (calendar-display task, 2026-09-09): one row of six read as
-/// a cluttered shelf, so the user asked for two rows — top: appliance
-/// helper, directions, feeds; bottom: meds, reminders, call. Same
-/// `dockItem` components, same ≥44pt targets, same material card, same
-/// accessibility labels.
+/// The shortcut dock — Home is the only screen that shows it. THREE
+/// persistent shortcuts (Medication, Phone, Reminders) plus a labeled
+/// "More" tile that opens the secondary surface holding the rest
+/// (Appliance, Directions, Feeds): the two-row dock gave six destinations
+/// equal priority, and for an elderly audience three daily shortcuts plus
+/// one clearly labeled secondary surface ranks them honestly. One row of
+/// four same-weight tiles also buys every target a practical 56pt instead
+/// of the bare 44pt minimum.
 struct HomeDock: View {
     /// The top family contact's name — its face replaces the generic
     /// phone icon on the call tile when one is configured (redesign spec
     /// §3.1/§3.2).
     let contactName: String?
     /// The appliance vision helper presents app-wide (via
-    /// `pendingPluginPresentation`), same as the voice path — a Button,
-    /// not a NavigationLink.
+    /// `pendingPluginPresentation`), same as the voice path.
     let onAppliance: () -> Void
+    /// Push a leaf chosen in the More sheet.
+    let onOpenLeaf: (LeafDestination) -> Void
+
+    /// The More sheet's own presentation.
+    @State private var showsMore = false
+    /// What the More sheet chose, performed once the sheet is GONE: a
+    /// push started while the sheet is still on screen races its
+    /// dismissal (the pushed leaf lands behind it), so the dock defers
+    /// the action to `onDismiss` instead — the sheet's own lifecycle is
+    /// the signal, never a timer.
+    @State private var pendingAction: MoreAction?
+
+    /// A choice made in the secondary surface.
+    private enum MoreAction: Equatable {
+        case leaf(LeafDestination)
+        case applianceHelper
+    }
 
     var body: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 2) {
-                applianceItem
-                dockItem(.directions, icon: "map.fill", tint: .directions, titleKey: "home.hub.directions")
-                dockItem(.feed, icon: "rectangle.stack.fill", tint: .feeds, titleKey: "home.hub.feeds")
-            }
-            HStack(spacing: 2) {
-                dockItem(.meds, icon: "pills.fill", tint: .meds, titleKey: "home.hub.meds")
-                dockItem(.reminders, icon: "clock.fill", tint: .reminders, titleKey: "home.hub.reminders")
-                callItem
-            }
+        HStack(spacing: 6) {
+            dockItem(.meds, icon: "pills.fill", tint: .meds, titleKey: "home.hub.meds")
+            callItem
+            dockItem(.reminders, icon: "clock.fill", tint: .reminders, titleKey: "home.hub.reminders")
+            moreItem
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 10)
+        .padding(.vertical, 8)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 22))
+        .sheet(isPresented: $showsMore, onDismiss: performPendingAction) {
+            HomeMoreSheet(
+                onAppliance: { choose(.applianceHelper) },
+                onOpenLeaf: { choose(.leaf($0)) })
+        }
+    }
+
+    private func choose(_ action: MoreAction) {
+        pendingAction = action
+        showsMore = false
+    }
+
+    private func performPendingAction() {
+        guard let action = pendingAction else { return }
+        pendingAction = nil
+        switch action {
+        case .leaf(let destination):
+            onOpenLeaf(destination)
+        case .applianceHelper:
+            onAppliance()
+        }
     }
 
     private func dockItem(_ destination: LeafDestination, icon: String,
                           tint: DesignTokens.BadgeTint, titleKey: String) -> some View {
         NavigationLink(value: destination) {
-            VStack(spacing: 4) {
-                IconBadge(systemImage: icon, tint: tint, diameter: 42)
-                Text(LocalizedStringKey(titleKey))
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-            }
-            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+            tile(icon: icon, tint: tint, titleKey: titleKey)
         }
         .buttonStyle(.plain)
     }
@@ -502,38 +529,136 @@ struct HomeDock: View {
         NavigationLink(value: LeafDestination.call) {
             VStack(spacing: 4) {
                 if let contactName {
-                    FaceAvatar(name: contactName, diameter: 42)
+                    FaceAvatar(name: contactName, diameter: 44)
                 } else {
-                    IconBadge(systemImage: "phone.fill", tint: .call, diameter: 42)
+                    IconBadge(systemImage: "phone.fill", tint: .call, diameter: 44)
                 }
-                Text(LocalizedStringKey("home.hub.call"))
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                tileLabel("home.hub.call")
             }
-            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    /// The design §4 "Show Me" dock tile.
-    private var applianceItem: some View {
-        Button(action: onAppliance) {
-            VStack(spacing: 4) {
-                IconBadge(systemImage: "camera.viewfinder", tint: .appliance, diameter: 36)
-                Text(LocalizedStringKey("plugin.applianceHelper.name"))
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-            }
-            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+    /// The secondary surface's entry point — a clearly labeled tile (the
+    /// design review's "More"), never an unlabeled overflow glyph.
+    private var moreItem: some View {
+        Button { showsMore = true } label: {
+            tile(icon: "ellipsis.circle.fill", tint: .apps, titleKey: "home.dock.more")
         }
         .buttonStyle(.plain)
+    }
+
+    /// One dock tile: a 44pt badge over an 18pt label (the caption token —
+    /// navigation labels sit at or above the 18pt floor), on a 56pt
+    /// minimum target that grows when the text does.
+    private func tile(icon: String, tint: DesignTokens.BadgeTint,
+                      titleKey: String) -> some View {
+        VStack(spacing: 4) {
+            IconBadge(systemImage: icon, tint: tint, diameter: 44)
+            tileLabel(titleKey)
+        }
+        .frame(maxWidth: .infinity, minHeight: 56)
+        .contentShape(Rectangle())
+    }
+
+    private func tileLabel(_ titleKey: String) -> some View {
+        Text(LocalizedStringKey(titleKey))
+            .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+            .foregroundStyle(DesignTokens.textPrimary)
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
 extension HomeDock: Equatable {
-    /// The contact name is the only datum the dock renders (the tiles are
-    /// static links).
+    /// The contact name is the only datum the dock renders: the tiles are
+    /// static links, and the More sheet's choices reach the dock as
+    /// parameters of the closures it calls — never as captured state.
     static func == (lhs: HomeDock, rhs: HomeDock) -> Bool {
         lhs.contactName == rhs.contactName
+    }
+}
+
+// MARK: - More sheet (the dock's secondary surface)
+
+/// The dock's secondary surface: the three shortcuts that are not daily —
+/// Appliance (the "Show Me" camera helper), Directions and Feeds — as
+/// full-width rows at a 60pt target with 20pt labels, plus Close. Purely
+/// a chooser: it reports the choice to the dock and dismisses; the dock
+/// performs it once the sheet is gone, so a push never races the sheet's
+/// transition.
+private struct HomeMoreSheet: View {
+    let onAppliance: () -> Void
+    let onOpenLeaf: (LeafDestination) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 12) {
+                Text("home.dock.more")
+                    .font(DesignTokens.warmFont(size: 24, weight: .bold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .padding(.top, 20)
+                row(icon: "camera.viewfinder", tint: .appliance,
+                    titleKey: "plugin.applianceHelper.name") {
+                    onAppliance()
+                    dismiss()
+                }
+                row(icon: "map.fill", tint: .directions,
+                    titleKey: "home.hub.directions") {
+                    onOpenLeaf(.directions)
+                    dismiss()
+                }
+                row(icon: "rectangle.stack.fill", tint: .feeds,
+                    titleKey: "home.hub.feeds") {
+                    onOpenLeaf(.feed)
+                    dismiss()
+                }
+                row(icon: "xmark", tint: .settings, titleKey: "common.close",
+                    showsChevron: false) {
+                    dismiss()
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 24)
+        }
+        // Medium by default (four rows fit without scrolling) and
+        // resizable to full height so Accessibility XXL and Nepali can
+        // wrap without clipping.
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .background(DesignTokens.background)
+    }
+
+    private func row(icon: String, tint: DesignTokens.BadgeTint, titleKey: String,
+                     showsChevron: Bool = true,
+                     action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                IconBadge(systemImage: icon, tint: tint, diameter: 44)
+                Text(LocalizedStringKey(titleKey))
+                    .font(DesignTokens.warmFont(size: 20, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                if showsChevron {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(minHeight: 60)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

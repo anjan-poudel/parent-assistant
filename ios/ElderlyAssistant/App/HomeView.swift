@@ -152,9 +152,13 @@ struct HomeView: View {
                     if showsPinnedHistoryChip {
                         historyChip
                     }
-                    HomeDock(contactName: homePresentation.primaryContactName) {
-                        coordinator.presentApplianceHelper(question: nil)
-                    }
+                    HomeDock(contactName: homePresentation.primaryContactName,
+                             onAppliance: {
+                                 coordinator.presentApplianceHelper(question: nil)
+                             },
+                             onOpenLeaf: { destination in
+                                 navPath.append(destination)
+                             })
                     .equatable()
                 }
                 .padding(.horizontal, 20)
