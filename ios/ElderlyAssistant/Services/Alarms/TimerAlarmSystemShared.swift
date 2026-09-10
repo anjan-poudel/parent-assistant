@@ -35,6 +35,17 @@ import AlarmKit
 struct TimerAlarmSystemMetadata: AlarmMetadata, Codable, Hashable, Sendable {
 }
 
+/// [TIMER-DEBUG] (2026-09-11) The DAILY-ALARM side's metadata type
+/// (moved here from `AlarmKitAlarmBackend.swift`). The alarm backend
+/// schedules with `AlarmAttributes<AlarmKitMetadata>` — for the system to
+/// present that alarm, the widget extension must declare an
+/// ActivityConfiguration for the SAME type name. Like the timer metadata,
+/// this type now lives in this file compiled by BOTH targets (app +
+/// widget extension), the standard Live Activity type-matching pattern.
+@available(iOS 26.0, *)
+struct AlarmKitMetadata: AlarmMetadata, Codable, Hashable, Sendable {
+}
+
 /// Bundle identifier of the widget extension that hosts the AlarmKit
 /// alarm presentation (declared in project.yml).
 enum TimerAlarmSystemShared {

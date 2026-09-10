@@ -46,18 +46,16 @@ protocol SystemAlarmManaging: AnyObject {
 
 // MARK: - Production adapter (iOS 26+)
 
-/// [ALARMKIT-ALARMS] (2026-09-10) Empty metadata type — AlarmKit's
-/// `AlarmAttributes` is generic over `AlarmMetadata`, and even with no
-/// custom data a concrete type must be supplied. Referenced ONLY inside
-/// iOS-26-gated code (the adapter below). The type is nonisolated (the
-/// project's Swift 5 mode defaults there) so the Codable/Hashable/
-/// Sendable conformances hold.
-@available(iOS 26.0, *)
-struct AlarmKitMetadata: AlarmMetadata {}
-
-/// Production `SystemAlarmManaging` — a thin adapter over
-/// `AlarmManager.shared`. ALL AlarmKit references in the app live in this
-/// iOS-26-gated file; nothing outside it touches AlarmKit.
+/// [ALARMKIT-ALARMS] (2026-09-10) Production `SystemAlarmManaging` — a
+/// thin adapter over `AlarmManager.shared`. ALL AlarmKit references in
+/// the app live in this iOS-26-gated file; nothing outside it touches
+/// AlarmKit.
+///
+/// [TIMER-DEBUG] (2026-09-11) The alarm metadata type moved to the
+/// SHARED file (`TimerAlarmSystemShared.swift`) so the widget extension
+/// compiles the same `AlarmKitMetadata` type name and can host the
+/// alarm's ActivityConfiguration (AlarmKit alarms without one have no
+/// presentation host).
 ///
 /// API surface verified against the iOS 26.5 SDK swiftinterface
 /// (AlarmKit.framework/Modules/AlarmKit.swiftmodule/

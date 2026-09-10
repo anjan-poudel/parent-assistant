@@ -23,10 +23,22 @@ import AlarmKit
 /// alert at fire time is SYSTEM UI (like the Clock app's alarm) — the
 /// presentation configured by the app at schedule time
 /// (`AlarmPresentation`), not rendered here.
+///
+/// [TIMER-DEBUG] (2026-09-11) Countdown rendering FIX: Live Activity
+/// content is a STATIC SNAPSHOT — the system re-renders it only when
+/// `AlarmPresentationState` changes (mode transitions: countdown →
+/// alert, pause/resume), never once per second. The previous view
+/// computed the remaining time into a plain string at render time, so
+/// the countdown FROZE at whatever second the snapshot was taken
+/// ("4:59" for a fresh 5-minute timer — the on-device report). The
+/// countdown text must be SELF-TICKING: `Text(timerInterval:)` is the
+/// Live-Activity countdown primitive — the render server ticks it
+/// every second without any content update.
 @main
 struct TimerAlarmSystemWidgetBundle: WidgetBundle {
     var body: some Widget {
         TimerAlarmSystemActivityWidget()
+        TimerAlarmSystemAlarmWidget()
     }
 }
 
@@ -47,8 +59,7 @@ struct TimerAlarmSystemActivityWidget: Widget {
             } compactLeading: {
                 Image(systemName: "timer")
             } compactTrailing: {
-                Text(remaining(context.state))
-                    .font(.caption.monospacedDigit())
+                compactTrailing(context.state)
             } minimal: {
                 Image(systemName: "timer")
             }
@@ -64,14 +75,76 @@ struct TimerAlarmSystemActivityWidget: Widget {
         return String(localized: attributes.presentation.alert.title)
     }
 
-    /// Remaining countdown as m:ss while counting down; the alert title
-    /// once alerting.
-    private func remaining(_ state: AlarmPresentationState) -> String {
-        if case .countdown(let countdown) = state.mode {
-            let seconds = max(0, Int(countdown.fireDate.timeIntervalSinceNow))
-            return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    /// The Dynamic Island compact trailing slot: the SELF-TICKING
+    /// countdown while counting down (see the class doc — a plain
+    /// computed string freezes here, it did on-device), static remaining
+    /// text while paused.
+    @ViewBuilder
+    private func compactTrailing(_ state: AlarmPresentationState) -> some View {
+        switch state.mode {
+        case .countdown(let countdown):
+            Text(timerInterval: countdown.startDate...countdown.fireDate,
+                 countsDown: true)
+                .font(.caption.monospacedDigit())
+        case .paused(let paused):
+            Text(staticRemaining(total: paused.totalCountdownDuration,
+                                 previouslyElapsed: paused.previouslyElapsedDuration))
+                .font(.caption.monospacedDigit())
+        case .alert:
+            Image(systemName: "timer")
         }
-        return ""
+    }
+
+    /// "M:SS" from the paused snapshot — a paused countdown has no
+    /// `fireDate`, so a static string is the honest form (a paused timer
+    /// does not tick anyway).
+    private func staticRemaining(total: TimeInterval, previouslyElapsed: TimeInterval) -> String {
+        let seconds = max(0, Int(total - previouslyElapsed))
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+/// [TIMER-DEBUG] (2026-09-11) The DAILY-ALARM side's ActivityConfiguration.
+/// The alarm backend (`AlarmKitAlarmBackend`) schedules system alarms with
+/// `AlarmAttributes<AlarmKitMetadata>` — and an AlarmKit alarm WITHOUT a
+/// widget ActivityConfiguration for its attributes type has no
+/// presentation host: same bug class as the frozen timer countdown.
+/// `AlarmKitMetadata` therefore also lives in the shared file now
+/// (`TimerAlarmSystemShared.swift`), compiled by both targets so the
+/// type name matches exactly.
+struct TimerAlarmSystemAlarmWidget: Widget {
+    var body: some WidgetConfiguration {
+        ActivityConfiguration(for: AlarmAttributes<AlarmKitMetadata>.self) { context in
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "alarm.fill")
+                        .foregroundColor(context.attributes.tintColor)
+                    Text(String(localized: context.attributes.presentation.alert.title))
+                        .font(.headline)
+                        .lineLimit(2)
+                }
+            }
+            .padding()
+            .activityBackgroundTint(Color.black.opacity(0.4))
+            .activitySystemActionForegroundColor(.white)
+        } dynamicIsland: { context in
+            DynamicIsland {
+                DynamicIslandExpandedRegion(.center) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "alarm.fill")
+                        Text(String(localized: context.attributes.presentation.alert.title))
+                            .font(.headline)
+                            .lineLimit(1)
+                    }
+                }
+            } compactLeading: {
+                Image(systemName: "alarm.fill")
+            } compactTrailing: {
+                Image(systemName: "alarm.fill")
+            } minimal: {
+                Image(systemName: "alarm.fill")
+            }
+        }
     }
 }
 
@@ -88,10 +161,21 @@ struct TimerAlarmActivityView: View {
                     .font(.headline)
                     .lineLimit(2)
             }
-            if case .countdown(let countdown) = context.state.mode {
-                Text(remaining(countdown))
+            switch context.state.mode {
+            case .countdown(let countdown):
+                // [TIMER-DEBUG] Self-ticking: the render server keeps
+                // this countdown live without any content-state update.
+                // (The previous plain-string form froze at the snapshot
+                // second — "4:59" on a fresh 5-minute timer.)
+                Text(timerInterval: countdown.startDate...countdown.fireDate,
+                     countsDown: true)
                     .font(.title2.monospacedDigit())
                     .contentTransition(.numericText())
+            case .paused(let paused):
+                Text(staticRemaining(paused))
+                    .font(.title2.monospacedDigit())
+            case .alert:
+                EmptyView()
             }
         }
         .padding()
@@ -106,8 +190,12 @@ struct TimerAlarmActivityView: View {
         return String(localized: context.attributes.presentation.alert.title)
     }
 
-    private func remaining(_ countdown: AlarmPresentationState.Mode.Countdown) -> String {
-        let seconds = max(0, Int(countdown.fireDate.timeIntervalSinceNow))
+    /// "M:SS" from the paused snapshot — a paused countdown has no
+    /// `fireDate`, so a static string is the honest form (a paused timer
+    /// does not tick anyway).
+    private func staticRemaining(_ paused: AlarmPresentationState.Mode.Paused) -> String {
+        let seconds = max(0, Int(paused.totalCountdownDuration
+                                 - paused.previouslyElapsedDuration))
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }

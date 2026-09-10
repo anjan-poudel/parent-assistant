@@ -224,8 +224,15 @@ targets:
       # AlarmKit alarm presentation (ActivityConfiguration for
       # AlarmAttributes<TimerAlarmSystemMetadata>) — the system renders
       # system-managed timer countdowns and alerts through it.
+      # [TIMER-DEBUG] (2026-09-11) `codeSign: true` makes the embed phase
+      # carry CodeSignOnCopy (Xcode's standard Embed App Extensions
+      # phase does) — an embedded appex whose seal the app's signing
+      # pass did not refresh can be refused at extension load, which
+      # degrades the alarm presentation exactly like a missing
+      # extension (stale/frozen countdown on the Lock Screen).
       - target: TimerAlarmWidgetExtension
         embed: true
+        codeSign: true
 
   # [TIMER-ALARM] (2026-09-10) WidgetKit extension for the AlarmKit
   # system-managed timer presentation. iOS-26-only by nature (AlarmKit is
@@ -263,6 +270,10 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         APPLICATION_EXTENSION_API_ONLY: YES
         GENERATE_INFOPLIST_FILE: NO
+        # [TIMER-DEBUG] (2026-09-11) Xcode's app-extension template sets
+        # this — an extension is never an installable product of its own.
+        # Without it archive/install validation can reject the bundle.
+        SKIP_INSTALL: YES
 
   ElderlyAssistantTests:
     type: bundle.unit-test
