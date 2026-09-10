@@ -352,7 +352,16 @@ struct HomeTimerChipView: View {
         // The service publishes on create/cancel/expire; every publish
         // recomputes the snapshot (visibility, nearest, count). The
         // per-second ticking below is the display's own business.
-        .onReceive(service.objectWillChange) { viewModel.refresh() }
+        //
+        // `receive(on:)` is load-bearing: `objectWillChange` fires during
+        // the service's `willSet` — BEFORE the mutation commits — so a
+        // synchronous refresh would read the STALE rows (a cancelled
+        // timer would linger until the next publish). The main-queue hop
+        // delivers the refresh in a later runloop turn, after the rows
+        // are already the new value.
+        .onReceive(service.objectWillChange.receive(on: DispatchQueue.main)) {
+            viewModel.refresh()
+        }
     }
 
     private var chip: some View {
