@@ -24,8 +24,12 @@ import SwiftUI
 protocol AlarmKitManaging: AnyObject {
     var authorizationState: AlarmManager.AuthorizationState { get }
     func requestAuthorization() async throws -> AlarmManager.AuthorizationState
+    /// Schedules (or replaces, same id) the system alarm. Returns nothing:
+    /// `AlarmKit.Alarm` has no public memberwise initializer (SDK
+    /// swiftinterface — Codable inits only), and the caller never needs
+    /// the echoed alarm back.
     func schedule(id: AlarmKit.Alarm.ID,
-                  configuration: AlarmManager.AlarmConfiguration<AlarmKitMetadata>) async throws -> AlarmKit.Alarm
+                  configuration: AlarmManager.AlarmConfiguration<AlarmKitMetadata>) async throws
     func cancel(id: AlarmKit.Alarm.ID) throws
     /// Transitions the alarm into its countdown phase — the SYSTEM snooze:
     /// the alarm re-fires after its postAlert duration (WWDC25 230:
@@ -60,8 +64,8 @@ final class ProductionAlarmManagerAdapter: AlarmKitManaging {
     }
 
     func schedule(id: AlarmKit.Alarm.ID,
-                  configuration: AlarmManager.AlarmConfiguration<AlarmKitMetadata>) async throws -> AlarmKit.Alarm {
-        try await AlarmManager.shared.schedule(id: id, configuration: configuration)
+                  configuration: AlarmManager.AlarmConfiguration<AlarmKitMetadata>) async throws {
+        _ = try await AlarmManager.shared.schedule(id: id, configuration: configuration)
     }
 
     func cancel(id: AlarmKit.Alarm.ID) throws {
@@ -217,7 +221,7 @@ final class AlarmKitAlarmBackend: AlarmSchedulingBackend {
 
         let task = Task { [manager] in
             do {
-                _ = try await manager.schedule(id: alarm.id, configuration: configuration)
+                try await manager.schedule(id: alarm.id, configuration: configuration)
             } catch {
                 print("[AlarmKitAlarmBackend] System refused alarm \(alarm.id) (\(error)) — arming the UN fallback.")
                 self.armUNFallback(for: alarm)
