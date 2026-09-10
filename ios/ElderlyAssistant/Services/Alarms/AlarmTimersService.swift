@@ -863,6 +863,16 @@ final class AlarmTimersService: ObservableObject {
     /// alert's Stop, the Dynamic Island dismiss) — its row expires,
     /// mirroring the system, never outliving it. Main-confined (dispatches
     /// like `scheduleAll` when called off main).
+    ///
+    /// [TIMER-DEBUG] (2026-09-11) The async snapshot is only the change
+    /// SIGNAL — never the expiry authority. An `alarmUpdates` element is
+    /// a point-in-time list; one generated BEFORE a new timer was
+    /// scheduled can be processed AFTER the schedule landed, and the old
+    /// code then wrongly expired the fresh row (the on-device symptom:
+    /// timer vanishes from the app list while the system keeps counting).
+    /// Every decision below is taken against the AUTHORITATIVE
+    /// synchronous list (`systemTimerIDs()`); unreadable (nil) means
+    /// "unknown" and expires nothing.
     func noteSystemTimerUpdates(systemTimerIDs systemIDs: Set<UUID>) {
         if !Thread.isMainThread {
             DispatchQueue.main.async { [weak self] in
@@ -870,10 +880,15 @@ final class AlarmTimersService: ObservableObject {
             }
             return
         }
-        for id in systemManagedTimerIDs where !systemIDs.contains(id) {
+        guard let authoritative = systemScheduler?.systemTimerIDs() else {
+            // Unreadable system record — expire nothing; the next
+            // readable pass (this or scheduleAll) reconciles.
+            return
+        }
+        for id in systemManagedTimerIDs where !authoritative.contains(id) {
             expireTimer(id: id)
         }
-        systemManagedTimerIDs.formIntersection(systemIDs)
+        systemManagedTimerIDs.formIntersection(authoritative)
     }
 
     /// [TIMER-ALARM] Pushes the active locale into the AlarmKit adapter
@@ -962,14 +977,24 @@ final class AlarmTimersService: ObservableObject {
     ///  - active rows the system NO LONGER manages were dismissed from
     ///    the system UI (e.g. the Lock Screen countdown's dismiss) while
     ///    the app was dead — they are expired, mirroring the system.
+    ///
+    /// [TIMER-DEBUG] (2026-09-11) The reconciliation runs ONLY against a
+    /// READABLE system list. An unreadable list (nil — `AlarmManager.
+    /// alarms` throws, e.g. a BGTask wake while the alarm store is
+    /// briefly unavailable) must never be read as "the system manages
+    /// NOTHING": the old code expired every tracked system-managed row
+    /// against the empty fallback — the on-device symptom, a voice-set
+    /// timer vanishing from the app list while the system kept counting
+    /// it. On nil the tracked set is kept as-is: those rows stay
+    /// excluded from the UN re-arm, nothing is expired, and the next
+    /// readable pass reconciles.
     func scheduleAll() {
         if !Thread.isMainThread {
             DispatchQueue.main.async { [weak self] in self?.scheduleAll() }
             return
         }
         pruneFinishedTimers()
-        if let systemScheduler {
-            let systemIDs = systemScheduler.systemTimerIDs()
+        if let systemScheduler, let systemIDs = systemScheduler.systemTimerIDs() {
             systemManagedTimerIDs.formIntersection(Set(timers.map(\.id)))
             for timer in activeTimers
             where systemManagedTimerIDs.contains(timer.id) && !systemIDs.contains(timer.id) {
