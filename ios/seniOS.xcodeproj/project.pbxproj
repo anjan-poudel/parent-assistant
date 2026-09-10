@@ -425,7 +425,7 @@
 		F9733892B9057BFD343A0326 /* TimerAlarmSystemWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035C53FE0D3B7A5E398E8009 /* TimerAlarmSystemWidget.swift */; };
 		F9A1B873CE4E1B83AAC4AE62 /* ApplianceGuidancePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F269E7A40BD190077BD33723 /* ApplianceGuidancePolicyTests.swift */; };
 		F9F9B701EF9EE201C206BAFF /* FeedTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C9E6972B31A317A9768601 /* FeedTranslator.swift */; };
-		FB08138BA9AC3832DC85F65A /* TimerAlarmWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C8B55A5BB14FF231C646B663 /* TimerAlarmWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		FB08138BA9AC3832DC85F65A /* TimerAlarmWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C8B55A5BB14FF231C646B663 /* TimerAlarmWidgetExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		FBC88FA25857FE81D384DA30 /* LiveCallDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FF3C56B2C8890D5319BBC15 /* LiveCallDetectorTests.swift */; };
 		FC45AA513A1FB96632DEBAE2 /* NewsFeedParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E958FEE29592043A50F66EA /* NewsFeedParserTests.swift */; };
 		FCAE28139316D0CA297FADE0 /* SilenceEndpointTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9C936AC5BE83B61A6B44320 /* SilenceEndpointTests.swift */; };
@@ -2540,6 +2540,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.elderlyassistant.app.TimerAlarmWidget;
 				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -2737,6 +2738,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.elderlyassistant.app.TimerAlarmWidget;
 				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
