@@ -701,11 +701,15 @@ struct TalkButton: View {
             } else {
                 Image(systemName: visuals.icon)
                     .font(.system(size: 32))
+                // The state caption is essential localized text ("I'm
+                // ready" / Nepali), so it WRAPS to a second line instead
+                // of shrinking: `minimumScaleFactor(0.7)` could render
+                // longer Nepali strings at ~14pt, under the 18pt floor
+                // this audience needs.
                 Text(session.state.buttonText(locale: locale))
                     .font(DesignTokens.warmFont(size: 20, weight: .bold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
-                    .minimumScaleFactor(0.7)
                     .padding(.horizontal, 12)
             }
         }
