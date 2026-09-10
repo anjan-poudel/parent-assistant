@@ -731,14 +731,32 @@ final class AppCoordinator: ObservableObject {
     /// `handleScenePhase`, and via `MainActor.run` after async fires).
     /// Drives the Today's-briefing Home widget presence and the briefing
     /// leaf; the leaf's "Speak again" replays this stored text.
-    @Published private(set) var todayBriefing: StoredBriefing?
+    /// [BOOT-REVIEW P1-7] A briefing landing/expiring is one of the two
+    /// inputs of the derived notification count, so it refreshes here —
+    /// and nowhere else in the publish path.
+    @Published private(set) var todayBriefing: StoredBriefing? {
+        didSet {
+            guard todayBriefing != oldValue else { return }
+            refreshActiveNotificationCount()
+        }
+    }
     // Feed agent (feed-agent task, 2026-09-08): the feed's composition
     // root lives here like every other store/service — the Settings leaf
     // edits through the coordinator's mutation methods, the Feed leaf
     // renders the published state, and the service itself publishes
     // nothing (its results forward through `refreshFeed()`).
-    private let feedSettingsStore: FeedSettingsStore
-    private let feedService: FeedService
+    ///
+    /// [BOOT-REVIEW P0-1] Both are built on FIRST USE. The feed is a
+    /// secondary capability: nothing on the first frame (Home, Settings,
+    /// Emergency) renders feed state, and the configuration these read
+    /// only arrives with the boot's restore phase — so neither object
+    /// needs to exist before first paint. `start()` touches both on main
+    /// before the off-main restore reads the store (lazy initialization
+    /// is not thread-safe).
+    private lazy var feedSettingsStore = FeedSettingsStore(storage: storage)
+    private lazy var feedService = FeedService(settings: feedSettingsStore,
+                                               transport: URLSession.shared,
+                                               observability: observabilityBus)
 
     /// The configured feed sources — the Settings leaf's list (published
     /// so add/remove re-renders it live).
@@ -1667,19 +1685,27 @@ final class AppCoordinator: ObservableObject {
         // Forward the external calendar service's publishes (Settings
         // status/lead, scan results reaching the Reminders + Calendar
         // leaves) — nested ObservableObject, see the property docs.
+        //
+        // [BOOT-REVIEW P1-7] Forwarded through the COALESCING seam, not
+        // straight to `objectWillChange`: a scan publishes per-item, and
+        // every forwarded publish invalidates every coordinator observer
+        // (HomeView included). One invalidation per main-runloop turn is
+        // the same information with a fraction of the fan-out — observers
+        // re-read current values, and the turn always completes before the
+        // next frame is rendered.
         externalCalendarCancellable = externalCalendar.objectWillChange
             .sink { [weak self] _ in
-                self?.objectWillChange.send()
+                self?.noteForwardedStateChanged()
             }
 
         // Forward the alarms/timers service's publishes ([ALARMS-TIMERS]
-        // 2026-09-07) — nested ObservableObject, same pattern as the
-        // external-calendar forwarding above: the Settings leaf observes
-        // the coordinator, so a toggle/delete/timer-start must invalidate
-        // it through this sink.
+        // 2026-09-07) — nested ObservableObject, same pattern (and the same
+        // coalescing seam) as the external-calendar forwarding above: the
+        // Settings leaf observes the coordinator, so a toggle/delete/
+        // timer-start must invalidate it through this sink.
         alarmTimersCancellable = alarmTimersService.objectWillChange
             .sink { [weak self] _ in
-                self?.objectWillChange.send()
+                self?.noteForwardedStateChanged()
             }
 
         // Foreground timer-completion reporting ([ALARMS-TIMERS]
@@ -1692,8 +1718,78 @@ final class AppCoordinator: ObservableObject {
         alarmTimerNotificationDelegate?.onForegroundTimerFinished = { [weak self] timerID in
             self?.handleForegroundTimerFinished(timerID: timerID)
         }
+
+        // [BOOT-REVIEW P1-7] Coalescing seam for the two nested-object
+        // forwards above.
+        //
+        // The forwarded services publish once PER ITEM they mutate (a
+        // calendar scan walks N events, each one a separate
+        // `objectWillChange`), and a raw forward turns each of those into
+        // a full coordinator invalidation — every observer of the
+        // coordinator (HomeView's whole tree included) re-evaluates per
+        // item, for state that is only meaningful once the scan settles.
+        //
+        // The contract kept here: an observer that re-reads current
+        // values after any one invalidation sees the SAME state as after
+        // the last one, so collapsing a burst into a single invalidation
+        // is lossless — and the invalidation lands on the next main-run-
+        // loop turn, before SwiftUI renders the following frame.
+        //
+        // Deliberately NOT a timer/debounce: nothing is delayed past the
+        // current turn, so a single publish (a Settings toggle) still
+        // invalidates within the same frame as before. The seam itself
+        // (`noteForwardedStateChanged`) lives next to the init's closing
+        // brace, below.
+
+        // [BOOT-REVIEW P0 item 1] End of the composition root. [BOOT-REVIEW
+        // P0-1] Everything past this point — store loads, model paths, AI
+        // runtimes, second-frame composition — is first-use lazy or
+        // deferred to `start()`, so this interval stays short by
+        // construction.
+        StartupSignposts.end(.bootstrapInit)
     }
 
+    /// True while a coalesced forwarded invalidation is already queued for
+    /// this main-runloop turn.
+    private var forwardedInvalidationPending = false
+
+    /// One invalidation per main-runloop turn, no matter how many nested
+    /// publishes arrive ([BOOT-REVIEW P1-7]). Main-confined; off-main
+    /// callers hop first (Combine sinks can fire on the publisher's
+    /// thread, and the forwarded services are not main-only by contract).
+    private func noteForwardedStateChanged() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.noteForwardedStateChanged()
+            }
+            return
+        }
+        guard !forwardedInvalidationPending else { return }
+        forwardedInvalidationPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.forwardedInvalidationPending = false
+            self.objectWillChange.send()
+        }
+    }
+
+    /// Starts the app's post-first-frame composition. Called from
+    /// `ContentView.onAppear` (and from the onboarding wizard's finish
+    /// path); idempotent.
+    ///
+    /// [BOOT-REVIEW P0-1] This method is deliberately TINY. Everything it
+    /// used to do synchronously (live-call detector, background-task
+    /// registration, the safety-reminder re-arms, the whole voice +
+    /// speaker + briefing + router composition) now runs one main-actor
+    /// turn LATER, in `composePostFirstFrame()`. `onAppear` runs inside
+    /// the same update transaction that renders the first frame, so
+    /// synchronous work here delays the frame that is supposed to show
+    /// the loading state; yielding one turn first lets SwiftUI commit it.
+    ///
+    /// What stays: the boot machine's `begin()` (the spinner's appearance
+    /// window opens now, so an indicator appears only if work is genuinely
+    /// still running) and the two static seams the UI reaches through —
+    /// both are a handful of instructions.
     func start() {
         guard !started else { return }
         started = true
@@ -1732,6 +1828,12 @@ final class AppCoordinator: ObservableObject {
 
         // Register background tasks (iOS)
         registerBackgroundTasks()
+
+        // [BOOT-REVIEW P1-7] Day rollover for the derived notification
+        // count ("X of Y doses taken today" is date-dependent). Installed
+        // here — post-first-frame, like every other observer — not in
+        // `init()`.
+        observeCalendarDayChange()
 
         // Restore and re-arm any outstanding medication reminders
         medicationScheduler.scheduleAll()
@@ -2036,6 +2138,20 @@ final class AppCoordinator: ObservableObject {
             self.feedTopics = batch.feedTopics
             self.conversationHistory = batch.history
             self.recentActivity = batch.activity
+            // [BOOT-REVIEW P1-7] The restore moved both of the derived
+            // count's inputs (a stored briefing + today's restored dose
+            // list) — recompute once, here, instead of leaving the badge
+            // stale until the next reminder edit.
+            self.refreshActiveNotificationCount()
+            // [BOOT-REVIEW P0 item 1] Safety-critical data is live the
+            // moment these windows are published (contacts feed the
+            // emergency path, appointments/places the care flows); the
+            // interval ends HERE — after the restore, before the voice
+            // phase — so it measures restoration alone.
+            StartupSignposts.end(
+                .safetyDataRestored,
+                note: "contacts=\(batch.contacts.count) places=\(batch.places.count) appointments=\(batch.appointments.count)"
+            )
             self.startupBoot.advance(to: .preparingVoice)
             // Phase 2 runs on MAIN (see bootPrepareVoiceEngine — the
             // sherpa runtime segfaults off-main on the x86_64 simulator).
@@ -5272,6 +5388,80 @@ final class AppCoordinator: ObservableObject {
             .medicationName ?? ""
     }
 
+    // MARK: - Derived notification count ([BOOT-REVIEW P1-7])
+
+    /// The bell badge's derived count — how many notification rows the
+    /// Updates leaf lists — published as STORED state.
+    ///
+    /// The row-presence inputs are exactly two (`HomeWidgetRegistry`'s
+    /// built-ins): `todayBriefing` (`TodayBriefingWidget`) and
+    /// `pendingReminders` (`MedsStatusWidget`, "X of Y doses taken
+    /// today"). The count is therefore recomputed ONLY from the seams that
+    /// move one of those — medication schedule edits, dose
+    /// acknowledgements, routine/native-calendar mutations, a stored
+    /// briefing landing, the boot restore, and the calendar-day rollover
+    /// ("today's doses" is date-dependent). It is deliberately NOT
+    /// recomputed on unrelated invalidations (feed translation, download
+    /// progress, voice timing, settings toggles), so a view that reads
+    /// this value does not re-filter/re-sort widget rows per render the
+    /// way a live computation must.
+    ///
+    /// The seam is `refreshActiveNotificationCount()`; nothing else writes
+    /// this property, and an unchanged recomputation does not publish.
+    @Published private(set) var activeNotificationCount: Int = 0
+
+    /// Registry used for the derivation. Stateless widgets — HomeView
+    /// keeps its own registry for the leaf's rows, and both derive the
+    /// same list from the same state.
+    private lazy var notificationCountRegistry = HomeWidgetRegistry()
+
+    /// Day-rollover observer: "today's doses" changes at midnight with no
+    /// mutation to hang off, so the derived count would otherwise go
+    /// stale until the next reminder edit.
+    private var dayChangeObserver: NSObjectProtocol?
+
+    /// Recomputes + publishes the derived count. Main-confined by
+    /// contract (it reads main-confined coordinator state and publishes);
+    /// callers on the voice/acknowledgement paths hop here first. An
+    /// unchanged result is a no-op, so repeated calls are free.
+    ///
+    /// The derivation itself lives on `HomeWidgetRegistry` and is
+    /// `@MainActor` (it builds view-facing rows) — one source of truth with
+    /// the Updates leaf, which is the whole point of this seam. Reaching it
+    /// from this nonisolated, main-confined method therefore costs ONE
+    /// main-actor turn: the count is derived UI state that nothing latches
+    /// on synchronously, and the mutation the call follows is already
+    /// published by the caller, so the badge simply lands in the same
+    /// frame's update cycle.
+    func refreshActiveNotificationCount() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.refreshActiveNotificationCount()
+            }
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let source: any HomeWidgetDataSource = self
+            let next = self.notificationCountRegistry.activeNotificationCount(
+                coordinator: source)
+            guard next != self.activeNotificationCount else { return }
+            self.activeNotificationCount = next
+        }
+    }
+
+    /// Installs the day-rollover refresh. Called from `start()` — never
+    /// from `init()` (a notification observer is startup work with no
+    /// first-frame value).
+    private func observeCalendarDayChange() {
+        guard dayChangeObserver == nil else { return }
+        dayChangeObserver = NotificationCenter.default.addObserver(
+            forName: .NSCalendarDayChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.refreshActiveNotificationCount()
+        }
+    }
+
     /// Adds or validates a medication schedule entry from the Settings
     /// editor. Returns a catalog key on validation failure, nil on success.
     /// Success persists via `loadSchedule` and re-arms alarms (spec §4.4.3).
@@ -5303,6 +5493,9 @@ final class AppCoordinator: ObservableObject {
         medicationScheduler.loadSchedule(entries: entries)
         medicationScheduler.scheduleAll()
         calendarSync.syncNow(entries: routineScheduler.entries())
+        // [BOOT-REVIEW P1-7] A schedule edit changes today's dose total —
+        // one of the count's two inputs.
+        refreshActiveNotificationCount()
         return nil
     }
 
@@ -5313,6 +5506,9 @@ final class AppCoordinator: ObservableObject {
         medicationScheduler.loadSchedule(entries: entries)
         medicationScheduler.scheduleAll()
         calendarSync.syncNow(entries: routineScheduler.entries())
+        // [BOOT-REVIEW P1-7] Removing an entry can empty today's doses —
+        // the row hides itself, so the count must follow.
+        refreshActiveNotificationCount()
     }
 
     // MARK: - Doctor's appointments (medical task, 2026-09-07)
@@ -5470,6 +5666,9 @@ final class AppCoordinator: ObservableObject {
         DispatchQueue.main.async { [weak self] in
             self?.objectWillChange.send()
         }
+        // [BOOT-REVIEW P1-7] Native-calendar edits reach the app's
+        // reminder schedule, so the derived count follows them.
+        refreshActiveNotificationCount()
     }
 
     // MARK: - Read-only external Calendar/Reminders surface (2026-09-07)
@@ -5590,6 +5789,9 @@ final class AppCoordinator: ObservableObject {
     /// persists and re-arms through the scheduler.
     func setRoutineEntryEnabled(_ entryId: UUID, enabled: Bool) {
         routineScheduler.setEnabled(entryId, enabled: enabled)
+        // [BOOT-REVIEW P1-7] Routine mutations land in the same reminder
+        // surface the derived count reads.
+        refreshActiveNotificationCount()
     }
 
     /// Today's medication reminders as localized "name — time" lines for
@@ -5615,6 +5817,8 @@ final class AppCoordinator: ObservableObject {
     /// FR-D01 (challenge) and FR-D03 (double-dose check) actually run.
     func handleMedicationAcknowledgement(entryId: UUID) {
         _ = medicationScheduler.acknowledge(entryId: entryId, at: Date())
+        // [BOOT-REVIEW P1-7] Acknowledged doses move the derived count.
+        refreshActiveNotificationCount()
         // No undo here — the scheduler has no reversal operation for a
         // recorded dose, and faking one would be exactly the kind of mocked
         // affordance the redesign is trying to avoid (spec §6).
@@ -5629,6 +5833,8 @@ final class AppCoordinator: ObservableObject {
             at: Date(),
             confirmationResponse: response
         )
+        // [BOOT-REVIEW P1-7] Same count seam as the BASELINE ack above.
+        refreshActiveNotificationCount()
     }
 
     /// Dementia-aware voice ack: issues the FR-D01 confirmation challenge
@@ -5708,6 +5914,9 @@ final class AppCoordinator: ObservableObject {
             at: Date(),
             confirmationResponse: response
         )
+        // [BOOT-REVIEW P1-7] The voice confirmation's ack moves the
+        // derived count exactly like the BASELINE ack does.
+        refreshActiveNotificationCount()
         let name = medicationName(for: entryId)
         switch response {
         case .yes:
