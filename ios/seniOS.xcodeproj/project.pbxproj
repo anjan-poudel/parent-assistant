@@ -82,6 +82,7 @@
 		3186F48E9A2627B4ECC603DB /* ApplianceManualLibraryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3040563E7A559BB5552E3E30 /* ApplianceManualLibraryTests.swift */; };
 		31BBAB14511B2440F03E0FE1 /* VoiceSessionStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E50F03A4A3FAF1A1A0B822 /* VoiceSessionStateMachineTests.swift */; };
 		337B4856DE580A9844D0E46A /* TimerAlarmSystemShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D15E89A116B24DADD574A85 /* TimerAlarmSystemShared.swift */; };
+		34318704BAD37239F22EA813 /* AlarmTimersSystemPathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36B554D5C323CBF29159025B /* AlarmTimersSystemPathTests.swift */; };
 		34DFEAB7A06DFCA706E71047 /* SpeakerBiometricTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 277B510740CCCB3BC47555CF /* SpeakerBiometricTestSupport.swift */; };
 		36BE348CA5BACCC5139BD5E9 /* CloudFallbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F63BE0F70F8D66B3FF4F28F /* CloudFallbackTests.swift */; };
 		36E22F0466C005027B0921E5 /* TithiCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 269C71573D21DF9EAFB68405 /* TithiCalculatorTests.swift */; };
@@ -111,6 +112,7 @@
 		45C7D93F774317633EEA0D5B /* IntentLogStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 719AA0AA9C2BB68B77B82DD2 /* IntentLogStoreTests.swift */; };
 		4697FEE4A11CE9F6DC3A3817 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54C3513A2DF368011B7B7C45 /* DesignTokens.swift */; };
 		46C2E59971AC3B3AA61A79CC /* FeedSpeechSanitizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF63F351314880DD9A42A6AB /* FeedSpeechSanitizerTests.swift */; };
+		4706C690591D882919A03ACE /* TimerAlarmEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FED1E5343F765632EF56FEBE /* TimerAlarmEngineTests.swift */; };
 		482BC982DD49234B12D53434 /* VoiceSessionBindingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFB5064750DE4B1073059D3 /* VoiceSessionBindingTests.swift */; };
 		4A131371BBD03CB576450A29 /* FestivalCalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90391AA61F888C033874331E /* FestivalCalendarService.swift */; };
 		4AFABF7658B11789605CCCA1 /* GeminiSpeechRecognizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BB5C4A4994FE6A86DB2CFA5 /* GeminiSpeechRecognizerTests.swift */; };
@@ -552,6 +554,7 @@
 		353679F01CB04C7AC8321B9E /* QueryEndToEndRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryEndToEndRegressionTests.swift; sourceTree = "<group>"; };
 		357BB0A805BFD53734B0F7B4 /* SpokenTime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpokenTime.swift; sourceTree = "<group>"; };
 		365282A34BA338A9BB151269 /* CallChannelResolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallChannelResolutionTests.swift; sourceTree = "<group>"; };
+		36B554D5C323CBF29159025B /* AlarmTimersSystemPathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmTimersSystemPathTests.swift; sourceTree = "<group>"; };
 		37467E7836D25AA30D4FC68E /* DirectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectionsView.swift; sourceTree = "<group>"; };
 		375D810EE613E93BB5E56717 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		3CB785F3E9F2AB2CF381AFDE /* RoutinePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinePlugin.swift; sourceTree = "<group>"; };
@@ -859,6 +862,7 @@
 		FBFB5064750DE4B1073059D3 /* VoiceSessionBindingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionBindingTests.swift; sourceTree = "<group>"; };
 		FDADF751C3E88E7BCE67D6AD /* LLM.swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = LLM.swift; path = vendor/LLM.swift; sourceTree = SOURCE_ROOT; };
 		FE811FACF80BAA62A9F6C1D9 /* WarmStart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WarmStart.swift; sourceTree = "<group>"; };
+		FED1E5343F765632EF56FEBE /* TimerAlarmEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerAlarmEngineTests.swift; sourceTree = "<group>"; };
 		FF81CDFC6907A32734288D91 /* AlarmTimerCommandParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmTimerCommandParserTests.swift; sourceTree = "<group>"; };
 		FF8A64B10D6831804634E41B /* ChannelPreferenceStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelPreferenceStoreTests.swift; sourceTree = "<group>"; };
 		FFD2F93E4848F1F25F54E66A /* ElderlyAssistantTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ElderlyAssistantTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1074,6 +1078,8 @@
 			isa = PBXGroup;
 			children = (
 				7938856DC662726CF322AEE2 /* AlarmTimersServiceTests.swift */,
+				36B554D5C323CBF29159025B /* AlarmTimersSystemPathTests.swift */,
+				FED1E5343F765632EF56FEBE /* TimerAlarmEngineTests.swift */,
 			);
 			path = Alarms;
 			sourceTree = "<group>";
@@ -2190,6 +2196,7 @@
 			files = (
 				7527984FC995000E19182948 /* AlarmTimerCommandParserTests.swift in Sources */,
 				2546F508392D79E45374D367 /* AlarmTimersServiceTests.swift in Sources */,
+				34318704BAD37239F22EA813 /* AlarmTimersSystemPathTests.swift in Sources */,
 				87F947AF575711F672F43F9C /* AppActivityLogTests.swift in Sources */,
 				F486D39BD7AE380042C5D247 /* AppLauncherTests.swift in Sources */,
 				A677CF6F38E5CDC5BFD0AAB0 /* AppThemeTests.swift in Sources */,
@@ -2339,6 +2346,7 @@
 				6161CE0C2CA506243091FE63 /* SystemContactSearchTests.swift in Sources */,
 				A71CB9964BC96FEDE42530BD /* TTSVoiceCatalogTests.swift in Sources */,
 				670296484F8953CB54D6DDF9 /* TTSVoiceInstallTests.swift in Sources */,
+				4706C690591D882919A03ACE /* TimerAlarmEngineTests.swift in Sources */,
 				36E22F0466C005027B0921E5 /* TithiCalculatorTests.swift in Sources */,
 				4359AC45AD296B70CF2114BF /* TopicPreAnswerTests.swift in Sources */,
 				58A4B3B234A2D554FF19CA71 /* TranscriptSanityGuardTests.swift in Sources */,

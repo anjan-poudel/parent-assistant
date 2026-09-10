@@ -250,6 +250,9 @@ targets:
       path: TimerAlarmWidget/Info.plist
       properties:
         CFBundleDisplayName: Timer Alarm
+        # App extensions must declare the XPC! package type for the
+        # system to load them.
+        CFBundlePackageType: XPC!
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
         NSSupportsLiveActivities: true
