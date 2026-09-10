@@ -40,3 +40,24 @@ struct TimerAlarmSystemMetadata: AlarmMetadata, Codable, Hashable, Sendable {
 enum TimerAlarmSystemShared {
     static let widgetExtensionBundleID = "com.elderlyassistant.app.TimerAlarmWidget"
 }
+
+// MARK: - App Intents `.clock` schema — investigated, NOT adoptable yet
+//
+// iOS 26's new App Intents schema domains (Apple, WWDC25 "Adopt App
+// Intents for Apple Intelligence" — domains incl. `.clock` with
+// createTimer/createAlarm/…, where Siri/Apple Intelligence routes clock
+// commands to the app that adopts the domain) are NOT present in the SDK
+// this codebase builds against. Verified 2026-09-10 against the installed
+// toolchain (Xcode 26.6, iPhoneOS26.5 SDK): no `Clock*` intent or schema
+// type exists in any shipped framework's public swiftinterface
+// (AppIntents, ClockKit, WidgetKit, AlarmKit all searched). The
+// `AssistantSchemas.Intent` MARKER protocol exists (iOS 16+), but the
+// clock domain's concrete schema types ship in a later SDK.
+//
+// Constraint for the future adoption: the clock domain is ALL-OR-NOTHING
+// per app — adopting any clock schema (e.g. timers) requires adopting
+// every one (alarms, stopwatch, …), which also means those intents must
+// exist in the app. When the SDK with the schema ships: add the domain's
+// intent conformances for ALL clock actions or none; a timers-only
+// adoption is rejected. Nothing to do in this codebase today.
+
