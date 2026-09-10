@@ -605,4 +605,87 @@ final class AlarmTimerCommandParserTests: XCTestCase {
         XCTAssertEqual(NumberWordNormalizer.normalise("टाइमर पाँच मिनेट", locale: unknown),
                        "टाइमर पाँच मिनेट")
     }
+
+    // MARK: - parseTimerCancel ([HOME-TIMER-CHIP] 2026-09-11)
+
+    func testTimerCancelSanctionedPhrasesParseDataDriven() {
+        // The sanctioned shapes — English whole-token verbs, the Nepali
+        // बन्द/रोक/रद्द family in bare, imperative and honorific forms,
+        // and the emphasis-particle surface natural speech adds. The
+        // sanctioned set carries no numbers, so both locales parse it
+        // identically.
+        let phrases = [
+            // English
+            "cancel timer", "cancel the timer", "stop the timer", "stop timer",
+            "timer cancel", "timer stop",
+            // Nepali — the user's scope list
+            "टाइमर बन्द गर", "टाइमर रोक", "टाइमर रद्द गर", "टाइमर बन्द",
+            // Nepali — honorific/imperative inflections
+            "टाइमर बन्द गर्नुहोस्", "टाइमर बन्द गर्नुस्", "टाइमर बन्द गरिदिनुहोस्",
+            "टाइमर रोक्नुहोस्", "टाइमर रद्द गर्नुहोस्",
+            // Nepali — natural-speech particles
+            "टाइमर बन्द गर है", "टाइमर रोक त", "टाइमर बन्द गर्नुहोस् नि"
+        ]
+        for phrase in phrases {
+            XCTAssertTrue(AlarmTimerCommandParser.parseTimerCancel(phrase, locale: ne),
+                          "expected a sanctioned timer cancel: \(phrase)")
+            XCTAssertTrue(AlarmTimerCommandParser.parseTimerCancel(phrase, locale: en),
+                          "expected a sanctioned timer cancel (en locale): \(phrase)")
+        }
+    }
+
+    func testTimerCancelVetoesAndQualifiedShapesFallThrough() {
+        // Everything outside the sanctioned set must NOT cancel the
+        // nearest timer — questions, negations, shapes that name a
+        // SPECIFIC timer, alarm business, set commands, and bare verbs
+        // with no timer marker.
+        let notCancels = [
+            // Questions + negations
+            "when does my timer end?", "don't stop the timer",
+            "टाइमर कति बेरमा सकिन्छ?",
+            // Duration-qualified — the cancel branch must not guess WHICH timer
+            "cancel the 5 minute timer", "stop the 10 minute timer",
+            "५ मिनेटको टाइमर बन्द गर",
+            // Clock-qualified — same rule
+            "stop the 6 o'clock timer",
+            // Alarm business is the OFF branch's, not the timer cancel's
+            "cancel the alarm", "अलार्म बन्द गर",
+            // Set commands are set commands
+            "set a timer for 5 minutes", "टाइमर ५ मिनेट",
+            // No timer marker at all
+            "cancel", "stop", "बन्द गर", "रोक्नुहोस्",
+            // A statement, not a command (रोकिएको is one token, never "रोक")
+            "रोकिएको टाइमर"
+        ]
+        for phrase in notCancels {
+            XCTAssertFalse(AlarmTimerCommandParser.parseTimerCancel(phrase, locale: ne),
+                           "must NOT be a timer cancel: \(phrase)")
+            XCTAssertFalse(AlarmTimerCommandParser.parseTimerCancel(phrase, locale: en),
+                           "must NOT be a timer cancel (en locale): \(phrase)")
+        }
+    }
+
+    func testTimerCancelWordAmountQualificationNeedsTheNepaliLexicon() {
+        // [NUMBER-WORDS] "टाइमर पाँच मिनेट रद्द गर" names the 5-MINUTE
+        // timer — with the ne lexicon the word amount normalizes to a
+        // digit and the duration qualification vetoes the cancel (the
+        // branch must not guess which timer). The en locale has no ne
+        // word lexicon, so there the same utterance reads as a plain
+        // cancel — the same number-word dependency every parser here
+        // carries (the router always parses with the ACTIVE app locale,
+        // so a Nepali-speaking user gets the qualified veto).
+        XCTAssertFalse(AlarmTimerCommandParser.parseTimerCancel(
+            "टाइमर पाँच मिनेट रद्द गर", locale: ne))
+        XCTAssertTrue(AlarmTimerCommandParser.parseTimerCancel(
+            "टाइमर पाँच मिनेट रद्द गर", locale: en))
+    }
+
+    func testTimerCancelIsNotAQuestionNorTheSetParsersBusiness() {
+        // The ladder's safety: the SET parsers must keep rejecting the
+        // sanctioned cancel shapes (their cancel vetoes), so the router
+        // order can never double-handle.
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer("cancel the timer", locale: en))
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarm("cancel the timer", locale: en))
+        XCTAssertFalse(AlarmTimerCommandParser.parseAlarmOff("cancel the timer", locale: en))
+    }
 }

@@ -103,6 +103,22 @@ enum AlarmSnoozeOutcome: Equatable {
     case failed
 }
 
+/// [HOME-TIMER-CHIP] (2026-09-11) Outcome of a timer-CANCEL request — the
+/// chip's one-tap STOP and the voice "cancel the timer" command both land
+/// on `cancelNearestTimer()`, and this is the honest result the router
+/// speaks (the confirmation / the "no timers running" line / the failure
+/// fallback). Same outcome-returning contract as `AlarmOffOutcome`.
+enum TimerCancelOutcome: Equatable {
+    /// The nearest running timer was cancelled — persisted removal plus
+    /// the pending notification and, when system-managed, the AlarmKit
+    /// timer.
+    case cancelled
+    /// No timer is running — nothing was cancelled.
+    case noActiveTimer
+    /// The removal could not be persisted — nothing was cancelled.
+    case failed
+}
+
 // MARK: - Store
 
 /// [ALARMS-TIMERS] (2026-09-07) Encrypted persistence for the alarms +

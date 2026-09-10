@@ -43,6 +43,7 @@
 		175FBED180C17BFE65E59593 /* VoiceContactSearchRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80462B405AD704A16369558F /* VoiceContactSearchRoute.swift */; };
 		185F8F10CBA47EB0474089E1 /* StoragePlacementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D20F36D1AE5D46DF4157698 /* StoragePlacementTests.swift */; };
 		189638E7A83C0FB5E2C6CC1A /* IntentCommandCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A30374E46C623263C9165B51 /* IntentCommandCache.swift */; };
+		189B019772EFC433CD42BC60 /* HomeTimerChipModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92F8B8264F7A569F2943ABF9 /* HomeTimerChipModelTests.swift */; };
 		19024C562DCEDCAF34E6E270 /* CallOverrideParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED32B7996617D6A05D9423F8 /* CallOverrideParser.swift */; };
 		1A78AA3AD77DA25AFA4D13DD /* MessengerHandleStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C1E3FDDC092D291009FA2CF /* MessengerHandleStoreTests.swift */; };
 		1B19A8427986D4D8146FB481 /* MigratingEncryptedStorageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BE37B436A630B55C44B0CDA /* MigratingEncryptedStorageTests.swift */; };
@@ -224,6 +225,7 @@
 		872D679F12ABF43E3057C7B4 /* MorningBriefingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D87AD48584D9CB8354BD123 /* MorningBriefingTests.swift */; };
 		87F947AF575711F672F43F9C /* AppActivityLogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42D1318C2E8379EE03ECD6A1 /* AppActivityLogTests.swift */; };
 		8BF37B5627241532432A7D13 /* TopicPreAnswer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B97C16366222C54ED70E03C /* TopicPreAnswer.swift */; };
+		8F07F30F45804E18B02ABF84 /* HomeTimerChipModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D45B7533CABF3CD4400145E5 /* HomeTimerChipModel.swift */; };
 		8F80BE33478C5C1AF4CCA78B /* CallLinks.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF94EF103968B07445324A94 /* CallLinks.swift */; };
 		8F8D38392071EB681655CDE1 /* ReplySanityGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E1D65BC1DE8E3579F552844 /* ReplySanityGateTests.swift */; };
 		915E4D8D8BC9AADB6693AE1F /* ChatHistoryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F77AAE8D39CC0556C033AF7 /* ChatHistoryStoreTests.swift */; };
@@ -425,7 +427,7 @@
 		F9733892B9057BFD343A0326 /* TimerAlarmSystemWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035C53FE0D3B7A5E398E8009 /* TimerAlarmSystemWidget.swift */; };
 		F9A1B873CE4E1B83AAC4AE62 /* ApplianceGuidancePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F269E7A40BD190077BD33723 /* ApplianceGuidancePolicyTests.swift */; };
 		F9F9B701EF9EE201C206BAFF /* FeedTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C9E6972B31A317A9768601 /* FeedTranslator.swift */; };
-		FB08138BA9AC3832DC85F65A /* TimerAlarmWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C8B55A5BB14FF231C646B663 /* TimerAlarmWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		FB08138BA9AC3832DC85F65A /* TimerAlarmWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C8B55A5BB14FF231C646B663 /* TimerAlarmWidgetExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		FBC88FA25857FE81D384DA30 /* LiveCallDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FF3C56B2C8890D5319BBC15 /* LiveCallDetectorTests.swift */; };
 		FC45AA513A1FB96632DEBAE2 /* NewsFeedParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E958FEE29592043A50F66EA /* NewsFeedParserTests.swift */; };
 		FCAE28139316D0CA297FADE0 /* SilenceEndpointTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9C936AC5BE83B61A6B44320 /* SilenceEndpointTests.swift */; };
@@ -737,6 +739,7 @@
 		902AADF4AB2F5A7B7F00EF13 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		90391AA61F888C033874331E /* FestivalCalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FestivalCalendarService.swift; sourceTree = "<group>"; };
 		90BC211A2D8A5DE381E7A5FE /* VoiceTurnLatencyTracer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTurnLatencyTracer.swift; sourceTree = "<group>"; };
+		92F8B8264F7A569F2943ABF9 /* HomeTimerChipModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeTimerChipModelTests.swift; sourceTree = "<group>"; };
 		9343373A38D6137D52284887 /* FeedTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedTransport.swift; sourceTree = "<group>"; };
 		940ADBAE2E5A811B03503971 /* VoiceContactSearchRouteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceContactSearchRouteTests.swift; sourceTree = "<group>"; };
 		941D0495DF6D75A7B90FBC15 /* DevanagariNumerals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevanagariNumerals.swift; sourceTree = "<group>"; };
@@ -840,6 +843,7 @@
 		D3219AF741C48CEC61208CA0 /* CalendarSyncServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSyncServiceTests.swift; sourceTree = "<group>"; };
 		D38AF87751F86953AC90E7D9 /* RepetitionGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepetitionGuardTests.swift; sourceTree = "<group>"; };
 		D3A543E5064714054230C154 /* NoiseSuppressor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoiseSuppressor.swift; sourceTree = "<group>"; };
+		D45B7533CABF3CD4400145E5 /* HomeTimerChipModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeTimerChipModel.swift; sourceTree = "<group>"; };
 		D49DA0EAA80FE9867B155E2A /* SearchPhraseCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchPhraseCapture.swift; sourceTree = "<group>"; };
 		D4C9E6972B31A317A9768601 /* FeedTranslator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedTranslator.swift; sourceTree = "<group>"; };
 		D58698672297EF24236D19FB /* ApplianceHelperPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceHelperPlugin.swift; sourceTree = "<group>"; };
@@ -1122,6 +1126,7 @@
 				3EF86DFDDAB5D6C4F9ED445D /* AlarmSchedulingBackendTests.swift */,
 				7938856DC662726CF322AEE2 /* AlarmTimersServiceTests.swift */,
 				36B554D5C323CBF29159025B /* AlarmTimersSystemPathTests.swift */,
+				92F8B8264F7A569F2943ABF9 /* HomeTimerChipModelTests.swift */,
 				FED1E5343F765632EF56FEBE /* TimerAlarmEngineTests.swift */,
 			);
 			path = Alarms;
@@ -1561,6 +1566,7 @@
 				C5835F05602FF8F952479823 /* AlarmKitSystemScheduler.swift */,
 				8CD378730DF20C5CEC77F600 /* AlarmSchedulingBackend.swift */,
 				59C5B48EC8342CFBCA05F2C5 /* AlarmTimersService.swift */,
+				D45B7533CABF3CD4400145E5 /* HomeTimerChipModel.swift */,
 				0D04CA7227131F251E255130 /* TimerAlarmBellPlayer.swift */,
 				3EDA2D35E433C9B6200F167F /* TimerAlarmEngine.swift */,
 				7D15E89A116B24DADD574A85 /* TimerAlarmSystemShared.swift */,
@@ -2132,6 +2138,7 @@
 				D0EE39ACE349FF9690B9C5C8 /* HomeDateLineComposer.swift in Sources */,
 				658CEABEBD0B6680270CD27F /* HomePresentationState.swift in Sources */,
 				53663E9D4EF0EA782E6CF361 /* HomeSubviews.swift in Sources */,
+				8F07F30F45804E18B02ABF84 /* HomeTimerChipModel.swift in Sources */,
 				0EFFF9E695C8F3159509D8C2 /* HomeView.swift in Sources */,
 				B0E7FB06E4B5F6028742BFAB /* HomeWidget.swift in Sources */,
 				CFC10AF90AED3B0DA5834916 /* IdHashing.swift in Sources */,
@@ -2341,6 +2348,7 @@
 				EE315CDFC9C22D92690442DA /* GuidePluginDispatchTests.swift in Sources */,
 				4B1186A99DD1B243EAD5F19D /* HistoryTimeFormatTests.swift in Sources */,
 				916DEEB02831B7415BFB307F /* HomeDateLineComposerTests.swift in Sources */,
+				189B019772EFC433CD42BC60 /* HomeTimerChipModelTests.swift in Sources */,
 				6EBC86F77CF0346E38A75FA5 /* HomeWidgetRegistryTests.swift in Sources */,
 				090F94B2C3D159992225B40C /* HomeWidgetTestSupport.swift in Sources */,
 				815471BF3F0560582E1D0B16 /* InAppNavigationSessionTests.swift in Sources */,
@@ -2540,6 +2548,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.elderlyassistant.app.TimerAlarmWidget;
 				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = 1;
 			};
@@ -2737,6 +2746,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.elderlyassistant.app.TimerAlarmWidget;
 				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = 1;
 			};

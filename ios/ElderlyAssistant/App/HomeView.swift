@@ -119,6 +119,15 @@ struct HomeView: View {
                     // scroll region then absorbs the overflow exactly as
                     // before.
                     Spacer(minLength: 8)
+                    // [HOME-TIMER-CHIP] (2026-09-11) The active-timer
+                    // chip in the hero's empty area: the nearest running
+                    // timer's remaining time + one-tap STOP. Renders
+                    // nothing (no space) while no timer runs — the free
+                    // area above the hero stays free.
+                    HomeTimerChipView(service: coordinator.alarmTimersService) { id in
+                        coordinator.cancelTimer(id: id)
+                    }
+                    .equatable()
                     // The talk stage is FIXED chrome (home-redesign v3):
                     // hero + the small status/rotating texts under it sit
                     // between the top bar and the outcome region, so the
