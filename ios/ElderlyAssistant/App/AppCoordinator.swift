@@ -6,6 +6,9 @@ import UserNotifications
 import UIKit
 import MessageUI
 import SwiftUI
+// [TIMER-ALARM] AlarmKit (iOS 26) — used only inside `@available`-gated
+// code; the import itself is inert on older deployment targets.
+import AlarmKit
 
 /// Central coordinator that wires all services together.
 /// Starts safety-critical services first (medication scheduler, health monitor),
@@ -73,6 +76,7 @@ final class AppCoordinator: ObservableObject {
         routineScheduler.locale = activeLocale
         externalCalendar.locale = activeLocale
         alarmTimersService.locale = activeLocale
+        alarmTimersService.setSystemSchedulerLocale(activeLocale)
         // Voice-OS shell v1: the briefing composes in the app language,
         // same injection pattern as every other locale-aware service.
         morningBriefing?.locale = activeLocale
@@ -1177,29 +1181,35 @@ final class AppCoordinator: ObservableObject {
         // BGTask re-queue; locale starts at the scheduler default and is
         // pushed to the service by `syncServiceLocales()` below (this
         // runs before the persisted app language is restored).
+        // [TIMER-ALARM] (2026-09-10) The AlarmKit seam (nil pre-iOS-26):
+        // timers then become SYSTEM-managed on iOS 26 and fall back to
+        // the UN path everywhere else / on denial.
         let alarmTimersService = AlarmTimersService(
             store: AlarmTimersStore(storage: storage),
             scheduler: AlarmScheduler(
                 notifications: UNNotificationCenterScheduler()
             ),
-            observabilityBus: bus
+            observabilityBus: bus,
+            systemScheduler: Self.makeAlarmKitSystemScheduler()
         )
         self.alarmTimersService = alarmTimersService
 
-        // Foreground notification delegate for alarms/timers. Constructed
-        // and RETAINED here — the center's delegate property is weak, so
-        // the coordinator owns the delegate's lifetime. The app had NO
-        // notification delegate before this feature (medication/routine
-        // banners only ever presented from the OS); this delegate presents
-        // alarm/timer notifications while the app is foregrounded and
-        // reports timer completions up for spoken output — every other
-        // notification keeps its old silent-foreground behavior (see
-        // `AlarmTimerNotificationDelegate`). Construction touches no
-        // permissions; its completion closure is attached at the end of
-        // init because it captures self.
-        let alarmTimerDelegate = AlarmTimerNotificationDelegate()
-        self.alarmTimerNotificationDelegate = alarmTimerDelegate
-        UNUserNotificationCenter.current().delegate = alarmTimerDelegate
+        // [TIMER-ALARM] (2026-09-10) The in-app ringing engine. The old
+        // AlarmTimerNotificationDelegate is gone — since the voice-OS
+        // shell, `NotificationFacade` (installed in `start()`) is the
+        // single UNUserNotificationCenter delegate, which made the old
+        // delegate's foreground timer path dead code: timers only ever
+        // popped a notification, nobody waited for it. The engine now
+        // rings a LOUD LOOPING bell in the foreground until the user
+        // presses STOP (and routes tapped timer notifications into the
+        // ringing screen as a facade handler). Construction touches no
+        // permissions or storage; the ring-start closure is attached at
+        // the end of init because it captures self.
+        let timerAlarmEngine = TimerAlarmEngine(
+            audio: TimerAlarmBellPlayer(observabilityBus: bus),
+            observabilityBus: bus
+        )
+        self.timerAlarmEngine = timerAlarmEngine
 
         // Language — restore the persisted choice, defaulting to the Nepali
         // pilot language (spec §3.2).
@@ -1586,15 +1596,15 @@ final class AppCoordinator: ObservableObject {
                 self?.objectWillChange.send()
             }
 
-        // Foreground timer-completion reporting ([ALARMS-TIMERS]
-        // 2026-09-07): the retained delegate reports finished timers up
-        // through this closure — the row is expired and the completion is
-        // SPOKEN while the app is active (a chime the user cannot see is
-        // useless to someone already looking at the phone). Attached here
-        // (not next to the delegate's construction) because the closure
-        // captures self.
-        alarmTimerNotificationDelegate?.onForegroundTimerFinished = { [weak self] timerID in
-            self?.handleForegroundTimerFinished(timerID: timerID)
+        // [TIMER-ALARM] (2026-09-10) Ring-start hook: the looping bell
+        // takes over from the OS one-shot notification sound (cancel the
+        // pending UN request so the two never double up), and any spoken
+        // output stops so the alarm owns the phone. Attached here (not
+        // next to the engine's construction) because the closure captures
+        // self.
+        timerAlarmEngine.onRingStarted = { [weak self] timerID in
+            self?.alarmTimersService.cancelPendingNotification(id: timerID)
+            self?.speaker?.cancel()
         }
     }
 
@@ -1767,9 +1777,30 @@ final class AppCoordinator: ObservableObject {
         registry.register(newsReader)
         // Single UNUserNotificationCenter delegate (design §2 confirmed
         // decision — verified no other object in the app owns this slot).
-        let facade = NotificationFacade(handlers: [notificationReader],
+        // [TIMER-ALARM] The ringing engine is the FIRST handler: it claims
+        // timer-completion notifications, so the reader never speaks over
+        // the bell, and routes a tap on a delivered timer notification
+        // into the ringing alarm screen.
+        let facade = NotificationFacade(handlers: [timerAlarmEngine, notificationReader],
                                          observability: observabilityBus)
         UNUserNotificationCenter.current().delegate = facade
+        // [TIMER-ALARM] Foreground driver: evaluates the ringing engine
+        // twice a second while the app runs (plus a tick on
+        // scene-phase .active). Cheap — a snapshot adopt + one deadline
+        // compare while idle.
+        let alarmDriver = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.timerAlarmEngine.tick(
+                activeTimers: self.alarmTimersService.engineManagedActiveTimers)
+        }
+        RunLoop.main.add(alarmDriver, forMode: .common)
+        self.timerAlarmDriver = alarmDriver
+        // [TIMER-ALARM] iOS 26: mirror system-side timer dismissals (the
+        // Lock Screen alert's Stop, the Dynamic Island dismiss) into the
+        // timer rows — the system record is the truth.
+        if #available(iOS 26.0, *) {
+            observeSystemTimerUpdates()
+        }
         self.speakQueue = queue
         self.speechSourceRegistry = registry
         self.notificationFacade = facade
@@ -4960,13 +4991,23 @@ final class AppCoordinator: ObservableObject {
     /// "alarm" is a daily-repeating local notification).
     private(set) var alarmTimersService: AlarmTimersService
 
-    /// [ALARMS-TIMERS] (2026-09-07) Foreground presentation for
-    /// alarm/timer notifications. RETAINED here — the center's delegate
-    /// property is weak, and before this feature the app had no
-    /// notification delegate at all (medication/routine reminders
-    /// presented via the OS alone). See `AlarmTimerNotificationDelegate`
-    /// for what presents and what stays silent.
-    private var alarmTimerNotificationDelegate: AlarmTimerNotificationDelegate?
+    /// [TIMER-ALARM] (2026-09-10) The in-app timer-alarm engine — the
+    /// idle → ringing → stopped state machine that drives the full-screen
+    /// alarm overlay and the looping loud bell for UN-path timers (the
+    /// pre-iOS-26 / AlarmKit-denied foreground fallback). On iOS 26 with
+    /// AlarmKit authorized its feed is empty (system-managed timers ring
+    /// through the SYSTEM's own full-screen alert), so the two never
+    /// double-ring. Also the notification facade handler that routes a
+    /// tapped timer notification into the ringing screen.
+    private(set) var timerAlarmEngine: TimerAlarmEngine
+
+    /// [TIMER-ALARM] Foreground driver: a main-runloop timer evaluating
+    /// the engine twice a second while the app runs.
+    private var timerAlarmDriver: Timer?
+
+    /// [TIMER-ALARM] iOS 26 only — the AlarmKit `alarmUpdates`
+    /// observation that mirrors system-side dismissals into timer rows.
+    private var systemTimerUpdatesTask: Task<Void, Never>?
 
     /// Forwards the alarms/timers service's publishes ([ALARMS-TIMERS]
     /// 2026-09-07): nested ObservableObject — a toggle/delete/timer-start
@@ -5077,6 +5118,13 @@ final class AppCoordinator: ObservableObject {
         guard started else { return }   // start() already refreshes
         switch phase {
         case .active:
+            // [TIMER-ALARM] Immediate re-evaluation on activation — a
+            // UN-path timer that elapsed while the app was backgrounded
+            // rings the moment the user returns (the OS notification was
+            // the background fallback; in the foreground the looping bell
+            // is the honest timer behavior).
+            timerAlarmEngine.tick(
+                activeTimers: alarmTimersService.engineManagedActiveTimers)
             // The top-bar date line may be a day stale after a long
             // background stretch — the offline recompose is cheap and
             // its equality guard makes the everyday case a no-op.
@@ -5516,21 +5564,40 @@ extension AppCoordinator {
         alarmTimersService.cancelTimer(id: id)
     }
 
-    /// [ALARMS-TIMERS] (2026-09-07) A timer's completion notification
-    /// arrived while the app was foregrounded (the retained
-    /// `AlarmTimerNotificationDelegate` closure — possibly off main): the
-    /// service expires the row (it dispatches to main itself), then the
-    /// completion surfaces as an outcome card and is spoken. The spoken
-    /// line matters: a countdown the user set by voice should end in a
-    /// voice when they are looking at the phone, not just a banner.
-    func handleForegroundTimerFinished(timerID: UUID) {
-        alarmTimersService.expireTimer(id: timerID)
-        let text = L10n.str("timers.finished", locale: activeLocale)
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.setOutcome(icon: "timer", text: text, undo: nil)
-            self.speak(text: text)
+    /// [TIMER-ALARM] (2026-09-10) The alarm screen's single STOP button:
+    /// ends the looping bell and expires the timer row. Main-confined
+    /// (the button runs on main).
+    func stopTimerAlarm() {
+        if let timerID = timerAlarmEngine.stopRinging() {
+            alarmTimersService.expireTimer(id: timerID)
         }
+    }
+
+    /// [TIMER-ALARM] iOS 26: subscribes to `AlarmManager.alarmUpdates`
+    /// and mirrors system-side dismissals/cancellations into the timer
+    /// rows via the service's `noteSystemTimerUpdates` (main-confined).
+    /// The system is the source of truth for system-managed timers; the
+    /// app never outlives it.
+    @available(iOS 26.0, *)
+    private func observeSystemTimerUpdates() {
+        let task = Task { [weak self] in
+            guard let self else { return }
+            for await alarms in AlarmManager.shared.alarmUpdates {
+                let ids = Set(alarms.map(\.id))
+                self.alarmTimersService.noteSystemTimerUpdates(systemTimerIDs: ids)
+            }
+        }
+        systemTimerUpdatesTask = task
+    }
+
+    /// [TIMER-ALARM] The AlarmKit seam factory — nil on iOS < 26 (the
+    /// service then stays on the pure UN path, which every pre-26 test
+    /// pins). Constructing the adapter touches no authorization state.
+    private static func makeAlarmKitSystemScheduler() -> AlarmKitTimerScheduling? {
+        if #available(iOS 26.0, *) {
+            return AlarmKitSystemScheduler()
+        }
+        return nil
     }
 }
 

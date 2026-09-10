@@ -12189,6 +12189,108 @@
         }
       }
     },
+    "timerAlarm.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Timer finished"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "टाइमर सकियो"
+          }
+        }
+      }
+    },
+    "timerAlarm.stop" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "रोक्नुहोस्"
+          }
+        }
+      }
+    },
+    "timerAlarm.ringingNote" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The bell keeps ringing until you press Stop."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "तपाईंले रोक्नुहोस् थिच्दासम्म घण्टी बजिरहन्छ।"
+          }
+        }
+      }
+    },
+    "timerAlarm.backgroundNote" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When the app is closed, a timer plays one bell and shows one notification. Tap it to open this screen."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "टाइमर सकिँदा एप बन्द भएको भए, फोनले एक पटक घण्टी बजाएर सूचना देखाउँछ। यो स्क्रिन खोल्न त्यसलाई थिच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "timerAlarm.countdownTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Timer"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "टाइमर"
+          }
+        }
+      }
+    },
+    "timerAlarm.settingsCaption" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Timers ring like real alarms. On iOS 26 or newer your phone itself rings them — loud, full screen, and through silent mode, even when the app is closed. On older iOS a timer rings in this app while it is open; when the app is closed, it plays one bell and shows a notification — tap the notification to open the ringing screen."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "टाइमरहरू साँचो अलार्म जस्तै बज्छन्। iOS 26 वा नयाँमा फोन आफैँले बजाउँछ — ठूलो स्वरमा, पूरा स्क्रिनमा, र साइलेन्ट मोडमा पनि, एप बन्द भए पनि। पुरानो iOS मा, एप खुला हुँदा टाइमर यही एपभित्र बज्छ; एप बन्द हुँदा एक पटक घण्टी बजेर सूचना देखिन्छ — रिङ भइरहेको स्क्रिन खोल्न सूचनालाई थिच्नुहोस्।"
+          }
+        }
+      }
+    },
     "timers.cancel" : {
       "extractionState" : "manual",
       "localizations" : {

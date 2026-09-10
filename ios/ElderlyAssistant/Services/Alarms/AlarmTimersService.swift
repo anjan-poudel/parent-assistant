@@ -218,8 +218,12 @@ final class UNNotificationCenterScheduler: LocalNotificationScheduling {
 /// [.hour, .minute], repeats: true)`). The Settings leaf caption
 /// (`alarms.honestyNote`) and this doc say exactly that. Timers are fully
 /// in-app countdowns whose completion fires a one-shot notification at
-/// `endsAt`; while the app is foregrounded the presentation delegate
-/// (`AlarmTimerNotificationDelegate`) also speaks "Timer finished."
+/// `endsAt` — the UN-path fallback. [TIMER-ALARM] (2026-09-10) On iOS 26
+/// the PRIMARY timer path is AlarmKit's system-managed timer
+/// (`AlarmKitSystemScheduler` — full-screen system alert, rings through
+/// silent/Focus, survives app termination); while the app is foregrounded
+/// on the UN path, the in-app `TimerAlarmEngine` rings a looping loud
+/// bell until the user stops it.
 final class AlarmScheduler {
     private let notifications: LocalNotificationScheduling
 
@@ -318,11 +322,31 @@ final class AlarmScheduler {
     /// Arms the one-shot completion notification for `timer` at its
     /// `endsAt`. The trigger date is absolute, so an in-flight timer
     /// survives re-arms (`scheduleAll`) by simple replacement.
+    /// [TIMER-ALARM] (2026-09-10) Loudest configuration public API allows
+    /// for the background fallback:
+    ///  - Custom bundled bell sound (`timer-alarm-bell.wav`, CC0, ~4.6 s —
+    ///    within the ≤30 s linear-PCM limit for custom notification
+    ///    sounds; falls back to the system default sound if the asset is
+    ///    missing). The OS plays it ONCE — notification sounds cannot
+    ///    loop — and it RESPECTS the silent switch. The repeating
+    ///    until-stopped alarm is the in-app engine (foreground) and, on
+    ///    iOS 26, the system-managed AlarmKit timer.
+    ///  - `.timeSensitive` interruption level (iOS 15+ public API): the
+    ///    user explicitly set this countdown, so the notification breaks
+    ///    through Focus like a call would.
+    ///  - NOT critical alerts: that needs the
+    ///    com.apple.developer.usernotifications.critical-alerts
+    ///    entitlement — an Apple-reviewed special entitlement this app
+    ///    does not hold, and claiming the API without it would silently
+    ///    degrade. If the project ever obtains the entitlement, switch
+    ///    this line to `.defaultCritical`; do NOT claim it now.
     func scheduleTimerCompletion(for timer: TimerItem) {
         let content = UNMutableNotificationContent()
         content.title = L10n.str("timers.finished", locale: locale)
         content.body = timer.label ?? ""
-        content.sound = .default
+        content.sound = UNNotificationSound(named: UNNotificationSoundName("timer-alarm-bell.wav"))
+            ?? .default
+        content.interruptionLevel = .timeSensitive
         content.userInfo = ["kind": "timer", "id": timer.id.uuidString]
 
         let components = Calendar.current.dateComponents(
@@ -365,44 +389,6 @@ final class AlarmScheduler {
     }
 }
 
-// MARK: - Foreground presentation delegate
-
-/// [ALARMS-TIMERS] (2026-09-07) Foreground delivery for alarm/timer
-/// notifications. iOS silences notification PRESENTATION while the app is
-/// active unless a `UNUserNotificationCenterDelegate` returns presentation
-/// options, and no other delegate exists in the app today (medication and
-/// routine reminders deliver via the OS alone). This delegate:
-///
-///  - presents OUR alarm/timer notifications as banners + sound while the
-///    app is foregrounded, and
-///  - reports a TIMER completion up to `AppCoordinator` (via the
-///    `onForegroundTimerFinished` closure), which expires the timer row
-///    and SPEAKS "Timer finished." — a chime the user cannot see is
-///    useless to someone already looking at the phone.
-///
-/// Every OTHER notification (medication reminders etc., which carry no
-/// "kind" userInfo) returns `[]` — exactly the no-delegate behavior those
-/// features have today; nothing about them changes.
-final class AlarmTimerNotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
-    /// Called when a timer-completion notification arrives while the app
-    /// is foregrounded. May be invoked on any queue; the coordinator hops
-    /// to main before touching published state.
-    var onForegroundTimerFinished: ((UUID) -> Void)?
-
-    func userNotificationCenter(_ center: UNUserNotificationCenter,
-                                willPresent notification: UNNotification
-    ) async -> UNNotificationPresentationOptions {
-        let info = notification.request.content.userInfo
-        guard let kind = info["kind"] as? String else { return [] }
-        if kind == "timer",
-           let idString = info["id"] as? String,
-           let id = UUID(uuidString: idString) {
-            onForegroundTimerFinished?(id)
-        }
-        return [.banner, .sound]
-    }
-}
-
 // MARK: - AlarmTimersService
 
 /// [ALARMS-TIMERS] (2026-09-07) Owns the on-device alarms + timers feature
@@ -410,12 +396,26 @@ final class AlarmTimerNotificationDelegate: NSObject, UNUserNotificationCenterDe
 /// `AppCoordinator`), the Settings leaf, launch re-arm and the background
 /// task.
 ///
+/// [TIMER-ALARM] (2026-09-10) Timer paths, best-first:
+///  1. iOS 26 + AlarmKit authorized — SYSTEM-MANAGED timer
+///     (`AlarmManager`, see `AlarmKitSystemScheduler`): the system rings
+///     it like the Clock app (full-screen alert, through silent mode and
+///     Focus, Dynamic Island/StandBy/Watch countdown), and it survives
+///     app termination. These timers are NOT re-armed by `scheduleAll` —
+///     the system owns them; `scheduleAll` reconciles against
+///     `AlarmManager.alarms` instead.
+///  2. Everything else — the UN notification path (one-shot completion
+///     notification with the bundled bell + `.timeSensitive`), plus the
+///     in-app `TimerAlarmEngine` ringing a LOUD LOOPING bell in the
+///     foreground until the user stops it (the fallback foreground
+///     experience, also used when AlarmKit authorization is denied).
+///
 /// Rules inherited from the medication/routine paths:
 ///  - Persistence BEFORE arming: a crash between the two must leave
 ///    durable state, never an armed notification for a forgotten item.
-///  - FR-025 re-queue: `scheduleAll()` re-arms everything on every launch
-///    and BGTask wake; armed requests replace in place by id, so this is
-///    idempotent.
+///  - FR-025 re-queue: `scheduleAll()` re-arms every UN-path item on
+///    every launch and BGTask wake; armed requests replace in place by
+///    id, so this is idempotent.
 ///  - Store caps keep the app well under iOS's 64 pending-notification
 ///    limit.
 ///
@@ -444,8 +444,17 @@ final class AlarmTimersService: ObservableObject {
 
     private let store: AlarmTimersStore
     private let scheduler: AlarmScheduler
+    /// [TIMER-ALARM] The AlarmKit seam (iOS 26). Nil in tests and on
+    /// pre-26 builds — the service then behaves exactly as before (pure
+    /// UN path), which is what every existing test pins.
+    private let systemScheduler: AlarmKitTimerScheduling?
     private let observabilityBus: ObservabilityBus
     private let now: () -> Date
+    /// [TIMER-ALARM] Main-confined: ids of active timers the SYSTEM
+    /// manages (AlarmKit path). Rebuilt by `scheduleAll`'s reconciliation
+    /// and extended on every system-path creation; never persisted — the
+    /// system alarm list IS the durable record.
+    private(set) var systemManagedTimerIDs: Set<UUID> = []
     /// [BOOT-M1M2] Main-confined: the persisted lists have been restored
     /// at least once (guards `restoreAndScheduleAll` against a second
     /// restore clobbering in-memory mutations).
@@ -455,12 +464,14 @@ final class AlarmTimersService: ObservableObject {
          scheduler: AlarmScheduler,
          observabilityBus: ObservabilityBus,
          locale: Locale = Locale(identifier: "en"),
-         now: @escaping () -> Date = Date.init) {
+         now: @escaping () -> Date = Date.init,
+         systemScheduler: AlarmKitTimerScheduling? = nil) {
         self.store = store
         self.scheduler = scheduler
         self.observabilityBus = observabilityBus
         self.locale = locale
         self.now = now
+        self.systemScheduler = systemScheduler
         // [BOOT-M1M2] ZERO storage IO in init (constant-time startup):
         // the lists start empty and `restoreAndScheduleAll()` (called
         // once from AppCoordinator.start() on the boot queue) loads +
@@ -686,44 +697,77 @@ final class AlarmTimersService: ObservableObject {
 
     // MARK: Timer creation (voice + UI)
 
-    /// Point-of-use creation, same contract as `addAlarm`. The countdown
-    /// is fully in-app: `endsAt` is persisted immediately, the one-shot
-    /// completion notification is armed, and the Settings leaf renders the
-    /// live remaining time.
+    /// Point-of-use creation. The notification-permission flow is
+    /// UNCHANGED (same ask, same honest denial line); [TIMER-ALARM] on
+    /// iOS 26 an AlarmKit authorization is asked at the same point of
+    /// use and, when granted, the timer becomes SYSTEM-managed (the
+    /// system rings it — through silent mode and Focus, full-screen, even
+    /// after the app is terminated). Denied/absent AlarmKit keeps the UN
+    /// path, so a timer always works through at least the old mechanism
+    /// whenever notifications are on.
     func startTimer(durationSeconds: Int, label: String?) async -> AlarmTimerSetOutcome {
         guard (1...Self.maxTimerDurationSeconds).contains(durationSeconds) else {
             emit("timer_invalid_duration", outcome: "failed")
             return .failed
         }
-        let granted = await scheduler.requestAuthorizationIfNeeded()
-        guard granted else {
+        let notificationGranted = await scheduler.requestAuthorizationIfNeeded()
+        var systemAuthorized = false
+        if let systemScheduler {
+            systemAuthorized = await systemScheduler.requestAuthorization() == .authorized
+            if systemAuthorized {
+                emit("timer_system_path_selected", outcome: "info")
+            }
+        }
+        guard notificationGranted || systemAuthorized else {
             emit("timer_permission_denied", outcome: "denied")
             return .permissionDenied
         }
         return await onMain {
-            self.startTimerAuthorized(durationSeconds: durationSeconds, label: label)
+            await self.startTimerAuthorized(durationSeconds: durationSeconds,
+                                            label: label,
+                                            useSystemPath: systemAuthorized)
         }
     }
 
-    private func startTimerAuthorized(durationSeconds: Int, label: String?) -> AlarmTimerSetOutcome {
+    private func startTimerAuthorized(durationSeconds: Int, label: String?,
+                                      useSystemPath: Bool) async -> AlarmTimerSetOutcome {
         guard activeTimers.count < AlarmTimersStore.maxTimers else {
             emit("timer_capacity_reached", outcome: "at_capacity")
             return .atCapacity
         }
         let timer = TimerItem(endsAt: now().addingTimeInterval(TimeInterval(durationSeconds)),
                               label: Self.trimmed(label))
+        // Persistence BEFORE arming (house rule — see class doc).
         guard store.saveTimers(timers + [timer]) else {
             emit("timer_persistence_failed", outcome: "failed")
             return .failed
         }
         timers.append(timer)
-        scheduler.scheduleTimerCompletion(for: timer)
+        if useSystemPath, let systemScheduler {
+            do {
+                try await systemScheduler.scheduleTimer(id: timer.id,
+                                                        duration: TimeInterval(durationSeconds),
+                                                        label: timer.label)
+                systemManagedTimerIDs.insert(timer.id)
+                emit("timer_system_scheduled", outcome: "success", id: timer.id)
+            } catch {
+                // Honest fallback: the system path failed (e.g.
+                // maximumLimitReached) — the UN path still delivers the
+                // old behavior, which is better than a lost timer.
+                scheduler.scheduleTimerCompletion(for: timer)
+                emit("timer_system_schedule_failed_un_fallback",
+                     outcome: "fallback", id: timer.id)
+            }
+        } else {
+            scheduler.scheduleTimerCompletion(for: timer)
+        }
         emit("timer_created", outcome: "success", id: timer.id)
         return .scheduled
     }
 
     /// Cancels a running timer (persist removal, then cancel the pending
-    /// notification). Main-confined (UI).
+    /// notification AND, when system-managed, the AlarmKit timer).
+    /// Main-confined (UI).
     func cancelTimer(id: UUID) {
         guard timer(with: id) != nil else { return }
         guard store.saveTimers(timers.filter { $0.id != id }) else {
@@ -732,17 +776,69 @@ final class AlarmTimersService: ObservableObject {
         }
         timers.removeAll { $0.id == id }
         scheduler.cancelTimer(id: id)
+        if systemManagedTimerIDs.remove(id) != nil {
+            systemScheduler?.cancelTimer(id: id)
+        }
         emit("timer_cancelled", outcome: "success", id: id)
     }
 
-    /// Marks a timer finished (the foreground notification delegate
-    /// observed its completion). The row leaves the visible list and the
+    /// [TIMER-ALARM] Cancels only the pending UN completion notification
+    /// — the `TimerAlarmEngine`'s ring-start hook: the in-app looping
+    /// bell takes over in the foreground, and the OS one-shot sound must
+    /// not double up. The row and any system-managed timer are untouched.
+    /// Main-confined.
+    func cancelPendingNotification(id: UUID) {
+        scheduler.cancelTimer(id: id)
+    }
+
+    /// [TIMER-ALARM] Active timers that ring through the app's own engine
+    /// (the UN path) — the foreground driver's feed. System-managed
+    /// timers are excluded: the SYSTEM presents their alarm (in the
+    /// foreground too), and a second in-app bell would double-ring.
+    var engineManagedActiveTimers: [TimerItem] {
+        activeTimers.filter { !systemManagedTimerIDs.contains($0.id) }
+    }
+
+    /// [TIMER-ALARM] The coordinator's AlarmKit `alarmUpdates`
+    /// observation: a system-managed timer whose alarm no longer exists
+    /// was dismissed or cancelled in the SYSTEM UI (the Lock Screen
+    /// alert's Stop, the Dynamic Island dismiss) — its row expires,
+    /// mirroring the system, never outliving it. Main-confined (dispatches
+    /// like `scheduleAll` when called off main).
+    func noteSystemTimerUpdates(systemTimerIDs systemIDs: Set<UUID>) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.noteSystemTimerUpdates(systemTimerIDs: systemIDs)
+            }
+            return
+        }
+        for id in systemManagedTimerIDs where !systemIDs.contains(id) {
+            expireTimer(id: id)
+        }
+        systemManagedTimerIDs.formIntersection(systemIDs)
+    }
+
+    /// [TIMER-ALARM] Pushes the active locale into the AlarmKit adapter
+    /// (its alert/countdown titles resolve at schedule time, the same
+    /// contract as `AlarmScheduler.locale`). No-op when the seam is nil.
+    func setSystemSchedulerLocale(_ locale: Locale) {
+        if #available(iOS 26.0, *),
+           let systemScheduler = systemScheduler as? AlarmKitSystemScheduler {
+            systemScheduler.locale = locale
+        }
+    }
+
+    /// Marks a timer finished — [TIMER-ALARM] either the user pressed
+    /// STOP on the in-app alarm screen, or the SYSTEM-managed timer's
+    /// alert was dismissed (the coordinator's AlarmKit `alarmUpdates`
+    /// observation reports it). The row leaves the visible list and the
     /// next prune sweeps it from storage. Dispatches to main when called
     /// off it (delegate callbacks can arrive on any queue).
     func expireTimer(id: UUID) {
         guard timer(with: id) != nil else { return }
         let mutation = { [weak self] in
             guard let self else { return }
+            self.systemManagedTimerIDs.remove(id)
             guard var timer = self.timer(with: id), timer.isActive else { return }
             timer.isActive = false
             guard self.store.saveTimers(self.timers.map { $0.id == id ? timer : $0 }) else {
@@ -778,21 +874,41 @@ final class AlarmTimersService: ObservableObject {
 
     // MARK: Schedule all (FR-025 launch + BGTask re-queue)
 
-    /// Re-arms every enabled alarm and every live timer — the FR-025
-    /// re-queue. Idempotent: pending requests replace in place by id.
-    /// Launched from `start()` (main) and the background task (off main —
-    /// this dispatches the whole pass to main; nothing else can mutate the
-    /// service concurrently while the app is suspended).
+    /// Re-arms every enabled alarm and every UN-path live timer — the
+    /// FR-025 re-queue. Idempotent: pending requests replace in place by
+    /// id. Launched from `start()` (main) and the background task (off
+    /// main — this dispatches the whole pass to main; nothing else can
+    /// mutate the service concurrently while the app is suspended).
+    ///
+    /// [TIMER-ALARM] System-managed (AlarmKit) timers are NOT re-armed
+    /// here — the SYSTEM owns them across app terminations, which is
+    /// their whole point. Instead the pass reconciles against
+    /// `AlarmManager.alarms`:
+    ///  - active rows whose id the system still manages are tracked in
+    ///    `systemManagedTimerIDs` (excluded from the UN re-arm AND from
+    ///    the in-app engine's feed);
+    ///  - active rows the system NO LONGER manages were dismissed from
+    ///    the system UI (e.g. the Lock Screen countdown's dismiss) while
+    ///    the app was dead — they are expired, mirroring the system.
     func scheduleAll() {
         if !Thread.isMainThread {
             DispatchQueue.main.async { [weak self] in self?.scheduleAll() }
             return
         }
         pruneFinishedTimers()
+        if let systemScheduler {
+            let systemIDs = systemScheduler.systemTimerIDs()
+            systemManagedTimerIDs.formIntersection(Set(timers.map(\.id)))
+            for timer in activeTimers
+            where systemManagedTimerIDs.contains(timer.id) && !systemIDs.contains(timer.id) {
+                expireTimer(id: timer.id)
+            }
+            systemManagedTimerIDs.formUnion(systemIDs)
+        }
         for alarm in alarms where alarm.isEnabled {
             scheduler.scheduleAlarm(alarm)
         }
-        for timer in activeTimers {
+        for timer in activeTimers where !systemManagedTimerIDs.contains(timer.id) {
             scheduler.scheduleTimerCompletion(for: timer)
         }
         emit("alarms_timers_requeued", outcome: "success")
@@ -822,6 +938,20 @@ final class AlarmTimersService: ObservableObject {
         return await withCheckedContinuation { continuation in
             DispatchQueue.main.async {
                 continuation.resume(returning: body())
+            }
+        }
+    }
+
+    /// Async variant for main-confined bodies that themselves await (the
+    /// [TIMER-ALARM] AlarmKit schedule). SE-0338 overload ranking keeps
+    /// the existing sync call sites on the sync overload.
+    private func onMain<Value>(_ body: @escaping () async -> Value) async -> Value {
+        if Thread.isMainThread { return await body() }
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.main.async {
+                Task {
+                    continuation.resume(returning: await body())
+                }
             }
         }
     }

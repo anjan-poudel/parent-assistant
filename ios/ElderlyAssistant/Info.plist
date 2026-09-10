@@ -74,6 +74,8 @@
 	<string>The assistant uses your location to tell you the local weather and to give you driving directions to your home or saved places (your current location is the route's start point). Nothing else in the app uses it, and you can say no.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>The assistant needs microphone access to listen for your voice commands and wake word. Your voice data never leaves this device.</string>
+	<key>NSAlarmKitUsageDescription</key>
+	<string>Timers you set are kept by your phone so they ring like a real alarm — loudly and full screen, even when this app is closed or the phone is on silent. You can say no; timers will then only ring while the app is open.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Speech recognition runs entirely on-device to understand your voice commands. No audio is sent to the cloud.</string>
 	<key>UIBackgroundModes</key>
