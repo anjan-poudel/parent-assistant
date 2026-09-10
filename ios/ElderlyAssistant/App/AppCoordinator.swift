@@ -6094,6 +6094,12 @@ final class AppCoordinator: ObservableObject {
     // MARK: - Background tasks
 
     private func registerBackgroundTasks() {
+        // BGTaskScheduler registration raises an NSException on the
+        // simulator (background tasks are device-only); skip there so a
+        // sim launch can never abort in this call (crash 2026-09-11).
+        #if targetEnvironment(simulator)
+        return
+        #endif
         BGTaskScheduler.shared.register(
             forTaskWithIdentifier: "com.elderlyassistant.medication.check",
             using: nil
