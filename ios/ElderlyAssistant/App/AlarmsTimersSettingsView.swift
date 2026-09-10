@@ -56,7 +56,9 @@ struct AlarmsTimersSettingsView: View {
                 // permission is surfaced, never hidden — nothing the
                 // user sets here can ring until they allow it.
                 if coordinator.alarmAuthorizationStatus == .denied {
-                    Text(coordinator.alarmPermissionDeniedKey)
+                    // LocalizedStringKey wrapper — a String variable would
+                    // render the KEY verbatim, not the translated line.
+                    Text(LocalizedStringKey(coordinator.alarmPermissionDeniedKey))
                         .font(.system(size: DesignTokens.minCaptionPointSize))
                         .foregroundColor(DesignTokens.stateError)
                         .multilineTextAlignment(.center)
