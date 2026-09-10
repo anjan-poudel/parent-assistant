@@ -324,11 +324,12 @@ enum HistoryTimeFormat {
         return shortDateFormatter(locale: locale).string(from: timestamp)
     }
 
+    /// DESIGN-REVIEW (P2): was a fresh `DateFormatter` per row, per body
+    /// evaluation — hundreds of identical formatters for one locale's
+    /// answer. `LocaleFormatters` builds one per locale and caches it;
+    /// `DateFormatter` is safe to format from multiple threads (iOS 7+),
+    /// and the cache is lock-guarded besides, so sharing it is safe.
     private static func shortDateFormatter(locale: Locale) -> DateFormatter {
-        let formatter = DateFormatter()
-        formatter.locale = locale
-        formatter.dateStyle = .short
-        formatter.timeStyle = .none
-        return formatter
+        LocaleFormatters.shortDate(locale: locale)
     }
 }

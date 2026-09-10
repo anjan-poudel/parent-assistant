@@ -214,13 +214,12 @@ struct AlarmsTimersSettingsView: View {
 
     // MARK: Text helpers
 
+    /// DESIGN-REVIEW (P2): the row used to build a `DateFormatter` per
+    /// render — once per alarm, per body evaluation, for an answer that
+    /// only depends on the locale. `LocaleFormatters` builds it once per
+    /// locale and hands back the same instance (see `ViewCaches.swift`).
     private func timeText(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = coordinator.appLanguage.locale
-        formatter.timeZone = .current
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
+        LocaleFormatters.shortTime(locale: coordinator.appLanguage.locale).string(from: date)
     }
 
     /// Compact clock countdown — "H:MM:SS" above an hour, "M:SS" below

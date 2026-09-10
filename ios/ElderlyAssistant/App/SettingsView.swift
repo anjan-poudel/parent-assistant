@@ -1263,11 +1263,23 @@ struct WakeWordSettingsView: View {
 
 struct FamilyContactsSettingsView: View {
     @EnvironmentObject var coordinator: AppCoordinator
+    @Environment(\.displayScale) private var displayScale
 
     /// The open add/edit sheet — nil when closed. Item-driven so a
     /// swipe-dismiss also clears it (same pattern as CallView's
     /// handle-capture sheet).
     @State private var editorTarget: FamilyContactEditorTarget?
+
+    /// Row faces by contact id, resolved OFF the body (design review P2
+    /// — "keep image-file reads out of `body`"). The rows used to call
+    /// `coordinator.contactPhoto(for:)` — a file read plus a full-size
+    /// decode — while composing each card, and every body evaluation of
+    /// this list paid it again for every contact. The pass below runs
+    /// only when the roster or a stored photo actually changes, hands
+    /// each face through the shared downsampling cache (so it is sized
+    /// for the 44pt circle it is drawn in), and the body then reads
+    /// plain state.
+    @State private var contactPhotos: [UUID: UIImage] = [:]
 
     /// What the add/edit sheet is editing: a blank add, or an existing
     /// contact pre-filled for editing.
@@ -1309,6 +1321,25 @@ struct FamilyContactsSettingsView: View {
         .sheet(item: $editorTarget) { target in
             FamilyContactWizardSheet(target: target)
         }
+        .task(id: contactPhotoKey) {
+            var resolved: [UUID: UIImage] = [:]
+            for contact in coordinator.familyContacts {
+                resolved[contact.id] = DownsampledImageCache.shared.contactFace(
+                    for: contact,
+                    diameter: DesignTokens.iconBadgeDiameter,
+                    displayScale: displayScale
+                ) { coordinator.contactPhoto(for: contact) }
+            }
+            contactPhotos = resolved
+        }
+    }
+
+    /// Identity of everything the row faces depend on: who is on the
+    /// roster, and which file each face lives in. The file name matters
+    /// as much as the id — editing a contact KEEPS its id, so a photo
+    /// added or removed in the wizard would otherwise never re-resolve.
+    private var contactPhotoKey: [String] {
+        coordinator.familyContacts.map { "\($0.id.uuidString):\($0.photoFilename ?? "-")" }
     }
 
     /// Opens the add sheet (hidden at the cap — nothing to add).
@@ -1430,11 +1461,12 @@ struct FamilyContactsSettingsView: View {
 
     /// The row's 44pt visual: the stored photo when one is on file,
     /// else the initials avatar. Photos are best-effort — a missing or
-    /// unreadable file reads back as nil and falls through to initials.
+    /// unreadable file resolves to nil (see `contactPhotoKey`'s task)
+    /// and falls through to initials.
     @ViewBuilder
     private func contactPhotoThumb(_ contact: FamilyContact) -> some View {
         let diameter = DesignTokens.iconBadgeDiameter
-        if let photo = coordinator.contactPhoto(for: contact) {
+        if let photo = contactPhotos[contact.id] {
             Image(uiImage: photo)
                 .resizable()
                 .scaledToFill()
@@ -2193,7 +2225,15 @@ private struct FamilyContactWizardSheet: View {
         Task {
             guard let data = try? await item.loadTransferable(type: Data.self),
                   let image = UIImage(data: data) else { return }
-            pickedPhoto = image
+            // DESIGN-REVIEW (P2): a picked camera-roll image can be tens
+            // of megapixels (~48 MB decoded) and this @State holds it for
+            // the wizard's whole lifetime. The store only ever KEEPS
+            // `ContactPhotoStore.maxDimension` on the longest edge, and
+            // the preview is smaller still — so shrink to that as soon as
+            // the bytes arrive: same saved photo, a fraction of the
+            // resident memory.
+            pickedPhoto = DownsampledImageCache.downsampled(
+                image, maxPixelEdge: ContactPhotoStore.maxDimension) ?? image
             removingStoredPhoto = false
         }
     }

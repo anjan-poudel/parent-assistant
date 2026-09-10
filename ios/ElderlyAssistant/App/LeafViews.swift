@@ -513,12 +513,41 @@ struct RemindersView: View {
     /// the coordinator exposes reminders as computed vars, not @Published.
     @State private var entriesVersion = 0
 
+    /// DESIGN-REVIEW (P2 — "keep encrypted storage reads out of `body`",
+    /// "build row presentation values when source data changes"): every
+    /// `coordinator.routineEntries` access is a Keychain read plus a JSON
+    /// decode (`RoutineStore.loadEntries` → `EncryptedLocalStorage`), and
+    /// this screen used to make that read TWICE per body evaluation —
+    /// once building `todayRows`, once in the `ForEach` below — plus one
+    /// more for the occurrences. A body evaluation happens on any
+    /// coordinator publish, so merely having this leaf open used to mean
+    /// a steady stream of securityd round-trips.
+    ///
+    /// The roster and the finished rows now live in state, rebuilt by the
+    /// `.task` below when the underlying data actually changes; the body
+    /// only reads them.
+    @State private var routineEntries: [RoutineEntry] = []
+    @State private var todayRows: [TodayRow] = []
+    /// Each manage row's subtitle ("Sun, Tue · 9:00 AM"), built with the
+    /// rows so no formatter work runs while drawing.
+    @State private var routineSummaries: [UUID: String] = [:]
+
+    /// Everything the cached rows depend on: an in-screen toggle, a voice
+    /// turn (a routine can be added by asking), a dose completed
+    /// elsewhere, and the app's language (the rows carry localized
+    /// titles). Counting these is cheap; re-reading the stores is not.
+    private var refreshKey: String {
+        "\(entriesVersion)|\(coordinator.conversationHistory.count)"
+            + "|\(coordinator.pendingReminders.count)"
+            + "|\(coordinator.activeLocale.identifier)"
+    }
+
     /// One row per today's reminder, all three systems, sorted by time.
-    private var todayRows: [TodayRow] {
-        _ = entriesVersion
+    /// Called from the refresh task — never from `body`.
+    private func buildTodayRows() -> [TodayRow] {
         // One store read for the whole list, not two per row.
         let entriesById = Dictionary(
-            uniqueKeysWithValues: coordinator.routineEntries.map { ($0.id, $0) }
+            uniqueKeysWithValues: routineEntries.map { ($0.id, $0) }
         )
         let meds = coordinator.pendingReminders
             .filter { Calendar.current.isDateInToday($0.scheduledAt) }
@@ -563,13 +592,21 @@ struct RemindersView: View {
                 // task, 2026-09-07) — see `upcomingEventsSection`.
                 upcomingEventsSection
 
-                if !coordinator.routineEntries.isEmpty {
+                if !routineEntries.isEmpty {
                     sectionHeader(key: "reminders.routinesSection")
-                    ForEach(coordinator.routineEntries) { entry in
+                    ForEach(routineEntries) { entry in
                         routineManageRow(entry)
                     }
                 }
             }
+        }
+        .task(id: refreshKey) {
+            let roster = coordinator.routineEntries
+            routineEntries = roster
+            routineSummaries = Dictionary(
+                uniqueKeysWithValues: roster.map { ($0.id, scheduleSummary($0)) }
+            )
+            todayRows = buildTodayRows()
         }
     }
 
@@ -650,7 +687,7 @@ struct RemindersView: View {
                 Text(entry.displayTitle(locale: coordinator.activeLocale))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(DesignTokens.textPrimary)
-                Text(scheduleSummary(entry))
+                Text(routineSummaries[entry.id] ?? "")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
             }
@@ -682,14 +719,14 @@ struct RemindersView: View {
     private func scheduleSummary(_ entry: RoutineEntry) -> String {
         let locale = coordinator.activeLocale
         let calendar = Calendar.current
+        let timeFormatter = LocaleFormatters.shortTime(locale: locale)
         let times = entry.scheduleTimes.compactMap { components -> String? in
             calendar.date(from: components).map { timeFormatter.string(from: $0) }
         }
         let timesText = times.joined(separator: ", ")
         guard entry.frequency == .weekly, !entry.weekdays.isEmpty else { return timesText }
-        let formatter = DateFormatter()
-        formatter.locale = coordinator.activeLocale
-        guard let symbols = formatter.shortWeekdaySymbols else { return timesText }
+        let symbols = LocaleFormatters.shortWeekdaySymbols(locale: locale)
+        guard !symbols.isEmpty else { return timesText }
         let days = entry.weekdays.sorted().compactMap { weekday -> String? in
             weekday >= 1 && weekday <= symbols.count ? symbols[weekday - 1] : nil
         }
@@ -857,6 +894,7 @@ struct RemindersView: View {
 struct CallView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.displayScale) private var displayScale
 
     private let directory = AddressBookDirectory()
 
@@ -908,6 +946,15 @@ struct CallView: View {
     /// The sheet's draft username, bound to its TextField.
     @State private var handleText = ""
 
+    /// Faces for the current search's family rows, resolved OFF the body
+    /// (design review P2 — "keep image-file reads out of `body`"). The
+    /// results pass used to call `coordinator.contactPhoto(for:)` — a
+    /// file read plus a full-size decode — once per family row, inside
+    /// `body`, so every keystroke re-read every face. One keyed pass
+    /// fills this instead and the rows only index it; each face is also
+    /// downsampled to the 52pt circle it is drawn in.
+    @State private var resultPhotos: [String: UIImage] = [:]
+
     var body: some View {
         LeafScreen(titleKey: "call.title") {
             VStack(spacing: 12) {
@@ -936,6 +983,11 @@ struct CallView: View {
             // request and prefill; a fresh publish while the leaf was
             // already open is picked up by the onChange below.
             consumePendingVoiceRequestIfPresent()
+        }
+        // Re-resolve the search rows' faces when the query or the roster
+        // changes — never during body evaluation (see `resultPhotos`).
+        .task(id: resultPhotoKey) {
+            resultPhotos = resolveResultPhotos()
         }
         .onChange(of: coordinator.pendingContactSearchRequest?.id) { _ in
             consumePendingVoiceRequestIfPresent()
@@ -1046,6 +1098,39 @@ struct CallView: View {
         searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     private var isSearching: Bool { !trimmedQuery.isEmpty }
+
+    /// What the resolved faces depend on: the query the rows matched and
+    /// each family contact's stored file (a photo edit keeps the contact
+    /// id, so the file name has to be part of the identity).
+    /// `recency` deliberately stays out — re-ranking a row never changes
+    /// its face.
+    private var resultPhotoKey: String {
+        let family = coordinator.familyContacts
+            .map { "\($0.id.uuidString):\($0.photoFilename ?? "-")" }
+            .joined(separator: ",")
+        return "\(trimmedQuery)|\(family)"
+    }
+
+    /// One pass over the current search outcome's `.family` rows,
+    /// through the shared downsampling cache — a face already decoded at
+    /// this size (this screen, the family list, a tile) is a memory hit.
+    private func resolveResultPhotos() -> [String: UIImage] {
+        guard isSearching, let entries else { return [:] }
+        let outcome = UnifiedContactSearch.search(query: trimmedQuery,
+                                                  family: coordinator.familyContacts,
+                                                  in: entries,
+                                                  recency: recency)
+        var resolved: [String: UIImage] = [:]
+        for row in outcome.entries {
+            guard case .family(let contact) = row else { continue }
+            resolved[row.id] = DownsampledImageCache.shared.contactFace(
+                for: contact,
+                diameter: UnifiedContactResultRow.avatarDiameter,
+                displayScale: displayScale
+            ) { coordinator.contactPhoto(for: contact) }
+        }
+        return resolved
+    }
 
     /// WhatsApp present on this phone — the sync hint exists to guide
     /// INTO WhatsApp, so with the app absent the whole card hides
@@ -1587,18 +1672,12 @@ struct CallView: View {
                     emptyState(key: "call.search.noResults")
                 }
             } else {
-                // Per-row photo thumbnails, resolved ONCE per search
-                // outcome next to the channel pass below (contact-photos
-                // task, 2026-09-07): only `.family` rows have a photo —
-                // `contactPhoto(for:)` is a curated-contact API, book
-                // rows get nil — and the rows index this result instead
-                // of touching the photo resolver per body evaluation.
-                let photos = outcome.entries.reduce(into: [String: UIImage]()) {
-                    photos, row in
-                    guard case .family(let contact) = row,
-                          let image = coordinator.contactPhoto(for: contact) else { return }
-                    photos[row.id] = image
-                }
+                // Per-row photo thumbnails come from `resultPhotos`,
+                // filled once per query/roster change by the `.task` on
+                // this view (design review P2 — no file access in body).
+                // Only `.family` rows have a photo; book rows get nil and
+                // keep the initials avatar.
+                //
                 // Per-row channel state, resolved ONCE per search
                 // outcome (channel-chooser task, 2026-09-07): the
                 // preference store and the captured-handle store are
@@ -1614,7 +1693,7 @@ struct CallView: View {
                 VStack(spacing: 12) {
                     ForEach(outcome.entries) { result in
                         UnifiedContactResultRow(result: result,
-                                                photo: photos[result.id],
+                                                photo: resultPhotos[result.id],
                                                 channelState: channelStates[result.id]
                                                     ?? rowChannelState(for: result),
                                                 dial: { dialChannel(result) },
@@ -2426,6 +2505,16 @@ struct ContactTile: View {
     let contact: FamilyContact
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.locale) private var locale
+    @Environment(\.displayScale) private var displayScale
+
+    /// DESIGN-REVIEW (P2): the tile used to call
+    /// `coordinator.contactPhoto(for:)` — a file read plus a full-size
+    /// decode — while composing the row, i.e. once per contact per body
+    /// evaluation. The face is now resolved in `.task` (off the body)
+    /// through the shared downsampling cache, so a re-render costs a
+    /// dictionary lookup and the bitmap it holds is sized for a 52pt
+    /// circle rather than the 512pt file on disk.
+    @State private var photo: UIImage?
 
     /// The tile's face circle — photo or initials (see the struct doc).
     /// The photo branch is hidden from VoiceOver: an unlabelled "image"
@@ -2485,6 +2574,16 @@ struct ContactTile: View {
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
         .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
+        // Keyed by the stored file name, so replacing a contact's photo
+        // (or clearing it) re-resolves the face; an unchanged contact
+        // costs one cached lookup per appearance.
+        .task(id: contact.photoFilename ?? "") {
+            photo = DownsampledImageCache.shared.contactFace(
+                for: contact,
+                diameter: Self.avatarDiameter,
+                displayScale: displayScale
+            ) { coordinator.contactPhoto(for: contact) }
+        }
     }
 
     private func videoCall() {
@@ -2505,16 +2604,38 @@ struct ContactTile: View {
 struct CalendarView: View {
     @EnvironmentObject var coordinator: AppCoordinator
 
+    /// DESIGN-REVIEW (P2 — repeated work in view evaluation): this leaf
+    /// asked the calendar service for TODAY'S overlay three times per
+    /// body evaluation (each a BS conversion + tithi calculation +
+    /// festival catalog lookup) and resolved the routine roster — a
+    /// Keychain read plus a JSON decode — while composing the schedule
+    /// rows. Both are now resolved once per data change by the `.task`
+    /// below; the body reads state.
+    @State private var todayOverlay: FestivalCalendarService.TodayOverlay?
+    @State private var scheduleRows: [ScheduleRow] = []
+
+    /// What the cached values depend on: a dose completed or a routine
+    /// toggled elsewhere, a voice turn (either can add one), and the
+    /// app's language, which the row titles follow.
+    private var refreshKey: String {
+        "\(coordinator.pendingReminders.count)|\(coordinator.conversationHistory.count)"
+            + "|\(coordinator.activeLocale.identifier)"
+    }
+
     var body: some View {
         LeafScreen(titleKey: "calendar.title") {
             VStack(spacing: 12) {
                 bsDateCard
-                if !(coordinator.festivalCalendar.todayOverlay()?.festivals.isEmpty ?? true) {
+                if !(todayOverlay?.festivals.isEmpty ?? true) {
                     festivalTodayCard
                 }
                 upcomingCard
                 scheduleSection
             }
+        }
+        .task(id: refreshKey) {
+            todayOverlay = coordinator.festivalCalendar.todayOverlay()
+            scheduleRows = buildScheduleRows()
         }
     }
 
@@ -2522,7 +2643,7 @@ struct CalendarView: View {
     /// calendar shows Bikram Sambat dates, not Gregorian, in Nepali
     /// numerals — with the Hindu tithi overlay on every day).
     private var bsDateCard: some View {
-        let overlay = coordinator.festivalCalendar.todayOverlay()
+        let overlay = todayOverlay
         return VStack(spacing: 8) {
             if let overlay {
                 Text(overlay.weekdayNepali)
@@ -2553,7 +2674,7 @@ struct CalendarView: View {
 
     /// Festival(s) falling today, with their tithi labels.
     private var festivalTodayCard: some View {
-        let festivals = coordinator.festivalCalendar.todayOverlay()?.festivals ?? []
+        let festivals = todayOverlay?.festivals ?? []
         return VStack(alignment: .leading, spacing: 8) {
             Text("calendar.festivalToday")
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
@@ -2623,7 +2744,7 @@ struct CalendarView: View {
     /// schedule"). Medication rows are unchanged; routine rows include
     /// only `.pending` occurrences (the reminders leaf keeps the dimmed
     /// history); external rows carry the calendar/checklist badge.
-    private var scheduleRows: [ScheduleRow] {
+    private func buildScheduleRows() -> [ScheduleRow] {
         let entriesById = Dictionary(
             uniqueKeysWithValues: coordinator.routineEntries.map { ($0.id, $0) }
         )

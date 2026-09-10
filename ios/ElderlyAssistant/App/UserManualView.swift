@@ -30,10 +30,36 @@ import SwiftUI
 /// empty-state card, never a half-rendered manual.
 struct UserManualView: View {
     @EnvironmentObject var coordinator: AppCoordinator
+    @Environment(\.displayScale) private var displayScale
 
     /// nil = not loaded yet (or the resource is absent); the `.task`
     /// loads once — the resource is fixed at build time.
     @State private var sections: [UserManualSection]?
+
+    /// Section id → the diagrams that resolved, loaded ONCE with the
+    /// content (design review P2 — "keep image-file reads out of
+    /// `body`"). `imagesBlock` used to call
+    /// `UserManualCatalog.image(named:)` per diagram, per body
+    /// evaluation: a bundle lookup, a file read and a full-size decode
+    /// of a screen-wide PNG, re-paid on every scroll and every state
+    /// update. Each bitmap is also downsampled to the width the card
+    /// actually draws, so a page of diagrams holds a bounded amount of
+    /// decoded memory rather than full-resolution copies.
+    @State private var sectionImages: [String: [ResolvedDiagram]] = [:]
+
+    /// A section diagram that resolved — the file name (its identity in
+    /// the `ForEach`) plus the bitmap the card draws.
+    struct ResolvedDiagram: Identifiable {
+        let name: String
+        let image: UIImage
+        var id: String { name }
+    }
+
+    /// Largest width a diagram is ever drawn at, in points: the widest
+    /// supported iPhone (430pt) plus slack for a future larger class.
+    /// The card lays the image out `.scaledToFit()` at full width, so
+    /// this is an upper bound, never an upscale target.
+    private static let diagramMaxPointSize: CGFloat = 440
 
     /// The sections the viewer renders — shipped ones that pass the
     /// content gate (an invalid section fails the whole load upstream,
@@ -58,8 +84,33 @@ struct UserManualView: View {
         }
         .task {
             guard sections == nil else { return }
-            sections = UserManualCatalog.bundledSections()
+            let loaded = UserManualCatalog.bundledSections()
+            sections = loaded
+            if let loaded {
+                sectionImages = Self.resolveDiagrams(in: loaded,
+                                                     displayScale: displayScale)
+            }
         }
+    }
+
+    /// Reads and downsamples every diagram the shipped sections declare,
+    /// once per load. Decorative-only contract: a file that does not
+    /// resolve is simply absent from the map (and from the card).
+    private static func resolveDiagrams(in sections: [UserManualSection],
+                                        displayScale: CGFloat) -> [String: [ResolvedDiagram]] {
+        var resolved: [String: [ResolvedDiagram]] = [:]
+        for section in sections where !section.images.isEmpty {
+            let diagrams = section.images.compactMap { name -> ResolvedDiagram? in
+                let cached = DownsampledImageCache.shared.thumbnail(
+                    forKey: "manual-diagram:\(name)",
+                    pointSize: diagramMaxPointSize,
+                    displayScale: displayScale
+                ) { UserManualCatalog.image(named: name) }
+                return cached.map { ResolvedDiagram(name: name, image: $0) }
+            }
+            if !diagrams.isEmpty { resolved[section.id] = diagrams }
+        }
+        return resolved
     }
 
     // MARK: - Content
@@ -118,12 +169,12 @@ struct UserManualView: View {
     /// The section's diagrams + the honest sketch caption. Images that
     /// don't resolve (a missing file) are skipped — decorative-only by
     /// contract, never an error; the shipped-artifact test pins that
-    /// every declared image resolves in the built bundle.
+    /// every declared image resolves in the built bundle. The resolved
+    /// bitmaps come from state (see `sectionImages`) — this block does
+    /// no file access at all.
     @ViewBuilder
     private func imagesBlock(_ section: UserManualSection) -> some View {
-        let rendered = section.images.compactMap { name in
-            UserManualCatalog.image(named: name).map { (name: name, image: $0) }
-        }
+        let rendered = sectionImages[section.id] ?? []
         if !rendered.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(rendered, id: \.name) { entry in
