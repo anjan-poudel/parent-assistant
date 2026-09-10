@@ -546,6 +546,11 @@ final class AppCoordinator: ObservableObject {
     /// of init — plugin registration runs before `self` is fully
     /// initialised, so the closure can't be captured at registration time.
     private let routinePlugin: RoutinePlugin
+    /// [BOOT-M1M2] The reminders persistence facade is retained so
+    /// `start()` can run the first-run seed on the boot queue — the seed
+    /// used to run in `init` (keychain IO before first paint, which the
+    /// constant-time startup contract forbids).
+    private let routineStore: RoutineStore
 
     /// The curated "Family and friends" list (spec §4.4.2) — persisted
     /// encrypted, feeds the notifier whenever the list changes.
@@ -1147,8 +1152,10 @@ final class AppCoordinator: ObservableObject {
         // owns medication, and a parallel one would double-prompt doses).
         let routineAlarmScheduler = UNRoutineNotificationScheduler()
         self.routineAlarmScheduler = routineAlarmScheduler
-        let routineStore = RoutineStore(storage: storage)
-        routineStore.seedDefaultsIfNeeded()
+        // [BOOT-M1M2] Construction only — the first-run seed moved to
+        // `start()` on the boot queue (constant-time init: no keychain
+        // IO before first paint; see RoutineStore.seedDefaultsIfNeeded).
+        self.routineStore = RoutineStore(storage: storage)
         let routineScheduler = RoutineScheduler(
             store: routineStore,
             alarmScheduler: routineAlarmScheduler,
@@ -1632,12 +1639,28 @@ final class AppCoordinator: ObservableObject {
 
         // Restore and re-arm any outstanding medication reminders
         medicationScheduler.scheduleAll()
-        // Same re-queue for routine reminders (FR-025)
-        routineScheduler.scheduleAll()
+        // Same re-queue for routine reminders (FR-025).
+        // [BOOT-M1M2] The first-run seed moved off init: seed THEN
+        // re-arm, on the boot queue (seed first — the defaults must
+        // exist before scheduleAll regenerates the window; the re-arm
+        // itself stays main-confined). Order preserved from the old
+        // init-seed → start-rearm sequence, a few ms later.
+        bootQueue.async { [weak self] in
+            guard let self else { return }
+            self.routineStore.seedDefaultsIfNeeded()
+            DispatchQueue.main.async { self.routineScheduler.scheduleAll() }
+        }
         // Same re-queue for alarms + timers ([ALARMS-TIMERS] 2026-09-07 —
         // idempotent: pending requests replace in place by id, and
         // expired timer rows are pruned first).
-        alarmTimersService.scheduleAll()
+        // [BOOT-M1M2] Load-then-arm on the boot queue (constant-time
+        // init): the persisted lists restore OFF init, and the re-arm
+        // runs only after they land — arming against an unloaded list
+        // would sweep the stored rows (the prune persists the in-memory
+        // list).
+        bootQueue.async { [weak self] in
+            self?.alarmTimersService.restoreAndScheduleAll()
+        }
 
         // Festival notifications (BS calendar, 2026-09-06): day-of for
         // every catalog festival + advance N-day reminders for important
@@ -1869,6 +1892,11 @@ final class AppCoordinator: ObservableObject {
         // boot queue.
         _ = chatHistoryStore
         _ = activityLog
+        // [BOOT-M1M2] Gemini key/model restore, same discipline: the
+        // kick runs on MAIN here (the store's @Published values are
+        // main-confined), the keychain reads run on the boot queue and
+        // the published values land back on main.
+        geminiConfigStore.loadPersistedValues(on: bootQueue)
         bootQueue.async { [weak self] in
             self?.bootRestoreData()
         }

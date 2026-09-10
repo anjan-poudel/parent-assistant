@@ -446,6 +446,10 @@ final class AlarmTimersService: ObservableObject {
     private let scheduler: AlarmScheduler
     private let observabilityBus: ObservabilityBus
     private let now: () -> Date
+    /// [BOOT-M1M2] Main-confined: the persisted lists have been restored
+    /// at least once (guards `restoreAndScheduleAll` against a second
+    /// restore clobbering in-memory mutations).
+    private var didRestorePersistedState = false
 
     init(store: AlarmTimersStore,
          scheduler: AlarmScheduler,
@@ -457,8 +461,55 @@ final class AlarmTimersService: ObservableObject {
         self.observabilityBus = observabilityBus
         self.locale = locale
         self.now = now
-        self.alarms = store.loadAlarms()
-        self.timers = store.loadTimers()
+        // [BOOT-M1M2] ZERO storage IO in init (constant-time startup):
+        // the lists start empty and `restoreAndScheduleAll()` (called
+        // once from AppCoordinator.start() on the boot queue) loads +
+        // re-arms them moments after first paint. Mutators keep working
+        // against the in-memory lists; the restore lands long before any
+        // UI or voice turn can touch them.
+        self.alarms = []
+        self.timers = []
+    }
+
+    /// [BOOT-M1M2] Restore the persisted lists, callable from any
+    /// thread: the storage reads run on the CALLING queue (the
+    /// coordinator's boot queue), the published lists are assigned on
+    /// main, then `completion` fires on main. Synchronous when called on
+    /// main (the UI/test path). Idempotent per process (restore once —
+    /// a second restore would clobber in-memory mutations;
+    /// MedicationScheduler's didRestore rule). Load-only: nothing is
+    /// armed, nothing is pruned, no events are emitted.
+    func restorePersistedState(completion: (() -> Void)? = nil) {
+        let loadedAlarms = store.loadAlarms()
+        let loadedTimers = store.loadTimers()
+        let apply: () -> Void = { [weak self] in
+            guard let self, !self.didRestorePersistedState else {
+                completion?()
+                return
+            }
+            self.didRestorePersistedState = true
+            self.alarms = loadedAlarms
+            self.timers = loadedTimers
+            completion?()
+        }
+        if Thread.isMainThread {
+            apply()
+        } else {
+            DispatchQueue.main.async(execute: apply)
+        }
+    }
+
+    /// [BOOT-M1M2] Launch restore + re-arm in one shot (what
+    /// `AppCoordinator.start()` runs on the boot queue): restore first,
+    /// then `scheduleAll()` on main — the re-arm must never see an
+    /// unloaded list: `pruneFinishedTimers` persists the in-memory rows,
+    /// so arming against `[]` would WIPE the stored timers. `completion`
+    /// fires on main after the re-arm.
+    func restoreAndScheduleAll(completion: (() -> Void)? = nil) {
+        restorePersistedState { [weak self] in
+            self?.scheduleAll()
+            completion?()
+        }
     }
 
     // MARK: Visible state
