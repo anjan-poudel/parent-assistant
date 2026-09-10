@@ -298,6 +298,9 @@ final class AlarmTimerCommandParserTests: XCTestCase {
     }
 
     func testAlarmPhrasingIsNeverATimer() {
+        // A clock alarm phrase carries no duration unit — it is never a
+        // timer (alarm-worded COUNTDOWNS are the exception; see the
+        // [NUMBER-WORDS] doctrine tests below).
         XCTAssertNil(AlarmTimerCommandParser.parseTimer("set an alarm for 6 am"))
     }
 
@@ -456,21 +459,42 @@ final class AlarmTimerCommandParserTests: XCTestCase {
         XCTAssertEqual(halfPast?.time, date(2026, 9, 8, 5, 30))
     }
 
-    func testUserPhrasePanchMinutKoAlarmLagaauIsACountdownNotAnAlarm() {
-        // The user-reported phrase, at the parser level: the word form
-        // and its digit spelling must BOTH take the countdown veto — a
-        // "5-minute alarm" is a countdown, never a 5 o'clock alarm (the
-        // pre-fix hazard: with "मिनुट" missing from the unit vocabulary
-        // the digit form fell through the veto into the time-of-day
-        // parser). The same words DO parse as a duration when a timer
-        // marker makes it a timer command.
+    func testUserPhrasePanchMinutKoAlarmLagaauParsesAsFiveMinuteTimer() {
+        // The user-reported phrase, at the parser level: an alarm-worded
+        // countdown with an explicit duration unit is a 5-MINUTE TIMER
+        // (doctrine extension) — never a 5 o'clock alarm, whose pre-fix
+        // hazard was the digit form falling through the countdown veto
+        // while "मिनुट" was missing from the unit vocabulary.
+        let timer = AlarmTimerCommandParser.parseTimer(
+            "पांच मिनुटको अलार्म लगाऊ", locale: ne)
+        XCTAssertEqual(timer?.durationSeconds, 300)
+        XCTAssertNil(timer?.label)
+        // The alarm parser still vetoes countdowns (safety net), word
+        // and digit spellings alike.
         XCTAssertNil(AlarmTimerCommandParser.parseAlarm(
             "पांच मिनुटको अलार्म लगाऊ", now: now, calendar: calendar, locale: ne))
         XCTAssertNil(AlarmTimerCommandParser.parseAlarm(
             "५ मिनुटको अलार्म लगाऊ", now: now, calendar: calendar, locale: ne),
             "the digit spelling must get the same countdown veto")
+        // Safety: a bare clock phrase has no duration unit — it is NOT a
+        // timer and stays an alarm.
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer(
+            "५ बजेको अलार्म लगाऊ", locale: ne))
+    }
+
+    func testAlarmWordedCountdownsParseAsTimers() {
         XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
-            "टाइमर पांच मिनुट", locale: ne)?.durationSeconds, 300)
+            "set an alarm in 5 minutes", locale: en)?.durationSeconds, 300)
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "पाँच मिनेटमा अलार्म लगाऊ", locale: ne)?.durationSeconds, 300)
+        // Out-of-range alarm-worded countdowns stay rejected.
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer(
+            "set an alarm in 25 hours", locale: en))
+        // Snooze-worded durations are snooze business, never a timer.
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer(
+            "snooze the alarm for 5 minutes", locale: en))
+        XCTAssertEqual(AlarmTimerCommandParser.parseAlarmSnooze(
+            "snooze the alarm for 5 minutes", locale: en), 5)
     }
 
     func testNumberWordRewritesAreContextGuarded() {
@@ -480,6 +504,7 @@ final class AlarmTimerCommandParserTests: XCTestCase {
                        "अलार्म छ?")
         XCTAssertNil(AlarmTimerCommandParser.parseAlarm(
             "अलार्म छ?", now: now, calendar: calendar, locale: ne))
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer("अलार्म छ?", locale: ne))
         // "एक" inside another word is a different token.
         XCTAssertNil(AlarmTimerCommandParser.parseAlarm(
             "एकछिन पछि अलार्म बजाऊ", now: now, calendar: calendar, locale: ne))

@@ -688,11 +688,12 @@ final class CommandRouter {
         // is a command, never small talk ("नमस्ते, ५ मिनेटको टाइमर लगाऊ"
         // must set a timer, not get a greeting). The parser vetoes
         // questions ("when is my alarm?", "कति बजेको अलार्म?"),
-        // cancellations ("cancel the timer"), third-person wake requests
-        // ("wake my grandson", "छोरालाई उठाउनुहोस्") and countdown
-        // phrasings ("alarm in 5 minutes" — a countdown is a TIMER,
-        // which parses FIRST below). Anything vetoed or unparseable
-        // falls through this stage unchanged.
+        // cancellations ("cancel the timer") and third-person wake
+        // requests ("wake my grandson", "छोरालाई उठाउनुहोस्"); countdown
+        // phrasings ("alarm in 5 minutes", "पांच मिनुटको अलार्म लगाऊ")
+        // are TIMERs and the timer parse claims them FIRST below
+        // (2026-09-10 doctrine extension). Anything vetoed or
+        // unparseable falls through this stage unchanged.
         //
         // The stage only PARSES and hands off: the coordinator owns the
         // permission round-trip (point-of-use requestAuthorization), the

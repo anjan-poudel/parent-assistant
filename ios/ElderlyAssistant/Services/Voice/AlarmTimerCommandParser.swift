@@ -24,9 +24,12 @@ import Foundation
 ///    "कति बजेको अलार्म?"), negations, third-person wake requests
 ///    ("wake my grandson", "छोरालाई उठाउनुहोस्" — that is not THIS
 ///    device's alarm), and countdown phrasings ("alarm in 5 minutes" — a
-///    countdown is a TIMER, and timer commands win the parse order; the
-///    router checks `parseTimer` first). Anything vetoed returns nil and
-///    the utterance falls through the router ladder unchanged.
+///    countdown is a TIMER: since 2026-09-10 the router's `parseTimer`
+///    claims alarm-worded countdowns outright, and this veto remains the
+///    safety net for countdowns the timer parse cannot own, e.g.
+///    out-of-range durations or wake-worded countdowns). Anything
+///    vetoed returns nil and the utterance falls through the router
+///    ladder unchanged.
 ///  - Cancellations are NOT blanket-vetoed any more (2026-09-08): the
 ///    sanctioned shapes parse — `parseAlarmOff` ("turn off the alarm",
 ///    "cancel my alarm", "अलार्म बन्द गर") and `parseAlarmSnooze`
@@ -111,7 +114,9 @@ enum AlarmTimerCommandParser {
         // "alarm"-word command is always this device's own alarm) …
         if hasWakeMarker && mentionsAnotherPerson(withDigits) { return nil }
         // … and countdown phrasings — "in N minutes/hours" is a TIMER
-        // (which the router parses first); never silently an alarm.
+        // (the router's timer parse claims alarm-worded countdowns
+        // first); this veto is the safety net that keeps one from ever
+        // silently becoming a time-of-day alarm.
         if countdownSeconds(in: withDigits) != nil { return nil }
 
         guard let parsed = NepaliTimeParser.parse(withDigits),
@@ -151,6 +156,9 @@ enum AlarmTimerCommandParser {
     /// Durations: a single amount+unit ("5 minutes", "१ घण्टा", "90 min")
     /// or a compound chain ("1 hour 30 minutes" → 5400 s; "टाइमर १ घण्टा
     /// ३० मिनेट"), bounded 1…`maxTimerSeconds`. Nil for anything else.
+    /// The marker gate also claims alarm-worded COUNTDOWNS ("पांच मिनुटको
+    /// अलार्म लगाऊ", "set an alarm in 5 minutes") as timers — doctrine
+    /// extension 2026-09-10; see the gate below.
     static func parseTimer(_ text: String,
                            locale: Locale = AppLanguage.persisted().locale)
         -> (durationSeconds: Int, label: String?)? {
@@ -160,7 +168,19 @@ enum AlarmTimerCommandParser {
         // [NUMBER-WORDS] spoken number words → digits, upstream of the
         // duration grammar ("टाइमर पाँच मिनेट" → "टाइमर 5 मिनेट").
         let withDigits = NumberWordNormalizer.normalise(normalized, locale: locale)
-        guard timerMarkers.contains(where: { containsToken($0, in: withDigits) }) else {
+        // Marker gate — a timer word, OR an alarm-worded countdown
+        // (doctrine extension, 2026-09-10): an alarm marker plus an
+        // explicit duration unit+amount ("पांच मिनुटको अलार्म लगाऊ",
+        // "set an alarm in 5 minutes") is unambiguous "ring me in N"
+        // intent and routes as a TIMER. A bare clock phrase carries no
+        // duration unit, so "५ बजेको अलार्म" stays a clock alarm.
+        let hasTimerMarker = timerMarkers.contains(where: { containsToken($0, in: withDigits) })
+        let hasAlarmMarker = alarmMarkers.contains(where: { containsToken($0, in: withDigits) })
+        guard hasTimerMarker || hasAlarmMarker else { return nil }
+        // Snooze-worded durations are snooze business ("snooze the alarm
+        // for 15 minutes") — the new alarm-worded path must never steal
+        // them; timer-worded utterances keep their historical claim.
+        if !hasTimerMarker, snoozeMarkers.contains(where: { withDigits.contains($0) }) {
             return nil
         }
         guard !vetoedAsQuestionOrCancellation(withDigits) else { return nil }
