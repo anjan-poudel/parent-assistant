@@ -228,6 +228,22 @@ final class AlarmTimersSystemPathTests: XCTestCase {
         XCTAssertFalse(service.activeTimers.contains(where: { $0.id == id }))
     }
 
+    func testPruneKeepsRecentlyEndedRowForTapGrace() {
+        // A timer that ended 2 minutes ago survives the prune for the
+        // tap grace window — the delivered notification stays tappable
+        // and must be able to route into the ringing screen.
+        let endedRecently = TimerItem(endsAt: nowDate.addingTimeInterval(-120))
+        XCTAssertTrue(AlarmTimersStore(storage: storage).saveTimers([endedRecently]))
+        let service = makeService()
+        service.restorePersistedState()
+
+        service.pruneFinishedTimers()
+
+        XCTAssertTrue(service.timers.contains(where: { $0.id == endedRecently.id }))
+        // Past-deadline rows never render as live countdowns.
+        XCTAssertTrue(service.activeTimers.isEmpty)
+    }
+
     func testCancelPendingNotificationRemovesOnlyUNRequest() async {
         alarmKit.authorization = .denied
         let service = makeService()

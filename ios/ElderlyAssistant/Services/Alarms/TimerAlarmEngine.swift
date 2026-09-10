@@ -84,6 +84,12 @@ final class TimerAlarmEngine: ObservableObject {
     /// Snapshot of the timers this engine may ring for (the UN-path
     /// active timers), adopted on every `tick`.
     private var activeTimers: [TimerItem] = []
+    /// [TIMER-ALARM] Tap-path lookup: resolves a timer by id even when it
+    /// has LEFT the active snapshot — a timer that ended while the app
+    /// was backgrounded is past its deadline (so `tick` ignores it), yet
+    /// its row is still live and the delivered notification's tap must
+    /// open the ringing screen. Wired by the coordinator to the service.
+    var timerLookup: ((UUID) -> TimerItem?)?
 
     init(audio: TimerAlarmAudioPlaying,
          observabilityBus: ObservabilityBus,
@@ -108,15 +114,29 @@ final class TimerAlarmEngine: ObservableObject {
 
     /// Notification-response routing target: a tap on the timer's
     /// delivered notification opens the app INTO the ringing alarm
-    /// screen. Returns true only when ringing actually started (the timer
-    /// must still be live in the snapshot — an already-expired row rings
-    /// nothing, honestly).
+    /// screen. Returns true only when ringing actually started.
+    ///
+    /// Resolution order (both honest, no zombie alarms):
+    ///  1. the active snapshot — the foreground case;
+    ///  2. `timerLookup` — the background case: the timer ended while the
+    ///     app was closed, so it left the snapshot (deadline passed) but
+    ///     its row is still live within the prune grace window; only
+    ///     rows whose deadline has actually passed ring (a future timer
+    ///     can never have delivered a notification, so a future deadline
+    ///     in a tap payload is stale and ignored).
     @discardableResult
     func ringTimer(id: UUID) -> Bool {
-        guard phase == .idle,
-              let timer = activeTimers.first(where: { $0.id == id }) else { return false }
-        startRinging(timer, trigger: "notification_response")
-        return true
+        guard phase == .idle else { return false }
+        if let timer = activeTimers.first(where: { $0.id == id }) {
+            startRinging(timer, trigger: "notification_response")
+            return true
+        }
+        if let timer = timerLookup?(id),
+           timer.endsAt <= now().addingTimeInterval(1) {  // 1 s skew grace
+            startRinging(timer, trigger: "notification_response")
+            return true
+        }
+        return false
     }
 
     /// The STOP button. Stops the bell, returns to idle, and hands back

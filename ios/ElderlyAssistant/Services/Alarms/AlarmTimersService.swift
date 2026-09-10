@@ -857,12 +857,26 @@ final class AlarmTimersService: ObservableObject {
         }
     }
 
-    /// Drops finished rows and rows whose deadline has passed (their
-    /// one-shot notification already fired or is stale). Runs inside
-    /// `scheduleAll` and whenever the Settings leaf appears.
+    /// [TIMER-ALARM] (2026-09-10) How long a finished row survives in
+    /// storage after its deadline — the notification-tap grace window:
+    /// the delivered notification stays tappable for a while after the
+    /// timer ended (typically seconds to minutes), and the tap must be
+    /// able to route into the ringing screen (`TimerAlarmEngine`'s
+    /// `timerLookup` resolves the row). Beyond the grace a tap opens the
+    /// app without ringing — honest: that timer ended long ago.
+    static let timerTapGraceSeconds: TimeInterval = 300
+
+    /// Drops finished rows and rows whose deadline has passed LONGER than
+    /// `timerTapGraceSeconds` (their one-shot notification already fired
+    /// or is stale). Runs inside `scheduleAll` and whenever the Settings
+    /// leaf appears.
     func pruneFinishedTimers() {
         let current = now()
-        let living = timers.filter { $0.isActive && $0.endsAt > current }
+        let living = timers.filter { timer in
+            guard timer.isActive else { return false }
+            if timer.endsAt > current { return true }
+            return current.timeIntervalSince(timer.endsAt) <= Self.timerTapGraceSeconds
+        }
         guard living.count != timers.count else { return }
         guard store.saveTimers(living) else {
             emit("timer_persistence_failed", outcome: "failed")

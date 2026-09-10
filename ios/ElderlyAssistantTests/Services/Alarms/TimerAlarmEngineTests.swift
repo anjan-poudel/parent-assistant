@@ -204,4 +204,41 @@ final class TimerAlarmEngineTests: XCTestCase {
         XCTAssertEqual(audio.startCount, 1)
         XCTAssertEqual(engine.phase, .ringing(due))
     }
+
+    // MARK: - Tap path: the timer ended while the app was backgrounded
+
+    func testTapRouteRingsTimerThatLeftTheActiveSnapshot() {
+        let engine = makeEngine()
+        // Ended 2 minutes ago — past the snapshot filter, but its row is
+        // still live within the prune grace window (the coordinator's
+        // timerLookup resolves it).
+        let ended = timer(endsInMinutes: -2)
+        engine.timerLookup = { id in id == ended.id ? ended : nil }
+
+        let started = engine.ringTimer(id: ended.id)
+
+        XCTAssertTrue(started)
+        XCTAssertEqual(engine.phase, .ringing(ended))
+        XCTAssertEqual(audio.startCount, 1)
+    }
+
+    func testTapRouteIgnoresFutureTimerFromStalePayload() {
+        let engine = makeEngine()
+        // A future deadline can never have delivered a notification —
+        // a stale payload must not ring an alarm for nothing.
+        let future = timer(endsInMinutes: 5)
+        engine.timerLookup = { id in id == future.id ? future : nil }
+
+        XCTAssertFalse(engine.ringTimer(id: future.id))
+        XCTAssertEqual(engine.phase, .idle)
+        XCTAssertEqual(audio.startCount, 0)
+    }
+
+    func testTapRouteWithoutRowRingsNothing() {
+        let engine = makeEngine()
+        engine.timerLookup = { _ in nil }
+
+        XCTAssertFalse(engine.ringTimer(id: UUID()))
+        XCTAssertEqual(engine.phase, .idle)
+    }
 }

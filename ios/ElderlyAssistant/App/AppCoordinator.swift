@@ -1606,6 +1606,18 @@ final class AppCoordinator: ObservableObject {
             self?.alarmTimersService.cancelPendingNotification(id: timerID)
             self?.speaker?.cancel()
         }
+        // [TIMER-ALARM] Tap-path lookup: resolves the row for a tapped
+        // timer notification even after its deadline passed (the row
+        // survives the prune grace window for exactly this) — but never
+        // for system-managed timers (the system presents those itself).
+        timerAlarmEngine.timerLookup = { [weak self] id in
+            guard let self,
+                  let timer = self.alarmTimersService.timer(with: id),
+                  timer.isActive,
+                  !self.alarmTimersService.systemManagedTimerIDs.contains(timer.id)
+            else { return nil }
+            return timer
+        }
     }
 
     func start() {
