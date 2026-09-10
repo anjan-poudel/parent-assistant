@@ -75,12 +75,14 @@ final class CommandRouterPreAckTests: XCTestCase {
         }
         waitForAsyncSpeak()
 
-        // The four acks commit synchronously during the four routes; the
-        // four confirmations follow from the async arming Tasks.
+        // The acks commit synchronously during each route; the
+        // confirmations land from the async arming Tasks, so acks and
+        // confirmations can interleave. Pin the ack subsequence and the
+        // totals — never a fixed interleaving.
         let m1 = ackVariant(1, locale: ne), m2 = ackVariant(2, locale: ne)
         let m3 = ackVariant(3, locale: ne)
-        XCTAssertEqual(coordinator.assistantSpoken.prefix(4),
-                       [m1, m2, m3, m1],
+        let acks = coordinator.assistantSpoken.filter { $0 == m1 || $0 == m2 || $0 == m3 }
+        XCTAssertEqual(acks, [m1, m2, m3, m1],
                        "variants rotate 1→2→3→1 per slow turn")
         XCTAssertEqual(coordinator.assistantSpoken.count, 8,
                        "each of the four turns speaks ack + confirmation")

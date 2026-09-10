@@ -137,6 +137,13 @@ final class QueryEndToEndRegressionTests: XCTestCase {
         L10n.str("router.reprompt", locale: Locale(identifier: "ne-NP"))
     }
 
+    /// [VOICE-ACK] The pre-ack committed on the LLM round-trip — spoken
+    /// before every model reply or honest fallback in these end-to-end
+    /// pins.
+    private func preAckText() -> String {
+        L10n.str("voiceAck.moment1", locale: Locale(identifier: "ne-NP"))
+    }
+
     // MARK: - The device repro, fixed (model path, neutral question)
 
     func testOpenQuestionYieldsSpokenAnswerNotApologyEndToEnd() {
@@ -152,8 +159,8 @@ final class QueryEndToEndRegressionTests: XCTestCase {
         waitUntil { harness.coordinator.genericReplies.count == 1 }
         XCTAssertEqual(harness.coordinator.genericReplies, [modelAnswer],
                        "the query answer must reach the visible reply channel")
-        waitUntil { !harness.speaker.spoken.isEmpty }
-        XCTAssertEqual(harness.speaker.spoken, [modelAnswer],
+        waitUntil { harness.speaker.spoken.count == 2 }
+        XCTAssertEqual(harness.speaker.spoken, [preAckText(), modelAnswer],
                        "the query answer must be SPOKEN — never the apology")
 
         XCTAssertTrue(bus.contains("command_dispatched_to_llm"))
@@ -195,8 +202,8 @@ final class QueryEndToEndRegressionTests: XCTestCase {
                        "an empty-response interpretation must never dispatch")
         XCTAssertTrue(harness.coordinator.genericReplies.isEmpty,
                       "an empty-response command must not reach noteGenericReply")
-        waitUntil { !harness.speaker.spoken.isEmpty }
-        XCTAssertEqual(harness.speaker.spoken, [repromptText()],
+        waitUntil { harness.speaker.spoken.count == 2 }
+        XCTAssertEqual(harness.speaker.spoken, [preAckText(), repromptText()],
                        "the honest re-prompt is spoken — never silence")
     }
 
@@ -217,8 +224,8 @@ final class QueryEndToEndRegressionTests: XCTestCase {
         XCTAssertFalse(bus.contains("inference_done"),
                        "an empty completion must never report success")
         XCTAssertTrue(bus.contains("command_unrecognised"))
-        waitUntil { !harness.speaker.spoken.isEmpty }
-        XCTAssertEqual(harness.speaker.spoken, [repromptText()])
+        waitUntil { harness.speaker.spoken.count == 2 }
+        XCTAssertEqual(harness.speaker.spoken, [preAckText(), repromptText()])
     }
 
     // MARK: - [NO-GIBBERISH] weather pre-answer intercepts before the brain
@@ -292,7 +299,7 @@ final class QueryEndToEndRegressionTests: XCTestCase {
 
         waitUntil { self.bus.contains("command_unrecognised") }
         XCTAssertFalse(bus.contains("command_llm_query"))
-        waitUntil { !harness.speaker.spoken.isEmpty }
-        XCTAssertEqual(harness.speaker.spoken, [repromptText()])
+        waitUntil { harness.speaker.spoken.count == 2 }
+        XCTAssertEqual(harness.speaker.spoken, [preAckText(), repromptText()])
     }
 }

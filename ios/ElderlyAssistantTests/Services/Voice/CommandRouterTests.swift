@@ -289,7 +289,7 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertEqual(speaker.utterances.count, 2,
                        "the pre-ack and the unavailable message must both be spoken")
         XCTAssertEqual(speaker.utterances.first?.text,
-                       L10n.str("voiceAck.moment1", locale: ne),
+                       L10n.str("voiceAck.moment1", locale: Locale(identifier: "ne-NP")),
                        "the LLM round-trip is acked before the dispatch result")
     }
 
