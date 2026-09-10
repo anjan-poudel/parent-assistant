@@ -31,7 +31,12 @@ final class VoicePipeline {
     var onSTTError: ((String) -> Void)?
 
     private let audioSession: AudioSessionManager
-    private let wakeWordEngine: WakeWordEngine
+    /// [STARTUP-R2] No longer immutable: the boot constructs the pipeline
+    /// with the `NullWakeWordEngine` so the heavy sherpa KWS build can
+    /// run AFTER the speak affordance is live (main thread — the ONNX
+    /// runtime segfaults off-main on the x86_64 simulator), then
+    /// hot-swaps the real engine in via `setWakeWordEngine`.
+    private var wakeWordEngine: WakeWordEngine
     /// Consulted (on the processing queue) before every idle-state audio
     /// chunk reaches the wake-word engine, and before inbound wake
     /// detections start a capture (wake word #4, 2026-09-06) — see
@@ -249,6 +254,33 @@ final class VoicePipeline {
         vad = newVAD
         wireVADCallbacks()
         emit("vad_hot_swap", outcome: "success")
+    }
+
+    /// [STARTUP-R2] Hot-swaps the wake-word engine mid-flight: stops the
+    /// current engine, rewires `onDetection` to the pipeline's wake
+    /// handler, and starts the new one when the pipeline is already
+    /// live (the boot's `start()` starts the engine it constructs the
+    /// pipeline with — the deferred KWS swap lands after `.idle`).
+    /// Both engine shapes share the 16 kHz / 512-frame audio contract,
+    /// so the installed mic tap needs no reconfiguration. A start
+    /// failure keeps the previous engine stopped and reports honestly —
+    /// the pipeline continues with the Talk button exactly as before
+    /// the swap (the Null engine's no-op behavior).
+    func setWakeWordEngine(_ newEngine: WakeWordEngine) {
+        wakeWordEngine.stop()
+        wakeWordEngine = newEngine
+        wakeWordEngine.onDetection = { [weak self] in
+            self?.handleWakeDetected()
+        }
+        if state == .idle || state == .capturingCommand {
+            do {
+                try newEngine.start()
+                emit("kws_hot_swap", outcome: "success")
+            } catch {
+                emit("kws_hot_swap", outcome: "failure",
+                     errorCode: "start_failed")
+            }
+        }
     }
 
     /// [NOISE-FILTER] Hot-swap the denoising stage (mirrors
