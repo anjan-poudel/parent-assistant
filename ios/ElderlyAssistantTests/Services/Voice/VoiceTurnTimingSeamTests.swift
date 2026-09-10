@@ -379,7 +379,9 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
                 && $0.eventType == "vad_end_of_utterance" },
                        "a forced end must not masquerade as a normal silence end")
 
-        h.recognizer.complete(with: .success("ठीक छ।"))
+        // Emergency transcript: the deterministic net answers
+        // synchronously, so the turn finalizes without an LLM round-trip.
+        h.recognizer.complete(with: .success("मद्दत गर्नुहोस्"))
         wait(for: [finalized], timeout: 2)
 
         XCTAssertEqual(h.bus.turnTimingEvents.count, 1)
