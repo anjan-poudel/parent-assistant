@@ -193,7 +193,7 @@ struct QuickAccessAppsView: View {
             .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
             .foregroundColor(.white)
             .padding(.horizontal, 14)
-            .frame(height: DesignTokens.minTapTargetSize)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
             .background(DesignTokens.accent)
             .clipShape(Capsule())
         }
@@ -218,7 +218,7 @@ struct QuickAccessAppsView: View {
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                 .foregroundColor(DesignTokens.accent)
                 .padding(.horizontal, 14)
-                .frame(height: DesignTokens.minTapTargetSize)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
         }
         .buttonStyle(.plain)
     }

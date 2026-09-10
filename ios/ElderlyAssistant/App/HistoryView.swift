@@ -66,7 +66,7 @@ struct HistoryView: View {
                 Text(caption(for: entry))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
             }
             Spacer(minLength: 0)
             if entry.channel == .unanswered {
@@ -92,8 +92,8 @@ struct HistoryView: View {
         Image(systemName: "phone.fill")
             .font(.system(size: 18, weight: .semibold))
             .foregroundColor(.white)
-            .frame(width: DesignTokens.minTapTargetSize,
-                   height: DesignTokens.minTapTargetSize)
+            .frame(minWidth: DesignTokens.minTapTargetSize,
+                   minHeight: DesignTokens.minTapTargetSize)
             .background(DesignTokens.accent)
             .clipShape(Circle())
             .accessibilityHidden(true)
@@ -118,6 +118,13 @@ struct HistoryView: View {
         }
     }
 
+    /// Every row is a re-openable ACTION, so every row wears the
+    /// brand/action role (badge-tint consolidation 2026-09-10 — `.call`
+    /// and `.reminders` resolve to the same accent now). A call row and
+    /// a message row are told apart by their glyph (phone.fill vs the
+    /// chat bubbles) and their caption, not by hue; only the urgency of
+    /// an unanswered call gets its own visual weight, and that lives in
+    /// the row's dialer circle.
     private func tint(for channel: AppActivityEntry.Channel) -> DesignTokens.BadgeTint {
         switch channel {
         case .phone, .faceTimeVideo, .faceTimeAudio: return .call

@@ -85,8 +85,8 @@ struct AlarmsTimersSettingsView: View {
                 Image(systemName: "trash.fill")
                     .font(.system(size: 22))
                     .foregroundColor(DesignTokens.stateError)
-                    .frame(width: DesignTokens.minTapTargetSize,
-                           height: DesignTokens.minTapTargetSize)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text("alarms.delete"))
@@ -125,8 +125,8 @@ struct AlarmsTimersSettingsView: View {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 26))
                         .foregroundColor(DesignTokens.stateError)
-                        .frame(width: DesignTokens.minTapTargetSize,
-                               height: DesignTokens.minTapTargetSize)
+                        .frame(minWidth: DesignTokens.minTapTargetSize,
+                               minHeight: DesignTokens.minTapTargetSize)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text("timers.cancel"))
@@ -156,7 +156,11 @@ struct AlarmsTimersSettingsView: View {
                     .environment(\.locale, coordinator.appLanguage.locale)
             }
             .padding(14)
-            .frame(height: 56)
+            // DESIGN-REVIEW: was a fixed 56pt — a minimum keeps the row
+            // tall by default and lets it grow with the label + picker at
+            // Accessibility XXXL instead of clipping them.
+            .frame(minHeight: 56)
+            .fixedSize(horizontal: false, vertical: true)
             .background(DesignTokens.background)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
 
@@ -174,7 +178,11 @@ struct AlarmsTimersSettingsView: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
-                    .frame(height: DesignTokens.chipHeight)
+                    // DESIGN-REVIEW: minHeight + fixedSize (was a fixed
+                    // 60pt chip) so the action label wraps/grows rather
+                    // than clipping at Accessibility XXXL.
+                    .frame(minHeight: DesignTokens.chipHeight)
+                    .fixedSize(horizontal: false, vertical: true)
                     .background(DesignTokens.accent)
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }

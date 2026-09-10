@@ -157,7 +157,7 @@ struct EmergencyIconButton: View {
                 // scales without clipping at Accessibility XXXL.
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                 .foregroundColor(DesignTokens.BadgeTint.emergency.tint)
-                .frame(width: 32, height: 32)
+                .frame(minWidth: 32, minHeight: 32)
                 .background(DesignTokens.BadgeTint.emergency.background)
                 .clipShape(Circle())
                 .overlay(
@@ -405,7 +405,7 @@ struct OutcomeCardView: View {
                 Text(outcome.text)
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
-                    .lineLimit(1)
+                    .lineLimit(2)
                 Image(systemName: "chevron.up")
                     // Caption-token disclosure chevron (DESIGN-REVIEW).
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
@@ -591,7 +591,7 @@ struct ConversationHistorySheet: View {
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                 .foregroundColor(DesignTokens.accent)
                 .frame(maxWidth: .infinity)
-                .frame(height: DesignTokens.minTapTargetSize)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
                 .background(DesignTokens.card)
                 .clipShape(Capsule())
                 .overlay(

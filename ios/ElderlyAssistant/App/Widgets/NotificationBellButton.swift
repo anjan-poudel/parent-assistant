@@ -26,8 +26,9 @@ struct NotificationBellButton: View {
                         // instead of clipping the digits.
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                         .foregroundColor(.white)
-                        .padding(.horizontal, 5)
+                        .padding(.horizontal, 6)
                         .padding(.vertical, 1)
+                        .frame(minWidth: 22, minHeight: 22)
                         .background(DesignTokens.accent)
                         .clipShape(Capsule())
                         .offset(x: 2, y: -2)
@@ -35,7 +36,7 @@ struct NotificationBellButton: View {
             }
         }
         .buttonStyle(.plain)
-        .frame(width: 44, height: 44)
+        .frame(minWidth: 44, minHeight: 44)
         .accessibilityLabel(Text("notifications.bell"))
     }
 

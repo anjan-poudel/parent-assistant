@@ -33,8 +33,8 @@ struct LeafScreen<Content: View>: View {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 26, weight: .bold))
                             .foregroundColor(DesignTokens.textPrimary)
-                            .frame(width: DesignTokens.minTapTargetSize,
-                                   height: DesignTokens.minTapTargetSize)
+                            .frame(minWidth: DesignTokens.minTapTargetSize,
+                                   minHeight: DesignTokens.minTapTargetSize)
                             .background(DesignTokens.card)
                             .clipShape(Circle())
                     }
@@ -199,8 +199,8 @@ struct MedicalView: View {
                 Image(systemName: "trash.fill")
                     .font(.system(size: 22))
                     .foregroundColor(DesignTokens.stateError)
-                    .frame(width: DesignTokens.minTapTargetSize,
-                           height: DesignTokens.minTapTargetSize)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text("medical.appointments.remove"))
@@ -232,8 +232,8 @@ struct MedicalView: View {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 22))
                     .foregroundColor(DesignTokens.textSecondary)
-                    .frame(width: DesignTokens.minTapTargetSize,
-                           height: DesignTokens.minTapTargetSize)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text("common.close"))
@@ -275,7 +275,8 @@ struct MedicalView: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                     .foregroundColor(DesignTokens.accent)
                     .frame(maxWidth: .infinity)
-                    .frame(height: DesignTokens.chipHeight)
+                    .frame(minHeight: DesignTokens.chipHeight)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .buttonStyle(.plain)
 
@@ -298,13 +299,15 @@ struct MedicalView: View {
             TextField(LocalizedStringKey("medical.appointments.doctor"), text: $doctor)
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .padding(14)
-                .frame(height: 56)
+                .frame(minHeight: 56)
+                .fixedSize(horizontal: false, vertical: true)
                 .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             TextField(LocalizedStringKey("medical.appointments.place"), text: $clinic)
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .padding(14)
-                .frame(height: 56)
+                .frame(minHeight: 56)
+                .fixedSize(horizontal: false, vertical: true)
                 .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
 
@@ -318,7 +321,8 @@ struct MedicalView: View {
             TextField(LocalizedStringKey("medical.appointments.note"), text: $note)
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .padding(14)
-                .frame(height: 56)
+                .frame(minHeight: 56)
+                .fixedSize(horizontal: false, vertical: true)
                 .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
 
@@ -329,7 +333,8 @@ struct MedicalView: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
-                    .frame(height: DesignTokens.chipHeight)
+                    .frame(minHeight: DesignTokens.chipHeight)
+                    .fixedSize(horizontal: false, vertical: true)
                     .background(canAddAppointment ? DesignTokens.accent : DesignTokens.textSecondary.opacity(0.4))
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }
@@ -356,7 +361,8 @@ struct MedicalView: View {
                 .environment(\.locale, coordinator.appLanguage.locale)
         }
         .padding(14)
-        .frame(height: 56)
+        .frame(minHeight: 56)
+        .fixedSize(horizontal: false, vertical: true)
         .background(DesignTokens.background)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
     }
@@ -462,7 +468,7 @@ struct MedicalView: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 20)
-                    .frame(height: DesignTokens.minTapTargetSize)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.accent)
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }
@@ -503,7 +509,7 @@ struct MedicalView: View {
 /// this screen never mutates medication data.
 struct RemindersView: View {
     @EnvironmentObject var coordinator: AppCoordinator
-    /// Bumped after a toggle so the computed lists re-read fresh data —
+    /// Bumped after a toggle so the cached lists re-read fresh data —
     /// the coordinator exposes reminders as computed vars, not @Published.
     @State private var entriesVersion = 0
 
@@ -666,10 +672,18 @@ struct RemindersView: View {
 
     /// "7:00 AM, 4:00 PM" for daily entries; weekly entries prefix the
     /// localized weekday names ("Sun, Tue · 9:00 AM").
+    ///
+    /// DESIGN-REVIEW (P2): this ran per routine row, per body evaluation,
+    /// and built a `DateFormatter` on every pass just to read its
+    /// weekday-symbol table — plus a `Date.formatted` per scheduled time.
+    /// Both now come from the locale-keyed cache in `ViewCaches.swift`,
+    /// and the times format in the app's ACTIVE language rather than the
+    /// device locale, matching how the rest of the app renders time.
     private func scheduleSummary(_ entry: RoutineEntry) -> String {
+        let locale = coordinator.activeLocale
         let calendar = Calendar.current
         let times = entry.scheduleTimes.compactMap { components -> String? in
-            calendar.date(from: components)?.formatted(date: .omitted, time: .shortened)
+            calendar.date(from: components).map { timeFormatter.string(from: $0) }
         }
         let timesText = times.joined(separator: ", ")
         guard entry.frequency == .weekly, !entry.weekdays.isEmpty else { return timesText }
@@ -795,7 +809,7 @@ struct RemindersView: View {
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                 .foregroundColor(DesignTokens.accent)
                 .frame(maxWidth: .infinity)
-                .frame(height: DesignTokens.minTapTargetSize)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
                 .background(DesignTokens.card)
                 .clipShape(Capsule())
                 .overlay(
@@ -1079,7 +1093,7 @@ struct CallView: View {
                 // glyph can never clip at Accessibility XXXL.
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                 .foregroundColor(listening ? .white : DesignTokens.accent)
-                .frame(width: 30, height: 30)
+                .frame(minWidth: 30, minHeight: 30)
                 .background(listening ? DesignTokens.accent : DesignTokens.background)
                 .clipShape(Circle())
         }
@@ -1148,8 +1162,8 @@ struct CallView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundColor(DesignTokens.accent)
-                .frame(width: DesignTokens.minTapTargetSize,
-                       height: DesignTokens.minTapTargetSize)
+                .frame(minWidth: DesignTokens.minTapTargetSize,
+                       minHeight: DesignTokens.minTapTargetSize)
                 .background(DesignTokens.card)
                 .clipShape(Circle())
         }
@@ -1168,8 +1182,8 @@ struct CallView: View {
             Image(systemName: "chevron.backward")
                 .font(.system(size: 20, weight: .bold))
                 .foregroundColor(DesignTokens.textPrimary)
-                .frame(width: DesignTokens.minTapTargetSize,
-                       height: DesignTokens.minTapTargetSize)
+                .frame(minWidth: DesignTokens.minTapTargetSize,
+                       minHeight: DesignTokens.minTapTargetSize)
                 .background(DesignTokens.card)
                 .clipShape(Circle())
         }
@@ -1672,7 +1686,7 @@ struct CallView: View {
                             .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                             .foregroundColor(DesignTokens.accent)
                             .frame(maxWidth: .infinity)
-                            .frame(height: DesignTokens.minTapTargetSize)
+                            .frame(minHeight: DesignTokens.minTapTargetSize)
                             .background(DesignTokens.card)
                             .clipShape(Capsule())
                             .overlay(
@@ -1710,14 +1724,14 @@ struct CallView: View {
                     Text(recentActivityTimeText(entry))
                         .font(.system(size: DesignTokens.minCaptionPointSize))
                         .foregroundColor(DesignTokens.textSecondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "phone.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.white)
-                    .frame(width: DesignTokens.minTapTargetSize,
-                           height: DesignTokens.minTapTargetSize)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.accent)
                     .clipShape(Circle())
                     .accessibilityHidden(true)
@@ -1876,7 +1890,10 @@ struct CallView: View {
                         Text("\(index)")
                             .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                             .foregroundColor(.white)
-                            .frame(width: 22, height: 22)
+                            // DESIGN-REVIEW: minWidth/minHeight (was a
+                            // fixed 22pt circle) so the scaled digit can
+                            // never clip at Accessibility XXXL.
+                            .frame(minWidth: 22, minHeight: 22)
                             .background(DesignTokens.accent)
                             .clipShape(Circle())
                         Text(L10n.str("messenger.handleHints.line\(index)", locale: locale))
@@ -1901,7 +1918,7 @@ struct CallView: View {
                     }
                     .buttonStyle(.plain)
                     .padding(.horizontal, 20)
-                    .frame(height: DesignTokens.minTapTargetSize)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.background)
                     .clipShape(Capsule())
                     Spacer()
@@ -1911,7 +1928,7 @@ struct CallView: View {
                     .buttonStyle(.plain)
                     .disabled(!canSave)
                     .padding(.horizontal, 20)
-                    .frame(height: DesignTokens.minTapTargetSize)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
                     .foregroundColor(.white)
                     .background(canSave ? DesignTokens.accent : DesignTokens.textSecondary.opacity(0.5))
                     .clipShape(Capsule())
@@ -1956,7 +1973,7 @@ private struct AddressBookAccessCard: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 20)
-                    .frame(height: DesignTokens.minTapTargetSize)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.accent)
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }
@@ -2017,7 +2034,7 @@ private struct WhatsAppSyncHintCard: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 20)
-                    .frame(height: DesignTokens.minTapTargetSize)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.accent)
                     .clipShape(Capsule())
             }
@@ -2059,7 +2076,7 @@ private struct AddressBookLoadFailedCard: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 20)
-                    .frame(height: DesignTokens.minTapTargetSize)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.accent)
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }
@@ -2183,14 +2200,14 @@ private struct UnifiedContactResultRow: View {
                         Text(result.caption)
                             .font(.system(size: DesignTokens.minCaptionPointSize))
                             .foregroundColor(DesignTokens.textSecondary)
-                            .lineLimit(1)
+                            .lineLimit(2)
                     }
                 }
                 Spacer(minLength: 8)
                 Image(systemName: Self.icon(for: channelState.resolvedChannel))
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.white)
-                    .frame(width: DesignTokens.minTapTargetSize, height: DesignTokens.minTapTargetSize)
+                    .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
                     .background(Self.circleColor(for: channelState.resolvedChannel))
                     .clipShape(Circle())
                     .accessibilityHidden(true)
@@ -2217,13 +2234,17 @@ private struct UnifiedContactResultRow: View {
             Image(uiImage: photo)
                 .resizable()
                 .scaledToFill()
-                .frame(width: 52, height: 52)
+                .frame(width: Self.avatarDiameter, height: Self.avatarDiameter)
                 .clipShape(Circle())
                 .accessibilityHidden(true)
         } else {
-            FaceAvatar(name: result.name, diameter: 52)
+            FaceAvatar(name: result.name, diameter: Self.avatarDiameter)
         }
     }
+
+    /// The face circle's diameter — read by `CallView`'s resolve pass so
+    /// the cached bitmap is decoded for exactly the size drawn here.
+    static let avatarDiameter: CGFloat = 52
 
     /// Value text of the dial button (see above).
     private var resolvedChannelValue: String {
@@ -2306,7 +2327,7 @@ private struct UnifiedContactResultRow: View {
             Image(systemName: "ellipsis.circle")
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundColor(DesignTokens.textSecondary)
-                .frame(width: DesignTokens.minTapTargetSize, height: DesignTokens.minTapTargetSize)
+                .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
                 .background(DesignTokens.background)
                 .clipShape(Circle())
         }
@@ -2341,7 +2362,7 @@ private struct UnifiedContactResultRow: View {
             Image(systemName: "person.crop.circle.badge.plus")
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundColor(DesignTokens.accent)
-                .frame(width: DesignTokens.minTapTargetSize, height: DesignTokens.minTapTargetSize)
+                .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
                 .background(DesignTokens.background)
                 .clipShape(Circle())
         }
@@ -2361,9 +2382,11 @@ private struct UnifiedContactResultRow: View {
         }
     }
 
-    /// The circle's fill — accent for the dialer, the FaceTime call
-    /// blue, and each chat app's own brand color so the glyph reads like
-    /// the app it opens.
+    /// The circle's fill — the brand/action role for the two call
+    /// channels (phone and FaceTime now share it, distinguished by the
+    /// phone.fill / video.fill glyph, per the 2026-09-10 badge-tint
+    /// consolidation), and each chat app's own brand color so the glyph
+    /// reads like the app it opens.
     private static func circleColor(for app: CallApp) -> Color {
         switch app {
         case .phone: return DesignTokens.accent
@@ -2410,7 +2433,7 @@ struct ContactTile: View {
     /// it. The initials fallback keeps its legacy exposure untouched.
     @ViewBuilder
     private func avatar(for contact: FamilyContact) -> some View {
-        if let photo = coordinator.contactPhoto(for: contact) {
+        if let photo {
             Image(uiImage: photo)
                 .resizable()
                 .scaledToFill()
@@ -2440,7 +2463,7 @@ struct ContactTile: View {
                 Image(systemName: "video.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.white)
-                    .frame(width: DesignTokens.minTapTargetSize, height: DesignTokens.minTapTargetSize)
+                    .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.BadgeTint.call.tint)
                     .clipShape(Circle())
             }
@@ -2450,7 +2473,7 @@ struct ContactTile: View {
                 Image(systemName: "phone.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundColor(.white)
-                    .frame(width: DesignTokens.minTapTargetSize, height: DesignTokens.minTapTargetSize)
+                    .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.accent)
                     .clipShape(Circle())
             }
@@ -2742,7 +2765,7 @@ struct BriefingView: View {
             .foregroundColor(.white)
             .padding(.horizontal, 18)
             .frame(maxWidth: .infinity)
-            .frame(height: DesignTokens.minTapTargetSize)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
             .background(DesignTokens.accent)
             .clipShape(Capsule())
         }

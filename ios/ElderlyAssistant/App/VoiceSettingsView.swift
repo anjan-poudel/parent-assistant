@@ -234,7 +234,7 @@ struct VoicePersonalizationSettingsView: View {
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: DesignTokens.minTapTargetSize)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
                         .background(DesignTokens.accent)
                         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
                 }
@@ -385,7 +385,7 @@ struct VoicePersonalizationSettingsView: View {
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
-                .frame(height: DesignTokens.minTapTargetSize)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
                 .background(isRecording ? DesignTokens.stateError : DesignTokens.accent)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
         }
@@ -528,7 +528,7 @@ struct VoicePersonalizationSettingsView: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 20)
-                    .frame(height: DesignTokens.minTapTargetSize)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.accent)
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }
@@ -561,7 +561,7 @@ struct VoicePersonalizationSettingsView: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 20)
-                    .frame(height: DesignTokens.minTapTargetSize)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.accent)
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }

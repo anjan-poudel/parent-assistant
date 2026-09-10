@@ -427,7 +427,7 @@ struct UpdatesRowButton: View {
                     Text(secondaryText)
                         .font(.system(size: DesignTokens.minCaptionPointSize))
                         .foregroundColor(DesignTokens.textSecondary)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
             }
             Spacer(minLength: 0)

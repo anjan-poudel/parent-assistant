@@ -222,7 +222,8 @@ struct CalendarSettingsView: View {
                     }
                 }
                 .padding(14)
-                .frame(height: 56)
+                .frame(minHeight: 56)
+                .fixedSize(horizontal: false, vertical: true)
                 .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
 

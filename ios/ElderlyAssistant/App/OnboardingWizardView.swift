@@ -53,8 +53,8 @@ struct OnboardingWizardView: View {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 26, weight: .bold))
                     .foregroundColor(DesignTokens.textPrimary)
-                    .frame(width: DesignTokens.minTapTargetSize,
-                           height: DesignTokens.minTapTargetSize)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.card)
                     .clipShape(Circle())
             }
@@ -65,7 +65,7 @@ struct OnboardingWizardView: View {
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                     .foregroundColor(DesignTokens.textSecondary)
                     .padding(.horizontal, 12)
-                    .frame(height: DesignTokens.minTapTargetSize)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
             }
         }
     }
@@ -254,7 +254,8 @@ private struct PermissionsStep: View {
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: DesignTokens.chipHeight)
+                        .frame(minHeight: DesignTokens.chipHeight)
+                        .fixedSize(horizontal: false, vertical: true)
                         .background(DesignTokens.accent)
                         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
                 }
@@ -380,7 +381,8 @@ private struct FamilyContactStep: View {
         TextField(LocalizedStringKey(placeholderKey), text: text)
             .font(.system(size: DesignTokens.minBodyPointSize))
             .padding(16)
-            .frame(height: 60)
+            .frame(minHeight: 60)
+            .fixedSize(horizontal: false, vertical: true)
             .background(DesignTokens.card)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
     }
@@ -454,7 +456,8 @@ private func primaryButton(key: String, action: @escaping () -> Void) -> some Vi
             .font(.system(size: 22, weight: .bold))
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)
-            .frame(height: 64)
+            .frame(minHeight: 64)
+            .fixedSize(horizontal: false, vertical: true)
             .background(DesignTokens.accent)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             .shadow(color: DesignTokens.accent.opacity(0.35), radius: 8, y: 3)

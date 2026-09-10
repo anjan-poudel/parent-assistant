@@ -83,7 +83,7 @@ struct FeedsSettingsView: View {
                 Text(source.urlString)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
             }
             Spacer()
             Button(role: .destructive) {
@@ -92,8 +92,8 @@ struct FeedsSettingsView: View {
                 Image(systemName: "trash.fill")
                     .font(.system(size: 20))
                     .foregroundColor(DesignTokens.stateError)
-                    .frame(width: DesignTokens.minTapTargetSize,
-                           height: DesignTokens.minTapTargetSize)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text("settings.feeds.removeSource"))
@@ -198,8 +198,8 @@ struct FeedsSettingsView: View {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 22))
                     .foregroundColor(DesignTokens.textSecondary)
-                    .frame(width: DesignTokens.minTapTargetSize,
-                           height: DesignTokens.minTapTargetSize)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text("settings.feeds.removeTopic"))

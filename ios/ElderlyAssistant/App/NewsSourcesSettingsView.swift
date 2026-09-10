@@ -35,15 +35,15 @@ struct NewsSourcesSettingsView: View {
                                 Text(source.urlString)
                                     .font(.system(size: DesignTokens.minCaptionPointSize))
                                     .foregroundColor(DesignTokens.textSecondary)
-                                    .lineLimit(1)
+                                    .lineLimit(2)
                             }
                             Spacer()
                             Button(role: .destructive) {
                                 _ = store.remove(id: source.id)
                             } label: {
                                 Image(systemName: "trash.fill")
-                                    .frame(width: DesignTokens.minTapTargetSize,
-                                           height: DesignTokens.minTapTargetSize)
+                                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                                           minHeight: DesignTokens.minTapTargetSize)
                             }
                             .accessibilityLabel(Text("settings.feeds.removeSource"))
                         }
@@ -86,7 +86,7 @@ struct NewsSourcesSettingsView: View {
                             Text("settings.feeds.addSource")
                                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                                 .foregroundColor(.white)
-                                .frame(height: DesignTokens.minTapTargetSize)
+                                .frame(minHeight: DesignTokens.minTapTargetSize)
                                 .frame(maxWidth: .infinity)
                                 .background(DesignTokens.accent)
                                 .clipShape(Capsule())

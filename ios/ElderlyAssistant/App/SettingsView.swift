@@ -54,8 +54,8 @@ struct SettingsView: View {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 26, weight: .bold))
                             .foregroundColor(DesignTokens.textPrimary)
-                            .frame(width: DesignTokens.minTapTargetSize,
-                                   height: DesignTokens.minTapTargetSize)
+                            .frame(minWidth: DesignTokens.minTapTargetSize,
+                                   minHeight: DesignTokens.minTapTargetSize)
                             .background(DesignTokens.card)
                             .clipShape(Circle())
                     }
@@ -484,7 +484,7 @@ struct GeminiAPISettingsView: View {
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: DesignTokens.minTapTargetSize)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
                         .background(draftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                     ? DesignTokens.textSecondary.opacity(0.4) : DesignTokens.accent)
                         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
@@ -646,7 +646,7 @@ struct SearchSettingsView: View {
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: DesignTokens.minTapTargetSize)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
                         .background(draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                     && draftEngineID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                     ? DesignTokens.textSecondary.opacity(0.4) : DesignTokens.accent)
@@ -761,7 +761,7 @@ struct YouTubeSettingsView: View {
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: DesignTokens.minTapTargetSize)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
                         .background(draftAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                                     ? DesignTokens.textSecondary.opacity(0.4) : DesignTokens.accent)
                         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
@@ -1320,7 +1320,8 @@ struct FamilyContactsSettingsView: View {
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
-                .frame(height: DesignTokens.chipHeight)
+                .frame(minHeight: DesignTokens.chipHeight)
+                .fixedSize(horizontal: false, vertical: true)
                 .background(DesignTokens.accent)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
         }
@@ -1371,8 +1372,8 @@ struct FamilyContactsSettingsView: View {
                 Image(systemName: "pencil")
                     .font(.system(size: 20))
                     .foregroundColor(DesignTokens.textSecondary)
-                    .frame(width: DesignTokens.minTapTargetSize,
-                           height: DesignTokens.minTapTargetSize)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text("settings.family.edit"))
@@ -1382,8 +1383,8 @@ struct FamilyContactsSettingsView: View {
                 Image(systemName: "trash.fill")
                     .font(.system(size: 22))
                     .foregroundColor(DesignTokens.stateError)
-                    .frame(width: DesignTokens.minTapTargetSize,
-                           height: DesignTokens.minTapTargetSize)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text("settings.family.delete"))
@@ -1657,8 +1658,8 @@ private struct FamilyContactWizardSheet: View {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 26, weight: .bold))
                     .foregroundColor(DesignTokens.textPrimary)
-                    .frame(width: DesignTokens.minTapTargetSize,
-                           height: DesignTokens.minTapTargetSize)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.card)
                     .clipShape(Circle())
             }
@@ -1748,7 +1749,7 @@ private struct FamilyContactWizardSheet: View {
             .foregroundColor(DesignTokens.textPrimary)
             .padding(.horizontal, 18)
             .frame(maxWidth: .infinity)
-            .frame(height: DesignTokens.minTapTargetSize)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
             .background(DesignTokens.card)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
         }
@@ -1767,7 +1768,8 @@ private struct FamilyContactWizardSheet: View {
         TextField(LocalizedStringKey(placeholderKey), text: text)
             .font(.system(size: DesignTokens.minBodyPointSize))
             .padding(14)
-            .frame(height: 56)
+            .frame(minHeight: 56)
+            .fixedSize(horizontal: false, vertical: true)
             .background(DesignTokens.background)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
     }
@@ -1811,7 +1813,7 @@ private struct FamilyContactWizardSheet: View {
                 .font(.system(size: DesignTokens.minBodyPointSize))
         }
         .padding(.horizontal, 14)
-        .frame(height: DesignTokens.minTapTargetSize)
+        .frame(minHeight: DesignTokens.minTapTargetSize)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
     }
@@ -1854,7 +1856,7 @@ private struct FamilyContactWizardSheet: View {
                                     Text(entry.caption)
                                         .font(.system(size: DesignTokens.minCaptionPointSize))
                                         .foregroundColor(DesignTokens.textSecondary)
-                                        .lineLimit(1)
+                                        .lineLimit(2)
                                 }
                                 Spacer(minLength: 8)
                             }
@@ -1913,7 +1915,8 @@ private struct FamilyContactWizardSheet: View {
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 16)
-                    .frame(height: 40)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
+                    .fixedSize(horizontal: false, vertical: true)
                     .background(DesignTokens.accent)
                     .clipShape(Capsule())
             }
@@ -1945,7 +1948,7 @@ private struct FamilyContactWizardSheet: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 20)
-                    .frame(height: DesignTokens.minTapTargetSize)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.accent)
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }
@@ -1979,7 +1982,7 @@ private struct FamilyContactWizardSheet: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 20)
-                    .frame(height: DesignTokens.minTapTargetSize)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.accent)
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }
@@ -2162,7 +2165,7 @@ private struct FamilyContactWizardSheet: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 18)
-                    .frame(height: DesignTokens.minTapTargetSize)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.accent)
                     .clipShape(Capsule())
             }
@@ -2175,7 +2178,7 @@ private struct FamilyContactWizardSheet: View {
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                         .foregroundColor(DesignTokens.textPrimary)
                         .padding(.horizontal, 18)
-                        .frame(height: DesignTokens.minTapTargetSize)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
                         .background(DesignTokens.background)
                         .clipShape(Capsule())
                 }
@@ -2222,7 +2225,11 @@ private struct FamilyContactWizardSheet: View {
                     Text("\(index)")
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                         .foregroundColor(.white)
-                        .frame(width: 22, height: 22)
+                        // DESIGN-REVIEW: the 22pt circle was fixed while
+                        // the digit inside it scales — minWidth/minHeight
+                        // lets the circle grow with the number instead of
+                        // clipping it at Accessibility XXXL.
+                        .frame(minWidth: 22, minHeight: 22)
                         .background(DesignTokens.accent)
                         .clipShape(Circle())
                     Text(L10n.str("messenger.handleHints.line\(index)",
@@ -2244,7 +2251,8 @@ private struct FamilyContactWizardSheet: View {
             TextField("", text: $nickname)
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .padding(14)
-                .frame(height: 56)
+                .frame(minHeight: 56)
+                .fixedSize(horizontal: false, vertical: true)
                 .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             Text(L10n.str("settings.family.address", locale: coordinator.activeLocale))
@@ -2253,7 +2261,8 @@ private struct FamilyContactWizardSheet: View {
             TextField("", text: $address)
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .padding(14)
-                .frame(height: 56)
+                .frame(minHeight: 56)
+                .fixedSize(horizontal: false, vertical: true)
                 .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             Text("settings.family.addressHint")
@@ -2279,7 +2288,7 @@ private struct FamilyContactWizardSheet: View {
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                 .foregroundColor(DesignTokens.textPrimary)
                 .padding(.horizontal, 18)
-                .frame(height: DesignTokens.minTapTargetSize)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
                 .background(DesignTokens.card)
                 .clipShape(Capsule())
             }
@@ -2309,7 +2318,7 @@ private struct FamilyContactWizardSheet: View {
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                 .foregroundColor(.white)
                 .padding(.horizontal, 22)
-                .frame(height: DesignTokens.minTapTargetSize)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
                 .background(isEnabled ? DesignTokens.accent
                                       : DesignTokens.textSecondary.opacity(0.5))
                 .clipShape(Capsule())
@@ -2564,8 +2573,8 @@ struct PlacesSettingsView: View {
                     Image(systemName: "pencil")
                         .font(.system(size: 20))
                         .foregroundColor(DesignTokens.textSecondary)
-                        .frame(width: DesignTokens.minTapTargetSize,
-                               height: DesignTokens.minTapTargetSize)
+                        .frame(minWidth: DesignTokens.minTapTargetSize,
+                               minHeight: DesignTokens.minTapTargetSize)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text("settings.places.edit"))
@@ -2575,8 +2584,8 @@ struct PlacesSettingsView: View {
                     Image(systemName: "trash.fill")
                         .font(.system(size: 22))
                         .foregroundColor(DesignTokens.stateError)
-                        .frame(width: DesignTokens.minTapTargetSize,
-                               height: DesignTokens.minTapTargetSize)
+                        .frame(minWidth: DesignTokens.minTapTargetSize,
+                               minHeight: DesignTokens.minTapTargetSize)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text("settings.places.delete"))
@@ -2614,7 +2623,8 @@ struct PlacesSettingsView: View {
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
-                .frame(height: DesignTokens.chipHeight)
+                .frame(minHeight: DesignTokens.chipHeight)
+                .fixedSize(horizontal: false, vertical: true)
                 .background(DesignTokens.accent)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
         }
@@ -2682,8 +2692,8 @@ private struct PlacesEditorSheet: View {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 26, weight: .bold))
                     .foregroundColor(DesignTokens.textPrimary)
-                    .frame(width: DesignTokens.minTapTargetSize,
-                           height: DesignTokens.minTapTargetSize)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.card)
                     .clipShape(Circle())
             }
@@ -2702,7 +2712,8 @@ private struct PlacesEditorSheet: View {
         TextField(LocalizedStringKey(placeholderKey), text: text)
             .font(.system(size: DesignTokens.minBodyPointSize))
             .padding(14)
-            .frame(height: 56)
+            .frame(minHeight: 56)
+            .fixedSize(horizontal: false, vertical: true)
             .background(DesignTokens.background)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
     }
@@ -2737,7 +2748,7 @@ private struct PlacesEditorSheet: View {
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                 .foregroundColor(isSelected ? .white : DesignTokens.textPrimary)
                 .frame(maxWidth: .infinity)
-                .frame(height: DesignTokens.minTapTargetSize)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
                 .background(isSelected ? DesignTokens.accent : DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
         }
@@ -2777,7 +2788,8 @@ private struct PlacesEditorSheet: View {
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                 .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
-                .frame(height: DesignTokens.chipHeight)
+                .frame(minHeight: DesignTokens.chipHeight)
+                .fixedSize(horizontal: false, vertical: true)
                 .background(canSave ? DesignTokens.accent
                                     : DesignTokens.textSecondary.opacity(0.5))
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
@@ -2864,8 +2876,8 @@ struct MedicationScheduleSettingsView: View {
                 Image(systemName: "trash.fill")
                     .font(.system(size: 22))
                     .foregroundColor(DesignTokens.stateError)
-                    .frame(width: DesignTokens.minTapTargetSize,
-                           height: DesignTokens.minTapTargetSize)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text("settings.meds.delete"))
@@ -2881,7 +2893,8 @@ struct MedicationScheduleSettingsView: View {
             TextField(LocalizedStringKey("settings.meds.name"), text: $name)
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .padding(14)
-                .frame(height: 56)
+                .frame(minHeight: 56)
+                .fixedSize(horizontal: false, vertical: true)
                 .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             HStack(spacing: 12) {
@@ -2894,7 +2907,8 @@ struct MedicationScheduleSettingsView: View {
                     .environment(\.locale, coordinator.appLanguage.locale)
             }
             .padding(14)
-            .frame(height: 56)
+            .frame(minHeight: 56)
+            .fixedSize(horizontal: false, vertical: true)
             .background(DesignTokens.background)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
 
@@ -2914,7 +2928,8 @@ struct MedicationScheduleSettingsView: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
-                    .frame(height: DesignTokens.chipHeight)
+                    .frame(minHeight: DesignTokens.chipHeight)
+                    .fixedSize(horizontal: false, vertical: true)
                     .background(DesignTokens.accent)
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }
@@ -3204,8 +3219,8 @@ private struct ModelManagementRow: View {
                         Image(systemName: "trash")
                             .font(.system(size: 20))
                             .foregroundColor(DesignTokens.stateError)
-                            .frame(width: DesignTokens.minTapTargetSize,
-                                   height: DesignTokens.minTapTargetSize)
+                            .frame(minWidth: DesignTokens.minTapTargetSize,
+                                   minHeight: DesignTokens.minTapTargetSize)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("model.delete"))
@@ -3225,7 +3240,7 @@ private struct ModelManagementRow: View {
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 14)
-                    .frame(height: DesignTokens.minTapTargetSize)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.accent)
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }
@@ -3236,7 +3251,7 @@ private struct ModelManagementRow: View {
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                     .foregroundColor(DesignTokens.textSecondary)
                     .padding(.horizontal, 14)
-                    .frame(height: DesignTokens.minTapTargetSize)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
                     .overlay(
                         RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
                             .stroke(DesignTokens.textSecondary, lineWidth: 2)
@@ -3406,8 +3421,8 @@ struct TTSVoicesSettingsView: View {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 26, weight: .bold))
                             .foregroundColor(DesignTokens.textPrimary)
-                            .frame(width: DesignTokens.minTapTargetSize,
-                                   height: DesignTokens.minTapTargetSize)
+                            .frame(minWidth: DesignTokens.minTapTargetSize,
+                                   minHeight: DesignTokens.minTapTargetSize)
                             .background(DesignTokens.card)
                             .clipShape(Circle())
                     }

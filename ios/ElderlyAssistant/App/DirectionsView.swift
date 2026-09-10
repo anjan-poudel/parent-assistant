@@ -271,7 +271,7 @@ struct DirectionsView: View {
                 // `minHeight`/`minWidth` so the glyph can never clip.
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                 .foregroundColor(listening ? .white : DesignTokens.accent)
-                .frame(width: 30, height: 30)
+                .frame(minWidth: 30, minHeight: 30)
                 .background(listening ? DesignTokens.accent : DesignTokens.background)
                 .clipShape(Circle())
         }
@@ -425,7 +425,7 @@ struct DirectionsView: View {
                     Text(relationship)
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                         .foregroundColor(DesignTokens.accent)
-                        .lineLimit(1)
+                        .lineLimit(2)
                 }
                 Text(row.address)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
@@ -506,7 +506,8 @@ struct DirectionsView: View {
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 24)
-                    .frame(height: 52)
+                    .frame(minHeight: 52)
+                    .fixedSize(horizontal: false, vertical: true)
                     .background(DesignTokens.accent)
                     .clipShape(Capsule())
             }
