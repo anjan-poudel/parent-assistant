@@ -3,78 +3,158 @@ import ActivityKit
 import AlarmKit
 import SwiftUI
 
-// MARK: - AlarmManager seam
+// MARK: - System alarm manager seam (neutral — no AlarmKit types)
 
-/// [ALARMKIT-ALARMS] (2026-09-10) Test seam over the parts of AlarmKit's
-/// `AlarmManager` the alarm path uses. AlarmKit is not deterministically
-/// testable (system alarms are real), so the backend speaks to
-/// `AlarmManager` only through this protocol; tests inject a recording
-/// fake (`AlarmKitAlarmBackendTests`).
+/// [ALARMKIT-ALARMS] (2026-09-11) The seam over the system alarm manager,
+/// deliberately FREE of AlarmKit types: every type in the signatures below
+/// is neutral (`AlarmAuthorizationStatus`, UUID, String, Int). The
+/// production implementation (`ProductionSystemAlarmManager`, iOS 26+)
+/// bridges to AlarmKit's `AlarmManager`; tests inject a recording fake
+/// (`AlarmKitAlarmBackendTests`) that never touches AlarmKit.
+///
+/// WHY NEUTRAL: a test-bundle type that CONFORMS to an iOS-26-only
+/// protocol or stores an iOS-26-only type crashes the test runner on
+/// older runtimes at TYPE METADATA COMPLETION — the completion function
+/// resolves the unavailable symbols even though `@available` defers the
+/// type's own use (integration failure reproduced on an iOS 18.3
+/// simulator: "test runner crashed ... at type metadata completion
+/// function for FakeAlarmKitManager"). Keeping the fake's protocol
+/// neutral means the test bundle contains NO AlarmKit symbol at all, so
+/// nothing can crash pre-26 — while the seam/selection tests still run
+/// everywhere.
+protocol SystemAlarmManaging: AnyObject {
+    /// AlarmKit authorization mapped to the seam's neutral status.
+    var alarmAuthorizationStatus: AlarmAuthorizationStatus { get }
+    /// Requests AlarmKit authorization; returns the resolved status
+    /// (a previous denial must never re-prompt — the caller checks
+    /// `alarmAuthorizationStatus` first).
+    func requestSystemAlarmAuthorization() async -> AlarmAuthorizationStatus
+    /// Schedules (or replaces, same id) a system time-of-day alarm that
+    /// repeats DAILY at hour/minute, with a `snoozeMinutes` postAlert
+    /// countdown and the pre-localized `title`/`snoozeLabel` (the
+    /// configuration is built inside the production adapter — AlarmKit's
+    /// `AlarmConfiguration` exposes no stored properties, so nothing is
+    /// lost to the seam).
+    func scheduleSystemAlarm(id: UUID, hour: Int, minute: Int,
+                             snoozeMinutes: Int,
+                             title: String, snoozeLabel: String) async throws
+    func cancelSystemAlarm(id: UUID) throws
+    /// The SYSTEM snooze: transitions the alarm into its countdown phase
+    /// (re-fires after the postAlert interval).
+    func countdownSystemAlarm(id: UUID) throws
+}
+
+// MARK: - Production adapter (iOS 26+)
+
+/// [ALARMKIT-ALARMS] (2026-09-10) Empty metadata type — AlarmKit's
+/// `AlarmAttributes` is generic over `AlarmMetadata`, and even with no
+/// custom data a concrete type must be supplied. Referenced ONLY inside
+/// iOS-26-gated code (the adapter below). The type is nonisolated (the
+/// project's Swift 5 mode defaults there) so the Codable/Hashable/
+/// Sendable conformances hold.
+@available(iOS 26.0, *)
+struct AlarmKitMetadata: AlarmMetadata {}
+
+/// Production `SystemAlarmManaging` — a thin adapter over
+/// `AlarmManager.shared`. ALL AlarmKit references in the app live in this
+/// iOS-26-gated file; nothing outside it touches AlarmKit.
 ///
 /// API surface verified against the iOS 26.5 SDK swiftinterface
 /// (AlarmKit.framework/Modules/AlarmKit.swiftmodule/
 /// arm64e-apple-ios.swiftinterface) and Apple's documentation:
 ///  - https://developer.apple.com/documentation/AlarmKit
 ///  - WWDC25 session 230 "Wake up to the AlarmKit API"
-///
-/// AlarmKit requires NO special entitlement; it DOES require the
-/// `NSAlarmKitUsageDescription` Info.plist key plus user authorization
-/// (`requestAuthorization()`, `authorizationState`).
 @available(iOS 26.0, *)
-protocol AlarmKitManaging: AnyObject {
-    var authorizationState: AlarmManager.AuthorizationState { get }
-    func requestAuthorization() async throws -> AlarmManager.AuthorizationState
-    /// Schedules (or replaces, same id) the system alarm. Returns nothing:
-    /// `AlarmKit.Alarm` has no public memberwise initializer (SDK
-    /// swiftinterface — Codable inits only), and the caller never needs
-    /// the echoed alarm back.
-    func schedule(id: AlarmKit.Alarm.ID,
-                  configuration: AlarmManager.AlarmConfiguration<AlarmKitMetadata>) async throws
-    func cancel(id: AlarmKit.Alarm.ID) throws
-    /// Transitions the alarm into its countdown phase — the SYSTEM snooze:
-    /// the alarm re-fires after its postAlert duration (WWDC25 230:
-    /// "snoozing re-runs the post-alert countdown interval").
-    func countdown(id: AlarmKit.Alarm.ID) throws
-}
+final class ProductionSystemAlarmManager: SystemAlarmManaging {
 
-/// [ALARMKIT-ALARMS] (2026-09-10) Empty metadata type — AlarmKit's
-/// `AlarmAttributes` is generic over `AlarmMetadata`, and even with no
-/// custom data a concrete type must be supplied. This app renders NO
-/// alarm widget today: the widget extension carries the countdown/alarm
-/// Live Activity UI (WWDC25 230 — the extension is REQUIRED for the
-/// countdown/paused presentations; the ALERT presentation this alarm path
-/// uses is presented by the system itself without one). The extension is
-/// owned by the timers workstream. The type is nonisolated (the project's
-/// Swift 5 mode defaults there) so the Codable/Hashable/Sendable
-/// conformances hold.
-@available(iOS 26.0, *)
-struct AlarmKitMetadata: AlarmMetadata {}
-
-/// Production `AlarmKitManaging` — a thin adapter over
-/// `AlarmManager.shared`.
-@available(iOS 26.0, *)
-final class ProductionAlarmManagerAdapter: AlarmKitManaging {
-
-    var authorizationState: AlarmManager.AuthorizationState {
-        AlarmManager.shared.authorizationState
+    var alarmAuthorizationStatus: AlarmAuthorizationStatus {
+        AlarmKitAlarmBackend.map(AlarmManager.shared.authorizationState)
     }
 
-    func requestAuthorization() async throws -> AlarmManager.AuthorizationState {
-        try await AlarmManager.shared.requestAuthorization()
+    func requestSystemAlarmAuthorization() async -> AlarmAuthorizationStatus {
+        let resolved = (try? await AlarmManager.shared.requestAuthorization()) ?? .denied
+        return AlarmKitAlarmBackend.map(resolved)
     }
 
-    func schedule(id: AlarmKit.Alarm.ID,
-                  configuration: AlarmManager.AlarmConfiguration<AlarmKitMetadata>) async throws {
+    func scheduleSystemAlarm(id: UUID, hour: Int, minute: Int,
+                             snoozeMinutes: Int,
+                             title: String, snoozeLabel: String) async throws {
+        // Time-of-day with a weekly all-seven-days recurrence = the daily
+        // repeat this app's alarms are (AlarmKit's only granularity for
+        // time-of-day alarms is weekly weekday sets — SDK swiftinterface;
+        // relative schedules adjust for timezone changes).
+        let schedule = AlarmKit.Alarm.Schedule.relative(
+            .init(time: .init(hour: hour, minute: minute),
+                  repeats: .weekly(Self.dailyWeekdays))
+        )
+
+        // LocalizedStringResource literals carry the pre-localized text
+        // with no catalog lookup in the system process (L10n.str already
+        // resolved them for the app language).
+        let snoozeButton = AlarmKit.AlarmButton(
+            text: LocalizedStringResource(stringLiteral: snoozeLabel),
+            textColor: DesignTokens.accent,
+            systemImageName: "zzz"
+        )
+        let attributes = AlarmKit.AlarmAttributes<AlarmKitMetadata>(
+            presentation: .init(alert: Self.makeAlertPresentation(
+                title: LocalizedStringResource(stringLiteral: title),
+                snoozeButton: snoozeButton
+            )),
+            metadata: AlarmKitMetadata(),
+            tintColor: DesignTokens.accent
+        )
+        let configuration = AlarmKit.AlarmManager.AlarmConfiguration<AlarmKitMetadata>(
+            countdownDuration: .init(preAlert: nil,
+                                     postAlert: TimeInterval(snoozeMinutes * 60)),
+            schedule: schedule,
+            attributes: attributes,
+            sound: .default
+        )
         _ = try await AlarmManager.shared.schedule(id: id, configuration: configuration)
     }
 
-    func cancel(id: AlarmKit.Alarm.ID) throws {
+    func cancelSystemAlarm(id: UUID) throws {
         try AlarmManager.shared.cancel(id: id)
     }
 
-    func countdown(id: AlarmKit.Alarm.ID) throws {
+    func countdownSystemAlarm(id: UUID) throws {
         try AlarmManager.shared.countdown(id: id)
     }
+
+    /// The system alert presentation. On iOS 26.1+ the Stop button is
+    /// implicit (the system always offers Stop — WWDC25 230); the
+    /// 26.0-only initializer still requires the (deprecated) stopButton,
+    /// so 26.0.x devices build the alert the legacy way.
+    private static func makeAlertPresentation(
+        title: LocalizedStringResource,
+        snoozeButton: AlarmKit.AlarmButton
+    ) -> AlarmKit.AlarmPresentation.Alert {
+        if #available(iOS 26.1, *) {
+            return AlarmKit.AlarmPresentation.Alert(
+                title: title,
+                secondaryButton: snoozeButton,
+                secondaryButtonBehavior: .countdown
+            )
+        } else {
+            // Deprecated-in-26.1 initializer kept for 26.0.x devices; the
+            // stopButton property is ignored by the system on 26.1+.
+            return AlarmKit.AlarmPresentation.Alert(
+                title: title,
+                stopButton: AlarmKit.AlarmButton(
+                    text: LocalizedStringResource(stringLiteral: "Stop"),
+                    textColor: .white,
+                    systemImageName: "xmark"
+                ),
+                secondaryButton: snoozeButton,
+                secondaryButtonBehavior: .countdown
+            )
+        }
+    }
+
+    private static let dailyWeekdays: [Locale.Weekday] = [
+        .sunday, .monday, .tuesday, .wednesday, .thursday, .friday, .saturday
+    ]
 }
 
 // MARK: - AlarmKit backend (iOS 26+)
@@ -83,21 +163,18 @@ final class ProductionAlarmManagerAdapter: AlarmKitManaging {
 /// alarms via AlarmKit.
 ///
 /// Behavior notes (WWDC25 230 + the SDK swiftinterface):
-///  - TIME-OF-DAY: `Alarm.Schedule.relative` with a `Relative.Time`
-///    (hour/minute) and a weekly weekday recurrence — all seven weekdays
-///    is the daily repeat this app's alarms are (AlarmKit's only
-///    granularity for time-of-day alarms is weekly weekday sets; it
-///    adjusts for timezone changes).
+///  - TIME-OF-DAY: daily repeat at the alarm's hour/minute (see the
+///    adapter).
 ///  - SNOOZE/DISMISS: when the alarm fires, the SYSTEM presents the alert
 ///    with Stop (and, as configured here, a Snooze button with
 ///    `.countdown` behavior — "snoozing re-runs the post-alert countdown
 ///    interval"). The app receives no event for a system-UI dismissal —
 ///    the daily alarm persists (it is a recurring alarm, not one-shot),
 ///    so the app's own list stays the source of truth. A VOICE snooze of
-///    the DEFAULT length hands off to `AlarmManager.countdown(id:)` (the
-///    system re-fires after the alarm's postAlert); the system duration
-///    is FIXED per alarm, so arbitrary-minute snoozes fall back to the
-///    app's one-shot notification (see `snoozeViaSystem`).
+///    the DEFAULT length hands off to the system's countdown transition
+///    (the system re-fires after the alarm's postAlert); the system
+///    duration is FIXED per alarm, so arbitrary-minute snoozes fall back
+///    to the app's one-shot notification (see `snoozeViaSystem`).
 ///  - CAPACITY: the app's own 20-alarm cap (`AlarmTimersStore.maxAlarms`)
 ///    still gates first; if the system refuses anyway
 ///    (`AlarmManager.AlarmError.maximumLimitReached` — the only public
@@ -118,7 +195,7 @@ final class AlarmKitAlarmBackend: AlarmSchedulingBackend {
 
     var locale: Locale
 
-    private let manager: AlarmKitManaging
+    private let manager: SystemAlarmManaging
     private let notifications: LocalNotificationScheduling
     /// Outstanding system-arm tasks — awaited by tests
     /// (`waitForPendingArms`) to make the fire-and-forget schedule
@@ -126,7 +203,7 @@ final class AlarmKitAlarmBackend: AlarmSchedulingBackend {
     private var pendingArms: [Task<Void, Never>] = []
     private static let maxPendingArms = 64
 
-    init(manager: AlarmKitManaging = ProductionAlarmManagerAdapter(),
+    init(manager: SystemAlarmManaging,
          notifications: LocalNotificationScheduling,
          locale: Locale = Locale(identifier: "en"),
          systemSnoozeMinutes: Int = AlarmTimerCommandParser.defaultSnoozeMinutes) {
@@ -139,11 +216,13 @@ final class AlarmKitAlarmBackend: AlarmSchedulingBackend {
     // MARK: Authorization
 
     var authorizationStatus: AlarmAuthorizationStatus {
-        Self.map(manager.authorizationState)
+        manager.alarmAuthorizationStatus
     }
 
     /// `AlarmManager.AuthorizationState` → the seam's neutral status.
-    /// Tested directly — the seam stays AlarmKit-free.
+    /// Lives here (26-gated) because only the app target may touch the
+    /// AlarmKit enum; tested in `AlarmKitAuthorizationStateMappingTests`
+    /// on iOS 26 runtimes.
     static func map(_ state: AlarmManager.AuthorizationState) -> AlarmAuthorizationStatus {
         switch state {
         case .notDetermined: return .notDetermined
@@ -162,12 +241,11 @@ final class AlarmKitAlarmBackend: AlarmSchedulingBackend {
     /// a UN denial NEVER gates a system alarm.
     func requestAuthorizationIfNeeded() async -> Bool {
         var granted = false
-        switch manager.authorizationState {
+        switch manager.alarmAuthorizationStatus {
         case .authorized:
             granted = true
         case .notDetermined:
-            let resolved = (try? await manager.requestAuthorization()) ?? .denied
-            granted = resolved == .authorized
+            granted = await manager.requestSystemAlarmAuthorization() == .authorized
         case .denied:
             granted = false
         }
@@ -182,47 +260,24 @@ final class AlarmKitAlarmBackend: AlarmSchedulingBackend {
 
     /// Arms (or replaces — the system keys alarms by id) the SYSTEM
     /// time-of-day alarm. Synchronous to the caller like the UN path:
-    /// `AlarmManager.schedule` is async, so the arm runs fire-and-forget
-    /// on a task the backend retains; failures fall back to the UN daily
+    /// the system schedule is async, so the arm runs fire-and-forget on
+    /// a task the backend retains; failures fall back to the UN daily
     /// notification so the alarm still rings.
     func scheduleAlarm(_ alarm: Alarm) {
         let components = Calendar.current.dateComponents([.hour, .minute], from: alarm.time)
-        let schedule = AlarmKit.Alarm.Schedule.relative(
-            .init(time: .init(hour: components.hour ?? 0,
-                              minute: components.minute ?? 0),
-                  repeats: .weekly(Self.dailyWeekdays))
-        )
-
-        // The system renders the title (our app name alongside it) and
-        // the Snooze button; a LocalizedStringResource literal carries
-        // our pre-localized text with no catalog lookup in the system
-        // process (L10n.str resolved it for the app language already).
-        let title = LocalizedStringResource(
-            stringLiteral: L10n.str("alarms.notification.title", locale: locale))
-        let snoozeButton = AlarmKit.AlarmButton(
-            text: LocalizedStringResource(
-                stringLiteral: L10n.str("alarmAlarmKit.snoozeButton", locale: locale)),
-            textColor: DesignTokens.accent,
-            systemImageName: "zzz"
-        )
-        let attributes = AlarmKit.AlarmAttributes<AlarmKitMetadata>(
-            presentation: .init(alert: Self.makeAlertPresentation(
-                title: title, snoozeButton: snoozeButton
-            )),
-            metadata: AlarmKitMetadata(),
-            tintColor: DesignTokens.accent
-        )
-        let configuration = AlarmKit.AlarmManager.AlarmConfiguration<AlarmKitMetadata>(
-            countdownDuration: .init(preAlert: nil,
-                                     postAlert: TimeInterval(systemSnoozeMinutes * 60)),
-            schedule: schedule,
-            attributes: attributes,
-            sound: .default
-        )
+        let hour = components.hour ?? 0
+        let minute = components.minute ?? 0
+        let snoozeMinutes = systemSnoozeMinutes
+        let title = L10n.str("alarms.notification.title", locale: locale)
+        let snoozeLabel = L10n.str("alarmAlarmKit.snoozeButton", locale: locale)
 
         let task = Task { [manager] in
             do {
-                try await manager.schedule(id: alarm.id, configuration: configuration)
+                try await manager.scheduleSystemAlarm(
+                    id: alarm.id, hour: hour, minute: minute,
+                    snoozeMinutes: snoozeMinutes,
+                    title: title, snoozeLabel: snoozeLabel
+                )
             } catch {
                 print("[AlarmKitAlarmBackend] System refused alarm \(alarm.id) (\(error)) — arming the UN fallback.")
                 self.armUNFallback(for: alarm)
@@ -246,7 +301,7 @@ final class AlarmKitAlarmBackend: AlarmSchedulingBackend {
 
     func cancelAlarm(id: UUID) {
         do {
-            try manager.cancel(id: id)
+            try manager.cancelSystemAlarm(id: id)
         } catch {
             print("[AlarmKitAlarmBackend] Failed to cancel alarm \(id): \(error)")
         }
@@ -280,7 +335,7 @@ final class AlarmKitAlarmBackend: AlarmSchedulingBackend {
     func snoozeViaSystem(id: UUID, minutes: Int) -> Bool {
         guard minutes == systemSnoozeMinutes else { return false }
         do {
-            try manager.countdown(id: id)
+            try manager.countdownSystemAlarm(id: id)
             return true
         } catch {
             print("[AlarmKitAlarmBackend] System snooze failed for \(id): \(error) — falling back to the one-shot.")
@@ -302,41 +357,4 @@ final class AlarmKitAlarmBackend: AlarmSchedulingBackend {
             }
         }
     }
-
-    /// The system alert presentation. On iOS 26.1+ the Stop button is
-    /// implicit (the system always offers Stop — WWDC25 230); the
-    /// 26.0-only initializer still requires the (deprecated) stopButton,
-    /// so 26.0.x devices build the alert the legacy way.
-    private static func makeAlertPresentation(
-        title: LocalizedStringResource,
-        snoozeButton: AlarmKit.AlarmButton
-    ) -> AlarmKit.AlarmPresentation.Alert {
-        if #available(iOS 26.1, *) {
-            return AlarmKit.AlarmPresentation.Alert(
-                title: title,
-                secondaryButton: snoozeButton,
-                secondaryButtonBehavior: .countdown
-            )
-        } else {
-            // Deprecated-in-26.1 initializer kept for 26.0.x devices; the
-            // stopButton property is ignored by the system on 26.1+.
-            return AlarmKit.AlarmPresentation.Alert(
-                title: title,
-                stopButton: AlarmKit.AlarmButton(
-                    text: LocalizedStringResource(stringLiteral: "Stop"),
-                    textColor: .white,
-                    systemImageName: "xmark"
-                ),
-                secondaryButton: snoozeButton,
-                secondaryButtonBehavior: .countdown
-            )
-        }
-    }
-
-    /// All seven weekdays = DAILY (AlarmKit's only recurrence granularity
-    /// for time-of-day alarms — SDK swiftinterface,
-    /// `Alarm.Schedule.Relative.Recurrence.weekly([Locale.Weekday])`).
-    private static let dailyWeekdays: [Locale.Weekday] = [
-        .sunday, .monday, .tuesday, .wednesday, .thursday, .friday, .saturday
-    ]
 }

@@ -3,55 +3,60 @@ import UserNotifications
 import AlarmKit
 @testable import ElderlyAssistant
 
-// MARK: - Recording AlarmKit manager fake
+// MARK: - Recording system-alarm-manager fake (NEUTRAL — no AlarmKit)
 
-/// [ALARMKIT-ALARMS] (2026-09-10) Scriptable `AlarmKitManaging` fake.
-/// `AlarmManager` cannot be driven deterministically (system alarms are
-/// real), and `AlarmManager.AlarmConfiguration` exposes NO stored
-/// properties (SDK swiftinterface shows init + static factories only),
-/// so these tests assert the OBSERVABLE contract: which alarms reach the
-/// system, which cancellations/snoozes are issued, what the state
-/// mapping resolves, and that a system refusal degrades to the UN arm.
-@available(iOS 26.0, *)
-private final class FakeAlarmKitManager: AlarmKitManaging {
-    var state: AlarmManager.AuthorizationState = .authorized
+/// [ALARMKIT-ALARMS] (2026-09-11) Scriptable `SystemAlarmManaging` fake.
+/// Deliberately conforms to the NEUTRAL seam protocol, not to any
+/// AlarmKit-typed protocol: a test-bundle type conforming to an
+/// iOS-26-only protocol crashes the test runner on older runtimes at
+/// TYPE METADATA COMPLETION (reproduced on an iOS 18.3 simulator —
+/// "test runner crashed ... at type metadata completion function for
+/// FakeAlarmKitManager"). With the neutral seam this file carries no
+/// AlarmKit symbol in any declaration, so nothing can crash pre-26.
+///
+/// The fake captures the schedule COMPONENTS (id, hour, minute,
+/// snoozeMinutes, pre-localized title/snooze label) — testable here
+/// precisely because `AlarmManager.AlarmConfiguration` exposes no stored
+/// properties (SDK swiftinterface shows init + static factories only)
+/// and the production adapter builds the real configuration.
+final class FakeSystemAlarmManager: SystemAlarmManaging {
+    var alarmAuthorizationStatus: AlarmAuthorizationStatus = .authorized
     var authorizationRequestCount = 0
-    var requestResult: AlarmManager.AuthorizationState = .authorized
+    var requestResult: AlarmAuthorizationStatus = .authorized
     var scheduleError: Error?
     var countdownError: Error?
-    private(set) var scheduledIDs: [UUID] = []
+    private(set) var scheduled: [(id: UUID, hour: Int, minute: Int,
+                                  snoozeMinutes: Int, title: String, snoozeLabel: String)] = []
     private(set) var cancelledIDs: [UUID] = []
     private(set) var countdownIDs: [UUID] = []
 
-    var authorizationState: AlarmManager.AuthorizationState { state }
-
-    func requestAuthorization() async throws -> AlarmManager.AuthorizationState {
+    func requestSystemAlarmAuthorization() async -> AlarmAuthorizationStatus {
         authorizationRequestCount += 1
         // The real manager's authorizationState reflects the resolved
         // status after the ask — the fake mirrors that.
-        state = requestResult
+        alarmAuthorizationStatus = requestResult
         return requestResult
     }
 
-    func schedule(id: AlarmKit.Alarm.ID,
-                  configuration: AlarmManager.AlarmConfiguration<AlarmKitMetadata>) async throws {
+    func scheduleSystemAlarm(id: UUID, hour: Int, minute: Int,
+                             snoozeMinutes: Int,
+                             title: String, snoozeLabel: String) async throws {
         if let scheduleError { throw scheduleError }
-        scheduledIDs.append(id)
+        scheduled.append((id, hour, minute, snoozeMinutes, title, snoozeLabel))
     }
 
-    func cancel(id: AlarmKit.Alarm.ID) throws {
+    func cancelSystemAlarm(id: UUID) throws {
         cancelledIDs.append(id)
     }
 
-    func countdown(id: AlarmKit.Alarm.ID) throws {
+    func countdownSystemAlarm(id: UUID) throws {
         if let countdownError { throw countdownError }
         countdownIDs.append(id)
     }
 }
 
-/// [ALARMKIT-ALARMS] (2026-09-10) Recording `LocalNotificationScheduling`
+/// [ALARMKIT-ALARMS] (2026-09-11) Recording `LocalNotificationScheduling`
 /// fake (the one in AlarmTimersServiceTests is file-private).
-@available(iOS 26.0, *)
 private final class RecordingAlarmKitNotificationCenter: LocalNotificationScheduling {
     var authorizationGranted = true
     private(set) var authorizationRequestCount = 0
@@ -76,8 +81,12 @@ private final class RecordingAlarmKitNotificationCenter: LocalNotificationSchedu
 // MARK: - AlarmKit backend tests
 
 /// [ALARMKIT-ALARMS] (2026-09-10) The AlarmKit backend's behavior with a
-/// fake manager — runs ONLY on iOS 26 runtimes (the SDK types exist at
-/// compile time; XCTest discovery skips this class below iOS 26).
+/// fake system-alarm manager. The class is `@available(iOS 26.0, *)`
+/// because `AlarmKitAlarmBackend` itself is iOS-26-gated (XCTest skips
+/// the class on older runtimes) — but every DECLARATION in this file is
+/// AlarmKit-free, so even a pre-26 metadata realization (integration
+/// failure on iOS 18.3) cannot touch an unavailable symbol. The
+/// seam/selection suites (`AlarmSchedulingBackendTests`) run everywhere.
 @available(iOS 26.0, *)
 @MainActor
 final class AlarmKitAlarmBackendTests: XCTestCase {
@@ -98,15 +107,9 @@ final class AlarmKitAlarmBackendTests: XCTestCase {
 
     // MARK: - Authorization
 
-    func testAuthorizationStateMapping() {
-        XCTAssertEqual(AlarmKitAlarmBackend.map(.notDetermined), .notDetermined)
-        XCTAssertEqual(AlarmKitAlarmBackend.map(.denied), .denied)
-        XCTAssertEqual(AlarmKitAlarmBackend.map(.authorized), .authorized)
-    }
-
     func testRequestAuthorizationNotDeterminedAsksAndReports() async {
-        let manager = FakeAlarmKitManager()
-        manager.state = .notDetermined
+        let manager = FakeSystemAlarmManager()
+        manager.alarmAuthorizationStatus = .notDetermined
         let backend = AlarmKitAlarmBackend(manager: manager, notifications: center)
 
         let granted = await backend.requestAuthorizationIfNeeded()
@@ -120,8 +123,8 @@ final class AlarmKitAlarmBackendTests: XCTestCase {
     }
 
     func testRequestAuthorizationDeniedNeverReprompts() async {
-        let manager = FakeAlarmKitManager()
-        manager.state = .denied
+        let manager = FakeSystemAlarmManager()
+        manager.alarmAuthorizationStatus = .denied
         let backend = AlarmKitAlarmBackend(manager: manager, notifications: center)
 
         let granted = await backend.requestAuthorizationIfNeeded()
@@ -134,8 +137,8 @@ final class AlarmKitAlarmBackendTests: XCTestCase {
     }
 
     func testRequestAuthorizationResolvesDenialFromTheAsk() async {
-        let manager = FakeAlarmKitManager()
-        manager.state = .notDetermined
+        let manager = FakeSystemAlarmManager()
+        manager.alarmAuthorizationStatus = .notDetermined
         manager.requestResult = .denied
         let backend = AlarmKitAlarmBackend(manager: manager, notifications: center)
 
@@ -146,8 +149,8 @@ final class AlarmKitAlarmBackendTests: XCTestCase {
     }
 
     func testRequestAuthorizationAlreadyAuthorizedSkipsTheAsk() async {
-        let manager = FakeAlarmKitManager()
-        manager.state = .authorized
+        let manager = FakeSystemAlarmManager()
+        manager.alarmAuthorizationStatus = .authorized
         let backend = AlarmKitAlarmBackend(manager: manager, notifications: center)
 
         let granted = await backend.requestAuthorizationIfNeeded()
@@ -158,9 +161,10 @@ final class AlarmKitAlarmBackendTests: XCTestCase {
 
     // MARK: - Arming
 
-    func testScheduleArmsTheSystemAlarmWithTheAppAlarmID() async {
-        let manager = FakeAlarmKitManager()
-        let backend = AlarmKitAlarmBackend(manager: manager, notifications: center)
+    func testScheduleArmsTheSystemAlarmWithTheAppAlarmIDAndTimeOfDay() async {
+        let manager = FakeSystemAlarmManager()
+        let backend = AlarmKitAlarmBackend(manager: manager, notifications: center,
+                                           systemSnoozeMinutes: 10)
         let alarm = Alarm(time: date(2026, 9, 7, 6, 0))
 
         backend.scheduleAlarm(alarm)
@@ -168,15 +172,22 @@ final class AlarmKitAlarmBackendTests: XCTestCase {
 
         // The SAME id the app persisted is the system alarm's id — the
         // AlarmKit list API (`AlarmManager.alarms`) stays reconcilable
-        // with the app's own list by id.
-        XCTAssertEqual(manager.scheduledIDs, [alarm.id])
+        // with the app's own list by id. The time-of-day and the
+        // postAlert snooze duration ride the seam as components.
+        XCTAssertEqual(manager.scheduled.count, 1)
+        XCTAssertEqual(manager.scheduled[0].id, alarm.id)
+        XCTAssertEqual(manager.scheduled[0].hour, 6)
+        XCTAssertEqual(manager.scheduled[0].minute, 0)
+        XCTAssertEqual(manager.scheduled[0].snoozeMinutes, 10)
+        XCTAssertEqual(manager.scheduled[0].title, "Alarm")
+        XCTAssertEqual(manager.scheduled[0].snoozeLabel, "Snooze")
         XCTAssertTrue(center.addedRequests.isEmpty,
                       "no UN fallback when the system accepts")
     }
 
     func testSystemRefusalDegradesToTheUNDailyNotification() async throws {
-        let manager = FakeAlarmKitManager()
-        manager.scheduleError = AlarmManager.AlarmError.maximumLimitReached
+        let manager = FakeSystemAlarmManager()
+        manager.scheduleError = SystemAlarmScheduleError.refused
         let backend = AlarmKitAlarmBackend(manager: manager, notifications: center)
         let alarm = Alarm(time: date(2026, 9, 7, 6, 0))
 
@@ -185,6 +196,7 @@ final class AlarmKitAlarmBackendTests: XCTestCase {
 
         // The system refused — the alarm still rings as the app's daily
         // notification (the pre-26 shape), never silently not at all.
+        XCTAssertTrue(manager.scheduled.isEmpty)
         XCTAssertEqual(center.addedRequests.count, 1)
         let request = try XCTUnwrap(center.addedRequests.first)
         let trigger = try XCTUnwrap(request.trigger as? UNCalendarNotificationTrigger)
@@ -198,7 +210,7 @@ final class AlarmKitAlarmBackendTests: XCTestCase {
     // MARK: - Snooze
 
     func testSnoozeViaSystemHonorsOnlyTheDefaultMinutes() {
-        let manager = FakeAlarmKitManager()
+        let manager = FakeSystemAlarmManager()
         let backend = AlarmKitAlarmBackend(manager: manager, notifications: center,
                                            systemSnoozeMinutes: 10)
         let alarmID = UUID()
@@ -211,7 +223,7 @@ final class AlarmKitAlarmBackendTests: XCTestCase {
         XCTAssertEqual(manager.countdownIDs, [alarmID],
                        "no system call for the refused snooze")
 
-        manager.countdownError = AlarmManager.AlarmError.maximumLimitReached
+        manager.countdownError = SystemAlarmScheduleError.refused
         XCTAssertFalse(backend.snoozeViaSystem(id: alarmID, minutes: 10),
                        "a system failure falls back too")
     }
@@ -219,7 +231,7 @@ final class AlarmKitAlarmBackendTests: XCTestCase {
     // MARK: - Cancel
 
     func testCancelRoutesToTheManager() {
-        let manager = FakeAlarmKitManager()
+        let manager = FakeSystemAlarmManager()
         let backend = AlarmKitAlarmBackend(manager: manager, notifications: center)
         let alarmID = UUID()
 
@@ -233,7 +245,7 @@ final class AlarmKitAlarmBackendTests: XCTestCase {
         // there is no separate system snooze to cancel; cancelling the
         // alarm kills its countdown. The backend's cancelSnooze must not
         // touch UN either (the system path armed no one-shot).
-        let manager = FakeAlarmKitManager()
+        let manager = FakeSystemAlarmManager()
         let backend = AlarmKitAlarmBackend(manager: manager, notifications: center)
         let alarmID = UUID()
 
@@ -241,5 +253,27 @@ final class AlarmKitAlarmBackendTests: XCTestCase {
 
         XCTAssertTrue(manager.cancelledIDs.isEmpty)
         XCTAssertTrue(center.removedIdentifiers.isEmpty)
+    }
+}
+
+/// A throw-anything error for the fake's refusal scripting (no AlarmKit
+/// types in the test bundle).
+private enum SystemAlarmScheduleError: Error {
+    case refused
+}
+
+// MARK: - Authorization-state mapping (iOS 26 runtime only)
+
+/// [ALARMKIT-ALARMS] (2026-09-11) The one test that names AlarmKit enum
+/// cases — in METHOD BODIES only. No declaration in this class is
+/// AlarmKit-typed, so metadata completion is safe everywhere; the
+/// `@available` gate makes XCTest skip it on pre-26 runtimes.
+@available(iOS 26.0, *)
+final class AlarmKitAuthorizationStateMappingTests: XCTestCase {
+
+    func testAuthorizationStateMapping() {
+        XCTAssertEqual(AlarmKitAlarmBackend.map(.notDetermined), .notDetermined)
+        XCTAssertEqual(AlarmKitAlarmBackend.map(.denied), .denied)
+        XCTAssertEqual(AlarmKitAlarmBackend.map(.authorized), .authorized)
     }
 }

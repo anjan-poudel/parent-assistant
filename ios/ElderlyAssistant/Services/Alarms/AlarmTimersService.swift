@@ -273,12 +273,16 @@ final class AlarmScheduler {
 
     /// Pure backend selection, isolated for tests: AlarmKit ONLY when the
     /// runtime actually has it (the `#available` gate is what makes the
-    /// boolean honest on every simulator/device).
+    /// boolean honest on every simulator/device). Every AlarmKit-touching
+    /// reference sits inside this guard — nothing outside it links the
+    /// iOS-26-only types (see `AlarmKitAlarmBackend.swift`).
     static func makeAlarmBackend(isAlarmKitAvailable: Bool,
                                  notifications: LocalNotificationScheduling,
                                  locale: Locale) -> AlarmSchedulingBackend {
         if isAlarmKitAvailable, #available(iOS 26.0, *) {
-            return AlarmKitAlarmBackend(notifications: notifications, locale: locale)
+            return AlarmKitAlarmBackend(manager: ProductionSystemAlarmManager(),
+                                        notifications: notifications,
+                                        locale: locale)
         }
         return UNAlarmBackend(notifications: notifications, locale: locale)
     }
