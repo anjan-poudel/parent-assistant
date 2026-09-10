@@ -16,6 +16,15 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            // [UNIT-TEST-HOST] The app's automatic boot never runs under
+            // XCTest: the post-first-frame composition is main-thread
+            // work that would overlap the first test's execution (P0-1
+            // defers it exactly one turn past launch) and trip the test
+            // watchdog — reproducible host kill on iOS 18.3 simulators.
+            // Tests construct their own coordinators and call `start()`
+            // explicitly when they need boot behavior; the host app
+            // boots nothing.
+            guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
             if coordinator.onboardingState.hasSeenOnboarding {
                 coordinator.start()
             }
