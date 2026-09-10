@@ -177,7 +177,12 @@ struct HomeView: View {
                 .padding(.horizontal, 20)
                 .padding(.bottom, 8)
             }
-            .navigationBarHidden(true)
+            // Home paints its own top bar (HomeTopBar), so the system
+            // navigation bar is hidden entirely. `.toolbar(.hidden,
+            // for: .navigationBar)` is the iOS 16 form —
+            // `.navigationBarHidden(true)` is deprecated and on iOS 16+
+            // can leave the bar's layout space behind on first render.
+            .toolbar(.hidden, for: .navigationBar)
             // Value-based navigation (iOS 16 pattern). The previous
             // navigationDestination(isPresented:) with a derived binding
             // is fragile — it silently fails to present on some iOS 16
@@ -621,12 +626,18 @@ struct TalkButton: View {
                 readiness,
                 stateLabel: session.state.buttonText(locale: locale),
                 locale: locale)))
-            // The hold-to-reset gesture + VoiceOver hint exist ONLY in
-            // reset-eligible states. An always-attached long press would
+            // The hold-to-reset gesture + VoiceOver hint are ENABLED only
+            // in reset-eligible states. An always-LIVE long press would
             // swallow the tap on holds ≥ `talkResetHoldSeconds` in
             // .speaking too — changing the "hold to stop the reply" tap
             // that users rely on today (TALK-CRASH-FIX, 2026-09-07).
-            .if(resetHoldable, ResetHoldAffordance(
+            // The modifier itself is attached unconditionally and gates
+            // its gestures from the inside (`GestureMask`), so flipping
+            // eligibility never changes the hero's view type — the old
+            // `.if(resetHoldable, …)` swapped the subtree's type and
+            // rebuilt everything under the disc on every state change.
+            .modifier(ResetHoldAffordance(
+                isEnabled: resetHoldable,
                 holdSeconds: DesignTokens.talkResetHoldSeconds,
                 // 40pt finger travel before the hold is abandoned — far
                 // more forgiving than the 10pt default for unsteady
@@ -649,7 +660,7 @@ struct TalkButton: View {
             // 2026-09-08).
             Text(statusTextLine)
                 .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .medium))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
                 .multilineTextAlignment(.center)
 
             // [P0-2] The ONE recovery a failed boot-time start offers —
@@ -818,40 +829,104 @@ struct TalkButton: View {
 // MARK: - Hold-to-reset affordance (TALK-CRASH-FIX, 2026-09-07)
 
 /// Attaches the Talk hero's hold-to-reset long press AND its VoiceOver
-/// hint in one modifier so the two can be applied conditionally (see the
-/// `.if` at the call site). Conditional attachment matters: in
+/// hint in one modifier. The modifier is applied UNCONDITIONALLY; its
+/// gestures are switched on and off from the inside via `GestureMask`
+/// (`isEnabled`), so an eligibility flip never changes the hero's view
+/// type. The previous `.if(resetHoldable, ResetHoldAffordance(…))`
+/// returned one type when eligible and another when not, so every
+/// .idle ⇄ .speaking flip tore down and rebuilt the whole talk-stage
+/// subtree instead of just re-rendering it.
+///
+/// Conditional ENABLEMENT still matters, exactly as before: in
 /// non-reset states (.speaking, .awaitingConfirmation) the hero must
-/// stay a plain tap target — an always-attached long press would swallow
-/// the tap on holds ≥ `talkResetHoldSeconds` there, changing the
-/// "hold to stop the reply" behavior users rely on today.
+/// stay a plain tap target — a live long press would swallow the tap on
+/// holds ≥ `talkResetHoldSeconds` there, changing the "hold to stop the
+/// reply" behavior users rely on today. With `.none` no recognizer is
+/// installed at all, which is the old "modifier not attached" state.
 private struct ResetHoldAffordance: ViewModifier {
+    /// The call site's `resetHoldable`: when false, neither gesture is
+    /// installed and the hint is cleared.
+    let isEnabled: Bool
     let holdSeconds: TimeInterval
     let maxDistance: CGFloat
     let accessibilityHint: String
     let onReset: () -> Void
     let onPressingChanged: (Bool) -> Void
 
+    /// True from touch-down until the hold ends (reset fired, finger
+    /// released, or the finger travelled past `maxDistance`). The
+    /// end-of-hold notification fires exactly once per touch.
+    @State private var isPressing = false
+    /// Latches when this touch travels past `maxDistance`: the long press
+    /// has failed for good (a recognizer does not re-arm mid-touch), so
+    /// the ring must not restart if the finger wanders back inside the
+    /// radius. Cleared on touch-up, for the next touch.
+    @State private var hasMovedTooFar = false
+
     func body(content: Content) -> some View {
         content
-            .accessibilityHint(Text(accessibilityHint))
-            .onLongPressGesture(minimumDuration: holdSeconds,
-                                maximumDistance: maxDistance,
-                                perform: onReset,
-                                onPressingChanged: onPressingChanged)
+            .gesture(
+                LongPressGesture(minimumDuration: holdSeconds, maximumDistance: maxDistance)
+                    .onEnded { _ in
+                        // Stand the hold tracking down BEFORE the reset,
+                        // so the caller's status line has already left
+                        // the hold hint when the reset publishes.
+                        endPress()
+                        onReset()
+                    },
+                including: gestureMask
+            )
+            .simultaneousGesture(
+                // Touch-down/release tracking for the hold hint + the
+                // progress arc (the long press itself only speaks on
+                // success). Simultaneous, so the hero's own tap is
+                // unaffected; the arc stands down as soon as the finger
+                // travels past `maxDistance`, mirroring the long press's
+                // own failure rule, so it is never seen filling for a
+                // hold that cannot fire.
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        guard !hasMovedTooFar else { return }
+                        let travelled = hypot(value.translation.width,
+                                              value.translation.height)
+                        if travelled > maxDistance {
+                            hasMovedTooFar = true
+                            endPress()
+                        } else if !isPressing {
+                            beginPress()
+                        }
+                    }
+                    .onEnded { _ in
+                        hasMovedTooFar = false
+                        endPress()
+                    },
+                including: gestureMask
+            )
+            .accessibilityHint(Text(isEnabled ? accessibilityHint : ""))
+            // A hold in flight when eligibility flips — a router utterance
+            // turned .listening into .speaking mid-hold — has its gestures
+            // detached by the mask, so no release callback can arrive:
+            // tear the tracking down here instead of leaving the hint and
+            // the arc stuck on screen.
+            .onChange(of: isEnabled) { enabled in
+                guard !enabled else { return }
+                endPress()
+            }
     }
-}
 
-/// Conditional-modifier helper: applies `modifier` only while `condition`
-/// holds. Used by the hero's reset affordance, which exists only in
-/// reset-eligible states. File-private — no other file sees it.
-private extension View {
-    @ViewBuilder
-    func `if`<M: ViewModifier>(_ condition: Bool, _ modifier: M) -> some View {
-        if condition {
-            self.modifier(modifier)
-        } else {
-            self
-        }
+    /// `.none` installs no recognizer — the pre-`.if` "not attached"
+    /// state, which keeps the hero a plain tap target.
+    private var gestureMask: GestureMask { isEnabled ? .all : .none }
+
+    private func beginPress() {
+        isPressing = true
+        onPressingChanged(true)
+    }
+
+    private func endPress() {
+        guard isPressing else { return }
+        isPressing = false
+        onPressingChanged(false)
     }
 }
 
