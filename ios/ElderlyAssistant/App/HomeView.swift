@@ -168,9 +168,6 @@ struct HomeView: View {
                     HomeDock(contactName: homePresentation.primaryContactName,
                              onAppliance: {
                                  coordinator.presentApplianceHelper(question: nil)
-                             },
-                             onOpenLeaf: { destination in
-                                 navPath.append(destination)
                              })
                     .equatable()
                 }
@@ -624,10 +621,13 @@ struct TalkButton: View {
             // keeps every existing affordance — tapping mid-cycle cancels
             // and recycles, tapping after a runtime error retries. [P0-2]
             // While loading or failed the hero is disabled (plain button
-            // style does not dim on its own — the opacity below is the
-            // disabled appearance).
+            // style does not dim on its own), and it is deliberately NOT
+            // opacity-dimmed either: the disc stays at FULL state color
+            // with white glyphs (≥4.5:1, unit tested), and the loading
+            // state is carried by the white spinner + localized label
+            // inside the disc. Greying the whole hero made the white text
+            // unreadable (user feedback, 2026-09-11).
             .disabled(isDisabled)
-            .opacity(isDisabled ? 0.5 : 1.0)
             .accessibilityLabel(Text(TalkReadinessCopy.accessibilityLabel(
                 readiness,
                 stateLabel: session.state.buttonText(locale: locale),

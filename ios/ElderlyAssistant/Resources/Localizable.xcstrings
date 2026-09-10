@@ -14881,13 +14881,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Starting voice…"
+            "value" : "Voice stack loading…"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "आवाज सुरु हुँदैछ…"
+            "value" : "आवाज लोड हुँदैछ…"
           }
         }
       }
@@ -14922,23 +14922,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "फेरि प्रयास गर्नुहोस्"
-          }
-        }
-      }
-    },
-    "home.dock.more" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "More"
-          }
-        },
-        "ne" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "अरू"
           }
         }
       }
