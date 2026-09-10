@@ -126,10 +126,44 @@ final class VoicePipeline {
     /// mid-utterance-pause protection for slow elderly speech. The
     /// noise-stall case (energy parked in the EnergyVAD hold band, where
     /// the hangover never even starts counting) is bounded instead by the
-    /// EnergyVAD force end (`forceEndAfterSilenceMs`, 7 s) and the total
-    /// capture cap above.
+    /// EnergyVAD force end (`forceEndAfterSilenceMs`, 3 s — [VAD-RT]
+    /// tightened from 7 s so the worst-case speech-end → vad_end gap sits
+    /// inside the 1-3 s target) and the total capture cap above.
     private static let endOfUtteranceMs: Int = 900
-    private var pcmBuffer: [Int16] = []
+
+    // MARK: - Frame accumulators ([VAD-RT])
+    //
+    // The idle wake-word path and the capture VAD path previously shared
+    // ONE `pcmBuffer`, and both used `prefix`/`removeFirst` per frame —
+    // an O(n) shift per 512-sample frame plus a per-frame array copy.
+    // They now have SEPARATE accumulators (a capture start can never
+    // inherit partial wake-word frames, nor a resume partial capture
+    // frames) drained by an index cursor with rare amortized compaction,
+    // so per-frame cost is one bounded slice-copy + the detector's own
+    // processing. The VAD frame loop is timed per frame for the
+    // `vad_frame_latency` diagnostic (see `vadClock`).
+    private var wakeFrameBuffer: [Int16] = []
+    private var vadFrameBuffer: [Int16] = []
+    private var vadFrameConsumed = 0
+    /// Compaction threshold: below this many consumed samples the cursor
+    /// just walks forward; at/above it the consumed prefix is dropped in
+    /// one amortized move (a capture pushes ~500 samples/s, so compaction
+    /// runs roughly once per 16 s of audio — never on the hot path).
+    private static let vadFrameCompactionThreshold = 16_384
+    /// [VAD-RT] Monotonic nanosecond clock for the VAD latency
+    /// diagnostics. Injectable on the instance so seam tests can pin the
+    /// hop-wait and frame-latency math deterministically.
+    var vadClock: () -> UInt64 = { DispatchTime.now().uptimeNanoseconds }
+    /// [VAD-RT] Per-capture VAD frame-processing stats — count, total ns,
+    /// and max ns per frame, measured AROUND frame extraction +
+    /// `vad.process` on the processing queue (the honest on-queue cost).
+    /// Reset at capture start; reported once per capture by
+    /// `reportVADFrameLatency` (from the VAD end hop, else the STT
+    /// completion tail).
+    private var vadFrameCount = 0
+    private var vadFrameTotalNs: UInt64 = 0
+    private var vadFrameMaxNs: UInt64 = 0
+    private var vadFrameLatencyReported = false
     /// Held only during the VAD-gated capture phase — how far past silence
     /// onset we've counted before firing `finish()`.
     private var silenceCounter: Int = 0
@@ -271,11 +305,29 @@ final class VoicePipeline {
     /// Hop to main first, then re-check generation + state — by the time
     /// the hop runs the capture may already be over (stop(), or a newer
     /// capture started), and finish() must not cross generations.
+    ///
+    /// [VAD-RT] First-turn instrumentation: `vad_fired` is marked HERE,
+    /// on the queue the VAD callback fired from, BEFORE the hop — the
+    /// tracer's next stage (`vad_end`, marked after the hop) therefore
+    /// carries the main-queue hop WAIT as its ms. That split is the
+    /// first-turn stall detector: a turn whose `vad_fired` stage is large
+    /// means the main thread was busy (the simulator's main-thread KWS
+    /// build, post-boot UI churn), NOT that the VAD algorithm was slow —
+    /// the two failure classes were previously indistinguishable in the
+    /// single `turn_start → vad_end` span. The end event also carries the
+    /// measured `hop_ms`, and `vad_frame_latency` reports the per-frame
+    /// VAD cost for the same capture.
     private func finishCaptureFromVAD(generation: Int, eventType: String) {
+        turnTracer?.mark("vad_fired")
+        let firedAt = vadClock()
         DispatchQueue.main.async { [weak self] in
             guard let self, self.captureGeneration == generation,
                   self.state == .capturingCommand else { return }
-            self.emit(eventType, outcome: "success")
+            let now = self.vadClock()
+            let hopMs = now >= firedAt ? (now - firedAt) / 1_000_000 : 0
+            self.emit(eventType, outcome: "success",
+                      metadata: ["hop_ms": "\(hopMs)"])
+            self.reportVADFrameLatency(eventType: "vad_frame_latency")
             // [TURN-TIMING] The user stopped speaking — capture ends.
             self.turnTracer?.mark("vad_end")
             self.speechRecognizer.finish()
@@ -484,11 +536,11 @@ final class VoicePipeline {
         // audio into the engine right after the reply ends, which is
         // exactly the false wake this gate exists to prevent.
         guard wakeWordGate?.allowsWakeWordAudio ?? true else { return }
-        pcmBuffer.append(contentsOf: samples)
+        wakeFrameBuffer.append(contentsOf: samples)
         let frameLength = wakeWordEngine.frameLength
-        while pcmBuffer.count >= frameLength {
-            let frame = Array(pcmBuffer.prefix(frameLength))
-            pcmBuffer.removeFirst(frameLength)
+        while wakeFrameBuffer.count >= frameLength {
+            let frame = Array(wakeFrameBuffer.prefix(frameLength))
+            wakeFrameBuffer.removeFirst(frameLength)
             wakeWordEngine.process(frame)
         }
     }
@@ -555,14 +607,49 @@ final class VoicePipeline {
             }
         }
         // Push to VAD — chunks of its expected frame length.
+        //
+        // [VAD-RT] The frame loop is the hot path the whole end-of-
+        // utterance latency depends on: each iteration is timed with the
+        // injected monotonic clock (frame extraction + `vad.process`) and
+        // the per-capture max/mean is reported by `vad_frame_latency`.
+        // The cursor + amortized compaction replaces the old per-frame
+        // `removeFirst` (an O(n) shift per frame), so the steady-state
+        // per-frame cost is one bounded slice copy + the detector.
         guard let vad = vad else { return }
-        pcmBuffer.append(contentsOf: enhanced)
+        vadFrameBuffer.append(contentsOf: enhanced)
         let frameLength = vad.frameLength
-        while pcmBuffer.count >= frameLength {
-            let frame = Array(pcmBuffer.prefix(frameLength))
-            pcmBuffer.removeFirst(frameLength)
+        while vadFrameBuffer.count - vadFrameConsumed >= frameLength {
+            let start = vadFrameConsumed
+            let t0 = vadClock()
+            let frame = Array(vadFrameBuffer[start..<(start + frameLength)])
             vad.process(frame)
+            let elapsed = vadClock() - t0
+            vadFrameConsumed += frameLength
+            vadFrameCount += 1
+            vadFrameTotalNs &+= elapsed
+            vadFrameMaxNs = max(vadFrameMaxNs, elapsed)
         }
+        if vadFrameConsumed >= Self.vadFrameCompactionThreshold {
+            vadFrameBuffer.removeFirst(vadFrameConsumed)
+            vadFrameConsumed = 0
+        }
+    }
+
+    /// [VAD-RT] Emits the per-capture `vad_frame_latency` diagnostic —
+    /// max/mean microseconds per VAD frame on the processing queue —
+    /// exactly once per capture. Called from the VAD end hop; the STT
+    /// completion tail calls it as the fallback for captures that end
+    /// without a VAD end (timeout/wedge), so every capture reports.
+    /// PII-free: only counts and durations.
+    private func reportVADFrameLatency(eventType: String) {
+        guard !vadFrameLatencyReported, vadFrameCount > 0 else { return }
+        vadFrameLatencyReported = true
+        let meanNs = vadFrameTotalNs / UInt64(vadFrameCount)
+        emit(eventType, outcome: "info", metadata: [
+            "frames": "\(vadFrameCount)",
+            "max_us": "\(vadFrameMaxNs / 1_000)",
+            "mean_us": "\(meanNs / 1_000)",
+        ])
     }
 
     /// Builds a fresh 16 kHz int16 mono buffer holding `samples` — used
@@ -598,8 +685,17 @@ final class VoicePipeline {
         // bumps the counter — see `captureGeneration` (TALK-CRASH-FIX).
         captureGeneration += 1
         let generation = captureGeneration
-        state = .capturingCommand
-        pcmBuffer.removeAll()
+        // [VAD-RT] Fresh capture epoch: clear BOTH frame accumulators
+        // (partial wake-word frames must never leak into a capture, nor
+        // partial capture frames into the next) and reset the per-capture
+        // VAD frame-latency stats.
+        wakeFrameBuffer.removeAll()
+        vadFrameBuffer.removeAll()
+        vadFrameConsumed = 0
+        vadFrameCount = 0
+        vadFrameTotalNs = 0
+        vadFrameMaxNs = 0
+        vadFrameLatencyReported = false
         silenceCounter = 0
         vadHeardSpeech = false
         // [NOISE-FILTER] Capture bookend (start) — see
@@ -622,11 +718,22 @@ final class VoicePipeline {
             if audioEngine.isRunning { audioEngine.stop() }
         } else {
             // Push mode: our tap stays live. Prime the VAD and wire its
-            // end-of-utterance callback to THIS capture's generation.
+            // end-of-utterance callback to THIS capture's generation —
+            // [VAD-RT] BEFORE the state flip below: a capture chunk can
+            // only route into `feedCapture` once `state` is
+            // `.capturingCommand`, so priming first guarantees the first
+            // chunk is never processed against an un-reset detector (the
+            // old order let the processing queue race main's reset with
+            // the first frames — benign but sloppy; the first turn paid
+            // it most often, right after launch).
             vad?.reset()
             vad?.start(endOfUtteranceMs: Self.endOfUtteranceMs)
             wireVADCallbacks()
         }
+        // [VAD-RT] Flip LAST: every handler the processing queue runs
+        // from here on is guaranteed to see a primed VAD (above) and
+        // cleared accumulators (top of this method).
+        state = .capturingCommand
 
         // `Self.captureTimeoutSeconds` after startListening, if we haven't
         // already exited capturingCommand, the STT's own timeout has fired
@@ -687,6 +794,11 @@ final class VoicePipeline {
             if self.vad != nil, !self.vadHeardSpeech {
                 self.emit("capture_ended_no_vad_speech", outcome: "info")
             }
+            // [VAD-RT] Captures that end WITHOUT a VAD end (STT timeout,
+            // wedge guard) still report their VAD frame-processing cost —
+            // the VAD end hop reports it first on the normal path, this
+            // is the once-per-capture fallback.
+            self.reportVADFrameLatency(eventType: "vad_frame_latency")
             // [TURN-TIMING] Recognition settled (success OR failure) —
             // the ASR span closes here.
             self.turnTracer?.mark("asr_done")

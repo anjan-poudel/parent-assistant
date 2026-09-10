@@ -680,6 +680,11 @@ final class AppCoordinator: ObservableObject {
     /// (or run) this launch — the one-shot guard for the post-ready
     /// wake-word build.
     private var deferredKWSBuildScheduled = false
+    /// [VAD-RT] True when the deferred KWS build found a live voice turn
+    /// and deferred itself — `handlePipelineState`'s `.idle` case
+    /// re-schedules it so the main-thread (simulator) sherpa session
+    /// construction can never overlap a capture's `vad_end` main hop.
+    private var deferredKWSBuildPendingWhileBusy = false
     /// [STARTUP-R2] The short main-thread deferral between the speak
     /// affordance going live and the sherpa KWS build starting — the
     /// build never contributes to perceived startup; wake-word
@@ -2451,6 +2456,24 @@ final class AppCoordinator: ObservableObject {
     /// wake-word and manual Talk are separate capabilities.
     private func buildDeferredWakeWordEngine() {
         guard voicePipeline != nil else { return }
+        // [VAD-RT] A live voice turn must never share the main thread
+        // with the KWS session build. The DEVICE path already runs the
+        // build on `wakeWordBuildQueue` (off-main — the sherpa ONNX
+        // off-main segfault is an x86_64 SIMULATOR defect, so the device
+        // build stays on the background executor); only `applyWakeWord
+        // Engine` lands on main there and it is cheap. The SIMULATOR
+        // path constructs the session ON MAIN (the segfault workaround)
+        // and that can take seconds — exactly the window in which
+        // `finishCaptureFromVAD`'s main hop waits, delaying the
+        // capture's `vad_end`/`finish()` by the whole build. When a
+        // capture is live here, defer until the pipeline is idle again:
+        // the retry hook lives in `handlePipelineState`'s `.idle` case.
+        guard voicePipeline?.state == .idle else {
+            deferredKWSBuildPendingWhileBusy = true
+            print("[AppCoordinator] deferred KWS build: voice turn live — "
+                + "deferring until idle")
+            return
+        }
         #if targetEnvironment(simulator)
         applyWakeWordEngine(Self.makeWakeWordEngine(observabilityBus: observabilityBus))
         #else
@@ -2892,6 +2915,16 @@ final class AppCoordinator: ObservableObject {
             voiceSession.transition(to: speakingCount > 0 ? .speaking : .idle)
             cancelVoiceWatchdog()
             cancelVoiceStartWatchdog()
+            // [VAD-RT] A deferred KWS build that dodged a live capture
+            // (see `buildDeferredWakeWordEngine`) re-schedules now the
+            // pipeline has settled back to idle — the main-thread
+            // simulator session construction can never overlap a
+            // capture's `vad_end` main hop.
+            if deferredKWSBuildPendingWhileBusy {
+                deferredKWSBuildPendingWhileBusy = false
+                deferredKWSBuildScheduled = false
+                scheduleDeferredKWSBuildIfNeeded()
+            }
             // Voice Processing I/O preset A/B (P0, slice C): a flip that
             // landed mid-turn applies now the pipeline has settled back
             // to idle — and only once no reply is playing (every speech

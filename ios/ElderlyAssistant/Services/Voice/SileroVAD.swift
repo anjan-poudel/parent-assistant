@@ -133,26 +133,50 @@ final class NullVAD: VoiceActivityDetector {
 /// runs, the reference DECAY IS FROZEN — the reference must not sink
 /// toward the background, or band noise would cross it frame-by-frame and
 /// keep resetting the timer forever (the same chicken-and-egg the
-/// 2026-09-07 note describes). After `forceEndAfterSilenceMs` (7 s
-/// production) with no clear-speech frame, the utterance is force-ended
-/// via `onForcedEndOfUtterance` — VoicePipeline then emits `vad_force_end`
+/// 2026-09-07 note describes). After `forceEndAfterSilenceMs` (3 s
+/// production — [VAD-RT] 2026-09-11, tightened from 7 s) with no
+/// clear-speech frame, the utterance is force-ended via
+/// `onForcedEndOfUtterance` — VoicePipeline then emits `vad_force_end`
 /// and feeds the recognizer exactly like a normal end.
+///
+/// [VAD-RT] Why 3 s: the user's device logs (vad_end ~105 s class) made
+/// the end-of-utterance bound the product's dominant complaint; the
+/// 7 s window still meant a worst-case "listening" tail of 7 s after the
+/// last word. The mid-speech protection the window buys is for pauses
+/// whose residual energy sits in the BAND — real quiet pauses are
+/// already ended by the 0.9 s hangover by design. 3 s keeps band-energy
+/// pauses of up to ~3 s alive (well above the documented elderly pause
+/// of 0.5-0.7 s — a pause beyond 3 s is a stopped utterance by any
+/// product measure), and it caps the worst-case speech-end → vad_end gap
+/// at ~3 s, inside the task's 1-3 s target. The captured audio is
+/// preserved either way (`finish()`, never cancel — a force-end
+/// transcript includes everything the user said before the cut).
 ///
 /// Trade-off (deliberate): a speaker who falls silent for the whole force
 /// window and THEN resumes — with the interim energy in the band — is cut
-/// at the force end. That is the same cut the recognizer's fixed capture
-/// cap used to impose at 8 s; the force end just moves it to speech-end +
-/// 7 s, keeps the audio (finish(), never cancel()), and reports honestly.
-/// The freeze also means a quieter continuation no longer re-anchors the
-/// reference by decay (the old ~1-2 s re-anchor path); it is held in the
-/// band until the force end. Energy at or above the reference still
-/// resets everything, so continuous speech keeps the utterance alive.
+/// at the force end. The freeze means a quieter continuation no longer
+/// re-anchors the reference by decay (the old ~1-2 s re-anchor path); it
+/// is held in the band until the force end. Energy at or above the
+/// reference still resets everything, so continuous speech keeps the
+/// utterance alive.
+/// [VAD-RT] Thread-safety: `process` runs on the pipeline's processing
+/// queue while `start`/`stop`/`reset` arrive from the main queue (capture
+/// boundaries, hot-swaps, `stop()`). An internal NSLock serializes the
+/// two, and every callback fires AFTER the lock is released, so a
+/// callback that re-enters the VAD (or blocks) can never deadlock the
+/// frame path. The lock is uncontended except at capture boundaries —
+/// the per-frame cost is tens of nanoseconds (pinned by
+/// `testFrameProcessingBudget`).
 final class EnergyVAD: VoiceActivityDetector {
     let requiredSampleRate: Double = 16_000
     let frameLength: Int = 512
     var onSpeechStateChange: ((Bool) -> Void)?
     var onEndOfUtterance: (() -> Void)?
     var onForcedEndOfUtterance: (() -> Void)?
+
+    /// Serializes `process` (processing queue) against `start`/`stop`/
+    /// `reset` (main queue) — see the [VAD-RT] class note.
+    private let lock = NSLock()
 
     /// Speech-start threshold = noiseFloor x this (before clamping).
     private let speechMultiplier: Float
@@ -189,7 +213,9 @@ final class EnergyVAD: VoiceActivityDetector {
     /// still-active utterance is force-ended. Must be well above
     /// `endOfUtteranceMs` (the normal end always wins in real quiet) and
     /// below the recognizer's total capture cap (22 s), which bounds the
-    /// no-speech and continuous-speech cases.
+    /// no-speech and continuous-speech cases. [VAD-RT] 3 s production:
+    /// the tightest window that still protects band-energy pauses far
+    /// beyond the documented 0.5-0.7 s elderly-speech pause.
     private let forceEndAfterSilenceMs: Int
     /// `forceEndAfterSilenceMs` in 32 ms frames, precomputed.
     private let forceEndAfterSilenceFrames: Int
@@ -223,7 +249,7 @@ final class EnergyVAD: VoiceActivityDetector {
          minSpeechThreshold: Float = 0.012,
          maxSpeechThreshold: Float = 0.10,
          initialNoiseFloor: Float = 0.005,
-         forceEndAfterSilenceMs: Int = 7000) {
+         forceEndAfterSilenceMs: Int = 3000) {
         self.speechMultiplier = speechMultiplier
         self.floorAlpha = floorAlpha
         self.dropRatio = dropRatio
@@ -248,28 +274,47 @@ final class EnergyVAD: VoiceActivityDetector {
     }
 
     func start(endOfUtteranceMs: Int) {
+        lock.lock()
         requiredQuietFrames = max(1, Int(ceil((Double(endOfUtteranceMs) / 1000.0) /
                                             (Double(frameLength) / requiredSampleRate))))
         running = true
-        reset()
+        resetLocked()
+        lock.unlock()
     }
 
     func stop() {
+        lock.lock()
         running = false
+        lock.unlock()
     }
 
     func reset() {
+        lock.lock()
+        resetLocked()
+        lock.unlock()
+    }
+
+    /// Locked reset — the shared body of `start` and `reset`. The
+    /// noiseFloor survives reset(): room calibration carries across
+    /// utterances within a capture session.
+    private func resetLocked() {
         speechActive = false
         speechLevel = 0
         quietFrames = 0
         hasReportedEnd = false
         framesSinceClearSpeech = 0
-        // noiseFloor survives reset(): room calibration carries across
-        // utterances within a capture session.
     }
 
     func process(_ pcm: [Int16]) {
-        guard running, !pcm.isEmpty, !hasReportedEnd else { return }
+        // [VAD-RT] Callbacks fire AFTER the lock is released — see the
+        // class note. Decision state is only ever mutated under the lock.
+        var fireSpeechStart = false
+
+        lock.lock()
+        guard running, !pcm.isEmpty, !hasReportedEnd else {
+            lock.unlock()
+            return
+        }
         let rms = Self.rms(pcm)
 
         if !speechActive {
@@ -278,9 +323,13 @@ final class EnergyVAD: VoiceActivityDetector {
                 speechLevel = rms
                 quietFrames = 0
                 framesSinceClearSpeech = 0
-                onSpeechStateChange?(true)
+                fireSpeechStart = true
             } else {
                 noiseFloor += floorAlpha * (rms - noiseFloor)
+            }
+            lock.unlock()
+            if fireSpeechStart {
+                onSpeechStateChange?(true)
             }
             return
         }
@@ -314,6 +363,7 @@ final class EnergyVAD: VoiceActivityDetector {
             quietFrames = 0
             framesSinceClearSpeech = 0
             speechLevel += speechLevelAlpha * (rms - speechLevel)
+            lock.unlock()
             return
         }
 
@@ -332,13 +382,14 @@ final class EnergyVAD: VoiceActivityDetector {
         // Every below-reference frame — band OR quiet — is "not clear
         // speech": accrue the force-end timer first. In production the
         // normal hangover (0.9 s) always fires long before the force
-        // window (7 s) whenever real quiet exists; the force end only
+        // window (3 s) whenever real quiet exists; the force end only
         // trips when noise parks in the band and the quiet counter never
         // accrues.
         framesSinceClearSpeech += 1
         if framesSinceClearSpeech >= forceEndAfterSilenceFrames {
             hasReportedEnd = true
             speechActive = false
+            lock.unlock()
             onSpeechStateChange?(false)
             onForcedEndOfUtterance?()
             return
@@ -347,6 +398,7 @@ final class EnergyVAD: VoiceActivityDetector {
         if rms >= endLevel {
             // The band: hold the quiet counter (see above) — this frame is
             // neither quiet enough to accrue nor loud enough to reset.
+            lock.unlock()
             return
         }
 
@@ -357,9 +409,12 @@ final class EnergyVAD: VoiceActivityDetector {
         if quietFrames >= requiredQuietFrames {
             hasReportedEnd = true
             speechActive = false
+            lock.unlock()
             onSpeechStateChange?(false)
             onEndOfUtterance?()
+            return
         }
+        lock.unlock()
     }
 
     private static func rms(_ pcm: [Int16]) -> Float {

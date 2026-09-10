@@ -85,10 +85,18 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
         /// [VAD-TUNE] Real storage (not the protocol's default no-op) so
         /// the pipeline's forced-end wiring is reachable from tests.
         var onForcedEndOfUtterance: (() -> Void)?
-        func start(endOfUtteranceMs: Int) {}
-        func stop() {}
-        func reset() {}
-        func process(_ pcm: [Int16]) {}
+        /// [VAD-RT] Call sequence across lifecycle methods + frame count —
+        /// pins the capture-start priming ORDER (reset/start before the
+        /// first process) and the frame-latency event math.
+        private(set) var calls: [String] = []
+        private(set) var frames: [[Int16]] = []
+        func start(endOfUtteranceMs: Int) { calls.append("start") }
+        func stop() { calls.append("stop") }
+        func reset() { calls.append("reset") }
+        func process(_ pcm: [Int16]) {
+            calls.append("process")
+            frames.append(pcm)
+        }
     }
 
     /// Async speaker that settles after a short suspension — long enough
@@ -268,10 +276,14 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
         // speak_queued commits BEFORE llm_start (it is spoken at route
         // time), and the reply's speak_queued trails llm_done — two
         // speak_queued/speak_finished pairs in one turn.
+        // [VAD-RT] `vad_fired` (marked on the VAD's queue, before the
+        // main hop) precedes `vad_end` (marked after the hop) — the
+        // hop-wait span between them is the first-turn main-thread stall
+        // detector.
         XCTAssertEqual(h.stageNames(), [
-            "turn_start", "vad_end", "asr_done", "speak_queued", "llm_start",
-            "router_done", "llm_done", "speak_queued", "speak_finished",
-            "speak_finished", "turn_end",
+            "turn_start", "vad_fired", "vad_end", "asr_done", "speak_queued",
+            "llm_start", "router_done", "llm_done", "speak_queued",
+            "speak_finished", "speak_finished", "turn_end",
         ])
         XCTAssertEqual(h.bus.turnTimingEvents[0].outcome, "success")
         XCTAssertNotNil(h.bus.turnTimingEvents[0].durationMs)
@@ -392,6 +404,14 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
         XCTAssertEqual(h.bus.turnTimingEvents.count, 1)
         XCTAssertTrue(h.stageNames().contains("vad_end"),
                       "the forced end marks vad_end like a normal end")
+        // [VAD-RT] The forced end also marks `vad_fired` before the hop —
+        // the same instrumentation as the normal end.
+        let stages = h.stageNames()
+        XCTAssertTrue(stages.contains("vad_fired"),
+                      "the forced end marks vad_fired like a normal end")
+        XCTAssertLessThan(stages.firstIndex(of: "vad_fired")!,
+                          stages.firstIndex(of: "vad_end")!,
+                          "vad_fired precedes vad_end (hop wait between them)")
     }
 
     /// The normal silence-detection end keeps its existing event and
@@ -414,5 +434,140 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
         XCTAssertFalse(h.bus.events.contains { $0.component == "voice_pipeline"
                 && $0.eventType == "vad_force_end" },
                        "a normal end must not emit the forced-end event")
+    }
+
+    // MARK: - VAD real-time diagnostics ([VAD-RT], 2026-09-11)
+    //
+    // The first-turn instrumentation: the hop wait between the VAD's
+    // fire (processing queue) and `finish()` (main hop) is measured and
+    // carried as `hop_ms` on the end event, and every capture reports
+    // its per-frame VAD processing cost via `vad_frame_latency`. These
+    // seams pin both with an injected monotonic clock.
+
+    /// Deterministic injected clock: first read (the fire, on the VAD
+    /// callback's queue) = 0 ns, second read (the main hop) = 5 000 000
+    /// ns — so the measured hop is exactly 5 ms.
+    private final class FakeVADClock {
+        private let lock = NSLock()
+        private var callCount = 0
+        func now() -> UInt64 {
+            lock.lock()
+            defer { lock.unlock() }
+            let value: UInt64 = callCount == 0 ? 0 : 5_000_000
+            callCount += 1
+            return value
+        }
+    }
+
+    /// The VAD end event carries `hop_ms` — the main-queue hop wait the
+    /// VAD's end decision paid before `finish()`. This is the
+    /// first-turn stall detector: a large hop_ms on the FIRST turn
+    /// means the main thread was busy (e.g. the simulator's
+    /// main-thread KWS build), not that the VAD was slow.
+    func testVADEndEventCarriesMeasuredHopMs() {
+        let h = Harness()
+        let clock = FakeVADClock()
+        h.pipeline.vadClock = clock.now
+
+        h.pipeline.debugEnterIdleForTesting()
+        h.pipeline.simulateWakeWordDetection()
+
+        let processed = expectation(description: "end processed")
+        DispatchQueue.main.async {
+            h.vad.onEndOfUtterance?()
+            DispatchQueue.main.async { processed.fulfill() }
+        }
+        wait(for: [processed], timeout: 2)
+
+        let event = h.bus.events.first { $0.component == "voice_pipeline"
+            && $0.eventType == "vad_end_of_utterance" }
+        XCTAssertNotNil(event, "the end event fires")
+        XCTAssertEqual(event?.metadata["hop_ms"], "5",
+                       "the injected clock pins the measured main-hop wait at 5 ms")
+    }
+
+    /// Every VAD-driven capture end reports `vad_frame_latency` with the
+    /// per-frame processing stats accumulated on the processing queue
+    /// (frame count + max/mean microseconds, including frame extraction).
+    func testVadFrameLatencyEventReportsPerCaptureFrameStats() {
+        let h = Harness()
+        h.pipeline.debugEnterIdleForTesting()
+        h.pipeline.simulateWakeWordDetection()
+
+        // Feed 2048 samples -> 4 VAD frames through the real seam.
+        let format = AVAudioFormat(commonFormat: .pcmFormatInt16,
+                                   sampleRate: 16_000, channels: 1,
+                                   interleaved: true)!
+        let samples = [Int16](repeating: 3_000, count: 2_048)
+        let buffer = VoicePipeline.makeInt16Buffer(from: samples, format: format)
+        h.pipeline.feedCapture(pcm: samples, buffer: buffer)
+        XCTAssertEqual(h.vad.frames.count, 4,
+                       "the VAD consumes the stream sliced into 512-sample frames")
+
+        let processed = expectation(description: "end processed")
+        DispatchQueue.main.async {
+            h.vad.onEndOfUtterance?()
+            DispatchQueue.main.async { processed.fulfill() }
+        }
+        wait(for: [processed], timeout: 2)
+
+        let event = h.bus.events.first { $0.component == "voice_pipeline"
+            && $0.eventType == "vad_frame_latency" }
+        XCTAssertNotNil(event, "a VAD-ended capture reports vad_frame_latency")
+        XCTAssertEqual(event?.metadata["frames"], "4",
+                       "the reported frame count matches the frames processed")
+        let meanUs = event?.metadata["mean_us"].flatMap(UInt64.init)
+        let maxUs = event?.metadata["max_us"].flatMap(UInt64.init)
+        XCTAssertNotNil(meanUs, "mean_us is reported")
+        XCTAssertNotNil(maxUs, "max_us is reported")
+        XCTAssertLessThanOrEqual(meanUs ?? 0, maxUs ?? 0,
+                                 "the mean can never exceed the max")
+        XCTAssertLessThan(maxUs ?? .max, 32_000,
+                          "per-frame VAD cost sits far inside the 32 ms realtime frame budget")
+    }
+
+    /// [VAD-RT] Capture-start priming order: the VAD is reset and
+    /// started BEFORE any frame reaches it — the first capture chunk can
+    /// never be processed against an un-primed detector (the old order
+    /// let the processing queue race main's reset on the first turn).
+    func testVadIsPrimedBeforeAnyCaptureFrameProcesses() {
+        let h = Harness()
+        h.pipeline.debugEnterIdleForTesting()
+        h.pipeline.simulateWakeWordDetection()
+
+        let format = AVAudioFormat(commonFormat: .pcmFormatInt16,
+                                   sampleRate: 16_000, channels: 1,
+                                   interleaved: true)!
+        let samples = [Int16](repeating: 1_000, count: 512)
+        let buffer = VoicePipeline.makeInt16Buffer(from: samples, format: format)
+        h.pipeline.feedCapture(pcm: samples, buffer: buffer)
+
+        XCTAssertEqual(Array(h.vad.calls.prefix(3)), ["reset", "start", "process"],
+                       "reset/start must precede the first processed frame")
+    }
+
+    /// Captures that end WITHOUT a VAD end (STT timeout / wedge) still
+    /// report their VAD frame cost — the once-per-capture fallback in
+    /// the STT completion tail.
+    func testVadFrameLatencyFallsBackWhenCaptureEndsWithoutVADEnd() {
+        let h = Harness()
+        h.pipeline.debugEnterIdleForTesting()
+        h.pipeline.simulateWakeWordDetection()
+
+        let format = AVAudioFormat(commonFormat: .pcmFormatInt16,
+                                   sampleRate: 16_000, channels: 1,
+                                   interleaved: true)!
+        let samples = [Int16](repeating: 3_000, count: 2_048)
+        let buffer = VoicePipeline.makeInt16Buffer(from: samples, format: format)
+        h.pipeline.feedCapture(pcm: samples, buffer: buffer)
+
+        // No VAD end — the recognizer times out and settles the capture.
+        h.recognizer.complete(with: .failure(.timedOut))
+
+        let events = h.bus.events.filter { $0.component == "voice_pipeline"
+            && $0.eventType == "vad_frame_latency" }
+        XCTAssertEqual(events.count, 1,
+                       "exactly one vad_frame_latency per capture, even without a VAD end")
+        XCTAssertEqual(events.first?.metadata["frames"], "4")
     }
 }
