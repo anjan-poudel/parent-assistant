@@ -286,7 +286,11 @@ final class CommandRouterTests: XCTestCase {
         let exp = expectation(description: "speak delivered")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp.fulfill() }
         wait(for: [exp], timeout: 2.0)
-        XCTAssertEqual(speaker.utterances.count, 1, "the unavailable message must actually be spoken")
+        XCTAssertEqual(speaker.utterances.count, 2,
+                       "the pre-ack and the unavailable message must both be spoken")
+        XCTAssertEqual(speaker.utterances.first?.text,
+                       L10n.str("voiceAck.moment1", locale: Locale(identifier: "ne-NP")),
+                       "the LLM round-trip is acked before the dispatch result")
     }
 
     func testSendMessageWithResolvedContactPresentsComposeSheet() {
@@ -3015,20 +3019,24 @@ final class CommandRouterTurnHoldingTests: XCTestCase {
 
         XCTAssertEqual(result, .unrecognised(transcript: llmBoundTranscript))
         XCTAssertEqual(interpreter.interpretCallCount, 1)
-        // The model is still "thinking" — nothing spoken, turn pending:
-        // the pipeline must NOT return to idle here (that was the dip).
+        // The model is still "thinking" — only the pre-ack is committed,
+        // the turn stays pending: the pipeline must NOT return to idle
+        // here (that was the dip).
         XCTAssertTrue(router.isTurnReplyPending,
                       "the turn must stay pending while the interpreter round-trip is outstanding")
-        XCTAssertTrue(coordinator.assistantSpoken.isEmpty,
-                      "no reply speech may exist while the turn is pending")
+        XCTAssertEqual(coordinator.assistantSpoken, [L10n.str("voiceAck.moment1", locale: ne)],
+                       "the pre-ack is committed while the turn is pending, nothing else")
 
         // The completion lands: the brain abstained → the router commits
         // the re-prompt fallback and only then resolves the turn.
         interpreter.completeNext(with: nil)
 
-        XCTAssertEqual(coordinator.assistantSpoken, [L10n.str("router.reprompt", locale: ne)])
-        XCTAssertEqual(coordinator.speakingStarts, 1,
-                       "the fallback reply speech must be committed by the time the turn resolves")
+        XCTAssertEqual(coordinator.assistantSpoken,
+                       [L10n.str("voiceAck.moment1", locale: ne),
+                        L10n.str("router.reprompt", locale: ne)],
+                       "ack first, fallback second — the lane orders them")
+        XCTAssertEqual(coordinator.speakingStarts, 2,
+                       "the ack and the fallback reply speech must be committed by the time the turn resolves")
         XCTAssertFalse(router.isTurnReplyPending,
                        "the turn resolves only after the reply speech was committed")
     }
@@ -3046,15 +3054,19 @@ final class CommandRouterTurnHoldingTests: XCTestCase {
         _ = router.route(transcript: llmBoundTranscript)
 
         // The model is thinking — the session must hold "understanding".
+        // [VOICE-ACK] The pre-ack IS committed here (the "I heard you"
+        // beat), and nothing else.
         XCTAssertTrue(router.isTurnReplyPending)
-        XCTAssertTrue(coordinator.assistantSpoken.isEmpty)
+        XCTAssertEqual(coordinator.assistantSpoken, [L10n.str("voiceAck.moment1", locale: ne)])
 
         interpreter.completeNext(with: queryCommand(reply: modelReply))
 
         // The reply was spoken, and the turn resolved only after the
         // commit (speech-start hop precedes the deferred idle hop).
-        XCTAssertEqual(coordinator.assistantSpoken.first, modelReply)
-        XCTAssertEqual(coordinator.speakingStarts, 1)
+        XCTAssertEqual(coordinator.assistantSpoken,
+                       [L10n.str("voiceAck.moment1", locale: ne), modelReply],
+                       "ack first, reply second — the lane orders them")
+        XCTAssertEqual(coordinator.speakingStarts, 2)
         XCTAssertFalse(router.isTurnReplyPending)
     }
 
@@ -3077,9 +3089,11 @@ final class CommandRouterTurnHoldingTests: XCTestCase {
         XCTAssertEqual(result, .unrecognised(transcript: llmBoundTranscript))
         XCTAssertFalse(router.isTurnReplyPending,
                        "a synchronously-answered turn must not hold the pipeline")
-        XCTAssertEqual(coordinator.assistantSpoken, [L10n.str("router.reprompt", locale: ne)],
-                       "the fallback was committed synchronously inside route()")
-        XCTAssertEqual(coordinator.speakingStarts, 1)
+        XCTAssertEqual(coordinator.assistantSpoken,
+                       [L10n.str("voiceAck.moment1", locale: ne),
+                        L10n.str("router.reprompt", locale: ne)],
+                       "the ack then the fallback were committed synchronously inside route()")
+        XCTAssertEqual(coordinator.speakingStarts, 2)
     }
 
     /// (c) Deterministic-stage turns (topic pre-answer here) speak
@@ -3118,6 +3132,7 @@ final class CommandRouterTurnHoldingTests: XCTestCase {
         // release a dead turn, so a wedged interpreter can never silently
         // strand the pipeline in a busy state past that bound.
         XCTAssertTrue(router.isTurnReplyPending)
-        XCTAssertTrue(coordinator.assistantSpoken.isEmpty)
+        XCTAssertEqual(coordinator.assistantSpoken, [L10n.str("voiceAck.moment1", locale: ne)],
+                       "the pre-ack is committed; a wedged interpreter adds nothing after it")
     }
 }

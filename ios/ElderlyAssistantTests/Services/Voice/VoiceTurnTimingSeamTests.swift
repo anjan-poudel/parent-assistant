@@ -263,15 +263,19 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
                        "exactly ONE voice_turn_timing event per turn")
         // Chronological: llm_start fires inside route() (before it
         // returns), so it precedes router_done; speak stages trail the
-        // async interpret completion.
+        // async interpret completion. [VOICE-ACK] The pre-ack's
+        // speak_queued commits BEFORE llm_start (it is spoken at route
+        // time), and the reply's speak_queued trails llm_done — two
+        // speak_queued/speak_finished pairs in one turn.
         XCTAssertEqual(h.stageNames(), [
-            "turn_start", "vad_end", "asr_done", "llm_start", "router_done",
-            "llm_done", "speak_queued", "speak_finished", "turn_end",
+            "turn_start", "vad_end", "asr_done", "speak_queued", "llm_start",
+            "router_done", "llm_done", "speak_queued", "speak_finished",
+            "speak_finished", "turn_end",
         ])
         XCTAssertEqual(h.bus.turnTimingEvents[0].outcome, "success")
         XCTAssertNotNil(h.bus.turnTimingEvents[0].durationMs)
-        XCTAssertEqual(h.speaker.spoken, ["सबै ठीक छ।"],
-                       "the seam must not alter what the turn speaks")
+        XCTAssertEqual(h.speaker.spoken, ["एक छिन…", "सबै ठीक छ।"],
+                       "the pre-ack precedes the model reply — the seam alters nothing else")
     }
 
     // MARK: - Deterministic (sync) path
