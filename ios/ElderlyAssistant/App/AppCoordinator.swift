@@ -103,6 +103,19 @@ final class AppCoordinator: ObservableObject {
     private let bootQueue = DispatchQueue(label: "senios.startup.boot",
                                           qos: .userInitiated)
 
+    /// [BOOT-REVIEW P1-5] Utility-QoS serial queue for model
+    /// housekeeping — stale-encoder cleanup and the bundled STT model's
+    /// first-use install. Housekeeping is explicitly NOT user-blocking
+    /// work: it must never sit on the boot queue (which gates `.ready`)
+    /// or on main.
+    private let modelHousekeepingQueue = DispatchQueue(
+        label: "senios.models.housekeeping",
+        qos: .utility
+    )
+    /// One bundled-STT install at a time (the install is idempotent, but
+    /// re-entrancy would queue a second useless copy attempt).
+    private var bundledSTTInstallInFlight = false
+
     /// User's STT model pick from the UI. Nil = automatic selection.
     /// Persisted in UserDefaults (a UI preference, not a secret) and
     /// pushed to WhisperSpeechRecognizer so it survives restarts.
@@ -2444,20 +2457,28 @@ final class AppCoordinator: ObservableObject {
     /// paint, still skipped on the Gemini stack / cached model, so no
     /// new network activity happens at launch.
     private func bootFinishSetup() {
-        // Repair encoder installs from older builds: the bundled-encoder
-        // copy step normally runs at download finalize, so models cached
-        // before a naming fix (or before the encoder existed) sit without
-        // one. Idempotent — no-op when the target already exists.
-        for entry in ModelCatalog.entries(kind: .whisperBase) {
-            modelStore.installBundledCoreMLEncoder(for: entry.id)
-            // Bundled ggml models (the default medium) install the same
-            // way — first run never downloads them.
-            modelStore.installBundledModel(for: entry.id)
+        // [BOOT-REVIEW P1-5] The old per-entry `installBundledModel` +
+        // `installBundledCoreMLEncoder` loop is GONE from this slot. That
+        // loop copied the app-bundled 560 MB default ggml into Application
+        // Support on EVERY launch's boot ("first run never downloads it" —
+        // by copying hundreds of MB instead). Normal startup now copies
+        // nothing: the one bundled artifact the app can run (the default
+        // Nepali medium, `bundledResourceName != nil`) is installed only
+        // when the stack that needs it is actually selected, on the
+        // utility-QoS housekeeping queue (see
+        // `installBundledSTTModelIfNeeded`).
+        //
+        // What is left here is BOUNDED and idempotent: delete stale CoreML
+        // encoder directories (entries we no longer ship an encoder for —
+        // large-v3's CoreML path hangs on-device — would otherwise be
+        // auto-loaded by whisper.cpp). Every catalog entry currently
+        // declares `coreMLEncoderBundledName: nil`, so in this build the
+        // pass removes leftovers from older installs and nothing else.
+        // [BOOT-REVIEW P1-5] Runs at UTILITY QoS: this is housekeeping,
+        // not user-blocking work, and boot must never wait on it.
+        modelHousekeepingQueue.async { [weak self] in
+            self?.modelStore.removeStaleCoreMLBundles()
         }
-        // And the reverse: entries we no longer ship an encoder for
-        // (large-v3 — its CoreML path hangs on-device) get their stale
-        // encoder dir deleted, or whisper.cpp auto-loads it anyway.
-        modelStore.removeStaleCoreMLBundles()
 
         // Interpreter-availability fix (2026-09-06): restore the
         // assistant-brain model's one-time auto-download. `start()` is
@@ -3208,7 +3229,89 @@ final class AppCoordinator: ObservableObject {
             DispatchQueue.main.async { [weak self] in
                 self?.updateActiveSTTName()
             }
+            // [BOOT-REVIEW P1-5] The on-device stack is live and
+            // whisper.cpp may be missing its one bundled model — install
+            // it NOW, at first use, instead of copying hundreds of MB
+            // during boot. Post-first-frame by construction: the stack is
+            // applied from the boot's voice-start callback (or a Settings
+            // toggle), never from `init`.
+            installBundledSTTModelIfNeeded()
         }
+    }
+
+    /// [BOOT-REVIEW P1-5] Installs the ONE app-bundled STT model (the
+    /// default Nepali medium — the only catalog entry with a
+    /// `bundledResourceName`) the first time the on-device stack actually
+    /// needs it, so a normal launch copies NOTHING. The old boot loop
+    /// copied the 586 MB ggml into Application Support on every launch,
+    /// gating `.ready` behind a multi-second disk write.
+    ///
+    /// Gates, in order:
+    ///  - the on-device stack is ACTIVE (a Gemini household never pays
+    ///    for a model it will not use),
+    ///  - whisper.cpp is what the pure selection table would pick once a
+    ///    model IS present (an ANE device with WhisperKit installed runs
+    ///    WhisperKit — no copy),
+    ///  - the model is genuinely absent (idempotent), no install already
+    ///    in flight.
+    ///
+    /// The copy runs at UTILITY QoS on `modelHousekeepingQueue` — never
+    /// on the boot queue, which gates `.ready`, and never on main — and
+    /// reports determinate byte progress through `ModelDownloadService`,
+    /// so the model-specific UI shows the same bar a download shows.
+    /// When it lands, the stack is re-applied so whisper.cpp takes over
+    /// from the SFSpeechRecognizer fallback the missing model forced.
+    private func installBundledSTTModelIfNeeded() {
+        guard voiceEngineStack == .onDevice else { return }
+        let bundled = ModelCatalog.whisperMediumFinetunedNepali
+        guard !modelStore.isCached(bundled),
+              !bundledSTTInstallInFlight,
+              bundledSTTModelIsTheNextChoice() else { return }
+        bundledSTTInstallInFlight = true
+        // Force both lazy services HERE, on main: the copy's progress
+        // callbacks fire on the housekeeping queue and must not touch an
+        // uninitialised `lazy var`.
+        let downloads = modelDownloadService
+        let store = modelStore
+        downloads.reportBundledInstallProgress(
+            bundled,
+            received: 0,
+            totalBytes: ModelCatalog.entry(for: bundled)?.sizeBytes ?? 0)
+        modelHousekeepingQueue.async { [weak self] in
+            let installed = store.installBundledModel(for: bundled) {
+                received, total in
+                downloads.reportBundledInstallProgress(
+                    bundled, received: received, totalBytes: total)
+            }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.bundledSTTInstallInFlight = false
+                downloads.reportBundledInstallOutcome(
+                    bundled, installed: installed != nil)
+                guard installed != nil else {
+                    print("[AppCoordinator] bundled STT install failed")
+                    return
+                }
+                print("[AppCoordinator] bundled STT model installed — re-applying stack")
+                // The recognizer is only now `isAvailable`, so the table
+                // can finally choose whisper.cpp over SFSpeechRecognizer.
+                self.applyVoiceEngineStack()
+            }
+        }
+    }
+
+    /// True when granting whisper.cpp a usable model would make the pure
+    /// selection table pick it — i.e. the bundled copy is the engine this
+    /// device would actually run. Reuses the SAME table the live swap
+    /// consults (`applyVoiceEngineStack`), so the install gate and the
+    /// engine choice can never disagree.
+    private func bundledSTTModelIsTheNextChoice() -> Bool {
+        if case .whisperCpp = Self.onDeviceSTTChoice(
+            whisperKitAvailable: whisperKitSpeechRecognizer.isAvailable,
+            whisperCppAvailable: true) {
+            return true
+        }
+        return false
     }
 
     /// Re-applies the audio-session preset after `voiceProcessingEnabled`
