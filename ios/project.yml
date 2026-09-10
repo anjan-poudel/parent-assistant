@@ -118,6 +118,14 @@ targets:
       # resource.
       - path: ElderlyAssistant/Resources/AppIcons.xcassets
         buildPhase: resources
+      # [TIMER-ALARM] The loud timer-alarm bell loop (CC0, synthesized from
+      # scratch by tools/generate-timer-alarm-bell.py — license note in
+      # Resources/TimerAlarmBell.LICENSE.txt). Bundled for the in-app
+      # looping AVAudioPlayer AND the pre-iOS-26 UN notification fallback
+      # sound (custom notification sounds must be <= 30 s, linear PCM —
+      # this is ~4.6 s). Same single-file resource pattern as above.
+      - path: ElderlyAssistant/Resources/timer-alarm-bell.wav
+        buildPhase: resources
       # [LAUNCH-SCREEN] The pre-first-paint launch screen. Info.plist
       # already sets UILaunchStoryboardName=LaunchScreen; without this
       # resource entry the storyboard never lands in the bundle and iOS

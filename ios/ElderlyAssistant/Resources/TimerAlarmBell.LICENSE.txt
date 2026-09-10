@@ -1,0 +1,17 @@
+# timer-alarm-bell.wav — license note
+
+Source: generated from scratch by `ios/tools/generate-timer-alarm-bell.py`
+(sum of decaying sine partials, no recorded audio, no samples, no
+third-party content).
+
+License: CC0 1.0 Universal (public domain dedication).
+To the extent possible under law, the author has waived all copyright and
+related or neighboring rights to this sound recording and to the generator
+script that produced it.
+
+- 44.1 kHz, 16-bit, mono, linear PCM WAV, ~4.6 s (three bell strikes).
+- Used as: (1) the in-app timer-alarm loop (AVAudioPlayer, numberOfLoops = -1)
+  and (2) the custom UN notification sound for timer completion on the
+  pre-iOS-26 fallback path (custom notification sounds must be <= 30 s,
+  linear PCM).
+- Reproducible: run `python3 ios/tools/generate-timer-alarm-bell.py`.
