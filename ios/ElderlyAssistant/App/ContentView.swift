@@ -34,6 +34,14 @@ struct ContentView: View {
                 coordinator.pendingMessageDraft = nil
             }
         }
+        // [TIMER-ALARM] (2026-09-10) The full-screen ringing alarm —
+        // mounted at the root so it covers every screen (it is a
+        // fullScreenCover, which also sits above the app's sheets).
+        // Transparent no-op while the engine is idle.
+        .overlay(
+            TimerAlarmOverlay(engine: coordinator.timerAlarmEngine,
+                              onStop: coordinator.stopTimerAlarm)
+        )
         // .plugin intent: a plugin-provided view (e.g. the appliance
         // photo + overlay), presented app-wide.
         .sheet(item: $coordinator.pendingPluginPresentation) { presentation in

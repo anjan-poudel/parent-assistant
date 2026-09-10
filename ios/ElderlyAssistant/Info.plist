@@ -62,6 +62,8 @@
 	<string>Your daily routine (medicines, exercise, meals) is mirrored to the Calendar app so your family can see it too. The app works fully even if you say no.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Events you keep in the Calendar app (doctor visits, family plans) can be read so they appear here with a reminder, and your routine can be mirrored to a dedicated Sahayak calendar. With two-way mirroring switched on (off by default), changes you make to those mirrored events in the Calendar app update your routine here too. The app works fully even if you say no.</string>
+	<key>NSAlarmKitUsageDescription</key>
+	<string>Alarms you ask for by voice ring like the built-in Clock's alarms — even in silent mode — and can be stopped or snoozed from the Lock Screen. If you say no, the assistant cannot set alarms.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>Reminders you keep in the Reminders app can be read so they appear here with a reminder. Nothing is ever written to them. The app works fully even if you say no.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
@@ -74,6 +76,8 @@
 	<string>The assistant uses your location to tell you the local weather and to give you driving directions to your home or saved places (your current location is the route's start point). Nothing else in the app uses it, and you can say no.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>The assistant needs microphone access to listen for your voice commands and wake word. Your voice data never leaves this device.</string>
+	<key>NSAlarmKitUsageDescription</key>
+	<string>Timers you set are kept by your phone so they ring like a real alarm — loudly and full screen, even when this app is closed or the phone is on silent. You can say no; timers will then only ring while the app is open.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Speech recognition runs entirely on-device to understand your voice commands. No audio is sent to the cloud.</string>
 	<key>UIBackgroundModes</key>

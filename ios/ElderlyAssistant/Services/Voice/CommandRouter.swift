@@ -254,6 +254,16 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// outcome-returning contract as `requestAlarmOff`; the router
     /// speaks the honest "snoozed until <spoken time>" line on success.
     func requestAlarmSnooze(minutes: Int) -> AlarmSnoozeOutcome
+
+    /// [ALARMKIT-ALARMS] (2026-09-10) The honest denial line when an
+    /// alarm-set hits a permission denial — backend-specific copy:
+    /// AlarmKit authorization on iOS 26+ (`alarmAlarmKit.permissionDenied`),
+    /// notification permission before (`alarms.permissionDenied`). Same
+    /// requirement-with-extension-default pattern as the alarm members
+    /// above: the router holds the coordinator as a protocol reference,
+    /// so an extension-only member would bind statically and
+    /// `AppCoordinator`'s backend-aware key could never be reached.
+    var alarmPermissionDeniedKey: String { get }
     /// [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1: fires the
     /// proactive morning briefing ("read me my briefing"). The briefing
     /// speaks itself through the shell's speak queue (once per calendar
@@ -307,6 +317,11 @@ extension VoiceCommandCoordinating {
     // under test) makes the stage do anything.
     func requestAlarmOff() -> AlarmOffOutcome { .noAlarm }
     func requestAlarmSnooze(minutes: Int) -> AlarmSnoozeOutcome { .noAlarm }
+    // [ALARMKIT-ALARMS] (2026-09-10) Inert default — a conformer that
+    // does not opt in (every mock/double) keeps the historical
+    // notification-permission denial line. `AppCoordinator` overrides it
+    // with the backend-aware key.
+    var alarmPermissionDeniedKey: String { "alarms.permissionDenied" }
     // [MORNING-BRIEFING] (2026-09-07) Inert default — a conformer that
     // does not opt in (every mock/double across app and test target)
     // never fires a briefing, so the deterministic ladder stage falls
@@ -1025,7 +1040,11 @@ final class CommandRouter {
                 self.speak(text: text, locale: locale)
             case .permissionDenied:
                 self.emitAlarmTimers(eventType: "alarm_set", outcome: "permission_denied")
-                self.speakWithVisibleOutcome(key: "alarms.permissionDenied")
+                // [ALARMKIT-ALARMS] Backend-specific honest copy: the
+                // AlarmKit permission line on iOS 26+, the notification
+                // line before.
+                self.speakWithVisibleOutcome(
+                    key: self.coordinator?.alarmPermissionDeniedKey ?? "alarms.permissionDenied")
             case .atCapacity:
                 self.emitAlarmTimers(eventType: "alarm_set", outcome: "at_capacity")
                 self.speakWithVisibleOutcome(key: "alarms.capacity")
