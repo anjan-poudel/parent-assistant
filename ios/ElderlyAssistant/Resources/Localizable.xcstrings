@@ -14398,6 +14398,40 @@
           }
         }
       }
+    },
+    "home.setupOptionalCount" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld optional setup items"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld वैकल्पिक सेटअप काम"
+          }
+        }
+      }
+    },
+    "home.setupTalkNow" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Talk now, or finish setup"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अहिले बोल्नुहोस्, वा सेटअप पूरा गर्नुहोस्"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

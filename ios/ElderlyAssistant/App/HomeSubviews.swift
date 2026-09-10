@@ -407,10 +407,19 @@ extension FeedbackRegion: Equatable {
     }
 }
 
-/// The slim, dismissible-by-navigation setup strip (redesign spec §3.1):
-/// Home's only resume affordance for the onboarding wizard, and transient
-/// per-user — it must never push the hero off the viewport, so the region
-/// below the hero owns it.
+/// The slim setup strip (redesign spec §3.1): Home's only resume
+/// affordance for the onboarding wizard, and transient per-user — it must
+/// never push the hero off the viewport, so the region below the hero owns
+/// it.
+///
+/// Copy (design review: "clarify ready versus optional setup"): the
+/// pending steps are OPTIONAL — the app is usable while they remain, which
+/// is exactly what the rendered "3 tasks remaining" treatment failed to
+/// say — so the strip now reads "%lld optional setup items" with the
+/// reassurance line "Talk now, or finish setup" beneath it. Warning
+/// styling (the alert glyph and the warm reminder tint) is reserved for
+/// the one case that IS a degradation: `needsAttention`, i.e. a startup
+/// capability that actually failed.
 private struct SetupStrip: View {
     let setup: SetupPresentation
     let action: () -> Void
@@ -422,24 +431,43 @@ private struct SetupStrip: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 8) {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(DesignTokens.accent)
-                Text(L10n.fmt("home.setupRemaining",
-                              locale: locale,
-                              setup.pendingCount))
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
-                Spacer()
+            HStack(spacing: 10) {
+                Image(systemName: setup.needsAttention
+                      ? "exclamationmark.triangle.fill"
+                      : "checklist")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(setup.needsAttention
+                                     ? DesignTokens.stateError
+                                     : DesignTokens.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.fmt("home.setupOptionalCount",
+                                  locale: locale,
+                                  setup.pendingCount))
+                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                                    weight: .semibold))
+                        .foregroundStyle(DesignTokens.textPrimary)
+                    Text(L10n.str("home.setupTalkNow", locale: locale))
+                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                                    weight: .regular))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                }
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
             }
             .padding(.horizontal, 14)
-            .frame(height: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.setupReminder)
-            .clipShape(Capsule())
+            .padding(.vertical, 8)
+            // Minimum, never a fixed height: two 18pt lines — and Nepali
+            // at Accessibility XXL — must be able to expand instead of
+            // clipping.
+            .frame(minHeight: 56)
+            .background(setup.needsAttention
+                        ? DesignTokens.setupReminder
+                        : DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
         }
         .buttonStyle(.plain)
     }
