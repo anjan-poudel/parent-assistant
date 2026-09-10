@@ -142,13 +142,6 @@ struct HomeView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
-                // [BOOT-LATENCY → LAUNCH-SCREEN] The hero-branch spinner
-                // is an overlay now (no flow shift when it collapses),
-                // but the confirmation-chips branch still hosts it as a
-                // flow element — keep the whole-settle ease so the chips
-                // rise gently instead of snapping, matching the overlay's
-                // own 0.2s ease.
-                .animation(.easeInOut(duration: 0.2), value: boot.spinnerVisible)
             }
             // Dock pinned to the bottom edge (home-redesign 2026-09-08):
             // previously the dock was the last child of the fixed VStack,
@@ -276,13 +269,6 @@ struct HomeView: View {
             showsOpenSettings: stageVisuals.isError && coordinator.voiceErrorKind == .permission)
     }
 
-    /// Boot state the stage renders.
-    private var startupPresentation: StartupState {
-        StartupState(spinnerVisible: boot.spinnerVisible,
-                     hasFailures: boot.hasFailures,
-                     showsCapsule: showsStartupCapsule)
-    }
-
     /// The Home widget registry (rendering v2, home-redesign 2026-09-08):
     /// panels now feed the Updates leaf + bell badge instead of a stacked
     /// card row — evaluated on every render; panels self-hide through
@@ -326,16 +312,6 @@ struct HomeView: View {
     /// the real `voicePipeline.start` completion callback.
     private var heroReadiness: VoicePipelineReadiness { coordinator.voicePipelineReadiness }
 
-    /// [P0-2] Whether the boot capsule is hosted above the hero's disc.
-    /// The hero shows its OWN loading presentation while the pipeline
-    /// start is in flight; during boot's `preparingVoice` stage the
-    /// capsule would repeat that same message 8pt above the disc, so it
-    /// stands down for exactly that stage. Every other boot stage
-    /// (restoring data, warming engines, finishing setup) keeps it.
-    private var showsStartupCapsule: Bool {
-        !(heroReadiness.isLoading && boot.stage == .preparingVoice)
-    }
-
     /// [P1-7] The extracted stage (`HomeSubviews.swift`). The tap switch
     /// lives inside the stage itself, so the closures Home hands over are
     /// the two coordinator calls the switch selects between — `onStart`
@@ -345,7 +321,6 @@ struct HomeView: View {
         TalkStage(state: session.state,
                   session: session,
                   voice: voicePresentation,
-                  startup: startupPresentation,
                   onStart: coordinator.simulateWakeWordDetection,
                   onRecover: coordinator.recoverVoiceCycle,
                   onReset: coordinator.resetVoiceActivation)
@@ -488,10 +463,6 @@ struct TalkButton: View {
     /// offers — an explicit control under the hero, so the hero's own tap
     /// can never double as an accidental recovery.
     var onRecover: (() -> Void)? = nil
-    /// [P0-2] Whether the boot capsule is hosted above the disc. The
-    /// caller suppresses it for the boot stage whose label the hero's own
-    /// loading presentation already carries.
-    var showsBootCapsule: Bool = true
 
 
     @State private var breathe = false
@@ -533,6 +504,16 @@ struct TalkButton: View {
     /// because startup has not completed" rule applies.
     private var isDisabled: Bool {
         readiness != .ready || session.state == .awaitingConfirmation
+    }
+
+    /// [P0-2 UX fix] The disc's fill. While the pipeline start is in
+    /// flight (or it failed), the session state is `.stopped`, whose
+    /// dimmed grey-blue tint reads as a light grey disc under white text
+    /// — unreadable (user feedback, 2026-09-11). Loading and failed
+    /// render the SOLID rest blue instead, so the white glyphs keep their
+    /// contrast and the disc never flashes grey → blue at readiness.
+    private var discTint: Color {
+        (isLoading || failure != nil) ? DesignTokens.stateIdle : visuals.tint
     }
 
     /// The hold-to-reset affordance is live only in a reset-eligible state,
@@ -586,30 +567,18 @@ struct TalkButton: View {
                     // the "alive" light in the state's own color family.
                     // [P0-2] The disc's DIMENSIONS are readiness-independent
                     // by construction (the frame below), so the hero keeps
-                    // its final size through loading and failure.
+                    // its final size through loading and failure. The fill
+                    // is `discTint` — solid rest blue while loading or
+                    // failed, the state color otherwise. The floating boot
+                    // capsule is GONE (user feedback, 2026-09-11): the
+                    // hero's own spinner + label is the loading UI, and
+                    // capability diagnostics live in Settings.
                     Circle()
-                        .fill(visuals.tint)
+                        .fill(discTint)
                         .frame(width: DesignTokens.talkButtonDiameter,
                                height: DesignTokens.talkButtonDiameter)
-                        .shadow(color: visuals.tint.opacity(0.4), radius: 10, y: 4)
+                        .shadow(color: discTint.opacity(0.4), radius: 10, y: 4)
                         .overlay(heroContent)
-                        // [LAUNCH-SCREEN] The startup spinner is anchored
-                        // to the DISC itself (8pt above its top edge), not
-                        // the surrounding ZStack: ring/halo sizes vary by
-                        // state (the idle rings breathe out to +130pt), so
-                        // any container-relative anchor would drift. The
-                        // disc is the state-independent landmark — the
-                        // capsule always hugs the speak button. It renders
-                        // zero-height once boot completes; the offset
-                        // never affects the stage's flow. [P0-2] It is not
-                        // hosted at all while the hero carries its own
-                        // loading label for that boot stage.
-                        .overlay(alignment: .bottom) {
-                            if showsBootCapsule {
-                                StartupProgressOverlay()
-                                    .offset(y: -(DesignTokens.talkButtonDiameter + 8))
-                            }
-                        }
                     if isPressingForReset {
                         resetProgressRing
                     }

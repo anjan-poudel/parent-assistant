@@ -112,14 +112,14 @@ struct StartupDegradation: Equatable, Identifiable {
     }
 }
 
-/// The recovery-action seam: the overlay's ONE button per degraded
-/// capability routes through here, and `AppCoordinator.start()` installs
+/// The recovery-action seam: each degraded capability's ONE recovery
+/// button routes through here (the Settings diagnostics card and the
+/// Talk hero's failure recovery), and `AppCoordinator.start()` installs
 /// the real handler (the same static-seam pattern as
 /// `NewsSourceEditorSeam.makeEditor`). A static seam — rather than an
-/// `@EnvironmentObject` lookup — keeps HomeView's existing no-argument
-/// `StartupProgressOverlay()` call sites source-compatible, and keeps the
-/// recovery behaviour owned by the coordinator, which is the only object
-/// that can actually retry the failed work.
+/// `@EnvironmentObject` lookup — keeps the recovery behaviour owned by
+/// the coordinator, which is the only object that can actually retry the
+/// failed work.
 enum StartupDegradationRecoverySeam {
     /// Default: nothing (an overlay rendered outside a started
     /// coordinator — e.g. a preview — stays inert rather than crashing).

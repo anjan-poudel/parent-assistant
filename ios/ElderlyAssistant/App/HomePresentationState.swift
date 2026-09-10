@@ -91,26 +91,6 @@ struct VoicePresentationState: Equatable {
         showsOpenSettings: false)
 }
 
-/// Boot state the Home stage renders: whether the boot capsule is hosted
-/// above the hero, and whether any boot stage failed (the honest
-/// degradation the setup strip and the capsule both key on).
-struct StartupState: Equatable {
-    var spinnerVisible: Bool
-    var hasFailures: Bool
-
-    /// Whether the capsule is hosted above the hero's disc. The hero's own
-    /// loading presentation already says "Starting voice…", so the caller
-    /// suppresses the capsule for the boot stage whose label it would
-    /// repeat ([P0-2]).
-    var showsCapsule: Bool
-
-    var isLoadingSpinnerVisible: Bool { spinnerVisible && showsCapsule }
-
-    static let idle = StartupState(spinnerVisible: false,
-                                   hasFailures: false,
-                                   showsCapsule: true)
-}
-
 /// Navigation-relevant inputs Home derives from the coordinator, kept in
 /// one value so no extracted view has to read the coordinator to know
 /// where a request wants to go.

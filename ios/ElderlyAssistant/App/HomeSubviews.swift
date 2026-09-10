@@ -213,8 +213,6 @@ struct TalkStage: View {
     let session: VoiceSessionStateMachine
     /// [P0-2] Manual Talk readiness + the labels the stage shows.
     let voice: VoicePresentationState
-    /// [P0-2] Boot state the capsule above the disc renders.
-    let startup: StartupState
     /// Idle hero tap — the manual wake-word simulation that starts a
     /// cycle.
     let onStart: () -> Void
@@ -229,14 +227,10 @@ struct TalkStage: View {
     var body: some View {
         Group {
             if visuals.isConfirmation {
-                // [BOOT-LATENCY] The spinner is an element of the stage
-                // itself — above whatever the stage currently shows — so
-                // it stays anchored to the speak area even in the chips
-                // branch.
-                VStack(spacing: 4) {
-                    StartupProgressOverlay()
-                    ConfirmationChips(titleKey: visuals.captionKey)
-                }
+                // The boot capsule is gone (user feedback, 2026-09-11):
+                // the hero's own spinner + label is the loading UI, and
+                // capability diagnostics live in Settings.
+                ConfirmationChips(titleKey: visuals.captionKey)
             } else {
                 // The stage reads as ONE unit: hero, its status line and
                 // the hint carousel each sit ≤4pt apart (visual-polish
@@ -275,13 +269,7 @@ struct TalkStage: View {
                                // under the hero. Tapping the hero itself can
                                // therefore never "recover" merely because
                                // startup has not completed.
-                               onRecover: onRecover,
-                               // [P0-2] The hero's own loading presentation
-                               // says "Starting voice…" inside the disc, so
-                               // the boot capsule stands down for the boot
-                               // stage whose label it would repeat; every
-                               // other boot stage keeps it.
-                               showsBootCapsule: startup.showsCapsule)
+                               onRecover: onRecover)
                     if visuals.showsHintCarousel {
                         HintCarousel()
                     }
@@ -321,7 +309,6 @@ extension TalkStage: Equatable {
         ObjectIdentifier(lhs.session) == ObjectIdentifier(rhs.session)
             && lhs.state == rhs.state
             && lhs.voice == rhs.voice
-            && lhs.startup == rhs.startup
     }
 }
 
@@ -509,19 +496,11 @@ struct HomeDock: View {
     let onAppliance: () -> Void
 
     var body: some View {
-        VStack(spacing: 6) {
-            // Primary row — Medication, Phone, Reminders: the three
-            // destinations the design review keeps at the top priority.
-            HStack(spacing: 6) {
-                dockItem(.meds, icon: "pills.fill", tint: .meds, titleKey: "home.hub.meds")
-                callItem
-                dockItem(.reminders, icon: "clock.fill", tint: .reminders, titleKey: "home.hub.reminders")
-            }
-            // Secondary row — Appliance, Directions, Feeds. Kept VISIBLE
-            // (user feedback, 2026-09-11): the review's "More" sheet hid
-            // these behind an extra tap and shrank the dock to one row;
-            // the two-row layout is restored, with priority expressed by
-            // row order instead of a secondary surface.
+        VStack(spacing: 10) {
+            // Secondary row — Appliance, Directions, Feeds, on TOP. Kept
+            // VISIBLE (user feedback, 2026-09-11): the review's "More"
+            // sheet hid these behind an extra tap; the two-row layout is
+            // restored with the secondary destinations above.
             HStack(spacing: 6) {
                 applianceItem
                 dockItem(.directions, icon: "map.fill", tint: .directions,
@@ -529,11 +508,36 @@ struct HomeDock: View {
                 dockItem(.feed, icon: "rectangle.stack.fill", tint: .feeds,
                          titleKey: "home.hub.feeds")
             }
+            // Very light grooved divider between the rows (user feedback,
+            // 2026-09-11): a hairline dark groove with a hairline light
+            // highlight just below — the classic embossed separator, kept
+            // subtle so it reads as texture, not a border.
+            groovedDivider
+            // Primary row — Medication, Phone, Reminders, on the BOTTOM
+            // (closest to the thumb; user feedback, 2026-09-11).
+            HStack(spacing: 6) {
+                dockItem(.meds, icon: "pills.fill", tint: .meds, titleKey: "home.hub.meds")
+                callItem
+                dockItem(.reminders, icon: "clock.fill", tint: .reminders, titleKey: "home.hub.reminders")
+            }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 22))
+    }
+
+    /// The dock's light grooved row separator.
+    private var groovedDivider: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(.black.opacity(0.06))
+                .frame(height: 1)
+            Rectangle()
+                .fill(.white.opacity(0.35))
+                .frame(height: 1)
+        }
+        .padding(.horizontal, 16)
     }
 
     private func dockItem(_ destination: LeafDestination, icon: String,
