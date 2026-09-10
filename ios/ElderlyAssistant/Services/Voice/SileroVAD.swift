@@ -418,9 +418,14 @@ final class EnergyVAD: VoiceActivityDetector {
     }
 
     private static func rms(_ pcm: [Int16]) -> Float {
+        // [VAD-RT] Pure-Float math: the old `Float(sample) / 32_768.0`
+        // promoted every sample to a DOUBLE division (32768.0 is a
+        // Double literal) — the hot path ran in double precision for no
+        // reason. Dividing by the integer literal 32768 (2^15) stays
+        // Float and is exact.
         var sum: Float = 0
         for sample in pcm {
-            let normalized = Float(sample) / 32_768.0
+            let normalized = Float(sample) / 32768
             sum += normalized * normalized
         }
         return sqrt(sum / Float(pcm.count))

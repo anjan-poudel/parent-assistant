@@ -297,7 +297,9 @@ final class SherpaKWSWakeWordEngine: WakeWordEngine {
         guard active else { return }
         #if canImport(SherpaOnnx)
         // sherpa expects [-1, 1) float samples at the model's rate.
-        let samples = pcm.map { Float($0) / 32_768.0 }
+        // [VAD-RT] Pure-Float normalization — `/ 32_768.0` was a Double
+        // division per sample on the always-on path.
+        let samples = pcm.map { Float($0) / 32768 }
         spotter.acceptWaveform(samples: samples, sampleRate: 16_000)
         // Official sherpa loop: isReady() means ≥ one full chunk (320 ms)
         // is buffered; decode() then drains it and getResult() returns

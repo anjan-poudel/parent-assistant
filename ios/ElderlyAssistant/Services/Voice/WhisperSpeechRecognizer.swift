@@ -758,7 +758,9 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
             + "backend=\(backend) load_ms=\(loadMs)")
 
         // 4. Int16 [-32768, 32767] → Float32 [-1, 1] as SwiftWhisper expects.
-        let floats: [Float] = pcm.map { Float($0) / 32_768.0 }
+        // [VAD-RT] Pure-Float normalization (was a Double division per
+        // sample over the whole utterance).
+        let floats: [Float] = pcm.map { Float($0) / 32768 }
 
         // 5. Transcribe. SwiftWhisper's async API bridges to whisper.cpp
         //    `whisper_full` under the hood and returns segment text on

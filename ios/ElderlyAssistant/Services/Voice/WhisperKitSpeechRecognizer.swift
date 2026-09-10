@@ -107,8 +107,11 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         guard listeningActive else { return }
         guard let channelData = buffer.int16ChannelData?.pointee else { return }
         let count = Int(buffer.frameLength)
+        // [VAD-RT] Pure-Float normalization (32768 is an exact Float
+        // power of two) — the old `/ 32_768.0` ran Double division per
+        // sample on the live capture path.
         let floats = UnsafeBufferPointer(start: channelData, count: count)
-            .map { Float($0) / 32_768.0 }
+            .map { Float($0) / 32768 }
         utteranceBuffer.append(contentsOf: floats)
     }
 

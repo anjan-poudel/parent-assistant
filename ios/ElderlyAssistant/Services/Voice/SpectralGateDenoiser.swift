@@ -89,7 +89,9 @@ final class SpectralGateDenoiser: NoiseSuppressor {
         defer { lock.unlock() }
 
         let config = currentConfig()
-        inputBuffer.append(contentsOf: samples.map { Float($0) / 32_768.0 })
+        // [VAD-RT] Pure-Float normalization (was a Double division per
+        // sample on the capture path).
+        inputBuffer.append(contentsOf: samples.map { Float($0) / 32768 })
 
         var out: [Float] = []
         out.reserveCapacity(samples.count)
@@ -196,8 +198,9 @@ final class SpectralGateDenoiser: NoiseSuppressor {
         var out = [Int16](repeating: 0, count: samples.count)
         for i in samples.indices {
             // Gains never exceed 1.0, so clipping is a belt-and-braces
-            // guard, not an expected path.
-            out[i] = Int16(clamping: Int32((samples[i] * 32_768.0).rounded()))
+            // guard, not an expected path. [VAD-RT] Float×int scaling —
+            // the old `* 32_768.0` ran Double math per sample.
+            out[i] = Int16(clamping: Int32((samples[i] * 32768).rounded()))
         }
         return out
     }

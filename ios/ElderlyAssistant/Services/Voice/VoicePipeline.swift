@@ -623,7 +623,8 @@ final class VoicePipeline {
             let t0 = vadClock()
             let frame = Array(vadFrameBuffer[start..<(start + frameLength)])
             vad.process(frame)
-            let elapsed = vadClock() - t0
+            let now = vadClock()
+            let elapsed = now >= t0 ? now - t0 : 0
             vadFrameConsumed += frameLength
             vadFrameCount += 1
             vadFrameTotalNs &+= elapsed
