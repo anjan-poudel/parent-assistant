@@ -124,13 +124,20 @@ final class StartupBoot: ObservableObject {
     /// would claim "Loading…" while nothing loads.
     @Published private(set) var hasStarted = false
 
-    /// [LAUNCH-SCREEN] Published (previously a computed property): a
-    /// fast boot keeps the spinner up until the visibility floor passes,
-    /// so dismissal must publish AFTER `.ready` too.
+    /// [BOOT-REVIEW P0-3] True while the indicator is on screen. Doors
+    /// both ways are gated on real progress: it appears only if the boot
+    /// is STILL running after the appearance delay, and it goes away the
+    /// moment boot reaches `.ready` (no minimum-display floor).
     @Published private(set) var spinnerVisible = false
 
     var isComplete: Bool { stage == .ready }
     var hasFailures: Bool { !failedStages.isEmpty }
+
+    /// The capability-specific degraded state the UI renders — persistent
+    /// until the capability recovers, never auto-hidden by a timer.
+    var degradations: [StartupDegradation] {
+        StartupDegradation.degradations(forFailedStages: failedStages)
+    }
 
     init(clock: @escaping () -> Date = { Date() }) {
         self.clock = clock
@@ -138,26 +145,33 @@ final class StartupBoot: ObservableObject {
 
     /// Starts the machine. Idempotent while a boot is in flight; only a
     /// COMPLETED boot may restart (a fresh `.restoringData`). A restart
-    /// opens a FRESH visibility window for the new boot.
+    /// opens a FRESH appearance window for the new boot.
     func begin() {
         hasStarted = true
+        // Any pending reveal from a previous boot is stale.
+        appearanceTimerToken += 1
         if stage == .ready {
             stage = .restoringData
             failedStages = []
-            spinnerVisible = true
-            spinnerFirstVisibleAt = clock()
-            dismissalTimerToken += 1
         }
-        showSpinnerIfNeeded()
+        // Hidden again from zero: the new boot gets its own full delay.
+        spinnerVisible = false
+        bootBeganAt = clock()
+        revealSpinnerIfNeeded()
     }
 
     /// Advances forward only. A repeated or backward advance is a no-op,
-    /// so a late phase completion can never rewind progress.
+    /// so a late phase completion can never rewind progress. Reaching
+    /// `.ready` dismisses the spinner IMMEDIATELY (the moment the
+    /// represented capability is ready) — the view animates the change.
     func advance(to next: StartupBootStage) {
         guard next.rank >= stage.rank else { return }
         stage = next
         if next == .ready {
-            dismissSpinnerIfFloorElapsed()
+            // A boot that finished before the delay never shows anything;
+            // one that did show dismisses now, with no minimum duration.
+            appearanceTimerToken += 1
+            spinnerVisible = false
         }
     }
 
@@ -167,51 +181,53 @@ final class StartupBoot: ObservableObject {
         failedStages.append(failed)
     }
 
-    /// The dismissal gate: hides the spinner once boot is complete AND
-    /// the minimum-visibility floor has passed. Called when `.ready`
-    /// lands, by the scheduled floor timer, and by tests with a fake
-    /// clock. Never delays boot — only the spinner's collapse.
-    func dismissSpinnerIfFloorElapsed() {
-        guard isComplete, spinnerVisible else { return }
-        guard let visibleAt = spinnerFirstVisibleAt else {
-            spinnerVisible = false
-            return
-        }
+    /// Clears a recorded failure after the capability actually recovered
+    /// (the recovery action's success path) — the degradation disappears
+    /// because it is no longer true, not because a timer expired.
+    func clearFailure(_ recovered: StartupBootStage) {
+        failedStages.removeAll { $0 == recovered }
+    }
+
+    /// The appearance gate: shows the spinner only when a boot is still
+    /// running AND the appearance delay has passed. Called by `begin()`,
+    /// by the scheduled delay timer, and by tests with a fake clock.
+    func revealSpinnerIfNeeded() {
+        guard hasStarted, !isComplete, !spinnerVisible,
+              let beganAt = bootBeganAt else { return }
         let now = clock()
-        if Self.visibilityFloor.isElapsed(firstVisibleAt: visibleAt, now: now) {
-            spinnerVisible = false
+        if Self.appearanceDelay.isElapsed(beganAt: beganAt, now: now) {
+            spinnerVisible = true
         } else {
-            scheduleFloorTimer(
-                after: Self.visibilityFloor.remaining(firstVisibleAt: visibleAt, now: now))
+            scheduleAppearanceTimer(
+                after: Self.appearanceDelay.remaining(beganAt: beganAt, now: now))
         }
     }
 
-    /// Shows the spinner the moment a boot is actually running. Guards
-    /// so a spinner already up (restart path) never rewinds its window.
-    private func showSpinnerIfNeeded() {
-        guard hasStarted, stage != .ready, !spinnerVisible else { return }
-        spinnerVisible = true
-        spinnerFirstVisibleAt = clock()
-    }
-
-    /// One-shot real-time timer for the floor remainder (production
-    /// only — tests tick the fake clock and call the gate directly).
-    private func scheduleFloorTimer(after seconds: TimeInterval) {
-        dismissalTimerToken += 1
-        let token = dismissalTimerToken
+    /// One-shot real-time timer for the remaining delay (production only
+    /// — tests tick the fake clock and call the gate directly).
+    private func scheduleAppearanceTimer(after seconds: TimeInterval) {
+        appearanceTimerToken += 1
+        let token = appearanceTimerToken
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
-            guard let self, self.dismissalTimerToken == token else { return }
-            self.dismissSpinnerIfFloorElapsed()
+            guard let self, self.appearanceTimerToken == token else { return }
+            self.revealSpinnerIfNeeded()
         }
     }
 }
 
-// MARK: - Spinner overlay (Home + onboarding host)
+// MARK: - Spinner + degraded-state overlay (Home + onboarding host)
 
 /// The visible startup indicator: a small capsule row listing what is
-/// loading, dismissed when the background boot completes. When a stage
-/// failed (honest degradation) a short caption surfaces once boot
-/// finishes and auto-hides — the app stays fully usable either way.
+/// loading. It appears only after `StartupBoot.spinnerAppearanceDelaySeconds`
+/// of real boot work and disappears the moment boot completes.
+///
+/// [BOOT-REVIEW, design item] When boot finished with failures, a
+/// PERSISTENT capability-specific state replaces the old generic
+/// self-hiding notice: the named feature, one sentence about what still
+/// works, and exactly ONE recovery action (routed through
+/// `StartupDegradationRecoverySeam` to the coordinator, which owns the
+/// retry). Diagnostics for the same failures belong in Settings, not in
+/// this capsule.
 ///
 /// [BOOT-LATENCY → LAUNCH-SCREEN] Hosted as an overlay anchored to the
 /// talk hero's disc (8pt above its top edge — see `TalkButton`), and as
@@ -221,56 +237,105 @@ final class StartupBoot: ObservableObject {
 /// zero-height while nothing shows.
 struct StartupProgressOverlay: View {
     @EnvironmentObject private var boot: StartupBoot
-    @State private var showDegradedNotice = false
-    @State private var degradedHideToken = 0
 
-    /// Seconds the degraded caption stays visible after boot completes.
-    private static let degradedNoticeSeconds: TimeInterval = 6
+    /// Seconds the row's show/hide transition takes. Short: the spinner
+    /// is informational, not a splash.
+    private static let transitionSeconds: Double = 0.18
+
+    /// The capsule's reserved height — the row keeps these dimensions
+    /// whether it holds a spinner or a degraded state, so swapping
+    /// content never shifts the controls around it.
+    private static let rowMinHeight: CGFloat = 44
+
+    /// Recovery actions are routed through the seam so this view needs no
+    /// coordinator reference (HomeView's call sites stay unchanged).
+    var onRecover: (StartupDegradation.Capability) -> Void = {
+        StartupDegradationRecoverySeam.perform($0)
+    }
 
     var body: some View {
         VStack(spacing: 6) {
             if boot.spinnerVisible {
-                HStack(spacing: 8) {
-                    ProgressView()
-                    Text(LocalizedStringKey(boot.stage.labelKey))
-                        .font(.footnote.weight(.medium))
-                        .lineLimit(1)
+                spinnerRow
+            } else {
+                ForEach(boot.degradations) { degradation in
+                    degradedRow(degradation)
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(
-                    Capsule().fill(.regularMaterial)
-                        .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
-                )
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel(Text(LocalizedStringKey(boot.stage.labelKey)))
-            } else if boot.hasFailures && showDegradedNotice {
-                Text(LocalizedStringKey("startup.degraded"))
-                    .font(.footnote)
-                    .foregroundColor(.secondary)
+            }
+        }
+        .animation(.easeInOut(duration: Self.transitionSeconds),
+                   value: boot.spinnerVisible)
+        .animation(.easeInOut(duration: Self.transitionSeconds),
+                   value: boot.degradations)
+    }
+
+    private var spinnerRow: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+            Text(LocalizedStringKey(boot.stage.labelKey))
+                // [BOOT-REVIEW, design item] The project's 18 pt caption
+                // token — `.footnote` is below the constitution's
+                // minimum text size.
+                .font(.system(size: DesignTokens.minCaptionPointSize,
+                              weight: .medium))
+                .lineLimit(nil)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .frame(minHeight: Self.rowMinHeight)
+        .background(
+            Capsule().fill(.regularMaterial)
+                .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(LocalizedStringKey(boot.stage.labelKey)))
+    }
+
+    /// One capability's persistent degraded state. Stays until the
+    /// capability recovers — no timer, no auto-dismissal.
+    private func degradedRow(_ degradation: StartupDegradation) -> some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(.orange)
+                    .accessibilityHidden(true)
+                Text(LocalizedStringKey(degradation.titleKey))
+                    .font(.system(size: DesignTokens.minCaptionPointSize,
+                                  weight: .semibold))
+                    .multilineTextAlignment(.center)
+            }
+            Text(LocalizedStringKey(degradation.detailKey))
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            // The affected CONTROL, named: the owning surface styles the
+            // control itself, and this line makes the degraded control
+            // visible (and audible to VoiceOver) where the state shows.
+            Text(LocalizedStringKey(degradation.controlKey))
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            // ONE recovery action per degraded capability.
+            Button {
+                onRecover(degradation.capability)
+            } label: {
+                Text(LocalizedStringKey(degradation.recoveryKey))
+                    .font(.system(size: DesignTokens.minCaptionPointSize,
+                                  weight: .semibold))
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(
-                        Capsule().fill(.regularMaterial)
-                            .shadow(color: .black.opacity(0.10), radius: 5, y: 2)
-                    )
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
             }
+            .buttonStyle(.bordered)
+            .accessibilityLabel(Text(LocalizedStringKey(degradation.recoveryKey)))
         }
-        .animation(.easeInOut(duration: 0.2), value: boot.spinnerVisible)
-        .animation(.easeInOut(duration: 0.2), value: showDegradedNotice)
-        .onChange(of: boot.isComplete) { complete in
-            guard complete, boot.hasFailures else { return }
-            showDegradedNotice = true
-            degradedHideToken += 1
-            let token = degradedHideToken
-            DispatchQueue.main.asyncAfter(
-                deadline: .now() + Self.degradedNoticeSeconds
-            ) {
-                // Only the LATEST token may hide — a newer notice keeps
-                // its full window (same rule as the voice-reset notice).
-                guard self.degradedHideToken == token else { return }
-                self.showDegradedNotice = false
-            }
-        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            Capsule().fill(.regularMaterial)
+                .shadow(color: .black.opacity(0.10), radius: 5, y: 2)
+        )
+        .accessibilityElement(children: .contain)
     }
 }

@@ -1800,7 +1800,37 @@ final class AppCoordinator: ObservableObject {
         NewsSourceEditorSeam.makeEditor = { [newsSourceStore] in
             AnyView(NewsSourcesSettingsView(store: newsSourceStore))
         }
+        // [BOOT-REVIEW, design item] The degraded-state recovery seam:
+        // the persistent capability capsule's ONE button routes here, so
+        // the recovery is owned by the coordinator (the only object that
+        // can retry the failed work) without HomeView needing a
+        // coordinator reference.
+        StartupDegradationRecoverySeam.perform = { [weak self] capability in
+            self?.recoverDegradedCapability(capability)
+        }
 
+        // [BOOT-REVIEW P0-1] Boot begins BEFORE the composition, so the
+        // spinner's appearance delay is measured from the true start of
+        // startup work.
+        startupBoot.begin()
+        // [BOOT-REVIEW P0 item 1] `safety-data-restored` opens here and
+        // closes when the restore batch is published.
+        StartupSignposts.begin(.safetyDataRestored)
+        print("[AppCoordinator] startup boot begin — restoring data off-main")
+
+        // [BOOT-REVIEW P0-1] Yield exactly one main-actor turn: SwiftUI
+        // commits the first frame (loading state included) before the
+        // synchronous composition below runs. Everything that follows is
+        // post-first-frame by construction.
+        DispatchQueue.main.async { [weak self] in
+            self?.composePostFirstFrame()
+        }
+    }
+
+    /// The synchronous composition `start()` used to run inline, now one
+    /// main-actor turn after the first frame ([BOOT-REVIEW P0-1]).
+    /// Main-confined; runs exactly once per launch (`start()`'s guard).
+    private func composePostFirstFrame() {
         // [STARTUP-PERF] Conversation + activity history, the keychain
         // store loads, the KWS engine build and the bundled-model
         // housekeeping moved OFF the main thread into the progressive
@@ -2509,11 +2539,19 @@ final class AppCoordinator: ObservableObject {
 
     /// Settles the warm phase exactly once and hands phase 3 to the boot
     /// queue. Main-confined.
-    private func advancePastWarmPhase() {
+    private func advancePastWarmPhase(outcome: String = "settled") {
         warmPhaseSettled = true
         warmWatchdogWork?.cancel()
         warmWatchdogWork = nil
+        // [BOOT-REVIEW P0 item 1] No-op when the warm plan was empty
+        // (nothing was begun) — the interval only ever covers real warm
+        // work.
+        StartupSignposts.end(.warmEnginesCompleted, note: outcome)
         self.startupBoot.advance(to: .finishingSetup)
+        // Phase 3 only exists while the boot is still running: a WARM
+        // RETRY after `.ready` (the degraded-state recovery action)
+        // settles the warm without re-running the model housekeeping.
+        guard !startupBoot.isComplete else { return }
         self.bootQueue.async { [weak self] in
             self?.bootFinishSetup()
         }
