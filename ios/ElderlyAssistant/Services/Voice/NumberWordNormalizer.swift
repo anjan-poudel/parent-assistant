@@ -149,7 +149,8 @@ enum NumberWordNormalizer {
     /// never fire inside "amazing" and "min" can never fire inside
     /// "mink".
     private static let neUnitPrefixes = [
-        "बजे", "घण्टा", "घन्टा", "मिनेट", "मिनुट", "मिनिट", "सेकेण्ड", "सेकेन्ड"
+        "बजे", "घण्टा", "घन्टा", "मिनेट", "मिनुट", "मिनिट", "मिने",
+        "सेकेण्ड", "सेकेन्ड"
     ]
     private static let enUnitWords = [
         "minute", "minutes", "hour", "hours", "second", "seconds",

@@ -2479,6 +2479,30 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
         })
     }
 
+    func testDeviceTranscriptPanchMinekoTimerLagaunRoutesAsTimer() async {
+        // Real-device whisper transcript, end to end: spoken "पाँच
+        // मिनेट टाइमर लगाऊ त" transcribed as "पाँच मिनेको टाइमर लगाउँ"
+        // — the मिने unit variant and the nasalized verb must reach the
+        // coordinator as a 300 s timer with a clean label, never an
+        // alarm.
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "पाँच मिनेको टाइमर लगाउँ")
+        await awaitReplyCommit(router, coordinator)
+
+        XCTAssertTrue(coordinator.alarmSetRequests.isEmpty)
+        XCTAssertEqual(coordinator.timerStartRequests.count, 1)
+        XCTAssertEqual(coordinator.timerStartRequests[0].durationSeconds, 300)
+        XCTAssertNil(coordinator.timerStartRequests[0].label)
+        XCTAssertTrue(coordinator.genericReplies.contains { $0.contains("टाइमर सुरु भयो") },
+                      "the confirmation speaks the timer, got \(coordinator.genericReplies)")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_started"
+                && $0.outcome == "success"
+        })
+    }
+
     func testTimerPermissionDeniedSpeaksTheTimerFallback() async {
         let coordinator = MockVoiceCommandCoordinator()
         coordinator.localeOverride = en

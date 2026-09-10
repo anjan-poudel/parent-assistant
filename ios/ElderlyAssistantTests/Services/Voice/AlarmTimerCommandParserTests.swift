@@ -579,6 +579,25 @@ final class AlarmTimerCommandParserTests: XCTestCase {
             "अलार्म बन्द गर त", locale: ne))
     }
 
+    func testDeviceTranscriptUnitAndVerbVariantsParseDataDriven() {
+        // Real-device whisper evidence: spoken "मिनेट" transcribed as
+        // "मिने" (usually with the को/का/मा postposition glued on) and
+        // "लगाऊ" nasalized to "लगाउँ" — every form must parse the same
+        // 5-minute timer with a clean label.
+        let unitForms = ["मिने", "मिनेको", "मिनेमा", "मिनेसम्म"]
+        let verbForms = ["लगाऊ", "लगाउँ"]
+        for unitForm in unitForms {
+            for verbForm in verbForms {
+                let phrase = "पाँच \(unitForm) टाइमर \(verbForm)"
+                let timer = AlarmTimerCommandParser.parseTimer(phrase, locale: ne)
+                XCTAssertEqual(timer?.durationSeconds, 300,
+                               "failed for: \(phrase)")
+                XCTAssertNil(timer?.label,
+                             "label must stay clean for: \(phrase)")
+            }
+        }
+    }
+
     func testNumberWordNormalizerIsIdentityWithoutLexicon() {
         // A locale with no bundled lexicon degrades to the identity
         // transform — the utterance falls through exactly as before.

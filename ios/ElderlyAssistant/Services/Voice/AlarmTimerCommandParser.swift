@@ -64,11 +64,14 @@ import Foundation
 ///    "एक" inside "एकछिन" never become numbers, and multi-word English
 ///    numbers ("forty five") are never partially rewritten.
 ///  - NATURAL-SPEECH SURFACE (2026-09-10): informal transliterations
-///    (टाइमअर/टाइमेर for टाइमर; लगाउ/लागू/लागु/लगाइदेऊ for लगाऊ) are
-///    marker/label vocabulary, and trailing emphasis particles (त/है/
-///    नि/ल — "लगाऊ त") are dropped as tokens or peeled off glued
-///    tokens when the remainder is a word this parser knows
-///    (`strippedOfEmphasisParticles`) — token-boundary-safe.
+///    (टाइमअर/टाइमेर for टाइमर; मिने for मिनेट — a real-device whisper
+///    transcript rendered "मिनेट" as "मिनेको", and the unit's
+///    substring match covers the को/का/मा suffixes; लगाउ/लागू/लागु/
+///    लगाइदेऊ/लगाउँ for लगाऊ) are marker/unit/label vocabulary, and
+///    trailing emphasis particles (त/है/नि/ल — "लगाऊ त") are dropped
+///    as tokens or peeled off glued tokens when the remainder is a
+///    word this parser knows (`strippedOfEmphasisParticles`) —
+///    token-boundary-safe.
 ///
 /// The alarm time engine reuses `NepaliTimeParser` (the reminder
 /// set_reminder extractor): Devanagari + ASCII digits, ne period words
@@ -560,13 +563,13 @@ enum AlarmTimerCommandParser {
     private static func labelForAlarm(from raw: String) -> String? {
         labelByStripping(raw,
                          markerTokens: alarmMarkers + timerMarkers + wakeMarkerTokensForLabel,
-                         containsDrops: ["बजे", "मिनेट", "मिनुट", "मिनिट", "घण्टा", "सेकेण्ड"])
+                         containsDrops: ["बजे", "मिनेट", "मिनुट", "मिनिट", "मिने", "घण्टा", "सेकेण्ड"])
     }
 
     private static func labelForTimer(from raw: String) -> String? {
         labelByStripping(raw,
                          markerTokens: timerMarkers + alarmMarkers + wakeMarkerTokensForLabel,
-                         containsDrops: ["बजे", "मिनेट", "मिनुट", "मिनिट", "घण्टा", "सेकेण्ड"])
+                         containsDrops: ["बजे", "मिनेट", "मिनुट", "मिनिट", "मिने", "घण्टा", "सेकेण्ड"])
     }
 
     /// For labels, "wake up"-type phrases reduce to their tokens
@@ -592,8 +595,9 @@ enum AlarmTimerCommandParser {
         "गरिदिनुहोस्", "लगाऊ", "लगाउनुहोस्", "लगाइदिनुहोस्", "बजाऊ",
         "बजाउनुहोस्", "राख", "राख्नुहोस्", "सेट", "अब",
         // [NUMBER-WORDS] informal imperative spellings of "लगाऊ" — ASR
-        // renders the command verb freely in natural speech.
-        "लगाउ", "लागू", "लागु", "लगाइदेऊ",
+        // renders the command verb freely in natural speech (लगाउँ is
+        // the nasalized form a real-device whisper transcript emitted).
+        "लगाउ", "लागू", "लागु", "लगाइदेऊ", "लगाउँ",
         // Nepali periods + relative days + weekdays
         "बिहान", "दिउँसो", "साँझ", "बेलुका", "राति", "साढे", "आज", "भोलि", "पर्सि",
         "आइतबार", "सोमबार", "मंगलबार", "बुधबार", "बिहीबार", "शुक्रबार", "शनिबार"
@@ -695,6 +699,11 @@ enum AlarmTimerCommandParser {
         // it the countdown veto never fires and "५ मिनुटको अलार्म" would
         // silently parse as a 5 O'CLOCK alarm.
         ("मिनुट", 60), ("मिनिट", 60),
+        // [NUMBER-WORDS] "मिने" — a real-device whisper transcript
+        // rendered "मिनेट" as "मिनेको" ("पाँच मिनेको टाइमर लगाउँ"); the
+        // substring match covers the को/का/मा suffixes. Listed after the
+        // longer spellings so "मिनेट" wins first and never double-counts.
+        ("मिने", 60),
         ("सेकेण्ड", 1), ("सेकेन्ड", 1)
     ]
 
