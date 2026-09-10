@@ -104,6 +104,7 @@ final class ProductionAlarmManagerAdapter: AlarmKitManaging {
 ///    AlarmKit error, and Apple documents no concrete cap), the alarm is
 ///    armed as the UN daily notification instead so it still rings, and
 ///    `scheduleAll()` retries the system arm on the next launch.
+@available(iOS 26.0, *)
 final class AlarmKitAlarmBackend: AlarmSchedulingBackend {
 
     let kind: AlarmBackendKind = .alarmKit
