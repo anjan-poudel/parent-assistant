@@ -14857,6 +14857,108 @@
           }
         }
       }
+    },
+    "voice.readiness.loading.starting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starting voice…"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आवाज सुरु हुँदैछ…"
+          }
+        }
+      }
+    },
+    "voice.readiness.failed.pipelineStart" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voice activation isn't available right now."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आवाज अहिले उपलब्ध छैन।"
+          }
+        }
+      }
+    },
+    "voice.readiness.failed.retry" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try again"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "फेरि प्रयास गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "home.dock.more" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "More"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अरू"
+          }
+        }
+      }
+    },
+    "home.setupOptionalCount" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld optional setup items"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld वैकल्पिक सेटअप काम"
+          }
+        }
+      }
+    },
+    "home.setupTalkNow" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Talk now, or finish setup"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अहिले बोल्नुहोस्, वा सेटअप पूरा गर्नुहोस्"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
