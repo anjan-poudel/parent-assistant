@@ -496,7 +496,7 @@ struct HomeDock: View {
     let onAppliance: () -> Void
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 4) {
             // Secondary row — Appliance, Directions, Feeds, on TOP. Kept
             // VISIBLE (user feedback, 2026-09-11): the review's "More"
             // sheet hid these behind an extra tap; the two-row layout is
