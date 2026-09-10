@@ -49,6 +49,17 @@ import Foundation
 ///    "टाइमर १ घण्टा ३० मिनेट") parse into ONE duration; two SEPARATE
 ///    commands ("5 minutes, then one for 3 minutes") return nil — never
 ///    silently merged into one timer.
+///  - NUMBER WORDS (2026-09-10): "पाँच मिनेट" / "five minutes" and their
+///    spelling variants parse exactly like digit forms. The per-locale
+///    `NumberWordNormalizer` (word tables in `Resources/NumberWords/
+///    <code>.json` — language data, not code) rewrites amount-like
+///    number words to digits UPSTREAM of this grammar, so units, amounts,
+///    compounds and snooze minutes all work untouched; word-digit mixes
+///    and compounds compose ("एक घण्टा तीस मिनेट" → "1 घण्टा 30 मिनेट"
+///    → 5400 s). The rewrite is guarded — a word counts only when a
+///    unit/clock word follows, so the copula "छ" ("अलार्म छ?") and
+///    "एक" inside "एकछिन" never become numbers, and multi-word English
+///    numbers ("forty five") are never partially rewritten.
 ///
 /// The alarm time engine reuses `NepaliTimeParser` (the reminder
 /// set_reminder extractor): Devanagari + ASCII digits, ne period words
@@ -80,26 +91,31 @@ enum AlarmTimerCommandParser {
     /// alarm command.
     static func parseAlarm(_ text: String,
                            now: Date = Date(),
-                           calendar: Calendar = .current) -> (time: Date, label: String?)? {
+                           calendar: Calendar = .current,
+                           locale: Locale = AppLanguage.persisted().locale)
+        -> (time: Date, label: String?)? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = NepaliTimeParser.normalise(trimmed)
         guard !normalized.isEmpty else { return nil }
+        // [NUMBER-WORDS] spoken number words → digits, upstream of the
+        // grammar below (clock times included: "सात बजे" → "7 बजे").
+        let withDigits = NumberWordNormalizer.normalise(normalized, locale: locale)
 
-        let hasAlarmMarker = alarmMarkers.contains { containsToken($0, in: normalized) }
-        let hasWakeMarker = wakeMarkers.contains { normalized.contains($0) }
+        let hasAlarmMarker = alarmMarkers.contains { containsToken($0, in: withDigits) }
+        let hasWakeMarker = wakeMarkers.contains { withDigits.contains($0) }
         guard hasAlarmMarker || hasWakeMarker else { return nil }
 
         // Vetoes — questions, cancellations, negations …
-        guard !vetoedAsQuestionOrCancellation(normalized) else { return nil }
+        guard !vetoedAsQuestionOrCancellation(withDigits) else { return nil }
         // … third-party wake requests (wake-marker commands only; an
         // "alarm"-word command is always this device's own alarm) …
-        if hasWakeMarker && mentionsAnotherPerson(normalized) { return nil }
+        if hasWakeMarker && mentionsAnotherPerson(withDigits) { return nil }
         // … and countdown phrasings — "in N minutes/hours" is a TIMER
         // (which the router parses first); never silently an alarm.
-        if countdownSeconds(in: normalized) != nil { return nil }
+        if countdownSeconds(in: withDigits) != nil { return nil }
 
-        guard let parsed = NepaliTimeParser.parse(normalized),
-              let hour = adjustedHour(from: parsed, text: normalized)
+        guard let parsed = NepaliTimeParser.parse(withDigits),
+              let hour = adjustedHour(from: parsed, text: withDigits)
         else { return nil }
         let minute = min(max(parsed.minute ?? 0, 0), 59)
 
@@ -126,24 +142,31 @@ enum AlarmTimerCommandParser {
         }
         guard let time = date else { return nil }
 
-        return (time, labelForAlarm(from: trimmed))
+        // Labels strip the DIGIT-carrying text (see `labelForAlarm`) so a
+        // spoken word form drops like its digit form would.
+        return (time, labelForAlarm(from: withDigits))
     }
 
     /// Parses a timer command into whole seconds + optional label.
     /// Durations: a single amount+unit ("5 minutes", "१ घण्टा", "90 min")
     /// or a compound chain ("1 hour 30 minutes" → 5400 s; "टाइमर १ घण्टा
     /// ३० मिनेट"), bounded 1…`maxTimerSeconds`. Nil for anything else.
-    static func parseTimer(_ text: String) -> (durationSeconds: Int, label: String?)? {
+    static func parseTimer(_ text: String,
+                           locale: Locale = AppLanguage.persisted().locale)
+        -> (durationSeconds: Int, label: String?)? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = NepaliTimeParser.normalise(trimmed)
         guard !normalized.isEmpty else { return nil }
-        guard timerMarkers.contains(where: { containsToken($0, in: normalized) }) else {
+        // [NUMBER-WORDS] spoken number words → digits, upstream of the
+        // duration grammar ("टाइमर पाँच मिनेट" → "टाइमर 5 मिनेट").
+        let withDigits = NumberWordNormalizer.normalise(normalized, locale: locale)
+        guard timerMarkers.contains(where: { containsToken($0, in: withDigits) }) else {
             return nil
         }
-        guard !vetoedAsQuestionOrCancellation(normalized) else { return nil }
-        guard let durationSeconds = countdownSeconds(in: normalized) else { return nil }
+        guard !vetoedAsQuestionOrCancellation(withDigits) else { return nil }
+        guard let durationSeconds = countdownSeconds(in: withDigits) else { return nil }
         guard (1...maxTimerSeconds).contains(durationSeconds) else { return nil }
-        return (durationSeconds, labelForTimer(from: trimmed))
+        return (durationSeconds, labelForTimer(from: withDigits))
     }
 
     /// True when the utterance is a sanctioned alarm-OFF command: an
@@ -156,19 +179,24 @@ enum AlarmTimerCommandParser {
     /// `parseAlarm` — safe because `parseAlarm`'s cancel veto already
     /// returns nil for every OFF shape, so a sanctioned cancellation is a
     /// command, never a vetoed fall-through.
-    static func parseAlarmOff(_ text: String) -> Bool {
+    static func parseAlarmOff(_ text: String,
+                              locale: Locale = AppLanguage.persisted().locale) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = NepaliTimeParser.normalise(trimmed)
         guard !normalized.isEmpty else { return false }
-        guard alarmMarkers.contains(where: { containsToken($0, in: normalized) }) else {
+        // [NUMBER-WORDS] word times count as times here too: "सात बजेको
+        // अलार्म बन्द गर" is a time-qualified cancellation and must not
+        // blank-off any alarm.
+        let withDigits = NumberWordNormalizer.normalise(normalized, locale: locale)
+        guard alarmMarkers.contains(where: { containsToken($0, in: withDigits) }) else {
             return false
         }
-        guard !vetoedAsQuestionOrNegation(normalized) else { return false }
+        guard !vetoedAsQuestionOrNegation(withDigits) else { return false }
         // A time-qualified cancellation names a specific alarm — with
         // several alarms the off branch must not guess which one; it
         // falls through unchanged instead.
-        if NepaliTimeParser.parse(normalized) != nil { return false }
-        return hasOffVerbPhrasing(normalized)
+        if NepaliTimeParser.parse(withDigits) != nil { return false }
+        return hasOffVerbPhrasing(withDigits)
     }
 
     /// Parses a snooze command into its delay in minutes. "snooze" /
@@ -183,24 +211,28 @@ enum AlarmTimerCommandParser {
     /// minutes" command and must never silently ring at the default).
     /// Questions and negations are vetoed. Nil for anything that is not
     /// snooze business.
-    static func parseAlarmSnooze(_ text: String) -> Int? {
+    static func parseAlarmSnooze(_ text: String,
+                                 locale: Locale = AppLanguage.persisted().locale) -> Int? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = NepaliTimeParser.normalise(trimmed)
         guard !normalized.isEmpty else { return nil }
-        guard snoozeMarkers.contains(where: { normalized.contains($0) }) else { return nil }
-        guard !vetoedAsQuestionOrNegation(normalized) else { return nil }
+        // [NUMBER-WORDS] spoken minute amounts parse like digits
+        // ("स्नुज पन्ध्र मिनेट" → "स्नुज 15 मिनेट" → 15).
+        let withDigits = NumberWordNormalizer.normalise(normalized, locale: locale)
+        guard snoozeMarkers.contains(where: { withDigits.contains($0) }) else { return nil }
+        guard !vetoedAsQuestionOrNegation(withDigits) else { return nil }
         // A timer-worded snooze ("snooze the timer") is TIMER business —
         // there is no timer-snooze command yet; fall through rather than
         // snooze an alarm the user did not mean.
-        if timerMarkers.contains(where: { containsToken($0, in: normalized) }),
-           !alarmMarkers.contains(where: { containsToken($0, in: normalized) }) {
+        if timerMarkers.contains(where: { containsToken($0, in: withDigits) }),
+           !alarmMarkers.contains(where: { containsToken($0, in: withDigits) }) {
             return nil
         }
-        let units = timerUnits(in: normalized)
+        let units = timerUnits(in: withDigits)
         if !units.isEmpty {
             guard units.count == 1,
                   units[0].seconds == 60,
-                  let amount = amountImmediatelyBefore(units[0].range, in: normalized),
+                  let amount = amountImmediatelyBefore(units[0].range, in: withDigits),
                   (1...Self.maxSnoozeMinutes).contains(amount)
             else { return nil }
             return amount
@@ -208,7 +240,7 @@ enum AlarmTimerCommandParser {
         // No duration words. A clock-shaped snooze ("snooze until 6:15")
         // is not a relative re-wake command — fall through rather than
         // ring at the default the user did not ask for.
-        if NepaliTimeParser.parse(normalized) != nil { return nil }
+        if NepaliTimeParser.parse(withDigits) != nil { return nil }
         // Plain "snooze" — the fixed default.
         return Self.defaultSnoozeMinutes
     }
@@ -494,13 +526,13 @@ enum AlarmTimerCommandParser {
     private static func labelForAlarm(from raw: String) -> String? {
         labelByStripping(raw,
                          markerTokens: alarmMarkers + timerMarkers + wakeMarkerTokensForLabel,
-                         containsDrops: ["बजे", "मिनेट", "घण्टा", "सेकेण्ड"])
+                         containsDrops: ["बजे", "मिनेट", "मिनुट", "मिनिट", "घण्टा", "सेकेण्ड"])
     }
 
     private static func labelForTimer(from raw: String) -> String? {
         labelByStripping(raw,
                          markerTokens: timerMarkers + alarmMarkers + wakeMarkerTokensForLabel,
-                         containsDrops: ["बजे", "मिनेट", "घण्टा", "सेकेण्ड"])
+                         containsDrops: ["बजे", "मिनेट", "मिनुट", "मिनिट", "घण्टा", "सेकेण्ड"])
     }
 
     /// For labels, "wake up"-type phrases reduce to their tokens
@@ -571,6 +603,11 @@ enum AlarmTimerCommandParser {
         ("minutes", 60), ("minute", 60), ("hours", 3600), ("hour", 3600),
         ("seconds", 1), ("second", 1), ("mins", 60), ("secs", 1), ("sec", 1),
         ("min", 60), ("घण्टा", 3600), ("घन्टा", 3600), ("मिनेट", 60),
+        // [NUMBER-WORDS] transliteration spellings of "minute" — "मिनुट"
+        // is the user-reported form ("पांच मिनुटको अलार्म लगाऊ"); without
+        // it the countdown veto never fires and "५ मिनुटको अलार्म" would
+        // silently parse as a 5 O'CLOCK alarm.
+        ("मिनुट", 60), ("मिनिट", 60),
         ("सेकेण्ड", 1), ("सेकेन्ड", 1)
     ]
 

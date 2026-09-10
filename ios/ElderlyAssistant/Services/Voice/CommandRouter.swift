@@ -700,12 +700,16 @@ final class CommandRouter {
         // stage speaks the honest line — the confirmation only once the
         // item is stored + armed, the denial fallback when notifications
         // are off.
-        if let timer = AlarmTimerCommandParser.parseTimer(raw) {
+        // [NUMBER-WORDS] the active locale selects the number-word
+        // lexicon the parsers normalize with (coordinator, as everywhere
+        // else in this file; the persisted app language as the fallback).
+        let stageLocale = coordinator?.activeLocale ?? AppLanguage.persisted().locale
+        if let timer = AlarmTimerCommandParser.parseTimer(raw, locale: stageLocale) {
             handleTimerStartCommand(durationSeconds: timer.durationSeconds,
                                     label: timer.label)
             return .unrecognised(transcript: raw)
         }
-        if let alarm = AlarmTimerCommandParser.parseAlarm(raw) {
+        if let alarm = AlarmTimerCommandParser.parseAlarm(raw, locale: stageLocale) {
             handleAlarmSetCommand(at: alarm.time, label: alarm.label)
             return .unrecognised(transcript: raw)
         }
@@ -719,11 +723,11 @@ final class CommandRouter {
         // target (the most recently rung enabled alarm) and returns the
         // honest outcome this stage speaks. SYNCHRONOUS — no permission
         // round-trip, so the reply is committed inside `route()` itself.
-        if AlarmTimerCommandParser.parseAlarmOff(raw) {
+        if AlarmTimerCommandParser.parseAlarmOff(raw, locale: stageLocale) {
             handleAlarmOffCommand()
             return .unrecognised(transcript: raw)
         }
-        if let snoozeMinutes = AlarmTimerCommandParser.parseAlarmSnooze(raw) {
+        if let snoozeMinutes = AlarmTimerCommandParser.parseAlarmSnooze(raw, locale: stageLocale) {
             handleAlarmSnoozeCommand(minutes: snoozeMinutes)
             return .unrecognised(transcript: raw)
         }

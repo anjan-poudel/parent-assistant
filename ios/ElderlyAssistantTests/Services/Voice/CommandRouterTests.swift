@@ -2377,6 +2377,48 @@ final class CommandRouterAlarmTimerTests: XCTestCase {
                       "an out-of-range duration must never be confirmed")
     }
 
+    // MARK: - [NUMBER-WORDS] number-word forms (2026-09-10)
+
+    func testNepaliNumberWordTimerRoutesToCoordinator() async {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "टाइमर पाँच मिनेट")
+        await awaitReplyCommit(router, coordinator)
+
+        XCTAssertEqual(result, .unrecognised(transcript: "टाइमर पाँच मिनेट"))
+        XCTAssertEqual(coordinator.timerStartRequests.count, 1)
+        XCTAssertEqual(coordinator.timerStartRequests[0].durationSeconds, 300)
+        XCTAssertTrue(coordinator.genericReplies.contains {
+            $0.contains("टाइमर सुरु भयो")
+        })
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "alarms_timers" && $0.eventType == "timer_started"
+                && $0.outcome == "success"
+        })
+    }
+
+    func testUserPhrasePanchMinutKoAlarmLagaauIsNeverAFiveOClockAlarm() async {
+        // The user-reported phrase, end to end: "पांच मिनुटको अलार्म
+        // लगाऊ" ("set a 5-minute alarm"). Number-word normalization plus
+        // the मिनुट unit word make this a COUNTDOWN, so the countdown
+        // veto fires and the stage never turns it into a 5 o'clock alarm
+        // (the pre-fix hazard the digit spelling hit). Alarm-worded
+        // countdowns stay model territory — exactly the master-pinned
+        // doctrine of `testCountdownPhraseNeverBecomesAnAlarm` — so the
+        // stage claims nothing and emits no alarms_timers events.
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "पांच मिनुटको अलार्म लगाऊ")
+        await Task.yield()
+
+        XCTAssertTrue(coordinator.alarmSetRequests.isEmpty,
+                      "a 5-minute alarm is a countdown — never a 5 o'clock alarm")
+        XCTAssertTrue(coordinator.timerStartRequests.isEmpty)
+        XCTAssertFalse(bus.emittedEvents.contains { $0.component == "alarms_timers" })
+    }
+
     func testTimerPermissionDeniedSpeaksTheTimerFallback() async {
         let coordinator = MockVoiceCommandCoordinator()
         coordinator.localeOverride = en

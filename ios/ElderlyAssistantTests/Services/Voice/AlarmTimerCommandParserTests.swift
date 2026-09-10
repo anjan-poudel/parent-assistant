@@ -386,4 +386,117 @@ final class AlarmTimerCommandParserTests: XCTestCase {
         XCTAssertEqual(AlarmTimerCommandParser.durationText(seconds: 3665, locale: ne),
                        "१ घण्टा १ मिनेट ५ सेकेण्ड")
     }
+
+    // MARK: - [NUMBER-WORDS] number words (2026-09-10)
+
+    func testBundledLexiconEntriesEachParseToTheirDuration() throws {
+        // Data-driven: EVERY word form in the bundled per-locale
+        // number-word lexicons must parse, through the unchanged
+        // duration grammar, to value × 1 minute. Adding a language or
+        // spelling variant = editing the JSON only; this test covers it
+        // automatically — no per-word hand-written assertions.
+        let cases: [(languageCode: String, locale: Locale, markerPrefix: String, unit: String)] = [
+            ("ne", ne, "टाइमर", "मिनेट"),
+            ("en", en, "set a timer for", "minutes")
+        ]
+        for entry in cases {
+            guard let lexicon = try NumberWordLexicon.bundled(languageCode: entry.languageCode) else {
+                throw XCTSkip("NumberWords/\(entry.languageCode).json not bundled yet")
+            }
+            XCTAssertFalse(lexicon.words.isEmpty, "the bundled lexicon must carry words")
+            for (word, value) in lexicon.words {
+                let timer = AlarmTimerCommandParser.parseTimer(
+                    "\(entry.markerPrefix) \(word) \(entry.unit)", locale: entry.locale)
+                XCTAssertEqual(timer?.durationSeconds, value * 60,
+                               "\(word) (locale \(entry.languageCode)) must parse to \(value) minutes")
+            }
+        }
+    }
+
+    func testEnglishDigitWordsParseLikeDigits() {
+        // The English fallback the pre-fix grammar never had in the
+        // deterministic stage: digit words parse exactly like digits.
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "set a timer for five minutes", locale: en)?.durationSeconds, 300)
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "set a timer for twenty minutes", locale: en)?.durationSeconds, 1200)
+    }
+
+    func testNumberWordsMixWithDigitsInCompounds() {
+        // A word/digit mix composes through the existing chain grammar,
+        // exactly like the all-digit form ("टाइमर १ घण्टा ५ मिनेट").
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "टाइमर १ घण्टा पाँच मिनेट", locale: ne)?.durationSeconds, 3900)
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "टाइमर पांच मिनेट ३० सेकेण्ड", locale: ne)?.durationSeconds, 330)
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "set a timer for 1 hour five minutes", locale: en)?.durationSeconds, 3900)
+        // The word forms leave no junk label behind (they normalize to
+        // digits, which the label stripper drops).
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer(
+            "टाइमर पाँच मिनेट", locale: ne)?.label)
+    }
+
+    func testSnoozeMinuteWordsParse() {
+        XCTAssertEqual(AlarmTimerCommandParser.parseAlarmSnooze(
+            "स्नुज पन्ध्र मिनेट", locale: ne), 15)
+        XCTAssertEqual(AlarmTimerCommandParser.parseAlarmSnooze(
+            "snooze for fifteen minutes", locale: en), 15)
+        // Hour-worded snoozes stay out — snooze is a minute spec.
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarmSnooze(
+            "स्नुज एक घण्टा", locale: ne))
+    }
+
+    func testNepaliNumberWordAlarmClockTime() {
+        let alarm = AlarmTimerCommandParser.parseAlarm(
+            "बिहान सात बजे अलार्म लगाऊ", now: now, calendar: calendar, locale: ne)
+        XCTAssertEqual(alarm?.time, date(2026, 9, 8, 7, 0))
+        let halfPast = AlarmTimerCommandParser.parseAlarm(
+            "साढे पाँच बजे अलार्म", now: now, calendar: calendar, locale: ne)
+        XCTAssertEqual(halfPast?.time, date(2026, 9, 8, 5, 30))
+    }
+
+    func testUserPhrasePanchMinutKoAlarmLagaauIsACountdownNotAnAlarm() {
+        // The user-reported phrase, at the parser level: the word form
+        // and its digit spelling must BOTH take the countdown veto — a
+        // "5-minute alarm" is a countdown, never a 5 o'clock alarm (the
+        // pre-fix hazard: with "मिनुट" missing from the unit vocabulary
+        // the digit form fell through the veto into the time-of-day
+        // parser). The same words DO parse as a duration when a timer
+        // marker makes it a timer command.
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarm(
+            "पांच मिनुटको अलार्म लगाऊ", now: now, calendar: calendar, locale: ne))
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarm(
+            "५ मिनुटको अलार्म लगाऊ", now: now, calendar: calendar, locale: ne),
+            "the digit spelling must get the same countdown veto")
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "टाइमर पांच मिनुट", locale: ne)?.durationSeconds, 300)
+    }
+
+    func testNumberWordRewritesAreContextGuarded() {
+        // The copula "छ" is never a number: "अलार्म छ?" (is there an
+        // alarm?) must not become "alarm 6?" → a 6 o'clock alarm.
+        XCTAssertEqual(NumberWordNormalizer.normalise("अलार्म छ?", locale: ne),
+                       "अलार्म छ?")
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarm(
+            "अलार्म छ?", now: now, calendar: calendar, locale: ne))
+        // "एक" inside another word is a different token.
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarm(
+            "एकछिन पछि अलार्म बजाऊ", now: now, calendar: calendar, locale: ne))
+        // Multi-word English numbers are never partially rewritten
+        // ("forty five minutes" must not become "forty 5 minutes").
+        XCTAssertEqual(NumberWordNormalizer.normalise(
+            "timer for forty five minutes", locale: en),
+            "timer for forty five minutes")
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer(
+            "timer for forty five minutes", locale: en))
+    }
+
+    func testNumberWordNormalizerIsIdentityWithoutLexicon() {
+        // A locale with no bundled lexicon degrades to the identity
+        // transform — the utterance falls through exactly as before.
+        let unknown = Locale(identifier: "fr-FR")
+        XCTAssertEqual(NumberWordNormalizer.normalise("टाइमर पाँच मिनेट", locale: unknown),
+                       "टाइमर पाँच मिनेट")
+    }
 }
