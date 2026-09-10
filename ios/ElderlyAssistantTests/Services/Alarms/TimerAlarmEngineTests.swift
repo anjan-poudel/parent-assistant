@@ -139,8 +139,10 @@ final class TimerAlarmEngineTests: XCTestCase {
         engine.tick(activeTimers: [first, second])
         XCTAssertEqual(engine.phase, .ringing(first))
 
+        // STOP expires the first row (the coordinator's expireTimer), so
+        // it leaves the next feed — then the second elapsed timer rings.
         engine.stopRinging()
-        engine.tick(activeTimers: [first, second])
+        engine.tick(activeTimers: [second])
 
         XCTAssertEqual(engine.phase, .ringing(second))
         XCTAssertEqual(audio.startCount, 2)
