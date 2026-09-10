@@ -1962,6 +1962,11 @@ final class AppCoordinator: ObservableObject {
     /// gate `.ready` — boot advances, and `kws_engine_ready` arrives
     /// when it arrives.
     private func bootPrepareVoiceEngine() {
+        // [BOOT-REVIEW P0 item 1] `voice-pipeline-start-requested` spans
+        // the voice-prep phase up to the moment the start request is
+        // actually issued (`noteVoicePipelineStartRequested` ends it and
+        // opens the callback interval).
+        StartupSignposts.begin(.voicePipelineStartRequested)
         self.startBootWarmPhase()
         // Null engine by default: the real KWS engine is built AFTER the
         // speak affordance goes live (see `scheduleDeferredKWSBuild`).
@@ -2086,6 +2091,10 @@ final class AppCoordinator: ObservableObject {
             return
         }
         self.startupBoot.advance(to: .warmingEngines)
+        // [BOOT-REVIEW P0 item 1] `warm-engines-completed` — begun with
+        // the real warm (not the skipped-plan path) and ended at settle,
+        // whichever path settles it.
+        StartupSignposts.begin(.warmEnginesCompleted)
         warmRunner.run(plan: bootPlan) { [weak self] outcomes in
             DispatchQueue.main.async {
                 guard let self, !self.warmPhaseSettled else { return }
@@ -5406,17 +5415,26 @@ final class AppCoordinator: ObservableObject {
     /// engine's construction is sherpa-guarded, inside `attempt()`.
     private static func makeWakeWordEngine(observabilityBus: ObservabilityBus)
         -> (engine: WakeWordEngine, isReal: Bool) {
+        // [BOOT-REVIEW P0 item 1] The KWS interval spans exactly the
+        // expensive half: the bundled-model resolution + the sherpa
+        // session/tokenizer construction. It is begun here (not at the
+        // call site) because this factory is the one place both the
+        // simulator's main-thread path and the device's serial-executor
+        // path run through.
+        StartupSignposts.begin(.kwsSessionReady)
         guard let real = WakeWordEngineSelection.make(
             toggleEnabled: WakeWordPreferences().isEnabled,
             sherpaCandidate: {
                 SherpaKWSWakeWordEngine.attempt(observabilityBus: observabilityBus)
             }
         ) else {
+            StartupSignposts.end(.kwsSessionReady, note: "null-engine")
             print("[AppCoordinator] Wake-word engine: NullWakeWordEngine "
                   + "(toggle off or sherpa model missing) — "
                   + "Talk button + simulate path unchanged")
             return (NullWakeWordEngine(), false)
         }
+        StartupSignposts.end(.kwsSessionReady, note: "real-engine")
         return (real, true)
     }
 
