@@ -2950,7 +2950,16 @@ final class AppCoordinator: ObservableObject {
     /// `VoicePipeline`'s capture+wedge-guard window, and
     /// `GeminiClient.Config.timeoutSeconds`) are coupled and MUST be
     /// re-checked together any time one of them changes.
-    private static let voiceWatchdogSeconds: TimeInterval = 40
+    ///
+    /// [VAD-TUNE] Raised 40 -> 60 on 2026-09-11: the capture cap went
+    /// 8 -> 22 s (VoicePipeline.captureTimeoutSeconds), so the worst
+    /// legitimate turn is now 22 s capture + 25 s Gemini HTTP = 47 s —
+    /// above the old 40 s value, which would have recycled mid-turn.
+    /// 60 s = 47 s + 13 s margin. The pipeline's internal wedge guard
+    /// (22 + 25 = 47 s) still flips the session out of `.listening`
+    /// before this watchdog can fire on a capture that is merely slow,
+    /// not wedged.
+    private static let voiceWatchdogSeconds: TimeInterval = 60
 
     private func armVoiceWatchdog() {
         cancelVoiceWatchdog()

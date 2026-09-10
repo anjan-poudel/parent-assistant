@@ -48,7 +48,12 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         static let `default` = Config(
             primaryLanguage: "ne",
             fallbackLanguage: "en",
-            maxUtteranceSeconds: 10,
+            // [VAD-TUNE] Raised 10 -> 22 to mirror
+            // `VoicePipeline.captureTimeoutSeconds`: the local clamp must
+            // not pre-empt the pipeline's total capture cap, or slow
+            // elderly speech gets cut here before the pipeline cap ever
+            // applies.
+            maxUtteranceSeconds: 22,
             forcePrimaryLanguage: true,
             inferenceTimeoutSeconds: 180
         )

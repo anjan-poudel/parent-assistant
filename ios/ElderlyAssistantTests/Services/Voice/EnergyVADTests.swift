@@ -228,4 +228,107 @@ final class EnergyVADTests: XCTestCase {
         for f in frames(1_300, count: 8) { vad.process(f) }   // 4th cycle: 24 + 5 >= 29
         XCTAssertTrue(ended, "quiet dips must keep accruing across band peaks")
     }
+
+    // MARK: - Trailing-silence force end ([VAD-TUNE], 2026-09-11)
+    //
+    // The force end bounds the one case the hangover cannot close:
+    // post-speech noise parked in the hold band (>= the end line but
+    // below the reference) keeps the quiet counter at zero forever, and
+    // the utterance would otherwise ride the recognizer's total capture
+    // cap (the device-observed "end of talk never detected" class). The
+    // force timer counts frames since the last clear-speech frame; the
+    // reference decay is FROZEN while it runs, so band noise cannot sink
+    // the reference and reset the timer frame by frame. Frames ARE the
+    // injected clock: 512 samples at 16 kHz = 32 ms per frame, fully
+    // deterministic — no wall-clock dependence.
+
+    /// Band-level noise after speech: the normal hangover never accrues
+    /// (the noise sits above the end line), but the force end fires
+    /// exactly at the bound. Pins the production default too:
+    /// 7000 ms = ceil(7000 / 32) = 219 frames.
+    func testForceEndFiresWhenPostSpeechNoiseHoldsTheBand() {
+        let vad = EnergyVAD()   // production default: 7000 ms -> 219 frames
+        var forced = false
+        var normalEnded = false
+        vad.onForcedEndOfUtterance = { forced = true }
+        vad.onEndOfUtterance = { normalEnded = true }
+
+        vad.start(endOfUtteranceMs: 900)
+        for f in frames(3_000, count: 4) { vad.process(f) }   // speech, RMS 0.0916
+        // Post-speech band noise: RMS 0.0610 — above the end line
+        // (0.0916 x 0.5 = 0.0458) but below the reference, so the quiet
+        // counter never accrues. The reference is frozen by the force
+        // timer, so the noise never crosses it.
+        for f in frames(2_000, count: 218) { vad.process(f) }
+        XCTAssertFalse(forced, "must not fire one frame before the bound")
+        XCTAssertFalse(normalEnded, "the hangover cannot accrue inside the band")
+        for f in frames(2_000, count: 1) { vad.process(f) }   // 219th frame
+        XCTAssertTrue(forced, "the force end must fire exactly at the bound")
+        XCTAssertFalse(normalEnded, "a force end is not a normal silence end")
+    }
+
+    /// Continuous clear speech keeps the force timer reset at every
+    /// frame: the cap must never fire mid-speech, no matter how long the
+    /// utterance runs ("energy above threshold keeps it alive").
+    func testForceEndNeverFiresDuringContinuousSpeech() {
+        let vad = EnergyVAD(forceEndAfterSilenceMs: 640)   // 20 frames
+        var forced = false
+        vad.onForcedEndOfUtterance = { forced = true }
+
+        vad.start(endOfUtteranceMs: 900)
+        for _ in 0..<100 {
+            for f in frames(3_000, count: 1) { vad.process(f) }
+        }
+        XCTAssertFalse(forced, "continuous speech must keep the force timer reset")
+    }
+
+    /// Speech that dips into the band between loud frames stays alive:
+    /// any clear-speech frame (rms >= the reference) resets the force
+    /// timer, so 19-band + 1-loud cycles never reach the 20-frame bound.
+    func testClearSpeechFramesResetTheForceTimer() {
+        let vad = EnergyVAD(forceEndAfterSilenceMs: 640)   // 20 frames
+        var forced = false
+        vad.onForcedEndOfUtterance = { forced = true }
+
+        vad.start(endOfUtteranceMs: 900)
+        for f in frames(3_000, count: 2) { vad.process(f) }
+        for _ in 0..<5 {
+            for f in frames(2_000, count: 19) { vad.process(f) }   // band
+            for f in frames(3_000, count: 1) { vad.process(f) }    // clear speech
+        }
+        XCTAssertFalse(forced, "a clear-speech frame must reset the force timer")
+    }
+
+    /// Real quiet still ends via the normal hangover — the force end must
+    /// never fire when genuine silence exists.
+    func testNormalSilenceEndWinsOverForceEnd() {
+        let vad = EnergyVAD(forceEndAfterSilenceMs: 640)   // 20 frames
+        var forced = false
+        var normalEnded = false
+        vad.onForcedEndOfUtterance = { forced = true }
+        vad.onEndOfUtterance = { normalEnded = true }
+
+        vad.start(endOfUtteranceMs: 100)   // 4-frame hangover
+        for f in frames(3_000, count: 4) { vad.process(f) }
+        for f in frames(0, count: 4) { vad.process(f) }
+        XCTAssertTrue(normalEnded, "the normal hangover must fire in real quiet")
+        XCTAssertFalse(forced, "the force end must stay silent when quiet exists")
+    }
+
+    /// The force end requires speech to have started: a capture that
+    /// never crosses the speech threshold can never force-end — it keeps
+    /// ending via the recognizer's total capture cap (the existing
+    /// no-speech path, see VoiceTurnTimingSeamTests).
+    func testForceEndRequiresSpeechToHaveStarted() {
+        let vad = EnergyVAD(forceEndAfterSilenceMs: 640)
+        var forced = false
+        var ended = false
+        vad.onForcedEndOfUtterance = { forced = true }
+        vad.onEndOfUtterance = { ended = true }
+
+        vad.start(endOfUtteranceMs: 100)
+        for f in frames(0, count: 50) { vad.process(f) }
+        XCTAssertFalse(forced, "no speech, no force end")
+        XCTAssertFalse(ended)
+    }
 }

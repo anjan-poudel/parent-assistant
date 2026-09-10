@@ -81,23 +81,53 @@ final class VoicePipeline {
     /// Max time the user can keep talking before capture is force-ended
     /// (VAD normally ends it much sooner). Also the `timeout` handed to
     /// `SpeechRecognizerProtocol.startListening`.
-    private static let captureTimeoutSeconds: TimeInterval = 8.0
+    ///
+    /// [VAD-TUNE] Raised 8 -> 22 on 2026-09-11: the old 8 s cap was an
+    /// ABSOLUTE deadline — when VAD endpointing stalled (post-speech
+    /// noise holding the EnergyVAD band, see `EnergyVAD`'s force-end
+    /// note), a slow elderly utterance still in progress at the 8 s mark
+    /// was cut mid-sentence, and every stalled capture rode the cap
+    /// before transcription even started (the "constant lag" class).
+    /// 22 s sits inside the task's suggested 20-25 s total-capture band
+    /// and, combined with the EnergyVAD force end (speech-end + 7 s) and
+    /// the 0.9 s normal hangover, ends a finished utterance promptly
+    /// without cutting mid-sentence speech. The recognizer's own timeout
+    /// turns this cap into a `finish()` — the captured audio is
+    /// transcribed, never discarded (only the wedge guard below cancels).
+    /// Coupled numbers re-checked together: capture timeout (22) +
+    /// wedge margin (25) = 47 s, below `AppCoordinator.voiceWatchdogSeconds`
+    /// (60) — see the coupled-numbers family comment near
+    /// `turnPendingSafetySeconds`.
+    private static let captureTimeoutSeconds: TimeInterval = 22.0
     /// Extra grace period, ON TOP of `captureTimeoutSeconds`, before the
     /// "stuck in listening" watchdog force-cancels the recognizer. Must
     /// comfortably exceed the slowest recognizer's own worst-case latency
     /// (a cloud recognizer's full network round-trip, not just on-device
     /// inference) — see the wiring comment at the watchdog's call site.
-    private static let wedgeGuardMarginSeconds: TimeInterval = 10.0
+    ///
+    /// [VAD-TUNE] Raised 10 -> 25 on 2026-09-11: the margin must cover
+    /// GeminiClient's 25 s HTTP timeout, or the wedge cancels a
+    /// legitimate in-flight cloud request that started at the 22 s
+    /// capture cap (the exact bug class 305a3cc fixed at the old 5.1 s
+    /// pair). 22 + 25 = 47 s — still below the 60 s voice watchdog.
+    private static let wedgeGuardMarginSeconds: TimeInterval = 25.0
     /// Trailing silence (ms) the VAD must observe before declaring the
     /// utterance over. Raised 200 -> 900 on 2026-09-07: the 200 ms
     /// hangover was shorter than a natural mid-utterance pause for
     /// elderly speakers (0.5-0.7 s — a breath, a word-search, a slow
     /// clause), so pauses cut captures in half; 900 ms (29 frames at
     /// 32 ms/frame) both survives those pauses and still ends a finished
-    /// utterance ~0.9 s after the last word — well inside the 8 s capture
-    /// cap and the target "end within ~0.8-1.5 s of trailing silence".
+    /// utterance ~0.9 s after the last word — well inside the capture cap
+    /// and the target "end within ~0.8-1.5 s of trailing silence".
     /// Long enough is cheap here: the VAD only fires once per capture,
     /// and the recognizer simply transcribes everything up to that point.
+    ///
+    /// [VAD-TUNE] Deliberately UNCHANGED: this hangover is the
+    /// mid-utterance-pause protection for slow elderly speech. The
+    /// noise-stall case (energy parked in the EnergyVAD hold band, where
+    /// the hangover never even starts counting) is bounded instead by the
+    /// EnergyVAD force end (`forceEndAfterSilenceMs`, 7 s) and the total
+    /// capture cap above.
     private static let endOfUtteranceMs: Int = 900
     private var pcmBuffer: [Int16] = []
     /// Held only during the VAD-gated capture phase — how far past silence
@@ -154,11 +184,12 @@ final class VoicePipeline {
     /// local leg's timeout, then GeminiClient's 25 s HTTP timeout on
     /// escalation, all of which guarantee the interpret completion
     /// eventually fires and clears the token) — so it never fires while a
-    /// reply is genuinely on its way. It sits deliberately below the 40 s
+    /// reply is genuinely on its way. It sits deliberately below the 60 s
     /// voice watchdog (AppCoordinator.voiceWatchdogSeconds — the
-    /// coupled-numbers family: capture timeout, wedge guard, Gemini
-    /// HTTP timeout, voice watchdog — re-checked together whenever one
-    /// changes).
+    /// coupled-numbers family: capture timeout 22 s, wedge guard 47 s,
+    /// Gemini HTTP timeout 25 s, voice watchdog 60 s — re-checked
+    /// together whenever one changes; the watchdog must exceed max
+    /// capture + Gemini HTTP = 47 s).
     private static let turnPendingSafetySeconds: TimeInterval = 35
 
     /// Armed while a route's async reply is outstanding: the pipeline
@@ -218,23 +249,36 @@ final class VoicePipeline {
             self?.vadHeardSpeech = true
         }
         vad.onEndOfUtterance = { [weak self] in
-            guard let self else { return }
-            // The VAD calls this from the pipeline's processing queue
-            // (vad.process runs there, via handleAudioBuffer), but the
-            // recognizer lifecycle is main-confined: a finish() issued
-            // from the processing queue raced a main-queue stop()/cancel()
-            // on the recognizers' internal buffers. Hop to main first,
-            // then re-check generation + state — by the time the hop runs
-            // the capture may already be over (stop(), or a newer capture
-            // started), and finish() must not cross generations.
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.captureGeneration == generation,
-                      self.state == .capturingCommand else { return }
-                self.emit("vad_end_of_utterance", outcome: "success")
-                // [TURN-TIMING] The user stopped speaking — capture ends.
-                self.turnTracer?.mark("vad_end")
-                self.speechRecognizer.finish()
-            }
+            self?.finishCaptureFromVAD(generation: generation,
+                                       eventType: "vad_end_of_utterance")
+        }
+        // [VAD-TUNE] The trailing-silence force end (EnergyVAD) ends the
+        // capture exactly like a normal end — finish() feeds the
+        // recognizer — but reports the honest `vad_force_end` event so
+        // device logs distinguish "the user paused / noise held the band"
+        // from a genuine silence-detection end.
+        vad.onForcedEndOfUtterance = { [weak self] in
+            self?.finishCaptureFromVAD(generation: generation,
+                                       eventType: "vad_force_end")
+        }
+    }
+
+    /// Shared main-queue hop for both VAD end paths. The VAD calls the
+    /// callbacks from the pipeline's processing queue (vad.process runs
+    /// there, via handleAudioBuffer), but the recognizer lifecycle is
+    /// main-confined: a finish() issued from the processing queue raced a
+    /// main-queue stop()/cancel() on the recognizers' internal buffers.
+    /// Hop to main first, then re-check generation + state — by the time
+    /// the hop runs the capture may already be over (stop(), or a newer
+    /// capture started), and finish() must not cross generations.
+    private func finishCaptureFromVAD(generation: Int, eventType: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.captureGeneration == generation,
+                  self.state == .capturingCommand else { return }
+            self.emit(eventType, outcome: "success")
+            // [TURN-TIMING] The user stopped speaking — capture ends.
+            self.turnTracer?.mark("vad_end")
+            self.speechRecognizer.finish()
         }
     }
 
