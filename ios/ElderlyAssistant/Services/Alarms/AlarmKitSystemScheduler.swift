@@ -47,7 +47,15 @@ protocol AlarmKitTimerScheduling: AnyObject {
     /// reconciliation's source of truth for which persisted rows are
     /// system-managed (those are NOT re-armed by `scheduleAll`; the
     /// system owns them across app terminations).
-    func systemTimerIDs() -> Set<UUID>
+    ///
+    /// [TIMER-DEBUG] (2026-09-11) nil means the system list is
+    /// UNREADABLE right now (`AlarmManager.alarms` throws — e.g. the
+    /// alarm store is briefly unavailable). Callers treat nil as
+    /// "unknown" and SKIP reconciliation entirely: an unreadable record
+    /// must never expire a live timer row (the on-device symptom: a
+    /// voice-set timer vanished from the app list while the system
+    /// kept counting it) or double-arm its UN fallback.
+    func systemTimerIDs() -> Set<UUID>?
 }
 
 // MARK: - Production adapter (iOS 26)
@@ -148,7 +156,10 @@ final class AlarmKitSystemScheduler: AlarmKitTimerScheduling {
         try? manager.cancel(id: id)
     }
 
-    func systemTimerIDs() -> Set<UUID> {
-        Set((try? manager.alarms.map(\.id)) ?? [])
+    func systemTimerIDs() -> Set<UUID>? {
+        // [TIMER-DEBUG] nil on throw = "unreadable" (see the seam doc):
+        // reconciliation must skip, never expire, against an unreadable
+        // system record.
+        try? Set(manager.alarms.map(\.id))
     }
 }

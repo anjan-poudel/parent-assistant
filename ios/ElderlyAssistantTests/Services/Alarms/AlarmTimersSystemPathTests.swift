@@ -11,6 +11,10 @@ import UserNotifications
 private final class FakeAlarmKitScheduler: AlarmKitTimerScheduling {
     var authorization: AlarmKitTimerAuthorization = .notDetermined
     var scheduleShouldThrow = false
+    /// [TIMER-DEBUG] nil = the system alarm list is unreadable (the
+    /// `AlarmManager.alarms` throw) — reconciliation must skip, never
+    /// expire, against it.
+    var systemIDsUnreadable = false
     private(set) var authorizationRequestCount = 0
     private(set) var scheduled: [(id: UUID, duration: TimeInterval, label: String?)] = []
     private(set) var cancelledIDs: [UUID] = []
@@ -36,7 +40,9 @@ private final class FakeAlarmKitScheduler: AlarmKitTimerScheduling {
         reportedSystemIDs.remove(id)
     }
 
-    func systemTimerIDs() -> Set<UUID> { reportedSystemIDs }
+    func systemTimerIDs() -> Set<UUID>? {
+        systemIDsUnreadable ? nil : reportedSystemIDs
+    }
 }
 
 /// [TIMER-ALARM] (2026-09-10) Local `LocalNotificationScheduling` fake
@@ -222,10 +228,66 @@ final class AlarmTimersSystemPathTests: XCTestCase {
         let service = makeService()
         _ = await service.startTimer(durationSeconds: 300, label: nil)
         let id = service.timers[0].id
+        // A real system-UI dismissal removes the alarm from the system
+        // record BEFORE the updates stream signals it.
+        alarmKit.reportedSystemIDs = []
 
         service.noteSystemTimerUpdates(systemTimerIDs: [])
 
         XCTAssertFalse(service.activeTimers.contains(where: { $0.id == id }))
+    }
+
+    // [TIMER-DEBUG] (2026-09-11) The on-device regression: an
+    // `alarmUpdates` snapshot generated BEFORE the timer was scheduled
+    // can be processed AFTER the schedule landed. The async snapshot is
+    // only a change signal — expiry must be decided against the
+    // AUTHORITATIVE synchronous list, which still contains the timer, so
+    // the row survives.
+    func testStaleAlarmUpdatesSnapshotDoesNotExpireStillManagedTimer() async {
+        alarmKit.authorization = .authorized
+        let service = makeService()
+        _ = await service.startTimer(durationSeconds: 300, label: nil)
+        let id = service.timers[0].id
+
+        // A stale snapshot lacking the id, while the authoritative list
+        // still manages it.
+        service.noteSystemTimerUpdates(systemTimerIDs: [])
+
+        XCTAssertTrue(service.activeTimers.contains(where: { $0.id == id }))
+        XCTAssertTrue(service.systemManagedTimerIDs.contains(id))
+    }
+
+    // [TIMER-DEBUG] (2026-09-11) An UNREADABLE system list (nil — the
+    // `AlarmManager.alarms` throw) is "unknown", not "empty": the re-arm
+    // must expire nothing and must not UN-arm the system-managed timer
+    // (a second bell at fire time).
+    func testScheduleAllWithUnreadableSystemListExpiresNothingAndArmsNoUN() async {
+        alarmKit.authorization = .authorized
+        let service = makeService()
+        _ = await service.startTimer(durationSeconds: 300, label: nil)
+        let id = service.timers[0].id
+        unCenter.addedRequests.removeAll()
+        alarmKit.systemIDsUnreadable = true
+
+        service.scheduleAll()
+
+        XCTAssertTrue(service.activeTimers.contains(where: { $0.id == id }))
+        XCTAssertTrue(service.systemManagedTimerIDs.contains(id))
+        XCTAssertTrue(unCenter.addedRequests.isEmpty)
+    }
+
+    // [TIMER-DEBUG] (2026-09-11) An unreadable system list must also not
+    // expire through the alarmUpdates observation path.
+    func testNoteSystemTimerUpdatesWithUnreadableSystemListExpiresNothing() async {
+        alarmKit.authorization = .authorized
+        let service = makeService()
+        _ = await service.startTimer(durationSeconds: 300, label: nil)
+        let id = service.timers[0].id
+        alarmKit.systemIDsUnreadable = true
+
+        service.noteSystemTimerUpdates(systemTimerIDs: [])
+
+        XCTAssertTrue(service.activeTimers.contains(where: { $0.id == id }))
     }
 
     func testPruneKeepsRecentlyEndedRowForTapGrace() {
