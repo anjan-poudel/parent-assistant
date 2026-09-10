@@ -61,7 +61,7 @@ struct DefaultManualsBrowseView: View {
             HStack(spacing: 14) {
                 Image(systemName: "book.fill")
                     .font(.system(size: 22))
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .frame(width: DesignTokens.iconBadgeDiameter,
                            height: DesignTokens.iconBadgeDiameter)
                     .background(DesignTokens.accent)
@@ -70,19 +70,19 @@ struct DefaultManualsBrowseView: View {
                     Text("settings.manuals.userManual")
                         .font(.system(size: DesignTokens.minBodyPointSize,
                                       weight: .semibold))
-                        .foregroundColor(DesignTokens.textPrimary)
+                        .foregroundStyle(DesignTokens.textPrimary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Text("settings.manuals.userManualHint")
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundStyle(DesignTokens.textSecondary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
             }
             .contentShape(Rectangle())
         }
@@ -101,10 +101,10 @@ struct DefaultManualsBrowseView: View {
         VStack(spacing: 20) {
             Image(systemName: "book.closed")
                 .font(.system(size: 56))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
             Text("appliance.manual.bundledEmpty")
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundStyle(DesignTokens.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
         }

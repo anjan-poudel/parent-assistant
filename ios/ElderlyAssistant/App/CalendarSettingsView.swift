@@ -43,7 +43,7 @@ struct CalendarSettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("calendarDisplay.sectionTitle")
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
             VStack(spacing: 8) {
                 defaultCalendarRow(.gregorian)
                 defaultCalendarRow(.nepali)
@@ -54,7 +54,7 @@ struct CalendarSettingsView: View {
             )) {
                 Text("calendarDisplay.bsOverlay")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
             }
             .tint(DesignTokens.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -64,13 +64,13 @@ struct CalendarSettingsView: View {
             )) {
                 Text("calendarDisplay.tithiOverlay")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
             }
             .tint(DesignTokens.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Text("calendarDisplay.offlineNote")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -88,12 +88,12 @@ struct CalendarSettingsView: View {
             HStack {
                 Text(LocalizedStringKey(option.labelKey))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 26))
-                        .foregroundColor(DesignTokens.accent)
+                        .foregroundStyle(DesignTokens.accent)
                 }
             }
             .padding(14)
@@ -121,12 +121,12 @@ struct CalendarSettingsView: View {
             )) {
                 Label("calendarSync.toggle", systemImage: "calendar")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
             }
             .tint(DesignTokens.accent)
             Text(statusText)
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -155,13 +155,13 @@ struct CalendarSettingsView: View {
             )) {
                 Label("calendar.twoWay.title", systemImage: "arrow.triangle.2.circlepath")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
             }
             .tint(DesignTokens.accent)
             .disabled(!coordinator.calendarSync.isEnabled)
             Text(twoWayStatusText)
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -200,7 +200,7 @@ struct CalendarSettingsView: View {
             )) {
                 Label("externalReminders.toggle", systemImage: "calendar.badge.clock")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
             }
             .tint(DesignTokens.accent)
 
@@ -208,7 +208,7 @@ struct CalendarSettingsView: View {
                 HStack {
                     Text("externalReminders.leadTitle")
                         .font(.system(size: DesignTokens.minBodyPointSize))
-                        .foregroundColor(DesignTokens.textPrimary)
+                        .foregroundStyle(DesignTokens.textPrimary)
                     Spacer()
                     // Setting the lead re-scans immediately (the
                     // service's didSet) so armed notifications follow.
@@ -218,23 +218,24 @@ struct CalendarSettingsView: View {
                     ), in: 0...ExternalCalendarService.maxLeadMinutes) {
                         Text(BikramSambat.devanagariDigits(coordinator.externalCalendar.leadMinutes))
                             .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                            .foregroundColor(DesignTokens.accent)
+                            .foregroundStyle(DesignTokens.accent)
                     }
                 }
                 .padding(14)
-                .frame(height: 56)
+                .frame(minHeight: 56)
+                .fixedSize(horizontal: false, vertical: true)
                 .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
 
                 Text(L10n.fmt("externalReminders.leadHint", locale: coordinator.activeLocale,
                               BikramSambat.devanagariDigits(coordinator.externalCalendar.leadMinutes)))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
             }
 
             Text(externalStatusText)
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -25,7 +25,7 @@ struct AlarmsTimersSettingsView: View {
                 if coordinator.alarms.isEmpty && coordinator.activeTimers.isEmpty {
                     Text("alarms.empty")
                         .font(.system(size: DesignTokens.minBodyPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundStyle(DesignTokens.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(32)
                         .frame(maxWidth: .infinity)
@@ -69,7 +69,7 @@ struct AlarmsTimersSettingsView: View {
                 // states plainly what happens on each path.
                 Text("timerAlarm.settingsCaption")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary.opacity(0.8))
+                    .foregroundStyle(DesignTokens.textSecondary.opacity(0.8))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 8)
             }
@@ -84,16 +84,16 @@ struct AlarmsTimersSettingsView: View {
         HStack(spacing: 12) {
             Image(systemName: alarm.isEnabled ? "alarm.fill" : "alarm")
                 .font(.system(size: 22))
-                .foregroundColor(alarm.isEnabled ? DesignTokens.accent
+                .foregroundStyle(alarm.isEnabled ? DesignTokens.accent
                                                  : DesignTokens.textSecondary)
             VStack(alignment: .leading, spacing: 4) {
                 Text(timeText(alarm.time))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                 if let label = alarm.label {
                     Text(label)
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundStyle(DesignTokens.textSecondary)
                         .lineLimit(2)
                 }
                 // [ALARMKIT-ALARMS] (2026-09-10) Honest per-row status:
@@ -116,9 +116,9 @@ struct AlarmsTimersSettingsView: View {
             } label: {
                 Image(systemName: "trash.fill")
                     .font(.system(size: 22))
-                    .foregroundColor(DesignTokens.stateError)
-                    .frame(width: DesignTokens.minTapTargetSize,
-                           height: DesignTokens.minTapTargetSize)
+                    .foregroundStyle(DesignTokens.stateError)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text("alarms.delete"))
@@ -137,16 +137,16 @@ struct AlarmsTimersSettingsView: View {
             HStack(spacing: 12) {
                 Image(systemName: "timer")
                     .font(.system(size: 22))
-                    .foregroundColor(DesignTokens.accent)
+                    .foregroundStyle(DesignTokens.accent)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(countdownText(remaining: timer.endsAt.timeIntervalSince(context.date)))
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundColor(DesignTokens.textPrimary)
+                        .foregroundStyle(DesignTokens.textPrimary)
                         .monospacedDigit()
                     if let label = timer.label {
                         Text(label)
                             .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundColor(DesignTokens.textSecondary)
+                            .foregroundStyle(DesignTokens.textSecondary)
                             .lineLimit(2)
                     }
                 }
@@ -156,9 +156,9 @@ struct AlarmsTimersSettingsView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 26))
-                        .foregroundColor(DesignTokens.stateError)
-                        .frame(width: DesignTokens.minTapTargetSize,
-                               height: DesignTokens.minTapTargetSize)
+                        .foregroundStyle(DesignTokens.stateError)
+                        .frame(minWidth: DesignTokens.minTapTargetSize,
+                               minHeight: DesignTokens.minTapTargetSize)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text("timers.cancel"))
@@ -176,26 +176,30 @@ struct AlarmsTimersSettingsView: View {
         VStack(spacing: 10) {
             Text("alarms.new")
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundStyle(DesignTokens.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 12) {
                 Text("alarms.time")
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                 Spacer()
                 DatePicker("", selection: $time, displayedComponents: .hourAndMinute)
                     .labelsHidden()
                     .environment(\.locale, coordinator.appLanguage.locale)
             }
             .padding(14)
-            .frame(height: 56)
+            // DESIGN-REVIEW: was a fixed 56pt — a minimum keeps the row
+            // tall by default and lets it grow with the label + picker at
+            // Accessibility XXXL instead of clipping them.
+            .frame(minHeight: 56)
+            .fixedSize(horizontal: false, vertical: true)
             .background(DesignTokens.background)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
 
             if let errorKey {
                 Text(LocalizedStringKey(errorKey))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.stateError)
+                    .foregroundStyle(DesignTokens.stateError)
                     .multilineTextAlignment(.center)
             }
 
@@ -204,9 +208,13 @@ struct AlarmsTimersSettingsView: View {
             } label: {
                 Text("alarms.save")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
-                    .frame(height: DesignTokens.chipHeight)
+                    // DESIGN-REVIEW: minHeight + fixedSize (was a fixed
+                    // 60pt chip) so the action label wraps/grows rather
+                    // than clipping at Accessibility XXXL.
+                    .frame(minHeight: DesignTokens.chipHeight)
+                    .fixedSize(horizontal: false, vertical: true)
                     .background(DesignTokens.accent)
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }
@@ -258,13 +266,12 @@ struct AlarmsTimersSettingsView: View {
 
     // MARK: Text helpers
 
+    /// DESIGN-REVIEW (P2): the row used to build a `DateFormatter` per
+    /// render — once per alarm, per body evaluation, for an answer that
+    /// only depends on the locale. `LocaleFormatters` builds it once per
+    /// locale and hands back the same instance (see `ViewCaches.swift`).
     private func timeText(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = coordinator.appLanguage.locale
-        formatter.timeZone = .current
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
+        LocaleFormatters.shortTime(locale: coordinator.appLanguage.locale).string(from: date)
     }
 
     /// Compact clock countdown — "H:MM:SS" above an hour, "M:SS" below

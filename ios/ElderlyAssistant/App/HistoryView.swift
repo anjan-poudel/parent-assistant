@@ -61,12 +61,11 @@ struct HistoryView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(ActivityRowText.name(for: entry, locale: coordinator.activeLocale))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(DesignTokens.textPrimary)
-                    .lineLimit(1)
+                    .foregroundStyle(DesignTokens.textPrimary)
                 Text(caption(for: entry))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
-                    .lineLimit(1)
+                    .foregroundStyle(DesignTokens.textSecondary)
+                    .lineLimit(2)
             }
             Spacer(minLength: 0)
             if entry.channel == .unanswered {
@@ -91,9 +90,9 @@ struct HistoryView: View {
     private var dialerCircle: some View {
         Image(systemName: "phone.fill")
             .font(.system(size: 18, weight: .semibold))
-            .foregroundColor(.white)
-            .frame(width: DesignTokens.minTapTargetSize,
-                   height: DesignTokens.minTapTargetSize)
+            .foregroundStyle(.white)
+            .frame(minWidth: DesignTokens.minTapTargetSize,
+                   minHeight: DesignTokens.minTapTargetSize)
             .background(DesignTokens.accent)
             .clipShape(Circle())
             .accessibilityHidden(true)
@@ -118,6 +117,13 @@ struct HistoryView: View {
         }
     }
 
+    /// Every row is a re-openable ACTION, so every row wears the
+    /// brand/action role (badge-tint consolidation 2026-09-10 — `.call`
+    /// and `.reminders` resolve to the same accent now). A call row and
+    /// a message row are told apart by their glyph (phone.fill vs the
+    /// chat bubbles) and their caption, not by hue; only the urgency of
+    /// an unanswered call gets its own visual weight, and that lives in
+    /// the row's dialer circle.
     private func tint(for channel: AppActivityEntry.Channel) -> DesignTokens.BadgeTint {
         switch channel {
         case .phone, .faceTimeVideo, .faceTimeAudio: return .call
@@ -224,10 +230,10 @@ struct HistoryView: View {
         HStack(spacing: 10) {
             Image(systemName: "phone.fill")
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.BadgeTint.call.tint)
+                .foregroundStyle(DesignTokens.BadgeTint.call.tint)
             Text("history.liveCall")
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.BadgeTint.call.tint)
+                .foregroundStyle(DesignTokens.BadgeTint.call.tint)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
@@ -240,7 +246,7 @@ struct HistoryView: View {
     private var emptyStateCard: some View {
         Text(LocalizedStringKey("history.empty"))
             .font(.system(size: DesignTokens.minBodyPointSize))
-            .foregroundColor(DesignTokens.textSecondary)
+            .foregroundStyle(DesignTokens.textSecondary)
             .multilineTextAlignment(.center)
             .padding(32)
             .frame(maxWidth: .infinity)
@@ -317,11 +323,12 @@ enum HistoryTimeFormat {
         return shortDateFormatter(locale: locale).string(from: timestamp)
     }
 
+    /// DESIGN-REVIEW (P2): was a fresh `DateFormatter` per row, per body
+    /// evaluation — hundreds of identical formatters for one locale's
+    /// answer. `LocaleFormatters` builds one per locale and caches it;
+    /// `DateFormatter` is safe to format from multiple threads (iOS 7+),
+    /// and the cache is lock-guarded besides, so sharing it is safe.
     private static func shortDateFormatter(locale: Locale) -> DateFormatter {
-        let formatter = DateFormatter()
-        formatter.locale = locale
-        formatter.dateStyle = .short
-        formatter.timeStyle = .none
-        return formatter
+        LocaleFormatters.shortDate(locale: locale)
     }
 }

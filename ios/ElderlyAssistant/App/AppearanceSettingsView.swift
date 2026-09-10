@@ -39,12 +39,12 @@ struct AppearanceSettingsView: View {
                     .accessibilityHidden(true)
                 Text(LocalizedStringKey(theme.nameKey))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 26))
-                        .foregroundColor(DesignTokens.accent)
+                        .foregroundStyle(DesignTokens.accent)
                         .accessibilityHidden(true)
                 }
             }

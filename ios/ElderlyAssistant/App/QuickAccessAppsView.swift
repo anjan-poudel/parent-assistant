@@ -54,10 +54,10 @@ struct QuickAccessAppsView: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
             TextField("quickApps.search.placeholder", text: $searchText)
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundStyle(DesignTokens.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
         }
@@ -109,7 +109,7 @@ struct QuickAccessAppsView: View {
             Text("apps.probeNote")
         }
         .font(.system(size: DesignTokens.minCaptionPointSize))
-        .foregroundColor(DesignTokens.textSecondary)
+        .foregroundStyle(DesignTokens.textSecondary)
     }
 
     private var atCap: Bool {
@@ -119,7 +119,7 @@ struct QuickAccessAppsView: View {
     private func sectionHeader(_ key: String) -> some View {
         Text(LocalizedStringKey(key))
             .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-            .foregroundColor(DesignTokens.textSecondary)
+            .foregroundStyle(DesignTokens.textSecondary)
     }
 
     // MARK: - Rows
@@ -154,7 +154,7 @@ struct QuickAccessAppsView: View {
             if isFavourite {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 26))
-                    .foregroundColor(DesignTokens.accent)
+                    .foregroundStyle(DesignTokens.accent)
                     .accessibilityLabel(Text("quickApps.added"))
             } else if isInstalledHere && !atCap {
                 addButton(app)
@@ -167,11 +167,11 @@ struct QuickAccessAppsView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(LocalizedStringKey(app.nameKey))
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundStyle(DesignTokens.textPrimary)
             if let captionKey {
                 Text(LocalizedStringKey(captionKey))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
             }
         }
     }
@@ -191,9 +191,9 @@ struct QuickAccessAppsView: View {
                 Text("quickApps.add")
             }
             .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-            .foregroundColor(.white)
+            .foregroundStyle(.white)
             .padding(.horizontal, 14)
-            .frame(height: DesignTokens.minTapTargetSize)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
             .background(DesignTokens.accent)
             .clipShape(Capsule())
         }
@@ -216,9 +216,9 @@ struct QuickAccessAppsView: View {
                           locale: coordinator.appLanguage.locale,
                           appDisplayName(app)))
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.accent)
+                .foregroundStyle(DesignTokens.accent)
                 .padding(.horizontal, 14)
-                .frame(height: DesignTokens.minTapTargetSize)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
         }
         .buttonStyle(.plain)
     }

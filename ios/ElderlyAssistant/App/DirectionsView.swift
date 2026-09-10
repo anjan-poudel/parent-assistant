@@ -241,10 +241,10 @@ struct DirectionsView: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
             TextField("directions.search.placeholder", text: $searchText)
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundStyle(DesignTokens.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             if micButtonVisible {
@@ -266,9 +266,12 @@ struct DirectionsView: View {
         let listening = micPhase == .listening
         return Button(action: micTapped) {
             Image(systemName: listening ? "stop.fill" : "mic.fill")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(listening ? .white : DesignTokens.accent)
-                .frame(width: 30, height: 30)
+                // Caption token (DESIGN-REVIEW): 18pt floor, Dynamic Type
+                // aware — the 30pt circle below grows with it via
+                // `minHeight`/`minWidth` so the glyph can never clip.
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .foregroundStyle(listening ? .white : DesignTokens.accent)
+                .frame(minWidth: 30, minHeight: 30)
                 .background(listening ? DesignTokens.accent : DesignTokens.background)
                 .clipShape(Circle())
         }
@@ -361,13 +364,13 @@ struct DirectionsView: View {
         case .listening:
             Text(L10n.str("directions.search.micListening", locale: coordinator.activeLocale))
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.accent)
+                .foregroundStyle(DesignTokens.accent)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
         case .failed:
             Text(L10n.str("directions.search.micFailed", locale: coordinator.activeLocale))
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
         case .idle:
@@ -396,7 +399,7 @@ struct DirectionsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(LocalizedStringKey(section.group.headerKey))
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 4)
             ForEach(section.rows) { row in
@@ -415,18 +418,18 @@ struct DirectionsView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(row.name)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
                 if let relationship = row.relationship {
                     Text(relationship)
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundColor(DesignTokens.accent)
-                        .lineLimit(1)
+                        .foregroundStyle(DesignTokens.accent)
+                        .lineLimit(2)
                 }
                 Text(row.address)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -472,7 +475,7 @@ struct DirectionsView: View {
         } label: {
             Text(LocalizedStringKey("directions.goLabel"))
                 .font(.system(size: 22, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundStyle(.white)
                 .frame(width: 56, height: 56)
                 .background(DesignTokens.accent)
                 .clipShape(Circle())
@@ -491,19 +494,20 @@ struct DirectionsView: View {
             IconBadge(systemImage: "map.fill", tint: .directions, diameter: 72)
             Text(LocalizedStringKey("settings.places.empty"))
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundStyle(DesignTokens.textPrimary)
                 .multilineTextAlignment(.center)
             Text(LocalizedStringKey("directions.empty.body"))
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             NavigationLink(value: SettingsView.SettingsSection.places) {
                 Text(LocalizedStringKey("settings.places.add"))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .padding(.horizontal, 24)
-                    .frame(height: 52)
+                    .frame(minHeight: 52)
+                    .fixedSize(horizontal: false, vertical: true)
                     .background(DesignTokens.accent)
                     .clipShape(Capsule())
             }
@@ -523,7 +527,7 @@ struct DirectionsView: View {
         Text(L10n.fmt("directions.search.noResults",
                       locale: coordinator.activeLocale, trimmedQuery))
             .font(.system(size: DesignTokens.minBodyPointSize))
-            .foregroundColor(DesignTokens.textSecondary)
+            .foregroundStyle(DesignTokens.textSecondary)
             .multilineTextAlignment(.center)
             .padding(24)
             .frame(maxWidth: .infinity)
