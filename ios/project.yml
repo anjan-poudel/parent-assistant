@@ -118,6 +118,14 @@ targets:
       # resource.
       - path: ElderlyAssistant/Resources/AppIcons.xcassets
         buildPhase: resources
+      # [TIMER-ALARM] The loud timer-alarm bell loop (CC0, synthesized from
+      # scratch by tools/generate-timer-alarm-bell.py — license note in
+      # Resources/TimerAlarmBell.LICENSE.txt). Bundled for the in-app
+      # looping AVAudioPlayer AND the pre-iOS-26 UN notification fallback
+      # sound (custom notification sounds must be <= 30 s, linear PCM —
+      # this is ~4.6 s). Same single-file resource pattern as above.
+      - path: ElderlyAssistant/Resources/timer-alarm-bell.wav
+        buildPhase: resources
       # [LAUNCH-SCREEN] The pre-first-paint launch screen. Info.plist
       # already sets UILaunchStoryboardName=LaunchScreen; without this
       # resource entry the storyboard never lands in the bundle and iOS
@@ -212,6 +220,49 @@ targets:
         product: WhisperKit
       - package: sherpa-onnx
         product: sherpa-onnx
+      # [TIMER-ALARM] (2026-09-10) The widget extension hosting the
+      # AlarmKit alarm presentation (ActivityConfiguration for
+      # AlarmAttributes<TimerAlarmSystemMetadata>) — the system renders
+      # system-managed timer countdowns and alerts through it.
+      - target: TimerAlarmWidgetExtension
+        embed: true
+
+  # [TIMER-ALARM] (2026-09-10) WidgetKit extension for the AlarmKit
+  # system-managed timer presentation. iOS-26-only by nature (AlarmKit is
+  # iOS 26+); embedding a higher-minimum extension in an iOS-16 app is
+  # supported — the extension simply never runs below iOS 26 and the
+  # app's UN/in-app fallback paths cover those systems. Its Info.plist is
+  # GENERATED here (unlike the app's hand-maintained plist — see the
+  # warning on the app target): the extension declares nothing but the
+  # widget-extension point and Live Activity support.
+  TimerAlarmWidgetExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: TimerAlarmWidget
+      # The AlarmMetadata type must be the SAME type (same name) in the
+      # app and the extension — ActivityKit matches the scheduled
+      # AlarmAttributes to this widget by the attributes type. Standard
+      # Live Activity pattern: both targets compile the one shared file.
+      - path: ElderlyAssistant/Services/Alarms/TimerAlarmSystemShared.swift
+    info:
+      path: TimerAlarmWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Timer Alarm
+        # App extensions must declare the XPC! package type for the
+        # system to load them.
+        CFBundlePackageType: XPC!
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        NSSupportsLiveActivities: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.elderlyassistant.app.TimerAlarmWidget
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+        APPLICATION_EXTENSION_API_ONLY: YES
+        GENERATE_INFOPLIST_FILE: NO
 
   ElderlyAssistantTests:
     type: bundle.unit-test

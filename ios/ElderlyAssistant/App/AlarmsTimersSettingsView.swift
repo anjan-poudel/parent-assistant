@@ -64,6 +64,14 @@ struct AlarmsTimersSettingsView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 8)
                 }
+// [TIMER-ALARM] (2026-09-10) Honest foreground-vs-
+                // background contract for timers — the Settings caption
+                // states plainly what happens on each path.
+                Text("timerAlarm.settingsCaption")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
             }
         }
     }

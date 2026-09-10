@@ -28,6 +28,7 @@
 		0C7E861E00E55C4732966C2B /* SpeakerEmbedding.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAFAA5EEF7BAFA884F059F6E /* SpeakerEmbedding.swift */; };
 		0E255A46ACA15B61C189716B /* DoubleDoseDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 029572625927FA28AB472E38 /* DoubleDoseDetectorTests.swift */; };
 		0EFFF9E695C8F3159509D8C2 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 375D810EE613E93BB5E56717 /* HomeView.swift */; };
+		0F2182D7226BF87E13A34306 /* TimerAlarmBellPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D04CA7227131F251E255130 /* TimerAlarmBellPlayer.swift */; };
 		0FA93A213F311EA549C821C6 /* FeedLanguageSorter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A170EB33621E742BD2C2BF /* FeedLanguageSorter.swift */; };
 		0FC766991BD9A0254F9879CE /* GeminiClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C49429A6D0922ACF3ED8872C /* GeminiClientTests.swift */; };
 		1053D099D25570A1AA356933 /* AppIcons.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 17293525E4065C56C776628C /* AppIcons.xcassets */; };
@@ -80,6 +81,8 @@
 		300D1EF6C0B7FC396C092DED /* FeedSpeechSanitizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11BDDC6690327B6A90AE9444 /* FeedSpeechSanitizer.swift */; };
 		3186F48E9A2627B4ECC603DB /* ApplianceManualLibraryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3040563E7A559BB5552E3E30 /* ApplianceManualLibraryTests.swift */; };
 		31BBAB14511B2440F03E0FE1 /* VoiceSessionStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E50F03A4A3FAF1A1A0B822 /* VoiceSessionStateMachineTests.swift */; };
+		337B4856DE580A9844D0E46A /* TimerAlarmSystemShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D15E89A116B24DADD574A85 /* TimerAlarmSystemShared.swift */; };
+		34318704BAD37239F22EA813 /* AlarmTimersSystemPathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36B554D5C323CBF29159025B /* AlarmTimersSystemPathTests.swift */; };
 		34DFEAB7A06DFCA706E71047 /* SpeakerBiometricTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 277B510740CCCB3BC47555CF /* SpeakerBiometricTestSupport.swift */; };
 		36BE348CA5BACCC5139BD5E9 /* CloudFallbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F63BE0F70F8D66B3FF4F28F /* CloudFallbackTests.swift */; };
 		36E22F0466C005027B0921E5 /* TithiCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 269C71573D21DF9EAFB68405 /* TithiCalculatorTests.swift */; };
@@ -87,6 +90,7 @@
 		386358312426B814486FFCDB /* SpeakerEmbeddingMathTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C66F1336A7C9BE3F3D4AAC7 /* SpeakerEmbeddingMathTests.swift */; };
 		3908094C5955879645F25C6F /* ConfirmationChallenge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6192FE81FC913309F899E19 /* ConfirmationChallenge.swift */; };
 		39BCCB367C5AB4044DB8A9C2 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC0CE650071C8E619B755C1C /* Models.swift */; };
+		39BDB8286A3DA20D7FB3D294 /* TimerAlarmSystemShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D15E89A116B24DADD574A85 /* TimerAlarmSystemShared.swift */; };
 		39BEE582EE0027E8C4092058 /* ApplianceCropGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7294DB0D9166528EB32040F2 /* ApplianceCropGeometryTests.swift */; };
 		3A1128AA1FC1B66982E3DCD5 /* VoicePipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 582CAEF95C1C80AA082EC877 /* VoicePipeline.swift */; };
 		3A9C9155AE4C7CE71BDEA962 /* NepaliTimeParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98930B8EC7CE463FFD1AEF78 /* NepaliTimeParserTests.swift */; };
@@ -109,6 +113,7 @@
 		45C7D93F774317633EEA0D5B /* IntentLogStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 719AA0AA9C2BB68B77B82DD2 /* IntentLogStoreTests.swift */; };
 		4697FEE4A11CE9F6DC3A3817 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54C3513A2DF368011B7B7C45 /* DesignTokens.swift */; };
 		46C2E59971AC3B3AA61A79CC /* FeedSpeechSanitizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF63F351314880DD9A42A6AB /* FeedSpeechSanitizerTests.swift */; };
+		4706C690591D882919A03ACE /* TimerAlarmEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FED1E5343F765632EF56FEBE /* TimerAlarmEngineTests.swift */; };
 		482BC982DD49234B12D53434 /* VoiceSessionBindingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBFB5064750DE4B1073059D3 /* VoiceSessionBindingTests.swift */; };
 		4A131371BBD03CB576450A29 /* FestivalCalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90391AA61F888C033874331E /* FestivalCalendarService.swift */; };
 		4AFABF7658B11789605CCCA1 /* GeminiSpeechRecognizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BB5C4A4994FE6A86DB2CFA5 /* GeminiSpeechRecognizerTests.swift */; };
@@ -127,6 +132,7 @@
 		517F7092B944DA9F449B888F /* FeedService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F43D783E7D83EF2A3FE0B5FB /* FeedService.swift */; };
 		518ADD3B18173AAFB2FF8B95 /* CallMethod.swift in Sources */ = {isa = PBXBuildFile; fileRef = 217C88EEE4C13EB59E70F612 /* CallMethod.swift */; };
 		51A1484398D9895D9F425AA0 /* YouTubePluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 634F4CB3294C0340AC9C67B9 /* YouTubePluginTests.swift */; };
+		52AD5F1B420319210845C090 /* AlarmKitSystemScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5835F05602FF8F952479823 /* AlarmKitSystemScheduler.swift */; };
 		52FB2CA82D0156774A459124 /* VoiceTurnTimingSeamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B45155CFD55E2FB76CC7380 /* VoiceTurnTimingSeamTests.swift */; };
 		5315C2DDD9FA5F65473922D1 /* DialectLexicon.json in Resources */ = {isa = PBXBuildFile; fileRef = 151B13AEC9B0FEF80AC8DD9F /* DialectLexicon.json */; };
 		535BD7B71EF639F3992769F8 /* FamilyNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FDECCC2CBBC24A6FD4E6A87 /* FamilyNotifier.swift */; };
@@ -270,6 +276,8 @@
 		AE6778AE48C116BEC75A9C41 /* ModelCatalogSTTNamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B8D7DEC413B2AB3DF3B0511 /* ModelCatalogSTTNamingTests.swift */; };
 		AF589ADE0665DD8433BCC200 /* StartupDataBatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4565222B482D35D3233C2498 /* StartupDataBatchTests.swift */; };
 		AFA35E445E49A49F01D8F2B8 /* PiperVoiceSpeakerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6D0122346CB9657139E6909 /* PiperVoiceSpeakerTests.swift */; };
+		B077987B5623105525365732 /* TimerAlarmEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EDA2D35E433C9B6200F167F /* TimerAlarmEngine.swift */; };
+		B0DB371B38805A29A5D859A9 /* timer-alarm-bell.wav in Resources */ = {isa = PBXBuildFile; fileRef = F839609F2F906E517A513FBF /* timer-alarm-bell.wav */; };
 		B0E7FB06E4B5F6028742BFAB /* HomeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8BC9CD50AB850816DCB32A0 /* HomeWidget.swift */; };
 		B0FAA9361B4E1A999B112E34 /* SpokenTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 357BB0A805BFD53734B0F7B4 /* SpokenTime.swift */; };
 		B140FEBAF38D71A4D89FA9E1 /* RoutineStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8D60A7A75105987FF8212D2 /* RoutineStoreTests.swift */; };
@@ -340,6 +348,7 @@
 		D89B09EADAED534ED9BBAB51 /* VoiceEnrollmentRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C6DC7636D26D44A73A7D71 /* VoiceEnrollmentRecorder.swift */; };
 		D8FA717DE7FFBBB66310949A /* IntentSchemaV2Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85ED77D882328D44E3F08B23 /* IntentSchemaV2Tests.swift */; };
 		D9BD936BF795D8F4891934B2 /* NewsReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42F00905A16D9B2FA337352A /* NewsReaderTests.swift */; };
+		DA7F15025B07E93EBBA807CE /* TimerAlarmScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A016233A0C060D8C8F6559 /* TimerAlarmScreen.swift */; };
 		DAEA587FE999D1C75F5F813C /* FamilyContactStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DF4872182C2AB35F523BB49 /* FamilyContactStore.swift */; };
 		DB04BEBC845CD0671CCD6C88 /* GeminiSpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9A0E238ABB8E7DFAE3DB7B9 /* GeminiSpeechRecognizer.swift */; };
 		DB3E2C105B25371BC8C1AD73 /* WhisperKit in Frameworks */ = {isa = PBXBuildFile; productRef = B5DAE0756784CD23FD779BD1 /* WhisperKit */; };
@@ -398,8 +407,10 @@
 		F80206557C6BEDC0F8335452 /* NepaliFestival.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E8F8D8770B2D5FCD7040516 /* NepaliFestival.swift */; };
 		F89A2F7E9A05B4FF5F2DDE2D /* AppLauncher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE0B21C850A52EB23706713A /* AppLauncher.swift */; };
 		F8AFC07B9DA9216441573D40 /* UpdatesCompositionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035A6B3D6A6D69D345838A01 /* UpdatesCompositionTests.swift */; };
+		F9733892B9057BFD343A0326 /* TimerAlarmSystemWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035C53FE0D3B7A5E398E8009 /* TimerAlarmSystemWidget.swift */; };
 		F9A1B873CE4E1B83AAC4AE62 /* ApplianceGuidancePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F269E7A40BD190077BD33723 /* ApplianceGuidancePolicyTests.swift */; };
 		F9F9B701EF9EE201C206BAFF /* FeedTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C9E6972B31A317A9768601 /* FeedTranslator.swift */; };
+		FB08138BA9AC3832DC85F65A /* TimerAlarmWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C8B55A5BB14FF231C646B663 /* TimerAlarmWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		FBC88FA25857FE81D384DA30 /* LiveCallDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FF3C56B2C8890D5319BBC15 /* LiveCallDetectorTests.swift */; };
 		FC45AA513A1FB96632DEBAE2 /* NewsFeedParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E958FEE29592043A50F66EA /* NewsFeedParserTests.swift */; };
 		FCAE28139316D0CA297FADE0 /* SilenceEndpointTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9C936AC5BE83B61A6B44320 /* SilenceEndpointTests.swift */; };
@@ -412,6 +423,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		01456F51DB0C6C61E357052B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 150F151FBE64431134A9E147 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 03D77F509BB1BAD1CCED7201;
+			remoteInfo = TimerAlarmWidgetExtension;
+		};
 		18674CDE642F075373A04DB8 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 150F151FBE64431134A9E147 /* Project object */;
@@ -428,6 +446,20 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		4852ADF0BB973A6ABE14C9F5 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				FB08138BA9AC3832DC85F65A /* TimerAlarmWidgetExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		00268D68833F8A8CC3CBB3FD /* NotificationFacade.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationFacade.swift; sourceTree = "<group>"; };
 		0097C8F2B89C110C2DE02931 /* ApplianceOverlayMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceOverlayMapperTests.swift; sourceTree = "<group>"; };
@@ -438,6 +470,7 @@
 		029572625927FA28AB472E38 /* DoubleDoseDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoubleDoseDetectorTests.swift; sourceTree = "<group>"; };
 		02B49CE098CF265F2E49046B /* NepaliTextNormalizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliTextNormalizerTests.swift; sourceTree = "<group>"; };
 		035A6B3D6A6D69D345838A01 /* UpdatesCompositionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdatesCompositionTests.swift; sourceTree = "<group>"; };
+		035C53FE0D3B7A5E398E8009 /* TimerAlarmSystemWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerAlarmSystemWidget.swift; sourceTree = "<group>"; };
 		040169ACAC28343657CF901A /* IntentCommandCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentCommandCacheTests.swift; sourceTree = "<group>"; };
 		041EC5EF8D87CC51513133B5 /* EventKitCalendarGateway.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventKitCalendarGateway.swift; sourceTree = "<group>"; };
 		04FA79D428D0A71D286F4701 /* DialectIdentifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialectIdentifierTests.swift; sourceTree = "<group>"; };
@@ -454,6 +487,7 @@
 		0BC86AD5E0D8C9FE1AAE7633 /* WhisperKitSpeechRecognizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperKitSpeechRecognizerTests.swift; sourceTree = "<group>"; };
 		0C4AC460804A8612A110725E /* HomeDateLineComposerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeDateLineComposerTests.swift; sourceTree = "<group>"; };
 		0C756153BE3609C46F69716B /* FacebookArchiveParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FacebookArchiveParserTests.swift; sourceTree = "<group>"; };
+		0D04CA7227131F251E255130 /* TimerAlarmBellPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerAlarmBellPlayer.swift; sourceTree = "<group>"; };
 		0D17744ACF2633AFD36C8AF8 /* GuidePluginDispatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuidePluginDispatchTests.swift; sourceTree = "<group>"; };
 		0D5E46F84DD8C7E7CE2161C5 /* PluginRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginRegistry.swift; sourceTree = "<group>"; };
 		0D87AD48584D9CB8354BD123 /* MorningBriefingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MorningBriefingTests.swift; sourceTree = "<group>"; };
@@ -526,12 +560,14 @@
 		353679F01CB04C7AC8321B9E /* QueryEndToEndRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueryEndToEndRegressionTests.swift; sourceTree = "<group>"; };
 		357BB0A805BFD53734B0F7B4 /* SpokenTime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpokenTime.swift; sourceTree = "<group>"; };
 		365282A34BA338A9BB151269 /* CallChannelResolutionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallChannelResolutionTests.swift; sourceTree = "<group>"; };
+		36B554D5C323CBF29159025B /* AlarmTimersSystemPathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmTimersSystemPathTests.swift; sourceTree = "<group>"; };
 		37467E7836D25AA30D4FC68E /* DirectionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DirectionsView.swift; sourceTree = "<group>"; };
 		375D810EE613E93BB5E56717 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		3CB785F3E9F2AB2CF381AFDE /* RoutinePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinePlugin.swift; sourceTree = "<group>"; };
 		3D4A62B2A41C75FEC84AAD08 /* Announcement.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Announcement.swift; sourceTree = "<group>"; };
 		3E1D65BC1DE8E3579F552844 /* ReplySanityGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplySanityGateTests.swift; sourceTree = "<group>"; };
 		3E958FEE29592043A50F66EA /* NewsFeedParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsFeedParserTests.swift; sourceTree = "<group>"; };
+		3EDA2D35E433C9B6200F167F /* TimerAlarmEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerAlarmEngine.swift; sourceTree = "<group>"; };
 		3EF86DFDDAB5D6C4F9ED445D /* AlarmSchedulingBackendTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmSchedulingBackendTests.swift; sourceTree = "<group>"; };
 		3F4B490AD8898085B8F0895A /* GoldenCorpus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoldenCorpus.swift; sourceTree = "<group>"; };
 		3F51FE529AAB1FD6F057801F /* ApplianceHelperPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceHelperPluginTests.swift; sourceTree = "<group>"; };
@@ -643,6 +679,7 @@
 		7C10F00EBA0FFE62595217FB /* StartupBoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartupBoot.swift; sourceTree = "<group>"; };
 		7C5D1E860C14D663EB83601C /* NewsSourceStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsSourceStoreTests.swift; sourceTree = "<group>"; };
 		7D0251A315F513ED0223E50A /* tts */ = {isa = PBXFileReference; lastKnownFileType = folder; name = tts; path = ElderlyAssistant/Resources/Models/tts; sourceTree = SOURCE_ROOT; };
+		7D15E89A116B24DADD574A85 /* TimerAlarmSystemShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerAlarmSystemShared.swift; sourceTree = "<group>"; };
 		7DC3D410769D72795295E8FC /* WeatherTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeatherTool.swift; sourceTree = "<group>"; };
 		7EF865070CB7823B1DC69074 /* LocalBrainChain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalBrainChain.swift; sourceTree = "<group>"; };
 		7F0D7FB40B242CD66515A290 /* MorningBriefingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MorningBriefingStore.swift; sourceTree = "<group>"; };
@@ -739,6 +776,7 @@
 		B5815D91DCCFA18BD943482A /* NepaliTimeParserExtensionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliTimeParserExtensionTests.swift; sourceTree = "<group>"; };
 		B5A00D2F8F62F1792BC2784F /* LocalBrainChainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalBrainChainTests.swift; sourceTree = "<group>"; };
 		B5B27A5F278473E1FB9ACC2D /* YouTubePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubePlugin.swift; sourceTree = "<group>"; };
+		B6EDAE4F0F33D9A5A1539AF0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		B7D8A76CCE745FEED78269EC /* IdHashing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdHashing.swift; sourceTree = "<group>"; };
 		B7DCE4BB312DE6F097E79236 /* IntentRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentRouter.swift; sourceTree = "<group>"; };
 		B85E00B732F42A31B01A3038 /* AppLauncherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLauncherTests.swift; sourceTree = "<group>"; };
@@ -755,10 +793,13 @@
 		C162389E74311BF3301489B1 /* FeedMediaResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedMediaResolver.swift; sourceTree = "<group>"; };
 		C17A565DFA8812094915C8AC /* CallingSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallingSettingsView.swift; sourceTree = "<group>"; };
 		C1C241D106EFDAF7D5F92FA9 /* InputSanitiserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSanitiserTests.swift; sourceTree = "<group>"; };
+		C3A016233A0C060D8C8F6559 /* TimerAlarmScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerAlarmScreen.swift; sourceTree = "<group>"; };
 		C49429A6D0922ACF3ED8872C /* GeminiClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiClientTests.swift; sourceTree = "<group>"; };
 		C56ECED33B6FFBA9DAEA9C9E /* NepaliTextNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliTextNormalizer.swift; sourceTree = "<group>"; };
+		C5835F05602FF8F952479823 /* AlarmKitSystemScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmKitSystemScheduler.swift; sourceTree = "<group>"; };
 		C7C332411D8CB3EFC6988286 /* ApplianceStepCards.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceStepCards.swift; sourceTree = "<group>"; };
 		C887D37D57DDAEE36D6FC9CD /* CalendarSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSettingsView.swift; sourceTree = "<group>"; };
+		C8B55A5BB14FF231C646B663 /* TimerAlarmWidgetExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = TimerAlarmWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		C8D60A7A75105987FF8212D2 /* RoutineStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineStoreTests.swift; sourceTree = "<group>"; };
 		C95F63C56E99BB74B9C7A446 /* MFCCSpeakerEmbedderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MFCCSpeakerEmbedderTests.swift; sourceTree = "<group>"; };
 		CAAB63C0D4AA7F27C9B275CA /* SavedPlaceStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedPlaceStoreTests.swift; sourceTree = "<group>"; };
@@ -821,6 +862,7 @@
 		F525688EDA15A66F48E45461 /* OnDeviceSTTSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnDeviceSTTSelection.swift; sourceTree = "<group>"; };
 		F6C6DC7636D26D44A73A7D71 /* VoiceEnrollmentRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceEnrollmentRecorder.swift; sourceTree = "<group>"; };
 		F6D0122346CB9657139E6909 /* PiperVoiceSpeakerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiperVoiceSpeakerTests.swift; sourceTree = "<group>"; };
+		F839609F2F906E517A513FBF /* timer-alarm-bell.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = "timer-alarm-bell.wav"; sourceTree = "<group>"; };
 		F8E1556B760B056BE5530FA7 /* NumberWordNormalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NumberWordNormalizer.swift; sourceTree = "<group>"; };
 		F8FFFAC3D594982082901DF5 /* MedicalAppointmentParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicalAppointmentParserTests.swift; sourceTree = "<group>"; };
 		F9A0E238ABB8E7DFAE3DB7B9 /* GeminiSpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiSpeechRecognizer.swift; sourceTree = "<group>"; };
@@ -828,6 +870,7 @@
 		FBFB5064750DE4B1073059D3 /* VoiceSessionBindingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionBindingTests.swift; sourceTree = "<group>"; };
 		FDADF751C3E88E7BCE67D6AD /* LLM.swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = LLM.swift; path = vendor/LLM.swift; sourceTree = SOURCE_ROOT; };
 		FE811FACF80BAA62A9F6C1D9 /* WarmStart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WarmStart.swift; sourceTree = "<group>"; };
+		FED1E5343F765632EF56FEBE /* TimerAlarmEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerAlarmEngineTests.swift; sourceTree = "<group>"; };
 		FF81CDFC6907A32734288D91 /* AlarmTimerCommandParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmTimerCommandParserTests.swift; sourceTree = "<group>"; };
 		FF8A64B10D6831804634E41B /* ChannelPreferenceStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelPreferenceStoreTests.swift; sourceTree = "<group>"; };
 		FFD2F93E4848F1F25F54E66A /* ElderlyAssistantTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ElderlyAssistantTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1045,6 +1088,8 @@
 				148E5FBD9E66E5EE4AB49ACD /* AlarmKitAlarmBackendTests.swift */,
 				3EF86DFDDAB5D6C4F9ED445D /* AlarmSchedulingBackendTests.swift */,
 				7938856DC662726CF322AEE2 /* AlarmTimersServiceTests.swift */,
+				36B554D5C323CBF29159025B /* AlarmTimersSystemPathTests.swift */,
+				FED1E5343F765632EF56FEBE /* TimerAlarmEngineTests.swift */,
 			);
 			path = Alarms;
 			sourceTree = "<group>";
@@ -1059,6 +1104,7 @@
 				08476E0DD062A20C8A89F674 /* Manuals */,
 				69276B6E988B7F41B6A1863A /* ManualText */,
 				97FCBEC54E900A1F06A9C9D2 /* NumberWords */,
+				F839609F2F906E517A513FBF /* timer-alarm-bell.wav */,
 				F9A7EEBA030948C2586498E1 /* Base.lproj */,
 				48E6EA198FE079C0D2344D10 /* Models */,
 			);
@@ -1114,6 +1160,15 @@
 				1C9080DC0F9997AFA7050A4E /* ExternalEventLinkStore.swift */,
 			);
 			path = CalendarSync;
+			sourceTree = "<group>";
+		};
+		5076019C59E6D4454999F83E /* TimerAlarmWidget */ = {
+			isa = PBXGroup;
+			children = (
+				B6EDAE4F0F33D9A5A1539AF0 /* Info.plist */,
+				035C53FE0D3B7A5E398E8009 /* TimerAlarmSystemWidget.swift */,
+			);
+			path = TimerAlarmWidget;
 			sourceTree = "<group>";
 		};
 		516D8D3E5BED77105E778CE8 /* MedicationScheduler */ = {
@@ -1424,6 +1479,7 @@
 				EBAE1F1AA52FA1D909EC6A08 /* RedesignComponents.swift */,
 				ACAF3F4EE4B4C11562224323 /* SettingsView.swift */,
 				7C10F00EBA0FFE62595217FB /* StartupBoot.swift */,
+				C3A016233A0C060D8C8F6559 /* TimerAlarmScreen.swift */,
 				849CDF1B348E474558E3A590 /* ToolLogReviewView.swift */,
 				1032362D986B658F154B8530 /* UpdatesView.swift */,
 				E6AA7959C860805DD367923A /* UserManualView.swift */,
@@ -1458,8 +1514,12 @@
 			isa = PBXGroup;
 			children = (
 				0DAA401A387C82710C36FEA6 /* AlarmKitAlarmBackend.swift */,
+				C5835F05602FF8F952479823 /* AlarmKitSystemScheduler.swift */,
 				8CD378730DF20C5CEC77F600 /* AlarmSchedulingBackend.swift */,
 				59C5B48EC8342CFBCA05F2C5 /* AlarmTimersService.swift */,
+				0D04CA7227131F251E255130 /* TimerAlarmBellPlayer.swift */,
+				3EDA2D35E433C9B6200F167F /* TimerAlarmEngine.swift */,
+				7D15E89A116B24DADD574A85 /* TimerAlarmSystemShared.swift */,
 			);
 			path = Alarms;
 			sourceTree = "<group>";
@@ -1596,6 +1656,7 @@
 				088172323B03EEA3957B534C /* ElderlyAssistant.app */,
 				FFD2F93E4848F1F25F54E66A /* ElderlyAssistantTests.xctest */,
 				A600B6B05329AADBC3BD185D /* ElderlyAssistantUITests.xctest */,
+				C8B55A5BB14FF231C646B663 /* TimerAlarmWidgetExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -1616,6 +1677,7 @@
 				391135E423E056F0051EA93C /* ElderlyAssistantTests */,
 				25BD4E16107C913F833BEFA2 /* ElderlyAssistantUITests */,
 				CF003E19EDEBF729E02E255D /* Packages */,
+				5076019C59E6D4454999F83E /* TimerAlarmWidget */,
 				3C468D77F8BC415721ED8379 /* Frameworks */,
 				CB538703F727B267754E33F0 /* Products */,
 			);
@@ -1749,6 +1811,23 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		03D77F509BB1BAD1CCED7201 /* TimerAlarmWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D0A887BB4892D7CE8C74CB36 /* Build configuration list for PBXNativeTarget "TimerAlarmWidgetExtension" */;
+			buildPhases = (
+				16320A0FF25A0EDC4ED4A3FB /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TimerAlarmWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = TimerAlarmWidgetExtension;
+			productReference = C8B55A5BB14FF231C646B663 /* TimerAlarmWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		50171E53856C230054A9E85B /* ElderlyAssistantUITests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 73A823A0D51BC4BC10626D95 /* Build configuration list for PBXNativeTarget "ElderlyAssistantUITests" */;
@@ -1774,10 +1853,12 @@
 				6FD65F41B0778AC60EAC3582 /* Sources */,
 				73D11DF1C0CA545589E6899A /* Resources */,
 				01AB87599713BA2AD73A1093 /* Frameworks */,
+				4852ADF0BB973A6ABE14C9F5 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				0582B7A000F751A73CC3D805 /* PBXTargetDependency */,
 			);
 			name = ElderlyAssistant;
 			packageProductDependencies = (
@@ -1818,6 +1899,10 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					03D77F509BB1BAD1CCED7201 = {
+						DevelopmentTeam = BKXWPS4X87;
+						ProvisioningStyle = Automatic;
+					};
 					50171E53856C230054A9E85B = {
 						DevelopmentTeam = BKXWPS4X87;
 						ProvisioningStyle = Automatic;
@@ -1855,6 +1940,7 @@
 			projectRoot = "";
 			targets = (
 				7675AC04A0FAA99ACB9C184F /* ElderlyAssistant */,
+				03D77F509BB1BAD1CCED7201 /* TimerAlarmWidgetExtension */,
 				F6F40A7946EB37A2CECF5CD2 /* ElderlyAssistantTests */,
 				50171E53856C230054A9E85B /* ElderlyAssistantUITests */,
 			);
@@ -1875,6 +1961,7 @@
 				EA29EE8D1454A4698EB8BBD3 /* Manuals in Resources */,
 				27F1ADCCB2C8A0CFF0C3736A /* NumberWords in Resources */,
 				7BD42D88F038F799AEDCEE36 /* kws in Resources */,
+				B0DB371B38805A29A5D859A9 /* timer-alarm-bell.wav in Resources */,
 				A2034AB8B86A66E1556E285E /* tts in Resources */,
 				E708D6B8397B5BAA99E522D9 /* whisper-medium-ne-q5_1.bin in Resources */,
 			);
@@ -1883,6 +1970,15 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		16320A0FF25A0EDC4ED4A3FB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				337B4856DE580A9844D0E46A /* TimerAlarmSystemShared.swift in Sources */,
+				F9733892B9057BFD343A0326 /* TimerAlarmSystemWidget.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		2F0B2F6B865EC394B035FCE4 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -1897,6 +1993,7 @@
 			files = (
 				DE9878B3A3044E85B6D76B65 /* AddressBookDirectory.swift in Sources */,
 				68E9D3CE686608AEF200FB56 /* AlarmKitAlarmBackend.swift in Sources */,
+				52AD5F1B420319210845C090 /* AlarmKitSystemScheduler.swift in Sources */,
 				8691FC6091EBEAD716AB834D /* AlarmSchedulingBackend.swift in Sources */,
 				15E7C212B549DC6370F18E88 /* AlarmTimerCommandParser.swift in Sources */,
 				FEBD69EE4C83AAD4E070AC28 /* AlarmTimersService.swift in Sources */,
@@ -2074,6 +2171,10 @@
 				B0FAA9361B4E1A999B112E34 /* SpokenTime.swift in Sources */,
 				6A67604ED7E66C048BD76561 /* StartupBoot.swift in Sources */,
 				635FF391B3B7B18CF6A7BC90 /* SwitchableCommandInterpreter.swift in Sources */,
+				0F2182D7226BF87E13A34306 /* TimerAlarmBellPlayer.swift in Sources */,
+				B077987B5623105525365732 /* TimerAlarmEngine.swift in Sources */,
+				DA7F15025B07E93EBBA807CE /* TimerAlarmScreen.swift in Sources */,
+				39BDB8286A3DA20D7FB3D294 /* TimerAlarmSystemShared.swift in Sources */,
 				1CA21B40BF45AE4B7FA53891 /* TithiCalculator.swift in Sources */,
 				EAF519D4E9EBCDA78AF63BD9 /* ToolLogReviewView.swift in Sources */,
 				8BF37B5627241532432A7D13 /* TopicPreAnswer.swift in Sources */,
@@ -2111,6 +2212,7 @@
 				5D287ACED3DC4566B7980E86 /* AlarmSchedulingBackendTests.swift in Sources */,
 				7527984FC995000E19182948 /* AlarmTimerCommandParserTests.swift in Sources */,
 				2546F508392D79E45374D367 /* AlarmTimersServiceTests.swift in Sources */,
+				34318704BAD37239F22EA813 /* AlarmTimersSystemPathTests.swift in Sources */,
 				87F947AF575711F672F43F9C /* AppActivityLogTests.swift in Sources */,
 				F486D39BD7AE380042C5D247 /* AppLauncherTests.swift in Sources */,
 				A677CF6F38E5CDC5BFD0AAB0 /* AppThemeTests.swift in Sources */,
@@ -2260,6 +2362,7 @@
 				6161CE0C2CA506243091FE63 /* SystemContactSearchTests.swift in Sources */,
 				A71CB9964BC96FEDE42530BD /* TTSVoiceCatalogTests.swift in Sources */,
 				670296484F8953CB54D6DDF9 /* TTSVoiceInstallTests.swift in Sources */,
+				4706C690591D882919A03ACE /* TimerAlarmEngineTests.swift in Sources */,
 				36E22F0466C005027B0921E5 /* TithiCalculatorTests.swift in Sources */,
 				4359AC45AD296B70CF2114BF /* TopicPreAnswerTests.swift in Sources */,
 				58A4B3B234A2D554FF19CA71 /* TranscriptSanityGuardTests.swift in Sources */,
@@ -2292,6 +2395,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		0582B7A000F751A73CC3D805 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 03D77F509BB1BAD1CCED7201 /* TimerAlarmWidgetExtension */;
+			targetProxy = 01456F51DB0C6C61E357052B /* PBXContainerItemProxy */;
+		};
 		DA0A2E42037C5059C20E28AB /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 7675AC04A0FAA99ACB9C184F /* ElderlyAssistant */;
@@ -2355,6 +2463,25 @@
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ElderlyAssistant.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ElderlyAssistant";
+			};
+			name = Debug;
+		};
+		67AF1CF0C9DD11D21F2F6AC9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TimerAlarmWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.elderlyassistant.app.TimerAlarmWidget;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
 			};
 			name = Debug;
 		};
@@ -2536,6 +2663,25 @@
 			};
 			name = Debug;
 		};
+		EC6B41F3F458D8614403C089 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = TimerAlarmWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.elderlyassistant.app.TimerAlarmWidget;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -2562,6 +2708,15 @@
 			buildConfigurations = (
 				702B26854E564FC57E884E81 /* Debug */,
 				8640C974BD8299E623DBCD6E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D0A887BB4892D7CE8C74CB36 /* Build configuration list for PBXNativeTarget "TimerAlarmWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				67AF1CF0C9DD11D21F2F6AC9 /* Debug */,
+				EC6B41F3F458D8614403C089 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
