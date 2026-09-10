@@ -119,6 +119,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         // sees the alarm even though the notification is gone.
         let reloaded = AlarmTimersService(store: store, scheduler: scheduler,
                                           observabilityBus: bus, now: fixedNow)
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        reloaded.restorePersistedState()
         XCTAssertEqual(reloaded.alarms, service.alarms)
 
         let event = lastEvent(service)
@@ -168,6 +171,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         }
         XCTAssertTrue(store.saveAlarms(seeds))
         let service = makeService()
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        service.restorePersistedState()
 
         let outcome = await service.addAlarm(at: date(2026, 9, 7, 20, 0), label: nil)
 
@@ -191,6 +197,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         // Persisted — a fresh service over the same storage sees it off.
         let reloaded = AlarmTimersService(store: store, scheduler: scheduler,
                                           observabilityBus: bus, now: fixedNow)
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        reloaded.restorePersistedState()
         XCTAssertEqual(reloaded.alarms[0].isEnabled, false)
 
         service.setAlarmEnabled(id: alarmID, enabled: true)
@@ -257,6 +266,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         // Persisted — a fresh service over the same storage sees it off.
         let reloaded = AlarmTimersService(store: store, scheduler: scheduler,
                                           observabilityBus: bus, now: fixedNow)
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        reloaded.restorePersistedState()
         XCTAssertEqual(reloaded.alarms[0].isEnabled, false)
         XCTAssertNil(reloaded.alarms[0].snoozedUntil)
     }
@@ -342,6 +354,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         // Persisted BEFORE arming — a fresh service sees the marker.
         let reloaded = AlarmTimersService(store: store, scheduler: scheduler,
                                           observabilityBus: bus, now: fixedNow)
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        reloaded.restorePersistedState()
         XCTAssertEqual(reloaded.alarms[0].snoozedUntil, date(2026, 9, 7, 10, 10))
         XCTAssertEqual(lastEvent(service)?.eventType, "alarm_snoozed")
         XCTAssertEqual(lastEvent(service)?.outcome, "success")
@@ -545,6 +560,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         }
         XCTAssertTrue(store.saveTimers(seeds))
         let service = makeService()
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        service.restorePersistedState()
         XCTAssertEqual(service.activeTimers.count, AlarmTimersStore.maxTimers)
 
         let outcome = await service.startTimer(durationSeconds: 300, label: nil)
@@ -580,6 +598,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         // Persisted as finished; the prune sweep drops the row entirely.
         let reloaded = AlarmTimersService(store: store, scheduler: scheduler,
                                           observabilityBus: bus, now: fixedNow)
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        reloaded.restorePersistedState()
         XCTAssertEqual(reloaded.timers.count, 1)
         XCTAssertFalse(reloaded.timers[0].isActive)
         XCTAssertEqual(lastEvent(service)?.eventType, "timer_finished")
@@ -598,6 +619,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         ]
         XCTAssertTrue(store.saveTimers(seeds))
         let service = makeService()
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        service.restorePersistedState()
         XCTAssertEqual(service.activeTimers.count, 1)
         XCTAssertEqual(service.activeTimers[0].label, "live")
 

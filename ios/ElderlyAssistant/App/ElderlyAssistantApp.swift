@@ -3,6 +3,11 @@ import SwiftUI
 @main
 struct ElderlyAssistantApp: App {
     @StateObject private var appCoordinator = AppCoordinator()
+    // [BOOT-M1] Feature readiness registry (constant-time startup
+    // architecture) — owned here next to the coordinator/startupBoot and
+    // injected into the environment below so every surface can render
+    // honest per-feature status (unavailable/preparing/ready/failed).
+    @StateObject private var readinessRegistry = ReadinessRegistry()
 
     var body: some Scene {
         WindowGroup {
@@ -22,6 +27,9 @@ struct ElderlyAssistantApp: App {
             // [STARTUP-PERF] Progressive boot progress — the spinner
             // overlay reads this (stage labels + honest failures).
             .environmentObject(appCoordinator.startupBoot)
+            // [BOOT-M1] Honest per-feature status for every surface —
+            // same injection pattern as startupBoot above.
+            .environmentObject(readinessRegistry)
             // Spec §3.2: AppLanguage drives `.locale` directly at the
             // root. Every Text/catalog lookup, date, and number
             // formatter below this point follows it automatically.
