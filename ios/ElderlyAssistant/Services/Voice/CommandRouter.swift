@@ -383,6 +383,10 @@ final class CommandRouter {
     private weak var coordinator: VoiceCommandCoordinating?
     private let observabilityBus: ObservabilityBus
     private let speaker: Speaker?
+    /// [VOICE-ACK] Serial FIFO lane for interactive reply speech — built
+    /// lazily on the first speak so tests and call sites that never speak
+    /// pay nothing. See `ReplySpeakLane` for the ordering contract.
+    private var speakLane: ReplySpeakLane?
     private let interpreter: CommandInterpreter
     /// [TURN-TIMING] Turn-scoped stage tracer (nil = timing off — tests
     /// and any construction site that does not opt in).
@@ -678,6 +682,9 @@ final class CommandRouter {
         switch DirectionsRoute.decide(transcript: raw,
                                       candidates: coordinator?.navigationCandidates ?? []) {
         case .navigate(let target):
+            // [VOICE-ACK] Navigation starts the map-surface chain (a beat
+            // before the coordinator's execution speech) — ack first.
+            speakPreAck()
             coordinator?.requestNavigation(to: target)
             emit(eventType: "directions_command", outcome: "success")
             return .navigationRequested
@@ -792,6 +799,9 @@ final class CommandRouter {
         // the same `.unrecognised(transcript:)` the topic/calculator
         // stages return once they have already spoken.
         if Self.briefingPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
+            // [VOICE-ACK] The digest is composed then spoken line by line
+            // — ack before the composition work.
+            speakPreAck()
             coordinator?.fireMorningBriefing()
             emit(eventType: "morning_briefing_command", outcome: "success")
             return .unrecognised(transcript: raw)
@@ -827,6 +837,9 @@ final class CommandRouter {
         // the turn with the same `.unrecognised(transcript:)` the
         // topic/calculator stages return once they have already spoken.
         if Self.newsPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
+            // [VOICE-ACK] The digest fetches + composes before speech —
+            // ack first, the reader owns every line after.
+            speakPreAck()
             coordinator?.fireNewsReader()
             emit(eventType: "news_reader_command", outcome: "success")
             return .unrecognised(transcript: raw)
@@ -986,6 +999,10 @@ final class CommandRouter {
             // its return to idle until the completion below resolves the
             // token — AFTER the reply speech was committed.
             markTurnReplyPending()
+            // [VOICE-ACK] The LLM round-trip is the longest wait — the
+            // pre-ack tells the user the request was heard BEFORE the
+            // model is consulted.
+            speakPreAck()
             // [TURN-TIMING] The LLM round-trip starts here — on-device
             // llama.cpp or the cloud interpreter (whose collapsed call
             // may have resolved from the ASR preparse slot, making this
@@ -1049,6 +1066,9 @@ final class CommandRouter {
             speakWithVisibleOutcome(key: "alarms.setFailed")
             return
         }
+        // [VOICE-ACK] Arming takes a permission round-trip + persistence —
+        // ack before the wait, the confirmation follows through the lane.
+        speakPreAck()
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         let timeText = formattedTime(
             Calendar.current.dateComponents([.hour, .minute], from: time),
@@ -1102,6 +1122,8 @@ final class CommandRouter {
             speakWithVisibleOutcome(key: "timers.setFailed")
             return
         }
+        // [VOICE-ACK] Same arming round-trip as alarm set — ack first.
+        speakPreAck()
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         // [REGRESSION-AUDIT] (2026-09-10) Same reply-pending hold as the
         // alarm set path — see handleAlarmSetCommand.
@@ -1772,6 +1794,9 @@ final class CommandRouter {
     ///   fabricated title, never a dead end.
     private func fireYouTubePlay(query: String) {
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        // [VOICE-ACK] The lookup/deeplink open takes a beat — ack before
+        // the attempt, the outcome line follows through the lane.
+        speakPreAck(locale: locale)
         let attemptStartedAt = Date()
 
         // Keyless path — no network at all; the deeplink IS the
@@ -2376,6 +2401,8 @@ final class CommandRouter {
 
     /// Speaks dynamic text (LLM-generated replies, scheduler challenge
     /// prompts) — no catalog lookup, already in the right language.
+    /// [VOICE-ACK] Commits through the serial `ReplySpeakLane`, so a
+    /// pre-acknowledgment and a later result reply drain in commit order.
     private func speak(text: String, locale: Locale? = nil) {
         #if DEBUG
         print("[command_router][DEBUG] speak() called, speaker=\(speaker != nil), text=\"\(text)\"")
@@ -2387,12 +2414,21 @@ final class CommandRouter {
             return
         }
         let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let lane = speakLane ?? {
+            let newLane = ReplySpeakLane(speaker: speaker)
+            speakLane = newLane
+            return newLane
+        }()
         coordinator?.noteAssistantSpoke(text)
         coordinator?.noteSpeakingStarted()
         // [TURN-TIMING] The reply utterance is handed to the speaker.
         turnTracer?.noteSpeakQueued()
         Task {
-            await speaker.speak(text, locale: locale)
+            // [VOICE-ACK] Await THIS utterance's turn in the lane — the
+            // speak-finished marks below keep their exact per-utterance
+            // semantics (they fire when this speech ends, not when a
+            // later queued utterance does).
+            await lane.enqueue(text, locale: locale)
             #if DEBUG
             print("[command_router][DEBUG] speaker.speak() returned (finished or cancelled)")
             #endif
@@ -2401,6 +2437,25 @@ final class CommandRouter {
             self.turnTracer?.noteSpeakFinished()
             coordinator?.noteSpeakingEnded()
         }
+    }
+
+    /// [VOICE-ACK] Speaks the next rotating pre-acknowledgment variant
+    /// ("एक छिन…" / "one moment…") for a stage whose reply will take a
+    /// beat — the LLM round-trip, alarm/timer arming, YouTube, briefing,
+    /// news, navigation. Committed BEFORE the slow work starts so the
+    /// lane plays it ahead of the result. Instant-answer stages
+    /// (greetings, time/date/weather pre-answers, calculator) and
+    /// confirmation challenges never call this — they already speak
+    /// immediately. Empty catalog text is a silent no-op (same guard as
+    /// `speak(key:)`).
+    private var preAckCounter = 0
+    private func speakPreAck(locale: Locale? = nil) {
+        let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let key = "voiceAck.moment\(preAckCounter % 3 + 1)"
+        preAckCounter += 1
+        let text = L10n.str(key, locale: locale)
+        guard !text.isEmpty else { return }
+        speak(text: text, locale: locale)
     }
 
     // MARK: - Notifications (localized, no raw transcripts — C9)
