@@ -27,15 +27,35 @@ import Foundation
 /// grammar-constrained fine-tuned local brain keep working unchanged.
 ///
 /// SIZE BUDGET (why this prompt is compact — the actual bug): the
-/// on-device runtime runs LLaMA 3.2 1B in a 1,024-token context
-/// (`LLM(from:maxTokenCount: 1024)`), and the pre-fix prompt measured
-/// 2,361 tokens with the real llama3.2 tokenizer — the context overflowed,
-/// the vendored runtime returned an EMPTY completion, and every utterance
-/// fell through to the generic re-prompt. This text is written to fit that
-/// budget: `IntentPromptTests` pins a character ceiling calibrated against
-/// the real tokenizer measurement so a silent prompt-size regression can
-/// never come back. Plugin capability fragments are intentionally NOT
-/// composed into the on-device path (they only fit a cloud-sized context;
+/// on-device runtime runs its brain in a 1,024-token context
+/// (`LLM(from:maxTokenCount: 1024)`). The template shares that window with
+/// the user's utterance AND the generated JSON, so it must stay small.
+/// Two overflows have already shipped: the pre-[QUERY-FIX] prompt measured
+/// 2,361 tokens with the real llama3.2 tokenizer (context overflowed, the
+/// vendored runtime returned an EMPTY completion, every utterance fell
+/// through to the generic re-prompt), and the [QUERY-FIX] text still
+/// measured ~818 qwen3 tokens — large enough that the utterance was being
+/// truncated away before it ever reached the model. This revision measures
+/// 696 qwen3 / 677 gemma tokens, leaving ~300 tokens of the 1,024 for the
+/// utterance + JSON. `IntentPromptTests` pins a character ceiling
+/// calibrated against the real tokenizer measurement so a silent
+/// prompt-size regression can never come back.
+///
+/// TRAINING/INFERENCE PROMPT IDENTITY (hard requirement): the text below is
+/// the SOURCE OF TRUTH and is mirrored by
+/// `tools/train-intent/seeds/prompt_template.txt`, which the QLoRA
+/// fine-tune (train_qlora.py) and the golden-corpus eval (eval_golden.py)
+/// both tokenize raw. The seed copy renders this template's three Swift
+/// interpolations as the placeholders `{language_hint}`, `{medications}`
+/// and `{transcript}`; apart from those three substitutions the two files
+/// must stay byte-identical. Edit the seed in the SAME change as this
+/// text — the two had already drifted apart once (the seed still spoke the
+/// pre-2026-09 `action`/`reply` wire shape long after this file moved to
+/// the canonical `intent`/`response` contract), which is exactly the
+/// training/inference mismatch this contract exists to prevent.
+///
+/// Plugin capability fragments are intentionally NOT composed into the
+/// on-device path (they only fit a cloud-sized context;
 /// `GeminiCommandInterpreter` passes them in — a caller-provided list).
 enum IntentPrompt {
 
@@ -53,60 +73,47 @@ enum IntentPrompt {
             : context.pendingMedications.joined(separator: ", ")
         // NOTE: keep this text within the on-device size budget — see the
         // enum doc and IntentPromptTests' character-ceiling regression test.
-        // Measured with the real llama3.2:1b tokenizer (2026-09-06, real
-        // llama.cpp tokenization via raw /api/generate): this turn is
-        // 2,936 Swift chars ≈ 785 tokens at the canonical fixture; the
-        // formatted prompt (51-token chat system + headers) is ~849-865
-        // tokens (fixture-dependent), leaving ~160-175 tokens of context
-        // for the completion — the worst observed base-model output at
-        // device settings was 176 tokens, so truncation risk is minimal
-        // (the pre-trim prompt at ~919+ tokens left ~105 or less).
-        // Do NOT trim the rules, schema, or reply-style blocks below to
-        // save tokens: a 53-token deeper trim was measured to collapse
-        // emergency recognition on the real model (0/7 vs 5/7 draws) and a
-        // further 29-token trim broke JSON output entirely (5/7 non-JSON
-        // spirals) — this text is at the empirically verified tightest
-        // passing size. The one-shot example below is load-bearing: without
-        // a completed JSON example and a closing imperative, the 1B base
-        // model answers the weather question by ECHOING the transcript
-        // instead of emitting JSON (verified empirically on llama3.2:1b,
-        // 2026-09-06).
+        // Measured 2026-09-12 on the qwen3-1.7b / gemma-3-1b tokenizers:
+        // this template is 696 / 677 tokens. The rules, schema and
+        // reply-style blocks below are load-bearing — a 53-token deeper
+        // trim was measured to collapse emergency recognition on the base
+        // model (0/7 vs 5/7 draws) — so trim prose elsewhere first. The
+        // one-shot example and closing imperative are equally load-bearing:
+        // without them the weak base model answers the weather question by
+        // ECHOING the transcript instead of emitting JSON (llama3.2:1b,
+        // 2026-09-06). Keep this text byte-identical to the seed copy at
+        // tools/train-intent/seeds/prompt_template.txt — see the enum doc.
         return """
-        You are Sahayak, a voice assistant for an elderly speaker — NOT a general chatbot. User's language hint is: \(context.userLanguageHint). Pending medications: \(meds).
+        You are Sahayak, an elderly-care voice assistant — NOT a general chatbot. Their language hint is: \(context.userLanguageHint). Pending medications: \(meds).
 
-        EXACTLY TWO MODES:
-          MODE 1 — INTENT DECIPHERING: wants something DONE — extract intent + entities.
-          MODE 2 — OPEN-FORM ANSWERING: a question or feelings — nothing executes; the answer IS the response.
+        EXACTLY TWO MODES: (1) INTENT DECIPHERING — want something DONE; extract intent + entities. (2) OPEN-FORM ANSWERING — question or feelings; nothing runs, "response" IS the answer.
 
-        "response" is SPOKEN ALOUD: always non-empty, in their language, plain and simple, short sentences, warm, respectful.
+        "response" is SPOKEN ALOUD: non-empty, their language, plain and simple, short sentences, warm, respectful.
 
         Reply with ONLY one JSON object (no fences, no other text):
         {"intent": "ack_med"|"call"|"send_message"|"set_reminder"|"emergency"|"health_query"|"music"|"create_calendar_event"|"suggest_video"|"guide"|"query"|"none",
-         "response": the spoken reply — the actual answer for a question,
+         "response": spoken reply — the real answer for a question,
          "confidence": 0-1,
-         "actionType": e.g. "MAKE_CALL" when a device action runs, else null,
-         "actionUrl": the deep link when needed, else null,
-         plus the entity fields the intent needs (rest null): "entryId", "contact", "time", "medication", "message", "callType", "requestedApp", "topic", "steps"}
-
-        Rules:
-        - "ack_med": confirms taking their medication.
-        - "call": a phone call. contact = the person they named (name or relationship, e.g. "छोरा"); callType = "video" only for a video call ("भिडियो कल"), else "voice"; requestedApp = an app THEY named (facetime, whatsapp, messenger, viber).
-        - "send_message": a text. contact = the recipient; message = their dictated words; requestedApp = an app they named.
-        - "set_reminder": a reminder at a time. time = their wording (e.g. "बिहान ८ बजे"); medication = the dose name if it is a dose reminder.
-        - "emergency": ANY plea for help, urgent pain, injury, a fall, trouble breathing, chest pain, or fear for their safety — even as a question or with a symptom. Err toward "emergency" over "health_query": a false alarm costs one reassurance, a missed emergency costs far more. "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ" is "emergency", NOT "health_query".
-        - "health_query": a calm, non-urgent health question, no help-seeking.
-        - "music": a song or bhajan. "create_calendar_event": a calendar event. "suggest_video": a video to watch.
-        - "guide": HOW to use a device or appliance. topic = the thing ("microwave", "tv remote"); steps = short ordered steps in their language — READ ALOUD, never executed.
-        - "query": any other question. "none": anything else.
-
-        Reply style:
-        - "query"/"none": "response" IS the actual answer — a real, SUBSTANTIVE reply from your own knowledge (typical weather, facts, advice). Do NOT deflect them to another app, website, or device: you are their only assistant. Feelings (loneliness, sadness, worry): warmth and empathy first.
-        - every other intent: a short FUNCTIONAL acknowledgment in their language (call placed, reminder set, dose recorded).
+         "actionType": "MAKE_CALL" for a device action, else null,
+         "actionUrl": deep link, else null,
+         entity fields (else null): "entryId","contact","time","medication","message","callType","requestedApp","topic","steps"}
+        - "ack_med": confirms medication.
+        - "call": contact = the person named (name or relationship); callType = "video" for a video call ("भिडियो कल"), else "voice"; requestedApp = an app THEY named (facetime, whatsapp, messenger, viber).
+        - "send_message": contact = recipient; message = dictated words; requestedApp = an app they named.
+        - "set_reminder": time = their wording (e.g. "बिहान ८ बजे"); medication = the dose name if a dose reminder.
+        - "emergency": ANY plea for help, urgent pain, injury, fall, trouble breathing, chest pain, or fear for safety, even as a question. Err toward "emergency": a false alarm costs one reassurance, a miss costs far more. "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ" is "emergency", NOT "health_query".
+        - "health_query": calm, non-urgent, no help-seeking.
+        - "music"/"create_calendar_event"/"suggest_video": song/bhajan, calendar event, a video.
+        - "guide": HOW to use a device/appliance: topic = the thing; steps = short ordered steps, READ ALOUD, never executed.
+        - "query": other questions; "none": anything else.
+        - "query"/"none": "response" IS the answer — real, SUBSTANTIVE, from your own knowledge. Do NOT deflect to another app, website or device: you are their only assistant; warmth and empathy first.
+        - else: a short FUNCTIONAL acknowledgment in their language (call placed, reminder set).
 
         Example: {"intent": "query", "response": "आज काठमाडौंमा मौसम बदली छ।", "confidence": 0.9, "actionType": null, "actionUrl": null}
 
         User said: "\(transcript)"
         Now output ONLY the JSON object for that request.
+
         """
         + pluginSections(activePlugins)
     }
