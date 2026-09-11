@@ -276,7 +276,7 @@ final class NullCommandInterpreter: CommandInterpreter {
 ///
 /// The `#if canImport(LLM)` guard keeps the file compilable in Phase 1
 /// without either being present.
-final class LlamaCommandInterpreter: CommandInterpreter {
+final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming {
 
     struct Config {
         let confidenceThreshold: Double
@@ -541,8 +541,8 @@ final class LlamaCommandInterpreter: CommandInterpreter {
             switch self.loadLLMHandle() {
             case .success:
                 completion(.ready)
-            case .failure(let reason):
-                completion(.failed(reason: reason))
+            case .failure(let error):
+                completion(.failed(reason: error.reason))
             }
             #else
             completion(.failed(reason: "runtime_missing"))
@@ -553,18 +553,32 @@ final class LlamaCommandInterpreter: CommandInterpreter {
     // MARK: - Inference (guarded, with timeout — spec §5.2)
 
     #if canImport(LLM)
+    /// The two honest load-failure shapes (`Result` requires an `Error`
+    /// failure type; the machine reason string the warm seam reports is
+    /// derived, never shown).
+    private enum LLMLoadFailure: Error {
+        case modelPathMissing
+        case modelLoadFailed
+        var reason: String {
+            switch self {
+            case .modelPathMissing: return "model_path_missing"
+            case .modelLoadFailed: return "model_load_failed"
+            }
+        }
+    }
+
     /// Loads (or reuses) the llama.cpp handle for the current base model:
     /// weights + context allocation, NO inference. Shared by the warm
     /// seam and the first inference — whichever runs first wins the load
     /// and the other reuses the cached handle. Emits the honest failure
     /// event on each failure shape (the caller maps the reason).
-    private func loadLLMHandle() -> Result<LLM, String> {
+    private func loadLLMHandle() -> Result<LLM, LLMLoadFailure> {
         if let existing = llmInstance as? LLM {
             return .success(existing)
         }
         guard let modelURL = modelStore.path(for: preferredBaseId) else {
             emit("model_path_missing", outcome: "failure")
-            return .failure("model_path_missing")
+            return .failure(.modelPathMissing)
         }
         // 1024-token context (default 2048): our prompts are ~150
         // tokens + 128 output, and the smaller n_batch halves
@@ -598,7 +612,7 @@ final class LlamaCommandInterpreter: CommandInterpreter {
                                 repetitionLookback: OnDeviceSampling.repetitionLookback,
                                 maxTokenCount: 1024) else {
             emit("model_load_failed", outcome: "failure")
-            return .failure("model_load_failed")
+            return .failure(.modelLoadFailed)
         }
         llmInstance = created
         emit("model_loaded", outcome: "success")
