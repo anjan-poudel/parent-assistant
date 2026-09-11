@@ -94,8 +94,10 @@ final class SearchPhraseCapture {
 
     /// Fixed upper bound for one utterance (a name/number is short).
     /// Normally `SilenceEndpoint` ends the capture far earlier; this is
-    /// the recognizer-timeout safety floor, mirroring
-    /// `VoicePipeline.captureTimeoutSeconds`.
+    /// the recognizer-timeout safety floor. Deliberately NOT raised with
+    /// `VoicePipeline.captureTimeoutSeconds` (22 s since [VAD-TUNE]):
+    /// this one-shot mic capture is a short name/number, and its
+    /// `SilenceEndpoint` gives up waiting for speech after 3 s.
     private static let maxSpeechSeconds: TimeInterval = 8
 
     private let audioSession: AudioSessionManager

@@ -45,6 +45,9 @@ final class AudioSessionPresetTests: XCTestCase {
         private(set) var categoryCalls: [CategoryCall] = []
         private(set) var activeCalls: [(Bool, AVAudioSession.SetActiveOptions)] = []
         private(set) var voiceProcessingCalls: [Bool] = []
+        /// [LOUD-TTS] Every `setMode` call, in order — the playback-mode
+        /// seam's begin/end dance is asserted against this.
+        private(set) var modeCalls: [AVAudioSession.Mode] = []
         private(set) var permissionRequests = 0
 
         func requestRecordPermission(_ callback: @escaping (Bool) -> Void) {
@@ -68,6 +71,10 @@ final class AudioSessionPresetTests: XCTestCase {
                        options: AVAudioSession.SetActiveOptions) throws {
             activeCalls.append((active, options))
             if let activeError { throw activeError }
+        }
+
+        func setMode(_ mode: AVAudioSession.Mode) throws {
+            modeCalls.append(mode)
         }
 
         func setVoiceProcessingEnabled(_ enabled: Bool) throws {
@@ -387,5 +394,53 @@ final class AudioSessionPresetTests: XCTestCase {
         AudioSessionManager(observabilityBus: RecordingBus(),
                             audioSession: session,
                             defaults: defaults)
+    }
+
+    // MARK: - Response playback loudness ([LOUD-TTS])
+
+    func testResponsePlaybackSwitchesToVoicePromptAndRestoresCaptureMode() {
+        let session = RecordingSession()
+        let manager = makeManager(session: session, defaults: makeDefaults())
+
+        manager.beginResponsePlayback()
+        XCTAssertEqual(session.modeCalls, [.voicePrompt],
+                       "speaking must switch the session to the speech-optimized mode")
+
+        manager.endResponsePlayback()
+        XCTAssertEqual(session.modeCalls, [.voicePrompt, .measurement],
+                       "playback end must restore the capture preset (default OFF = measurement)")
+    }
+
+    func testNestedResponsePlaybackRestoresOnlyAtOutermostEnd() {
+        let session = RecordingSession()
+        let manager = makeManager(session: session, defaults: makeDefaults())
+
+        // Piper falling back to the system speaker nests begin/end.
+        manager.beginResponsePlayback()
+        manager.beginResponsePlayback()
+        manager.endResponsePlayback()
+        XCTAssertEqual(session.modeCalls, [.voicePrompt],
+                       "the inner end must NOT restore while an outer playback still runs")
+        manager.endResponsePlayback()
+        XCTAssertEqual(session.modeCalls, [.voicePrompt, .measurement],
+                       "the outermost end restores exactly once")
+    }
+
+    func testResponsePlaybackEndWithoutBeginIsHarmless() {
+        let session = RecordingSession()
+        let manager = makeManager(session: session, defaults: makeDefaults())
+        manager.endResponsePlayback()
+        XCTAssertTrue(session.modeCalls.isEmpty)
+    }
+
+    func testResponsePlaybackRestoresVoiceChatWhenVPPresetIsOn() {
+        let session = RecordingSession()
+        let manager = makeManager(session: session, defaults: makeDefaults())
+        manager.voiceProcessingEnabled = true
+
+        manager.beginResponsePlayback()
+        manager.endResponsePlayback()
+        XCTAssertEqual(session.modeCalls, [.voicePrompt, .voiceChat],
+                       "restore must return to the ACTIVE preset, not hardcode measurement")
     }
 }

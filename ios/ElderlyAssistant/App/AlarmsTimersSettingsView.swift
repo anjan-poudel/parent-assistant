@@ -8,9 +8,11 @@ import SwiftUI
 /// (DatePicker — a time already past today rolls to tomorrow at the same
 /// minute, matching the voice parser's next-occurrence rule).
 ///
-/// The caption below the lists is the platform-honesty note: iOS does not
-/// let third-party apps write into the built-in Clock app, so an alarm
-/// here rings as the app's own daily notification.
+/// The caption below the lists is the platform-honesty note — backend
+/// dependent since [ALARMKIT-ALARMS] (2026-09-10): on iOS 26+ alarms are
+/// real system alarms (AlarmKit); before that iOS does not let
+/// third-party apps write into the built-in Clock app, so an alarm rings
+/// as the app's own daily notification, and the note says exactly that.
 struct AlarmsTimersSettingsView: View {
     @EnvironmentObject var coordinator: AppCoordinator
 
@@ -23,7 +25,7 @@ struct AlarmsTimersSettingsView: View {
                 if coordinator.alarms.isEmpty && coordinator.activeTimers.isEmpty {
                     Text("alarms.empty")
                         .font(.system(size: DesignTokens.minBodyPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundStyle(DesignTokens.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(32)
                         .frame(maxWidth: .infinity)
@@ -41,9 +43,33 @@ struct AlarmsTimersSettingsView: View {
                     }
                 }
                 addForm
-                Text("alarms.honestyNote")
+                // [ALARMKIT-ALARMS] (2026-09-10) Honest platform copy:
+                // iOS 26+ alarms are REAL system alarms; before that the
+                // note says plainly they ring as the app's own
+                // notifications.
+                Text(honestyNoteKey)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundColor(DesignTokens.textSecondary.opacity(0.8))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+                // [ALARMKIT-ALARMS] (2026-09-10) A denied alarm
+                // permission is surfaced, never hidden — nothing the
+                // user sets here can ring until they allow it.
+                if coordinator.alarmAuthorizationStatus == .denied {
+                    // LocalizedStringKey wrapper — a String variable would
+                    // render the KEY verbatim, not the translated line.
+                    Text(LocalizedStringKey(coordinator.alarmPermissionDeniedKey))
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.stateError)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 8)
+                }
+// [TIMER-ALARM] (2026-09-10) Honest foreground-vs-
+                // background contract for timers — the Settings caption
+                // states plainly what happens on each path.
+                Text("timerAlarm.settingsCaption")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(DesignTokens.textSecondary.opacity(0.8))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 8)
             }
@@ -58,18 +84,24 @@ struct AlarmsTimersSettingsView: View {
         HStack(spacing: 12) {
             Image(systemName: alarm.isEnabled ? "alarm.fill" : "alarm")
                 .font(.system(size: 22))
-                .foregroundColor(alarm.isEnabled ? DesignTokens.accent
+                .foregroundStyle(alarm.isEnabled ? DesignTokens.accent
                                                  : DesignTokens.textSecondary)
             VStack(alignment: .leading, spacing: 4) {
                 Text(timeText(alarm.time))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                 if let label = alarm.label {
                     Text(label)
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundStyle(DesignTokens.textSecondary)
                         .lineLimit(2)
                 }
+                // [ALARMKIT-ALARMS] (2026-09-10) Honest per-row status:
+                // a real system alarm on iOS 26+ (AlarmKit), the app's
+                // own notification before.
+                Text(backendStatusKey)
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundColor(DesignTokens.textSecondary.opacity(0.8))
             }
             Spacer()
             Toggle("", isOn: Binding(
@@ -84,9 +116,9 @@ struct AlarmsTimersSettingsView: View {
             } label: {
                 Image(systemName: "trash.fill")
                     .font(.system(size: 22))
-                    .foregroundColor(DesignTokens.stateError)
-                    .frame(width: DesignTokens.minTapTargetSize,
-                           height: DesignTokens.minTapTargetSize)
+                    .foregroundStyle(DesignTokens.stateError)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text("alarms.delete"))
@@ -105,16 +137,16 @@ struct AlarmsTimersSettingsView: View {
             HStack(spacing: 12) {
                 Image(systemName: "timer")
                     .font(.system(size: 22))
-                    .foregroundColor(DesignTokens.accent)
+                    .foregroundStyle(DesignTokens.accent)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(countdownText(remaining: timer.endsAt.timeIntervalSince(context.date)))
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundColor(DesignTokens.textPrimary)
+                        .foregroundStyle(DesignTokens.textPrimary)
                         .monospacedDigit()
                     if let label = timer.label {
                         Text(label)
                             .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundColor(DesignTokens.textSecondary)
+                            .foregroundStyle(DesignTokens.textSecondary)
                             .lineLimit(2)
                     }
                 }
@@ -124,9 +156,9 @@ struct AlarmsTimersSettingsView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 26))
-                        .foregroundColor(DesignTokens.stateError)
-                        .frame(width: DesignTokens.minTapTargetSize,
-                               height: DesignTokens.minTapTargetSize)
+                        .foregroundStyle(DesignTokens.stateError)
+                        .frame(minWidth: DesignTokens.minTapTargetSize,
+                               minHeight: DesignTokens.minTapTargetSize)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text("timers.cancel"))
@@ -144,26 +176,30 @@ struct AlarmsTimersSettingsView: View {
         VStack(spacing: 10) {
             Text("alarms.new")
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundStyle(DesignTokens.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 12) {
                 Text("alarms.time")
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                 Spacer()
                 DatePicker("", selection: $time, displayedComponents: .hourAndMinute)
                     .labelsHidden()
                     .environment(\.locale, coordinator.appLanguage.locale)
             }
             .padding(14)
-            .frame(height: 56)
+            // DESIGN-REVIEW: was a fixed 56pt — a minimum keeps the row
+            // tall by default and lets it grow with the label + picker at
+            // Accessibility XXXL instead of clipping them.
+            .frame(minHeight: 56)
+            .fixedSize(horizontal: false, vertical: true)
             .background(DesignTokens.background)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
 
             if let errorKey {
                 Text(LocalizedStringKey(errorKey))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.stateError)
+                    .foregroundStyle(DesignTokens.stateError)
                     .multilineTextAlignment(.center)
             }
 
@@ -172,9 +208,13 @@ struct AlarmsTimersSettingsView: View {
             } label: {
                 Text("alarms.save")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
-                    .frame(height: DesignTokens.chipHeight)
+                    // DESIGN-REVIEW: minHeight + fixedSize (was a fixed
+                    // 60pt chip) so the action label wraps/grows rather
+                    // than clipping at Accessibility XXXL.
+                    .frame(minHeight: DesignTokens.chipHeight)
+                    .fixedSize(horizontal: false, vertical: true)
                     .background(DesignTokens.accent)
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }
@@ -189,30 +229,49 @@ struct AlarmsTimersSettingsView: View {
     private func saveNewAlarm() {
         Task {
             let outcome = await coordinator.requestAlarmSet(at: time, label: nil)
-            errorKey = Self.errorKey(for: outcome)
+            errorKey = Self.errorKey(for: outcome, deniedKey: coordinator.alarmPermissionDeniedKey)
         }
     }
 
     /// Outcome → honest inline error text (the voice path speaks these
-    /// lines; the leaf shows them under the form).
-    private static func errorKey(for outcome: AlarmTimerSetOutcome) -> String? {
+    /// lines; the leaf shows them under the form). [ALARMKIT-ALARMS] The
+    /// denial line is backend-aware (AlarmKit vs notifications).
+    private static func errorKey(for outcome: AlarmTimerSetOutcome,
+                                 deniedKey: String) -> String? {
         switch outcome {
         case .scheduled: return nil
-        case .permissionDenied: return "alarms.permissionDenied"
+        case .permissionDenied: return deniedKey
         case .atCapacity: return "alarms.capacity"
         case .failed: return "alarms.setFailed"
         }
     }
 
+    // MARK: Backend-honesty keys ([ALARMKIT-ALARMS] 2026-09-10)
+
+    /// Per-row status: "System alarm" on the AlarmKit backend, "App
+    /// notification" before.
+    private var backendStatusKey: LocalizedStringKey {
+        coordinator.alarmSchedulingKind == .alarmKit
+            ? LocalizedStringKey("alarms.rowStatus.systemAlarm")
+            : LocalizedStringKey("alarms.rowStatus.appNotification")
+    }
+
+    /// The platform note under the lists — the AlarmKit reality on
+    /// iOS 26+, the notification fallback honesty before.
+    private var honestyNoteKey: LocalizedStringKey {
+        coordinator.alarmSchedulingKind == .alarmKit
+            ? LocalizedStringKey("alarmAlarmKit.honestyNote")
+            : LocalizedStringKey("alarms.honestyNote")
+    }
+
     // MARK: Text helpers
 
+    /// DESIGN-REVIEW (P2): the row used to build a `DateFormatter` per
+    /// render — once per alarm, per body evaluation, for an answer that
+    /// only depends on the locale. `LocaleFormatters` builds it once per
+    /// locale and hands back the same instance (see `ViewCaches.swift`).
     private func timeText(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = coordinator.appLanguage.locale
-        formatter.timeZone = .current
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
+        LocaleFormatters.shortTime(locale: coordinator.appLanguage.locale).string(from: date)
     }
 
     /// Compact clock countdown — "H:MM:SS" above an hour, "M:SS" below

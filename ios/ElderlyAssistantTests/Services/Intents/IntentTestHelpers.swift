@@ -89,11 +89,20 @@ final class NullObservabilityBus: ObservabilityBus {
 
 /// Observability bus that records event types — the observable signal for
 /// routing decisions whose side effects (speech, notifications) are
-/// no-ops under a nil speaker in tests.
+/// no-ops under a nil speaker in tests. [LAT-M3] `events` additionally
+/// records the FULL events (including metadata), so the
+/// `interpreter_selected` reason/interpreter pairs can be asserted.
 final class RecordingObservabilityBus: ObservabilityBus {
     private(set) var eventTypes: [String] = []
-    func emit(_ event: ObservabilityEvent) { eventTypes.append(event.eventType) }
+    private(set) var events: [ObservabilityEvent] = []
+    func emit(_ event: ObservabilityEvent) {
+        eventTypes.append(event.eventType)
+        events.append(event)
+    }
     func contains(_ eventType: String) -> Bool { eventTypes.contains(eventType) }
+    func events(named eventType: String) -> [ObservabilityEvent] {
+        events.filter { $0.eventType == eventType }
+    }
 }
 
 /// Minimal `VoiceCommandCoordinating` — every method a no-op with

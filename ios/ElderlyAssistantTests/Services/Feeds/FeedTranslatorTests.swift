@@ -270,36 +270,158 @@ final class FeedTranslatorTests: XCTestCase {
                        "English headline. English body")
     }
 
-    func testTranslationDecisionIsOnAskOnly() {
-        // The pipeline is pull, not push: nothing in the model or the
-        // resolver ever translates by itself — a translation only exists
-        // once `translateFeedItem` (the card tap) has stored one. The
-        // resolver with nil translation ALWAYS yields the original.
+    func testResolverShowsOriginalUntilATranslationLands() {
+        // The PROGRESSIVE contract's display half (feed translation
+        // task, 2026-09-09): cards render the ORIGINAL text the moment
+        // items publish — a translation only ever replaces it after the
+        // batch (or the per-item ask) stores one. nil translation ALWAYS
+        // yields the original, so originals can never be blocked,
+        // held back, or fabricated.
         let display = FeedCardDisplayResolver.resolve(
-            item: item(title: "Untranslated until asked"),
+            item: item(title: "Untranslated until it lands"),
             translation: nil, showingOriginal: false)
-        XCTAssertEqual(display.title, "Untranslated until asked")
+        XCTAssertEqual(display.title, "Untranslated until it lands")
         XCTAssertFalse(display.hasTranslation)
+    }
+
+    // MARK: - Progressive batch (visible page, one call)
+
+    func testBatchPromptNumbersEveryItemAndBoundsContent() {
+        let items = [item(title: "One", summary: "First"),
+                     item(title: "Two", summary: "Second")]
+        let prompt = FeedTranslator.batchPrompt(items: items, language: .nepali)
+        XCTAssertTrue(prompt.contains("2 news headlines"))
+        XCTAssertTrue(prompt.contains("into Nepali"))
+        XCTAssertTrue(prompt.contains("1. Headline: One"))
+        XCTAssertTrue(prompt.contains("2. Headline: Two"))
+        XCTAssertTrue(prompt.contains(#""translations""#))
+    }
+
+    func testParseBatchAlignsByIndexAndToleratesMissingEntries() {
+        let response = #"{"translations":[{"title":"नेपाली एक","summary":"सार"},{"title":"नेपाली दुई","summary":""}]}"#
+        let aligned = FeedTranslator.parseBatch(response: response, count: 3)
+        XCTAssertEqual(aligned?.count, 3)
+        XCTAssertEqual(aligned?[0], FeedBatchEntry(title: "नेपाली एक", summary: "सार"))
+        XCTAssertEqual(aligned?[1], FeedBatchEntry(title: "नेपाली दुई", summary: ""))
+        XCTAssertNil(aligned?[2], "missing third entry → that item fails alone, never fabricated")
+    }
+
+    func testParseBatchRejectsNonJSONAndEmptyEnvelopes() {
+        XCTAssertNil(FeedTranslator.parseBatch(response: "not json", count: 1))
+        XCTAssertNil(FeedTranslator.parseBatch(response: #"{"translations":[]}"#, count: 2),
+                     "an empty reply to a non-empty batch is non-compliance, not success")
+    }
+
+    func testTranslateBatchSuccessMakesExactlyOneCall() async {
+        let client = StubClient(text: .success(""), json: .success(
+            #"{"translations":[{"title":"नेपाली एक","summary":"सारांश"},{"title":"नेपाली दुई","summary":""}]}"#))
+        let translator = FeedTranslator(client: client, observability: CapturingBus())
+        let results = await translator.translateBatch(
+            [item(title: "One"), item(title: "Two")], language: .nepali)
+        XCTAssertEqual(results.map { $0.outcome }, [
+            .success(FeedTranslation(title: "नेपाली एक", summary: "सारांश")),
+            .success(FeedTranslation(title: "नेपाली दुई", summary: ""))
+        ])
+        XCTAssertEqual(client.jsonCallCount, 1)
+        XCTAssertEqual(client.textCallCount, 0,
+                       "the batch path is ONE call — the cheaper shape the spec prefers")
+    }
+
+    func testTranslateBatchFallsBackToPerItemWhenBatchShapeFails() async {
+        let client = StubClient(text: .success("नमस्ते\nसमाचार"),
+                                json: .success("not json"))
+        let translator = FeedTranslator(client: client, observability: CapturingBus())
+        let results = await translator.translateBatch(
+            [item(title: "A"), item(title: "B")], language: .nepali)
+        XCTAssertEqual(client.jsonCallCount, 1)
+        XCTAssertEqual(client.textCallCount, 2,
+                       "per-item fallback covers every item of the failed batch")
+        XCTAssertEqual(results.map { $0.outcome }, [
+            .success(FeedTranslation(title: "नमस्ते", summary: "समाचार")),
+            .success(FeedTranslation(title: "नमस्ते", summary: "समाचार"))
+        ])
+    }
+
+    func testTranslateBatchUnavailableMarksAllFailedWithoutPerItemStorm() async {
+        let client = StubClient(text: .failure(.unavailable),
+                                json: .failure(.unavailable))
+        let translator = FeedTranslator(client: client, observability: CapturingBus())
+        let results = await translator.translateBatch(
+            [item(title: "A"), item(title: "B")], language: .nepali)
+        XCTAssertEqual(client.jsonCallCount, 1)
+        XCTAssertEqual(client.textCallCount, 0,
+                       "no cloud must never trigger a per-item retry storm")
+        XCTAssertEqual(results.map { $0.outcome }, [.failure, .failure])
+    }
+
+    func testProgressiveFlowOriginalFirstThenTranslatedSwap() async {
+        // The progressive contract end to end (pure halves): original-
+        // first render, then the swap once the batch lands, and the
+        // language sort still reads the ORIGINAL script afterwards.
+        let items = [item(title: "English headline", summary: "English body")]
+        let before = FeedCardDisplayResolver.resolve(item: items[0], translation: nil,
+                                                     showingOriginal: false)
+        XCTAssertEqual(before.title, "English headline")
+        XCTAssertFalse(before.hasTranslation)
+
+        let client = StubClient(text: .success(""), json: .success(
+            #"{"translations":[{"title":"नेपाली शीर्षक","summary":"नेपाली सारांश"}]}"#))
+        let translator = FeedTranslator(client: client, observability: CapturingBus())
+        let results = await translator.translateBatch(items, language: .nepali)
+        guard case .success(let translation)? = results.first?.outcome else {
+            return XCTFail("the batch must translate the item")
+        }
+        let after = FeedCardDisplayResolver.resolve(item: items[0],
+                                                    translation: translation,
+                                                    showingOriginal: false)
+        XCTAssertEqual(after.title, "नेपाली शीर्षक")
+        XCTAssertTrue(after.isShowingTranslation)
+        // Translated items never re-sort: the detector/sorter see the
+        // ORIGINAL FeedItem text only (translations live outside it).
+        XCTAssertEqual(FeedLanguageDetector.language(of: items[0]), .latin)
     }
 }
 
 // MARK: - Test doubles
 
-/// Stub provider client for `FeedTranslator`.
+/// Stub provider client for `FeedTranslator` — scripted per shape
+/// (text vs JSON) with call counters so the batch/fallback shapes are
+/// pinned exactly.
 private final class StubClient: FeedTranslationClient {
     enum Outcome {
         case success(String)
         case failure(FeedTranslationError)
     }
-    private let result: Outcome
 
+    private let textResult: Outcome
+    private let jsonResult: Outcome
+    private(set) var textCallCount = 0
+    private(set) var jsonCallCount = 0
+
+    /// One scripted result for both shapes.
     init(result: Outcome) {
-        self.result = result
+        self.textResult = result
+        self.jsonResult = result
+    }
+
+    /// Independent scripts for the two shapes.
+    init(text: Outcome, json: Outcome) {
+        self.textResult = text
+        self.jsonResult = json
     }
 
     func completeText(prompt: String) async throws -> String {
-        switch result {
+        textCallCount += 1
+        switch textResult {
         case .success(let text): return text
+        case .failure(let error): throw error
+        }
+    }
+
+    func completeJSON(prompt: String) async throws -> String {
+        jsonCallCount += 1
+        switch jsonResult {
+        case .success(let json): return json
         case .failure(let error): throw error
         }
     }

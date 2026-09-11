@@ -50,15 +50,48 @@ final class VoiceSettingsModel: ObservableObject {
         }
     }
 
+    /// [WARM-START] Persisted through the coordinator (UserDefaults
+    /// "warmStartEngines", default ON — see AppCoordinator.warmStartEnabled):
+    /// the boot's warm phase preloads the speech + reply-voice models so
+    /// the first conversation starts fast. Warm runs only during boot, so
+    /// a flip applies from the next launch (the card's copy says so).
+    @Published var warmStartEnabled: Bool {
+        didSet {
+            guard warmStartEnabled != oldValue else { return }
+            warmStartController.warmStartEnabled = warmStartEnabled
+        }
+    }
+
+/// [TURN-TIMING] Persisted under "voiceTimingDebug" (default OFF) —
+    /// diagnostics-only: shows a per-stage timing caption under the
+    /// assistant's reply in the conversation transcript. One writer =
+    /// this model; `AppCoordinator` reads the key when rendering the
+    /// caption. The `voice_turn_timing` console event itself fires
+    /// regardless of this toggle (remote debugging evidence).
+    @Published var timingDebugEnabled: Bool {
+        didSet {
+            guard timingDebugEnabled != oldValue else { return }
+            defaults.set(timingDebugEnabled, forKey: Self.timingDebugKey)
+        }
+    }
+
+    static let timingDebugKey = "voiceTimingDebug"
+
     private let noiseFilterController: NoiseFilterPreferenceControlling
+    private let warmStartController: WarmStartPreferenceControlling
     private let defaults: UserDefaults
 
     init(noiseFilterController: NoiseFilterPreferenceControlling,
+         warmStartController: WarmStartPreferenceControlling,
          defaults: UserDefaults = .standard) {
         self.noiseFilterController = noiseFilterController
+        self.warmStartController = warmStartController
         self.defaults = defaults
         self.noiseFilterEnabled = noiseFilterController.noiseFilterEnabled
         self.accentBiasEnabled = DialectBiasSettings.isEnabled(defaults: defaults)
+        self.warmStartEnabled = warmStartController.warmStartEnabled
+
+self.timingDebugEnabled = defaults.bool(forKey: Self.timingDebugKey)
     }
 }
 

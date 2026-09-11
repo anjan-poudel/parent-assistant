@@ -48,7 +48,12 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         static let `default` = Config(
             primaryLanguage: "ne",
             fallbackLanguage: "en",
-            maxUtteranceSeconds: 10,
+            // [VAD-TUNE] Raised 10 -> 22 to mirror
+            // `VoicePipeline.captureTimeoutSeconds`: the local clamp must
+            // not pre-empt the pipeline's total capture cap, or slow
+            // elderly speech gets cut here before the pipeline cap ever
+            // applies.
+            maxUtteranceSeconds: 22,
             forcePrimaryLanguage: true,
             inferenceTimeoutSeconds: 180
         )
@@ -56,6 +61,10 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
 
     private let modelStore: ModelStore
     private let observabilityBus: ObservabilityBus
+    /// [TURN-TIMING] Turn-scoped stage tracer, property-injected by the
+    /// coordinator (nil = timing off). Marks `asr_loaded` with the
+    /// measured load ms when a model loads mid-turn.
+    var turnTracer: VoiceTurnLatencyTracer?
     private let config: Config
 
     /// Held during a single utterance. int16 PCM at 16 kHz mono.
@@ -719,6 +728,9 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         let loadStart = CFAbsoluteTimeGetCurrent()
         let whisper = Whisper(fromFileURL: modelURL, withParams: params)
         let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
+        // [TURN-TIMING] Model ready — the load ms rides as a point entry
+        // when this load happened inside a live turn.
+        turnTracer?.mark("asr_loaded", elapsedMs: loadMs)
         // `backend` is the whisper.cpp-side decision on where the encoder
         // runs. whisper.cpp only auto-loads a sibling `-encoder.mlmodelc`
         // for models whose dims exactly match a stock OpenAI arch (see
@@ -746,7 +758,9 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
             + "backend=\(backend) load_ms=\(loadMs)")
 
         // 4. Int16 [-32768, 32767] → Float32 [-1, 1] as SwiftWhisper expects.
-        let floats: [Float] = pcm.map { Float($0) / 32_768.0 }
+        // [VAD-RT] Pure-Float normalization (was a Double division per
+        // sample over the whole utterance).
+        let floats: [Float] = pcm.map { Float($0) / 32768 }
 
         // 5. Transcribe. SwiftWhisper's async API bridges to whisper.cpp
         //    `whisper_full` under the hood and returns segment text on

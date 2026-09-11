@@ -28,7 +28,7 @@ struct ToolLogReviewView: View {
                 // says what fills it (and that nothing here grows forever).
                 Text(L10n.str("toolLog.capNote", locale: coordinator.activeLocale))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                     .multilineTextAlignment(.center)
             }
         }
@@ -49,7 +49,7 @@ struct ToolLogReviewView: View {
                         Text("toolLog.export")
                     }
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.accent)
+                    .foregroundStyle(DesignTokens.accent)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
                 }
             }
@@ -75,25 +75,25 @@ struct ToolLogReviewView: View {
             HStack(spacing: 8) {
                 Image(systemName: kindIcon(for: entry.kind))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.accent)
+                    .foregroundStyle(DesignTokens.accent)
                 Text(kindLabel(for: entry.kind))
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                 outcomeBadge(entry.outcome)
                 Spacer(minLength: 0)
                 Text(timeLabel(for: entry))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
             }
             Text(entry.query)
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundStyle(DesignTokens.textPrimary)
                 .multilineTextAlignment(.leading)
                 .lineLimit(2)
             if !entry.response.isEmpty {
                 Text(entry.response)
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                     .multilineTextAlignment(.leading)
                     .lineLimit(3)
             }
@@ -113,7 +113,7 @@ struct ToolLogReviewView: View {
     private func outcomeBadge(_ outcome: String) -> some View {
         Text(outcome)
             .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-            .foregroundColor(.white)
+            .foregroundStyle(.white)
             .padding(.horizontal, 10)
             .padding(.vertical, 2)
             .background(outcomeTint(outcome))
@@ -162,10 +162,10 @@ struct ToolLogReviewView: View {
         VStack(spacing: 12) {
             Image(systemName: "text.magnifyingglass")
                 .font(.system(size: 44))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
             Text(L10n.str("toolLog.empty", locale: coordinator.activeLocale))
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, minHeight: 320)

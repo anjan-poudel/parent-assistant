@@ -27,7 +27,11 @@ struct LogSanitiser {
         "outcome",
         "state",
         "duration_ms",
-        "error_code"
+        "error_code",
+        // [TURN-TIMING] The serialized per-turn stage list
+        // (`[{stage, ms}, …]`) — stage names and integer durations only,
+        // never transcript or reply text (see VoiceTurnLatencyTracer).
+        "stages"
     ]
 
     private static let piiPatterns: [NSRegularExpression] = {

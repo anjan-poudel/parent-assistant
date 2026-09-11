@@ -1,0 +1,522 @@
+[
+  {
+    "id": "intro",
+    "titleEn": "About this manual",
+    "titleNe": "यो पुस्तिकाबारे",
+    "paragraphsEn": [
+      "The app on your home screen is called Elderly Assistant; the assistant who speaks to you is called Sahayak (सहायक — helper). This manual explains everything Sahayak can do, how to do each thing by voice and by touch, and what Sahayak will honestly never do.",
+      "Every button, every screen, and every spoken sentence also exists in Nepali (नेपाली). You can speak to Sahayak in either language at any time; Sahayak replies in the language chosen in Settings → Language & region.",
+      "Each feature below follows the same four-part pattern: what it does, how to do it by voice, how to do it by touch, and what it will never do."
+    ],
+    "paragraphsNe": [
+      "तपाईंको होम स्क्रिनको एपको नाम Elderly Assistant हो; तपाईंसँग बोल्ने सहायकको नाम सहायक (Sahayak) हो। यो पुस्तिकामा सहायकले गर्न सक्ने सबै काम, हरेक काम आवाजबाट र हातले गर्ने तरिका, र — त्यत्तिकै महत्त्वपूर्ण — सहायकले इमानदारीपूर्वक कहिल्यै नगर्ने कुराहरू लेखिएका छन्।",
+      "हरेक बटन, हरेक स्क्रिन र हरेक बोलिने वाक्य अंग्रेजीमा पनि छ। तपाईं जुनसुकै बेला जुनसुकै भाषामा सहायकसँग बोल्न सक्नुहुन्छ; सहायकले सेटिङ → भाषा र क्षेत्र मा रोजेको भाषामा जवाफ दिन्छ।",
+      "तलका हरेक सुविधा एउटै चार-भागको ढाँचामा छन्: के गर्छ, आवाजबाट कसरी गर्ने, हातले कसरी गर्ने, र कहिल्यै के गर्दैन।"
+    ],
+    "images": []
+  },
+  {
+    "id": "quickstart",
+    "titleEn": "Quick start — your first 15 minutes",
+    "titleNe": "छिटो सुरुवात — पहिलो १५ मिनेट",
+    "paragraphsEn": [
+      "Installing: Sahayak runs on any iPhone with iOS 16 or newer, in portrait. It needs the microphone — that is how it hears you.",
+      "First launch: a simple four-step welcome appears. Every step can be skipped (tap Skip, top right); skipped steps show later as a small “N setup steps left” reminder on the home screen.",
+      "• Step 1 — Choose language. Pick English or नेपाली (Nepali is pre-selected). Sahayak will speak in this language.",
+      "• Step 2 — Allow permissions. Microphone (so Sahayak can hear you) and Notifications (for medication reminders). Tap Allow on each.",
+      "• Step 3 — Family and friends. Type the person to notify if something goes wrong — name, phone number, relationship, Messenger username. You can add people later in Settings.",
+      "• Step 4 — Connect Gemini AI. A family member may paste an API key here. Skipping is fine — medicines, alarms, timers, the news and emergency phrases all work without it. Then tap Go to Home.",
+      "The Talk button is a traffic light. Blue (breathing rings) = resting, “Talk — I'm ready”. Amber, three deepening shades = working: Listening… → Writing… → Thinking…. Green = Speaking. Red = something failed — the line under the button says exactly what, and a Try again tap retries. Dim blue = voice off. Big Yes/No buttons appear whenever Sahayak asks you to confirm something.",
+      "• Tap once when blue: starts listening. • Tap while working or speaking: cancels the turn. • Press and hold for 2 seconds: resets the voice completely — a white ring fills up, then you hear “Voice reset. I'm ready.”",
+      "Three sentences that always work: “Set a timer for 5 minutes” (टाइमर ५ मिनेट), “Read me the news” (समाचार सुनाऊ), and “Call my daughter” (छोरीलाई फोन गर — Sahayak asks you to confirm before dialing; the person must be saved in Family & friends first).",
+      "Home screen tour, top to bottom: the top bar holds the Settings gear, the greeting and live clock (taps into Calendar), the bell (opens Updates, badge always matches), and the red-edged Emergency triangle — which is on every screen. Under the Talk button a small pill rotates example phrases you can imitate. After each exchange a card shows what you said and what Sahayak replied (folds into a chip after a few seconds; some actions have Undo).",
+      "The dock at the bottom has six tiles: Medication (pill), Reminders (clock), Call (phone — or your first family contact's face), Show Me (camera — appliance help), Directions (map), Feeds (stacked cards).",
+      "Updates (the bell): three sections — Notifications (today's briefing, medication status and other active panels), Today (the Nepali date with tithi and festivals, plus “Next: … at …” — the very next thing you must not miss), and Activity (a read-only log of recent conversations, newest first)."
+    ],
+    "paragraphsNe": [
+      "स्थापना: सहायक iOS १६ वा नयाँ भएको जुनसुकै आइफोनमा, सिधा (पोर्ट्रेट) मोडमा चल्छ। यसलाई माइक्रोफोन चाहिन्छ — त्यसैले यसले तपाईंलाई सुन्छ।",
+      "पहिलो पटक खोल्दा: चार सरल चरणको स्वागत स्क्रिन देखिन्छ। हरेक चरण छाड्न सकिन्छ (माथि दायाँपट्टिको 'छाड्नुहोस्' थिच्नुहोस्); छाडिएका चरण पछि होम स्क्रिनमा 'अझै N काम बाँकी' भनेर सम्झाइनेछन्।",
+      "• चरण १ — भाषा छान्नुहोस्। अंग्रेजी वा नेपाली (नेपाली पहिल्यै रोजिएको हुन्छ)। सहायक यसै भाषामा बोल्नेछ।",
+      "• चरण २ — अनुमति दिनुहोस्। माइक्रोफोन (सहायकले तपाईंलाई सुन्न) र सूचनाहरू (औषधिको सम्झनाका लागि)। दुवैमा 'दिनुहोस्' थिच्नुहोस्।",
+      "• चरण ३ — परिवार र साथीहरू। समस्या परेमा खबर पाउने मान्छेको नाम, फोन नम्बर, नाता र म्यासेन्जर नाम लेख्नुहोस्। पछि सेटिङबाट पनि थप्न सकिन्छ।",
+      "• चरण ४ — जेमिनी AI जोड्नुहोस्। परिवारको कसैले यहाँ API कुञ्जी राख्न सक्नुहुन्छ। छाड्दा पनि हुन्छ — औषधि, अलार्म, टाइमर, समाचार र आपतकालीन वाक्यहरू सबै योबिना चल्छन्। अनि 'घर जानुहोस्' थिच्नुहोस्।",
+      "बोल्ने बटन एउटा ट्राफिक-लाइट हो। निलो (सास फेर्ने घेरासहित) = आराममा, 'बोल्नुहोस् — तयार छु'। एम्बर, तीन गाढा रङ = काम हुँदैछ: सुन्दै छु… → लेख्दै छु… → बुझ्दै छु…। हरियो = बोल्दै छु। रातो = केही बिग्रियो — बटनमुनिको पङ्क्तिले ठ्याक्कै के भन्छ, र 'फेरि प्रयास गर्नुहोस्' थिच्दा फेरि सुरु हुन्छ। हल्का निलो = आवाज बन्द। सहायकले पुष्टि सोध्दा ठूला हो/होइन बटन देखिन्छन्।",
+      "• निलो हुँदा एक पटक थिच्नुहोस्: सुन्न सुरु हुन्छ। • काम वा बोलाइ चल्दा थिच्नुहोस्: त्यो पालो रद्द हुन्छ। • २ सेकेन्ड थिचिराख्नुहोस्: आवाज पूरै रिसेट हुन्छ — सेतो घेरा भरिन्छ, अनि 'आवाज रिसेट भयो। म तयार छु।' सुनिन्छ।",
+      "सधैं काम गर्ने तीन वाक्य: 'टाइमर ५ मिनेट' (Set a timer for 5 minutes), 'समाचार सुनाऊ' (Read me the news), र 'छोरीलाई फोन गर' (Call my daughter — सहायकले फोन गर्नुअघि पुष्टि सोध्छ; मान्छे पहिले परिवार र साथीहरूमा बचत भएको हुनुपर्छ)।",
+      "होम स्क्रिनको भ्रमण, माथिदेखि तलसम्म: माथिको पट्टीमा सेटिङको गियर, अभिवादन र चलिरहने घडी (थिच्दा पात्रो खुल्छ), घण्टी (अपडेटहरू खोल्छ; संख्याको चिन्ह सधैं मिल्छ), र रातो किनारा भएको आपतकालीन त्रिकोण — जुन हरेक स्क्रिनमा हुन्छ। बोल्ने बटनमुनि सानो पिल्लामा भन्न सकिने उदाहरण वाक्यहरू घुमिरहन्छन्। हरेक कुराकानीपछि एउटा कार्डले तपाईंले भनेको र सहायकले भनेको देखाउँछ (केही सेकेन्डपछि एउटा पङ्क्तिमा खुम्चिन्छ; कुनै काममा 'पूर्ववत' (Undo) पनि हुन्छ)।",
+      "तलको डकमा छवटा बटन छन्: औषधि (चक्की), सम्झना (घडी), फोन (फोन — वा पहिलो परिवारको सदस्यको अनुहार), देखाउनुहोस् (क्यामेरा — उपकरण सहायता), बाटो (नक्सा), फिड (थुप्रो कार्ड)।",
+      "अपडेटहरू (घण्टी): तीन खण्ड — सूचनाहरू (आजको ब्रीफिङ, औषधिको अवस्था र अरू सक्रिय सूचनाहरू), आज (तिथि र चाडपर्वसहितको नेपाली मिति, साथै 'अर्को: … बजे' — सबैभन्दा पहिले नछुटाउनुपर्ने कुरा), र गतिविधि (हालैका कुराकानीहरूको पढ्ने-मात्र लग, नयाँ पहिला)।"
+    ],
+    "images": [
+      "home-screen-layout.png",
+      "talk-button-states.png",
+      "updates-screen.png"
+    ]
+  },
+  {
+    "id": "talking",
+    "titleEn": "Talking to the assistant",
+    "titleNe": "सहायकसँग कुरा गर्ने",
+    "paragraphsEn": [
+      "One turn, four steps: Listening (amber — up to 8 seconds; Sahayak waits about one second of quiet, long enough for natural pauses), Writing (your words appear in the “You're saying” card), Understanding, Speaking (green — the reply is spoken and written, so you never miss it by ear alone).",
+      "Two ways to start: tap the Talk button, or say the wake phrase “ये कान्छी” (sounds like yeah kanchhi — a warm Nepali “hey, dear”), pause briefly, then speak your command, for example “ये कान्छी… समाचार सुनाऊ”. A few Settings screens still print the older name “Hey Sahayak” for this phrase; the phrase Sahayak actually listens for is “ये कान्छी” (yeah kanchhi), as shown on the Voice activation screen. The wake phrase can be switched off in Settings → Voice activation — the Talk button always works. While it is on, the microphone listens continuously, which uses a little more battery; the screen says so in plain words.",
+      "When Sahayak doesn't understand, it never pretends. It either asks you to say it again, repeats the command back as a yes/no question when it is only half sure (“Did I understand that correctly?”), or — when its brain is not ready — says exactly that (“my brain model is still downloading”, “my brain isn't set up — please ask a family member”) instead of blaming you.",
+      "Both languages, any time: speak English or Nepali freely; the language chosen in Settings → Language & region decides the interface and the language of the replies.",
+      "Replies are made to be heard: times are spoken the way people say them (“6 in the morning”, never “zero-six-hundred”); speech is slightly slower by design; every reply is also written on screen; and if a voice can't speak (missing voice files), Sahayak stays silent rather than mangling Nepali — the text is always there. Settings → Voices shows which voices are installed.",
+      "Yes/no questions: answer with “yes”/“हो” or “no”/“होइन” — or tap the big Yes/No buttons. If no answer comes within 45 seconds, Sahayak says “Time is up. I'll remind you again.”",
+      "The morning briefing: once a day Sahayak reads a short summary of your day — greeting, today's date (Nepali calendar in Nepali), routines, medicines, calendar events, and a weather line (honestly reported unavailable when it can't be fetched). It fires on its own the first time you open the app between 5:00 and 10:00 in the morning, or any time you say “Read me my briefing” (मेरो ब्रीफिङ सुनाऊ) — once per day either way. The exact text is stored encrypted for the day: find it in Updates → Notifications → Today's briefing, where Speak again re-reads it."
+    ],
+    "paragraphsNe": [
+      "एक पालो, चार चरण: सुन्दै (एम्बर — बढीमा ८ सेकेन्ड; तपाईं करिब एक सेकेन्ड चुप भएपछि सहायकले सकियो भन्ने बुझ्छ, प्राकृतिक रोकाइका लागि पर्याप्त), लेख्दै (तपाईंका शब्द 'तपाईं भन्दै हुनुहुन्छ' कार्डमा देखिन्छन्), बुझ्दै, बोल्दै (हरियो — जवाफ बोलेर र लेखेर दुवै दिइन्छ, कानले नसुन्दा पनि नछुट्ने गरी)।",
+      "सुरु गर्ने दुई तरिका: बोल्ने बटन थिच्नुहोस्, वा वेक वर्ड 'ये कान्छी' भन्नुहोस् (yeah kanchhi — मायालु नेपाली सम्बोधन), छोटो रोकिनुहोस्, अनि आफ्नो आदेश बोल्नुहोस्, जस्तै 'ये कान्छी… समाचार सुनाऊ'। केही सेटिङ स्क्रिनमा यो वाक्यका लागि पुरानो नाम 'हे सहायक' (Hey Sahayak) अझै छापिएको छ; सहायकले वास्तवमा सुन्ने वाक्य 'ये कान्छी' (yeah kanchhi) हो — आवाज सक्रियता स्क्रिनको वाक्य कार्डमा यही लेखिएको छ। वेक वर्ड सेटिङ → आवाज सक्रियता मा बन्द (र खोल्न) सकिन्छ — बोल्ने बटन जहिले पनि चल्छ। यो खोलिएको बेला माइक्रोफोनले सधैं सुनिरहन्छ, जसले अलि बढी ब्याट्री खान्छ; स्क्रिनमा यो सोझो शब्दमा लेखिएको छ।",
+      "सहायकले नबुझ्दा कहिल्यै बहाना गर्दैन। या त फेरि भन्न भन्छ, या आधा मात्र ढुक्क हुँदा कुरा दोहोर्याएर सोध्छ ('के मैले ठीक बुझें? हो वा होइन भन्नुहोस्।'), या — दिमाग तयार नभएको बेला — ठ्याक्कै त्यही भन्छ ('मेरो दिमागको मोडेल अझै डाउनलोड भइरहेको छ', 'मेरो दिमाग सेटअप भएको छैन — कृपया परिवारलाई भन्नुहोस्') — तपाईंलाई दोष दिँदैन।",
+      "दुवै भाषा, जुनसुकै बेला: अंग्रेजी वा नेपाली जुनसुकै बोल्नुहोस्; सेटिङ → भाषा र क्षेत्र मा रोजेको भाषाले स्क्रिन र जवाफको भाषा दुवै चलाउँछ।",
+      "जवाफहरू सुन्नकै लागि बनाइएका छन्: समय मान्छेले भनेजस्तै बोलिन्छ ('बिहान ६ बजे', कहिल्यै 'छ-शून्य-शून्य'); बोली अलि ढिलो हुन्छ; हरेक जवाफ स्क्रिनमा पनि लेखिन्छ; र आवाज चल्न नसक्दा (आवाजका फाइलहरू नभएको बेला) सहायक नेपाली बिगारेर बोल्नुभन्दा चुप बस्छ — लेखिएको कुरा सधैं रहन्छ। सेटिङ → आवाजहरू मा कुन आवाज स्थापित छ भन्ने स्पष्ट देखिन्छ।",
+      "हो/होइन प्रश्न: 'हो' / 'yes' वा 'होइन' / 'no' भनेर — वा ठूला हो/होइन बटन थिचेर जवाफ दिनुहोस्। ४५ सेकेन्डभित्र जवाफ नआए सहायकले 'समय सकियो, फेरि सम्झाउँछु।' भन्छ।",
+      "बिहानको ब्रीफिङ: दिनमा एक पटक सहायकले तपाईंको दिनको छोटो सारांश पढ्छ — अभिवादन, आजको मिति (नेपालीमा नेपाली पात्रो), दिनचर्या, औषधि, क्यालेन्डरका कार्यक्रम, र मौसमको पङ्क्ति (नल्याउन सक्दा बनाएर नभनी स्पष्ट भनिन्छ)। बिहान ५:००–१०:०० बीच पहिलो पटक एप खोल्दा आफैं पढिन्छ, वा जुनसुकै बेला 'मेरो ब्रीफिङ सुनाऊ' भन्दा पनि — दिनमा एक पटक मात्र। ठ्याक्कै त्यही पाठ दिनभरका लागि सुरक्षित (इन्क्रिप्टेड) बचत हुन्छ: अपडेटहरू → सूचनाहरू → आजको बिहानको सारांश मा भेटिन्छ, जहाँ 'फेरि सुन्नुहोस्' बटनले फेरि पढ्छ।"
+    ],
+    "images": [
+      "voice-flow-chain.png"
+    ]
+  },
+  {
+    "id": "commands",
+    "titleEn": "Voice command reference",
+    "titleNe": "आवाजका आदेशहरूको सूची",
+    "paragraphsEn": [
+      "Deterministic commands work without any setup — no AI, no internet. Commands marked “needs the brain” use the Gemini key or the on-device brain model (Settings → Voice Engine). Romanized Nepali (samachar sunau, ghar laija) also works.",
+      "• Emergency — “help”, “emergency”, “i fell”, “fell down”, “chest pain”, “can't breathe” / “मद्दत”, “सहयोग गर”, “बचाउ”, “आपतकाल”, “लडेँ”, “सास फेर्न सकिन”, “छाती दुख्यो”. Always answered first, never blocked by anything. Sahayak speaks “Help is on the way. I'm notifying your family.” and posts a notification. The Emergency button (any screen) additionally dials your emergency contact.",
+      "• Medicine taken — “I took my medicine”, “I've taken my medication” / “औषधि खाएँ”, “दवाई खाए”, “लिइसकेँ”. Sahayak asks “Did you take your <name> just now?” before recording anything. Saying “not yet” / “नखाए” / “खाएको छैन” is understood as a refusal — the app is careful with word tricks like नखाए containing खाए.",
+      "• Set an alarm — “set an alarm for 6 am”, “wake me up at 7:30”, “alarm at 8 pm”, “set an alarm for 6:30 am for yoga” / “बिहान ६ बजे अलार्म लगाऊ”, “बिहान ६ बजे उठाउनुहोस्”. Rings daily through the app's own notification (the iPhone doesn't allow writing to the Clock app). A time already past today rolls to tomorrow. Up to 20 alarms.",
+      "• Turn the alarm off — “turn off the alarm”, “cancel my alarm”, “switch off the alarm” / “अलार्म बन्द गर”, “रद्द गर”. Turns off the alarm that most recently rang; the confirmation always names its time. “Cancel the 6 am alarm” is deliberately not guessed — do that by touch.",
+      "• Snooze — “snooze”, “snooze for 15 minutes” / “स्नुज गर”, “स्नुज १५ मिनेट”. Bare “snooze” = 10 more minutes; 1–60 minutes accepted. A one-shot re-wake; the daily alarm stays untouched.",
+      "• Set a timer — “set a timer for 5 minutes”, “timer 10 minutes”, “1 hour timer”, “1 hour 30 minutes” / “टाइमर ५ मिनेट”, “५ मिनेटको टाइमर लगाऊ”, “१ घण्टाको टाइमर”. 1 second to 24 hours; compound durations count as one timer. Up to 10 running. While the app is open, finishing speaks “Timer finished.”",
+      "• News — “read me the news”, “read the news”, “tell me the news”, “what's the news” / “समाचार सुनाऊ”, “समाचार पढ”, “खबर सुनाऊ”. Up to 3 headlines per source, read per source, with honest lines for sources that fail or have nothing new.",
+      "• YouTube — “play bhajan on youtube”, “youtube news”, “search youtube for old songs” / “युट्युबमा गीत चलाऊ”, “युट्युबमा रामायण खोज”. Without an API key: opens YouTube search. With a key: plays the top result and speaks its title.",
+      "• Directions — “take me home”, “take me to the hospital”, “bring me home” / “मलाई घर लैजाऊ”, “मैयाको घर लैजाऊ”, “अस्पताल लैजाऊ”, “घर जानुहोस्”. Navigates to saved places and family addresses; Google Maps opens in walking mode and starts navigating on its own. If two places could match, Sahayak asks — never guesses a place.",
+      "• Find a contact — “contact search ram”, “maiya ko phone khoja” / “मैयाको फोन नम्बर खोज”. Opens the Phone screen with the search already typed and speaks the result (“Found मैया. Tap to call.”).",
+      "• Make a call — “call my son”, “call Maiya”, “video call my daughter” / “छोरालाई फोन गर”. Needs the brain and the person in Family & friends. Sahayak always asks first (“Make a phone call to …?”); nothing dials until you say yes. You can correct it: “no, call on Messenger”.",
+      "• Send a message — “send a message to my son: I will be late”. Opens the phone's message sheet (or WhatsApp) with your words pre-filled — you tap Send yourself; Sahayak never sends by itself.",
+      "• Reminder by voice — “remind me at 8 in the morning” / “बिहान ८ बजे सम्झना राख”. Needs the brain. Confirms with the spoken time.",
+      "• Routine by voice — “walk at 5”, “exercise every day at 7” / “बेलुका ५ बजे हिँड्ने सम्झना”. Needs the brain. Creates a repeating daily or weekly routine reminder.",
+      "• Calculator — “2 plus 3”, “10 times 4”, “100 minus 25” / “२ जोड ३”, “५ गुणा ४”. No brain needed. Dividing by zero gets the honest “You can't divide by zero.”",
+      "• Weather — “what's the weather today”, “is it raining in Arncliffe” / “आजको मौसम कस्तो छ?”. On the on-device engine: a live answer hedged with “According to the weather service…”. On the Gemini engine: a web-grounded answer. Otherwise the honest “I can't check the live weather yet.”",
+      "• Time and date — “what time is it”, “what's the date today” / “कति बजे”, “कति गते”. The Nepali date answer uses the Bikram Sambat calendar with the weekday.",
+      "• Greeting — “good morning”, “hello” / “नमस्ते”, “सुप्रभात”.",
+      "• Web search — any question (“who won the match yesterday?”) — only on the on-device engine with family-set Google search credentials; up to 50 searches a day; question-shaped utterances only. The Gemini engine answers open questions natively.",
+      "• Not yet available — music, health data, calendar-event creation by voice. Sahayak says honestly: “That feature isn't ready yet, but it's coming.” — it never pretends it worked."
+    ],
+    "paragraphsNe": [
+      "निर्धारित (deterministic) आदेशहरू कुनै सेटअपबिना चल्छन् — AI, इन्टरनेट केही चाहिँदैन। 'दिमाग चाहिने' भनिएका आदेशहरूले जेमिनी कुञ्जी वा यन्त्रमै भएको दिमाग मोडेल (सेटिङ → आवाज इन्जिन) प्रयोग गर्छन्। रोमनमा लेखिएको नेपाली (samachar sunau, ghar laija) पनि चल्छ।",
+      "• आपतकालीन — 'help', 'emergency', 'i fell', 'fell down', 'chest pain', 'can't breathe' / 'मद्दत', 'सहयोग गर', 'बचाउ', 'आपतकाल', 'लडेँ', 'सास फेर्न सकिन', 'छाती दुख्यो'। सधैं सबैभन्दा पहिले, कुनै कुराले रोक्दैन। सहायकले 'सहायता सुरु भयो। परिवारलाई खबर पठाउँदैछु।' भन्छ र सूचना पठाउँछ। आपतकालीन बटनले (हरेक स्क्रिनमा) साथसाथै आपतकालीन सम्पर्कलाई फोन पनि गर्छ।",
+      "• औषधि खाइयो — 'I took my medicine', 'I've taken my medication' / 'औषधि खाएँ', 'दवाई खाए', 'लिइसकेँ'। केही लेख्नुअघि सहायकले 'के तपाईंले भर्खरै <नाम> खानुभयो?' भनेर सोध्छ। 'खाएको छैन' / 'नखाए' भन्नु भनेको अस्वीकार हो — नखाएभित्र खाए छ भन्नेजस्ता शब्दको झुक्कोबाट एप जोगिन्छ।",
+      "• अलार्म राख्नुहोस् — 'set an alarm for 6 am', 'wake me up at 7:30', 'alarm at 8 pm', 'set an alarm for 6:30 am for yoga' / 'बिहान ६ बजे अलार्म लगाऊ', 'बिहान ६ बजे उठाउनुहोस्'। एपकै सूचनाबाट दिनहुँ बज्छ (आइफोनले Clock एपमा लेख्न दिँदैन)। आज बितिसकेको समय भोलिका लागि हुन्छ। बढीमा २० अलार्म।",
+      "• अलार्म बन्द गर्नुहोस् — 'turn off the alarm', 'cancel my alarm', 'switch off the alarm' / 'अलार्म बन्द गर', 'रद्द गर'। भर्खरै बजेको अलार्म बन्द हुन्छ; पुष्टिमा सधैं त्यसको समय भनिन्छ। '६ बजेको अलार्म रद्द गर' भन्दा अनुमान गर्दैन — त्यो हातले गर्नुहोस्।",
+      "• स्नुज — 'snooze', 'snooze for 15 minutes' / 'स्नुज गर', 'स्नुज १५ मिनेट'। खाली 'स्नुज' = अझै १० मिनेट; १–६० मिनेटसम्म मानिन्छ। एक पटकका लागि फेरि बजाउने; दैनिक अलार्म यथावत् रहन्छ।",
+      "• टाइमर राख्नुहोस् — 'set a timer for 5 minutes', 'timer 10 minutes', '1 hour timer', '1 hour 30 minutes' / 'टाइमर ५ मिनेट', '५ मिनेटको टाइमर लगाऊ', '१ घण्टाको टाइमर'। १ सेकेन्डदेखि २४ घण्टासम्म; जोडिएका समय ('१ घण्टा ३० मिनेट') एउटै टाइमर हुन्छ। चलिरहेका बढीमा १०। एप खुला हुँदा सकिँदा 'टाइमर सकियो।' पनि बोलिन्छ।",
+      "• समाचार — 'read me the news', 'read the news', 'tell me the news', 'what's the news' / 'समाचार सुनाऊ', 'समाचार पढ', 'खबर सुनाऊ'। हरेक स्रोतबाट बढीमा ३ शीर्षक, स्रोतअनुसार पढिन्छ, असफल स्रोतको स्पष्ट भनाइसहित।",
+      "• युट्युब — 'play bhajan on youtube', 'youtube news', 'search youtube for old songs' / 'युट्युबमा गीत चलाऊ', 'युट्युबमा रामायण खोज'। API कुञ्जी नभए: युट्युबको खोज खुल्छ। कुञ्जी भए: उत्कृष्ट भिडियो चल्छ र त्यसको नाम बोलिन्छ।",
+      "• बाटो — 'take me home', 'take me to the hospital', 'bring me home' / 'मलाई घर लैजाऊ', 'मैयाको घर लैजाऊ', 'अस्पताल लैजाऊ', 'घर जानुहोस्'। बचत गरिएका ठाउँ र परिवारका ठेगानामा पुर्‍याउँछ; गुगल नक्सा हिँड्ने मोडमा खुलेर आफैं बाटो सुरु गर्छ। दुईवटा ठाउँ मिल्न सक्ने भए सहायकले सोध्छ — कहिल्यै अनुमान गर्दैन।",
+      "• सम्पर्क खोज्नुहोस् — 'contact search ram', 'maiya ko phone khoja' / 'मैयाको फोन नम्बर खोज'। फोन स्क्रिन खोजसहित खुल्छ र नतिजा बोलिन्छ ('मैया फेला पर्‍यो। कल गर्न थिच्नुहोस्।')।",
+      "• फोन गर्नुहोस् — 'call my son', 'call Maiya', 'video call my daughter' / 'छोरालाई फोन गर'। दिमाग र परिवार तथा साथीहरूमा भएको मान्छे चाहिन्छ। सहायकले सधैं पहिले सोध्छ ('फोन कल गर्ने हो?'); तपाईंले 'हो' नभनेसम्म केही लाग्दैन। 'होइन, मेसेन्जरमा कल गर' भनेर सच्याउन पनि सकिन्छ।",
+      "• सन्देश पठाउनुहोस् — 'send a message to my son: I will be late'। तपाईंका शब्द राखेर फोनको सन्देश स्क्रिन (वा ह्वाट्सएप) खुल्छ — पठाउनुहोस् तपाईं आफैं थिच्नुहुन्छ; सहायकले आफैं कहिल्यै पठाउँदैन।",
+      "• आवाजबाट सम्झना — 'remind me at 8 in the morning' / 'बिहान ८ बजे सम्झना राख'। दिमाग चाहिन्छ। बोलिएको समयसहित पुष्टि गर्छ।",
+      "• आवाजबाट दिनचर्या — 'walk at 5', 'exercise every day at 7' / 'बेलुका ५ बजे हिँड्ने सम्झना'। दिमाग चाहिन्छ। दैनिक वा साप्ताहिक दिनचर्या बनाउँछ।",
+      "• क्याल्कुलेटर — '2 plus 3', '10 times 4', '100 minus 25' / '२ जोड ३', '५ गुणा ४'। दिमाग चाहिँदैन। शून्यले भाग गर्दा 'शून्यले भाग गर्न सकिँदैन।' भनिन्छ।",
+      "• मौसम — 'what's the weather today', 'is it raining in Arncliffe' / 'आजको मौसम कस्तो छ?'। यन्त्रमै इन्जिनमा: 'मौसम सेवा अनुसार…' भनेर जीवित जवाफ। जेमिनी इन्जिनमा: वेब खोजमा आधारित जवाफ। नत्र इमानदार 'म अहिले मौसम हेर्न सक्दिनँ।'",
+      "• समय र मिति — 'what time is it', 'what's the date today' / 'कति बजे', 'कति गते'। नेपाली जवाफमा बारसहितको नेपाली पात्रोको मिति आउँछ।",
+      "• अभिवादन — 'good morning', 'hello' / 'नमस्ते', 'सुप्रभात'।",
+      "• वेब खोज — जुनसुकै प्रश्न ('हिजोको खेल कसले जित्यो?') — यन्त्रमै इन्जिनमा र परिवारले राखेको गुगल खोज प्रमाणसहित मात्र; दिनमा बढीमा ५० खोज; प्रश्नको रूपका वाक्य मात्र। जेमिनी इन्जिनले खुला प्रश्नको जवाफ आफैं दिन्छ।",
+      "• अझै तयार नभएका — संगीत, स्वास्थ्य जानकारी, आवाजबाट क्यालेन्डर कार्यक्रम। सहायकले इमानदार भन्छ: 'त्यो सुविधा अहिले तयार छैन, तर चाँडै आउनेछ।' — काम भयो भनेर कहिल्यै ढाँट्दैन।"
+    ],
+    "images": []
+  },
+  {
+    "id": "medical",
+    "titleEn": "Medical — medications and appointments",
+    "titleNe": "औषधि — औषधि र डाक्टरको भेटघाट",
+    "paragraphsEn": [
+      "Medication screen (dock tile, pill icon): today's doses with times, and below them the Doctor's appointments list.",
+      "Taking a dose — by touch: tap “I took it” next to the dose. By voice: say “I took my medicine” / “औषधि खाएँ”.",
+      "The confirmation challenge: either way, Sahayak asks out loud “Did you take your <name> just now?” and shows big Yes/No buttons before recording anything. Why: the yes/no question protects users with memory difficulties, and a built-in double-dose guard refuses a second “taken” within the safety window (4 hours for once-daily medicines, 2 hours for twice-daily). Missed doses are re-prompted automatically. A refusal is accepted calmly: “Okay, I'll remind you again later.”",
+      "Doctor's appointments: a list of upcoming appointments (doctor/clinic, place, date, time, note), newest first, stored encrypted, up to 50.",
+      "By touch: Medical → the add form; or copy an appointment SMS in Messages and tap “Paste appointment message” — Sahayak shows you exactly what it understood and asks you to confirm before saving anything. The clipboard is read only on that tap, never in the background.",
+      "Honesty — SMS: the iPhone does not let apps read text messages, so appointment texts can never be added automatically; the screen says this in a one-time note and points to the paste button.",
+      "Honesty — the calendar toggle: “Add appointments to the iPhone Calendar” (default on) is the switch that will write appointments into the iPhone Calendar app. The writing backend is not yet wired into this build — appointments currently live in the app only.",
+      "Settings → Medication schedule: where the family types each medicine's name and time(s); duplicate name-and-time pairs are refused. Below it, Festival reminders: how many days early (0–7, default 2) important festivals notify.",
+      "What it will never do: mark a dose as taken without your yes; accept नखाए as खाए; double-count a dose inside the safety window; claim an SMS was read automatically; claim an appointment was written to the iPhone Calendar when it wasn't."
+    ],
+    "paragraphsNe": [
+      "औषधि स्क्रिन (डकको बटन, चक्कीको चिन्ह): आजका औषधिका खुराक समयसहित, र तल डाक्टरको भेटघाटको सूची।",
+      "खुराक लिने — हातले: खुराक छेउको 'लिएँ' थिच्नुहोस्। आवाजबाट: 'औषधि खाएँ' / 'I took my medicine' भन्नुहोस्।",
+      "पुष्टिको प्रश्न: जेसुकै गरे पनि, केही लेख्नुअघि सहायकले 'के तपाईंले भर्खरै <नाम> खानुभयो?' भनेर सोध्छ र ठूला हो/होइन बटन देखाउँछ। किन: यो हो/होइन प्रश्न स्मरणशक्तिमा समस्या भएकाहरूका लागि सुरक्षा हो, र भित्रको दोहोरो-खुराक रोकथामले सुरक्षा समयभित्र (दिनमा एक पटक खाने औषधिमा ४ घण्टा, दुई पटक खानेमा २ घण्टा) दोस्रो 'खाएँ' मान्दैन। छुटेका खुराक फेरि सम्झाइन्छ। अस्वीकार शान्त रूपमा स्वीकारिन्छ: 'ठीक छ, म पछि फेरि सम्झाउँछु।'",
+      "डाक्टरको भेटघाट: आउँदा भेटघाटहरूको सूची (डाक्टर/क्लिनिक, ठाउँ, मिति, समय, टिप्पणी), नयाँ पहिला, सुरक्षित बचत, बढीमा ५०।",
+      "हातले: औषधि स्क्रिन → थप्ने फारम; वा म्यासेज एपमा भेटघाटको SMS कपी गरेर 'भेटघाटको सन्देश टाँस्नुहोस्' थिच्नुहोस् — सहायकले के बुझ्यो देखाउँछ र बचत गर्नुअघि तपाईंसँग पुष्टि सोध्छ। क्लिपबोर्ड त्यही थिचाइमा मात्र पढिन्छ, कहिल्यै पछाडिबाट होइन।",
+      "इमानदारी — SMS: आइफोनले एपलाई टेक्स्ट सन्देश पढ्न दिँदैन, त्यसैले भेटघाटका सन्देश आफैं थपिन सक्दैनन्; स्क्रिनले यो एक पटकको टिप्पणीमा भन्छ र टाँस्ने बटनतिर देखाउँछ।",
+      "इमानदारी — क्यालेन्डरको स्विच: 'भेटघाट आईफोन क्यालेन्डरमा थप्नुहोस्' (सुरुमा खुला) भनेको भेटघाट आईफोनको क्यालेन्डर एपमा लेख्ने स्विच हो। अहिलेसम्म लेख्ने भाग यो संस्करणमा जोडिएको छैन — भेटघाट हाल एपभित्र मात्र रहन्छ। दैनिक दिनचर्या भने परिवारले क्यालेन्डर एपमा पहिल्यै देख्न सक्छन् (पात्रो खण्ड हेर्नुहोस्)।",
+      "सेटिङ → औषधि तालिका: परिवारले हरेक औषधिको नाम र समय(हरू) लेख्ने ठाउँ; एउटै नाम र समय दोहोरिएमा अस्वीकार हुन्छ। तल, चाडपर्वको सम्झना: महत्त्वपूर्ण चाडपर्व कति दिन अगाडि सम्झाउने (०–७, सुरुमा २)।",
+      "कहिल्यै के गर्दैन: तपाईंको 'हो' बिना खुराक लेख्दैन; नखाएलाई खाए मान्दैन; सुरक्षा समयभित्र खुराक दोहोर्‍याएर गन्दैन; SMS आफैं पढियो भन्दैन; आईफोन क्यालेन्डरमा भेटघाट लेखियो भनेर नलेखिएको बेला दाबी गर्दैन।"
+    ],
+    "images": [
+      "confirmation-chips.png"
+    ]
+  },
+  {
+    "id": "reminders",
+    "titleEn": "Reminders — routines and imported items",
+    "titleNe": "सम्झना — दिनचर्या र बाहिरबाट आएका कुरा",
+    "paragraphsEn": [
+      "The Reminders screen (dock tile, clock icon) merges three systems into one list sorted by time: medication doses (read-only here), routine occurrences (walk, exercise, meals, bedtime — past ones stay visible, dimmed, as context), and items imported from your iPhone's own Calendar and Reminders apps (marked with their calendar's name; tapping one opens it in its own app — the import is read-only, the app never writes to them).",
+      "The daily routine: the app comes with seven sensible reminders the family can switch on or off right on this screen: exercise (7:00 and 16:00), meals (8:00, 13:00, 19:00), a walk (17:30) and bedtime (21:30) start on; gym (Mon/Wed/Fri 9:00), reading (20:15) and “call a relative” (Sunday 18:00) start off. Voice-created reminders appear here too.",
+      "Upcoming events: below today's list, the next five events from the iPhone Calendar app (beyond today). More exist? A Show more button opens the Calendar screen. This section only appears while the import toggle is on; if the import is denied or failing, it says so instead of pretending nothing is coming.",
+      "Settings → Calendar hosts the three import/mirror switches (see the Calendar section).",
+      "What it will never do: write or change anything in your iPhone Calendar or Reminders apps through the import (strictly read-only); re-fire a late routine as if it were on time (late walk reminders are dropped as noise — only medication re-fires, because medicine is safety-critical)."
+    ],
+    "paragraphsNe": [
+      "सम्झना स्क्रिन (डकको बटन, घडीको चिन्ह) ले तीनवटा प्रणाली मिसाएर समयक्रममा एउटै सूची बनाउँछ: औषधिका खुराक (यहाँ पढ्न-मात्र), दिनचर्याका घटना (हिँड्ने, व्यायाम, खाना, सुत्ने — बितेका पनि धमिलो रूपमा दिनको सन्दर्भका लागि देखिन्छन्), र आईफोनकै पात्रो र सम्झना एपबाट ल्याइएका कुरा (आफ्नो क्यालेन्डरको नामसहित; थिच्दा आफ्नै एपमा खुल्छ — ल्याउने काम पढ्न-मात्र हो, एपले त्यहाँ कहिल्यै लेख्दैन)।",
+      "दैनिक दिनचर्या: एपमा सात उपयुक्त सम्झना पहिल्यै हुन्छन् — यही स्क्रिनबाट परिवारले खोल्न/बन्द गर्न सक्छन्: व्यायाम (७:०० र १६:००), खाना (८:००, १३:००, १९:००), हिँड्ने (१७:३०) र सुत्ने बेला (२१:३०) खुला छन्; जिम (सोम/बुध/शुक्र ९:००), किताब पढ्ने (२०:१५) र 'आफन्तलाई फोन' (आइतबार १८:००) सुरुमा बन्द छन्। आवाजबाट बनाएका सम्झना पनि यहाँ देखिन्छन्।",
+      "आउँदै गरेका कार्यक्रम: आजको सूचीमुनि, आईफोनको क्यालेन्डर एपका अर्का पाँच कार्यक्रम (भोलिदेखि)। अझ धेरै भए 'थप देखाउनुहोस्' बटनले पात्रो स्क्रिन खोल्छ। यो खण्ड ल्याउने स्विच खुला हुँदा मात्र देखिन्छ; ल्याउने काम रोकिएको वा असफल भएको भए, केही छैन भनेर बहाना गर्नुको सट्टा स्पष्ट भनिन्छ।",
+      "सेटिङ → पात्रो मा ल्याउने/मिरर गर्ने तीनवटा स्विच छन् (पात्रो खण्ड हेर्नुहोस्)।",
+      "कहिल्यै के गर्दैन: ल्याउने बाटोबाट तपाईंको आईफोनको पात्रो वा सम्झना एपमा केही लेख्दैन वा बदल्दैन (पढ्न-मात्र); ढिलो दिनचर्यालाई समयमै आएजस्तो गरेर फेरि बजाउँदैन (ढिलो हिँड्ने सम्झना हावामा हराउँछ — औषधि मात्र फेरि बज्छ, किनभने औषधि सुरक्षाको कुरा हो)।"
+    ],
+    "images": []
+  },
+  {
+    "id": "calendar",
+    "titleEn": "Calendar — the Nepali calendar and mirroring",
+    "titleNe": "पात्रो — नेपाली पात्रो र मिररिङ",
+    "paragraphsEn": [
+      "The Calendar screen (tap the greeting and clock at the top of Home) shows: today in the Nepali calendar — the Bikram Sambat date in Nepali numerals (for example “आइतबार, भदौ २१, २०८३”), the tithi for every day, and the English date beneath. The conversion is fully offline (1978–2099 BS); outside that range it honestly says the Nepali date is unavailable rather than guessing.",
+      "Festival today (with its tithi when one falls on the day), the next five upcoming festivals with “in N days” (Devanagari numerals in Nepali), and Today's routine — the same merged schedule as Reminders.",
+      "Festival notifications: every festival notifies on the day (08:00); the important ones (Dashain, Tihar, Teej, Laxmi Puja, Chhath, New Year…) also notify N days early — N is set in Settings → Medication schedule → Festival reminders (0–7, default 2).",
+      "Settings → Calendar — three switches, each with an honest status line beneath:",
+      "• Show in Calendar app — copies your daily routine into the iPhone Calendar app so the family can see it there. Calendar access is asked only when you switch it on; if denied, everything still works in-app.",
+      "• Mirror routine changes both ways (off by default) — mirrored routine events live in a dedicated “Sahayak” calendar inside the Calendar app; edits made there (time changes, deletions) flow back into the app's routine. Needs full calendar access, asked only when switched on. Works only while mirroring itself is on.",
+      "• Import from Calendar & Reminders — reads your native events and due reminders into the app (today's lists + notifications), never writes back. When on, a stepper sets how many minutes early to notify (0–30); all-day items always announce at 8:00 AM.",
+      "What it will never do: fabricate a Nepali date outside the verified table; warn about a festival on the wrong day (a fixed curated date catalog, lunar-sighted ones marked); pretend two-way sync is working when full calendar access wasn't granted."
+    ],
+    "paragraphsNe": [
+      "पात्रो स्क्रिन (होमको माथि अभिवादन र घडी थिच्नुहोस्) मा देखिन्छ: आज नेपाली पात्रोमा — नेपाली अंकमा विक्रम संवत्को मिति (जस्तै 'आइतबार, भदौ २१, २०८३'), हरेक दिनको तिथि, र तल अंग्रेजी मिति। रूपान्तरण पूरै अफलाइन छ (१९७८–२०९९ संवत्); त्यो दायराभन्दा बाहिर अनुमान नगरी 'नेपाली मिति उपलब्ध छैन' भनिन्छ।",
+      "आजको चाडपर्व (तिथिसहित, चाडपर्व परेको दिन), आउँदा पाँच चाडपर्व 'N दिनमा' भन्नेसहित (नेपालीमा देवनागरी अंक), र आजको दिनचर्या — सम्झना स्क्रिनकै मिलाइएको तालिका।",
+      "चाडपर्वका सूचना: हरेक चाडपर्वको दिनमा एउटा सूचना आउँछ (बिहान ८:००); महत्त्वपूर्णहरूको (दशैं, तिहार, तीज, लक्ष्मी पूजा, छठ, नयाँ वर्ष…) N दिन अगाडि पनि — N सेटिङ → औषधि तालिका → चाडपर्वको सम्झना मा मिलाइन्छ (०–७, सुरुमा २)।",
+      "सेटिङ → पात्रो — तीनवटा स्विच, हरेकमुनि इमानदार अवस्थाको पङ्क्ति:",
+      "• क्यालेन्डर एपमा देखाउनुहोस् — तपाईंको दैनिक दिनचर्या आईफोनको क्यालेन्डर एपमा सारिन्छ, ताकि परिवारले त्यहाँ पनि देखून्। क्यालेन्डरको पहुँच खोल्दा मात्र सोधिन्छ; अस्वीकार गरे पनि एपभित्र सबै चल्छ।",
+      "• दिनचर्याका परिवर्तन दुवैतिर मिरर गर्नुहोस् (सुरुमा बन्द) — मिरर भएका दिनचर्याका कार्यक्रम क्यालेन्डर एपभित्र छुट्टै 'Sahayak' क्यालेन्डरमा रहन्छन्; त्यहाँ गरिएका सम्पादन (समय बदल्ने, मेट्ने) यहाँको दिनचर्यामा फर्केर आउँछन्। पूर्ण पहुँच चाहिन्छ, खोल्दा मात्र सोधिन्छ। मिररिङ आफैं खुला हुँदा मात्र चल्छ।",
+      "• पात्रो र सम्झना एपबाट ल्याउनुहोस् — तपाईंका नेटिभ कार्यक्रम र बाँकी सम्झना एपभित्र ल्याइन्छ (आजका सूची + सूचनाहरू), फर्काएर केही लेखिँदैन। खुला हुँदा, कति मिनेट अगाडि सूचना दिने भन्ने मिलाउन सकिन्छ (०–३०); दिनभरिका कुरा सधैं बिहान ८:०० बजे भनिन्छ।",
+      "कहिल्यै के गर्दैन: जाँचिएको तालिकाभन्दा बाहिरको नेपाली मिति बनाउँदैन; गलत दिनमा चाडपर्वको सम्झना दिँदैन (मितिहरू तोकिएको सूचीबाट, चन्द्रमासग्रस्तहरू चिन्हित); पूर्ण पहुँच नपाउँदा दुवैतिर मिरर चलेको दाबी गर्दैन।"
+    ],
+    "images": [
+      "calendar-card.png"
+    ]
+  },
+  {
+    "id": "phone",
+    "titleEn": "Phone & people",
+    "titleNe": "फोन र मान्छेहरू",
+    "paragraphsEn": [
+      "The Phone screen (dock tile Call) leads with your curated Family & friends tiles, offers whole-phone-book search, and keeps Recent activity at the bottom.",
+      "Family & friends: each tile shows the person's photo (or initials), name and relationship, with two big buttons — video call and audio call — one tap dials. Settings → Family and friends manages the list (up to 12 people) with a five-step wizard: (1) find them in your contacts or add manually, (2) relationship from a fixed list (daughter, son, mother, father, sister, brother, husband, wife, grandmother, grandfather, friend, Doctor/GP) plus an Emergency contact flag, (3) photo, (4) Messenger username with hints on where to find it, (5) nickname + home address (the address is what lets voice navigation say “take me to Maiya's home”).",
+      "People flagged Emergency wear a red badge; Doctor/GP wears a green one.",
+      "Searching the whole phone book: tap the magnifying glass on the header. The search sweeps the system address book — your own entries plus everyone synced in by WhatsApp, Messenger and other apps. People you recently called rank first. Contacts permission is asked at that moment behind a plain-language card; the family tiles keep working either way. A small mic button inside the search pill lets you speak a name instead of typing. If WhatsApp people are missing, the screen shows the one-line fix (WhatsApp → Settings → Privacy → Sync contacts).",
+      "Choosing how to call: each result row's big circle dials through the person's resolved channel — a per-person choice, or the global default (Settings → Calling: FaceTime / Phone / Messenger / WhatsApp). The “…” menu picks the channel per person; Messenger needs that person's username on file. The WhatsApp pill always opens the official WhatsApp chat form. Tapping a contact is its own confirmation — your finger on your own phone.",
+      "Calls by voice: “Call my son” — Sahayak resolves the name or relationship against Family & friends, announces the plan, and asks yes/no; corrections like “no, call on Messenger” are understood. Recently dialed the same person? It mentions that. The name isn't in Family & friends? It says so and points at Settings.",
+      "Call history & missed calls: Recent activity (bottom of the Phone screen; the full History leaf via Show more) logs only what Sahayak itself opened — the app never reads the iPhone's own call log (iOS forbids it). Rows tap to redial through the same channel. Missed calls are detected anonymously (iOS masks the caller's identity and number); such rows read “Unanswered call” and tapping opens the Phone app — the call genuinely lives in its Recents tab, one tap away. A live-call banner shows while a call is connected.",
+      "The Emergency button (red triangle, every screen): speaks and posts “Help is on the way. I'm notifying your family.” and dials your emergency contact — the first contact flagged Emergency contact, or the first contact if none is flagged. If no contact exists at all, it honestly alerts you instead of pretending.",
+      "What it will never do: dial by voice without your yes; pretend a WhatsApp “call” was started (WhatsApp has no call deep link — a WhatsApp call request honestly opens the chat); invent a missed caller's name or number; read the iPhone's call log."
+    ],
+    "paragraphsNe": [
+      "फोन स्क्रिन (डकको बटन 'फोन') मान्छेहरूको केन्द्र हो: पहिले तपाईंका परिवार र साथीहरूका टायलहरू देखिन्छन्, अनि पूरा फोन-बुकको खोज, र तल हालसालैको गतिविधि।",
+      "परिवार र साथीहरू: हरेक टायलमा मान्छेको फोटो (वा नामको अक्षर), नाम र नाता, र दुई ठूला बटन — भिडियो कल र अडियो कल — एक थिचाइमा फोन लाग्छ। सेटिङ → परिवार र साथीहरू मा सूची (बढीमा १२ जना) पाँच चरणको प्रक्रियाले मिलाइन्छ: (१) सम्पर्कमा खोज्नुहोस् वा आफैं लेख्नुहोस्, (२) नाता तोकिएको सूचीबाट (छोरी, छोरा, आमा, बुबा, दिदी/बहिनी, दाइ/भाइ, श्रीमान, श्रीमती, हजुरआमा, हजुरबुबा, साथी, डाक्टर) साथै आपतकालीन सम्पर्कको चिन्ह, (३) फोटो, (४) म्यासेन्जर नाम (कहाँ भेटिन्छ भन्ने सुझावसहित), (५) उपनाम + घरको ठेगाना (ठेगाना भएकैले आवाजबाट 'मैयाको घर लैजाऊ' भन्न मिल्छ)।",
+      "आपतकालीन चिन्ह लगाएका मान्छेमा रातो ब्याज देखिन्छ; डाक्टर/जिपीमा हरियो।",
+      "पूरा फोन-बुक खोज्ने: माथिको पङ्क्तिमा म्याग्निफाइङ ग्लास थिच्नुहोस्। खोजले प्रणालीकै फोन-बुक छान्छ — तपाईंले राखेका सबै, साथै ह्वाट्सएप, मेसेन्जर र अरू एपले थपेका मान्छे। भर्खरै फोन गरेका मान्छे पहिले देखिन्छन्। सम्पर्कको अनुमति त्यही बेला सोझो भाषाको कार्डपछि सोधिन्छ; परिवारका टायल जसरी पनि चल्छन्। खोजको पिल्लाभित्र सानो माइक बटनले नाम बोलेर पनि खोज्न दिन्छ। ह्वाट्सएपका मान्छे देखिएनन् भने स्क्रिनले एक-पङ्क्तिको उपाय देखाउँछ (ह्वाट्सएप → सेटिङ → गोपनीयता → सम्पर्क सिंक खोल्नुहोस्)।",
+      "कसरी फोन गर्ने भन्ने छान्ने: हरेक नतिजाको ठूलो घेराले मान्छेको तोकिएको माध्यमबाट फोन गर्छ — प्रति-व्यक्ति रोजाइ, वा साझा पूर्वनिर्धारित (सेटिङ → कलिङ: फेसटाइम / फोन / मेसेन्जर / ह्वाट्सएप)। '…' मेनुले प्रति-व्यक्ति माध्यम छान्छ; मेसेन्जरका लागि मान्छेको मेसेन्जर नाम चाहिन्छ (सानो फारमले लिन्छ)। ह्वाट्सएपको बटनले सधैं ह्वाट्सएपकै च्याट खोल्छ। सम्पर्क थिच्नु आफैंमा पुष्टि हो — तपाईंको आफ्नै औंला, आफ्नै फोनमा।",
+      "आवाजबाट फोन: 'छोरालाई फोन गर' — सहायकले नाम वा नाता परिवार र साथीहरूमा खोज्छ, के गर्न लागेको बताउँछ, र हो/होइन सोध्छ; 'होइन, मेसेन्जरमा कल गर' जस्तो सच्याइ बुझिन्छ। भर्खरै फोन गरिएको मान्छे भए त्यो पनि भनिन्छ। परिवार र साथीहरूमा नभएको नाम भए स्पष्ट भन्छ र सेटिङ देखाउँछ।",
+      "कलको इतिहास र छुटेका कल: हालसालैको गतिविधि (फोन स्क्रिनको तल; पूरा इतिहास 'थप देखाउनुहोस्' बाट) ले सहायकले आफैं खोलेका कुरा मात्र लेख्छ — एपले आईफोनकै कल-लग कहिल्यै पढ्दैन (आईओएसले दिँदैन)। पङ्क्ति थिच्दा उही माध्यमबाट फेरि फोन लाग्छ। छुटेका कल अज्ञात रूपमा पत्ता लाग्छन् (आईओएसले फोन गर्नेको नाम र नम्बर दुवै लुकाउँछ); त्यस्ता पङ्क्ति 'नउठाएको कल' भन्छन् र थिच्दा फोन एप खुल्छ — कल वास्तवमा त्यहीँ, Recents खण्डमा हुन्छ। कल चलिरहँदा 'अहिले कल भइरहेको छ' भन्ने पट्टी पनि देखिन्छ।",
+      "आपतकालीन बटन (रातो त्रिकोण, हरेक स्क्रिनमा): ठ्याक्कै यसो गर्छ — 'सहायता सुरु भयो। परिवारलाई खबर पठाउँदैछु।' बोल्छ र सूचना पठाउँछ, अनि आपतकालीन सम्पर्कलाई फोन गर्छ — आपतकालीन सम्पर्क चिन्ह लगाएकामध्ये पहिलो, चिन्ह नभए पहिलो सम्पर्क। कोही सम्पर्कै नभए, केही भयो भनेर बहाना नगरी स्पष्ट भन्छ। आवाजका आपतकालीन वाक्यले आश्वासन र सूचना दिन्छन्; वास्तविक फोन बटनले गर्छ।",
+      "कहिल्यै के गर्दैन: तपाईंको 'हो' बिना आवाजबाट फोन लगाउँदैन; ह्वाट्सएपमा 'कल' भयो भनी बहाना गर्दैन (ह्वाट्सएपमा कलको सिधा लिङ्क छैन — कलको आग्रह इमानदारीपूर्वक च्याट खोल्छ); छुटेको कल गर्नेको नाम वा नम्बर अनुमान गर्दैन; आईफोनको कल-लग पढ्दैन।"
+    ],
+    "images": [
+      "phone-screen.png"
+    ]
+  },
+  {
+    "id": "news",
+    "titleEn": "News reader — the spoken digest",
+    "titleNe": "समाचार — बोलिने सारांश",
+    "paragraphsEn": [
+      "“Read me the news” turns your configured news sources into a short spoken headline digest — the source's own headlines, never an AI summary.",
+      "Default sources (used until someone configures their own): BBC World, NPR News, The Guardian (English) and Online Khabar, Ratopati, Setopati (Nepali) — all live-verified.",
+      "The replace rule: the moment at least one source is configured in Settings, the digest reads exactly the configured list — the defaults are only the out-of-box list. What the family saved is what gets read.",
+      "Digest shape: “Let me check the news.” → per source, “From BBC World: headline. headline. headline.” — at most 3 headlines each, all sources fetched in parallel with the same 8-second budget. A source with nothing new: “Nothing new from X.” A source that can't be reached: “X could not be reached.” Everything down: one honest “I couldn't fetch the news right now.” — never six failure lines, never a fake digest.",
+      "Settings → Feeds → News sources: a list with delete buttons and a one-field add form (paste a feed URL; the name is derived from the address). Family-facing by design — the elderly user is never asked to type URLs.",
+      "What it will never do: paraphrase news it didn't fetch, attribute a headline to a source that didn't publish it, or store a headline anywhere after it's spoken (news is ephemeral)."
+    ],
+    "paragraphsNe": [
+      "'समाचार सुनाऊ' ले तपाईंका समाचार स्रोतहरूलाई छोटो बोलिने शीर्षक-सारांशमा बदल्छ — स्रोतकै शीर्षक, कहिल्यै AI को सारांश होइन।",
+      "सुरुका स्रोत (परिवारले आफ्नो नराखेसम्म): BBC World, NPR News, The Guardian (अंग्रेजी) र अनलाइन खबर, रातोपाटी, सेतोपाटी (नेपाली) — सबै जाँचिएका।",
+      "बदल्ने नियम: सेटिङमा एउटा पनि स्रोत राखिएपछि सारांशले ठ्याक्कै राखिएका स्रोत मात्र पढ्छ — सुरुका सूची पहिलो पटकका लागि मात्र हो। परिवारले बचत गरेकै कुरा पढिन्छ।",
+      "सारांशको आकार: 'म समाचार ल्याउँदैछु।' → स्रोतअनुसार, 'BBC World बाट: शीर्षक। शीर्षक। शीर्षक।' — हरेकबाट बढीमा ३ शीर्षक, सबै स्रोत एकैचोटि उही ८-सेकेन्डको सीमाभित्र। नयाँ केही नभएको स्रोत: 'X बाट नयाँ समाचार छैन।' नखुल्ने स्रोत: 'X बाट समाचार लिन सकिएन।' सबै बिग्रे: एउटै इमानदार 'अहिले समाचार लिन सकिएन।' — छवटा असफलताका पङ्क्ति होइनन्, नक्कली सारांश होइन।",
+      "सेटिङ → फिड → समाचार स्रोतहरू: सूची मेट्ने बटनसहित, र एउटा-क्षेत्रको थप्ने फारम (फिडको लिङ्क टाँस्नुहोस्; नाम ठेगानाबाटै बन्छ)। परिवारकै लागि बनाइएको — वृद्ध प्रयोगकर्तालाई लिङ्क लेख्न कहिल्यै भनिँदैन।",
+      "कहिल्यै के गर्दैन: नल्याएको समाचार सारांशमा बनाउँदैन, कुनै स्रोतले नछापेको शीर्षक त्यसका नाममा भन्दैन, र बोलिसकेपछि कुनै शीर्षक कतै बचत गर्दैन (समाचार क्षणिक हो)।"
+    ],
+    "images": []
+  },
+  {
+    "id": "feeds",
+    "titleEn": "Feeds — the mixed-content feed",
+    "titleNe": "फिड — मिश्रित सामग्रीको फिड",
+    "paragraphsEn": [
+      "The Feeds screen (dock tile) turns RSS/Atom sources into a social-feed-style card list — text, picture, audio and video items mixed together, newest first, filtered by the family's topic keywords.",
+      "Default sources: BBC World (text), BBC नेपाली (text in Devanagari), NPR News (audio), NASA Image of the Day (images) — one per kind so the mixed feed shows its whole range out of the box. Up to 10 sources and 20 topics.",
+      "Cards and their one action: text cards → Read aloud (title + summary spoken in Sahayak's voice); image cards → the picture itself (no action); audio/video cards → Play (an in-app player sheet). Nothing ever autoplays — playback starts only from your tap, which is your consent.",
+      "Topics: only items whose title or summary mentions a topic appear (case- and diacritic-insensitive, Nepali-script safe); an empty topic list shows everything.",
+      "Honesty: a “Some sources could not be reached: …” card names exactly which sources failed while everything else still loads; an empty feed with clean sources is a normal state with guidance; stale content (every source failed but older items are cached) is shown only labelled with the failure. The feed re-fetches at most every 15 minutes.",
+      "Settings → Feeds manages sources (add by URL, one field), topics (keyword chips), and hosts the News sources editor.",
+      "What it will never do: rewrite an item's text (the card shows the feed's own title and summary, sanitized), autoplay anything, or guess a date an item didn't publish. An automatic Translate button for feed items is under development but not yet part of the screen — items currently appear in their original language."
+    ],
+    "paragraphsNe": [
+      "फिड स्क्रिन (डकको बटन) ले RSS/Atom स्रोतहरूलाई सामाजिक-फिडजस्तो कार्ड-सूचीमा बदल्छ — लेख, तस्बिर, अडियो र भिडियो मिसिएर, नयाँ पहिला, परिवारका विषय-शब्दले छानिएर।",
+      "सुरुका स्रोत: BBC World (लेख), BBC नेपाली (देवनागरी लेख), NPR News (अडियो), NASA Image of the Day (तस्बिर) — हरेक किसिमको एक, ताकि मिश्रित फिडले आफ्नो पूरा रूप देखाओस्। बढीमा १० स्रोत र २० विषय।",
+      "कार्ड र त्यसको एउटा काम: लेख-कार्ड → 'पढेर सुनाउनुहोस्' (शीर्षक + सारांश सहायककै आवाजमा); तस्बिर-कार्ड → तस्बिर आफैं (कुनै काम छैन); अडियो/भिडियो कार्ड → 'चलाउनुहोस्' (एपभित्रकै प्लेयर)। केही पनि आफैं चल्दैन — तपाईंको थिचाइबाट मात्र, त्यही नै तपाईंको स्वीकृति हो।",
+      "विषयहरू: शीर्षक वा सारांशमा विषय-शब्द भएका कुरा मात्र देखिन्छन् (अक्षर-संवेदनशीलता बिना, नेपाली लिपिमा सुरक्षित); विषयको सूची खाली भए सबै देखिन्छ।",
+      "इमानदारी: 'केही स्रोतहरू खुल्न सकेनन्: …' कार्डले ठ्याक्कै कुन स्रोत बिग्रे भन्छ, बाँकी सबै चलिरहन्छ; सफा खाली फिड सामान्य अवस्था हो, त्रुटि होइन; पुराना कुरा (सबै स्रोत बिग्रे पनि बचत भएका देखाउँदा) असफलताको चिन्हसहित मात्र देखाइन्छ। फिड बढीमा १५ मिनेटमा एक पटक ताजा हुन्छ।",
+      "सेटिङ → फिड मा स्रोत (लिङ्कबाट थप्ने, एउटा क्षेत्र), विषय (शब्द-चिप्स), र समाचार स्रोतहरूको सम्पादक छन्।",
+      "कहिल्यै के गर्दैन: कुनै कुराको लेख आफैं लेख्दैन वा सारांश बनाउँदैन (कार्डमा स्रोतकै शीर्षक/सारांश, सफा गरेर), केही पनि आफैं चलाउँदैन, नछापिएको मिति अनुमान गर्दैन। (फिडको कुरा स्वतः अनुवाद गर्ने बटन बन्दैछ तर अहिले स्क्रिनमा छैन — कुरा अहिले आफ्नै भाषामा देखिन्छ।)"
+    ],
+    "images": [
+      "feed-cards.png"
+    ]
+  },
+  {
+    "id": "appliance",
+    "titleEn": "Appliance help & the manuals",
+    "titleNe": "उपकरण सहायता र पुस्तिकाहरू",
+    "paragraphsEn": [
+      "Show Me — camera help: take a photo of an appliance, remote, or screen, and Sahayak (using its cloud vision service) guides you step by step with circled, annotated steps. When it is not completely sure, it says so — “I'm not completely sure about this — please double-check yourself.”",
+      "By touch: the dock tile Show Me (camera icon) → Take a photo. By voice: “how do I use the washing machine” — Sahayak offers the camera flow.",
+      "Saved manuals: a successful answer is saved to your Manuals library (searchable, newest first, delete-with-confirmation), which reopens with no camera and no network. Honest errors exist for every failure (offline, unusable photo, timeout, not configured).",
+      "Bundled manuals — no camera, no AI, no internet: five built-in picture guides ship with the app, in English and Nepali, each with zoomable, annotated step cards that circle the exact button to press: iPhone basics, Phone calls, Text messages, Messenger, YouTube.",
+      "By touch: Settings → Manuals → tap a manual (also reachable from the Show Me flow's library).",
+      "What it will never do: pretend certainty about a photo it is unsure of (it hedges openly), or invent a control on a photo where it can't mark the spot (it says to follow the written steps or take a closer photo)."
+    ],
+    "paragraphsNe": [
+      "देखाउनुहोस् — क्यामेरा सहायता: उपकरण, रिमोट वा स्क्रिनको फोटो खिच्नुहोस्, र सहायकले (आफ्नो क्लाउड भिजन सेवाबाट) घेरा र चिन्ह लगाइएका चरणहरूले सिकाउँछ। पूरै ढुक्क नभए, त्यो पनि भन्छ — 'यस बारेमा म पूर्ण पक्का छैन — कृपया आफैं पनि जाँच्नुहोस्।'",
+      "हातले: डकको बटन 'देखाउनुहोस्' (क्यामेराको चिन्ह) → 'फोटो खिच्नुहोस्'। आवाजबाट: 'वाशिङ मेसिन कसरी चलाउने' — सहायकले क्यामेराको बाटो देखाउँछ।",
+      "बचत भएका पुस्तिका: सफल जवाफ तपाईंको पुस्तिका-पुस्तकालयमा बचत हुन्छ (खोज्न मिल्ने, नयाँ पहिला, पुष्टिसहित मेट्न मिल्ने), जुन क्यामेरा र नेटवर्कबिना फेरि खुल्छ। हरेक असफलताको इमानदार सन्देश छ (अफलाइन, नचल्ने फोटो, समय सकियो, सेटअप नभएको)।",
+      "साथमा आएका पुस्तिका — क्यामेरा छैन, AI छैन, इन्टरनेट छैन: एपसँगै पाँचवटा फोटो-गाइड छन्, अंग्रेजी र नेपाली दुवैमा, हरेकमा ठूलो बनाउन मिल्ने, चिन्ह लगाइएका चरण-कार्डहरू — जसले थिच्नुपर्ने बटन ठ्याक्कै घेरेर देखाउँछन्: आइफोन सुरुवात, फोन कल, पाठ सन्देश, मेसेन्जर, युट्युब।",
+      "हातले: सेटिङ → म्यानुअलहरू → पुस्तिका थिच्नुहोस् (देखाउनुहोस् बाटोको पुस्तकालयबाट पनि पुगिन्छ)।",
+      "कहिल्यै के गर्दैन: ढुक्क नभएको फोटोबारे पक्का भएको बहाना गर्दैन (खुलेर शङ्का भन्छ), वा फोटोमा ठाउँ छुट्याउन नसकेको बटन बनाएर देखाउँदैन (लेखिएका चरण पढ्न वा नजिकको फोटो खिच्न भन्छ)।"
+    ],
+    "images": [
+      "show-me-camera.png"
+    ]
+  },
+  {
+    "id": "alarms",
+    "titleEn": "Alarms & timers",
+    "titleNe": "अलार्म र टाइमर",
+    "paragraphsEn": [
+      "Sahayak's alarms and countdown timers — set mostly by voice, managed on Settings → Alarms & timers (list, per-alarm on/off toggle, delete; live per-second countdown with cancel; a hand-set alarm form).",
+      "Alarms: daily-repeating notifications at the chosen time, up to 20. Snooze arms a one-shot re-wake (default 10 minutes, 1–60 allowed) without touching the daily repeat. “Turn off the alarm” disables the most recently rung alarm and always says which time it was.",
+      "Timers: in-app countdowns up to 10 live, 1 second to 24 hours, compound durations understood. Completion rings a notification and — while the app is open — speaks “Timer finished.”",
+      "The honesty note (printed in Settings): “Alarms ring through this app's own notifications — iPhone doesn't let apps set the built-in Clock's alarms.” Alarms therefore appear in this app's list, not the Clock app's.",
+      "Permissions at the point of use: the very first alarm or timer asks for notification permission; if denied, nothing is stored and Sahayak says so. Everything is persisted encrypted and re-armed on every launch.",
+      "What it will never do: write into the iPhone's Clock app; ring an alarm that wasn't stored and armed (confirmation only after both happen); silently guess which alarm to turn off (the spoken confirmation names the time)."
+    ],
+    "paragraphsNe": [
+      "सहायकका अलार्म र गन्ती टाइमर — धेरैजसो आवाजबाट राखिन्छन्, सेटिङ → अलार्म र टाइमर मा हेरिन्छन् (सूची, हरेक अलार्मको खोल्ने/बन्द गर्ने स्विच, मेट्ने; सेकेन्ड-सेकेन्ड घट्ने टाइमर रद्दसहित; हातले अलार्म राख्ने फारम)।",
+      "अलार्म: रोजेको समयमा दिनहुँ बज्ने सूचनाहरू, बढीमा २०। स्नुजले एक पटकका लागि फेरि बजाउँछ (सुरुमा १० मिनेट, १–६० मानिन्छ) — दैनिक अलार्म यथावत्। 'अलार्म बन्द गर' ले भर्खरै बजेको अलार्म बन्द गर्छ र सधैं कुन बजेको भन्छ।",
+      "टाइमर: एपभित्रकै गन्ती, चलिरहेका बढीमा १०, १ सेकेन्डदेखि २४ घण्टा, जोडिएका समय बुझिन्छ। सकिँदा सूचना बज्छ र — एप खुला हुँदा — 'टाइमर सकियो।' पनि बोलिन्छ।",
+      "इमानदारीको टिप्पणी (सेटिङमा छापिएको): 'अलार्म यस एपकै सूचनाबाट बज्छ — आईफोनले एपहरूलाई आफ्नै Clock एपको अलार्म सेट गर्न दिँदैन।' त्यसैले अलार्म यस एपकै सूचीमा देखिन्छन्, Clock एपको होइन।",
+      "अनुमति प्रयोगकै ठाउँमा: सबैभन्दा पहिलो अलार्म वा टाइमरले सूचनाको अनुमति सोध्छ; अस्वीकार भए केही बचत हुँदैन र सहायकले स्पष्ट भन्छ। सबै कुरा सुरक्षित बचत हुन्छ र हरेक पटक एप खोल्दा फेरि सजाइन्छ।",
+      "कहिल्यै के गर्दैन: आईफोनको Clock एपमा लेख्दैन; बचत र सजावट दुवै सकिएपछि मात्र 'राखियो' भन्छ; कुन अलार्म बन्द गर्ने भनेर चुपचाप अनुमान गर्दैन (बोलेको पुष्टिमा समय भनिन्छ)।"
+    ],
+    "images": [
+      "alarms-timers.png"
+    ]
+  },
+  {
+    "id": "brains",
+    "titleEn": "Voice brains & providers",
+    "titleNe": "आवाजका दिमाग र प्रदायकहरू",
+    "paragraphsEn": [
+      "Two engines, one switch (Settings → Voice Engine):",
+      "• Gemini (cloud) — the default. Speech recognition and understanding run through Google's Gemini AI using the family's API key. Uses the internet. Setup: Settings → Gemini AI → paste the key once. That screen also holds the daily cost guard — a family-set daily call limit (default 200, adjustable 10–1000) so a technical mishap can never run up a bill; when the limit is reached Sahayak says so and keeps medicines, alarms and emergency commands working, with full answers resuming tomorrow. A model picker (Flash-Lite, Flash, Pro, custom) trades cost for capability.",
+      "• On-device (offline) — speech recognition (Whisper models) and the local brain run entirely on the phone. Works fully offline once its models are downloaded. Downloads happen on the hidden AI models screen — long-press the word “Settings” at the top of the Settings screen for 1.5 seconds to open it (deliberately hidden from one-tap reach: it's a family tool). There you pick the speech-recognition model, the assistant brain model, and watch or delete downloads with sizes shown.",
+      "• Cloud fallback (on-device stack only, off by default): “Ask Gemini when I can't answer” — an opt-in that escalates only the questions the local brain couldn't answer, and only when a Gemini key exists.",
+      "The brain's ladder, whichever engine: emergency phrases → medicine acknowledgements → yes/no answers → contact search → directions → alarms/timers → briefing → news → YouTube → time/date/weather/greeting pre-answers → calculator → the brain model → web search. The safety vocabulary never waits on any model, so emergencies work even while the brain is downloading.",
+      "Offline behaviour, honestly: on-device engine with models downloaded — everything works offline (news, feeds and YouTube searches still need internet to fetch, and Sahayak says so when they fail). Gemini engine with no internet — understanding falls back to the deterministic commands; if no brain exists at all, Sahayak says “my brain isn't set up — please ask a family member” rather than pretending it misunderstood you.",
+      "Web search & YouTube keys (family-facing): Settings → Web search holds the Google Custom Search credentials (both fields required; up to 50 searches a day; queries go to Google — said plainly on the screen). Settings → YouTube holds the optional YouTube Data API key that upgrades “play X on youtube” from opening a search to auto-playing the top result (free quota about 100 searches a day; your words are sent to YouTube to find the video — said plainly on the screen).",
+      "What it will never do: send voice to Gemini unless the family configured a key (and, on the on-device engine, not even then — only the opt-in cloud-fallback questions); exceed the family's daily Gemini budget; answer a weather question from a stale web snippet (weather is live data or the honest “unavailable” line)."
+    ],
+    "paragraphsNe": [
+      "दुईवटा इन्जिन, एउटै स्विच (सेटिङ → आवाज इन्जिन):",
+      "• जेमिनी (क्लाउड) — पूर्वनिर्धारित। बोली चिन्ने र बुझ्ने काम गुगलको जेमिनी AI बाट, परिवारको API कुञ्जी प्रयोग गरेर हुन्छ। इन्टरनेट चाहिन्छ। सेटअप: सेटिङ → जेमिनी AI → एक पटक कुञ्जी टाँस्नुहोस्। त्यही स्क्रिनमा दैनिक खर्चको जोगार छ — परिवारले तोकेको दैनिक कल-सीमा (सुरुमा २००, १०–१००० मिलाउन मिल्ने) ताकि प्राविधिक गडबडीले ठूलो बिल आउनै नपाओस्; सीमा पुग्दा सहायकले भन्छ र औषधि, अलार्म र आपतकालीन चलिरहन्छ — पूरा जवाफ भोलि फर्किन्छ। मोडेल रोज्ने सूची (फ्ल्यास-लाइट, फ्ल्यास, प्रो, आफ्नै) ले खर्च र क्षमता मिलाउँछ।",
+      "• यन्त्रमै (अफलाइन) — बोली चिन्ने (Whisper मोडेल) र स्थानीय दिमाग पूरै फोनभित्रै चल्छ। मोडेल डाउनलोड भइसकेपछि पूरै अफलाइन चल्छ। डाउनलोड लुकेको 'AI मोडेल' स्क्रिनबाट हुन्छ — सेटिङ स्क्रिनको माथि 'सेटिङ' शब्दलाई १.५ सेकेन्ड थिचिराख्नुहोस् (एक थिचाइमा नपुग्ने गरी जानीजानी लुकाइएको: यो परिवारको उपकरण हो)। त्यहाँ बोली चिन्ने मोडेल, सहायक दिमागको मोडेल, र साइजसहित डाउनलोड हेर्ने/मेट्ने सुविधा छन्।",
+      "• क्लाउड फलब्याक (यन्त्रमै इन्जिनमा मात्र, सुरुमा बन्द): 'मैले जवाफ दिन नसके जेमिनीलाई सोध्ने' — स्थानीय दिमागले नसकेका प्रश्न मात्र, र जेमिनी कुञ्जी भए मात्र पठाइन्छ।",
+      "दिमागको भर्‍याङ, जुनसुकै इन्जिनमा पनि: हरेक वाक्य तोकिएको क्रममा जाँचिन्छ — आपतकालीन वाक्य → औषधिको स्वीकार → हो/होइन जवाफ → सम्पर्क खोज → बाटो → अलार्म/टाइमर → ब्रीफिङ → समाचार → युट्युब → समय/मिति/मौसम/अभिवादनको तयार जवाफ → क्याल्कुलेटर → दिमागको मोडेल → वेब खोज। सुरक्षाका शब्दहरू कुनै मोडेल कुर्दैनन्, त्यसैले दिमाग डाउनलोड हुँदा पनि आपतकालीन चल्छ।",
+      "अफलाइन व्यवहार, इमानदारीपूर्वक: यन्त्रमै इन्जिन + मोडेल डाउनलोड भए — सबै अफलाइन चल्छ (समाचार, फिड र युट्युब खोजलाई इन्टरनेट चाहिन्छ, र नपुग्दा सहायकले भन्छ)। जेमिनी इन्जिनमा इन्टरनेट नभए — बुझाइ निर्धारित आदेशमा झर्छ; दिमाग नै छैन भने सहायकले 'मेरो दिमाग सेटअप भएको छैन — कृपया परिवारलाई भन्नुहोस्' भन्छ, नबुझेको बहाना गर्दैन।",
+      "वेब खोज र युट्युबका कुञ्जी (परिवारका लागि): सेटिङ → वेब खोज मा गुगल कस्टम खोजका प्रमाणहरू छन् (दुवै क्षेत्र चाहिन्छ; दिनमा बढीमा ५० खोज; प्रश्नहरू गुगलमा पठाइन्छ — स्क्रिनमा स्पष्ट लेखिएको छ)। सेटिङ → युट्युब मा वैकल्पिक YouTube Data API कुञ्जी छ, जसले 'युट्युबमा चलाऊ' लाई खोज खोल्नेबाट बढाएर उत्कृष्ट भिडियो आफैं चलाउने बनाउँछ (निःशुल्क कोटा दिनमा करिब १०० खोज; भिडियो खोज्न तपाईंले भनेको कुरा युट्युबमा पठाइन्छ — स्क्रिनमा स्पष्ट लेखिएको छ)।",
+      "कहिल्यै के गर्दैन: परिवारले कुञ्जी नराखेसम्म आवाज जेमिनीमा पठाउँदैन (र यन्त्रमै इन्जिनमा त झन् — खोलिएको क्लाउड फलब्याकका प्रश्न मात्र); परिवारको दैनिक जेमिनी बजेट नाघ्दैन; पुरानो वेब-टुक्रालाई तथ्यजस्तो गरेर मौसम भन्दैन (मौसम जीवित तथ्य वा इमानदार 'उपलब्ध छैन' मात्र)।"
+    ],
+    "images": []
+  },
+  {
+    "id": "privacy",
+    "titleEn": "Privacy & honesty",
+    "titleNe": "गोपनीयता र इमानदारी",
+    "paragraphsEn": [
+      "Stored on this phone, encrypted (Keychain, strongest iPhone protection): your family contacts and their photos, saved places, routine entries, medication schedule, adherence log, doctor's appointments, morning briefing text, alarms & timers, news sources, feed sources & topics, conversation history (last 200 exchanges), and the voice fingerprint (if enrolled). The clipboard is read only when you tap “Paste appointment message”.",
+      "Logged — and deliberately not logged: Sahayak's internal events carry counts and outcomes only. Headline text, search queries, medication names, transcripts, and titles never reach any log. Two family-facing windows exist on purpose: Settings → Assistant activity (the intent log — which commands were confirmed or corrected; clearable, exportable) and Settings → Tool requests (the last 200 weather/search/YouTube requests, kept encrypted — exportable). YouTube's spoken video titles are spoken-only: never carded, never logged.",
+      "Permissions are asked at the point of use with plain-language cards (contacts when you search, calendar when you switch on the mirror, location when you ask for weather or directions, microphone and notifications in the welcome wizard) — and every feature keeps working in a reduced, honest mode if you say no.",
+      "Honesty guarantees — Sahayak will never: fabricate news, weather, dates, or events (news is verbatim headlines; weather is live data hedged with its source or an open “can't check it yet”; dates outside the conversion table are reported unavailable); claim a call or message happened when it didn't (messages are never auto-sent; WhatsApp “calls” are honestly chats); claim certainty it doesn't have (appliance guidance hedges; uncertain commands become yes/no questions); or blame you when the real problem is a missing brain model or permission — it names the actual fix.",
+      "One honest caveat to know: the Privacy screen's paragraph (“Nothing is sent to the cloud for AI processing”) describes the on-device promise. With the default Gemini engine and a key configured, your spoken words do go to Google's Gemini — that's how that engine works, and the Gemini, Web search and YouTube settings screens say so plainly. Choose the On-device engine (with its models downloaded) for the strictly-offline guarantee."
+    ],
+    "paragraphsNe": [
+      "यो फोनमा, सुरक्षित (इन्क्रिप्टेड, किचेन — आईफोनको सबैभन्दा बलियो सुरक्षा) बचत हुने: तपाईंका परिवारका सम्पर्क र फोटा, बचत गरिएका ठाउँ, दिनचर्याका कुरा, औषधिको तालिका, खुराकको लग, डाक्टरका भेटघाट, बिहानको ब्रीफिङको पाठ, अलार्म र टाइमर, समाचारका स्रोत, फिडका स्रोत र विषय, कुराकानीको इतिहास (पछिल्ला २००), र आवाजको औंठाछाप (दर्ता गरेको भए)। क्लिपबोर्ड 'भेटघाटको सन्देश टाँस्नुहोस्' थिच्दा मात्र पढिन्छ।",
+      "लग गरिने — र जानीजानी नगरिने: सहायकका भित्री घटना-लगमा गन्ती र नतिजा मात्र हुन्छन्। शीर्षक, खोजका प्रश्न, औषधिका नाम, ट्रान्सक्रिप्ट र शीर्षकहरू कुनै लगमा पुग्दैनन्। दुईवटा परिवार-झ्याल जानीजानी खुला छन्: सेटिङ → सहायकको गतिविधि (आदेश-लग: कुन आदेश पुष्टि वा सच्याइयो — हटाउन र निर्यात गर्न मिल्ने) र सेटिङ → उपकरण अनुरोधहरू (पछिल्ला २०० मौसम/खोज/युट्युब अनुरोध, सुरक्षित बचत — निर्यात गर्न मिल्ने)। युट्युबका बोलिने भिडियो-नाम बोल्नका लागि मात्र हुन्: कार्डमा देखाइँदैन, लगमा लेखिँदैन।",
+      "अनुमति प्रयोगकै ठाउँमा, सोझो भाषाको कार्डपछि सोधिन्छ (खोज्दा सम्पर्क, मिरर खोल्दा क्यालेन्डर, मौसम वा बाटो सोध्दा स्थान, स्वागतमा माइक्रोफोन र सूचना) — र 'नाईं' भन्दा पनि हरेक सुविधा घटेको तर इमानदार रूपमा चलिरहन्छ।",
+      "इमानदारीका वाचा — सहायकले कहिल्यै: समाचार, मौसम, मिति वा कार्यक्रम बनाउँदैन (समाचार स्रोतकै शीर्षक; मौसम जीवित तथ्य, स्रोतसहित, वा खुला 'अहिले हेर्न सक्दिनँ'; तालिकाबाहिरको मिति उपलब्ध छैन भनिन्छ); नभएको कल वा सन्देश भयो भनी दाबी गर्दैन (सन्देश आफैं पठाइँदैन; ह्वाट्सएपका 'कल' इमानदार च्याट हुन्); नभएको ढुक्की देखाउँदैन (उपकरण-सहायताले शङ्का भन्छ; नढुक्क आदेश हो/होइन प्रश्न बन्छ); र साँचो समस्या दिमागको मोडेल वा अनुमति हुँदा तपाईंलाई दोष दिँदैन — असली उपाय बताउँछ।",
+      "एउटा इमानदार सावधानी: गोपनीयता स्क्रिनको अनुच्छेद ('AI प्रशोधनका लागि कुनै पनि कुरा क्लाउडमा पठाइँदैन') ले यन्त्रमै-इन्जिनको वाचा बोल्छ। पूर्वनिर्धारित जेमिनी इन्जिन र कुञ्जी राखिएको बेला तपाईंका बोली गुगलको जेमिनीमा जान्छ — त्यो इन्जिन यसरी नै चल्छ, र जेमिनी, वेब खोज र युट्युबका सेटिङ स्क्रिनहरूले स्पष्ट भन्छन्। पूरै अफलाइन ग्यारेन्टी चाहिए यन्त्रमै इन्जिन (मोडेल डाउनलोडसहित) रोज्नुहोस्।"
+    ],
+    "images": []
+  },
+  {
+    "id": "settings",
+    "titleEn": "Settings tour",
+    "titleNe": "सेटिङको भ्रमण",
+    "paragraphsEn": [
+      "Open Settings with the gear at the top-left of Home. In order:",
+      "• Appearance — pick a warm background theme: Cream (default), Sage, Sky, Lavender, Dusk. Changes every screen instantly; text and cards keep their contrast.",
+      "• Language & region — English or नेपाली; the whole interface and Sahayak's spoken replies follow it.",
+      "• Calling — the default calling app for call buttons: FaceTime / Phone / Messenger / WhatsApp (Messenger needs a per-person username).",
+      "• Places and maps — saved places (home + important places, with a default-home radio), which map app voice navigation opens (Auto / Google Maps / Apple Maps / inside this app), add/edit/delete places.",
+      "• Gemini AI — paste the Gemini API key; daily call limit with a live usage bar (10–1000, default 200); AI model picker (Flash-Lite default, Flash, Pro, custom). Status dot: Connected / Setup needed.",
+      "• Voice Engine — Gemini (cloud) vs On-device (offline), instant switch without restart; plus the “Ask Gemini when I can't answer” fallback toggle under On-device.",
+      "• Voice activation — the wake-word switch (listen for “ये कान्छी”), an honest status card (Active / Off / Setup needed / Restart to activate) with a checklist of what's missing, and the battery note.",
+      "• Voices — pick the voice for Sahayak's replies: Google voice (Nepali) plus its 17 other speakers, Chitwan voice; Listen auditions each without switching; confirm before applying; English voice shown as status; a test button speaks a sample greeting.",
+      "• Voice personalization — Reduce background noise (experimental, off by default, on-device), Help with my accent (on by default, on-device), and the Voice fingerprint (enroll with 3 short recordings, stays on-device, removable).",
+      "• Web search — Google API key + search-engine ID for the on-device engine's web search; 50/day quota and the privacy note stated on the screen.",
+      "• YouTube — optional YouTube Data API key (upgrades voice “play X” to auto-play); quota and privacy notes on the screen.",
+      "• Feeds — feed sources (add-by-URL with “default” tags), topic chips, and the News sources editor.",
+      "• Quick apps — pick up to 8 favourite apps for the Home quick-access row; installed apps are detected honestly (apps that aren't on the phone are labelled).",
+      "• Family and friends — the curated contact list (up to 12) with the 5-step add/edit wizard: search → relationship (+ emergency flag) → photo → Messenger username → nickname + home address.",
+      "• Medication schedule — medicine names and times (duplicates refused), plus festival advance-reminder days (0–7, default 2).",
+      "• Manuals — the five bundled camera-free manuals (iPhone, Phone, Messages, Messenger, YouTube) in English + Nepali with zoomable annotated steps.",
+      "• Calendar — the three bridge switches: Show in Calendar app (mirror out), Mirror routine changes both ways (Sahayak calendar, off by default), Import from Calendar & Reminders (with notify-minutes-before stepper 0–30).",
+      "• Alarms & timers — every voice-set alarm (toggle/delete) and live countdown timer (cancel), a hand-set alarm form, and the honesty note about the Clock app.",
+      "• Privacy — the privacy statement and the app version number.",
+      "• Assistant activity — the intent log: confirmed/corrected commands; clear or export.",
+      "• Tool requests — the last 200 weather/search/YouTube requests with outcomes; export. (Encrypted on-device.)",
+      "• AI models (hidden) — long-press the word “Settings” at the top for 1.5 seconds: speech-recognition model picker, assistant brain model picker, and the downloads list with sizes, cancel and delete."
+    ],
+    "paragraphsNe": [
+      "होमको माथि बायाँको गियरबाट सेटिङ खोल्नुहोस्। क्रमअनुसार:",
+      "• रूप — तातो पृष्ठभूमिका विषयवस्तु: क्रिम (पूर्वनिर्धारित), सेज, स्काई, ल्याभेन्डर, डस्क। हरेक स्क्रिन तुरुन्तै बदलिन्छ; पाठ र कार्डको भिन्नता जोगिन्छ।",
+      "• भाषा र क्षेत्र — अंग्रेजी वा नेपाली; पूरै स्क्रिन र सहायकका बोली यसैलाई पछ्याउँछन्।",
+      "• कलिङ — कल-बटनहरूको पूर्वनिर्धारित एप: फेसटाइम / फोन / मेसेन्जर / ह्वाट्सएप (मेसेन्जरलाई प्रति-व्यक्ति नाम चाहिन्छ)।",
+      "• ठाउँ र नक्सा — बचत गरिएका ठाउँ (घर + महत्त्वपूर्ण ठाउँ, पूर्वनिर्धारित-घरको चिन्हसहित), आवाजको बाटो कुन नक्सा एपमा खोल्ने (स्वतः / गुगल नक्सा / एप्पल नक्सा / यही एपभित्र), ठाउँ थप्ने/सम्पादन/मेट्ने।",
+      "• जेमिनी AI — जेमिनीको API कुञ्जी टाँस्ने; प्रत्यक्ष प्रयोग-पट्टीसहितको दैनिक कल-सीमा (१०–१०००, सुरुमा २००); AI मोडेल रोज्ने सूची (पूर्वनिर्धारित फ्ल्यास-लाइट, फ्ल्यास, प्रो, आफ्नै)। अवस्थाको थोप्लो: जोडिएको / सेटअप चाहिन्छ।",
+      "• आवाज इन्जिन — जेमिनी (क्लाउड) वा यन्त्रमै (अफलाइन) — तुरुन्तै बदलिन्छ, एप फेरि खोल्नु पर्दैन; साथै यन्त्रमै मुनि 'मैले जवाफ दिन नसके जेमिनीलाई सोध्ने' स्विच।",
+      "• आवाज सक्रियता — वेक वर्डको स्विच ('ये कान्छी' सुन्ने), इमानदार अवस्था-कार्ड (सक्रिय / बन्द / सेटअप चाहिन्छ / पुनः सुरु गर्दा सक्रिय हुन्छ) के-के छुटेको छ भन्ने सूचीसहित, र ब्याट्रीको टिप्पणी।",
+      "• आवाजहरू — सहायकका जवाफको आवाज रोज्ने: गुगल आवाज (नेपाली) र त्यसका अरू १७ वक्ता, चितवन आवाज; 'सुन्नुहोस्' ले नबदली सुनाउँछ; प्रयोगअघि पुष्टि; अंग्रेजी आवाज अवस्थाको रूपमा; परीक्षण बटनले नमूना अभिवादन बोल्छ।",
+      "• आवाज निजीकरण — पछाडिको आवाज कम गर्ने (प्रयोगात्मक, सुरुमा बन्द, यन्त्रमै), मेरो उच्चारणमा सहयोग (सुरुमा खुला, यन्त्रमै), र आवाजको औंठाछाप (३ छोटा रेकर्डिङले दर्ता, यन्त्रमै रहन्छ, हटाउन मिल्छ)।",
+      "• वेब खोज — यन्त्रमै इन्जिनको वेब खोजका लागि गुगल API कुञ्जी + खोज इन्जिन ID; दिनमा ५० को कोटा र गोपनीयताको कुरा स्क्रिनमै लेखिएको छ।",
+      "• युट्युब — वैकल्पिक YouTube Data API कुञ्जी (आवाजको 'चलाऊ' लाई आफैं चलाउने बनाउँछ); कोटा र गोपनीयताको कुरा स्क्रिनमै छन्।",
+      "• फिड — फिडका स्रोत (लिङ्कबाट थप्ने, 'सुरुको' चिन्हसहित), विषय-चिप्स, र समाचार स्रोतहरूको सम्पादक।",
+      "• द्रुत एपहरू — होमको द्रुत-पङ्क्तिका लागि बढीमा ८ मनपर्ने एप; स्थापित एपहरू इमानदारीपूर्वक चिनिन्छन् (नभएका छुट्टै चिन्ह लाग्छ)।",
+      "• परिवार र साथीहरू — सम्पर्क सूची (बढीमा १२) र ५ चरणको थप्ने/सम्पादन: खोज → नाता (+ आपतकालीन चिन्ह) → फोटो → म्यासेन्जर नाम → उपनाम + घरको ठेगाना।",
+      "• औषधि तालिका — औषधिका नाम र समय (दोहोरो अस्वीकार), साथै चाडपर्व कति दिन अगाडि सम्झाउने (०–७, सुरुमा २)।",
+      "• म्यानुअलहरू — साथमा आएका पाँच पुस्तिका (आइफोन, फोन, म्यासेज, मेसेन्जर, युट्युब) अंग्रेजी + नेपाली, ठूलो बनाउन मिल्ने चिन्हित चरणसहित।",
+      "• पात्रो — तीनवटा पुल-स्विच: क्यालेन्डर एपमा देखाउनुहोस् (बाहिर मिरर), दिनचर्याका परिवर्तन दुवैतिर मिरर गर्नुहोस् (Sahayak क्यालेन्डर, सुरुमा बन्द), पात्रो र सम्झना एपबाट ल्याउनुहोस् (०–३० कति मिनेट अघि सूचना दिनेसहित)।",
+      "• अलार्म र टाइमर — हरेक आवाजबाट राखिएको अलार्म (स्विच/मेट्ने) र चलिरहेको टाइमर (रद्द), हातले अलार्म राख्ने फारम, र Clock एपबारेको इमानदारीको टिप्पणी।",
+      "• गोपनीयता — गोपनीयताको विवरण र एपको संस्करण नम्बर।",
+      "• सहायकको गतिविधि — आदेश-लग: पुष्टि/सच्याइएका आदेश; हटाउने वा निर्यात।",
+      "• उपकरण अनुरोधहरू — पछिल्ला २०० मौसम/खोज/युट्युब अनुरोध नतिजासहित; निर्यात। (यन्त्रमै, सुरक्षित।)",
+      "• AI मोडेल (लुकेको) — माथिको 'सेटिङ' शब्द १.५ सेकेन्ड थिचिराख्नुहोस्: बोली चिन्ने मोडेल रोज्ने, सहायक दिमागको मोडेल रोज्ने, र साइज, रद्द र मेटाइसहितको डाउनलोड-सूची।"
+    ],
+    "images": []
+  },
+  {
+    "id": "troubleshooting",
+    "titleEn": "Troubleshooting",
+    "titleNe": "समस्या समाधान",
+    "paragraphsEn": [
+      "• “Sorry, I didn't understand” often — speak a little slower and clearer, closer to the phone. Uneven spacing between words is fine — the app already handles it. If it keeps happening, tap the Talk button instead of the wake phrase. If Sahayak says its brain model is downloading or not set up, that's the real cause — see the next point.",
+      "• “My brain isn't set up” / brain still downloading — a family member should open Settings → Voice Engine: either paste a Gemini key (Settings → Gemini AI) or pick On-device and long-press the “Settings” title to open AI models and download the brain model (one-time; sizes shown).",
+      "• Voice stuck listening or misbehaving — tap the Talk button once (cancels the turn), or press and hold it for 2 seconds — the white ring fills and Sahayak says “Voice reset. I'm ready.” A red button with “Try again” means the pipeline failed: read the line under the button — it names the actual problem.",
+      "• Microphone permission denied — the button shows “Microphone access is turned off” with an Open Settings button; allow the microphone there and come back. (Also welcome wizard step 2.)",
+      "• Nothing speaks / Nepali replies are silent — Settings → Voices: the list shows Installed / Ready (installs on first use) / Missing. Tap Listen to audition a voice, then Use this voice (confirm). A red “Missing” line means the voice files aren't in this build — a family member must rebuild the app with them; until then replies are always written on screen.",
+      "• Calendar events don't appear — Settings → Calendar → turn on Import from Calendar & Reminders and grant access when asked (the status line says Denied / Partial / On). Also check Reminders → Upcoming events (only shows while the import is on).",
+      "• Alarms or timers don't ring — notifications must be allowed (welcome wizard step 2, or iOS Settings → the app → Notifications). Remember the honest rule: these alarms ring through the app's notifications, not the iPhone Clock app — they're listed in Settings → Alarms & timers. The first alarm/timer asks permission; if it was refused, setting another one tells you.",
+      "• Wake phrase doesn't wake Sahayak — Settings → Voice activation: check the status card. “Listening is on” + Active means it should work — say “ये कान्छी” (yeah kanchhi) clearly, pause briefly, then the command. “Restart to activate” means fully close and reopen the app once. “Setup needed” lists exactly what a family member must fix. The Talk button always works regardless.",
+      "• Contacts search shows nobody or asks again — contacts permission was denied: the search card shows Open Settings — allow it and return. Family tiles and manual entry keep working without it. WhatsApp people missing? WhatsApp → Settings → Privacy → Sync contacts.",
+      "• A voice call didn't happen — Sahayak only dials after your “yes” (or your tap). If it said “I couldn't find X in your family contacts”, add the person in Settings → Family and friends. If it said calling stays off, no brain is available — set up Gemini or the on-device brain.",
+      "• Directions say “no home” — Settings → Places and maps → add a place and mark one Default home; or add a home address to a family contact. “I couldn't find a place by that name” means the spoken name matched nothing saved.",
+      "• Gemini daily limit reached — Sahayak says so and keeps basic commands working (medicines, alarms, emergency). Full answers resume tomorrow, or a family member raises the limit in Settings → Gemini AI → Daily usage limit.",
+      "• The app seems to have forgotten everything — nothing is stored unencrypted; after deleting and reinstalling the app, encrypted data returns only from an iCloud backup that included it. Re-enter medicines and contacts via Settings if they're missing."
+    ],
+    "paragraphsNe": [
+      "• 'मैले बुझिनँ' बारम्बार आउँछ — अलि ढिलो र स्पष्ट बोल्नुहोस्, फोन नजिक राखेर। शब्दबीचको असमान खाली ठाउँ ठीकै हो — एपले आफैं मिलाउँछ। निरन्तर भए वेक वर्डको सट्टा बोल्ने बटन थिच्नुहोस्। सहायकले दिमागको मोडेल डाउनलोड हुँदैछ वा सेटअप भएको छैन भने त्यही असली कारण हो — तलको बुँदा हेर्नुहोस्।",
+      "• 'दिमाग सेटअप भएको छैन' / डाउनलोड जारी — परिवारले सेटिङ → आवाज इन्जिन खोलून्: या त जेमिनीको कुञ्जी टाँस्नुहोस् (सेटिङ → जेमिनी AI), या यन्त्रमै रोजेर 'सेटिङ' शीर्षकमा लामो थिचेर AI मोडेल खोल्नुहोस् र दिमागको मोडेल डाउनलोड गर्नुहोस् (एक पटकका लागि; साइज देखाइन्छ)।",
+      "• आवाज अड्कियो वा बहुलायो — बोल्ने बटन एक पटक थिच्नुहोस् (पालो रद्द हुन्छ), वा २ सेकेन्ड थिचिराख्नुहोस् — सेतो घेरा भर्छ र सहायक 'आवाज रिसेट भयो। म तयार छु।' भन्छ। रातो बटन र 'फेरि प्रयास गर्नुहोस्' भने पाइपलाइन असफल भयो: बटनमुनिको पङ्क्ति पढ्नुहोस् — वास्तविक समस्या त्यहाँ लेखिएको हुन्छ।",
+      "• माइक्रोफोनको अनुमति अस्वीकार भयो — बटनमा 'माइक बन्द छ' र 'सेटिङ खोल्नुहोस्' बटन देखिन्छ; त्यहाँ गएर माइक्रोफोन खोल्नुहोस् र फर्कनुहोस्। (स्वागतको चरण २ पनि हेर्नुहोस्।)",
+      "• केही बोल्दैन / नेपाली जवाफ सुनिँदैन — सेटिङ → आवाजहरू: सूचीमा स्थापित / तयार (पहिलो प्रयोगमा स्थापना) / छैन देखिन्छ। 'सुन्नुहोस्' थिचेर आवाज सुन्नुहोस्, अनि 'यो आवाज प्रयोग गर्नुहोस्' (पुष्टि गर्नुहोस्)। रातो 'छैन' पङ्क्ति भने आवाजका फाइल यो संस्करणमा छैनन् — परिवारले फाइलसहित एप फेरि बनाउनुपर्छ; तबसम्म जवाफ सधैं स्क्रिनमा लेखिन्छ।",
+      "• क्यालेन्डरका कुरा देखिँदैनन् — सेटिङ → पात्रो → 'पात्रो र सम्झना एपबाट ल्याउनुहोस्' खोल्नुहोस् र माग्दा पहुँच दिनुहोस् (अवस्थाको पङ्क्तिले अस्वीकार / आंशिक / खुला भन्छ)। सम्झना → आउँदै गरेका कार्यक्रम पनि हेर्नुहोस् (ल्याउने स्विच खुला हुँदा मात्र देखिन्छ)।",
+      "• अलार्म/टाइमर बज्दैन — सूचना खुला हुनुपर्छ (स्वागतको चरण २, वा iOS सेटिङ → एप → सूचनाहरू)। इमानदार नियम सम्झनुहोस्: यी अलार्म एपकै सूचनाबाट बज्छन्, आईफोनको Clock एपको होइन — सूची सेटिङ → अलार्म र टाइमर मा छ। पहिलो अलार्म/टाइमरले अनुमति सोध्छ; अस्वीकार गरेको भए अर्को राख्दा भनिन्छ।",
+      "• वेक वर्डले ब्युँझाउँदैन — सेटिङ → आवाज सक्रियता: अवस्था-कार्ड हेर्नुहोस्। 'सुन्ने सुविधा सक्रिय छ' + सक्रिय भए काम गर्नुपर्छ — 'ये कान्छी' (yeah kanchhi) स्पष्ट भन्नुहोस्, छोटो रोकिनुहोस्, अनि आदेश। 'पुनः सुरु गर्दा सक्रिय हुन्छ' भने एप पूरै बन्द गरेर फेरि खोल्नुहोस्। 'सेटअप चाहिन्छ' ले परिवारले के मिलाउनुपर्छ ठ्याक्कै देखाउँछ। बोल्ने बटन जसरी पनि चल्छ।",
+      "• सम्पर्क खोज्दा कोही देखिँदैन / फेरि सोध्छ — सम्पर्कको अनुमति अस्वीकार भएको छ: खोज-कार्डमा 'सेटिङ्स खोल्नुहोस्' देखिन्छ — खोलेर अनुमति दिनुहोस् र फर्कनुहोस्। परिवारका टायल र आफैं लेख्ने बाटो बिना पनि चल्छ। ह्वाट्सएपका मान्छे देखिएनन्? ह्वाट्सएप → सेटिङ → गोपनीयता → सम्पर्क सिंक खोल्नुहोस्।",
+      "• आवाजबाट फोन भएन — सहायक तपाईंको 'हो' (वा थिचाइ) पछि मात्र फोन गर्छ। 'पारिवारिक सम्पर्कमा भेटिनँ' भने सेटिङ → परिवार र साथीहरू मा थप्नुहोस्। 'फोन र सन्देश बन्द छ' भने दिमाग उपलब्ध छैन — जेमिनी वा यन्त्रमै दिमाग सेटअप गर्नुहोस्।",
+      "• बाटोले 'घर छैन' भन्छ — सेटिङ → ठाउँ र नक्सा → ठाउँ थपेर एउटालाई पूर्वनिर्धारित घर बनाउनुहोस्; वा परिवारको सम्पर्कमा घरको ठेगाना राख्नुहोस्। 'त्यो नामको ठाउँ भेटिएन' भने बोलेको नाम कुनै बचत ठाउँसँग मिलेन।",
+      "• जेमिनीको दैनिक सीमा पुग्यो — सहायकले भन्छ र आधारभूत आदेश चलिरहन्छ (औषधि, अलार्म, आपतकालीन)। पूरा जवाफ भोलि फर्किन्छ, वा परिवारले सेटिङ → जेमिनी AI → दैनिक प्रयोग सीमा बढाउन सक्छन्।",
+      "• एपले सबै बिर्सिएजस्तो लाग्छ — कुनै कुरा सादा रूपमा बचत हुँदैन; एप मेटेर फेरि राख्दा सुरक्षित कुरा आईक्लाउड ब्याकअपले मात्र फर्काउँछ। नभेटिए औषधि र सम्पर्क सेटिङबाट फेरि लेख्नुहोस्।"
+    ],
+    "images": []
+  },
+  {
+    "id": "glossary",
+    "titleEn": "Glossary",
+    "titleNe": "शब्दावली",
+    "paragraphsEn": [
+      "• Sahayak (सहायक) — the assistant's name, Nepali for “helper”. The app itself is titled Elderly Assistant.",
+      "• Wake word / wake phrase — the phrase that wakes Sahayak without any button: “ये कान्छी” (yeah kanchhi).",
+      "• STT (speech-to-text) — turning your spoken words into written text, Sahayak's “ears”. Runs with Whisper models on the phone, or Gemini in the cloud.",
+      "• TTS (text-to-speech) — turning written replies into spoken words, Sahayak's “voice”. On-device Piper voices, falling back to the iPhone's own voice.",
+      "• Local brain / on-device model — the thinking model that runs inside the phone, with no internet.",
+      "• Cloud fallback — an opt-in that sends only the questions the local brain couldn't answer to Gemini.",
+      "• Gemini — Google's cloud AI, used for understanding and open questions when the family adds an API key.",
+      "• BS calendar (Bikram Sambat) — the Nepali calendar (currently in the 2080s), shown with tithi and festivals, converted offline.",
+      "• Tithi — the lunar day of the Nepali calendar, shown every day.",
+      "• RSS / Atom / feed — standard ways websites publish updates; the News reader and the Feeds screen read these.",
+      "• Enclosure — the attached file in a feed item — the picture, audio or video that decides an item's kind.",
+      "• Sahayak calendar — the dedicated calendar inside the iPhone Calendar app that holds your mirrored routine when two-way sync is on.",
+      "• Lane / speak queue — Sahayak's internal queuing of speech by importance: emergency and safety lines always jump ahead; ordinary notifications never interrupt what's being said.",
+      "• VAD (voice activity detection) — the mechanism that notices when you have finished speaking (about one second of quiet).",
+      "• Confirmation challenge — the yes/no question Sahayak asks before recording a medicine dose or dialing a call.",
+      "• Intent log / Tool log — the family-facing windows in Settings showing what commands were understood and what weather/search/YouTube requests were made.",
+      "• API key — a family-managed credential that connects Sahayak to Gemini, web search, or YouTube.",
+      "• App language — the language setting (English/Nepali) that drives the whole interface and spoken replies."
+    ],
+    "paragraphsNe": [
+      "• सहायक (Sahayak) — सहायकको नाम; नेपालीमा 'सहायक'। एपको नाम भने Elderly Assistant हो।",
+      "• वेक वर्ड / वेक वाक्य — बिनाबटन सहायकलाई ब्युँझाउने वाक्य: 'ये कान्छी' (yeah kanchhi)।",
+      "• STT (बोली-देखि-पाठ) — तपाईंका बोलेका शब्दलाई लेखिएको पाठमा बदल्ने, सहायकको 'कान'। फोनमा Whisper मोडेलले, वा क्लाउडमा जेमिनीले चल्छ।",
+      "• TTS (पाठ-देखि-बोली) — लेखिएको जवाफलाई बोलीमा बदल्ने, सहायकको 'आवाज'। यन्त्रमै भएका Piper आवाजहरू, आईफोनकै आवाजको सहारासहित।",
+      "• स्थानीय दिमाग / यन्त्रमै मोडेल — फोनभित्रै, इन्टरनेटबिना चल्ने सोच्ने मोडेल।",
+      "• क्लाउड फलब्याक — स्थानीय दिमागले नसकेका प्रश्न मात्र जेमिनीमा पठाउने वैकल्पिक सुविधा।",
+      "• जेमिनी — गुगलको क्लाउड AI; परिवारले API कुञ्जी राख्दा बुझाइ र खुला प्रश्नका लागि प्रयोग हुन्छ।",
+      "• BS पात्रो (विक्रम संवत्) — नेपाली पात्रो (अहिले २०८० को दशक), तिथि र चाडपर्वसहित, अफलाइन रूपान्तरित।",
+      "• तिथि — नेपाली पात्रोको चान्द्र दिन, हरेक दिन देखाइन्छ।",
+      "• RSS / Atom / फिड — वेबसाइटले नयाँ कुरा प्रकाशित गर्ने मानक तरिका; समाचार र फिड स्क्रिनले यिनै पढ्छन्।",
+      "• इन्क्लोजर — फिडको कुरासँग जोडिएको फाइल — तस्बिर, अडियो वा भिडियो, जसले कुराको किसिम तोक्छ।",
+      "• Sahayak क्यालेन्डर — दुवैतिरको मिरर खोल्दा तपाईंको दिनचर्या रहने, आईफोनको क्यालेन्डर एपभित्रको छुट्टै क्यालेन्डर।",
+      "• लेन / बोली-लाइन — सहायकको भित्री बोली-क्रम महत्त्वअनुसार: आपतकालीन र सुरक्षाका पङ्क्ति सधैं अघि; सामान्य सूचनाले बोल्दै गरेको कुरा कहिल्यै रोक्दैन।",
+      "• VAD (आवाज-गतिविधि पत्ता) — तपाईं बोलिसक्नुभयो (करिब एक सेकेन्डको शान्ति) भन्ने थाहा पाउने तरिका।",
+      "• पुष्टिको प्रश्न — औषधिको खुराक लेख्नु वा फोन गर्नुअघि सहायकले सोध्ने हो/होइन प्रश्न।",
+      "• आदेश-लग / उपकरण-लग — के-के आदेश बुझियो र कस्ता मौसम/खोज/युट्युब अनुरोध भए भन्ने परिवार-झ्याल; निर्यात गर्न मिल्ने।",
+      "• API कुञ्जी — सहायकलाई जेमिनी, वेब खोज वा युट्युबसँग जोड्ने, परिवारले सम्हाल्ने प्रमाणपत्र।",
+      "• एपको भाषा — पूरै स्क्रिन र बोली चलाउने भाषा-सेटिङ (अंग्रेजी/नेपाली)।"
+    ],
+    "images": []
+  }
+]

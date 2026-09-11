@@ -16,6 +16,15 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            // [UNIT-TEST-HOST] The app's automatic boot never runs under
+            // XCTest: the post-first-frame composition is main-thread
+            // work that would overlap the first test's execution (P0-1
+            // defers it exactly one turn past launch) and trip the test
+            // watchdog — reproducible host kill on iOS 18.3 simulators.
+            // Tests construct their own coordinators and call `start()`
+            // explicitly when they need boot behavior; the host app
+            // boots nothing.
+            guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
             if coordinator.onboardingState.hasSeenOnboarding {
                 coordinator.start()
             }
@@ -34,6 +43,14 @@ struct ContentView: View {
                 coordinator.pendingMessageDraft = nil
             }
         }
+        // [TIMER-ALARM] (2026-09-10) The full-screen ringing alarm —
+        // mounted at the root so it covers every screen (it is a
+        // fullScreenCover, which also sits above the app's sheets).
+        // Transparent no-op while the engine is idle.
+        .overlay(
+            TimerAlarmOverlay(engine: coordinator.timerAlarmEngine,
+                              onStop: coordinator.stopTimerAlarm)
+        )
         // .plugin intent: a plugin-provided view (e.g. the appliance
         // photo + overlay), presented app-wide.
         .sheet(item: $coordinator.pendingPluginPresentation) { presentation in
@@ -47,5 +64,11 @@ struct ContentView: View {
         .sheet(item: $coordinator.pendingNavigationPresentation) { presentation in
             InAppNavigationView(session: presentation.session)
         }
+        // [STARTUP-PERF] The progressive-boot spinner (a small capsule
+        // listing what is loading) now lives INSIDE HomeView, anchored
+        // above the speak button ([SPINNER-PLACEMENT]) — hosting it as a
+        // top overlay here put the capsule over the top bar's calendar
+        // date line. Boot only starts once onboarding finishes, so the
+        // wizard never showed it anyway.
     }
 }

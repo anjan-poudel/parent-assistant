@@ -12,6 +12,17 @@ protocol Speaker: AnyObject {
     func cancel()
 }
 
+/// [LOUD-TTS] Response-playback loudness seam: switches the shared audio
+/// session to `.voicePrompt` mode while the assistant speaks and restores
+/// the capture preset afterwards (see `AudioSessionManager`). A static
+/// seam — the same pattern as `NewsSourceEditorSeam` — installed by
+/// `AppCoordinator.start()`; the no-op default keeps speaker unit tests
+/// audio-free.
+enum ResponsePlaybackModeSeam {
+    static var begin: () -> Void = {}
+    static var end: () -> Void = {}
+}
+
 // MARK: - AVSpeechSynthesizer (default)
 
 final class SystemSpeechSpeaker: NSObject, Speaker {
@@ -37,6 +48,11 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
         utterance.volume = 1.0
         utterance.pitchMultiplier = 1.0
 
+        // [LOUD-TTS] Spoken responses get the loudness-optimized session
+        // mode for the duration of the utterance (restored by the
+        // delegate's finish/cancel below and by cancel()).
+        ResponsePlaybackModeSeam.begin()
+
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             currentContinuation = continuation
             synthesizer.speak(utterance)
@@ -48,6 +64,7 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
+        ResponsePlaybackModeSeam.end()
         if let cont = currentContinuation {
             currentContinuation = nil
             cont.resume()
@@ -84,6 +101,7 @@ final class SystemSpeechSpeaker: NSObject, Speaker {
 extension SystemSpeechSpeaker: AVSpeechSynthesizerDelegate {
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                            didFinish utterance: AVSpeechUtterance) {
+        ResponsePlaybackModeSeam.end()
         if let cont = currentContinuation {
             currentContinuation = nil
             cont.resume()
@@ -91,6 +109,7 @@ extension SystemSpeechSpeaker: AVSpeechSynthesizerDelegate {
     }
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer,
                            didCancel utterance: AVSpeechUtterance) {
+        ResponsePlaybackModeSeam.end()
         if let cont = currentContinuation {
             currentContinuation = nil
             cont.resume()
@@ -132,6 +151,13 @@ protocol TTSEngine {
 
     /// Stops any in-flight synthesis as soon as possible.
     func cancelSynthesis()
+
+    /// Warm-start seam: preloads the engine instance for
+    /// `voiceDirectory` (model.onnx load + espeak-ng data) so the first
+    /// synthesis skips engine construction. Throws exactly like the
+    /// construction inside `synthesize` would. The default is a no-op so
+    /// fakes and the non-sherpa stub build inherit it without change.
+    func warm(voiceDirectory: URL) throws
 }
 
 extension TTSEngine {
@@ -139,6 +165,8 @@ extension TTSEngine {
     func synthesize(_ text: String, voiceDirectory: URL, speed: Float) throws -> URL {
         try synthesize(text, voiceDirectory: voiceDirectory, speed: speed, speakerID: 0)
     }
+
+    func warm(voiceDirectory: URL) throws {}
 }
 
 enum TTSEngineError: Error {
@@ -158,6 +186,10 @@ import SherpaOnnx
 final class SherpaTTSEngine: TTSEngine {
     private var engines: [URL: SherpaOnnxOfflineTtsWrapper] = [:]
     private let engineQueue = DispatchQueue(label: "tts.sherpa.engine", qos: .userInitiated)
+    /// [TURN-TIMING] Fired once per NEW engine creation with the load ms
+    /// (cached engines do not fire) — the `tts_voice_loaded` stage
+    /// boundary, wired by PiperVoiceSpeaker to the turn tracer.
+    var onEngineCreated: ((_ loadMs: Int) -> Void)?
 
     func synthesize(_ text: String, voiceDirectory: URL, speed: Float,
                     speakerID: Int = 0) throws -> URL {
@@ -180,6 +212,14 @@ final class SherpaTTSEngine: TTSEngine {
         // PiperVoiceSpeaker.cancel). Nothing to do here.
     }
 
+    func warm(voiceDirectory: URL) throws {
+        // Same serialization as synthesis: engine construction is not
+        // re-entrant, and the warm must not race a live synthesize.
+        try engineQueue.sync {
+            _ = try engine(for: voiceDirectory)
+        }
+    }
+
     private func engine(for dir: URL) throws -> SherpaOnnxOfflineTtsWrapper {
         if let cached = engines[dir] { return cached }
         let fm = FileManager.default
@@ -197,10 +237,52 @@ final class SherpaTTSEngine: TTSEngine {
         )
         let modelCfg = sherpaOnnxOfflineTtsModelConfig(vits: vits, numThreads: 2, debug: 0)
         var cfg = sherpaOnnxOfflineTtsConfig(model: modelCfg)
-        let tts = SherpaOnnxOfflineTtsWrapper(config: &cfg)
-        guard tts.sampleRate > 0 else {
-            throw TTSEngineError.engineInitFailed(dir)
+        // [VAD-REGRESSION] (2026-09-10): the sherpa VITS session creation
+        // SEGFAULTS onnxruntime when it runs OFF-MAIN on the x86_64
+        // simulator — the same crash class as the KWS engine's documented
+        // off-main segfault (crash 204647, EXC_BAD_ACCESS in
+        // ConstantFolding). Seven crash reports from one morning
+        // (2026-09-10 02:21–06:14) all fault on `tts.sherpa.engine` inside
+        // `onnxruntime::InferenceSession::Initialize` /
+        // `DataTypeImpl::GetDataType` / `OpSchema` teardown; the
+        // [WARM-START] boot warms made this construction run at every
+        // launch, so every launch — and every first reply — became a
+        // crash lottery on the sim, and each crash relaunched the app
+        // into a fresh boot (the reported endless spinner + re-read
+        // briefing + never-completing voice cycles). The project's
+        // proven workaround for this class is session creation ON MAIN
+        // (that is how the KWS engine has run since crash 204647).
+        // Synthesis stays on this queue; only the one-time construction
+        // hops — and only on the simulator (the crash class is x86_64-
+        // sim-specific; device builds construct exactly as before). The
+        // isMainThread guard keeps a hypothetical main-queue caller from
+        // deadlocking on main.sync.
+        // [TURN-TIMING] Engine load is the expensive one-time part of the
+        // first synthesis — measure it for the `tts_voice_loaded` stage.
+        func construct() -> Result<SherpaOnnxOfflineTtsWrapper, Error> {
+            Result {
+                let loadStart = CFAbsoluteTimeGetCurrent()
+                let tts = SherpaOnnxOfflineTtsWrapper(config: &cfg)
+                let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
+                guard tts.sampleRate > 0 else {
+                    throw TTSEngineError.engineInitFailed(dir)
+                }
+                onEngineCreated?(loadMs)
+                return tts
+            }
         }
+        let tts: SherpaOnnxOfflineTtsWrapper
+        #if targetEnvironment(simulator)
+        if Thread.isMainThread {
+            tts = try construct().get()
+        } else {
+            tts = try DispatchQueue.main.sync(execute: construct).get()
+        }
+        #else
+        // Device: construct on the calling queue (engineQueue) — the
+        // pre-[VAD-REGRESSION] behavior, byte-identical.
+        tts = try construct().get()
+        #endif
         engines[dir] = tts
         return tts
     }
@@ -210,11 +292,19 @@ final class SherpaTTSEngine: TTSEngine {
 /// PiperVoiceSpeaker falls back to system speech. Keeps the app
 /// compilable in minimal configurations.
 final class SherpaTTSEngine: TTSEngine {
+    /// [TURN-TIMING] Never fires in this configuration (no engine is ever
+    /// created) — declared so PiperVoiceSpeaker's wiring compiles both ways.
+    var onEngineCreated: ((_ loadMs: Int) -> Void)?
     func synthesize(_ text: String, voiceDirectory: URL, speed: Float,
                     speakerID: Int = 0) throws -> URL {
         throw TTSEngineError.engineInitFailed(voiceDirectory)
     }
     func cancelSynthesis() {}
+    /// Honest refusal (the protocol's default no-op would claim a warm
+    /// that can never help — synthesis fails in this build regardless).
+    func warm(voiceDirectory: URL) throws {
+        throw TTSEngineError.engineInitFailed(voiceDirectory)
+    }
 }
 #endif
 
@@ -238,6 +328,13 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     private let modelStore: ModelStore
     private let engine: TTSEngine
     private let bundle: Bundle
+    /// [TURN-TIMING] Turn-scoped stage tracer (nil = timing off).
+    private let turnTracer: VoiceTurnLatencyTracer?
+    /// [LAT-M2] Shared pre-ack WAV cache the warm-time build writes and
+    /// the router's fast-lane player reads. A nil injection gets a
+    /// private instance pointing at the SAME default directory — the
+    /// files are the shared state (see `AckAudioCache`).
+    private let ackCache: AckAudioCache
 
     /// Elderly-friendly pace: 5% slower than the voice's natural rate.
     static let defaultSpeed: Float = 0.95
@@ -252,12 +349,22 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
          modelStore: ModelStore,
          engine: TTSEngine? = nil,
          silenceFallback: Speaker = NullSpeaker(),
-         bundle: Bundle = .main) {
+         bundle: Bundle = .main,
+         turnTracer: VoiceTurnLatencyTracer? = nil,
+         ackCache: AckAudioCache? = nil) {
         self.fallback = fallback
         self.silenceFallback = silenceFallback
         self.observabilityBus = observabilityBus
         self.modelStore = modelStore
-        self.engine = engine ?? SherpaTTSEngine()
+        self.turnTracer = turnTracer
+        self.ackCache = ackCache ?? AckAudioCache()
+        let sherpa = SherpaTTSEngine()
+        // [TURN-TIMING] Voice engine ready — the load ms rides as a point
+        // entry when a fresh engine loads inside a live turn.
+        sherpa.onEngineCreated = { loadMs in
+            turnTracer?.mark("tts_voice_loaded", elapsedMs: loadMs)
+        }
+        self.engine = engine ?? sherpa
         self.bundle = bundle
         super.init()
     }
@@ -349,6 +456,9 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         }
         generationTask = task
         let wav = await task.value
+        // [TURN-TIMING] Synthesis finished (voice load + generation) —
+        // playback starts next. No-op outside a live turn.
+        turnTracer?.mark("tts_done")
         guard let wav, !cancelled else {
             if wav == nil && !cancelled {
                 emit("tts_synthesis_failed_fallback", locale: spec.locale)
@@ -368,10 +478,37 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         engine.cancelSynthesis()
         player?.stop()
         player = nil
+        // [LOUD-TTS] Restore the capture mode (a no-op when playback never
+        // began — the seam's depth guard handles it).
+        ResponsePlaybackModeSeam.end()
         fallback.cancel()
         if let cont = currentContinuation {
             currentContinuation = nil
             cont.resume()
+        }
+    }
+
+    // MARK: - Warm-start seam (boot warm phase)
+
+    /// Preloads one catalog voice's sherpa engine so the first reply
+    /// doesn't pay engine construction. Resolves the directory exactly
+    /// like `speak` (installed, else bundled install — idempotent), then
+    /// warms the engine for it. One engine instance serves every speaker
+    /// of the voice (the sid tensor is per-call), so warming the
+    /// directory covers all sids. Synchronous on the caller's queue;
+    /// completion is called inline.
+    func warm(voiceID: ModelID, completion: (WarmStartEngineResult) -> Void) {
+        guard let dir = modelStore.ttsVoiceDirectory(for: voiceID)
+                ?? modelStore.installBundledTTSVoice(for: voiceID, bundle: bundle) else {
+            completion(.failed(reason: "voice_missing"))
+            return
+        }
+        do {
+            try engine.warm(voiceDirectory: dir)
+            completion(.ready)
+        } catch {
+            print("[speaker] warm failed for \(voiceID.rawValue): \(error)")
+            completion(.failed(reason: "engine_init_failed"))
         }
     }
 
@@ -383,6 +520,10 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
             self.player = player
             player.delegate = self
             player.prepareToPlay()
+            // [LOUD-TTS] Spoken responses get the loudness-optimized
+            // session mode for the duration of the playback (restored by
+            // settlePlayback and cancel() below).
+            ResponsePlaybackModeSeam.begin()
             await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
                 currentContinuation = cont
                 player.play()
@@ -394,6 +535,7 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     }
 
     private func settlePlayback() {
+        ResponsePlaybackModeSeam.end()
         if let cont = currentContinuation {
             currentContinuation = nil
             cont.resume()
@@ -435,5 +577,93 @@ extension PiperVoiceSpeaker: AVAudioPlayerDelegate {
 
     func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
         settlePlayback()
+    }
+}
+
+// MARK: - Warm-start seam (boot warm phase)
+
+/// PiperVoiceSpeaker is the production speaker, so it is the TTS warm
+/// seam the boot's warm phase constructs the sherpa engines through.
+extension PiperVoiceSpeaker: TTSVoiceWarming {}
+
+// MARK: - Ack-cache warm seam ([LAT-M2])
+
+/// PiperVoiceSpeaker is also the ack-cache warm seam: it owns the
+/// engine, the model store, and the voice resolution ladder, so the
+/// pre-acks are synthesized with exactly the voice the next reply will
+/// use. The build runs DETACHED (it must never hold the warm queue or
+/// any boot stage) and reports per-build observability events —
+/// `ack_cache`/`warm` started/ready/partial/failed.
+extension PiperVoiceSpeaker: AckCachePreSynthesizing {
+
+    func buildAckCache(locale: Locale,
+                       completion: @escaping (AckCacheWarmResult) -> Void) {
+        let spec = AckVoiceSpec.resolve(locale: locale)
+        guard let voiceDir = modelStore.ttsVoiceDirectory(for: spec.voiceID)
+                ?? modelStore.installBundledTTSVoice(for: spec.voiceID,
+                                                     bundle: bundle) else {
+            emitAckWarm(outcome: "failed", reason: "voice_missing",
+                        durationMs: nil, spec: spec)
+            completion(.failed(reason: "voice_missing"))
+            return
+        }
+        let variants = (1...3)
+            .map { AckCacheBuilder.Variant(
+                index: $0,
+                text: L10n.str("voiceAck.moment\($0)", locale: locale)) }
+            .filter { !$0.text.isEmpty }
+        guard !variants.isEmpty else {
+            emitAckWarm(outcome: "failed", reason: "catalog_empty",
+                        durationMs: nil, spec: spec)
+            completion(.failed(reason: "catalog_empty"))
+            return
+        }
+        emitAckWarm(outcome: "started", reason: nil, durationMs: nil, spec: spec)
+        let cache = ackCache
+        let engine = engine
+        Task.detached(priority: .utility) {
+            let start = CFAbsoluteTimeGetCurrent()
+            let result = AckCacheBuilder.build(
+                engine: engine,
+                voiceDirectory: voiceDir,
+                speed: Self.defaultSpeed,
+                variants: variants,
+                spec: spec,
+                cache: cache)
+            let ms = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
+            switch result {
+            case .ready:
+                self.emitAckWarm(outcome: "ready", reason: nil,
+                                 durationMs: ms, spec: spec)
+            case .partial(let built):
+                self.emitAckWarm(outcome: "partial",
+                                 reason: "variants_built_\(built)",
+                                 durationMs: ms, spec: spec)
+            case .failed(let reason):
+                self.emitAckWarm(outcome: "failed", reason: reason,
+                                 durationMs: ms, spec: spec)
+            }
+            completion(result)
+        }
+    }
+
+    /// Per-build event on the `ack_cache` component — PII-free catalog
+    /// ids + locale only, never ack audio or text.
+    private func emitAckWarm(outcome: String,
+                             reason: String?,
+                             durationMs: Int?,
+                             spec: AckVoiceSpec) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "ack_cache",
+            eventType: "warm",
+            durationMs: durationMs,
+            outcome: outcome,
+            errorCode: outcome == "failed" ? reason : nil,
+            metadata: [
+                "voice": spec.voiceID.rawValue,
+                "speaker": "\(spec.speakerID)",
+                "locale": spec.locale.identifier,
+            ]
+        ))
     }
 }

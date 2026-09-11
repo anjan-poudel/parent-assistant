@@ -18,9 +18,13 @@ import Foundation
 ///    `TopicPreAnswer.periodKey` exactly (see below). Devanagari digits,
 ///    never ASCII, never a colon.
 ///
-/// UI DISPLAY formatting must NOT route through here — screens keep
+/// UI DISPLAY formatting normally stays out — screens keep
 /// `Date.FormatStyle` / `DateFormatter`, which are locale-correct for
-/// reading. This helper exists only for text that is SPOKEN.
+/// reading. ONE deliberate display exception (updates-alarms task,
+/// 2026-09-10): the Updates leaf's alarm rows render this spoken form
+/// so the screen shows exactly the words the assistant speaks when the
+/// alarm rings — a senior reads what they hear. Everything else on
+/// screen keeps `Date.FormatStyle` / `DateFormatter`.
 enum SpokenTime {
 
     /// Formats `date`'s hour/minute in `locale`'s spoken convention,

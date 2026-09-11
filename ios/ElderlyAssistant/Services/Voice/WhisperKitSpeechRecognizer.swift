@@ -19,6 +19,10 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
 
     private let modelStore: ModelStore?
     private let observabilityBus: ObservabilityBus
+    /// [TURN-TIMING] Turn-scoped stage tracer, property-injected by the
+    /// coordinator (nil = timing off). Marks `asr_loaded` with the
+    /// measured load ms when a model loads mid-turn.
+    var turnTracer: VoiceTurnLatencyTracer?
 
     /// Which catalog artifact (a directory) to load in normal mode.
     private let preferredModelID: ModelID
@@ -63,6 +67,16 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         #endif
     }
 
+    /// [LAT-M1] True while the model weights are resident — loaded by the
+    /// boot warm, a live turn, or the post-turn re-warm. The post-turn
+    /// hold policy consults this: there is nothing to hold (or re-warm)
+    /// when the recognizer never loaded (a fallback STT served the turn).
+    /// Read on main while `kitInstance` is written on the inference
+    /// queue — a benign existence check, worst case one turn's
+    /// misattribution (same class as the coordinator's other engine
+    /// state reads).
+    var isModelLoaded: Bool { kitInstance != nil }
+
     init(observabilityBus: ObservabilityBus,
          modelStore: ModelStore? = nil,
          preferredModelID: ModelID = ModelCatalog.whisperKitNepaliMedium) {
@@ -103,8 +117,11 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         guard listeningActive else { return }
         guard let channelData = buffer.int16ChannelData?.pointee else { return }
         let count = Int(buffer.frameLength)
+        // [VAD-RT] Pure-Float normalization (32768 is an exact Float
+        // power of two) — the old `/ 32_768.0` ran Double division per
+        // sample on the live capture path.
         let floats = UnsafeBufferPointer(start: channelData, count: count)
-            .map { Float($0) / 32_768.0 }
+            .map { Float($0) / 32768 }
         utteranceBuffer.append(contentsOf: floats)
     }
 
@@ -187,12 +204,36 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     /// Preloads the model off the critical path: call at hot-swap time so
     /// the first utterance doesn't pay the load + CoreML specialization.
     func prepare() {
+        warm()
+    }
+
+    /// Warm-start seam (`STTModelWarming`): preloads the model weights +
+    /// CoreML specialization in the background and reports the outcome.
+    /// `completion` (when given) is called on an arbitrary queue — never
+    /// assumed main. Failures are honest and never throw: a missing
+    /// model, a missing runtime, or a failed load are `.failed(reason)`
+    /// results the boot's warm phase records (and moves past).
+    func warm(completion: ((WarmStartEngineResult) -> Void)? = nil) {
         #if canImport(WhisperKit)
-        guard let (descriptor, config) = loadDescriptor() else { return }
-        Task { [weak self] in
-            guard let self else { return }
-            _ = try? await self.loadKit(descriptor: descriptor, config: config)
+        guard let (descriptor, config) = loadDescriptor() else {
+            completion?(.failed(reason: "no_model_path"))
+            return
         }
+        Task { [weak self] in
+            guard let self else {
+                completion?(.failed(reason: "deallocated"))
+                return
+            }
+            do {
+                _ = try await self.loadKit(descriptor: descriptor, config: config)
+                completion?(.ready)
+            } catch {
+                print("[whisperkit_stt] warm failed: \(error)")
+                completion?(.failed(reason: "load_failed"))
+            }
+        }
+        #else
+        completion?(.failed(reason: "runtime_missing"))
         #endif
     }
 
@@ -239,6 +280,9 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         kitInstance = created
         loadedDescriptor = descriptor
         emit("model_loaded", errorCode: nil)
+        // [TURN-TIMING] Model ready — the load ms rides as a point entry
+        // when this load happened inside a live turn.
+        turnTracer?.mark("asr_loaded", elapsedMs: loadMs)
         print("[whisperkit_stt] model_loaded \(descriptor) load_ms=\(loadMs)")
         // What hardware the components will actually run on.
         // NE = Neural Engine (ANE). The simulator forces
@@ -620,3 +664,10 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         print("[dialect_id] \(event) reason=\(reason) outcome=\(outcome)")
     }
 }
+
+// MARK: - Warm-start seam (boot warm phase)
+
+/// WhisperKit is the one whisper runtime that can be warmed: `loadKit`
+/// caches the instance for the first utterance, unlike the whisper.cpp
+/// recognizer's per-attempt fresh contexts.
+extension WhisperKitSpeechRecognizer: STTModelWarming {}

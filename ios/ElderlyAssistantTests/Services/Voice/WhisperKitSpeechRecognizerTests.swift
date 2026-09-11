@@ -89,4 +89,34 @@ final class WhisperKitSpeechRecognizerTests: XCTestCase {
         recognizer.releaseModel()
         XCTAssertFalse(recognizer.isAvailable)
     }
+
+    // MARK: - Warm-start seam (boot warm phase)
+
+    func testWarmWithoutModelFailsHonestly() {
+        let recognizer = WhisperKitSpeechRecognizer(observabilityBus: bus,
+                                                    modelStore: nil)
+        // No bench override, no installed artifact → the warm must
+        // settle FAST with an honest reason, never attempt a real load.
+        let done = expectation(description: "warm settles")
+        var result: WarmStartEngineResult?
+        recognizer.warm { outcome in
+            result = outcome
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 2)
+        #if canImport(WhisperKit)
+        XCTAssertEqual(result, .failed(reason: "no_model_path"))
+        #else
+        XCTAssertEqual(result, .failed(reason: "runtime_missing"))
+        #endif
+    }
+
+    func testWarmWithoutCompletionIsHarmless() {
+        // `prepare()` (nil completion) must remain a safe fire-and-forget
+        // for the hot-swap path — no model, no crash, no hang.
+        let recognizer = WhisperKitSpeechRecognizer(observabilityBus: bus,
+                                                    modelStore: nil)
+        recognizer.prepare()
+        recognizer.warm()
+    }
 }

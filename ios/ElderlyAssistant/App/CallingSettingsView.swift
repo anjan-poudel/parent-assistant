@@ -30,7 +30,7 @@ struct CallingSettingsView: View {
                 }
                 Text("calling.defaultCaption")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -44,12 +44,12 @@ struct CallingSettingsView: View {
             HStack {
                 Text(LocalizedStringKey(Self.nameKey(for: app)))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 26))
-                        .foregroundColor(DesignTokens.accent)
+                        .foregroundStyle(DesignTokens.accent)
                 }
             }
             .padding(18)

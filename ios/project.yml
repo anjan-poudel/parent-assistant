@@ -118,6 +118,22 @@ targets:
       # resource.
       - path: ElderlyAssistant/Resources/AppIcons.xcassets
         buildPhase: resources
+      # [TIMER-ALARM] The loud timer-alarm bell loop (CC0, synthesized from
+      # scratch by tools/generate-timer-alarm-bell.py — license note in
+      # Resources/TimerAlarmBell.LICENSE.txt). Bundled for the in-app
+      # looping AVAudioPlayer AND the pre-iOS-26 UN notification fallback
+      # sound (custom notification sounds must be <= 30 s, linear PCM —
+      # this is ~4.6 s). Same single-file resource pattern as above.
+      - path: ElderlyAssistant/Resources/timer-alarm-bell.wav
+        buildPhase: resources
+      # [LAUNCH-SCREEN] The pre-first-paint launch screen. Info.plist
+      # already sets UILaunchStoryboardName=LaunchScreen; without this
+      # resource entry the storyboard never lands in the bundle and iOS
+      # renders pure black during the pre-paint phase. Same single-file
+      # pattern as the entries above (Resources is excluded from the
+      # source glob). Base.lproj is the standard launch-screen slot.
+      - path: ElderlyAssistant/Resources/Base.lproj/LaunchScreen.storyboard
+        buildPhase: resources
       # Bundled medium Nepali model — installed into the ModelStore on
       # first launch (no download). The .bin itself is gitignored
       # (*.bin); re-fetch from the models release v3 to rebuild locally.
@@ -146,11 +162,31 @@ targets:
         # SherpaKWSModelFile.bundledDirectory and the ModelStore kws
         # install expect.
         type: folder
+      # Bundled per-locale number-word lexicons for the voice
+      # number-word normalizer ([NUMBER-WORDS]): Resources/NumberWords/
+      # <language-code>.json, one flat word + spelling-variants → integer
+      # map per locale (schema + loader: Services/Voice/
+      # NumberWordNormalizer.swift). Blue folder reference — the
+      # directory lands in the bundle as NumberWords/ so adding a
+      # language = dropping in a JSON file, no project.yml or parser
+      # changes (same rationale as Manuals/ below).
+      - path: ElderlyAssistant/Resources/NumberWords
+        buildPhase: resources
+        type: folder
       # Bundled default instruction manuals — Resources/Manuals/README.md.
       # Blue folder reference: the whole directory lands in the bundle as
       # Manuals/, preserving the layout BundledManualCatalog expects
       # (Manuals/manifest.json + Manuals/images/<app>/... jpgs).
       - path: ElderlyAssistant/Resources/Manuals
+        buildPhase: resources
+        type: folder
+      # Bundled in-app user manual (user-manual-in-app task) — the
+      # structured phone-friendly content behind Settings → Manuals →
+      # "User manual". Blue folder reference (same rationale as Manuals/):
+      # the directory lands in the bundle as ManualText/, the subdirectory
+      # `UserManualCatalog.bundledSubdirectory` looks up
+      # (ManualText/userManual.json).
+      - path: ElderlyAssistant/Resources/ManualText
         buildPhase: resources
         type: folder
     # Do NOT add an `info:` block here — that would make XcodeGen overwrite
@@ -184,6 +220,60 @@ targets:
         product: WhisperKit
       - package: sherpa-onnx
         product: sherpa-onnx
+      # [TIMER-ALARM] (2026-09-10) The widget extension hosting the
+      # AlarmKit alarm presentation (ActivityConfiguration for
+      # AlarmAttributes<TimerAlarmSystemMetadata>) — the system renders
+      # system-managed timer countdowns and alerts through it.
+      # [TIMER-DEBUG] (2026-09-11) `codeSign: true` makes the embed phase
+      # carry CodeSignOnCopy (Xcode's standard Embed App Extensions
+      # phase does) — an embedded appex whose seal the app's signing
+      # pass did not refresh can be refused at extension load, which
+      # degrades the alarm presentation exactly like a missing
+      # extension (stale/frozen countdown on the Lock Screen).
+      - target: TimerAlarmWidgetExtension
+        embed: true
+        codeSign: true
+
+  # [TIMER-ALARM] (2026-09-10) WidgetKit extension for the AlarmKit
+  # system-managed timer presentation. iOS-26-only by nature (AlarmKit is
+  # iOS 26+); embedding a higher-minimum extension in an iOS-16 app is
+  # supported — the extension simply never runs below iOS 26 and the
+  # app's UN/in-app fallback paths cover those systems. Its Info.plist is
+  # GENERATED here (unlike the app's hand-maintained plist — see the
+  # warning on the app target): the extension declares nothing but the
+  # widget-extension point and Live Activity support.
+  TimerAlarmWidgetExtension:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: TimerAlarmWidget
+      # The AlarmMetadata type must be the SAME type (same name) in the
+      # app and the extension — ActivityKit matches the scheduled
+      # AlarmAttributes to this widget by the attributes type. Standard
+      # Live Activity pattern: both targets compile the one shared file.
+      - path: ElderlyAssistant/Services/Alarms/TimerAlarmSystemShared.swift
+    info:
+      path: TimerAlarmWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Timer Alarm
+        # App extensions must declare the XPC! package type for the
+        # system to load them.
+        CFBundlePackageType: XPC!
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        NSSupportsLiveActivities: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.elderlyassistant.app.TimerAlarmWidget
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1"
+        APPLICATION_EXTENSION_API_ONLY: YES
+        GENERATE_INFOPLIST_FILE: NO
+        # [TIMER-DEBUG] (2026-09-11) Xcode's app-extension template sets
+        # this — an extension is never an installable product of its own.
+        # Without it archive/install validation can reject the bundle.
+        SKIP_INSTALL: YES
 
   ElderlyAssistantTests:
     type: bundle.unit-test

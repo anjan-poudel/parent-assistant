@@ -298,6 +298,9 @@ final class AlarmTimerCommandParserTests: XCTestCase {
     }
 
     func testAlarmPhrasingIsNeverATimer() {
+        // A clock alarm phrase carries no duration unit — it is never a
+        // timer (alarm-worded COUNTDOWNS are the exception; see the
+        // [NUMBER-WORDS] doctrine tests below).
         XCTAssertNil(AlarmTimerCommandParser.parseTimer("set an alarm for 6 am"))
     }
 
@@ -385,5 +388,304 @@ final class AlarmTimerCommandParserTests: XCTestCase {
                        "२ घण्टा")
         XCTAssertEqual(AlarmTimerCommandParser.durationText(seconds: 3665, locale: ne),
                        "१ घण्टा १ मिनेट ५ सेकेण्ड")
+    }
+
+    // MARK: - [NUMBER-WORDS] number words (2026-09-10)
+
+    func testBundledLexiconEntriesEachParseToTheirDuration() throws {
+        // Data-driven: EVERY word form in the bundled per-locale
+        // number-word lexicons must parse, through the unchanged
+        // duration grammar, to value × 1 minute. Adding a language or
+        // spelling variant = editing the JSON only; this test covers it
+        // automatically — no per-word hand-written assertions.
+        let cases: [(languageCode: String, locale: Locale, markerPrefix: String, unit: String)] = [
+            ("ne", ne, "टाइमर", "मिनेट"),
+            ("en", en, "set a timer for", "minutes")
+        ]
+        for entry in cases {
+            guard let lexicon = try NumberWordLexicon.bundled(languageCode: entry.languageCode) else {
+                throw XCTSkip("NumberWords/\(entry.languageCode).json not bundled yet")
+            }
+            XCTAssertFalse(lexicon.words.isEmpty, "the bundled lexicon must carry words")
+            for (word, value) in lexicon.words {
+                let timer = AlarmTimerCommandParser.parseTimer(
+                    "\(entry.markerPrefix) \(word) \(entry.unit)", locale: entry.locale)
+                XCTAssertEqual(timer?.durationSeconds, value * 60,
+                               "\(word) (locale \(entry.languageCode)) must parse to \(value) minutes")
+            }
+        }
+    }
+
+    func testEnglishDigitWordsParseLikeDigits() {
+        // The English fallback the pre-fix grammar never had in the
+        // deterministic stage: digit words parse exactly like digits.
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "set a timer for five minutes", locale: en)?.durationSeconds, 300)
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "set a timer for twenty minutes", locale: en)?.durationSeconds, 1200)
+    }
+
+    func testNumberWordsMixWithDigitsInCompounds() {
+        // A word/digit mix composes through the existing chain grammar,
+        // exactly like the all-digit form ("टाइमर १ घण्टा ५ मिनेट").
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "टाइमर १ घण्टा पाँच मिनेट", locale: ne)?.durationSeconds, 3900)
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "टाइमर पांच मिनेट ३० सेकेण्ड", locale: ne)?.durationSeconds, 330)
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "set a timer for 1 hour five minutes", locale: en)?.durationSeconds, 3900)
+        // The word forms leave no junk label behind (they normalize to
+        // digits, which the label stripper drops).
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer(
+            "टाइमर पाँच मिनेट", locale: ne)?.label)
+    }
+
+    func testSnoozeMinuteWordsParse() {
+        XCTAssertEqual(AlarmTimerCommandParser.parseAlarmSnooze(
+            "स्नुज पन्ध्र मिनेट", locale: ne), 15)
+        XCTAssertEqual(AlarmTimerCommandParser.parseAlarmSnooze(
+            "snooze for fifteen minutes", locale: en), 15)
+        // Hour-worded snoozes stay out — snooze is a minute spec.
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarmSnooze(
+            "स्नुज एक घण्टा", locale: ne))
+    }
+
+    func testNepaliNumberWordAlarmClockTime() {
+        let alarm = AlarmTimerCommandParser.parseAlarm(
+            "बिहान सात बजे अलार्म लगाऊ", now: now, calendar: calendar, locale: ne)
+        XCTAssertEqual(alarm?.time, date(2026, 9, 8, 7, 0))
+        let halfPast = AlarmTimerCommandParser.parseAlarm(
+            "साढे पाँच बजे अलार्म", now: now, calendar: calendar, locale: ne)
+        XCTAssertEqual(halfPast?.time, date(2026, 9, 8, 5, 30))
+    }
+
+    func testUserPhrasePanchMinutKoAlarmLagaauParsesAsFiveMinuteTimer() {
+        // The user-reported phrase, at the parser level: an alarm-worded
+        // countdown with an explicit duration unit is a 5-MINUTE TIMER
+        // (doctrine extension) — never a 5 o'clock alarm, whose pre-fix
+        // hazard was the digit form falling through the countdown veto
+        // while "मिनुट" was missing from the unit vocabulary.
+        let timer = AlarmTimerCommandParser.parseTimer(
+            "पांच मिनुटको अलार्म लगाऊ", locale: ne)
+        XCTAssertEqual(timer?.durationSeconds, 300)
+        XCTAssertNil(timer?.label)
+        // The alarm parser still vetoes countdowns (safety net), word
+        // and digit spellings alike.
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarm(
+            "पांच मिनुटको अलार्म लगाऊ", now: now, calendar: calendar, locale: ne))
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarm(
+            "५ मिनुटको अलार्म लगाऊ", now: now, calendar: calendar, locale: ne),
+            "the digit spelling must get the same countdown veto")
+        // Safety: a bare clock phrase has no duration unit — it is NOT a
+        // timer and stays an alarm.
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer(
+            "५ बजेको अलार्म लगाऊ", locale: ne))
+    }
+
+    func testAlarmWordedCountdownsParseAsTimers() {
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "set an alarm in 5 minutes", locale: en)?.durationSeconds, 300)
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "पाँच मिनेटमा अलार्म लगाऊ", locale: ne)?.durationSeconds, 300)
+        // Out-of-range alarm-worded countdowns stay rejected.
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer(
+            "set an alarm in 25 hours", locale: en))
+        // Snooze-worded durations are snooze business, never a timer.
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer(
+            "snooze the alarm for 5 minutes", locale: en))
+        XCTAssertEqual(AlarmTimerCommandParser.parseAlarmSnooze(
+            "snooze the alarm for 5 minutes", locale: en), 5)
+    }
+
+    func testNumberWordRewritesAreContextGuarded() {
+        // The copula "छ" is never a number: "अलार्म छ?" (is there an
+        // alarm?) must not become "alarm 6?" → a 6 o'clock alarm.
+        XCTAssertEqual(NumberWordNormalizer.normalise("अलार्म छ?", locale: ne),
+                       "अलार्म छ?")
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarm(
+            "अलार्म छ?", now: now, calendar: calendar, locale: ne))
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer("अलार्म छ?", locale: ne))
+        // "एक" inside another word is a different token.
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarm(
+            "एकछिन पछि अलार्म बजाऊ", now: now, calendar: calendar, locale: ne))
+        // Multi-word English numbers are never partially rewritten
+        // ("forty five minutes" must not become "forty 5 minutes").
+        XCTAssertEqual(NumberWordNormalizer.normalise(
+            "timer for forty five minutes", locale: en),
+            "timer for forty five minutes")
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer(
+            "timer for forty five minutes", locale: en))
+    }
+
+    // MARK: - [NUMBER-WORDS] natural-speech surface (follow-up 2)
+
+    func testInformalSpellingsAndEmphasisParticlesParseDataDriven() {
+        // Data-driven over the natural-speech surface: every टाइमर
+        // spelling × every लगाऊ spelling × every emphasis particle
+        // (and none) must parse the same 5-minute timer with a clean
+        // label — the user's spoken form "पाँच मिनेट टाइमर लगाऊ त".
+        let timerSpellings = ["टाइमर", "टाइमअर", "टाइमेर"]
+        let verbSpellings = ["लगाऊ", "लगाउ", "लागू", "लागु", "लगाइदेऊ"]
+        let particles: [String?] = [nil, "त", "है", "नि", "ल"]
+        for timerSpelling in timerSpellings {
+            for verbSpelling in verbSpellings {
+                for particle in particles {
+                    let phrase = "पाँच मिनेट \(timerSpelling) \(verbSpelling)"
+                        + (particle.map { " \($0)" } ?? "")
+                    let timer = AlarmTimerCommandParser.parseTimer(phrase, locale: ne)
+                    XCTAssertEqual(timer?.durationSeconds, 300,
+                                   "failed for: \(phrase)")
+                    XCTAssertNil(timer?.label,
+                                 "label must stay clean for: \(phrase)")
+                }
+            }
+        }
+    }
+
+    func testGluedParticlesStripTokenBoundarySafe() {
+        // ASR sometimes glues the particle to the previous word — the
+        // strip peels it off only when the remainder is a known word.
+        for particle in ["त", "है", "नि", "ल"] {
+            let gluedMarker = AlarmTimerCommandParser.parseTimer(
+                "पाँच मिनेट टाइमर\(particle) लगाऊ", locale: ne)
+            XCTAssertEqual(gluedMarker?.durationSeconds, 300,
+                           "marker glued to \(particle)")
+            let gluedVerb = AlarmTimerCommandParser.parseTimer(
+                "पाँच मिनेट टाइमर लगाऊ\(particle)", locale: ne)
+            XCTAssertEqual(gluedVerb?.durationSeconds, 300,
+                           "verb glued to \(particle)")
+            XCTAssertNil(gluedVerb?.label)
+        }
+        // Token-boundary safety: a word-final "त" in real words is never
+        // eaten — "सात" stays 7 and "रात" survives as a label.
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "टाइमर सात मिनेट", locale: ne)?.durationSeconds, 420)
+        XCTAssertEqual(AlarmTimerCommandParser.parseTimer(
+            "टाइमर ७ मिनेट रात", locale: ne)?.label, "रात")
+    }
+
+    func testParticlesKeepTheDoctrinePins() {
+        // Clock-alarm safety and snooze non-theft hold through particle
+        // handling.
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer(
+            "५ बजेको अलार्म लगाऊ त", locale: ne),
+            "a clock phrase with a particle stays an alarm, never a timer")
+        XCTAssertEqual(AlarmTimerCommandParser.parseAlarmSnooze(
+            "अलार्म स्नुज १५ मिनेट है", locale: ne), 15)
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer(
+            "अलार्म स्नुज १५ मिनेट है", locale: ne),
+            "snooze-worded durations stay snooze business")
+        XCTAssertTrue(AlarmTimerCommandParser.parseAlarmOff(
+            "अलार्म बन्द गर त", locale: ne))
+    }
+
+    func testDeviceTranscriptUnitAndVerbVariantsParseDataDriven() {
+        // Real-device whisper evidence: spoken "मिनेट" transcribed as
+        // "मिने" (usually with the को/का/मा postposition glued on) and
+        // "लगाऊ" nasalized to "लगाउँ" — every form must parse the same
+        // 5-minute timer with a clean label.
+        let unitForms = ["मिने", "मिनेको", "मिनेमा", "मिनेसम्म"]
+        let verbForms = ["लगाऊ", "लगाउँ"]
+        for unitForm in unitForms {
+            for verbForm in verbForms {
+                let phrase = "पाँच \(unitForm) टाइमर \(verbForm)"
+                let timer = AlarmTimerCommandParser.parseTimer(phrase, locale: ne)
+                XCTAssertEqual(timer?.durationSeconds, 300,
+                               "failed for: \(phrase)")
+                XCTAssertNil(timer?.label,
+                             "label must stay clean for: \(phrase)")
+            }
+        }
+    }
+
+    func testNumberWordNormalizerIsIdentityWithoutLexicon() {
+        // A locale with no bundled lexicon degrades to the identity
+        // transform — the utterance falls through exactly as before.
+        let unknown = Locale(identifier: "fr-FR")
+        XCTAssertEqual(NumberWordNormalizer.normalise("टाइमर पाँच मिनेट", locale: unknown),
+                       "टाइमर पाँच मिनेट")
+    }
+
+    // MARK: - parseTimerCancel ([HOME-TIMER-CHIP] 2026-09-11)
+
+    func testTimerCancelSanctionedPhrasesParseDataDriven() {
+        // The sanctioned shapes — English whole-token verbs, the Nepali
+        // बन्द/रोक/रद्द family in bare, imperative and honorific forms,
+        // and the emphasis-particle surface natural speech adds. The
+        // sanctioned set carries no numbers, so both locales parse it
+        // identically.
+        let phrases = [
+            // English
+            "cancel timer", "cancel the timer", "stop the timer", "stop timer",
+            "timer cancel", "timer stop",
+            // Nepali — the user's scope list
+            "टाइमर बन्द गर", "टाइमर रोक", "टाइमर रद्द गर", "टाइमर बन्द",
+            // Nepali — honorific/imperative inflections
+            "टाइमर बन्द गर्नुहोस्", "टाइमर बन्द गर्नुस्", "टाइमर बन्द गरिदिनुहोस्",
+            "टाइमर रोक्नुहोस्", "टाइमर रद्द गर्नुहोस्",
+            // Nepali — natural-speech particles
+            "टाइमर बन्द गर है", "टाइमर रोक त", "टाइमर बन्द गर्नुहोस् नि"
+        ]
+        for phrase in phrases {
+            XCTAssertTrue(AlarmTimerCommandParser.parseTimerCancel(phrase, locale: ne),
+                          "expected a sanctioned timer cancel: \(phrase)")
+            XCTAssertTrue(AlarmTimerCommandParser.parseTimerCancel(phrase, locale: en),
+                          "expected a sanctioned timer cancel (en locale): \(phrase)")
+        }
+    }
+
+    func testTimerCancelVetoesAndQualifiedShapesFallThrough() {
+        // Everything outside the sanctioned set must NOT cancel the
+        // nearest timer — questions, negations, shapes that name a
+        // SPECIFIC timer, alarm business, set commands, and bare verbs
+        // with no timer marker.
+        let notCancels = [
+            // Questions + negations
+            "when does my timer end?", "don't stop the timer",
+            "टाइमर कति बेरमा सकिन्छ?",
+            // Duration-qualified — the cancel branch must not guess WHICH timer
+            "cancel the 5 minute timer", "stop the 10 minute timer",
+            "५ मिनेटको टाइमर बन्द गर",
+            // Clock-qualified — same rule
+            "stop the 6 o'clock timer",
+            // Alarm business is the OFF branch's, not the timer cancel's
+            "cancel the alarm", "अलार्म बन्द गर",
+            // Set commands are set commands
+            "set a timer for 5 minutes", "टाइमर ५ मिनेट",
+            // No timer marker at all
+            "cancel", "stop", "बन्द गर", "रोक्नुहोस्",
+            // A statement, not a command (रोकिएको is one token, never "रोक")
+            "रोकिएको टाइमर"
+        ]
+        for phrase in notCancels {
+            XCTAssertFalse(AlarmTimerCommandParser.parseTimerCancel(phrase, locale: ne),
+                           "must NOT be a timer cancel: \(phrase)")
+            XCTAssertFalse(AlarmTimerCommandParser.parseTimerCancel(phrase, locale: en),
+                           "must NOT be a timer cancel (en locale): \(phrase)")
+        }
+    }
+
+    func testTimerCancelWordAmountQualificationNeedsTheNepaliLexicon() {
+        // [NUMBER-WORDS] "टाइमर पाँच मिनेट रद्द गर" names the 5-MINUTE
+        // timer — with the ne lexicon the word amount normalizes to a
+        // digit and the duration qualification vetoes the cancel (the
+        // branch must not guess which timer). The en locale has no ne
+        // word lexicon, so there the same utterance reads as a plain
+        // cancel — the same number-word dependency every parser here
+        // carries (the router always parses with the ACTIVE app locale,
+        // so a Nepali-speaking user gets the qualified veto).
+        XCTAssertFalse(AlarmTimerCommandParser.parseTimerCancel(
+            "टाइमर पाँच मिनेट रद्द गर", locale: ne))
+        XCTAssertTrue(AlarmTimerCommandParser.parseTimerCancel(
+            "टाइमर पाँच मिनेट रद्द गर", locale: en))
+    }
+
+    func testTimerCancelIsNotAQuestionNorTheSetParsersBusiness() {
+        // The ladder's safety: the SET parsers must keep rejecting the
+        // sanctioned cancel shapes (their cancel vetoes), so the router
+        // order can never double-handle.
+        XCTAssertNil(AlarmTimerCommandParser.parseTimer("cancel the timer", locale: en))
+        XCTAssertNil(AlarmTimerCommandParser.parseAlarm("cancel the timer", locale: en))
+        XCTAssertFalse(AlarmTimerCommandParser.parseAlarmOff("cancel the timer", locale: en))
     }
 }

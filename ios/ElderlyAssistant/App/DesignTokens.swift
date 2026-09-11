@@ -30,6 +30,11 @@ enum DesignTokens {
     // Every fill keeps ≥4.5:1 white-glyph contrast (unit-tested in
     // DesignTokensTests) and ≥3:1 against the cream background.
     static let stateIdle = Color(red: 0.231, green: 0.431, blue: 0.647)      // #3B6EA5 — rest blue
+    /// [REBRAND] The seniOS brand pink (#C73D74) — the launch-screen and
+    /// app-icon artwork's background. The Talk hero's loading/failed disc
+    /// renders in it with white glyphs (the artwork's own scheme), so the
+    /// pre-readiness state reads as the brand mark.
+    static let brandPink = Color(red: 0.780, green: 0.239, blue: 0.455)      // #C73D74
     /// "Voice is off" (visual-polish 2026-09-08): the honest dimmed-blue
     /// sibling of `stateIdle` — same hue family, clearly darker, so an
     /// off/stopped hero never reads as an alarm (red is reserved for
@@ -73,55 +78,79 @@ enum DesignTokens {
     static let warmGlowEnd = Color(red: 0.851, green: 0.510, blue: 0.180)    // #D9822E
 
     /// Icon-badge tints (redesign spec §2 — replaces bare gray SF Symbols).
-    /// Each badge is `tint` on `background`, matching the icon's semantic
-    /// color family used elsewhere (meds = accent family, reminders =
-    /// bronze, call = warm vermilion, appliance = brown, settings =
-    /// purple, emergency = red, apps/directions = blue-cyan category).
-    /// Visual-polish 2026-09-08: `call` moved out of the blue family to a
-    /// warm vermilion (#C2541F) so the ONLY blues left are the app-
-    /// category badges (apps, directions) — the hero's traffic-light blue
-    /// rest never competes with a navy call tile — and `settings` now
-    /// keeps its own purple instead of borrowing the voice-state palette.
+    ///
+    /// DESIGN-REVIEW consolidation (2026-09-10, `docs/ios-swiftui-startup-
+    /// review.md` §"Reduce category-color noise"): the badge palette used
+    /// to carry nine unrelated hues — one per category — which read as
+    /// noise on a screen already asking an elderly user to find one
+    /// control. Every badge now resolves to one of FOUR semantic `Role`s:
+    ///
+    ///   • `brandAction`     — the three persistent daily actions
+    ///                         (medication, phone, reminders). Accent
+    ///                         green on a pale accent wash.
+    ///   • `voiceState`      — the assistant/launcher family (Quick
+    ///                         access apps). The hero's rest blue on its
+    ///                         pale wash, so nothing invented a new hue.
+    ///   • `emergency`       — urgency ONLY. Stop red on white; never
+    ///                         reused for a category.
+    ///   • `neutralCategory` — everything else (appliance, settings,
+    ///                         feeds, directions). Warm secondary text on
+    ///                         the warm neutral wash; the SF Symbol and
+    ///                         the label beside it carry the identity.
+    ///
+    /// The `case` names are deliberately UNCHANGED — call sites still say
+    /// what they mean (`tint: .feed`), and two categories that share a
+    /// role simply share a colour. A strong colour now means state or
+    /// urgency, never "this row is a different kind of thing".
     enum BadgeTint {
         case meds, reminders, call, appliance, settings, apps, feeds, emergency, directions
 
-        var background: Color {
-            switch self {
-            case .meds: return Color(red: 0.902, green: 0.945, blue: 0.925)      // #E6F1EC
-            case .reminders: return Color(red: 0.992, green: 0.918, blue: 0.824) // #FDEAD2
-            case .call: return Color(red: 0.976, green: 0.886, blue: 0.835)      // #F9E2D5 — pale salmon
-            case .appliance: return Color(red: 0.992, green: 0.945, blue: 0.890)  // #FDF1E3
-            case .settings: return Color(red: 0.937, green: 0.918, blue: 0.965)  // #EFEAF6
-            case .apps: return Color(red: 0.878, green: 0.941, blue: 0.949)      // #E0F0F2
+        /// The four semantic colour roles. `CaseIterable` so
+        /// `DesignTokensTests` can pin that no fifth role creeps back in.
+        enum Role: CaseIterable {
+            case brandAction, voiceState, emergency, neutralCategory
+        }
 
-            case .feeds: return Color(red: 0.969, green: 0.914, blue: 0.949)      // #F7E9F2 — pale orchid
-            case .emergency: return Color.white
-            case .directions: return Color(red: 0.867, green: 0.945, blue: 0.969) // #DDF1F7
+        /// Which role this category's badge wears. This mapping IS the
+        /// consolidation — the colour tables below switch on it, so a
+        /// category can never drift to its own hue again.
+        var role: Role {
+            switch self {
+            case .meds, .reminders, .call:
+                return .brandAction
+            case .apps:
+                return .voiceState
+            case .emergency:
+                return .emergency
+            case .appliance, .settings, .feeds, .directions:
+                return .neutralCategory
             }
         }
+
+        var background: Color {
+            switch role {
+            case .brandAction: return DesignTokens.userBubble                  // #E6F1EC
+            case .voiceState: return DesignTokens.stateVoiceRestWash           // #DDF1F7
+            case .emergency: return DesignTokens.card                          // white
+            case .neutralCategory: return DesignTokens.setupReminder           // #FDF1E3
+            }
+        }
+
         var tint: Color {
-            switch self {
-            case .meds: return DesignTokens.accent
-            case .reminders: return Color(red: 0.706, green: 0.392, blue: 0.118) // #B4641E
-            case .call: return Color(red: 0.761, green: 0.329, blue: 0.122)      // #C2541F — warm vermilion
-            case .appliance: return Color(red: 0.541, green: 0.427, blue: 0.231)  // #8A6D3B
-            // Settings keeps its own purple (#5C5A8A, 2026-09-08) — it
-            // used to alias the voice-state understanding token, which
-            // has since joined the amber processing ramp; a gear badge
-            // must not silently track voice-state colors.
-            case .settings: return Color(red: 0.361, green: 0.353, blue: 0.541)  // #5C5A8A
-            case .apps: return Color(red: 0.122, green: 0.478, blue: 0.549)      // #1F7A8C
-            case .feeds: return Color(red: 0.557, green: 0.235, blue: 0.435)      // #8E3C6F
-            case .emergency: return Color(red: 0.706, green: 0.251, blue: 0.118) // #B4401E
-            // Directions/maps (2026-09-07): the one dock badge in the
-            // blue-cyan family that reads "navigation" — lighter and
-            // brighter than the Quick apps' teal so the two never merge
-            // (the call badge left the blue family in visual-polish
-            // 2026-09-08, so no navy neighbor remains).
-            case .directions: return Color(red: 0.106, green: 0.522, blue: 0.639) // #1B85A3
+            switch role {
+            case .brandAction: return DesignTokens.accent
+            case .voiceState: return DesignTokens.stateIdle
+            case .emergency: return DesignTokens.stateError
+            case .neutralCategory: return DesignTokens.textSecondary
             }
         }
     }
+
+    /// The pale wash behind the `voiceState` badge role — the hero's rest
+    /// blue (#3B6EA5) reads at ≥4.5:1 on it, and the wash itself is a
+    /// step lighter than the cream background so a badge still reads as a
+    /// distinct circle on a white card.
+    static let stateVoiceRestWash = Color(red: 0.867, green: 0.945, blue: 0.969) // #DDF1F7
 
     // MARK: Type scale (spec §3.1, redesign spec §7)
     //
@@ -138,6 +167,11 @@ enum DesignTokens {
     static var minCaptionPointSize: CGFloat { scaled(18) }
     static var titlePointSize: CGFloat { scaled(32) }
     static var greetingPointSize: CGFloat { scaled(33) }
+    /// [HOME-TIMER-CHIP] The ticking digits of the home timer chip — a
+    /// step above the body floor (elderly legibility: the remaining time
+    /// is the ONE number on Home that must be readable at a glance),
+    /// below the title sizes so the chip stays a chip.
+    static var homeTimerDigitPointSize: CGFloat { scaled(28) }
 
     private static func scaled(_ base: CGFloat) -> CGFloat {
         UIFontMetrics.default.scaledValue(for: base)

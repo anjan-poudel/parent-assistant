@@ -4,7 +4,8 @@ import AVFoundation
 /// Voice activity detector: decides whether a chunk of PCM audio contains
 /// speech, and reports when the user has stopped talking — after the
 /// trailing-silence hangover VoicePipeline configures (900 ms since
-/// 2026-09-07, see `VoicePipeline.endOfUtteranceMs`). Used to gate the
+/// 2026-09-07, 700 ms behind the flag since 2026-09-11 — see
+/// `VADHangoverPolicy`). Used to gate the
 /// speech recognizer: VoicePipeline calls the recognizer's `finish()` on
 /// `onEndOfUtterance`, so a finished command flips to transcription
 /// within ~1.0-1.5 s of the user's last word instead of riding the
@@ -14,6 +15,47 @@ import AVFoundation
 /// implementation is a permissive fallback that always treats audio as
 /// speech — useful for tests and for the scaffold state before the ONNX
 /// model has been downloaded.
+// MARK: - Hangover policy ([LAT-M2], 2026-09-11)
+//
+// The trailing-silence hangover the pipeline configures per capture is
+// now flag-gated: 700 ms by default (the latency-compliance trim — a
+// finished utterance ends ~200 ms earlier), 900 ms when the flag is
+// explicitly OFF. The 900 ms value (2026-09-07) was chosen because
+// natural mid-utterance pauses for elderly speakers run 0.5-0.7 s — a
+// breath, a word-search, a slow clause. At 700 ms a TRUE-QUIET pause at
+// the top of that band (>= 700 ms) now closes the capture.
+//
+// The trade-off is documented, not hidden, and the protections that
+// made 900 ms survivable for elderly pauses remain in force:
+//  - a pause whose residual energy sits in the EnergyVAD hold band
+//    (between the end line and the speech reference) does NOT accrue
+//    the quiet counter at all — it is covered by the force end
+//    (`forceEndAfterSilenceMs`, 3 s) instead;
+//  - any frame at/above the speech reference still resets the quiet
+//    counter, so a resumed utterance after a pause restarts the
+//    hangover cleanly;
+//  - the force end, the capture cap (22 s), and the wedge guard are
+//    unchanged — the trim touches ONLY the normal quiet-run hangover.
+//
+// The flag exists so the field can restore 900 ms without a release if
+// elderly users report mid-sentence cuts.
+enum VADHangoverPolicy {
+    /// UserDefaults key: the trim is ON unless this key is present AND
+    /// false (default ON per the plan).
+    static let trim700DefaultsKey = "vadHangoverTrim700"
+    static let trimmedMs = 700
+    static let legacyMs = 900
+
+    /// Default ON: 700 ms unless the key exists and is explicitly false.
+    static func hangoverMs(defaults: UserDefaults) -> Int {
+        guard defaults.object(forKey: trim700DefaultsKey) != nil,
+              !defaults.bool(forKey: trim700DefaultsKey) else {
+            return trimmedMs
+        }
+        return legacyMs
+    }
+}
+
 protocol VoiceActivityDetector: AnyObject {
     /// Sample rate the detector expects (16 kHz for Silero).
     var requiredSampleRate: Double { get }
@@ -23,11 +65,29 @@ protocol VoiceActivityDetector: AnyObject {
     var onSpeechStateChange: ((Bool) -> Void)? { get set }
     /// Called once when trailing silence exceeds `endOfUtteranceMs`.
     var onEndOfUtterance: (() -> Void)? { get set }
+    /// Called once when the trailing-silence FORCE END trips instead of
+    /// the normal quiet-run end: the utterance contained speech, but no
+    /// end-of-utterance fired within the detector's force-end window
+    /// because post-speech noise kept every frame above the end line
+    /// (see `EnergyVAD.forceEndAfterSilenceMs`). Distinct from
+    /// `onEndOfUtterance` so callers can report an honest event
+    /// (`vad_force_end`) and tell a user-pause from a silence-detection.
+    var onForcedEndOfUtterance: (() -> Void)? { get set }
 
     func start(endOfUtteranceMs: Int)
     func stop()
     func reset()
     func process(_ pcm: [Int16])
+}
+
+extension VoiceActivityDetector {
+    /// Default no-op storage: implementations that never force-end
+    /// (`NullVAD`, the guarded Silero impl, test fakes) conform without
+    /// declaring the property.
+    var onForcedEndOfUtterance: (() -> Void)? {
+        get { nil }
+        set { }
+    }
 }
 
 // MARK: - Null implementation (fallback, tests)
@@ -102,11 +162,63 @@ final class NullVAD: VoiceActivityDetector {
 /// above the reference — clearly the user still talking — still resets
 /// the counter so a resumed utterance after a pause restarts the
 /// hangover cleanly.
+///
+/// TRAILING-SILENCE FORCE END ([VAD-TUNE], 2026-09-11): the hold band has
+/// one hole the 2026-09-07 design cannot close on its own. When speech
+/// stops and the remaining audio parks IN the band (post-speech noise at
+/// or above the end line — quiet elderly speech leaves `speechLevel` low,
+/// so `endLevel` sits near the `minSpeechThreshold` clamp, and the
+/// phone's input AGC keeps boosted room noise above it), the quiet
+/// counter never accrues and the utterance never ends. A third mechanism
+/// therefore runs alongside the hangover: a force-end timer counts frames
+/// since the last clear-speech frame (`rms >= speechLevel`). While it
+/// runs, the reference DECAY IS FROZEN — the reference must not sink
+/// toward the background, or band noise would cross it frame-by-frame and
+/// keep resetting the timer forever (the same chicken-and-egg the
+/// 2026-09-07 note describes). After `forceEndAfterSilenceMs` (3 s
+/// production — [VAD-RT] 2026-09-11, tightened from 7 s) with no
+/// clear-speech frame, the utterance is force-ended via
+/// `onForcedEndOfUtterance` — VoicePipeline then emits `vad_force_end`
+/// and feeds the recognizer exactly like a normal end.
+///
+/// [VAD-RT] Why 3 s: the user's device logs (vad_end ~105 s class) made
+/// the end-of-utterance bound the product's dominant complaint; the
+/// 7 s window still meant a worst-case "listening" tail of 7 s after the
+/// last word. The mid-speech protection the window buys is for pauses
+/// whose residual energy sits in the BAND — real quiet pauses are
+/// already ended by the 0.9 s hangover by design. 3 s keeps band-energy
+/// pauses of up to ~3 s alive (well above the documented elderly pause
+/// of 0.5-0.7 s — a pause beyond 3 s is a stopped utterance by any
+/// product measure), and it caps the worst-case speech-end → vad_end gap
+/// at ~3 s, inside the task's 1-3 s target. The captured audio is
+/// preserved either way (`finish()`, never cancel — a force-end
+/// transcript includes everything the user said before the cut).
+///
+/// Trade-off (deliberate): a speaker who falls silent for the whole force
+/// window and THEN resumes — with the interim energy in the band — is cut
+/// at the force end. The freeze means a quieter continuation no longer
+/// re-anchors the reference by decay (the old ~1-2 s re-anchor path); it
+/// is held in the band until the force end. Energy at or above the
+/// reference still resets everything, so continuous speech keeps the
+/// utterance alive.
+/// [VAD-RT] Thread-safety: `process` runs on the pipeline's processing
+/// queue while `start`/`stop`/`reset` arrive from the main queue (capture
+/// boundaries, hot-swaps, `stop()`). An internal NSLock serializes the
+/// two, and every callback fires AFTER the lock is released, so a
+/// callback that re-enters the VAD (or blocks) can never deadlock the
+/// frame path. The lock is uncontended except at capture boundaries —
+/// the per-frame cost is tens of nanoseconds (pinned by
+/// `testFrameProcessingBudget`).
 final class EnergyVAD: VoiceActivityDetector {
     let requiredSampleRate: Double = 16_000
     let frameLength: Int = 512
     var onSpeechStateChange: ((Bool) -> Void)?
     var onEndOfUtterance: (() -> Void)?
+    var onForcedEndOfUtterance: (() -> Void)?
+
+    /// Serializes `process` (processing queue) against `start`/`stop`/
+    /// `reset` (main queue) — see the [VAD-RT] class note.
+    private let lock = NSLock()
 
     /// Speech-start threshold = noiseFloor x this (before clamping).
     private let speechMultiplier: Float
@@ -138,6 +250,17 @@ final class EnergyVAD: VoiceActivityDetector {
     /// a silent room (floor ~ 0) and bounds it in a very loud one.
     private let minSpeechThreshold: Float
     private let maxSpeechThreshold: Float
+    /// Trailing-silence force-end window (see the class note): ms since
+    /// the last clear-speech frame (`rms >= speechLevel`) after which a
+    /// still-active utterance is force-ended. Must be well above
+    /// `endOfUtteranceMs` (the normal end always wins in real quiet) and
+    /// below the recognizer's total capture cap (22 s), which bounds the
+    /// no-speech and continuous-speech cases. [VAD-RT] 3 s production:
+    /// the tightest window that still protects band-energy pauses far
+    /// beyond the documented 0.5-0.7 s elderly-speech pause.
+    private let forceEndAfterSilenceMs: Int
+    /// `forceEndAfterSilenceMs` in 32 ms frames, precomputed.
+    private let forceEndAfterSilenceFrames: Int
     /// Ambient RMS estimate. Seeded low so first use is maximally
     /// sensitive. NOT reset per utterance — a property of the room.
     private var noiseFloor: Float
@@ -145,7 +268,9 @@ final class EnergyVAD: VoiceActivityDetector {
     /// Running speech-energy reference while `speechActive`: pulled UP by
     /// frames at/above it, otherwise decays only by time
     /// (`speechLevelReleaseDbPerSecond`) — never dragged toward a soft
-    /// frame or the ambient (2026-09-07). Reset per utterance.
+    /// frame or the ambient (2026-09-07). Reset per utterance. [VAD-TUNE]
+    /// The decay is FROZEN while the force-end timer is running
+    /// (`framesSinceClearSpeech > 0`) — see the class note.
     private var speechLevel: Float = 0
 
     private var running = false
@@ -153,6 +278,10 @@ final class EnergyVAD: VoiceActivityDetector {
     private var quietFrames = 0
     private var requiredQuietFrames = 8
     private var hasReportedEnd = false
+    /// [VAD-TUNE] Frames since the last clear-speech frame while
+    /// `speechActive` — the force-end timer. Reset by any frame at or
+    /// above the reference.
+    private var framesSinceClearSpeech = 0
 
     init(speechMultiplier: Float = 2.5,
          floorAlpha: Float = 0.08,
@@ -161,7 +290,8 @@ final class EnergyVAD: VoiceActivityDetector {
          speechLevelReleaseDbPerSecond: Float = 3.0,
          minSpeechThreshold: Float = 0.012,
          maxSpeechThreshold: Float = 0.10,
-         initialNoiseFloor: Float = 0.005) {
+         initialNoiseFloor: Float = 0.005,
+         forceEndAfterSilenceMs: Int = 3000) {
         self.speechMultiplier = speechMultiplier
         self.floorAlpha = floorAlpha
         self.dropRatio = dropRatio
@@ -175,6 +305,10 @@ final class EnergyVAD: VoiceActivityDetector {
         self.maxSpeechThreshold = maxSpeechThreshold
         self.initialNoiseFloor = initialNoiseFloor
         self.noiseFloor = initialNoiseFloor
+        self.forceEndAfterSilenceMs = forceEndAfterSilenceMs
+        self.forceEndAfterSilenceFrames = max(1, Int(ceil(
+            (Double(forceEndAfterSilenceMs) / 1000.0) /
+            (Double(frameLength) / requiredSampleRate))))
     }
 
     private var speechStartThreshold: Float {
@@ -182,27 +316,47 @@ final class EnergyVAD: VoiceActivityDetector {
     }
 
     func start(endOfUtteranceMs: Int) {
+        lock.lock()
         requiredQuietFrames = max(1, Int(ceil((Double(endOfUtteranceMs) / 1000.0) /
                                             (Double(frameLength) / requiredSampleRate))))
         running = true
-        reset()
+        resetLocked()
+        lock.unlock()
     }
 
     func stop() {
+        lock.lock()
         running = false
+        lock.unlock()
     }
 
     func reset() {
+        lock.lock()
+        resetLocked()
+        lock.unlock()
+    }
+
+    /// Locked reset — the shared body of `start` and `reset`. The
+    /// noiseFloor survives reset(): room calibration carries across
+    /// utterances within a capture session.
+    private func resetLocked() {
         speechActive = false
         speechLevel = 0
         quietFrames = 0
         hasReportedEnd = false
-        // noiseFloor survives reset(): room calibration carries across
-        // utterances within a capture session.
+        framesSinceClearSpeech = 0
     }
 
     func process(_ pcm: [Int16]) {
-        guard running, !pcm.isEmpty, !hasReportedEnd else { return }
+        // [VAD-RT] Callbacks fire AFTER the lock is released — see the
+        // class note. Decision state is only ever mutated under the lock.
+        var fireSpeechStart = false
+
+        lock.lock()
+        guard running, !pcm.isEmpty, !hasReportedEnd else {
+            lock.unlock()
+            return
+        }
         let rms = Self.rms(pcm)
 
         if !speechActive {
@@ -210,9 +364,14 @@ final class EnergyVAD: VoiceActivityDetector {
                 speechActive = true
                 speechLevel = rms
                 quietFrames = 0
-                onSpeechStateChange?(true)
+                framesSinceClearSpeech = 0
+                fireSpeechStart = true
             } else {
                 noiseFloor += floorAlpha * (rms - noiseFloor)
+            }
+            lock.unlock()
+            if fireSpeechStart {
+                onSpeechStateChange?(true)
             }
             return
         }
@@ -244,19 +403,44 @@ final class EnergyVAD: VoiceActivityDetector {
         // after a pause restarts the hangover cleanly.
         if rms >= speechLevel {
             quietFrames = 0
+            framesSinceClearSpeech = 0
             speechLevel += speechLevelAlpha * (rms - speechLevel)
+            lock.unlock()
             return
         }
 
         // Below the reference: it decays by time, never toward this frame
         // (a soft trailing word or ambient noise must not become the new
-        // reference; see above).
-        speechLevel *= releaseFactorPerFrame
+        // reference; see above). [VAD-TUNE] The decay is FROZEN while the
+        // force-end timer is running — decaying into band noise would let
+        // the noise cross the reference and reset the timer frame by
+        // frame, so the force end could never fire (see the class note).
+        if framesSinceClearSpeech == 0 {
+            speechLevel *= releaseFactorPerFrame
+        }
 
         let endLevel = max(minSpeechThreshold, speechLevel * dropRatio)
+
+        // Every below-reference frame — band OR quiet — is "not clear
+        // speech": accrue the force-end timer first. In production the
+        // normal hangover (0.9 s) always fires long before the force
+        // window (3 s) whenever real quiet exists; the force end only
+        // trips when noise parks in the band and the quiet counter never
+        // accrues.
+        framesSinceClearSpeech += 1
+        if framesSinceClearSpeech >= forceEndAfterSilenceFrames {
+            hasReportedEnd = true
+            speechActive = false
+            lock.unlock()
+            onSpeechStateChange?(false)
+            onForcedEndOfUtterance?()
+            return
+        }
+
         if rms >= endLevel {
-            // The band: hold the counter (see above) — this frame is
+            // The band: hold the quiet counter (see above) — this frame is
             // neither quiet enough to accrue nor loud enough to reset.
+            lock.unlock()
             return
         }
 
@@ -267,15 +451,23 @@ final class EnergyVAD: VoiceActivityDetector {
         if quietFrames >= requiredQuietFrames {
             hasReportedEnd = true
             speechActive = false
+            lock.unlock()
             onSpeechStateChange?(false)
             onEndOfUtterance?()
+            return
         }
+        lock.unlock()
     }
 
     private static func rms(_ pcm: [Int16]) -> Float {
+        // [VAD-RT] Pure-Float math: the old `Float(sample) / 32_768.0`
+        // promoted every sample to a DOUBLE division (32768.0 is a
+        // Double literal) — the hot path ran in double precision for no
+        // reason. Dividing by the integer literal 32768 (2^15) stays
+        // Float and is exact.
         var sum: Float = 0
         for sample in pcm {
-            let normalized = Float(sample) / 32_768.0
+            let normalized = Float(sample) / 32768
             sum += normalized * normalized
         }
         return sqrt(sum / Float(pcm.count))

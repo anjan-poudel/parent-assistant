@@ -20,6 +20,14 @@ final class VoiceSettingsModelTests: XCTestCase {
         init(initial: Bool) { noiseFilterEnabled = initial }
     }
 
+    /// In-memory stand-in for `AppCoordinator.warmStartEnabled` (the
+    /// coordinator persists UserDefaults "warmStartEngines" and is the
+    /// value the boot's warm phase reads; the model only forwards).
+    final class FakeWarmStartController: WarmStartPreferenceControlling {
+        var warmStartEnabled: Bool
+        init(initial: Bool) { warmStartEnabled = initial }
+    }
+
     final class FakeEnrollmentService: VoiceEnrollmentServicing {
         var isEnabled: Bool = true
         var currentEmbedderID: String = "fake.v1"
@@ -124,6 +132,7 @@ final class VoiceSettingsModelTests: XCTestCase {
     func testNoiseFilterDefaultsToControllerValue() {
         let controller = FakeNoiseFilterController(initial: false)
         let model = VoiceSettingsModel(noiseFilterController: controller,
+                                       warmStartController: FakeWarmStartController(initial: true),
                                        defaults: defaults)
         XCTAssertFalse(model.noiseFilterEnabled,
                        "noise filter ships OFF — the A/B default is the legacy path")
@@ -132,6 +141,7 @@ final class VoiceSettingsModelTests: XCTestCase {
     func testNoiseFilterToggleRoundTripsThroughController() {
         let controller = FakeNoiseFilterController(initial: false)
         let model = VoiceSettingsModel(noiseFilterController: controller,
+                                       warmStartController: FakeWarmStartController(initial: true),
                                        defaults: defaults)
         model.noiseFilterEnabled = true
         XCTAssertTrue(controller.noiseFilterEnabled,
@@ -140,6 +150,7 @@ final class VoiceSettingsModelTests: XCTestCase {
         // back — persistence is the controller's (the coordinator's), and
         // the model must never shadow it.
         let reloaded = VoiceSettingsModel(noiseFilterController: controller,
+                                          warmStartController: FakeWarmStartController(initial: true),
                                           defaults: defaults)
         XCTAssertTrue(reloaded.noiseFilterEnabled,
                       "a new model must read the persisted state, not a default")
@@ -148,16 +159,66 @@ final class VoiceSettingsModelTests: XCTestCase {
     func testNoiseFilterToggleDoesNotTouchAccentDefaults() {
         let controller = FakeNoiseFilterController(initial: false)
         let model = VoiceSettingsModel(noiseFilterController: controller,
+                                       warmStartController: FakeWarmStartController(initial: true),
                                        defaults: defaults)
         model.noiseFilterEnabled = true
         XCTAssertNil(defaults.object(forKey: DialectBiasSettings.defaultsKey),
                      "the noise toggle must not write the accent key")
     }
 
+    // MARK: - Warm-start toggle (controller seam)
+
+    func testWarmStartDefaultsToControllerValue() {
+        let model = VoiceSettingsModel(noiseFilterController: FakeNoiseFilterController(initial: false),
+                                       warmStartController: FakeWarmStartController(initial: true),
+                                       defaults: defaults)
+        XCTAssertTrue(model.warmStartEnabled,
+                      "warm start ships ON — the first conversation must be fast out of the box")
+    }
+
+    func testWarmStartToggleRoundTripsThroughController() {
+        let controller = FakeWarmStartController(initial: true)
+        let model = VoiceSettingsModel(noiseFilterController: FakeNoiseFilterController(initial: false),
+                                       warmStartController: controller,
+                                       defaults: defaults)
+        model.warmStartEnabled = false
+        XCTAssertFalse(controller.warmStartEnabled,
+                       "the model forwards the flip to the coordinator seam")
+
+        let reloaded = VoiceSettingsModel(noiseFilterController: FakeNoiseFilterController(initial: false),
+                                          warmStartController: controller,
+                                          defaults: defaults)
+        XCTAssertFalse(reloaded.warmStartEnabled,
+                       "a new model must read the controller's state, not a default")
+    }
+
+    func testWarmStartToggleDoesNotWriteDefaultsDirectly() {
+        let controller = FakeWarmStartController(initial: true)
+        let model = VoiceSettingsModel(noiseFilterController: FakeNoiseFilterController(initial: false),
+                                       warmStartController: controller,
+                                       defaults: defaults)
+        model.warmStartEnabled = false
+        XCTAssertNil(defaults.object(forKey: "warmStartEngines"),
+                     "the model must never shadow the coordinator's persistence — one writer")
+    }
+
+    func testWarmStartUnchangedValueDoesNotForward() {
+        let controller = FakeWarmStartController(initial: true)
+        let model = VoiceSettingsModel(noiseFilterController: FakeNoiseFilterController(initial: false),
+                                       warmStartController: controller,
+                                       defaults: defaults)
+        controller.warmStartEnabled = false
+        // Reassign the SAME value the model already holds — no forward.
+        model.warmStartEnabled = true
+        XCTAssertFalse(controller.warmStartEnabled,
+                       "an unchanged toggle must not clobber the controller")
+    }
+
     // MARK: - Accent bias toggle (UserDefaults round-trip)
 
     func testAccentBiasDefaultsOnWhenUnset() {
         let model = VoiceSettingsModel(noiseFilterController: FakeNoiseFilterController(initial: false),
+                                       warmStartController: FakeWarmStartController(initial: true),
                                        defaults: defaults)
         XCTAssertTrue(model.accentBiasEnabled,
                       "accent biasing ships ON — the toggle is an escape hatch, not an opt-in gate")
@@ -165,17 +226,20 @@ final class VoiceSettingsModelTests: XCTestCase {
 
     func testAccentBiasToggleRoundTripsAcrossModelInstances() {
         let first = VoiceSettingsModel(noiseFilterController: FakeNoiseFilterController(initial: false),
+                                       warmStartController: FakeWarmStartController(initial: true),
                                        defaults: defaults)
         first.accentBiasEnabled = false
         XCTAssertFalse(DialectBiasSettings.isEnabled(defaults: defaults))
 
         let second = VoiceSettingsModel(noiseFilterController: FakeNoiseFilterController(initial: false),
+                                        warmStartController: FakeWarmStartController(initial: true),
                                         defaults: defaults)
         XCTAssertFalse(second.accentBiasEnabled,
                        "a new model must read the persisted OFF state")
 
         second.accentBiasEnabled = true
         let third = VoiceSettingsModel(noiseFilterController: FakeNoiseFilterController(initial: false),
+                                       warmStartController: FakeWarmStartController(initial: true),
                                        defaults: defaults)
         XCTAssertTrue(third.accentBiasEnabled,
                       "a new model must read the persisted ON state")

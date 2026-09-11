@@ -93,6 +93,22 @@ final class ApplianceManualLibraryModel: ObservableObject {
         }
     }
 
+    /// Whether the USER MANUAL row (user-manual-in-app task, 2026-09-09)
+    /// is visible under the current query. The user manual is the library's
+    /// own "Default manuals" section's top row — it opens `UserManualView`
+    /// (the full text manual), unlike the device manuals which open the
+    /// step-card guidance. Searchable by its localized title and hint, so
+    /// an elder typing "manual"/"पुस्तिका" finds it like any other row.
+    /// Pure, directly unit-testable like `filterBundled`.
+    static func isUserManualVisible(query: String, locale: Locale) -> Bool {
+        guard !query.isEmpty else { return true }
+        let haystacks = [
+            L10n.str("settings.manuals.userManual", locale: locale),
+            L10n.str("settings.manuals.userManualHint", locale: locale),
+        ]
+        return haystacks.contains { $0.localizedStandardContains(query) }
+    }
+
     /// Reloads from the cache (most recently saved first). Cheap enough
     /// for a synchronous reload on library open — ≤40 small entries, each
     /// with a ~256px JPEG.

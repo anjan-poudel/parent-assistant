@@ -27,16 +27,58 @@ final class GeminiConfigStore: ObservableObject {
 
     var isConfigured: Bool { apiKey != nil }
 
+    /// [BOOT-M1M2] Guards the one-shot deferred load
+    /// (`loadPersistedValues` — main-confined, like every mutation here).
+    private var loadScheduled = false
+    /// Set by `save`/`clear` (main-confined). A deferred load that lands
+    /// AFTER a user write must never clobber it — the user's explicit
+    /// action always wins over a boot-time restore.
+    private var apiKeyWritten = false
+    /// Same rule for `saveModel`.
+    private var modelWritten = false
+
+    /// [BOOT-M1M2] ZERO storage IO in init (constant-time startup): the
+    /// key/model start at their no-value defaults and the persisted
+    /// values are restored by `loadPersistedValues(on:)`, which
+    /// `AppCoordinator.start()` calls once after first paint. No caller
+    /// observes a difference: `GeminiClient` reads `apiKey`/`model`
+    /// point-of-use (request time), and the deferred restore lands
+    /// within milliseconds of launch — the same values, a paint earlier.
     init(storage: EncryptedLocalStorage) {
         self.storage = storage
-        self.apiKey = Self.load(storage: storage)
-        self.model = Self.loadModel(storage: storage)
+        self.apiKey = nil
+        self.model = Self.defaultModel
+    }
+
+    /// [BOOT-M1M2] Deferred keychain restore. Call ONCE, on MAIN, after
+    /// first paint (`AppCoordinator.start()` — force-on-main-first
+    /// discipline: the kick runs on main because the published values
+    /// are main-confined; the LOADS run on the supplied queue, normally
+    /// the coordinator's boot queue, and the published assignments plus
+    /// `completion` hop back to main).
+    func loadPersistedValues(on queue: DispatchQueue,
+                             completion: (() -> Void)? = nil) {
+        assert(Thread.isMainThread,
+               "GeminiConfigStore.loadPersistedValues must be kicked on main")
+        guard !loadScheduled else { return }
+        loadScheduled = true
+        queue.async { [weak self] in
+            guard let self else { return }
+            let key = Self.load(storage: self.storage)
+            let storedModel = Self.loadModel(storage: self.storage)
+            DispatchQueue.main.async {
+                if !self.apiKeyWritten { self.apiKey = key }
+                if !self.modelWritten { self.model = storedModel }
+                completion?()
+            }
+        }
     }
 
     func saveModel(_ newModel: String) {
         let trimmed = newModel.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         _ = storage.write(key: Self.modelStorageKey, value: trimmed)
+        modelWritten = true
         model = trimmed
     }
 
@@ -53,11 +95,13 @@ final class GeminiConfigStore: ObservableObject {
             return
         }
         _ = storage.write(key: Self.storageKey, value: trimmed)
+        apiKeyWritten = true
         apiKey = trimmed
     }
 
     func clear() {
         _ = storage.delete(key: Self.storageKey)
+        apiKeyWritten = true
         apiKey = nil
     }
 

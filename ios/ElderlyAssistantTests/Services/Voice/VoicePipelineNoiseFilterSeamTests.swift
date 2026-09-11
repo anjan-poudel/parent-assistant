@@ -28,6 +28,7 @@ final class VoicePipelineNoiseFilterSeamTests: XCTestCase {
                          options: AVAudioSession.CategoryOptions) throws {}
         func setActive(_ active: Bool,
                        options: AVAudioSession.SetActiveOptions) throws {}
+        func setMode(_ mode: AVAudioSession.Mode) throws {}
         func setVoiceProcessingEnabled(_ enabled: Bool) throws {}
     }
 
@@ -348,6 +349,76 @@ final class VoicePipelineNoiseFilterSeamTests: XCTestCase {
         pipeline.beginNoiseFilterCapture()
         pipeline.endNoiseFilterCapture()
         // Must not crash, emit, or touch anything.
+    }
+
+    // MARK: - Wake-engine hot-swap ([STARTUP-R2])
+
+    /// Recording wake engine — starts/stop calls counted, `fireDetection`
+    /// triggers the handler the pipeline wired.
+    private final class FakeWakeWordEngine: WakeWordEngine {
+        let requiredSampleRate: Double = 16_000
+        let frameLength: Int = 512
+        var onDetection: (() -> Void)?
+        private(set) var startCalls = 0
+        private(set) var stopCalls = 0
+        var failStart = false
+
+        func start() throws {
+            if failStart { throw NSError(domain: "FakeWakeWordEngine", code: 1) }
+            startCalls += 1
+        }
+
+        func stop() { stopCalls += 1 }
+        func process(_ pcm: [Int16]) {}
+
+        func fireDetection() { onDetection?() }
+    }
+
+    func testSetWakeWordEngineSwapsInAndStartsWhenIdle() {
+        let (pipeline, recognizer, _, bus) = makePipeline()
+        pipeline.debugEnterIdleForTesting()
+
+        let real = FakeWakeWordEngine()
+        pipeline.setWakeWordEngine(real)
+
+        XCTAssertEqual(real.startCalls, 1,
+                       "the swapped-in engine starts against a live pipeline")
+        XCTAssertEqual(bus.events(ofType: "kws_hot_swap").last?.outcome,
+                       "success")
+
+        // The re-wired detection drives a real capture — the swap is a
+        // first-class wake path, not a display-only substitution.
+        real.fireDetection()
+        XCTAssertEqual(pipeline.state, .capturingCommand)
+        XCTAssertEqual(recognizer.startCalls, 1,
+                       "a detection on the swapped engine starts STT exactly like the original engine's")
+    }
+
+    func testSetWakeWordEngineDoesNotStartWhileStopped() {
+        let (pipeline, _, _, _) = makePipeline()
+        // Never debugEnterIdleForTesting — the pipeline stays .stopped,
+        // matching a swap landing after a recycle.
+        let real = FakeWakeWordEngine()
+        pipeline.setWakeWordEngine(real)
+        XCTAssertEqual(real.startCalls, 0,
+                       "no start against a stopped pipeline (the boot's start() owns that)")
+        // Detection is still wired for when the pipeline does start.
+        XCTAssertNotNil(real.onDetection)
+    }
+
+    func testSetWakeWordEngineReportsStartFailureHonestly() {
+        let (pipeline, _, _, bus) = makePipeline()
+        pipeline.debugEnterIdleForTesting()
+
+        let real = FakeWakeWordEngine()
+        real.failStart = true
+        pipeline.setWakeWordEngine(real)
+
+        let event = bus.events(ofType: "kws_hot_swap").last
+        XCTAssertEqual(event?.outcome, "failure")
+        XCTAssertEqual(event?.errorCode, "start_failed")
+        // The pipeline keeps its pre-swap behavior: .idle stays usable.
+        XCTAssertEqual(pipeline.state, .idle)
     }
 }
 

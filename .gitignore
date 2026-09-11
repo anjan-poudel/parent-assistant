@@ -41,8 +41,10 @@ ios/ElderlyAssistant/Resources/Models/tts/
 
 # Bundled wake-word KWS model — fetched via tools/fetch-kws-model.sh
 # (~17.6 MB tarball; not committed — see .ppn above for the artifact it
-# replaces)
-ios/ElderlyAssistant/Resources/Models/kws/
+# replaces). No trailing slash: the pattern must also ignore a SYMLINK
+# named kws (worktrees symlink it to the main checkout — a trailing
+# slash matches directories only and lets the symlink slip into commits).
+ios/ElderlyAssistant/Resources/Models/kws
 
 # Local secrets
 .env

@@ -4,10 +4,15 @@ import SwiftUI
 /// three native-calendar bridge cards that used to crowd the Medication
 /// schedule settings leaf, moved here wholesale (the meds leaf now edits
 /// medications and festival advance reminders alone):
-///   1. `calendarSyncCard`   — mirror the routine OUT to the Calendar app.
-///   2. `twoWayCard`         — mirror events live in a Sahayak calendar and
+///   1. `calendarDisplayCard`  — the Calendar display card (added with
+///                               the calendar-display task, 2026-09-09):
+///                               the default-calendar picker + the BS and
+///                               tithi overlay toggles behind the Home
+///                               top bar's date line.
+///   2. `calendarSyncCard`   — mirror the routine OUT to the Calendar app.
+///   3. `twoWayCard`         — mirror events live in a Sahayak calendar and
 ///                             native edits apply back (default off).
-///   3. `externalCalendarCard` — import native Calendar events / Reminders
+///   4. `externalCalendarCard` — import native Calendar events / Reminders
 ///                             items IN (in-app reminders + lists).
 /// Cards and their status captions are verbatim carries from the meds
 /// leaf — same coordinator calls, same intent-vs-OS-truth split each
@@ -18,11 +23,89 @@ struct CalendarSettingsView: View {
     var body: some View {
         LeafScreen(titleKey: "settings.calendar.title") {
             VStack(spacing: 12) {
+                calendarDisplayCard
                 calendarSyncCard
                 twoWayCard
                 externalCalendarCard
             }
         }
+    }
+
+    /// Calendar display (calendar-display task, 2026-09-09): the
+    /// default-calendar picker + overlay toggles that drive the Home top
+    /// bar's date line. Two big checkmark rows (the language picker's
+    /// house style — senior-friendly) and two independent toggles. The
+    /// app language seeded the FIRST-ever defaults (Nepali → BS primary
+    /// with both overlays ON; English → Gregorian with overlays OFF);
+    /// every choice here persists from then on and the language never
+    /// overrides it again.
+    private var calendarDisplayCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("calendarDisplay.sectionTitle")
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .foregroundStyle(DesignTokens.textSecondary)
+            VStack(spacing: 8) {
+                defaultCalendarRow(.gregorian)
+                defaultCalendarRow(.nepali)
+            }
+            Toggle(isOn: Binding(
+                get: { coordinator.showBSOverlay },
+                set: { coordinator.showBSOverlay = $0 }
+            )) {
+                Text("calendarDisplay.bsOverlay")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            Toggle(isOn: Binding(
+                get: { coordinator.showTithiOverlay },
+                set: { coordinator.showTithiOverlay = $0 }
+            )) {
+                Text("calendarDisplay.tithiOverlay")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            Text("calendarDisplay.offlineNote")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// One default-calendar row — big, checkmarked, bordered when
+    /// selected (the language picker's house style).
+    private func defaultCalendarRow(_ option: CalendarDisplayDefault) -> some View {
+        let isSelected = coordinator.calendarDisplayDefault == option
+        return Button {
+            coordinator.calendarDisplayDefault = option
+        } label: {
+            HStack {
+                Text(LocalizedStringKey(option.labelKey))
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 26))
+                        .foregroundStyle(DesignTokens.accent)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+            .background(DesignTokens.background)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
+                    .stroke(isSelected ? DesignTokens.accent : Color.clear, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     /// EventKit mirror toggle (v2 design §4.1) — requests calendar
@@ -38,12 +121,12 @@ struct CalendarSettingsView: View {
             )) {
                 Label("calendarSync.toggle", systemImage: "calendar")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
             }
             .tint(DesignTokens.accent)
             Text(statusText)
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -72,13 +155,13 @@ struct CalendarSettingsView: View {
             )) {
                 Label("calendar.twoWay.title", systemImage: "arrow.triangle.2.circlepath")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
             }
             .tint(DesignTokens.accent)
             .disabled(!coordinator.calendarSync.isEnabled)
             Text(twoWayStatusText)
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -117,7 +200,7 @@ struct CalendarSettingsView: View {
             )) {
                 Label("externalReminders.toggle", systemImage: "calendar.badge.clock")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundStyle(DesignTokens.textPrimary)
             }
             .tint(DesignTokens.accent)
 
@@ -125,7 +208,7 @@ struct CalendarSettingsView: View {
                 HStack {
                     Text("externalReminders.leadTitle")
                         .font(.system(size: DesignTokens.minBodyPointSize))
-                        .foregroundColor(DesignTokens.textPrimary)
+                        .foregroundStyle(DesignTokens.textPrimary)
                     Spacer()
                     // Setting the lead re-scans immediately (the
                     // service's didSet) so armed notifications follow.
@@ -135,23 +218,24 @@ struct CalendarSettingsView: View {
                     ), in: 0...ExternalCalendarService.maxLeadMinutes) {
                         Text(BikramSambat.devanagariDigits(coordinator.externalCalendar.leadMinutes))
                             .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                            .foregroundColor(DesignTokens.accent)
+                            .foregroundStyle(DesignTokens.accent)
                     }
                 }
                 .padding(14)
-                .frame(height: 56)
+                .frame(minHeight: 56)
+                .fixedSize(horizontal: false, vertical: true)
                 .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
 
                 Text(L10n.fmt("externalReminders.leadHint", locale: coordinator.activeLocale,
                               BikramSambat.devanagariDigits(coordinator.externalCalendar.leadMinutes)))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.textSecondary)
             }
 
             Text(externalStatusText)
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundStyle(DesignTokens.textSecondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

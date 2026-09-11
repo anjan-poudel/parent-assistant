@@ -254,6 +254,28 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// outcome-returning contract as `requestAlarmOff`; the router
     /// speaks the honest "snoozed until <spoken time>" line on success.
     func requestAlarmSnooze(minutes: Int) -> AlarmSnoozeOutcome
+
+    /// [HOME-TIMER-CHIP] (2026-09-11) Voice timer CANCEL ("cancel the
+    /// timer", "stop the timer", "टाइमर बन्द गर", "टाइमर रोक"):
+    /// cancels the NEAREST running timer (soonest deadline) through the
+    /// existing cancel path — persist removal, cancel the pending
+    /// notification and, when system-managed, the AlarmKit timer — and
+    /// returns the honest outcome so the router speaks the confirmation
+    /// ("Timer cancelled." / "टाइमर बन्द भयो।") or the "no timers
+    /// running" / failure fallback. SYNCHRONOUS (cancellation needs no
+    /// permission round-trip), main-confined like the service. Same
+    /// requirement-with-extension-default pattern as `requestAlarmOff`.
+    func requestTimerCancel() -> TimerCancelOutcome
+
+    /// [ALARMKIT-ALARMS] (2026-09-10) The honest denial line when an
+    /// alarm-set hits a permission denial — backend-specific copy:
+    /// AlarmKit authorization on iOS 26+ (`alarmAlarmKit.permissionDenied`),
+    /// notification permission before (`alarms.permissionDenied`). Same
+    /// requirement-with-extension-default pattern as the alarm members
+    /// above: the router holds the coordinator as a protocol reference,
+    /// so an extension-only member would bind statically and
+    /// `AppCoordinator`'s backend-aware key could never be reached.
+    var alarmPermissionDeniedKey: String { get }
     /// [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1: fires the
     /// proactive morning briefing ("read me my briefing"). The briefing
     /// speaks itself through the shell's speak queue (once per calendar
@@ -307,6 +329,18 @@ extension VoiceCommandCoordinating {
     // under test) makes the stage do anything.
     func requestAlarmOff() -> AlarmOffOutcome { .noAlarm }
     func requestAlarmSnooze(minutes: Int) -> AlarmSnoozeOutcome { .noAlarm }
+    // [HOME-TIMER-CHIP] (2026-09-11) Inert default — a conformer that
+    // does not opt in (mocks/doubles) reports .noActiveTimer, and the
+    // router stage speaks the honest "no timers running" line. Only a
+    // coordinator that explicitly implements the member
+    // (AppCoordinator, and the scripted mock under test) cancels
+    // anything.
+    func requestTimerCancel() -> TimerCancelOutcome { .noActiveTimer }
+    // [ALARMKIT-ALARMS] (2026-09-10) Inert default — a conformer that
+    // does not opt in (every mock/double) keeps the historical
+    // notification-permission denial line. `AppCoordinator` overrides it
+    // with the backend-aware key.
+    var alarmPermissionDeniedKey: String { "alarms.permissionDenied" }
     // [MORNING-BRIEFING] (2026-09-07) Inert default — a conformer that
     // does not opt in (every mock/double across app and test target)
     // never fires a briefing, so the deterministic ladder stage falls
@@ -349,7 +383,21 @@ final class CommandRouter {
     private weak var coordinator: VoiceCommandCoordinating?
     private let observabilityBus: ObservabilityBus
     private let speaker: Speaker?
+    /// [VOICE-ACK] Serial FIFO lane for interactive reply speech — built
+    /// lazily on the first speak so tests and call sites that never speak
+    /// pay nothing. See `ReplySpeakLane` for the ordering contract.
+    private var speakLane: ReplySpeakLane?
     private let interpreter: CommandInterpreter
+    /// [TURN-TIMING] Turn-scoped stage tracer (nil = timing off — tests
+    /// and any construction site that does not opt in).
+    private let turnTracer: VoiceTurnLatencyTracer?
+    /// [LAT-M2] The ack fast lane: plays the pre-synthesized ack WAV
+    /// directly instead of routing the ack through TTS synthesis. Nil
+    /// (the default) = dormant — `speakPreAck` behaves byte-identically
+    /// to the pre-fast-lane path (synthesis through the lane, no extra
+    /// events), so every pre-existing construction site and test keeps
+    /// its behavior.
+    private let preAckPlayer: PreAckPlaying?
 
     /// [REST-DIP-FIX] (2026-09-08) Turn-scoped "async reply pending"
     /// token. Set while `route()` has handed the turn to an ASYNC
@@ -446,11 +494,15 @@ final class CommandRouter {
          localToolLogStore: LocalToolLogStore? = nil,
          youtubeConfigStore: YouTubeConfigStore? = nil,
          youtubeTransport: LocalToolTransport? = nil,
-         youtubeLinkOpener: CallLinkOpening? = nil) {
+         youtubeLinkOpener: CallLinkOpening? = nil,
+         preAckPlayer: PreAckPlaying? = nil,
+         turnTracer: VoiceTurnLatencyTracer? = nil) {
         self.coordinator = coordinator
         self.observabilityBus = observabilityBus
         self.speaker = speaker
         self.interpreter = interpreter
+        self.turnTracer = turnTracer
+        self.preAckPlayer = preAckPlayer
         self.pluginRegistry = pluginRegistry
         self.geminiClient = geminiClient
         self.searchConfigStore = searchConfigStore
@@ -462,6 +514,13 @@ final class CommandRouter {
         self.youtubeConfigStore = youtubeConfigStore
         self.youtubeTransport = youtubeTransport
         self.youtubeLinkOpener = youtubeLinkOpener
+        // [LAT-M2] A fast-lane ack's playback settled (finished, decode
+        // error, or cancelled) — the same per-utterance speak
+        // bookkeeping the lane's tail fires for synthesized utterances.
+        preAckPlayer?.onPlaybackFinished = { [weak self] in
+            self?.turnTracer?.noteSpeakFinished()
+            self?.coordinator?.noteSpeakingEnded()
+        }
     }
 
     @discardableResult
@@ -639,6 +698,9 @@ final class CommandRouter {
         switch DirectionsRoute.decide(transcript: raw,
                                       candidates: coordinator?.navigationCandidates ?? []) {
         case .navigate(let target):
+            // [VOICE-ACK] Navigation starts the map-surface chain (a beat
+            // before the coordinator's execution speech) — ack first.
+            speakPreAck()
             coordinator?.requestNavigation(to: target)
             emit(eventType: "directions_command", outcome: "success")
             return .navigationRequested
@@ -683,11 +745,12 @@ final class CommandRouter {
         // is a command, never small talk ("नमस्ते, ५ मिनेटको टाइमर लगाऊ"
         // must set a timer, not get a greeting). The parser vetoes
         // questions ("when is my alarm?", "कति बजेको अलार्म?"),
-        // cancellations ("cancel the timer"), third-person wake requests
-        // ("wake my grandson", "छोरालाई उठाउनुहोस्") and countdown
-        // phrasings ("alarm in 5 minutes" — a countdown is a TIMER,
-        // which parses FIRST below). Anything vetoed or unparseable
-        // falls through this stage unchanged.
+        // cancellations ("cancel the timer") and third-person wake
+        // requests ("wake my grandson", "छोरालाई उठाउनुहोस्"); countdown
+        // phrasings ("alarm in 5 minutes", "पांच मिनुटको अलार्म लगाऊ")
+        // are TIMERs and the timer parse claims them FIRST below
+        // (2026-09-10 doctrine extension). Anything vetoed or
+        // unparseable falls through this stage unchanged.
         //
         // The stage only PARSES and hands off: the coordinator owns the
         // permission round-trip (point-of-use requestAuthorization), the
@@ -695,12 +758,16 @@ final class CommandRouter {
         // stage speaks the honest line — the confirmation only once the
         // item is stored + armed, the denial fallback when notifications
         // are off.
-        if let timer = AlarmTimerCommandParser.parseTimer(raw) {
+        // [NUMBER-WORDS] the active locale selects the number-word
+        // lexicon the parsers normalize with (coordinator, as everywhere
+        // else in this file; the persisted app language as the fallback).
+        let stageLocale = coordinator?.activeLocale ?? AppLanguage.persisted().locale
+        if let timer = AlarmTimerCommandParser.parseTimer(raw, locale: stageLocale) {
             handleTimerStartCommand(durationSeconds: timer.durationSeconds,
                                     label: timer.label)
             return .unrecognised(transcript: raw)
         }
-        if let alarm = AlarmTimerCommandParser.parseAlarm(raw) {
+        if let alarm = AlarmTimerCommandParser.parseAlarm(raw, locale: stageLocale) {
             handleAlarmSetCommand(at: alarm.time, label: alarm.label)
             return .unrecognised(transcript: raw)
         }
@@ -714,12 +781,27 @@ final class CommandRouter {
         // target (the most recently rung enabled alarm) and returns the
         // honest outcome this stage speaks. SYNCHRONOUS — no permission
         // round-trip, so the reply is committed inside `route()` itself.
-        if AlarmTimerCommandParser.parseAlarmOff(raw) {
+        if AlarmTimerCommandParser.parseAlarmOff(raw, locale: stageLocale) {
             handleAlarmOffCommand()
             return .unrecognised(transcript: raw)
         }
-        if let snoozeMinutes = AlarmTimerCommandParser.parseAlarmSnooze(raw) {
+        if let snoozeMinutes = AlarmTimerCommandParser.parseAlarmSnooze(raw, locale: stageLocale) {
             handleAlarmSnoozeCommand(minutes: snoozeMinutes)
+            return .unrecognised(transcript: raw)
+        }
+        // [HOME-TIMER-CHIP] (2026-09-11) Timer CANCEL branch — checked
+        // after the set + off + snooze parses (a set command wins first)
+        // and before the briefing stage + topic table. Only the
+        // sanctioned shapes parse (see
+        // `AlarmTimerCommandParser.parseTimerCancel`); duration- or
+        // clock-qualified cancellations ("cancel the 5 minute timer")
+        // fall through unchanged — the cancel branch must not guess
+        // which timer. The stage only PARSES and hands off; the
+        // coordinator cancels the NEAREST active timer and returns the
+        // honest outcome this stage speaks. SYNCHRONOUS — no permission
+        // round-trip, so the reply is committed inside `route()` itself.
+        if AlarmTimerCommandParser.parseTimerCancel(raw, locale: stageLocale) {
+            handleTimerCancelCommand()
             return .unrecognised(transcript: raw)
         }
 
@@ -733,6 +815,9 @@ final class CommandRouter {
         // the same `.unrecognised(transcript:)` the topic/calculator
         // stages return once they have already spoken.
         if Self.briefingPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
+            // [VOICE-ACK] The digest is composed then spoken line by line
+            // — ack before the composition work.
+            speakPreAck()
             coordinator?.fireMorningBriefing()
             emit(eventType: "morning_briefing_command", outcome: "success")
             return .unrecognised(transcript: raw)
@@ -768,6 +853,9 @@ final class CommandRouter {
         // the turn with the same `.unrecognised(transcript:)` the
         // topic/calculator stages return once they have already spoken.
         if Self.newsPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
+            // [VOICE-ACK] The digest fetches + composes before speech —
+            // ack first, the reader owns every line after.
+            speakPreAck()
             coordinator?.fireNewsReader()
             emit(eventType: "news_reader_command", outcome: "success")
             return .unrecognised(transcript: raw)
@@ -800,6 +888,49 @@ final class CommandRouter {
         if case .play(let query) = YouTubeRoute.decide(transcript: raw) {
             fireYouTubePlay(query: query)
             return .unrecognised(transcript: raw)
+        }
+
+        // [INTENT-KEYWORDS] (2026-09-11) Relaxed keyword co-occurrence
+        // stage: the strict stages above validated FORM (full phrases,
+        // enumerated verb families, marker adjacency). When they all
+        // declined, resolve intent from keyword CO-OCCURRENCE instead —
+        // the small `KeywordIntentRule` table of SAFE domains only
+        // (news digest, YouTube play): every required keyword group must
+        // co-occur anywhere in the utterance, no grammar validation.
+        //
+        // Placement: AFTER every strict deterministic stage (safety net
+        // + confirmation flow + contact search + directions +
+        // alarms/timers + briefing + strict news + strict YouTube) and
+        // BEFORE the topic table + interpreter — an emergency / med-ack
+        // / yes-no / alarm-timer utterance can never reach this stage,
+        // and a keyword-resolved request is never answered as small
+        // talk. Rule order inside the table mirrors the strict ladder
+        // (news before YouTube), so a both-sets utterance resolves as
+        // the strict ordering would.
+        //
+        // The table only widens the GATE — execution stays the strict
+        // stage's: news hands off to the reader exactly like the strict
+        // stage (ack first, the reader owns every line), YouTube still
+        // requires a survivable non-marker query from `YouTubeRoute`'s
+        // extraction and fires the same honest play/search path. Every
+        // relaxed claim is observable: `intent_keyword_match` (domain,
+        // matched keys — fixed rule vocabulary, never user text).
+        if let relaxed = KeywordIntentRule.match(transcript: preText) {
+            switch relaxed.domain {
+            case .news:
+                emitIntentKeywordMatch(relaxed)
+                // [VOICE-ACK] Same hand-off as the strict news stage —
+                // ack first, the reader owns every line after.
+                speakPreAck()
+                coordinator?.fireNewsReader()
+                emit(eventType: "news_reader_command", outcome: "success")
+                return .unrecognised(transcript: raw)
+            case .youtube:
+                guard let query = YouTubeRoute.extractQuery(from: preText) else { break }
+                emitIntentKeywordMatch(relaxed)
+                fireYouTubePlay(query: query)
+                return .unrecognised(transcript: raw)
+            }
         }
 
         // [NO-GIBBERISH] Deterministic TOPIC PRE-ANSWERS (2026-09-07): the
@@ -927,8 +1058,19 @@ final class CommandRouter {
             // its return to idle until the completion below resolves the
             // token — AFTER the reply speech was committed.
             markTurnReplyPending()
+            // [VOICE-ACK] The LLM round-trip is the longest wait — the
+            // pre-ack tells the user the request was heard BEFORE the
+            // model is consulted.
+            speakPreAck()
+            // [TURN-TIMING] The LLM round-trip starts here — on-device
+            // llama.cpp or the cloud interpreter (whose collapsed call
+            // may have resolved from the ASR preparse slot, making this
+            // span ~0 ms — both are honest).
+            turnTracer?.mark("llm_start")
             interpreter.interpret(transcript: raw, context: context) { [weak self] command in
                 guard let self else { return }
+                // [TURN-TIMING] The model answered (or abstained).
+                self.turnTracer?.mark("llm_done")
                 if let command = command {
                     // REPHRASE band (spec §4, decision #6): a mid-band
                     // tier-`free` command becomes a yes/no question rather
@@ -954,6 +1096,9 @@ final class CommandRouter {
                 // This runs AFTER the commit, so the reply's speech-start
                 // hop is enqueued before the pipeline's deferred idle hop.
                 self.resolveTurnReplyPending()
+                // [TURN-TIMING] Dispatch resolved — the tracer finalizes
+                // now or once the reply speech finishes.
+                self.turnTracer?.endTurn()
             }
             // We can't return a synchronous result once the LLM path fires;
             // report the transcript as "handled asynchronously".
@@ -962,6 +1107,25 @@ final class CommandRouter {
         }
 
         return routeKeywordRemainder(raw)
+    }
+
+    /// [INTENT-KEYWORDS] (2026-09-11) Observability for a fired relaxed
+    /// rule — `intent_keyword_match` carries the claimed domain and the
+    /// matched keyword keys (fixed vocabulary from the rule table,
+    /// never user text) so every relaxed claim is auditable, exactly
+    /// like the other router events.
+    private func emitIntentKeywordMatch(_ match: KeywordIntentRule.Match) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "intent_keyword_match",
+            durationMs: nil,
+            outcome: "success",
+            errorCode: nil,
+            metadata: [
+                "domain": match.domain.rawValue,
+                "matched_keys": match.matchedKeys.joined(separator: ",")
+            ]
+        ))
     }
 
     // MARK: - [ALARMS-TIMERS] Alarm + timer command handlers
@@ -980,11 +1144,22 @@ final class CommandRouter {
             speakWithVisibleOutcome(key: "alarms.setFailed")
             return
         }
+        // [VOICE-ACK] Arming takes a permission round-trip + persistence —
+        // ack before the wait, the confirmation follows through the lane.
+        speakPreAck()
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         let timeText = formattedTime(
             Calendar.current.dateComponents([.hour, .minute], from: time),
             locale: locale
         )
+        // [REGRESSION-AUDIT] (2026-09-10) The permission round-trip is an
+        // ASYNC dispatch — mark the turn reply-pending exactly like the
+        // LLM path so the pipeline holds idle until the reply commits
+        // (without this the pipeline resumed wake listening while the
+        // notification dialog was still up, and the reply speech could
+        // collide with a new capture). Broken since the alarms stage
+        // landed (3b6c9a9) — see testAlarmRoutingSurvivesTimingHooks.
+        markTurnReplyPending()
         Task { [weak self] in
             guard let self else { return }
             let outcome = await self.coordinator?.requestAlarmSet(at: time, label: label)
@@ -997,7 +1172,11 @@ final class CommandRouter {
                 self.speak(text: text, locale: locale)
             case .permissionDenied:
                 self.emitAlarmTimers(eventType: "alarm_set", outcome: "permission_denied")
-                self.speakWithVisibleOutcome(key: "alarms.permissionDenied")
+                // [ALARMKIT-ALARMS] Backend-specific honest copy: the
+                // AlarmKit permission line on iOS 26+, the notification
+                // line before.
+                self.speakWithVisibleOutcome(
+                    key: self.coordinator?.alarmPermissionDeniedKey ?? "alarms.permissionDenied")
             case .atCapacity:
                 self.emitAlarmTimers(eventType: "alarm_set", outcome: "at_capacity")
                 self.speakWithVisibleOutcome(key: "alarms.capacity")
@@ -1005,6 +1184,11 @@ final class CommandRouter {
                 self.emitAlarmTimers(eventType: "alarm_set", outcome: "failed")
                 self.speakWithVisibleOutcome(key: "alarms.setFailed")
             }
+            // [REGRESSION-AUDIT] Resolve AFTER the commit (speech-start
+            // hop precedes the pipeline's deferred idle hop) and finalize
+            // the turn tracer, mirroring the LLM dispatch completion.
+            self.resolveTurnReplyPending()
+            self.turnTracer?.endTurn()
         }
     }
 
@@ -1016,7 +1200,12 @@ final class CommandRouter {
             speakWithVisibleOutcome(key: "timers.setFailed")
             return
         }
+        // [VOICE-ACK] Same arming round-trip as alarm set — ack first.
+        speakPreAck()
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        // [REGRESSION-AUDIT] (2026-09-10) Same reply-pending hold as the
+        // alarm set path — see handleAlarmSetCommand.
+        markTurnReplyPending()
         Task { [weak self] in
             guard let self else { return }
             let outcome = await self.coordinator?.requestTimerStart(
@@ -1041,6 +1230,10 @@ final class CommandRouter {
                 self.emitAlarmTimers(eventType: "timer_started", outcome: "failed")
                 self.speakWithVisibleOutcome(key: "timers.setFailed")
             }
+            // [REGRESSION-AUDIT] Resolve after the commit + finalize the
+            // tracer, mirroring the alarm set path.
+            self.resolveTurnReplyPending()
+            self.turnTracer?.endTurn()
         }
     }
 
@@ -1098,6 +1291,35 @@ final class CommandRouter {
         case .failed:
             emitAlarmTimers(eventType: "alarm_snoozed", outcome: "failed")
             speakWithVisibleOutcome(key: "alarms.snoozeFailed")
+        }
+    }
+
+    /// [HOME-TIMER-CHIP] (2026-09-11) Voice timer CANCEL handler — same
+    /// synchronous contract as the OFF handler: the coordinator cancels
+    /// the NEAREST active timer and returns the outcome this handler
+    /// speaks. `.cancelled` confirms ("Timer cancelled." / "टाइमर बन्द
+    /// भयो।"), `.noActiveTimer` speaks the honest "no timers running"
+    /// line, `.failed` the honest fallback. Observability is emitted at
+    /// resolution (component "alarms_timers", event "timer_cancel"),
+    /// never before.
+    private func handleTimerCancelCommand() {
+        guard coordinator != nil else {
+            speakWithVisibleOutcome(key: "timers.cancelFailed")
+            return
+        }
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        switch coordinator?.requestTimerCancel() ?? .noActiveTimer {
+        case .cancelled:
+            emitAlarmTimers(eventType: "timer_cancel", outcome: "success")
+            let text = L10n.str("timers.cancelled", locale: locale)
+            coordinator?.noteGenericReply(text)
+            speak(text: text, locale: locale)
+        case .noActiveTimer:
+            emitAlarmTimers(eventType: "timer_cancel", outcome: "no_active_timer")
+            speakWithVisibleOutcome(key: "timers.none")
+        case .failed:
+            emitAlarmTimers(eventType: "timer_cancel", outcome: "failed")
+            speakWithVisibleOutcome(key: "timers.cancelFailed")
         }
     }
 
@@ -1650,6 +1872,9 @@ final class CommandRouter {
     ///   fabricated title, never a dead end.
     private func fireYouTubePlay(query: String) {
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        // [VOICE-ACK] The lookup/deeplink open takes a beat — ack before
+        // the attempt, the outcome line follows through the lane.
+        speakPreAck(locale: locale)
         let attemptStartedAt = Date()
 
         // Keyless path — no network at all; the deeplink IS the
@@ -1834,10 +2059,14 @@ final class CommandRouter {
             coordinator?.noteAssistantSpoke(line)
         }
         coordinator?.noteSpeakingStarted()
+        // [TURN-TIMING] Same speak bookends as `speak(text:)` — one
+        // queued entry for the whole sequence.
+        turnTracer?.noteSpeakQueued()
         Task {
             for line in lines {
                 await speaker.speak(line, locale: locale)
             }
+            self.turnTracer?.noteSpeakFinished()
             coordinator?.noteSpeakingEnded()
         }
     }
@@ -2250,6 +2479,8 @@ final class CommandRouter {
 
     /// Speaks dynamic text (LLM-generated replies, scheduler challenge
     /// prompts) — no catalog lookup, already in the right language.
+    /// [VOICE-ACK] Commits through the serial `ReplySpeakLane`, so a
+    /// pre-acknowledgment and a later result reply drain in commit order.
     private func speak(text: String, locale: Locale? = nil) {
         #if DEBUG
         print("[command_router][DEBUG] speak() called, speaker=\(speaker != nil), text=\"\(text)\"")
@@ -2261,15 +2492,78 @@ final class CommandRouter {
             return
         }
         let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let lane = speakLane ?? {
+            let newLane = ReplySpeakLane(speaker: speaker)
+            speakLane = newLane
+            return newLane
+        }()
         coordinator?.noteAssistantSpoke(text)
         coordinator?.noteSpeakingStarted()
+        // [TURN-TIMING] The reply utterance is handed to the speaker.
+        turnTracer?.noteSpeakQueued()
         Task {
-            await speaker.speak(text, locale: locale)
+            // [VOICE-ACK] Await THIS utterance's turn in the lane — the
+            // speak-finished marks below keep their exact per-utterance
+            // semantics (they fire when this speech ends, not when a
+            // later queued utterance does).
+            await lane.enqueue(text, locale: locale)
             #if DEBUG
             print("[command_router][DEBUG] speaker.speak() returned (finished or cancelled)")
             #endif
+            // [TURN-TIMING] Reply speech finished — the last one
+            // finalizes the turn.
+            self.turnTracer?.noteSpeakFinished()
             coordinator?.noteSpeakingEnded()
         }
+    }
+
+    /// [VOICE-ACK] Speaks the next rotating pre-acknowledgment variant
+    /// ("एक छिन…" / "one moment…") for a stage whose reply will take a
+    /// beat — the LLM round-trip, alarm/timer arming, YouTube, briefing,
+    /// news, navigation. Committed BEFORE the slow work starts so the
+    /// lane plays it ahead of the result. Instant-answer stages
+    /// (greetings, time/date/weather pre-answers, calculator) and
+    /// confirmation challenges never call this — they already speak
+    /// immediately. Empty catalog text is a silent no-op (same guard as
+    /// `speak(key:)`).
+    ///
+    /// [LAT-M2] Ack fast lane: when the pre-synthesized cache is warm
+    /// the ack plays the cached WAV directly — the ack is the one
+    /// utterance whose start latency the user feels, so it must not pay
+    /// synthesis (target: `router_done → speak_queued` ≤ 200 ms).
+    /// Wording, variant rotation, and stage selection are UNCHANGED —
+    /// only the audio path differs. The ack keeps its full speak
+    /// bookkeeping (assistant-spoke note, speaking state, turn-tracer
+    /// speak marks — the finished side arrives from the player's
+    /// `onPlaybackFinished`). A miss falls back to the pre-task
+    /// synthesis path with an honest `ack_cache_miss` event; with no
+    /// player installed (nil seam — tests, dormant wiring) the legacy
+    /// path runs byte-identically, no events.
+    private var preAckCounter = 0
+    private func speakPreAck(locale: Locale? = nil) {
+        let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let variant = preAckCounter % 3 + 1
+        preAckCounter += 1
+        let key = "voiceAck.moment\(variant)"
+        let text = L10n.str(key, locale: locale)
+        guard !text.isEmpty else { return }
+        if let preAckPlayer,
+           preAckPlayer.playCachedAck(variant: variant, locale: locale) {
+            // [LAT-M2] Cache hit — the WAV is already handed to the
+            // player (no synthesis, no lane wait). Same synchronous
+            // notes, in the same order, as `speak(text:)` commits.
+            coordinator?.noteAssistantSpoke(text)
+            coordinator?.noteSpeakingStarted()
+            turnTracer?.noteSpeakQueued()
+            return
+        }
+        if preAckPlayer != nil {
+            // [LAT-M2] Honest miss: the cache wasn't ready (never built
+            // for this locale/voice, evicted, or the player failed) —
+            // the existing synthesis path speaks the ack.
+            emit(eventType: "ack_cache_miss", outcome: "miss")
+        }
+        speak(text: text, locale: locale)
     }
 
     // MARK: - Notifications (localized, no raw transcripts — C9)

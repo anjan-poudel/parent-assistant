@@ -119,6 +119,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         // sees the alarm even though the notification is gone.
         let reloaded = AlarmTimersService(store: store, scheduler: scheduler,
                                           observabilityBus: bus, now: fixedNow)
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        reloaded.restorePersistedState()
         XCTAssertEqual(reloaded.alarms, service.alarms)
 
         let event = lastEvent(service)
@@ -168,6 +171,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         }
         XCTAssertTrue(store.saveAlarms(seeds))
         let service = makeService()
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        service.restorePersistedState()
 
         let outcome = await service.addAlarm(at: date(2026, 9, 7, 20, 0), label: nil)
 
@@ -191,6 +197,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         // Persisted — a fresh service over the same storage sees it off.
         let reloaded = AlarmTimersService(store: store, scheduler: scheduler,
                                           observabilityBus: bus, now: fixedNow)
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        reloaded.restorePersistedState()
         XCTAssertEqual(reloaded.alarms[0].isEnabled, false)
 
         service.setAlarmEnabled(id: alarmID, enabled: true)
@@ -257,6 +266,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         // Persisted — a fresh service over the same storage sees it off.
         let reloaded = AlarmTimersService(store: store, scheduler: scheduler,
                                           observabilityBus: bus, now: fixedNow)
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        reloaded.restorePersistedState()
         XCTAssertEqual(reloaded.alarms[0].isEnabled, false)
         XCTAssertNil(reloaded.alarms[0].snoozedUntil)
     }
@@ -342,6 +354,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         // Persisted BEFORE arming — a fresh service sees the marker.
         let reloaded = AlarmTimersService(store: store, scheduler: scheduler,
                                           observabilityBus: bus, now: fixedNow)
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        reloaded.restorePersistedState()
         XCTAssertEqual(reloaded.alarms[0].snoozedUntil, date(2026, 9, 7, 10, 10))
         XCTAssertEqual(lastEvent(service)?.eventType, "alarm_snoozed")
         XCTAssertEqual(lastEvent(service)?.outcome, "success")
@@ -545,6 +560,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         }
         XCTAssertTrue(store.saveTimers(seeds))
         let service = makeService()
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        service.restorePersistedState()
         XCTAssertEqual(service.activeTimers.count, AlarmTimersStore.maxTimers)
 
         let outcome = await service.startTimer(durationSeconds: 300, label: nil)
@@ -559,13 +577,76 @@ final class AlarmTimersServiceTests: XCTestCase {
         _ = await service.startTimer(durationSeconds: 300, label: nil)
         let timerID = service.timers[0].id
 
-        service.cancelTimer(id: timerID)
+        let removed = service.cancelTimer(id: timerID)
 
+        XCTAssertTrue(removed)
         XCTAssertTrue(service.timers.isEmpty)
         XCTAssertTrue(service.activeTimers.isEmpty)
         XCTAssertTrue(center.removedIdentifiers.contains(AlarmScheduler.timerRequestID(timerID)))
         XCTAssertEqual(store.loadTimers(), [])
         XCTAssertEqual(lastEvent(service)?.eventType, "timer_cancelled")
+    }
+
+    // MARK: - [HOME-TIMER-CHIP] cancelNearestTimer (2026-09-11)
+
+    func testCancelNearestTimerCancelsTheSoonestRunningTimer() async {
+        let service = makeService()
+        let near = TimerItem(endsAt: nowDate.addingTimeInterval(120), label: "near")
+        let far = TimerItem(endsAt: nowDate.addingTimeInterval(600), label: "far")
+        XCTAssertTrue(store.saveTimers([near, far]))
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        service.restorePersistedState()
+
+        let outcome = service.cancelNearestTimer()
+
+        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertEqual(service.timers.map(\.id), [far.id], "the nearest row leaves, the rest stay")
+        XCTAssertEqual(service.timers.first?.label, "far")
+        XCTAssertTrue(center.removedIdentifiers.contains(AlarmScheduler.timerRequestID(near.id)),
+                      "the pending completion notification is cancelled")
+        XCTAssertEqual(store.loadTimers().map(\.id), [far.id], "the removal persists")
+        XCTAssertEqual(lastEvent(service)?.eventType, "timer_cancelled")
+    }
+
+    func testCancelNearestTimerWithNothingRunningReportsNoActiveTimer() {
+        let service = makeService()
+
+        let outcome = service.cancelNearestTimer()
+
+        XCTAssertEqual(outcome, .noActiveTimer)
+        XCTAssertTrue(center.removedIdentifiers.isEmpty, "nothing to cancel — nothing cancelled")
+    }
+
+    func testCancelNearestTimerSkipsFinishedRows() {
+        // A finished row within its grace window (deadline passed, not
+        // yet expired) must never be the cancel target — the NEAREST
+        // RUNNING timer wins.
+        let service = makeService()
+        let finished = TimerItem(endsAt: nowDate.addingTimeInterval(-30), label: "finished")
+        let live = TimerItem(endsAt: nowDate.addingTimeInterval(300), label: "live")
+        XCTAssertTrue(store.saveTimers([finished, live]))
+        service.restorePersistedState()
+
+        let outcome = service.cancelNearestTimer()
+
+        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertEqual(service.timers.map(\.id), [finished.id],
+                       "the live row leaves; the finished row stays for its grace sweep")
+    }
+
+    func testCancelNearestTimerPersistenceFailureReportsFailed() {
+        let service = makeService()
+        let near = TimerItem(endsAt: nowDate.addingTimeInterval(120))
+        XCTAssertTrue(store.saveTimers([near]))
+        service.restorePersistedState()
+        storage.shouldFailWrite = true
+
+        let outcome = service.cancelNearestTimer()
+
+        XCTAssertEqual(outcome, .failed)
+        XCTAssertEqual(service.timers.map(\.id), [near.id], "a failed persist cancels nothing")
+        XCTAssertTrue(center.removedIdentifiers.isEmpty)
     }
 
     func testExpireTimerMarksInactiveAndPruneSweeps() async {
@@ -580,6 +661,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         // Persisted as finished; the prune sweep drops the row entirely.
         let reloaded = AlarmTimersService(store: store, scheduler: scheduler,
                                           observabilityBus: bus, now: fixedNow)
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        reloaded.restorePersistedState()
         XCTAssertEqual(reloaded.timers.count, 1)
         XCTAssertFalse(reloaded.timers[0].isActive)
         XCTAssertEqual(lastEvent(service)?.eventType, "timer_finished")
@@ -598,6 +682,9 @@ final class AlarmTimersServiceTests: XCTestCase {
         ]
         XCTAssertTrue(store.saveTimers(seeds))
         let service = makeService()
+        // [BOOT-M1M2] init no longer loads (constant-time startup) —
+        // restore the persisted lists explicitly, like the launch path.
+        service.restorePersistedState()
         XCTAssertEqual(service.activeTimers.count, 1)
         XCTAssertEqual(service.activeTimers[0].label, "live")
 

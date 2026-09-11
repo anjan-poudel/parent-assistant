@@ -28,7 +28,7 @@ struct IntentLogReviewView: View {
                                 }
                                 .font(.system(size: DesignTokens.minCaptionPointSize,
                                               weight: .semibold))
-                                .foregroundColor(DesignTokens.accent)
+                                .foregroundStyle(DesignTokens.accent)
                                 .frame(minHeight: DesignTokens.minTapTargetSize)
                             }
                         }
@@ -42,7 +42,7 @@ struct IntentLogReviewView: View {
                             }
                             .font(.system(size: DesignTokens.minCaptionPointSize,
                                           weight: .semibold))
-                            .foregroundColor(DesignTokens.stateError)
+                            .foregroundStyle(DesignTokens.stateError)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
                         }
                     }
@@ -51,10 +51,10 @@ struct IntentLogReviewView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "checklist")
                             .font(.system(size: 44))
-                            .foregroundColor(DesignTokens.textSecondary)
+                            .foregroundStyle(DesignTokens.textSecondary)
                         Text(L10n.str("intentLog.empty", locale: coordinator.activeLocale))
                             .font(.system(size: DesignTokens.minBodyPointSize))
-                            .foregroundColor(DesignTokens.textSecondary)
+                            .foregroundStyle(DesignTokens.textSecondary)
                             .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity, minHeight: 320)
@@ -63,10 +63,10 @@ struct IntentLogReviewView: View {
                         ForEach(records) { record in
                             HStack(spacing: 10) {
                                 Image(systemName: icon(for: record))
-                                    .foregroundColor(DesignTokens.accent)
+                                    .foregroundStyle(DesignTokens.accent)
                                 Text(summary(for: record))
                                     .font(.system(size: DesignTokens.minBodyPointSize))
-                                    .foregroundColor(DesignTokens.textPrimary)
+                                    .foregroundStyle(DesignTokens.textPrimary)
                                     .multilineTextAlignment(.leading)
                                 Spacer(minLength: 0)
                             }

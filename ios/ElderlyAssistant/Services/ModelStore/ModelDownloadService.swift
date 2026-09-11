@@ -141,6 +141,29 @@ final class ModelDownloadService: NSObject, ObservableObject {
         update(id, .notStarted)
     }
 
+    // MARK: - Bundled (no-network) installs
+
+    /// [BOOT-REVIEW P1-5] Reports the byte progress of an app-bundled
+    /// artifact being copied into place by `ModelStore.installBundledModel`.
+    /// The published shape is IDENTICAL to a download's, so the
+    /// model-specific UI (Settings → AI मोडेल rows) renders the same
+    /// determinate bar + "received / total" text with no extra plumbing —
+    /// the user sees real numbers for a copy exactly as for a download.
+    /// No network task is registered: `cancel(_:)` cannot interrupt a copy
+    /// (there is nothing to resume, and the copy is a local disk op).
+    func reportBundledInstallProgress(_ id: ModelID, received: Int64,
+                                      totalBytes: Int64) {
+        update(id, .downloading(bytesReceived: received, totalBytes: totalBytes))
+    }
+
+    /// Terminates a bundled-install report stream: `.completed` when the
+    /// artifact landed, `.failed` otherwise (the row then offers its
+    /// normal download path as the recovery).
+    func reportBundledInstallOutcome(_ id: ModelID, installed: Bool,
+                                     reason: String = "bundled copy failed") {
+        update(id, installed ? .completed : .failed(reason: reason))
+    }
+
     // MARK: - Called by DownloadProxyDelegate
 
     fileprivate func handleProgress(_ id: ModelID, received: Int64, total: Int64) {

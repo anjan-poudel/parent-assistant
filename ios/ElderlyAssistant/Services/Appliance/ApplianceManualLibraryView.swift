@@ -92,19 +92,16 @@ struct ApplianceManualLibraryView: View {
 
     @ViewBuilder
     private var content: some View {
-        // The whole-screen empty state belongs to "nothing was ever
-        // saved AND no default manuals shipped" — with defaults on board
-        // the library is never empty, so the search pill and list show.
-        if model.manuals.isEmpty && bundled.isEmpty && !model.isSearching {
-            emptyLibrary
-        } else {
-            VStack(spacing: 14) {
-                searchPill
-                results
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
+        // The library is never empty since the user manual row
+        // (user-manual-in-app task, 2026-09-09) always ships — the
+        // search pill and the list show unconditionally; an empty
+        // SEARCH shows the honest no-results state instead.
+        VStack(spacing: 14) {
+            searchPill
+            results
         }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
     }
 
     /// The bundled rows after the query filter (default manuals search
@@ -115,19 +112,12 @@ struct ApplianceManualLibraryView: View {
                                                   locale: locale)
     }
 
-    private var emptyLibrary: some View {
-        VStack(spacing: 20) {
-            Spacer()
-            Image(systemName: "books.vertical")
-                .font(.system(size: 56))
-                .foregroundColor(DesignTokens.textSecondary)
-            Text("appliance.manual.empty")
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textPrimary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            Spacer()
-        }
+    /// Whether the USER MANUAL row matches the current query — the same
+    /// model-owned rule the Default-manuals section and the no-results
+    /// state both consult, so they can never disagree.
+    private var isUserManualVisible: Bool {
+        ApplianceManualLibraryModel.isUserManualVisible(query: model.query,
+                                                        locale: locale)
     }
 
     /// Big search pill — as-you-type, no submit step (same pattern as
@@ -153,7 +143,7 @@ struct ApplianceManualLibraryView: View {
     private var results: some View {
         let matches = model.visibleManuals
         let bundledMatches = visibleBundled
-        if matches.isEmpty && bundledMatches.isEmpty {
+        if matches.isEmpty && bundledMatches.isEmpty && !isUserManualVisible {
             noResults
         } else {
             ScrollView {
@@ -162,8 +152,14 @@ struct ApplianceManualLibraryView: View {
                     // rows sit above the saved list — they are the
                     // starting point for an elder who just wants to read
                     // "how do I use this app" with no camera involved.
-                    if !bundledMatches.isEmpty {
+                    // The USER MANUAL row (user-manual-in-app task,
+                    // 2026-09-09) leads the section: it opens the full
+                    // text manual, not the step-card guidance.
+                    if !bundledMatches.isEmpty || isUserManualVisible {
                         bundledSectionHeader
+                        if isUserManualVisible {
+                            userManualRow
+                        }
                         ForEach(bundledMatches, id: \.id) { manual in
                             BundledManualRow(manual: manual) {
                                 openBundled(manual)
@@ -186,6 +182,56 @@ struct ApplianceManualLibraryView: View {
             .foregroundColor(DesignTokens.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 4)
+    }
+
+    /// The USER MANUAL row (user-manual-in-app task, 2026-09-09): the
+    /// full in-app guide to Sahayak, first in the "Default manuals"
+    /// section. Same card shape as `BundledManualRow`, but it pushes
+    /// `UserManualView` (the text manual) onto the library's own
+    /// NavigationStack instead of arming a step-card session — the
+    /// viewer's LeafScreen back returns to this list. Non-deletable like
+    /// the device manuals; the book badge carries the accent like the
+    /// Settings → Manuals entry so the row reads as the same manual on
+    /// both surfaces.
+    private var userManualRow: some View {
+        NavigationLink {
+            UserManualView()
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "book.fill")
+                    .font(.system(size: 22))
+                    .foregroundColor(.white)
+                    .frame(width: DesignTokens.iconBadgeDiameter,
+                           height: DesignTokens.iconBadgeDiameter)
+                    .background(DesignTokens.accent)
+                    .clipShape(Circle())
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("settings.manuals.userManual")
+                        .font(.system(size: DesignTokens.minBodyPointSize,
+                                      weight: .semibold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                    Text("settings.manuals.userManualHint")
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(DesignTokens.textSecondary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .frame(minHeight: DesignTokens.minTapTargetSize)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
     }
 
     private var noResults: some View {
