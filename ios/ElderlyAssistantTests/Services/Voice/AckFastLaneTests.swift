@@ -309,17 +309,20 @@ final class AckFastLaneTests: XCTestCase {
         let tracer = VoiceTurnLatencyTracer(observabilityBus: bus)
         let (router, _, _) = makeRouter(coordinator, player: player,
                                         bus: bus, tracer: tracer)
-        tracer.onTurnFinalized = { _, _ in }
         tracer.beginTurn()
 
         _ = router.route(transcript: "set a timer for 5 minutes")
-        XCTAssertEqual(coordinator.speakingStarted, 1)
+        // Let the async confirmation settle first (its lane tail fires
+        // noteSpeakingEnded for the confirmation) — only the ack's
+        // finished note is then outstanding.
+        waitForAsyncSpeak()
+        XCTAssertEqual(coordinator.speakingStarted, 2,
+                       "ack (fast lane) + confirmation (lane) each note speaking start")
 
         // The ack's playback settles (production: player delegate).
         player.onPlaybackFinished?()
-        XCTAssertEqual(coordinator.speakingEnded, 1,
-                       "the player's finished note closes the speaking state")
-        waitForAsyncSpeak()
+        XCTAssertEqual(coordinator.speakingEnded, 2,
+                       "the player's finished note closes the ack's speaking state")
         tracer.endTurn()
 
         let timing = bus.events.first { $0.eventType == "voice_turn_timing" }
