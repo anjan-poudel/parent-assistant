@@ -13907,6 +13907,40 @@
         }
       }
     },
+    "voiceSettings.interpreter.cloud" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open questions are answered by Gemini over the internet."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "खुला प्रश्नको जवाफ इन्टरनेटबाट जेमिनीले दिन्छ।"
+          }
+        }
+      }
+    },
+    "voiceSettings.interpreter.local" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open questions are answered on this device."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "खुला प्रश्नको जवाफ यही यन्त्रमा दिइन्छ।"
+          }
+        }
+      }
+    },
     "voiceSettings.mic.allow" : {
       "extractionState" : "manual",
       "localizations" : {

@@ -1012,6 +1012,19 @@ struct VoiceEngineSettingsView: View {
                         : "settings.voiceEngine.onDevice.notReady"
                 )
 
+                // [LAT-M3] (2026-09-11) Honest interpreter-state caption:
+                // one line stating which interpreter answers open-domain
+                // questions right now — the same stack-consent +
+                // key + budget inputs the per-turn selection uses, so
+                // the caption can never disagree with what the chain
+                // actually does next.
+                Text(LocalizedStringKey(coordinator.isCloudInterpreterActive
+                                        ? "voiceSettings.interpreter.cloud"
+                                        : "voiceSettings.interpreter.local"))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(DesignTokens.textSecondary)
+                    .multilineTextAlignment(.leading)
+
                 // Cloud fallback (cloud-fallback task, 2026-09-07): an
                 // OPT-IN escalation for the ON-DEVICE stack — when the
                 // local chain cannot answer a question, it may go to the

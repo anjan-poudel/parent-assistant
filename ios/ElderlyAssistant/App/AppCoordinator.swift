@@ -2094,6 +2094,25 @@ final class AppCoordinator: ObservableObject {
                                              standIn: llamaCommandInterpreter)
         router3.cloudBrain = geminiInterpreter
         router3.cloudEnabled = (voiceEngineStack == .gemini)
+        // [LAT-M3] (2026-09-11) Cloud-FIRST open-domain interpretation
+        // (latency plan M3): armed here; the per-turn selector inside
+        // `IntentRouter` then picks cloud vs local from the SAME inputs
+        // the rest of the app consults — the stack's cloud consent
+        // (`cloudEnabled`, maintained by `applyVoiceEngineStack`) plus
+        // the Gemini key plus the day's cost budget. On the on-device
+        // stack `cloudEnabled` stays false (absent the cloud-fallback
+        // opt-in) and the legacy local-first ladder runs unchanged;
+        // with the opt-in — or on the Gemini stack — a configured key
+        // and an open budget make every LLM-bound utterance answer from
+        // the cloud (~1.5–2.5 s) with a time-bounded llama fallback on
+        // failure.
+        router3.cloudFirstEnabled = true
+        router3.geminiKeyConfigured = { [weak self] in
+            self?.geminiConfigStore.isConfigured ?? false
+        }
+        router3.geminiCostAllows = { [weak self] in
+            self?.geminiCostGovernor.allowsCall() ?? false
+        }
         self.intentRouter = router3
         // Collapse #1 (spec §4): when the Gemini recognizer is the active
         // STT, ONE understand call does STT + intent; the command half is
@@ -3666,6 +3685,22 @@ final class AppCoordinator: ObservableObject {
     var isOnDeviceStackReady: Bool {
         llamaCommandInterpreter.isAvailable
             && (whisperSpeechRecognizer.isAvailable || whisperKitSpeechRecognizer.isAvailable)
+    }
+
+    /// [LAT-M3] (2026-09-11) Honest Settings caption state: whether
+    /// open-domain interpretation actually runs through the CLOUD
+    /// interpreter right now — the exact inputs the per-turn
+    /// `InterpreterSelector` in `IntentRouter` consults (the stack's
+    /// cloud consent, the Gemini key, the day's cost budget), so the
+    /// caption can never disagree with what the chain will do on the
+    /// next utterance.
+    var isCloudInterpreterActive: Bool {
+        guard intentRouter?.cloudFirstEnabled == true,
+              intentRouter?.cloudEnabled == true else { return false }
+        let selection = InterpreterSelector.select(
+            keyConfigured: geminiConfigStore.isConfigured,
+            costAllows: geminiCostGovernor.allowsCall())
+        return selection == .cloud
     }
 
     /// Interpreter-chain status for `CommandRouter`'s no-brain fallback
