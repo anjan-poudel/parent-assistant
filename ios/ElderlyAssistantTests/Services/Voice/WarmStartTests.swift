@@ -58,9 +58,9 @@ final class WarmStartTests: XCTestCase {
             availableTTSVoices: [ModelCatalog.piperNepali,
                                  ModelCatalog.piperEnglishUS],
             selectedNepaliVoiceID: ModelCatalog.piperNepali,
+            llamaAvailable: true,
             wakeWordEnabled: true,
-            isSimulator: false,
-            llamaAvailable: true
+            isSimulator: false
         )
     }
 

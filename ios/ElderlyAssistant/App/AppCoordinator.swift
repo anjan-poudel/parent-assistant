@@ -2637,9 +2637,9 @@ final class AppCoordinator: ObservableObject {
                                                             bundle: .main),
             selectedNepaliVoiceID: ResponseVoiceSelection.persisted()?.voiceID
                 ?? ModelCatalog.piperNepali,
+            llamaAvailable: llamaCommandInterpreter.isAvailable,
             wakeWordEnabled: wakeWordEnabled,
-            isSimulator: Self.isSimulator,
-            llamaAvailable: llamaCommandInterpreter.isAvailable
+            isSimulator: Self.isSimulator
         )
         let plan = WarmStartPlanner.plan(for: config)
         let bootPlan = plan.filter { $0.phase == .boot }
