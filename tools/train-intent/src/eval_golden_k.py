@@ -336,7 +336,7 @@ def main() -> None:
         # ---- 2. export (CPU-only by design; skips completed steps) ----
         if not gguf.exists():
             rc = stage([PY, "src/export_gguf.py", "--model",
-                        str(ckpt_final), "--tag", tag],
+                        str(ckpt_final), "--tag", tag, "--base", args.base],
                        ROOT / "logs" / f"krun_{tag}_export.log")
             if rc != 0:
                 save_state(args.base, state)
