@@ -75,6 +75,7 @@
 		2A45E70C7594AF54C85ADEA6 /* CallOverrideParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98573B9EA24313548CD58B10 /* CallOverrideParserTests.swift */; };
 		2AE02C7C83CDCD7AC7376DE8 /* WhisperKitSpeechRecognizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E34BE966A1B870A54C81C85 /* WhisperKitSpeechRecognizer.swift */; };
 		2AF6ABDD1D9AA240DBCDA1F9 /* LiveCallDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C74DE20F41523F7A263CCF9 /* LiveCallDetector.swift */; };
+		2B316D781843502CD1CE6039 /* TalkBootContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90F1CAB2F40BD85B1145D51E /* TalkBootContractTests.swift */; };
 		2C68CE11C1CA35F0FA8D1580 /* NotificationReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BA70380B9611FE297DA6C91 /* NotificationReader.swift */; };
 		2CECF2049A14EC0E2B0CFEC6 /* StoragePlacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4229C5877680AE4D2AC829EC /* StoragePlacement.swift */; };
 		2D2ECCC216F351CA19504A48 /* VoiceTurnLatencyTracer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90BC211A2D8A5DE381E7A5FE /* VoiceTurnLatencyTracer.swift */; };
@@ -265,6 +266,7 @@
 		A353E5454E65DB1D1DAE3ADD /* GeminiClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65514C0E79667183D266FC74 /* GeminiClient.swift */; };
 		A3F93701994B8D36E72EB24B /* CallLinksTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC819B3F4B2CFA0092570634 /* CallLinksTests.swift */; };
 		A4CFD6206EAD1235F54C7C0E /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = 07AB2A1511365C471514CDF7 /* ZIPFoundation */; };
+		A4F54D2E5067279EC6BF1ECD /* TalkBootContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83DFDE9A1EB7508FB720FFC0 /* TalkBootContract.swift */; };
 		A57D391FB2397B6FD9AEABC1 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5570777B135C237FC06BB290 /* Accelerate.framework */; };
 		A5A4F2BA6A6956511C0F15EB /* ChannelPreferenceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE2802C746DB19D22FB0DCB3 /* ChannelPreferenceStore.swift */; };
 		A65A12DB051E44AE148AC7EF /* UnifiedContactSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB8C99DCB2156C33403F2AAB /* UnifiedContactSearchTests.swift */; };
@@ -377,6 +379,7 @@
 		DE9878B3A3044E85B6D76B65 /* AddressBookDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95B48DC1BE341D4E8D4D75CA /* AddressBookDirectory.swift */; };
 		DEA0097A14081ABFC31190CD /* ExternalCalendarService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E79AC378B30CF9784D31F61 /* ExternalCalendarService.swift */; };
 		DF77B9BAE300A7AAD325C8A5 /* ApplianceCropGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F0795548716779E4610EAAE /* ApplianceCropGeometry.swift */; };
+		DF7FD289DB740C607DD58A10 /* WhisperPostTurnPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D48C33AF32E7C9599EF8140 /* WhisperPostTurnPolicyTests.swift */; };
 		DFCB990AB2673E5F93E03285 /* ContactCallButtonsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 126B9531CD4BFF2A82CE5E13 /* ContactCallButtonsTests.swift */; };
 		E036F7780694F57EA7B2E72E /* IntentLogReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1FC8E5AED12A4E6C020AAE2 /* IntentLogReviewView.swift */; };
 		E1332EE639C8187D8BE48D80 /* ApplianceManualLibraryModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD162BE8935894B1124A7B49 /* ApplianceManualLibraryModel.swift */; };
@@ -403,6 +406,7 @@
 		ED3D43C17AD13CA9E0ED1CE0 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44C19F8493D2084A32B36889 /* AppTheme.swift */; };
 		ED936B2D4570D5E18C0935AE /* GeminiCostGovernorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 693B7D1F3B00327614DF9E10 /* GeminiCostGovernorTests.swift */; };
 		EDB40322DA71A0CF7DB0EC27 /* SpeechSourceRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E2F545614DEDFA182DBB163 /* SpeechSourceRegistryTests.swift */; };
+		EDBF05CE75925FB84E926F3F /* WhisperPostTurnPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF58FA93A22B7535FF6104CE /* WhisperPostTurnPolicy.swift */; };
 		EDCA05479FFBDFA517DD5487 /* AlarmsTimersSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D2FF53AC2FD5DEC493AF7E9 /* AlarmsTimersSettingsView.swift */; };
 		EE315CDFC9C22D92690442DA /* GuidePluginDispatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D17744ACF2633AFD36C8AF8 /* GuidePluginDispatchTests.swift */; };
 		EF36E091D15AC4AF4BCA006D /* FeedsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1335E0760DD3A920FB22D80 /* FeedsView.swift */; };
@@ -539,6 +543,7 @@
 		1BA70380B9611FE297DA6C91 /* NotificationReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationReader.swift; sourceTree = "<group>"; };
 		1C66F1336A7C9BE3F3D4AAC7 /* SpeakerEmbeddingMathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerEmbeddingMathTests.swift; sourceTree = "<group>"; };
 		1C9080DC0F9997AFA7050A4E /* ExternalEventLinkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalEventLinkStore.swift; sourceTree = "<group>"; };
+		1D48C33AF32E7C9599EF8140 /* WhisperPostTurnPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperPostTurnPolicyTests.swift; sourceTree = "<group>"; };
 		1DF4872182C2AB35F523BB49 /* FamilyContactStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyContactStore.swift; sourceTree = "<group>"; };
 		1E79AC378B30CF9784D31F61 /* ExternalCalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalCalendarService.swift; sourceTree = "<group>"; };
 		1E8F8D8770B2D5FCD7040516 /* NepaliFestival.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliFestival.swift; sourceTree = "<group>"; };
@@ -721,6 +726,7 @@
 		822B86279A9F75D9F94B44FB /* SpeakerEmbedderSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerEmbedderSelectionTests.swift; sourceTree = "<group>"; };
 		8302DB1270ED342869E228C0 /* NepaliCalendarPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliCalendarPlugin.swift; sourceTree = "<group>"; };
 		83D7A38BF8A5C9EBE3A7EF52 /* kws */ = {isa = PBXFileReference; lastKnownFileType = folder; name = kws; path = ElderlyAssistant/Resources/Models/kws; sourceTree = SOURCE_ROOT; };
+		83DFDE9A1EB7508FB720FFC0 /* TalkBootContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkBootContract.swift; sourceTree = "<group>"; };
 		849CDF1B348E474558E3A590 /* ToolLogReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolLogReviewView.swift; sourceTree = "<group>"; };
 		8525BCEE218FE3CE4BAB85D8 /* AppLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLanguage.swift; sourceTree = "<group>"; };
 		85ED77D882328D44E3F08B23 /* IntentSchemaV2Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentSchemaV2Tests.swift; sourceTree = "<group>"; };
@@ -741,6 +747,7 @@
 		902AADF4AB2F5A7B7F00EF13 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		90391AA61F888C033874331E /* FestivalCalendarService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FestivalCalendarService.swift; sourceTree = "<group>"; };
 		90BC211A2D8A5DE381E7A5FE /* VoiceTurnLatencyTracer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceTurnLatencyTracer.swift; sourceTree = "<group>"; };
+		90F1CAB2F40BD85B1145D51E /* TalkBootContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkBootContractTests.swift; sourceTree = "<group>"; };
 		92F8B8264F7A569F2943ABF9 /* HomeTimerChipModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeTimerChipModelTests.swift; sourceTree = "<group>"; };
 		9343373A38D6137D52284887 /* FeedTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedTransport.swift; sourceTree = "<group>"; };
 		940ADBAE2E5A811B03503971 /* VoiceContactSearchRouteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceContactSearchRouteTests.swift; sourceTree = "<group>"; };
@@ -839,6 +846,7 @@
 		CE350F7008686CCAEAF75F29 /* PluginRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PluginRegistryTests.swift; sourceTree = "<group>"; };
 		CE7E6C15D13A58EC3684BA2E /* TTSVoiceCatalogTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TTSVoiceCatalogTests.swift; sourceTree = "<group>"; };
 		CF57A34D7B6B978C213BCD54 /* ApplianceManualLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceManualLibraryView.swift; sourceTree = "<group>"; };
+		CF58FA93A22B7535FF6104CE /* WhisperPostTurnPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperPostTurnPolicy.swift; sourceTree = "<group>"; };
 		D0B1DE15DC91ED50AED5D835 /* ApplianceGuidance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceGuidance.swift; sourceTree = "<group>"; };
 		D1B7B8F7FB2574A707AC5A49 /* TalkReadiness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TalkReadiness.swift; sourceTree = "<group>"; };
 		D21F7BA7E5D00F74045D0043 /* MethodResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MethodResolverTests.swift; sourceTree = "<group>"; };
@@ -1411,6 +1419,7 @@
 				6BE6514EAD2F6FF0B0FE782A /* SpectralGateDenoiserTests.swift */,
 				88F4888213A3996C8B57BD20 /* SpokenTimeTests.swift */,
 				49B372CC505A3162D8144A79 /* SwitchableCommandInterpreterTests.swift */,
+				90F1CAB2F40BD85B1145D51E /* TalkBootContractTests.swift */,
 				20C12B30F3746F4FC89C1EC0 /* TopicPreAnswerTests.swift */,
 				690C3B5217EF328191AB0323 /* TranscriptSanityGuardTests.swift */,
 				9AD22F253FD8BA87501C3442 /* VoiceBiometricStoreTests.swift */,
@@ -1425,6 +1434,7 @@
 				A3DBD918C01E5949FAD2002A /* WarmStartTests.swift */,
 				6ED036AAD2D08726E1F50E09 /* WeatherToolTests.swift */,
 				0BC86AD5E0D8C9FE1AAE7633 /* WhisperKitSpeechRecognizerTests.swift */,
+				1D48C33AF32E7C9599EF8140 /* WhisperPostTurnPolicyTests.swift */,
 				5E3EEA3E69C5ECA0B8EE1DBA /* WhisperSpeechRecognizerTests.swift */,
 				2B0D6D7DA7023467AC7A546E /* YouTubeRouteTests.swift */,
 				79CD5EF816149787B2F611E9 /* YouTubeToolTests.swift */,
@@ -1782,6 +1792,7 @@
 				8FF78C50B8B5418424D76F16 /* SpeechRecognizer.swift */,
 				357BB0A805BFD53734B0F7B4 /* SpokenTime.swift */,
 				4476625DD15275C43E27A3DA /* SwitchableCommandInterpreter.swift */,
+				83DFDE9A1EB7508FB720FFC0 /* TalkBootContract.swift */,
 				9B97C16366222C54ED70E03C /* TopicPreAnswer.swift */,
 				8E873864734A0F0500AE4D63 /* TranscriptSanityGuard.swift */,
 				7F9CB2D914CCA960DB69EEFA /* VoiceBiometricStore.swift */,
@@ -1796,6 +1807,7 @@
 				FE811FACF80BAA62A9F6C1D9 /* WarmStart.swift */,
 				7DC3D410769D72795295E8FC /* WeatherTool.swift */,
 				4E34BE966A1B870A54C81C85 /* WhisperKitSpeechRecognizer.swift */,
+				CF58FA93A22B7535FF6104CE /* WhisperPostTurnPolicy.swift */,
 				9C5E5CF8BE78DC4717747523 /* WhisperSpeechRecognizer.swift */,
 				A151E4562D9A1677C2176C14 /* YouTubeRoute.swift */,
 				C074CAB06970C46E5B8D1BEE /* YouTubeTool.swift */,
@@ -2238,6 +2250,7 @@
 				999EA26B3E5147D90AC8F7A2 /* StartupSignposts.swift in Sources */,
 				2CECF2049A14EC0E2B0CFEC6 /* StoragePlacement.swift in Sources */,
 				635FF391B3B7B18CF6A7BC90 /* SwitchableCommandInterpreter.swift in Sources */,
+				A4F54D2E5067279EC6BF1ECD /* TalkBootContract.swift in Sources */,
 				33C99ADD8ACCB84AE2C4AA38 /* TalkReadiness.swift in Sources */,
 				0F2182D7226BF87E13A34306 /* TimerAlarmBellPlayer.swift in Sources */,
 				B077987B5623105525365732 /* TimerAlarmEngine.swift in Sources */,
@@ -2266,6 +2279,7 @@
 				ABEC5425E38DCCB59974CE4E /* WarmStart.swift in Sources */,
 				590DDB85C665FBC890EF94D1 /* WeatherTool.swift in Sources */,
 				2AE02C7C83CDCD7AC7376DE8 /* WhisperKitSpeechRecognizer.swift in Sources */,
+				EDBF05CE75925FB84E926F3F /* WhisperPostTurnPolicy.swift in Sources */,
 				941F99388BEF6FBD2091C047 /* WhisperSpeechRecognizer.swift in Sources */,
 				CC8BDCDAF8C8FE37B5609EB0 /* YouTubePlugin.swift in Sources */,
 				71D8DB735F59D965E788016D /* YouTubeRoute.swift in Sources */,
@@ -2439,6 +2453,7 @@
 				6161CE0C2CA506243091FE63 /* SystemContactSearchTests.swift in Sources */,
 				A71CB9964BC96FEDE42530BD /* TTSVoiceCatalogTests.swift in Sources */,
 				670296484F8953CB54D6DDF9 /* TTSVoiceInstallTests.swift in Sources */,
+				2B316D781843502CD1CE6039 /* TalkBootContractTests.swift in Sources */,
 				4706C690591D882919A03ACE /* TimerAlarmEngineTests.swift in Sources */,
 				36E22F0466C005027B0921E5 /* TithiCalculatorTests.swift in Sources */,
 				4359AC45AD296B70CF2114BF /* TopicPreAnswerTests.swift in Sources */,
@@ -2461,6 +2476,7 @@
 				73AEF3359D4BE0C14D2A6031 /* WarmStartTests.swift in Sources */,
 				9775343496AF770345F48F67 /* WeatherToolTests.swift in Sources */,
 				60B6B9E66B41FFFD756699BB /* WhisperKitSpeechRecognizerTests.swift in Sources */,
+				DF7FD289DB740C607DD58A10 /* WhisperPostTurnPolicyTests.swift in Sources */,
 				D591B79C10F7D608353FA1F7 /* WhisperSpeechRecognizerTests.swift in Sources */,
 				51A1484398D9895D9F425AA0 /* YouTubePluginTests.swift in Sources */,
 				9AB581C091C99FA677CA9C32 /* YouTubeRouteTests.swift in Sources */,
