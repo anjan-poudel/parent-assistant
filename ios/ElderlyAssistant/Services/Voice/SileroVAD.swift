@@ -4,7 +4,8 @@ import AVFoundation
 /// Voice activity detector: decides whether a chunk of PCM audio contains
 /// speech, and reports when the user has stopped talking — after the
 /// trailing-silence hangover VoicePipeline configures (900 ms since
-/// 2026-09-07, see `VoicePipeline.endOfUtteranceMs`). Used to gate the
+/// 2026-09-07, 700 ms behind the flag since 2026-09-11 — see
+/// `VADHangoverPolicy`). Used to gate the
 /// speech recognizer: VoicePipeline calls the recognizer's `finish()` on
 /// `onEndOfUtterance`, so a finished command flips to transcription
 /// within ~1.0-1.5 s of the user's last word instead of riding the
@@ -14,6 +15,47 @@ import AVFoundation
 /// implementation is a permissive fallback that always treats audio as
 /// speech — useful for tests and for the scaffold state before the ONNX
 /// model has been downloaded.
+// MARK: - Hangover policy ([LAT-M2], 2026-09-11)
+//
+// The trailing-silence hangover the pipeline configures per capture is
+// now flag-gated: 700 ms by default (the latency-compliance trim — a
+// finished utterance ends ~200 ms earlier), 900 ms when the flag is
+// explicitly OFF. The 900 ms value (2026-09-07) was chosen because
+// natural mid-utterance pauses for elderly speakers run 0.5-0.7 s — a
+// breath, a word-search, a slow clause. At 700 ms a TRUE-QUIET pause at
+// the top of that band (>= 700 ms) now closes the capture.
+//
+// The trade-off is documented, not hidden, and the protections that
+// made 900 ms survivable for elderly pauses remain in force:
+//  - a pause whose residual energy sits in the EnergyVAD hold band
+//    (between the end line and the speech reference) does NOT accrue
+//    the quiet counter at all — it is covered by the force end
+//    (`forceEndAfterSilenceMs`, 3 s) instead;
+//  - any frame at/above the speech reference still resets the quiet
+//    counter, so a resumed utterance after a pause restarts the
+//    hangover cleanly;
+//  - the force end, the capture cap (22 s), and the wedge guard are
+//    unchanged — the trim touches ONLY the normal quiet-run hangover.
+//
+// The flag exists so the field can restore 900 ms without a release if
+// elderly users report mid-sentence cuts.
+enum VADHangoverPolicy {
+    /// UserDefaults key: the trim is ON unless this key is present AND
+    /// false (default ON per the plan).
+    static let trim700DefaultsKey = "vadHangoverTrim700"
+    static let trimmedMs = 700
+    static let legacyMs = 900
+
+    /// Default ON: 700 ms unless the key exists and is explicitly false.
+    static func hangoverMs(defaults: UserDefaults) -> Int {
+        guard defaults.object(forKey: trim700DefaultsKey) != nil,
+              !defaults.bool(forKey: trim700DefaultsKey) else {
+            return trimmedMs
+        }
+        return legacyMs
+    }
+}
+
 protocol VoiceActivityDetector: AnyObject {
     /// Sample rate the detector expects (16 kHz for Silero).
     var requiredSampleRate: Double { get }

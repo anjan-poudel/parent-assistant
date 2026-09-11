@@ -391,6 +391,13 @@ final class CommandRouter {
     /// [TURN-TIMING] Turn-scoped stage tracer (nil = timing off — tests
     /// and any construction site that does not opt in).
     private let turnTracer: VoiceTurnLatencyTracer?
+    /// [LAT-M2] The ack fast lane: plays the pre-synthesized ack WAV
+    /// directly instead of routing the ack through TTS synthesis. Nil
+    /// (the default) = dormant — `speakPreAck` behaves byte-identically
+    /// to the pre-fast-lane path (synthesis through the lane, no extra
+    /// events), so every pre-existing construction site and test keeps
+    /// its behavior.
+    private let preAckPlayer: PreAckPlaying?
 
     /// [REST-DIP-FIX] (2026-09-08) Turn-scoped "async reply pending"
     /// token. Set while `route()` has handed the turn to an ASYNC
@@ -488,12 +495,14 @@ final class CommandRouter {
          youtubeConfigStore: YouTubeConfigStore? = nil,
          youtubeTransport: LocalToolTransport? = nil,
          youtubeLinkOpener: CallLinkOpening? = nil,
+         preAckPlayer: PreAckPlaying? = nil,
          turnTracer: VoiceTurnLatencyTracer? = nil) {
         self.coordinator = coordinator
         self.observabilityBus = observabilityBus
         self.speaker = speaker
         self.interpreter = interpreter
         self.turnTracer = turnTracer
+        self.preAckPlayer = preAckPlayer
         self.pluginRegistry = pluginRegistry
         self.geminiClient = geminiClient
         self.searchConfigStore = searchConfigStore
@@ -505,6 +514,13 @@ final class CommandRouter {
         self.youtubeConfigStore = youtubeConfigStore
         self.youtubeTransport = youtubeTransport
         self.youtubeLinkOpener = youtubeLinkOpener
+        // [LAT-M2] A fast-lane ack's playback settled (finished, decode
+        // error, or cancelled) — the same per-utterance speak
+        // bookkeeping the lane's tail fires for synthesized utterances.
+        preAckPlayer?.onPlaybackFinished = { [weak self] in
+            self?.turnTracer?.noteSpeakFinished()
+            self?.coordinator?.noteSpeakingEnded()
+        }
     }
 
     @discardableResult
@@ -2448,13 +2464,43 @@ final class CommandRouter {
     /// confirmation challenges never call this — they already speak
     /// immediately. Empty catalog text is a silent no-op (same guard as
     /// `speak(key:)`).
+    ///
+    /// [LAT-M2] Ack fast lane: when the pre-synthesized cache is warm
+    /// the ack plays the cached WAV directly — the ack is the one
+    /// utterance whose start latency the user feels, so it must not pay
+    /// synthesis (target: `router_done → speak_queued` ≤ 200 ms).
+    /// Wording, variant rotation, and stage selection are UNCHANGED —
+    /// only the audio path differs. The ack keeps its full speak
+    /// bookkeeping (assistant-spoke note, speaking state, turn-tracer
+    /// speak marks — the finished side arrives from the player's
+    /// `onPlaybackFinished`). A miss falls back to the pre-task
+    /// synthesis path with an honest `ack_cache_miss` event; with no
+    /// player installed (nil seam — tests, dormant wiring) the legacy
+    /// path runs byte-identically, no events.
     private var preAckCounter = 0
     private func speakPreAck(locale: Locale? = nil) {
         let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
-        let key = "voiceAck.moment\(preAckCounter % 3 + 1)"
+        let variant = preAckCounter % 3 + 1
         preAckCounter += 1
+        let key = "voiceAck.moment\(variant)"
         let text = L10n.str(key, locale: locale)
         guard !text.isEmpty else { return }
+        if let preAckPlayer,
+           preAckPlayer.playCachedAck(variant: variant, locale: locale) {
+            // [LAT-M2] Cache hit — the WAV is already handed to the
+            // player (no synthesis, no lane wait). Same synchronous
+            // notes, in the same order, as `speak(text:)` commits.
+            coordinator?.noteAssistantSpoke(text)
+            coordinator?.noteSpeakingStarted()
+            turnTracer?.noteSpeakQueued()
+            return
+        }
+        if preAckPlayer != nil {
+            // [LAT-M2] Honest miss: the cache wasn't ready (never built
+            // for this locale/voice, evicted, or the player failed) —
+            // the existing synthesis path speaks the ack.
+            emit(eventType: "ack_cache_miss", outcome: "miss")
+        }
         speak(text: text, locale: locale)
     }
 
