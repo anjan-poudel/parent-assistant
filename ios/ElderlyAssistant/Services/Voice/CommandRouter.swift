@@ -874,6 +874,49 @@ final class CommandRouter {
             return .unrecognised(transcript: raw)
         }
 
+        // [INTENT-KEYWORDS] (2026-09-11) Relaxed keyword co-occurrence
+        // stage: the strict stages above validated FORM (full phrases,
+        // enumerated verb families, marker adjacency). When they all
+        // declined, resolve intent from keyword CO-OCCURRENCE instead —
+        // the small `KeywordIntentRule` table of SAFE domains only
+        // (news digest, YouTube play): every required keyword group must
+        // co-occur anywhere in the utterance, no grammar validation.
+        //
+        // Placement: AFTER every strict deterministic stage (safety net
+        // + confirmation flow + contact search + directions +
+        // alarms/timers + briefing + strict news + strict YouTube) and
+        // BEFORE the topic table + interpreter — an emergency / med-ack
+        // / yes-no / alarm-timer utterance can never reach this stage,
+        // and a keyword-resolved request is never answered as small
+        // talk. Rule order inside the table mirrors the strict ladder
+        // (news before YouTube), so a both-sets utterance resolves as
+        // the strict ordering would.
+        //
+        // The table only widens the GATE — execution stays the strict
+        // stage's: news hands off to the reader exactly like the strict
+        // stage (ack first, the reader owns every line), YouTube still
+        // requires a survivable non-marker query from `YouTubeRoute`'s
+        // extraction and fires the same honest play/search path. Every
+        // relaxed claim is observable: `intent_keyword_match` (domain,
+        // matched keys — fixed rule vocabulary, never user text).
+        if let relaxed = KeywordIntentRule.match(transcript: preText) {
+            switch relaxed.domain {
+            case .news:
+                emitIntentKeywordMatch(relaxed)
+                // [VOICE-ACK] Same hand-off as the strict news stage —
+                // ack first, the reader owns every line after.
+                speakPreAck()
+                coordinator?.fireNewsReader()
+                emit(eventType: "news_reader_command", outcome: "success")
+                return .unrecognised(transcript: raw)
+            case .youtube:
+                guard let query = YouTubeRoute.extractQuery(from: preText) else { break }
+                emitIntentKeywordMatch(relaxed)
+                fireYouTubePlay(query: query)
+                return .unrecognised(transcript: raw)
+            }
+        }
+
         // [NO-GIBBERISH] Deterministic TOPIC PRE-ANSWERS (2026-09-07): the
         // most common Q&A topics — weather, time, date, greetings — are
         // answered from a pre-written, honest table (`TopicPreAnswer`)
@@ -1048,6 +1091,25 @@ final class CommandRouter {
         }
 
         return routeKeywordRemainder(raw)
+    }
+
+    /// [INTENT-KEYWORDS] (2026-09-11) Observability for a fired relaxed
+    /// rule — `intent_keyword_match` carries the claimed domain and the
+    /// matched keyword keys (fixed vocabulary from the rule table,
+    /// never user text) so every relaxed claim is auditable, exactly
+    /// like the other router events.
+    private func emitIntentKeywordMatch(_ match: KeywordIntentRule.Match) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "intent_keyword_match",
+            durationMs: nil,
+            outcome: "success",
+            errorCode: nil,
+            metadata: [
+                "domain": match.domain.rawValue,
+                "matched_keys": match.matchedKeys.joined(separator: ",")
+            ]
+        ))
     }
 
     // MARK: - [ALARMS-TIMERS] Alarm + timer command handlers
