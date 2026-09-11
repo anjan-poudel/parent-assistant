@@ -205,9 +205,9 @@ final class AckFastLaneTests: XCTestCase {
     func testRemoveDropsOneSpecOnly() throws {
         let neSpec = AckVoiceSpec.resolve(locale: ne)
         let enSpec = AckVoiceSpec.resolve(locale: en)
-        let wav = try writeTinyWAV("src.wav")
-        try cache.store(wav: wav, variant: 1, spec: neSpec)
-        try cache.store(wav: wav, variant: 1, spec: enSpec)
+        // store MOVES the source WAV — each slot needs its own source.
+        try cache.store(wav: writeTinyWAV("src-ne.wav"), variant: 1, spec: neSpec)
+        try cache.store(wav: writeTinyWAV("src-en.wav"), variant: 1, spec: enSpec)
 
         cache.remove(spec: neSpec)
         XCTAssertNil(cache.wavURL(variant: 1, spec: neSpec))
