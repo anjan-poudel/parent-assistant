@@ -478,16 +478,19 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: intentNepali1B,
             kind: .llamaBase,
-            displayName: "Intent engine (Nepali, 1B)",
-            // PLACEHOLDER — no real artifact until the tools/train-intent
-            // bake-off exports and publishes one (same convention as the
-            // whisperKitNepali placeholder above). Nothing can fire a
-            // real request against an .invalid URL.
-            filename: "intent-ne-1b-q4km.gguf",
-            downloadURL: URL(string: "https://TODO-unset.example.invalid/intent-ne-1b-q4km.gguf")!,
-            sizeBytes: 900_000_000,         // ESTIMATE: ~1B Q4_K_M ballpark
-            sha256: "0000000000000000000000000000000000000000000000000000000000000000",
-            minDeviceRAMBytes: 2_500_000_000,
+            displayName: "Intent engine (Nepali, Qwen 1.7B)",
+            // Qwen3-1.7B QLoRA intent fine-tune, seed 42 of the
+            // deterministic k=3 bake-off (2026-09-12, anchored dataset,
+            // seeded training). Emergency gate PASSES for this seed;
+            // closed-intent/time remain below ship gates — EXPERIMENTAL,
+            // published as the best available on-device brain while the
+            // 4B capacity test runs. Supersedes the Gemma v7 brain (which
+            // fails the emergency hard gate).
+            filename: "intent-ne-qwen-s42-q4_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v12/intent-ne-qwen-s42-q4_k_m.gguf")!,
+            sizeBytes: 1_107_408_576,
+            sha256: "136392b324b2e24503b8376cdb8332d8909192644d910a3b8ec83c0db227a42d",
+            minDeviceRAMBytes: 3_000_000_000,
             dependsOn: nil
         ),
         ModelCatalogEntry(
@@ -680,13 +683,10 @@ enum ModelCatalog {
     }()
 
     /// The brain models the Settings picker can select: every `.llamaBase`
-    /// entry with a real, hosted artifact. Excludes `intentNepali1B`, the
-    /// fine-tune PLACEHOLDER — its URLs are `.invalid` stubs and its
-    /// sha256 is all-zero, nothing can fire a real request against it
-    /// (same rule `availableSTTEntries` used to hold). `intentGemma1B`
-    /// (the released Gemma-leg fine-tune, v7) IS offered like any other
-    /// brain.
+    /// entry with a real, hosted artifact. The former `intentNepali1B`
+    /// placeholder is now the released Qwen fine-tune (v12, 2026-09-12),
+    /// so no exclusions remain.
     static let availableBrainEntries: [ModelCatalogEntry] = {
-        entries(kind: .llamaBase).filter { $0.id != intentNepali1B }
+        entries(kind: .llamaBase)
     }()
 }

@@ -14,9 +14,9 @@ final class BrainModelSelectionTests: XCTestCase {
                         ModelCatalog.llama3_2_3B,
                         ModelCatalog.qwen3_1_7BInstruct,
                         ModelCatalog.qwen3_4BInstruct])
-        // The fine-tune placeholder must never be selectable: its URLs
-        // are `.invalid` stubs and nothing could fetch it.
-        XCTAssertFalse(ModelCatalog.availableBrainEntries.contains { $0.id == ModelCatalog.intentNepali1B })
+        // The fine-tune entry is now a real artifact (v12, 2026-09-12) —
+        // it IS selectable alongside the other brains.
+        XCTAssertTrue(ModelCatalog.availableBrainEntries.contains { $0.id == ModelCatalog.intentNepali1B })
     }
 
     func testGemmaIntentBrainEntryPinsRealArtifact() {
