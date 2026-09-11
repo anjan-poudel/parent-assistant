@@ -137,6 +137,9 @@ enum ModelCatalog {
     /// v5 fine-tune on the ANE path — 6-bit palettized, best accuracy +
     /// fast (v9 release, 2026-09-09).
     static let whisperKitMediumV5 = ModelID("whisperkit-ne-medium-v5-q6")
+    /// v6 fine-tune on the ANE path — 6-bit palettized, best accuracy +
+    /// fast (v11 release, 2026-09-11).
+    static let whisperKitMediumV6 = ModelID("whisperkit-ne-medium-v6-q6")
     static let whisperSmallMultilingual = ModelID("whisper-small-multilingual-q5_1")
     /// The FINISHED small Devanagari Nepali model: stage-4 fine-tune on
     /// labeled Devanagari transcripts, started from the distilled
@@ -413,6 +416,26 @@ enum ModelCatalog {
             dependsOn: nil,
             whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v9/whisperkit-ne-medium-v5-q6.zip")!,
             whisperKitZipBytes: 642_347_390,
+            requiresiOS18: true
+        ),
+        ModelCatalogEntry(
+            id: whisperKitMediumV6,
+            kind: .whisperBase,
+            displayName: "Nepali — Medium v6 · WhisperKit (best + fast)",
+            // finetune-medium-v6-final, 6-bit palettized CoreML (group 64,
+            // 2-bit sparse outliers) — FLEURS WER 25.28 / CER 8.14, the
+            // best measured accuracy, on the ANE fast path. CoreML spec
+            // v9 → iOS 18+.
+            filename: "whisperkit-ne-medium-v6-q6",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v11/whisperkit-ne-medium-v6-q6.zip")!,
+            // Unpacked q6 mlmodelc trio + tokenizer (~613 MB zip).
+            sizeBytes: 800_000_000,
+            // SHA-256 of the release ZIP — verified by installWhisperKitModel.
+            sha256: "88ff2a77020b9a1e3e67b694be7bb91e97c9a4b91d12322cbea02e753e7bddf2",
+            minDeviceRAMBytes: 4_000_000_000,
+            dependsOn: nil,
+            whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v11/whisperkit-ne-medium-v6-q6.zip")!,
+            whisperKitZipBytes: 642_434_570,
             requiresiOS18: true
         ),
         ModelCatalogEntry(
