@@ -296,8 +296,8 @@ final class AckFastLaneTests: XCTestCase {
                       "a cache hit must not synthesize the ack (the confirmation may still synthesize)")
         XCTAssertEqual(coordinator.assistantSpoken.first, ackVariant(1, locale: ne),
                        "the conversation card still shows the ack text")
-        XCTAssertEqual(coordinator.speakingStarted, 1,
-                       "the fast-lane ack commits the same speaking-state note")
+        XCTAssertEqual(coordinator.speakingStarted, 2,
+                       "ack + confirmation each commit a speaking-state note — the fast lane drops nothing")
         XCTAssertFalse(bus.events.contains { $0.eventType == "ack_cache_miss" },
                        "a hit never logs a miss")
     }
