@@ -1968,12 +1968,20 @@ final class AppCoordinator: ObservableObject {
         turnTracer.onTurnFinalized = { [weak self] stages, _ in
             DispatchQueue.main.async { self?.applyTurnTimingCaption(stages) }
         }
+        // [LAT-M2] Ack fast lane: one shared file-backed pre-ack cache —
+        // the speaker pre-synthesizes the ack variants into it at warm
+        // time (see `maybeStartAckCacheWarm`), the player below reads
+        // the cached WAVs on the ack path. Files are the shared state.
+        let ackAudioCache = AckAudioCache()
         let speaker: Speaker = PiperVoiceSpeaker(
             fallback: systemSpeaker,
             observabilityBus: observabilityBus,
             modelStore: modelStore,
-            turnTracer: turnTracer
+            turnTracer: turnTracer,
+            ackCache: ackAudioCache
         )
+        let ackFastLanePlayer = AckFastLanePlayer(cache: ackAudioCache,
+                                                  observabilityBus: observabilityBus)
         self.speaker = speaker
         // The registry is built in init but the speaker only exists now —
         // hand it to the appliance plugin so guidance summaries are spoken
@@ -2157,6 +2165,9 @@ final class AppCoordinator: ObservableObject {
             youtubeConfigStore: youtubeConfigStore,
             youtubeTransport: URLSession.shared,
             youtubeLinkOpener: SystemCallLinkOpener(),
+            // [LAT-M2] Ack fast lane: cached-WAV playback on the pre-ack
+            // path (miss → synthesis fallback + `ack_cache_miss`).
+            preAckPlayer: ackFastLanePlayer,
             turnTracer: turnTracer
         )
         // [STARTUP-PERF] Retained for the boot's pipeline build.
@@ -2595,6 +2606,11 @@ final class AppCoordinator: ObservableObject {
                     // conversation pays the load, i.e. today's behavior.
                     self.startupBoot.recordFailure(.warmingEngines)
                 }
+                // [LAT-M2] The TTS warm step (if any) settled — build
+                // the pre-ack cache on its heels. Detached: never holds
+                // the boot; the ack path falls back to synthesis until
+                // it lands.
+                self.maybeStartAckCacheWarm()
                 self.advancePastWarmPhase()
             }
         }
@@ -2755,10 +2771,42 @@ final class AppCoordinator: ObservableObject {
     private func startDetachedPostBootWarm() {
         let steps = postBootWarmSteps
         postBootWarmSteps = []
-        guard !steps.isEmpty else { return }
-        warmRunner.run(plan: steps) { _ in
+        guard !steps.isEmpty else {
+            // [LAT-M2] Empty post-boot slice (warm disabled, or the boot
+            // slice consumed the whole plan) — the ack-cache hook still
+            // runs so a warm-eligible boot path that skipped the stage
+            // does not also skip the pre-acks.
+            maybeStartAckCacheWarm()
+            return
+        }
+        warmRunner.run(plan: steps) { [weak self] _ in
             // Detached by design: the runner reports each engine's
             // outcome on the ObservabilityBus; nothing gates on them.
+            DispatchQueue.main.async {
+                self?.maybeStartAckCacheWarm()
+            }
+        }
+    }
+
+    /// [LAT-M2] Builds the pre-synthesized ack cache once per launch,
+    /// after the warm plan's TTS step settled (the runner completion
+    /// fires after every step — so the engine the build uses is the
+    /// warmed one). Gated exactly like the TTS warm itself: the
+    /// warm-start preference (a disabled warm means the user declined
+    /// engine loads at boot — pre-synthesis would load it anyway) and
+    /// the simulator (sherpa engine construction there is the slow
+    /// sim-only cost the warm already skips, see
+    /// `WarmStartPlanner.ttsSteps`). Main-confined; idempotent.
+    private var ackCacheWarmStarted = false
+    private func maybeStartAckCacheWarm() {
+        guard !ackCacheWarmStarted, warmStartEnabled, !Self.isSimulator,
+              let warmer = speaker as? AckCachePreSynthesizing else { return }
+        ackCacheWarmStarted = true
+        let locale = activeLocale
+        warmer.buildAckCache(locale: locale) { _ in
+            // Per-build outcomes are reported on the ObservabilityBus by
+            // the speaker seam (`ack_cache`/`warm`); a miss until it
+            // lands is the designed fallback (`ack_cache_miss`).
         }
     }
 

@@ -122,14 +122,22 @@ final class VoicePipeline {
     /// Long enough is cheap here: the VAD only fires once per capture,
     /// and the recognizer simply transcribes everything up to that point.
     ///
-    /// [VAD-TUNE] Deliberately UNCHANGED: this hangover is the
-    /// mid-utterance-pause protection for slow elderly speech. The
-    /// noise-stall case (energy parked in the EnergyVAD hold band, where
-    /// the hangover never even starts counting) is bounded instead by the
-    /// EnergyVAD force end (`forceEndAfterSilenceMs`, 3 s — [VAD-RT]
-    /// tightened from 7 s so the worst-case speech-end → vad_end gap sits
-    /// inside the 1-3 s target) and the total capture cap above.
-    private static let endOfUtteranceMs: Int = 900
+    /// [LAT-M2] (2026-09-11) Now flag-gated: 700 ms by default (the
+    /// latency-compliance trim — a finished utterance ends ~200 ms
+    /// earlier), 900 ms when `vadHangoverTrim700` is explicitly OFF.
+    /// The elderly-pause trade-off, and the protections that remain
+    /// (EnergyVAD band hold + 3 s force end + clear-speech reset), are
+    /// documented at `VADHangoverPolicy` — the trim touches ONLY this
+    /// quiet-run hangover, never the force end or the capture cap.
+    private var endOfUtteranceMs: Int {
+        VADHangoverPolicy.hangoverMs(defaults: vadHangoverDefaults)
+    }
+
+    /// [LAT-M2] Injected UserDefaults for the hangover flag — the same
+    /// injectable-defaults pattern as `AudioSessionManager`. Tests pin
+    /// the 700/900 seam with a disposable suite; production uses
+    /// `.standard`.
+    var vadHangoverDefaults: UserDefaults = .standard
 
     // MARK: - Frame accumulators ([VAD-RT])
     //
@@ -728,7 +736,7 @@ final class VoicePipeline {
             // the first frames — benign but sloppy; the first turn paid
             // it most often, right after launch).
             vad?.reset()
-            vad?.start(endOfUtteranceMs: Self.endOfUtteranceMs)
+            vad?.start(endOfUtteranceMs: endOfUtteranceMs)
             wireVADCallbacks()
         }
         // [VAD-RT] Flip LAST: every handler the processing queue runs

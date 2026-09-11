@@ -330,6 +330,11 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     private let bundle: Bundle
     /// [TURN-TIMING] Turn-scoped stage tracer (nil = timing off).
     private let turnTracer: VoiceTurnLatencyTracer?
+    /// [LAT-M2] Shared pre-ack WAV cache the warm-time build writes and
+    /// the router's fast-lane player reads. A nil injection gets a
+    /// private instance pointing at the SAME default directory — the
+    /// files are the shared state (see `AckAudioCache`).
+    private let ackCache: AckAudioCache
 
     /// Elderly-friendly pace: 5% slower than the voice's natural rate.
     static let defaultSpeed: Float = 0.95
@@ -345,12 +350,14 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
          engine: TTSEngine? = nil,
          silenceFallback: Speaker = NullSpeaker(),
          bundle: Bundle = .main,
-         turnTracer: VoiceTurnLatencyTracer? = nil) {
+         turnTracer: VoiceTurnLatencyTracer? = nil,
+         ackCache: AckAudioCache? = nil) {
         self.fallback = fallback
         self.silenceFallback = silenceFallback
         self.observabilityBus = observabilityBus
         self.modelStore = modelStore
         self.turnTracer = turnTracer
+        self.ackCache = ackCache ?? AckAudioCache()
         let sherpa = SherpaTTSEngine()
         // [TURN-TIMING] Voice engine ready — the load ms rides as a point
         // entry when a fresh engine loads inside a live turn.
@@ -578,3 +585,85 @@ extension PiperVoiceSpeaker: AVAudioPlayerDelegate {
 /// PiperVoiceSpeaker is the production speaker, so it is the TTS warm
 /// seam the boot's warm phase constructs the sherpa engines through.
 extension PiperVoiceSpeaker: TTSVoiceWarming {}
+
+// MARK: - Ack-cache warm seam ([LAT-M2])
+
+/// PiperVoiceSpeaker is also the ack-cache warm seam: it owns the
+/// engine, the model store, and the voice resolution ladder, so the
+/// pre-acks are synthesized with exactly the voice the next reply will
+/// use. The build runs DETACHED (it must never hold the warm queue or
+/// any boot stage) and reports per-build observability events —
+/// `ack_cache`/`warm` started/ready/partial/failed.
+extension PiperVoiceSpeaker: AckCachePreSynthesizing {
+
+    func buildAckCache(locale: Locale,
+                       completion: @escaping (AckCacheWarmResult) -> Void) {
+        let spec = AckVoiceSpec.resolve(locale: locale)
+        guard let voiceDir = modelStore.ttsVoiceDirectory(for: spec.voiceID)
+                ?? modelStore.installBundledTTSVoice(for: spec.voiceID,
+                                                     bundle: bundle) else {
+            emitAckWarm(outcome: "failed", reason: "voice_missing",
+                        durationMs: nil, spec: spec)
+            completion(.failed(reason: "voice_missing"))
+            return
+        }
+        let variants = (1...3)
+            .map { AckCacheBuilder.Variant(
+                index: $0,
+                text: L10n.str("voiceAck.moment\($0)", locale: locale)) }
+            .filter { !$0.text.isEmpty }
+        guard !variants.isEmpty else {
+            emitAckWarm(outcome: "failed", reason: "catalog_empty",
+                        durationMs: nil, spec: spec)
+            completion(.failed(reason: "catalog_empty"))
+            return
+        }
+        emitAckWarm(outcome: "started", reason: nil, durationMs: nil, spec: spec)
+        let cache = ackCache
+        let engine = engine
+        Task.detached(priority: .utility) {
+            let start = CFAbsoluteTimeGetCurrent()
+            let result = AckCacheBuilder.build(
+                engine: engine,
+                voiceDirectory: voiceDir,
+                speed: Self.defaultSpeed,
+                variants: variants,
+                spec: spec,
+                cache: cache)
+            let ms = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
+            switch result {
+            case .ready:
+                self.emitAckWarm(outcome: "ready", reason: nil,
+                                 durationMs: ms, spec: spec)
+            case .partial(let built):
+                self.emitAckWarm(outcome: "partial",
+                                 reason: "variants_built_\(built)",
+                                 durationMs: ms, spec: spec)
+            case .failed(let reason):
+                self.emitAckWarm(outcome: "failed", reason: reason,
+                                 durationMs: ms, spec: spec)
+            }
+            completion(result)
+        }
+    }
+
+    /// Per-build event on the `ack_cache` component — PII-free catalog
+    /// ids + locale only, never ack audio or text.
+    private func emitAckWarm(outcome: String,
+                             reason: String?,
+                             durationMs: Int?,
+                             spec: AckVoiceSpec) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "ack_cache",
+            eventType: "warm",
+            durationMs: durationMs,
+            outcome: outcome,
+            errorCode: outcome == "failed" ? reason : nil,
+            metadata: [
+                "voice": spec.voiceID.rawValue,
+                "speaker": "\(spec.speakerID)",
+                "locale": spec.locale.identifier,
+            ]
+        ))
+    }
+}
