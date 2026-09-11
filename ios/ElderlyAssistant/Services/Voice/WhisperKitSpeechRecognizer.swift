@@ -67,6 +67,16 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         #endif
     }
 
+    /// [LAT-M1] True while the model weights are resident — loaded by the
+    /// boot warm, a live turn, or the post-turn re-warm. The post-turn
+    /// hold policy consults this: there is nothing to hold (or re-warm)
+    /// when the recognizer never loaded (a fallback STT served the turn).
+    /// Read on main while `kitInstance` is written on the inference
+    /// queue — a benign existence check, worst case one turn's
+    /// misattribution (same class as the coordinator's other engine
+    /// state reads).
+    var isModelLoaded: Bool { kitInstance != nil }
+
     init(observabilityBus: ObservabilityBus,
          modelStore: ModelStore? = nil,
          preferredModelID: ModelID = ModelCatalog.whisperKitNepaliMedium) {

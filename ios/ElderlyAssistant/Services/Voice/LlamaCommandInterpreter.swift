@@ -514,7 +514,97 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         }
     }
 
+    // MARK: - Warm seam ([LAT-M1])
+
+    /// `LLMInterpreterWarming`: loads the base model's weights and
+    /// allocates its context on the interpreter's own queue — NO
+    /// inference — so the first utterance's `interpret` skips the load.
+    /// The same outcome contract as the STT/TTS warms: never throws,
+    /// honest failures. The `generateOverride` test seam stands in for
+    /// the whole runtime, so it reports `.ready` without touching
+    /// llama.cpp.
+    func warm(completion: @escaping (WarmStartEngineResult) -> Void) {
+        guard isAvailable else {
+            completion(.failed(reason: "model_not_cached"))
+            return
+        }
+        if generateOverride != nil {
+            completion(.ready)
+            return
+        }
+        inferenceQueue.async { [weak self] in
+            guard let self else {
+                completion(.failed(reason: "deallocated"))
+                return
+            }
+            #if canImport(LLM)
+            switch self.loadLLMHandle() {
+            case .success:
+                completion(.ready)
+            case .failure(let reason):
+                completion(.failed(reason: reason))
+            }
+            #else
+            completion(.failed(reason: "runtime_missing"))
+            #endif
+        }
+    }
+
     // MARK: - Inference (guarded, with timeout — spec §5.2)
+
+    #if canImport(LLM)
+    /// Loads (or reuses) the llama.cpp handle for the current base model:
+    /// weights + context allocation, NO inference. Shared by the warm
+    /// seam and the first inference — whichever runs first wins the load
+    /// and the other reuses the cached handle. Emits the honest failure
+    /// event on each failure shape (the caller maps the reason).
+    private func loadLLMHandle() -> Result<LLM, String> {
+        if let existing = llmInstance as? LLM {
+            return .success(existing)
+        }
+        guard let modelURL = modelStore.path(for: preferredBaseId) else {
+            emit("model_path_missing", outcome: "failure")
+            return .failure("model_path_missing")
+        }
+        // 1024-token context (default 2048): our prompts are ~150
+        // tokens + 128 output, and the smaller n_batch halves
+        // llama.cpp's compute buffers — with Whisper resident,
+        // 2048 overflowed the app's memory ceiling and crashed
+        // `llama_context::output_reserve` on 6 GB devices.
+        // [NO-GIBBERISH] (2026-09-07): deterministic sampling — temp 0
+        // + the FIXED seed in `OnDeviceSampling` — passed at LLM
+        // creation. Before this date the handle was created with
+        // LLM.swift's defaults (temp 0.8, RANDOM seed), so the same
+        // prompt sampled differently on every run (the unreproducible
+        // one-off gibberish class). Every other parameter is explicit
+        // so a future runtime default bump cannot silently change
+        // behavior here. The template remains per-model (`template`
+        // from the brain picker — LLaMA 3.2 and Qwen3 share this
+        // call site).
+        let format = Self.chatFormat(for: preferredBaseId)
+        let template = Template(
+            system: (format.systemPrefix, format.systemSuffix),
+            user: (format.userPrefix, format.userSuffix),
+            bot: (format.botPrefix, format.botSuffix),
+            stopSequence: format.stopSequence,
+            systemPrompt: Self.chatSystemPrompt
+        )
+        guard let created = LLM(from: modelURL, template: template,
+                                seed: OnDeviceSampling.fixedSeed,
+                                topK: OnDeviceSampling.topK,
+                                topP: OnDeviceSampling.topP,
+                                temp: OnDeviceSampling.temperature,
+                                repeatPenalty: OnDeviceSampling.repeatPenalty,
+                                repetitionLookback: OnDeviceSampling.repetitionLookback,
+                                maxTokenCount: 1024) else {
+            emit("model_load_failed", outcome: "failure")
+            return .failure("model_load_failed")
+        }
+        llmInstance = created
+        emit("model_loaded", outcome: "success")
+        return .success(created)
+    }
+    #endif
 
     private func runInference(prompt: String,
                               completion: @escaping (String?) -> Void) {
@@ -545,8 +635,13 @@ final class LlamaCommandInterpreter: CommandInterpreter {
             return
         }
         #if canImport(LLM)
-        guard let modelURL = modelStore.path(for: preferredBaseId) else {
-            emit("model_path_missing", outcome: "failure")
+        let llm: LLM
+        switch loadLLMHandle() {
+        case .success(let handle):
+            llm = handle
+        case .failure:
+            // The load helper already emitted the honest failure event
+            // (model_path_missing / model_load_failed).
             completion(nil)
             return
         }
@@ -555,51 +650,8 @@ final class LlamaCommandInterpreter: CommandInterpreter {
         // selectable, and Qwen3 speaks a different special-token
         // scheme than LLaMA 3.2. `chatFormat(for:)` carries both —
         // the LLaMA branch is byte-identical to the shipped
-        // hard-coded template. Declared OUTSIDE the load branch so the
-        // cached-handle path formats with the same scheme.
+        // hard-coded template.
         let format = Self.chatFormat(for: preferredBaseId)
-        let llm: LLM
-        if let existing = llmInstance as? LLM {
-            llm = existing
-        } else {
-            let template = Template(
-                system: (format.systemPrefix, format.systemSuffix),
-                user: (format.userPrefix, format.userSuffix),
-                bot: (format.botPrefix, format.botSuffix),
-                stopSequence: format.stopSequence,
-                systemPrompt: Self.chatSystemPrompt
-            )
-            // 1024-token context (default 2048): our prompts are ~150
-            // tokens + 128 output, and the smaller n_batch halves
-            // llama.cpp's compute buffers — with Whisper resident,
-            // 2048 overflowed the app's memory ceiling and crashed
-            // `llama_context::output_reserve` on 6 GB devices.
-            // [NO-GIBBERISH] (2026-09-07): deterministic sampling — temp 0
-            // + the FIXED seed in `OnDeviceSampling` — passed at LLM
-            // creation. Before this date the handle was created with
-            // LLM.swift's defaults (temp 0.8, RANDOM seed), so the same
-            // prompt sampled differently on every run (the unreproducible
-            // one-off gibberish class). Every other parameter is explicit
-            // so a future runtime default bump cannot silently change
-            // behavior here. The template remains per-model (`template`
-            // from the brain picker — LLaMA 3.2 and Qwen3 share this
-            // call site).
-            guard let created = LLM(from: modelURL, template: template,
-                                    seed: OnDeviceSampling.fixedSeed,
-                                    topK: OnDeviceSampling.topK,
-                                    topP: OnDeviceSampling.topP,
-                                    temp: OnDeviceSampling.temperature,
-                                    repeatPenalty: OnDeviceSampling.repeatPenalty,
-                                    repetitionLookback: OnDeviceSampling.repetitionLookback,
-                                    maxTokenCount: 1024) else {
-                emit("model_load_failed", outcome: "failure")
-                completion(nil)
-                return
-            }
-            llm = created
-            llmInstance = llm
-            emit("model_loaded", outcome: "success")
-        }
 
         // LLM.swift's `getCompletion(from:)` sends the raw string with
         // no template preprocessing — the Template we passed to `LLM(from:)`

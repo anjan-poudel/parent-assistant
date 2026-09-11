@@ -222,6 +222,8 @@ struct TalkStage: View {
     /// Hold-to-reset on the hero.
     let onReset: () -> Void
 
+    @Environment(\.locale) private var locale
+
     private var visuals: TalkStageVisuals { state.talkVisuals }
 
     var body: some View {
@@ -241,7 +243,8 @@ struct TalkStage: View {
                     TalkButton(session: session,
                                // [P0-2] Manual Talk readiness — the shared
                                // `VoicePipelineReadiness` contract, driven
-                               // by the pipeline's own start callback.
+                               // by the pipeline's own start callback and
+                               // the [LAT-M1] boot contract.
                                readiness: voice.readiness,
                                onTap: {
                                    switch state {
@@ -270,6 +273,21 @@ struct TalkStage: View {
                                // therefore never "recover" merely because
                                // startup has not completed.
                                onRecover: onRecover)
+                    // [LAT-M1] The boot contract's honest line under the
+                    // hero: the per-feature preparing caption while the
+                    // contract is open, the cold-feature banner once it
+                    // settles degraded. Nothing in any other state.
+                    if let extraLine = TalkReadinessCopy.extraLine(voice.readiness,
+                                                                   locale: locale) {
+                        Text(extraLine)
+                            .font(DesignTokens.warmFont(
+                                size: DesignTokens.minCaptionPointSize,
+                                weight: .medium))
+                            .foregroundColor(DesignTokens.textSecondary)
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .padding(.horizontal, 16)
+                    }
                     if visuals.showsHintCarousel {
                         HintCarousel()
                     }

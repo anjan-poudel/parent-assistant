@@ -32,11 +32,23 @@ final class WarmStartTests: XCTestCase {
         }
     }
 
+    /// [LAT-M1] The llama warm seam fake — same shape as the other two.
+    final class FakeLLMWarming: LLMInterpreterWarming {
+        var isAvailable = true
+        var result: WarmStartEngineResult = .ready
+        private(set) var warmCalls = 0
+
+        func warm(completion: @escaping (WarmStartEngineResult) -> Void) {
+            warmCalls += 1
+            completion(result)
+        }
+    }
+
     // MARK: - Config helpers
 
     /// The shipped defaults: enabled, on-device stack, WhisperKit
-    /// available, both TTS voices installed, no voice selection, wake
-    /// word on, not a simulator.
+    /// available, llama available, both TTS voices installed, no voice
+    /// selection, wake word on, not a simulator.
     private func defaultConfig() -> WarmStartConfig {
         WarmStartConfig(
             enabled: true,
@@ -47,7 +59,8 @@ final class WarmStartTests: XCTestCase {
                                  ModelCatalog.piperEnglishUS],
             selectedNepaliVoiceID: ModelCatalog.piperNepali,
             wakeWordEnabled: true,
-            isSimulator: false
+            isSimulator: false,
+            llamaAvailable: true
         )
     }
 
@@ -69,6 +82,14 @@ final class WarmStartTests: XCTestCase {
                        WarmStartStep(engine: .whisperKit,
                                      action: .skip(reason: "gemini_stack")),
                        "the Gemini STT stack must never warm an on-device whisper runtime")
+        // [LAT-M1] The .gemini stack is LOCAL-FIRST hybrid ("the local
+        // brain answers what it can, Gemini takes the rest"), so the
+        // llama warm applies there too — the first conversation's
+        // interpret still runs on the local brain.
+        XCTAssertTrue(plan.contains(WarmStartStep(engine: .llamaInterpreter,
+                                                  action: .warm,
+                                                  phase: .boot)),
+                      "the llama brain warms on the gemini stack — the local-first hybrid still runs it")
         XCTAssertTrue(plan.contains(WarmStartStep(engine: .ttsVoice(ModelCatalog.piperNepali),
                                                   action: .warm,
                                                   phase: .boot)),
@@ -79,24 +100,45 @@ final class WarmStartTests: XCTestCase {
                       "the secondary English voice still warms — deferred past boot, not skipped")
     }
 
-    func testDefaultConfigBootSlotWarmsWhisperKitAndPrimaryVoiceOnly() {
+    func testLlamaMissingModelSkipsHonestly() {
+        var config = defaultConfig()
+        config.llamaAvailable = false
+        let plan = WarmStartPlanner.plan(for: config)
+
+        XCTAssertTrue(plan.contains(WarmStartStep(engine: .llamaInterpreter,
+                                                  action: .skip(reason: "model_missing"))),
+                      "a brain model that cannot load is an honest skip — the first interpret pays the load, today's behavior")
+    }
+
+    func testLlamaWarmIsSettingsGatedLikeEveryOtherWarm() {
+        var config = defaultConfig()
+        config.enabled = false
+        XCTAssertEqual(WarmStartPlanner.plan(for: config), [],
+                       "warm-start OFF warms nothing — llama included")
+    }
+
+    func testDefaultConfigBootSlotWarmsWhisperKitLlamaAndPrimaryVoiceOnly() {
         let plan = WarmStartPlanner.plan(for: defaultConfig())
-        // [BOOT-LATENCY] The boot slot carries the whisper model + ONLY
-        // the primary reply voice (whisper first — the biggest load).
-        // The secondary English voice defers to the post-boot slot so it
-        // can never delay `.ready`.
+        // [BOOT-LATENCY] The boot slot carries the whisper model, the
+        // llama brain ([LAT-M1] — weights + context, no inference) and
+        // ONLY the primary reply voice (whisper first — the biggest
+        // load). The secondary English voice defers to the post-boot
+        // slot so it can never delay `.ready`.
         XCTAssertEqual(plan, [
             WarmStartStep(engine: .whisperKit, action: .warm, phase: .boot),
+            WarmStartStep(engine: .llamaInterpreter, action: .warm, phase: .boot),
             WarmStartStep(engine: .ttsVoice(ModelCatalog.piperNepali), action: .warm, phase: .boot),
             WarmStartStep(engine: .ttsVoice(ModelCatalog.piperEnglishUS), action: .warm, phase: .postBoot)
-        ], "defaults → boot: whisper + primary voice; post-boot: secondary voice")
+        ], "defaults → boot: whisper + llama + primary voice; post-boot: secondary voice")
     }
 
     func testSecondaryVoiceIsDeferredNotSkipped() {
         let plan = WarmStartPlanner.plan(for: defaultConfig())
         let bootEngines = plan.filter { $0.phase == .boot }.map(\.engine)
-        XCTAssertEqual(bootEngines, [.whisperKit, .ttsVoice(ModelCatalog.piperNepali)],
-                       "the boot slot warms ONLY the primary reply voice (+ whisper)")
+        XCTAssertEqual(bootEngines,
+                       [.whisperKit, .llamaInterpreter,
+                        .ttsVoice(ModelCatalog.piperNepali)],
+                       "the boot slot warms ONLY whisper + llama + the primary reply voice")
         let deferred = plan.filter { $0.phase == .postBoot }
         XCTAssertEqual(deferred, [WarmStartStep(engine: .ttsVoice(ModelCatalog.piperEnglishUS),
                                                 action: .warm,
@@ -172,6 +214,12 @@ final class WarmStartTests: XCTestCase {
                        WarmStartStep(engine: .whisperKit,
                                      action: .skip(reason: "simulator")),
                        "WhisperKit is CPU-only on the simulator — the warm could outlive boot without ever helping")
+        // [LAT-M1] The llama warm skips on the simulator too: llama.cpp
+        // is CPU-only there (no Metal), the load is minutes-scale and
+        // never helps a sim conversation — the whisper doctrine.
+        XCTAssertTrue(plan.contains(WarmStartStep(engine: .llamaInterpreter,
+                                                  action: .skip(reason: "simulator"))),
+                      "the llama brain warm is SKIPPED on the simulator, never loaded")
         // [VAD-REGRESSION] On the simulator TTS warms are SKIPPED, not
         // deferred: the measured sherpa engine constructions cost up to
         // ~9 s there, hold the serial TTS engine queue (delaying the
@@ -235,7 +283,7 @@ final class WarmStartTests: XCTestCase {
             let plan = WarmStartPlanner.plan(for: config)
             for step in plan {
                 switch step.engine {
-                case .whisperKit, .whisperCpp, .ttsVoice:
+                case .whisperKit, .whisperCpp, .ttsVoice, .llamaInterpreter:
                     break // the only engine kinds the warm plan may carry
                 }
             }
@@ -247,9 +295,11 @@ final class WarmStartTests: XCTestCase {
     private func run(_ plan: [WarmStartStep],
                      stt: STTModelWarming? = nil,
                      tts: TTSVoiceWarming? = nil,
+                     llm: LLMInterpreterWarming? = nil,
                      bus: MockObservabilityBus = MockObservabilityBus())
         -> ([WarmStartRunner.WarmStartStepOutcome], MockObservabilityBus) {
-        let runner = WarmStartRunner(stt: stt, tts: tts, observabilityBus: bus)
+        let runner = WarmStartRunner(stt: stt, tts: tts, llm: llm,
+                                     observabilityBus: bus)
         let done = expectation(description: "warm plan settles")
         var outcomes: [WarmStartRunner.WarmStartStepOutcome] = []
         runner.run(plan: plan) { results in
@@ -335,6 +385,40 @@ final class WarmStartTests: XCTestCase {
 
         let ready = bus.emittedEvents.first { $0.outcome == "ready" }
         XCTAssertEqual(ready?.metadata["voice"], ModelCatalog.piperNepaliChitwan.rawValue)
+    }
+
+    // MARK: - Llama warm ([LAT-M1])
+
+    func testRunnerWarmsLlamaThroughTheSeam() {
+        let llm = FakeLLMWarming()
+        let plan = [WarmStartStep(engine: .llamaInterpreter, action: .warm)]
+        let (outcomes, bus) = run(plan, llm: llm)
+
+        XCTAssertEqual(outcomes.map(\.result), [.ready])
+        XCTAssertEqual(llm.warmCalls, 1)
+        let ready = bus.emittedEvents.first { $0.outcome == "ready" }
+        XCTAssertEqual(ready?.metadata["engine"], "llama_interpreter")
+        XCTAssertNotNil(ready?.durationMs)
+    }
+
+    func testRunnerReportsLlamaFailureHonestly() {
+        let llm = FakeLLMWarming()
+        llm.result = .failed(reason: "model_load_failed")
+        let plan = [WarmStartStep(engine: .llamaInterpreter, action: .warm)]
+        let (outcomes, bus) = run(plan, llm: llm)
+
+        let failed = bus.emittedEvents.filter { $0.outcome == "failed" }
+        XCTAssertEqual(failed.first?.metadata["engine"], "llama_interpreter")
+        XCTAssertEqual(failed.first?.errorCode, "model_load_failed")
+        XCTAssertEqual(outcomes.map(\.result),
+                       [.failed(reason: "model_load_failed")])
+    }
+
+    func testRunnerMissingLlamaSeamFailsHonestly() {
+        let plan = [WarmStartStep(engine: .llamaInterpreter, action: .warm)]
+        let (outcomes, _) = run(plan, llm: nil)
+        XCTAssertEqual(outcomes.map(\.result),
+                       [.failed(reason: "seam_unavailable")])
     }
 
     // MARK: - Settings copy (catalog binding, both shipped languages)

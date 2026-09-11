@@ -23,11 +23,23 @@ import Foundation
 // taken by the fold-based `VoiceReadiness` ObservableObject in this
 // folder (startup-r2 task).
 
-/// Manual Talk readiness, driven solely by `voicePipeline.start`'s
-/// completion callback.
+/// Manual Talk readiness, driven by `voicePipeline.start`'s completion
+/// callback AND the [LAT-M1] invariance boot contract (`TalkBootContract`):
+///
+///  - `.loading(.starting)`          — the start request is in flight.
+///  - `.loading(.preparingEngines)`  — the start SUCCEEDED, but the boot
+///    contract is still open (warms/KWS settling). The hero stays
+///    disabled with the honest preparing label + per-feature status;
+///    the warm budget expiry alone never settles this (no silent enable).
+///  - `.ready`                       — start succeeded ∧ contract satisfied.
+///  - `.degraded(TalkBootDegradation)` — start succeeded, some feature
+///    failed/timed out: the hero is ENABLED with an honest banner naming
+///    the cold features (never blocked forever, never silently enabled).
+///  - `.failed(VoiceStartupFailure)` — the start callback failed (sticky).
 enum VoicePipelineReadiness: Equatable {
     case loading(VoiceLoadingStage)
     case ready
+    case degraded(TalkBootDegradation)
     case failed(VoiceStartupFailure)
 }
 
@@ -35,6 +47,10 @@ enum VoicePipelineReadiness: Equatable {
 enum VoiceLoadingStage: Equatable {
     /// Pipeline start has been requested (or will be imminently).
     case starting
+    /// [LAT-M1] The start succeeded; the boot contract (warms + KWS) is
+    /// still settling — the hero shows the preparing label with the
+    /// per-feature progress.
+    case preparingEngines(TalkBootProgress)
 }
 
 /// Named, deterministic failure of the voice pipeline's boot-time start.
@@ -52,9 +68,25 @@ extension VoicePipelineReadiness {
         return false
     }
 
+    /// True when the hero may start a conversation: fully ready, or
+    /// degraded — the degraded hero is ENABLED (the first conversation
+    /// honestly pays the cold engines' loads) with a banner naming them.
+    var isTalkEnabled: Bool {
+        switch self {
+        case .ready, .degraded: return true
+        case .loading, .failed: return false
+        }
+    }
+
     /// The named failure, when the pipeline's boot-time start failed.
     var failure: VoiceStartupFailure? {
         if case .failed(let failure) = self { return failure }
+        return nil
+    }
+
+    /// The cold-feature payload, when the contract settled degraded.
+    var degradation: TalkBootDegradation? {
+        if case .degraded(let degradation) = self { return degradation }
         return nil
     }
 }
