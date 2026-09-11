@@ -119,6 +119,9 @@ enum ModelCatalog {
     /// FLEURS accuracy (28.23/8.89), downloadable (v8 release), not
     /// bundled.
     static let whisperMediumV5 = ModelID("whisper-medium-v5-q5_1")
+    /// v6 fine-tune on the IndicVoices 399k-row mix — best measured
+    /// FLEURS accuracy (25.28/8.14), downloadable (v10 release).
+    static let whisperMediumV6 = ModelID("whisper-medium-v6-q5_1")
     /// WhisperKit-format Nepali model (directory artifact, zip-delivered)
     /// — the ANE-accelerated path that replaces the ggml STT entries.
     /// Placeholder until the teacher conversion lands (see migration).
@@ -211,7 +214,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperMediumV5,
             kind: .whisperBase,
-            displayName: "Nepali — Medium v5 (best accuracy)",
+            displayName: "Nepali — Medium v5",
             // finetune-medium-v5-final (2026-09-09): 3 epochs on the
             // expanded 162k-row manifest (complete SLR54 + FLEURS +
             // slr43/143), fleurs-weight 25. FLEURS WER 28.23 / CER 8.89 —
@@ -220,6 +223,22 @@ enum ModelCatalog {
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v8/whisper-medium-v5-q5_1.bin")!,
             sizeBytes: 586_572_036,
             sha256: "4516cbcc98d8308fed342d051ee97b56c30df2a4f3a7620d82ed6b5ee51f7d71",
+            minDeviceRAMBytes: 3_500_000_000,
+            dependsOn: nil,
+            coreMLEncoderBundledName: nil
+        ),
+        ModelCatalogEntry(
+            id: whisperMediumV6,
+            kind: .whisperBase,
+            displayName: "Nepali — Medium v6 (best accuracy)",
+            // finetune-medium-v6-final (2026-09-11): 3 epochs on the
+            // 399k-row manifest (IndicVoices 237k conversational +
+            // complete SLR54 + FLEURS). FLEURS WER 25.28 / CER 8.14 —
+            // best measured (v5: 28.23/8.89).
+            filename: "whisper-medium-v6-q5_1.bin",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v10/whisper-medium-v6-q5_1.bin")!,
+            sizeBytes: 586_572_036,
+            sha256: "23d428d7d21e14c46be8cffaa356e69db286da0a9cd9cf3ae09c9b1f122410fd",
             minDeviceRAMBytes: 3_500_000_000,
             dependsOn: nil,
             coreMLEncoderBundledName: nil
