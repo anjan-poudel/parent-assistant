@@ -120,6 +120,8 @@ final class AckFastLaneTests: XCTestCase {
     override func setUpWithError() throws {
         tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("ack-fast-lane-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempRoot,
+                                                withIntermediateDirectories: true)
         cache = AckAudioCache(root: tempRoot.appendingPathComponent("cache"))
         savedSeamBegin = ResponsePlaybackModeSeam.begin
         savedSeamEnd = ResponsePlaybackModeSeam.end
