@@ -295,6 +295,37 @@ final class LlamaCommandInterpreterTests: XCTestCase {
         XCTAssertTrue(interp.isAvailable, "seam must stand in for the llama.cpp runtime")
     }
 
+    // MARK: - Warm seam ([LAT-M1])
+
+    func testWarmReportsFailedWhenModelNotCached() {
+        let interp = LlamaCommandInterpreter(modelStore: store, observabilityBus: bus)
+        let expectation = expectation(description: "warm completion fires")
+        var result: WarmStartEngineResult?
+        interp.warm { outcome in
+            result = outcome
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 2.0)
+        XCTAssertEqual(result, .failed(reason: "model_not_cached"),
+                       "no cached model ⇒ an honest warm failure, never a hang or a throw")
+    }
+
+    func testWarmWithGenerateOverrideReportsReadyWithoutRuntime() {
+        // The seam stands in for the whole llama.cpp runtime — the warm
+        // has nothing to load and reports ready (the seam's "runtime" is
+        // already warm), so the coordinator's boot contract can settle
+        // the llama feature in seamed end-to-end tests.
+        let interp = makeSeamedInterpreter(json: "{}")
+        let expectation = expectation(description: "warm completion fires")
+        var result: WarmStartEngineResult?
+        interp.warm { outcome in
+            result = outcome
+            expectation.fulfill()
+        }
+        wait(for: [expectation], timeout: 2.0)
+        XCTAssertEqual(result, .ready)
+    }
+
     func testGenerateOverrideCanonicalJSONYieldsQueryCommand() throws {
         let answer = "भोलि काठमाडौंमा हल्का बदली छ।"
         let json = """

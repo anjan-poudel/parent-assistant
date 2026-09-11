@@ -506,13 +506,15 @@ struct TalkButton: View {
     /// explanation and one recovery.
     private var failure: VoiceStartupFailure? { readiness.failure }
 
-    /// Disabled unless the pipeline's own start callback succeeded, plus
-    /// the chips' own case: while loading (or failed) the hero is inert —
-    /// the reset hold is not even attached, so a hold cannot reach the
-    /// reset path while the review's "cannot invoke recovery merely
-    /// because startup has not completed" rule applies.
+    /// Disabled unless the pipeline's own start callback succeeded AND
+    /// the [LAT-M1] boot contract settled (ready OR degraded — a
+    /// degraded hero is ENABLED with an honest cold-feature banner, never
+    /// silently), plus the chips' own case: while loading (or failed) the
+    /// hero is inert — the reset hold is not even attached, so a hold
+    /// cannot reach the reset path while the review's "cannot invoke
+    /// recovery merely because startup has not completed" rule applies.
     private var isDisabled: Bool {
-        readiness != .ready || session.state == .awaitingConfirmation
+        !readiness.isTalkEnabled || session.state == .awaitingConfirmation
     }
 
     /// [P0-2 UX fix] The disc's fill. While the pipeline start is in
@@ -553,9 +555,10 @@ struct TalkButton: View {
                     // While a reset hold is underway the breathing rings
                     // stand down (the arc below is the motion that
                     // matters); they return on release. [P0-2] they stand
-                    // down unless the pipeline is ready too — a loading or
-                    // failed hero does not breathe.
-                    if isBreathing && !isPressingForReset && readiness == .ready {
+                    // down unless the pipeline is live too — a loading or
+                    // failed hero does not breathe. [LAT-M1] A DEGRADED
+                    // hero is live (enabled + banner), so it breathes.
+                    if isBreathing && !isPressingForReset && readiness.isTalkEnabled {
                         breathingRings
                     }
                     if visuals.showsHalo && !isPressingForReset {

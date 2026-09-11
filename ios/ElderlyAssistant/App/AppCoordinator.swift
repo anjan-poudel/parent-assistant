@@ -673,9 +673,38 @@ final class AppCoordinator: ObservableObject {
     /// The state machine is a plain value type (`ManualTalkReadinessState`)
     /// so its rules are unit-tested without a coordinator; the coordinator
     /// is its only writer and publishes the value here.
+    ///
+    /// [LAT-M1] The published value is now the CONJUNCTION of the
+    /// pipeline-start machine and the invariance boot contract
+    /// (`TalkBootContractState`): `publishManualTalkReadiness` combines
+    /// them, so the hero's speak-enabled condition is exactly
+    /// pipeline started ∧ warms settled ∧ KWS settled (or the honest
+    /// degraded settle).
     @Published private(set) var voicePipelineReadiness: VoicePipelineReadiness =
         ManualTalkReadinessState.initial
     private var manualTalkReadiness = ManualTalkReadinessState()
+    /// [LAT-M1] The invariance boot contract's machine (pure, unit-tested
+    /// in TalkBootContractTests) — the coordinator feeds it warm plan
+    /// steps/outcomes, the KWS settle and the talk watchdog, and
+    /// publishes the combined readiness.
+    private var talkBootContract = TalkBootContractState()
+    /// The talk watchdog's pending work — a warm step (or the KWS build)
+    /// still pending past `TalkBootContractState.talkWatchdogSeconds`
+    /// settles the contract degraded instead of blocking the button
+    /// forever. Never cancels boot: the spinner's 4 s budget
+    /// (`WarmStartPlanner.bootWarmBudgetSeconds`) is untouched.
+    private var talkContractWatchdogWork: DispatchWorkItem?
+    /// The settle event (`talk_boot_contract`) fired at most once per
+    /// contract.
+    private var talkContractSettled = false
+    /// [LAT-M1] The TTL-hold owner for post-turn whisper weights — see
+    /// `WhisperWeightsHold` / `WhisperPostTurnPolicy`.
+    private let whisperWeightsHold = WhisperWeightsHold()
+    /// A post-turn whisper re-warm is owed to the NEXT conversation (set
+    /// by the release path at `recordTranscript`, run when the turn
+    /// finalizes — after the reply speech, when the LLM's memory has
+    /// settled).
+    private var pendingPostTurnReWarm = false
     /// [STARTUP-R2] True once the deferred KWS build has been scheduled
     /// (or run) this launch — the one-shot guard for the post-ready
     /// wake-word build.
@@ -1966,7 +1995,13 @@ final class AppCoordinator: ObservableObject {
         // init is rejected by definite-initialization, and the caption
         // only matters once the voice composition exists anyway.
         turnTracer.onTurnFinalized = { [weak self] stages, _ in
-            DispatchQueue.main.async { self?.applyTurnTimingCaption(stages) }
+            DispatchQueue.main.async {
+                self?.applyTurnTimingCaption(stages)
+                // [LAT-M1] The turn is over (reply speech done) — run a
+                // owed post-turn whisper re-warm now that the LLM's
+                // memory has settled.
+                self?.runPostTurnWhisperReWarmIfPending()
+            }
         }
         // [LAT-M2] Ack fast lane: one shared file-backed pre-ack cache —
         // the speaker pre-synthesizes the ack variants into it at warm
@@ -2305,19 +2340,17 @@ final class AppCoordinator: ObservableObject {
 
     // MARK: - Voice readiness ([STARTUP-R2])
 
-    /// Pushes the voice stack's readiness into the tracker. Called from
-    /// `handlePipelineState` (every pipeline state change, main-
-    /// confined) and from the boot's pipeline-start completion. The
-    /// pipeline source is READY exactly when `voiceState == .idle` — the
     /// The legacy fold tracker is gone ([BOOT-REVIEW] cleanup): the Talk
-    /// hero gates on the strict `voicePipelineReadiness` contract, and
-    /// this state hook now only drives the deferred KWS build — when the
-    /// pipeline first reaches `.idle`, the speak affordance is live and
-    /// the sherpa engine may be built off the critical path (one-shot
-    /// per launch — see `scheduleDeferredKWSBuildIfNeeded`).
+    /// hero gates on the strict `voicePipelineReadiness` contract ([LAT-
+    /// M1]: pipeline start ∧ boot contract). This state hook now only
+    /// drives the deferred KWS build — when the pipeline first reaches
+    /// `.idle` the sherpa engine may be built off the critical path
+    /// (one-shot per launch — see `scheduleDeferredKWSBuildIfNeeded`).
+    /// [LAT-M1] `.idle` no longer equals "speak enabled": the published
+    /// readiness is the boot contract's conjunction.
     private func updateVoiceReadiness() {
         if case .idle = voiceState {
-            print("[AppCoordinator] voice pipeline idle — speak enabled")
+            print("[AppCoordinator] voice pipeline idle — KWS build eligible")
             scheduleDeferredKWSBuildIfNeeded()
         }
     }
@@ -2370,11 +2403,15 @@ final class AppCoordinator: ObservableObject {
         publishManualTalkReadiness()
     }
 
-    /// Main-confined publish of the machine's value (the callbacks are
+    /// Main-confined publish of the COMBINED readiness (the callbacks are
     /// documented to arrive on main; the hop is the same defensive marshal
-    /// `updateVoiceReadiness`'s tracker uses).
+    /// `updateVoiceReadiness`'s tracker uses). [LAT-M1] The combination is
+    /// the invariance boot contract: pipeline start ∧ warm/KWS settle —
+    /// `TalkBootContract.combine` maps it onto the published cases.
     private func publishManualTalkReadiness() {
-        let value = manualTalkReadiness.value
+        let value = TalkBootContract.combine(
+            pipeline: manualTalkReadiness.value,
+            contract: talkBootContract)
         if Thread.isMainThread {
             voicePipelineReadiness = value
         } else {
@@ -2382,6 +2419,48 @@ final class AppCoordinator: ObservableObject {
                 self?.voicePipelineReadiness = value
             }
         }
+    }
+
+    /// [LAT-M1] The boot contract changed: settle it once, then publish.
+    /// The settle cancels the talk watchdog and emits ONE honest
+    /// `talk_boot_contract` event (component) with the cold features —
+    /// the same PII-free machine-string discipline as the warm events.
+    private func noteTalkContractChanged() {
+        if talkBootContract.isComplete, !talkContractSettled {
+            talkContractSettled = true
+            talkContractWatchdogWork?.cancel()
+            talkContractWatchdogWork = nil
+            observabilityBus.emit(ObservabilityEvent(
+                component: "talk_boot_contract",
+                eventType: "settled",
+                durationMs: nil,
+                outcome: talkBootContract.isSatisfied ? "ready" : "degraded",
+                errorCode: nil,
+                metadata: [
+                    "cold_features": talkBootContract.coldFeatures
+                        .map(\.rawValue).joined(separator: ",")
+                ]))
+        }
+        publishManualTalkReadiness()
+    }
+
+    /// [LAT-M1] Arms the talk watchdog once per contract (boot warm
+    /// phase or the degraded-state warm retry — re-arming is a no-op on
+    /// an already-settled contract). Main-confined.
+    private func armTalkContractWatchdog() {
+        talkContractWatchdogWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard !self.talkBootContract.isComplete else { return }
+            print("[AppCoordinator] talk contract watchdog — degrading "
+                + "pending features honestly")
+            self.talkBootContract.noteTalkWatchdogExpired()
+            self.noteTalkContractChanged()
+        }
+        talkContractWatchdogWork = work
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + TalkBootContractState.talkWatchdogSeconds,
+            execute: work)
     }
 
     // MARK: - Degraded-capability recovery ([BOOT-REVIEW, design item])
@@ -2535,6 +2614,13 @@ final class AppCoordinator: ObservableObject {
         self.wakeWordEngine = launch.engine
         self.wakeWordEngineRealAtLaunch = launch.isReal
         manualTalkReadiness.noteWakeWordEngineSettled(isReal: launch.isReal)
+        // [LAT-M1] The invariance contract's KWS half settles HERE — the
+        // deferred build's decision is made. A real engine (swapped in
+        // below) is `.ready`; the honest Null fallback is `.skipped`
+        // (wake word never degrades manual Talk — the startup-r2
+        // doctrine, preserved as a satisfied skip instead of a failure).
+        talkBootContract.noteKWSApplied(isReal: launch.isReal)
+        noteTalkContractChanged()
         print("[AppCoordinator] deferred KWS build settled real=\(launch.isReal)")
         guard launch.isReal,
               voicePipeline?.state == .idle else { return }
@@ -2554,6 +2640,10 @@ final class AppCoordinator: ObservableObject {
     private lazy var warmRunner = WarmStartRunner(
         stt: whisperKitSpeechRecognizer,
         tts: speaker as? TTSVoiceWarming,
+        // [LAT-M1] The llama warm seam — the interpreter loads its
+        // weights + context at boot so the first interpret skips the
+        // load.
+        llm: llamaCommandInterpreter,
         observabilityBus: observabilityBus)
     /// The plan slice deferred past `.ready` (secondary voices,
     /// simulator TTS warms). Consumed exactly once — boot runs once per
@@ -2577,12 +2667,26 @@ final class AppCoordinator: ObservableObject {
                                                             bundle: .main),
             selectedNepaliVoiceID: ResponseVoiceSelection.persisted()?.voiceID
                 ?? ModelCatalog.piperNepali,
+            llamaAvailable: llamaCommandInterpreter.isAvailable,
             wakeWordEnabled: wakeWordEnabled,
             isSimulator: Self.isSimulator
         )
         let plan = WarmStartPlanner.plan(for: config)
         let bootPlan = plan.filter { $0.phase == .boot }
         postBootWarmSteps = plan.filter { $0.phase == .postBoot }
+        // [LAT-M1] Feed the invariance boot contract BEFORE any early
+        // return: plan-time skips settle their features now (a skipped
+        // feature satisfies the contract — the skip is the planner's
+        // honest reason), boot-phase warms await their runner outcomes,
+        // and features with no step (preference off) settle as
+        // `preference_off` — the button never waits on a warm the user
+        // turned off. The talk watchdog bounds the wait.
+        for step in plan {
+            talkBootContract.noteWarmPlanStep(step)
+        }
+        talkBootContract.settleUnplannedWarmFeatures()
+        armTalkContractWatchdog()
+        noteTalkContractChanged()
         guard !bootPlan.isEmpty else {
             // Nothing warms during boot (preference off, or the whole
             // plan deferred — the simulator defers every TTS warm) —
@@ -2598,6 +2702,17 @@ final class AppCoordinator: ObservableObject {
         warmRunner.run(plan: bootPlan) { [weak self] outcomes in
             DispatchQueue.main.async {
                 guard let self, !self.warmPhaseSettled else { return }
+                // [LAT-M1] Feed the contract first: every boot-slice
+                // outcome settles its feature (ready / failed — skip
+                // steps were already settled at plan time and the
+                // machine ignores their nil results).
+                for outcome in outcomes {
+                    guard let feature = TalkBootContractState.feature(
+                        for: outcome.step.engine),
+                        let result = outcome.result else { continue }
+                    self.talkBootContract.noteWarmOutcome(feature: feature,
+                                                          result: result)
+                }
                 if outcomes.contains(where: {
                     if case .failed = $0.result { return true }
                     return false
@@ -2611,6 +2726,7 @@ final class AppCoordinator: ObservableObject {
                 // the boot; the ack path falls back to synthesis until
                 // it lands.
                 self.maybeStartAckCacheWarm()
+self.noteTalkContractChanged()
                 self.advancePastWarmPhase()
             }
         }
@@ -3905,14 +4021,177 @@ final class AppCoordinator: ObservableObject {
     /// context — its ~1.5 GB (large-v3) would otherwise stay resident
     /// while LLaMA runs and crash llama.cpp's output buffer reservation
     /// on 6 GB devices.
+    ///
+    /// [LAT-M1] The whisper release now goes through the post-turn
+    /// policy (`WhisperPostTurnPolicy`): TTL-hold when the RAM probe
+    /// allows (back-to-back turns skip the reload), release + post-turn
+    /// re-warm when it doesn't, and the unconditional release (today's
+    /// exact behavior) when the policy is off, the stack is not
+    /// WhisperKit, or the probe is critical.
     func recordTranscript(_ text: String) {
-        whisperSpeechRecognizer.releaseModel()
-        whisperKitSpeechRecognizer.releaseModel()
+        applyPostTranscriptWhisperPolicy()
         DispatchQueue.main.async { [weak self] in
             self?.livePartialTranscript = nil
             self?.lastTranscript = text
             self?.appendHistory(.user, text)
         }
+    }
+
+    // MARK: - Post-turn whisper weights ([LAT-M1])
+
+    /// The catalog whisper footprint the hold/probe arithmetic uses —
+    /// the medium-class model's declared size (the weights the boot warm
+    /// actually loads).
+    private static let whisperFootprintBytes: UInt64 = UInt64(
+        ModelCatalog.entry(for: ModelCatalog.whisperKitNepaliMedium)?.sizeBytes
+            ?? 1_600_000_000)
+
+    /// True while WhisperKit is the STT the on-device selection table
+    /// would actually run — the only recognizer whose weights can be
+    /// held/re-warmed (whisper.cpp loads a fresh context per attempt).
+    private var whisperKitIsActiveSTT: Bool {
+        guard voiceEngineStack == .onDevice else { return false }
+        if case .whisperKit = Self.onDeviceSTTChoice(
+            whisperKitAvailable: whisperKitSpeechRecognizer.isAvailable,
+            whisperCppAvailable: whisperSpeechRecognizer.isAvailable) {
+            return true
+        }
+        return false
+    }
+
+    /// Applies the post-transcript policy to the whisper weights (any
+    /// queue — the recognizer's release is queue-agnostic, the hold's
+    /// expiry and the re-warm landing marshal to main).
+    private func applyPostTranscriptWhisperPolicy() {
+        // whisper.cpp loads a FRESH context per attempt by design — a
+        // held context could never be reused. It always releases.
+        whisperSpeechRecognizer.releaseModel()
+        let wantsPolicy = warmStartEnabled
+            && voiceEngineStack == .onDevice
+            && whisperKitIsActiveSTT
+            && whisperKitSpeechRecognizer.isAvailable
+        guard wantsPolicy else {
+            whisperWeightsHold.cancel()
+            pendingPostTurnReWarm = false
+            whisperKitSpeechRecognizer.releaseModel()
+            return
+        }
+        // Nothing loaded (a fallback STT served the turn) — there is
+        // nothing to hold or re-warm; today's release applies.
+        guard whisperKitSpeechRecognizer.isModelLoaded else {
+            whisperWeightsHold.cancel()
+            whisperKitSpeechRecognizer.releaseModel()
+            return
+        }
+        switch WhisperPostTurnPolicy.decide(
+            availableBytes: MemoryProbe.availableProcessMemoryBytes,
+            whisperFootprintBytes: Self.whisperFootprintBytes) {
+        case .hold:
+            // The probe allows the weights to stay resident across the
+            // LLM inference of this turn: hold them for the TTL so a
+            // back-to-back turn reuses the instance and skips the load.
+            whisperWeightsHold.arm(ttl: WhisperPostTurnPolicy.ttlSeconds) {
+                [weak self] in
+                DispatchQueue.main.async {
+                    self?.releaseHeldWhisperWeights()
+                }
+            }
+            emitWhisperWeightsEvent(
+                eventType: "post_transcript", outcome: "held",
+                metadata: ["ttl_s": "\(Int(WhisperPostTurnPolicy.ttlSeconds))"])
+        case .releaseAndReWarm:
+            // Tight RAM: release now (the crash-safety contract), then
+            // re-warm after the turn so the NEXT conversation isn't cold.
+            whisperWeightsHold.cancel()
+            whisperKitSpeechRecognizer.releaseModel()
+            emitWhisperWeightsEvent(
+                eventType: "post_transcript", outcome: "released",
+                metadata: ["reason": "ram_headroom"])
+            schedulePostTurnWhisperReWarm()
+        case .releaseOnly:
+            // Critically tight: release and stay released — a reload
+            // would endanger the app. The next turn pays the load.
+            whisperWeightsHold.cancel()
+            whisperKitSpeechRecognizer.releaseModel()
+            emitWhisperWeightsEvent(
+                eventType: "post_transcript", outcome: "released",
+                metadata: ["reason": "ram_critical"])
+        }
+    }
+
+    /// The TTL lapsed with no new transcript: the weights go back to the
+    /// pre-warm RAM contract (the next turn pays the load).
+    private func releaseHeldWhisperWeights() {
+        whisperKitSpeechRecognizer.releaseModel()
+        emitWhisperWeightsEvent(eventType: "ttl_expired", outcome: "released")
+    }
+
+    /// Marks the post-turn re-warm as owed. It RUNS when the turn
+    /// finalizes — the reply speech has ended and the LLM's memory has
+    /// settled, so the reload can never race the inference that forced
+    /// the release.
+    private func schedulePostTurnWhisperReWarm() {
+        pendingPostTurnReWarm = true
+    }
+
+    /// The turn-finalize hook's re-warm half (main-confined): re-probes
+    /// at execution time — the ceiling may have recovered once the
+    /// LLM/TTS work settled; if not, the skip is honest. On success the
+    /// re-warmed weights are held under the same TTL.
+    private func runPostTurnWhisperReWarmIfPending() {
+        guard pendingPostTurnReWarm else { return }
+        pendingPostTurnReWarm = false
+        guard warmStartEnabled,
+              voiceEngineStack == .onDevice,
+              whisperKitIsActiveSTT,
+              whisperKitSpeechRecognizer.isAvailable else { return }
+        guard MemoryProbe.availableProcessMemoryBytes
+                >= Self.whisperFootprintBytes
+                    + WhisperPostTurnPolicy.llamaRuntimeHeadroomBytes else {
+            emitWhisperWeightsEvent(
+                eventType: "rewarm", outcome: "skipped",
+                metadata: ["reason": "ram_headroom"])
+            return
+        }
+        emitWhisperWeightsEvent(eventType: "rewarm", outcome: "started")
+        whisperKitSpeechRecognizer.warm { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch result {
+                case .ready:
+                    self.emitWhisperWeightsEvent(
+                        eventType: "rewarm", outcome: "ready")
+                    // The weights are resident again — hold them for the
+                    // same TTL so back-to-back turns skip the load.
+                    self.whisperWeightsHold.arm(
+                        ttl: WhisperPostTurnPolicy.ttlSeconds
+                    ) { [weak self] in
+                        DispatchQueue.main.async {
+                            self?.releaseHeldWhisperWeights()
+                        }
+                    }
+                case .failed(let reason):
+                    self.emitWhisperWeightsEvent(
+                        eventType: "rewarm", outcome: "failed",
+                        metadata: ["reason": reason])
+                }
+            }
+        }
+    }
+
+    /// The post-turn whisper weights events: component `whisper_weights`
+    /// (PII-free — outcomes/reasons only, never audio or transcripts).
+    private func emitWhisperWeightsEvent(eventType: String,
+                                         outcome: String,
+                                         metadata: [String: String] = [:]) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "whisper_weights",
+            eventType: eventType,
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: metadata
+        ))
     }
 
     // MARK: - Family & friends — curated contacts (spec §4.4.2)

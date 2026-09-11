@@ -68,6 +68,10 @@ enum WarmStartEngine: Equatable {
     case whisperKit
     case whisperCpp
     case ttsVoice(ModelID)
+    /// [LAT-M1] The on-device LLM interpreter (llama.cpp): the warm loads
+    /// the base model's weights + allocates its context — no inference —
+    /// so the first utterance's interpret() skips the load.
+    case llamaInterpreter
 }
 
 /// What the plan decided for one engine.
@@ -121,6 +125,10 @@ struct WarmStartConfig: Equatable {
     /// the first Nepali reply will actually use — as the boot slot's
     /// only TTS step (deferred to the post-boot slot on the simulator).
     var selectedNepaliVoiceID: ModelID
+    /// [LAT-M1] The llama interpreter's own availability (base model
+    /// cached + runtime linked). The warm only runs when the local brain
+    /// can actually load.
+    var llamaAvailable: Bool
     /// "Listen for Hey Sahayak" preference. Kept in the config so tests
     /// pin that it does NOT gate STT/TTS warming (see the header).
     var wakeWordEnabled: Bool
@@ -146,7 +154,7 @@ enum WarmStartPlanner {
 
     static func plan(for config: WarmStartConfig) -> [WarmStartStep] {
         guard config.enabled else { return [] }
-        var steps: [WarmStartStep] = [sttStep(for: config)]
+        var steps: [WarmStartStep] = [sttStep(for: config), llamaStep(for: config)]
         steps.append(contentsOf: ttsSteps(for: config))
         return steps
     }
@@ -174,6 +182,28 @@ enum WarmStartPlanner {
             return WarmStartStep(engine: .whisperKit,
                                  action: .skip(reason: "model_missing"))
         }
+    }
+
+    /// [LAT-M1] The local brain warms in the boot slot, on BOTH stacks:
+    /// the .gemini stack is local-first hybrid ("the local brain answers
+    /// what it can, Gemini takes the rest" — `applyVoiceEngineStack`), so
+    /// the llama interpreter serves the first conversation there too.
+    /// Same gates as the whisper warm (settings on, model cached); the
+    /// SIMULATOR skips it — llama.cpp is CPU-only there (no Metal), the
+    /// load is minutes-scale and never helps a sim conversation, the same
+    /// doctrine as the whisper skip. A missing model skips honestly.
+    private static func llamaStep(for config: WarmStartConfig) -> WarmStartStep {
+        if config.isSimulator {
+            return WarmStartStep(engine: .llamaInterpreter,
+                                 action: .skip(reason: "simulator"))
+        }
+        if config.llamaAvailable {
+            return WarmStartStep(engine: .llamaInterpreter,
+                                 action: .warm,
+                                 phase: .boot)
+        }
+        return WarmStartStep(engine: .llamaInterpreter,
+                             action: .skip(reason: "model_missing"))
     }
 
     /// [BOOT-LATENCY] The boot warms ONLY the primary reply voice — the
@@ -261,6 +291,15 @@ protocol TTSVoiceWarming: AnyObject {
     func warm(voiceID: ModelID, completion: (WarmStartEngineResult) -> Void)
 }
 
+/// [LAT-M1] Warm seam for the on-device LLM interpreter: loads the base
+/// model's weights + context allocation off the critical path (no
+/// inference). `completion` is called on an arbitrary queue — never
+/// assumed main. Failures are honest and never throw.
+protocol LLMInterpreterWarming: AnyObject {
+    var isAvailable: Bool { get }
+    func warm(completion: @escaping (WarmStartEngineResult) -> Void)
+}
+
 // MARK: - Runner (execution + observability)
 
 /// Executes a warm plan against the two seams and reports per-engine
@@ -281,16 +320,21 @@ final class WarmStartRunner {
 
     private let stt: STTModelWarming?
     private let tts: TTSVoiceWarming?
+    /// [LAT-M1] The llama warm seam — same failure honesty as the other
+    /// two (a missing seam is `.failed(reason: "seam_unavailable")`).
+    private let llm: LLMInterpreterWarming?
     private let bus: ObservabilityBus
     private let warmQueue: DispatchQueue
 
     init(stt: STTModelWarming?,
          tts: TTSVoiceWarming?,
+         llm: LLMInterpreterWarming? = nil,
          observabilityBus: ObservabilityBus,
          queue: DispatchQueue = DispatchQueue(label: "senios.startup.warm",
                                               qos: .userInitiated)) {
         self.stt = stt
         self.tts = tts
+        self.llm = llm
         self.bus = observabilityBus
         self.warmQueue = queue
     }
@@ -372,6 +416,19 @@ final class WarmStartRunner {
                 return
             }
             tts.warm(voiceID: voiceID, completion: completion)
+        case .llamaInterpreter:
+            guard let llm else {
+                completion(.failed(reason: "seam_unavailable"))
+                return
+            }
+            llm.warm { result in
+                // The interpreter's completion lands on its own inference
+                // queue — re-marshal so the settle chain stays
+                // single-threaded (same rule as the whisper seam).
+                self.warmQueue.async {
+                    completion(result)
+                }
+            }
         }
     }
 
@@ -407,6 +464,7 @@ final class WarmStartRunner {
         case .whisperKit: return "whisper_kit"
         case .whisperCpp: return "whisper_cpp"
         case .ttsVoice: return "tts_voice"
+        case .llamaInterpreter: return "llama_interpreter"
         }
     }
 }
