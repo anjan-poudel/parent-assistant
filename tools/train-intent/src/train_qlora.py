@@ -46,6 +46,7 @@ ROOT = Path(__file__).resolve().parent.parent
 BASE_TAGS = {
     "gemma": "google/gemma-3-1b-it",
     "qwen": "Qwen/Qwen3-1.7B",
+    "qwen4b": "Qwen/Qwen3-4B-Instruct-2507",
 }
 
 # End-of-turn tokens per base tag (bake-off round 3, 2026-09-09) —
@@ -62,6 +63,8 @@ BASE_TAGS = {
 EOT_TOKENS = {
     "gemma": "<end_of_turn>",
     "qwen": "<|im_end|>",
+    # Qwen3 4B is the same qwen3 arch/tokenizer family — same turn end.
+    "qwen4b": "<|im_end|>",
 }
 
 LABEL_FIELDS = ["action", "entryId", "contact", "time", "medication", "message",
