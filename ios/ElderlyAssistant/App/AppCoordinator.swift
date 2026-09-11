@@ -693,7 +693,11 @@ final class AppCoordinator: ObservableObject {
     /// settles the contract degraded instead of blocking the button
     /// forever. Never cancels boot: the spinner's 4 s budget
     /// (`WarmStartPlanner.bootWarmBudgetSeconds`) is untouched.
-    private var talkContractWatchdogWork: DispatchWorkItem?
+    /// [CONTRACT-FIX] The deadline runs through `TalkBootWatchdog` on an
+    /// INDEPENDENT scheduler (main) — never the warm queue — so a warm
+    /// hung on its own serial queue can never delay settlement. First
+    /// arm wins: progress notes never extend the deadline.
+    private let talkContractWatchdog = TalkBootWatchdog()
     /// The settle event (`talk_boot_contract`) fired at most once per
     /// contract.
     private var talkContractSettled = false
@@ -2426,20 +2430,29 @@ final class AppCoordinator: ObservableObject {
     /// `talk_boot_contract` event (component) with the cold features —
     /// the same PII-free machine-string discipline as the warm events.
     private func noteTalkContractChanged() {
-        if talkBootContract.isComplete, !talkContractSettled {
-            talkContractSettled = true
-            talkContractWatchdogWork?.cancel()
-            talkContractWatchdogWork = nil
-            observabilityBus.emit(ObservabilityEvent(
-                component: "talk_boot_contract",
-                eventType: "settled",
-                durationMs: nil,
-                outcome: talkBootContract.isSatisfied ? "ready" : "degraded",
-                errorCode: nil,
-                metadata: [
-                    "cold_features": talkBootContract.coldFeatures
-                        .map(\.rawValue).joined(separator: ",")
-                ]))
+        if talkBootContract.isComplete {
+            if !talkContractSettled {
+                talkContractSettled = true
+                talkContractWatchdog.cancel()
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "talk_boot_contract",
+                    eventType: "settled",
+                    durationMs: nil,
+                    outcome: talkBootContract.isSatisfied ? "ready" : "degraded",
+                    errorCode: nil,
+                    metadata: [
+                        "cold_features": talkBootContract.coldFeatures
+                            .map(\.rawValue).joined(separator: ",")
+                    ]))
+            }
+        } else {
+            // [CONTRACT-FIX] Belt-and-braces: ANY feed of an open
+            // contract guarantees the settlement backstop is armed. The
+            // arm is idempotent (first arm wins), so a feed path that
+            // runs without `startBootWarmPhase`'s explicit arm still
+            // gets the deadline — the contract can never await a signal
+            // with no bound.
+            armTalkContractWatchdog()
         }
         publishManualTalkReadiness()
     }
@@ -2447,20 +2460,26 @@ final class AppCoordinator: ObservableObject {
     /// [LAT-M1] Arms the talk watchdog once per contract (boot warm
     /// phase or the degraded-state warm retry — re-arming is a no-op on
     /// an already-settled contract). Main-confined.
+    /// [CONTRACT-FIX] The deadline runs on an INDEPENDENT scheduler
+    /// (main) — never the warm queue — so a hung warm can never delay
+    /// settlement past the deadline. Idempotent: the deadline is measured
+    /// from the FIRST arm; a retry re-plan cannot extend the wait.
     private func armTalkContractWatchdog() {
-        talkContractWatchdogWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in
+        guard !talkBootContract.isComplete else { return }
+        talkContractWatchdog.arm(
+            after: TalkBootContractState.talkWatchdogSeconds
+        ) { [weak self] in
             guard let self else { return }
             guard !self.talkBootContract.isComplete else { return }
             print("[AppCoordinator] talk contract watchdog — degrading "
                 + "pending features honestly")
+            // [CONTRACT-FIX] The machine re-reads CURRENT state: only
+            // features still `.pending` settle here, so any real settle
+            // that landed before the deadline is honored, never
+            // overwritten.
             self.talkBootContract.noteTalkWatchdogExpired()
             self.noteTalkContractChanged()
         }
-        talkContractWatchdogWork = work
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + TalkBootContractState.talkWatchdogSeconds,
-            execute: work)
     }
 
     // MARK: - Degraded-capability recovery ([BOOT-REVIEW, design item])
@@ -2564,7 +2583,22 @@ final class AppCoordinator: ObservableObject {
     /// it is still idle). Manual Talk readiness is deliberately NOT —
     /// wake-word and manual Talk are separate capabilities.
     private func buildDeferredWakeWordEngine() {
-        guard voicePipeline != nil else { return }
+        guard voicePipeline != nil else {
+            // [CONTRACT-FIX] The pipeline is gone (recycled mid-deferral)
+            // and `deferredKWSBuildScheduled` is one-shot — this build
+            // can never run again, so the contract would wait on a
+            // settle that can never arrive. Tell it the honest truth:
+            // the Null engine's no-op behavior applies exactly as it
+            // does pre-build (the same `noteKWSApplied(isReal: false)`
+            // the Null fallback emits) — settled, never awaited, never a
+            // Talk degradation. The talk watchdog stays armed as the
+            // backstop for everything else.
+            talkBootContract.noteKWSApplied(isReal: false)
+            noteTalkContractChanged()
+            print("[AppCoordinator] deferred KWS build: pipeline gone — "
+                + "contract KWS settled as Null fallback")
+            return
+        }
         // [VAD-RT] A live voice turn must never share the main thread
         // with the KWS session build. The DEVICE path already runs the
         // build on `wakeWordBuildQueue` (off-main — the sherpa ONNX

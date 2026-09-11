@@ -325,18 +325,35 @@ final class WarmStartRunner {
     private let llm: LLMInterpreterWarming?
     private let bus: ObservabilityBus
     private let warmQueue: DispatchQueue
+    /// [CONTRACT-FIX] Seconds one `.warm` step may hold the settle chain
+    /// before it settles as `.failed(reason: "seam_timeout")` and the
+    /// chain CONTINUES — a hung seam can never wedge the serial queue or
+    /// starve the remaining steps' outcomes. Deliberately LONGER than the
+    /// talk contract's watchdog: the contract watchdog is the speak
+    /// button's bound; this timeout is the runner's own honesty bound
+    /// (the post-boot slice has no contract watchdog at all).
+    let stepTimeoutSeconds: TimeInterval
+    /// [CONTRACT-FIX] The per-step timeout's scheduler — INDEPENDENT of
+    /// `warmQueue` by construction: a hung seam OCCUPIES the warm queue,
+    /// so the timeout can never be scheduled on it (the shared-queue
+    /// self-deadlock the contract-fix pins as a regression).
+    private let timeoutScheduler: DispatchQueue
 
     init(stt: STTModelWarming?,
          tts: TTSVoiceWarming?,
          llm: LLMInterpreterWarming? = nil,
          observabilityBus: ObservabilityBus,
          queue: DispatchQueue = DispatchQueue(label: "senios.startup.warm",
-                                              qos: .userInitiated)) {
+                                              qos: .userInitiated),
+         stepTimeoutSeconds: TimeInterval = 60,
+         timeoutScheduler: DispatchQueue = DispatchQueue.global(qos: .utility)) {
         self.stt = stt
         self.tts = tts
         self.llm = llm
         self.bus = observabilityBus
         self.warmQueue = queue
+        self.stepTimeoutSeconds = stepTimeoutSeconds
+        self.timeoutScheduler = timeoutScheduler
     }
 
     /// Runs every step in plan order. `completion` is called exactly
@@ -388,12 +405,38 @@ final class WarmStartRunner {
 
     /// Fans a `.warm` step out to the matching seam. All completions are
     /// delivered on `warmQueue` so the settle chain stays single-threaded.
+    ///
+    /// [CONTRACT-FIX] Harden the boundary: every `.warm` step ALWAYS
+    /// publishes an outcome (ready/failed) — a seam that never calls
+    /// back is settled by the per-step timeout as
+    /// `.failed(reason: "seam_timeout")` and the chain continues.
+    /// Whichever lands first wins; a late seam completion is dropped
+    /// safely (the settle chain settles exactly once). All settles
+    /// funnel through `warmQueue`, so the settle-once guard is
+    /// single-threaded by construction. The timeout is scheduled on
+    /// `timeoutScheduler` — NEVER `warmQueue`, which the hung seam
+    /// occupies.
     private func runWarm(_ step: WarmStartStep,
                          completion: @escaping (WarmStartEngineResult) -> Void) {
+        var settled = false
+        let settle: (WarmStartEngineResult) -> Void = { result in
+            guard !settled else { return }
+            settled = true
+            completion(result)
+        }
+        if stepTimeoutSeconds > 0 {
+            timeoutScheduler.asyncAfter(deadline: .now() + stepTimeoutSeconds) {
+                [weak self] in
+                guard let self else { return }
+                self.warmQueue.async {
+                    settle(.failed(reason: "seam_timeout"))
+                }
+            }
+        }
         switch step.engine {
         case .whisperKit:
             guard let stt else {
-                completion(.failed(reason: "seam_unavailable"))
+                settle(.failed(reason: "seam_unavailable"))
                 return
             }
             stt.warm { result in
@@ -401,7 +444,7 @@ final class WarmStartRunner {
                 // (its load Task) — re-marshal so the settle chain stays
                 // single-threaded.
                 self.warmQueue.async {
-                    completion(result)
+                    settle(result)
                 }
             }
         case .whisperCpp:
@@ -409,16 +452,16 @@ final class WarmStartRunner {
             // recognizer loads a fresh context per attempt by design, so
             // a warm context could never be reused (see the header).
             // Defensive honesty if a hand-built plan slips through.
-            completion(.failed(reason: "per_attempt_contexts"))
+            settle(.failed(reason: "per_attempt_contexts"))
         case .ttsVoice(let voiceID):
             guard let tts else {
-                completion(.failed(reason: "seam_unavailable"))
+                settle(.failed(reason: "seam_unavailable"))
                 return
             }
-            tts.warm(voiceID: voiceID, completion: completion)
+            tts.warm(voiceID: voiceID, completion: settle)
         case .llamaInterpreter:
             guard let llm else {
-                completion(.failed(reason: "seam_unavailable"))
+                settle(.failed(reason: "seam_unavailable"))
                 return
             }
             llm.warm { result in
@@ -426,7 +469,7 @@ final class WarmStartRunner {
                 // queue — re-marshal so the settle chain stays
                 // single-threaded (same rule as the whisper seam).
                 self.warmQueue.async {
-                    completion(result)
+                    settle(result)
                 }
             }
         }

@@ -33,6 +33,23 @@ import Foundation
 //    coordinator's talk watchdog (see `noteTalkWatchdogExpired`) fails
 //    still-pending features.
 //
+// [CONTRACT-FIX] The never-stuck guarantee (device field report, the
+// speak button stuck disabled with the preparing label):
+//
+//  - The watchdog's deadline runs on an INDEPENDENT scheduler — never the
+//    warm queue — so a warm hung on its own serial queue can never delay
+//    settlement past the deadline (`TalkBootWatchdog`; the coordinator
+//    arms it on main). First arm wins: progress notes and retry re-plans
+//    never extend the deadline.
+//  - The watchdog fire re-reads CURRENT state: it only settles features
+//    that are still `.pending`, so a settle signal that landed just
+//    before the deadline is honored, never overwritten.
+//  - A publisher that never emits is not fatal: warm outcomes have a
+//    runner-level per-step timeout (`WarmStartRunner`, seam_timeout),
+//    and the KWS path settles on EVERY exit of the deferred build —
+//    including "no pipeline to swap into" — plus the watchdog skip.
+//    Manual Talk never depends on a signal that can never arrive.
+//
 // Settlement rules:
 //
 //  - `.skip` actions (simulator, gemini_stack, model_missing,
@@ -266,5 +283,49 @@ enum TalkBootContract {
                 : .degraded(TalkBootDegradation(coldFeatures: contract.coldFeatures))
         }
         return .loading(.preparingEngines(contract.progress))
+    }
+}
+
+// MARK: - The watchdog seam ([CONTRACT-FIX])
+
+/// The talk contract's settlement backstop. The deadline is scheduled on
+/// an INDEPENDENT scheduler — never the warm queue — so a warm hung on
+/// its own serial queue (or any publisher that never emits) can never
+/// delay settlement past the deadline. Idempotent: the deadline is
+/// measured from the FIRST arm; later arms keep the original deadline
+/// (progress notes and retry re-plans must not extend the wait).
+final class TalkBootWatchdog {
+    private let scheduler: DispatchQueue
+    private var workItem: DispatchWorkItem?
+
+    /// True while a fire is scheduled.
+    var isArmed: Bool { workItem != nil }
+
+    /// - Parameter scheduler: where the deadline runs. Defaults to main
+    ///   (the coordinator's settle path is main-confined); tests inject
+    ///   their own queue. Must NEVER be the warm queue — a hung warm
+    ///   occupies it, which is exactly the state the watchdog must
+    ///   survive.
+    init(scheduler: DispatchQueue = .main) {
+        self.scheduler = scheduler
+    }
+
+    /// Schedules `fire` after `interval` unless already armed. Returns
+    /// true when this call armed the watchdog (first arm wins).
+    @discardableResult
+    func arm(after interval: TimeInterval, fire: @escaping () -> Void) -> Bool {
+        guard workItem == nil else { return false }
+        let work = DispatchWorkItem { [weak self] in
+            self?.workItem = nil
+            fire()
+        }
+        workItem = work
+        scheduler.asyncAfter(deadline: .now() + interval, execute: work)
+        return true
+    }
+
+    func cancel() {
+        workItem?.cancel()
+        workItem = nil
     }
 }

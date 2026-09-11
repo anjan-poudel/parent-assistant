@@ -421,6 +421,89 @@ final class WarmStartTests: XCTestCase {
                        [.failed(reason: "seam_unavailable")])
     }
 
+    // MARK: - Runner hardening ([CONTRACT-FIX])
+
+    /// A seam that NEVER reports — occupies the settle chain forever
+    /// without the per-step timeout.
+    private final class NeverCompletingSTTWarming: STTModelWarming {
+        var isAvailable = true
+        private(set) var warmCalls = 0
+        func warm(completion: ((WarmStartEngineResult) -> Void)?) {
+            warmCalls += 1
+            // Deliberately never calls back.
+        }
+    }
+
+    /// A seam that stores its completion — the test reports it late.
+    private final class CapturingSTTWarming: STTModelWarming {
+        var isAvailable = true
+        private(set) var completion: ((WarmStartEngineResult) -> Void)?
+        func warm(completion: ((WarmStartEngineResult) -> Void)?) {
+            self.completion = completion
+        }
+    }
+
+    func testRunnerTimesOutAHungSeamAndDeliversEveryOutcome() {
+        // The FIRST step hangs forever. Without the hardening the whole
+        // settle chain starved (no outcome ever reached the coordinator,
+        // even for the steps that would have settled). The per-step
+        // timeout settles the hung seam honestly and the chain
+        // CONTINUES — every outcome is always delivered.
+        let hung = NeverCompletingSTTWarming()
+        let tts = FakeTTSWarming()
+        let plan = [
+            WarmStartStep(engine: .whisperKit, action: .warm),
+            WarmStartStep(engine: .ttsVoice(ModelCatalog.piperNepali),
+                          action: .warm),
+        ]
+        let runner = WarmStartRunner(stt: hung, tts: tts, llm: nil,
+                                     observabilityBus: MockObservabilityBus(),
+                                     stepTimeoutSeconds: 0.05)
+        let done = expectation(description: "the chain settles despite the hung seam")
+        var outcomes: [WarmStartRunner.WarmStartStepOutcome] = []
+        runner.run(plan: plan) { results in
+            outcomes = results
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 2)
+
+        XCTAssertEqual(outcomes.map(\.result), [
+            .failed(reason: "seam_timeout"),
+            .ready,
+        ], "the hung seam settles as seam_timeout and the chain continues to the next step — every outcome is delivered")
+        XCTAssertEqual(hung.warmCalls, 1)
+        XCTAssertEqual(tts.warmCalls, [ModelCatalog.piperNepali],
+                       "the step AFTER the hung one still runs")
+    }
+
+    func testLateSeamCompletionAfterTimeoutIsDroppedSafely() {
+        // The seam reports AFTER the timeout settled the chain — the
+        // late result is dropped, the settle chain settles exactly once,
+        // and nothing crashes.
+        let stt = CapturingSTTWarming()
+        let plan = [WarmStartStep(engine: .whisperKit, action: .warm)]
+        let runner = WarmStartRunner(stt: stt, tts: nil, llm: nil,
+                                     observabilityBus: MockObservabilityBus(),
+                                     stepTimeoutSeconds: 0.05)
+        let done = expectation(description: "the timeout settles the chain")
+        var outcomes: [WarmStartRunner.WarmStartStepOutcome] = []
+        runner.run(plan: plan) { results in
+            outcomes = results
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 2)
+        XCTAssertEqual(outcomes.map(\.result),
+                       [.failed(reason: "seam_timeout")])
+
+        // The seam reports late — the settle-once guard drops it.
+        stt.completion?(.ready)
+        Thread.sleep(forTimeInterval: 0.1)
+        XCTAssertEqual(outcomes.count, 1,
+                       "a late seam completion after the timeout is dropped — the chain settles exactly once")
+        XCTAssertEqual(outcomes.first?.result,
+                       .failed(reason: "seam_timeout"))
+    }
+
     // MARK: - Settings copy (catalog binding, both shipped languages)
 
     func testWarmStartSettingsCopyResolvesInBothLanguages() {
