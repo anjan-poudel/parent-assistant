@@ -213,25 +213,34 @@ final class TalkBootContractTests: XCTestCase {
 
     func testRetryWarmOutcomeUpgradesAFailedFeature() {
         var contract = TalkBootContractState()
+        contract.noteWarmOutcome(feature: .whisper, result: .ready)
+        contract.noteWarmOutcome(feature: .primaryTTS, result: .ready)
         contract.noteWarmOutcome(feature: .llama,
                                  result: .failed(reason: "model_load_failed"))
-        XCTAssertFalse(contract.isSatisfied)
+        contract.noteKWSApplied(isReal: true)
+        XCTAssertTrue(contract.isComplete)
+        XCTAssertEqual(contract.coldFeatures, [.llama])
 
         // The degraded-state recovery re-runs the warm; success clears
         // the degradation honestly (never by a timer).
         contract.noteWarmOutcome(feature: .llama, result: .ready)
         XCTAssertTrue(contract.isSatisfied)
+        XCTAssertTrue(contract.coldFeatures.isEmpty)
     }
 
     func testLateRealSettleUpgradesWatchdogSkip() {
         var contract = TalkBootContractState()
+        // Two warms settle normally; the whisper warm hangs past the
+        // watchdog; the KWS build never landed.
+        contract.noteWarmOutcome(feature: .primaryTTS, result: .ready)
+        contract.noteWarmOutcome(feature: .llama, result: .ready)
         contract.noteTalkWatchdogExpired()
         XCTAssertEqual(contract.statuses[.whisper],
                        .failed(reason: TalkBootContractState.watchdogReason))
         XCTAssertEqual(contract.statuses[.kws],
                        .skipped(reason: TalkBootContractState.watchdogReason))
 
-        // The warm landed late — the feature is genuinely warm now.
+        // The whisper warm landed late — the feature is genuinely warm now.
         contract.noteWarmOutcome(feature: .whisper, result: .ready)
         XCTAssertEqual(contract.statuses[.whisper], .ready)
         // KWS applies for real late too.
