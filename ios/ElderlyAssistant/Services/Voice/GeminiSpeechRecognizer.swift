@@ -136,7 +136,12 @@ final class GeminiSpeechRecognizer: SpeechRecognizerProtocol {
                     self.settle(.success(transcript))
                 }
             } catch {
-                self.emit("transcribe_failed", outcome: "failure", errorCode: String(describing: error))
+                // T-050/B2: never `String(describing: error)` — a transport
+                // error's description embeds the failing URL (and the key
+                // used to ride in it). `ErrorCodeMapper` emits the
+                // content-free domain + code instead.
+                self.emit("transcribe_failed", outcome: "failure",
+                          errorCode: ErrorCodeMapper.code(for: error))
                 self.settle(.failure(.recognitionFailed(error)))
             }
         }

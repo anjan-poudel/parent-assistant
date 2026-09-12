@@ -86,8 +86,10 @@ final class NepaliCalendarPlugin: AssistantPlugin {
             context.observabilityBus.emit(Self.event("nepali_calendar_answered"))
             return .spoken(decoded.answer)
         } catch {
+            // T-050/B2: content-free code, never the error's description
+            // (it embeds the failing URL — see `ErrorCodeMapper`).
             context.observabilityBus.emit(Self.event("nepali_calendar_call_failed",
-                                                     errorCode: String(describing: error)))
+                                                     errorCode: ErrorCodeMapper.code(for: error)))
             return .failed(spokenApology: Self.localized(
                 "plugin.nepaliCalendar.unavailable", locale: context.locale))
         }

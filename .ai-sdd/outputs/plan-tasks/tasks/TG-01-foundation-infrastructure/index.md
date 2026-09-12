@@ -13,6 +13,7 @@ Establishes the project repositories, CI/CD pipelines, shared encrypted storage 
 | [T-001](T-001-repository-cicd-scaffolding.md) | Repository and CI/CD Scaffolding | S | — | LOW |
 | [T-002](T-002-encrypted-local-storage/) | EncryptedLocalStorage (iOS + Android) | M+M | T-001 | MEDIUM |
 | [T-004](T-004-observability-bus-log-sanitiser.md) | ObservabilityBus + LogSanitiser | S | T-001 | LOW |
+| [T-050](T-050-api-key-error-code-log-leak.md) | API key / raw upstream body leak via `error_code` (rework — security-test B2) | M | T-004 | HIGH |
 
 ## Group effort estimate
 

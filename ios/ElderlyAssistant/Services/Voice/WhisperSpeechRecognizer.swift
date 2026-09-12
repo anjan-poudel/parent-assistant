@@ -809,10 +809,15 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
                     print("[whisper_stt] transcribed attempt=\(attemptID) duration_ms=\(ms) "
                         + "audio_seconds=\(String(format: "%.1f", audioSeconds)) "
                         + "chars=\(joined.count)")
-                    // Transcript content on the console (requested for
-                    // on-device WER review) — dev-facing print, not the
-                    // sanitised observability bus.
+                    #if DEBUG
+                    // Debug-build-only, per explicit request for on-device
+                    // WER review — never compiled into Release (B1/T-049:
+                    // transcript content is exactly the material NFR-016
+                    // forbids in any log sink, and this print bypasses the
+                    // sanitised observability bus). Same construct as the
+                    // guarded prints in GeminiSpeechRecognizer.
                     print("[whisper_stt] transcript=" + joined)
+                    #endif
                     self?.settleAttempt(attemptID, with: .success(joined), timedOut: false)
                 }
             } catch {
@@ -829,8 +834,14 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
                     mapped = .recognitionFailed(error)
                 }
                 self?.emit("inference_failed", errorCode: "whisper_error")
+                // B1/T-049: never print the raw error object (its
+                // description can carry a URL, an upstream body or a
+                // path). Attempt/duration stay — they are PII-free
+                // diagnostics — and the error is reduced to its
+                // content-free domain + numeric code.
+                let nsError = error as NSError
                 print("[whisper_stt] inference_failed attempt=\(attemptID) "
-                    + "duration_ms=\(ms) \(error)")
+                    + "duration_ms=\(ms) domain=\(nsError.domain) code=\(nsError.code)")
                 self?.settleAttempt(attemptID, with: .failure(mapped), timedOut: false)
             }
         }

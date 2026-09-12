@@ -403,6 +403,19 @@ run_tests() {
     local label extra only_count=$#
     local -a only_classes=("$@")
     local -a testing_args=()
+
+    # Source-level privacy guards run before every test gate (B1/T-049):
+    # the unit suite runs in Debug, where a re-introduced Release-compiled
+    # transcript print (or raw-error print) still reads as "present and
+    # working" — so this class of defect cannot be caught by a test that
+    # only exercises the binary.
+    echo ""
+    echo "Checking source privacy guards..."
+    "${PROJECT_DIR}/tools/check-release-log-safety.sh" || {
+        echo "ERROR: Release-log privacy guard failed — see above." >&2
+        exit 1
+    }
+
     case "${scope}" in
         unit) label="unit tests"
               testing_args=(-skip-testing:ElderlyAssistantUITests) ;;

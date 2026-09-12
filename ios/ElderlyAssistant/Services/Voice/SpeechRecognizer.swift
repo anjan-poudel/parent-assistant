@@ -55,6 +55,24 @@ enum RecognitionError: Error {
     case cancelled
 }
 
+/// T-050/B2: content-free codes for the observability bus. The `NSError`
+/// bridge would collapse every case (and every associated value) into one
+/// domain/code pair, losing the failure taxonomy the log needs to stay
+/// diagnosable; these names are compile-time constants and carry no
+/// transcript, URL or user info.
+extension RecognitionError: LogSafeErrorCode {
+    var logSafeErrorCode: String {
+        switch self {
+        case .notAuthorized: return "not_authorized"
+        case .localeUnsupported: return "locale_unsupported"
+        case .audioEngineFailed: return "audio_engine_failed"
+        case .recognitionFailed: return "recognition_failed"
+        case .timedOut: return "timed_out"
+        case .cancelled: return "cancelled"
+        }
+    }
+}
+
 // MARK: - SFSpeechRecognizer implementation (dual-mode)
 
 final class OnDeviceSpeechRecognizer: SpeechRecognizerProtocol {

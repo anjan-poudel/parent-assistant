@@ -304,7 +304,18 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
                 _ = try await self.loadKit(descriptor: descriptor, config: config)
                 completion?(.ready)
             } catch {
-                print("[whisperkit_stt] warm failed: \(error)")
+                #if DEBUG
+                // B1/T-049 (review fix): Debug-build-only, and content-free
+                // even here — a raw error object's description can carry a
+                // key-bearing URL, an upstream body or a path. The
+                // completion's "load_failed" reason is the Release-side
+                // signal. Same construct as the inference-failure print
+                // below. This print sits inside `#if canImport(WhisperKit)`,
+                // which is NOT a Debug gate.
+                let nsError = error as NSError
+                print("[whisperkit_stt] warm failed domain=\(nsError.domain) "
+                    + "code=\(nsError.code)")
+                #endif
                 completion?(.failed(reason: "load_failed"))
             }
         }
@@ -485,12 +496,29 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
                                 userInfo: [NSLocalizedDescriptionKey: "empty transcript"]))))
                 } else {
                     print("[whisperkit_stt] transcribed duration_ms=\(ms) chars=\(joined.count)")
+                    #if DEBUG
+                    // Debug-build-only, per explicit request for on-device
+                    // WER review — never compiled into Release (B1/T-049:
+                    // transcript content is exactly the material NFR-016
+                    // forbids in any log sink, and this print bypasses the
+                    // sanitised observability bus). Same construct as the
+                    // guarded prints in GeminiSpeechRecognizer.
                     print("[whisperkit_stt] transcript=" + joined)
+                    #endif
                     completion(.success(joined))
                 }
             } catch {
                 emit("inference_failed", errorCode: "whisperkit_error")
-                print("[whisperkit_stt] inference_failed \(error)")
+                #if DEBUG
+                // B1/T-049: Debug-build-only, and content-free even here —
+                // a raw error object's description can carry a key-bearing
+                // URL, an upstream body or a path. Domain + numeric code
+                // is the diagnostic value; the bus event above carries the
+                // content-free code in Release.
+                let nsError = error as NSError
+                print("[whisperkit_stt] inference_failed domain=\(nsError.domain) "
+                    + "code=\(nsError.code)")
+                #endif
                 completion(.failure(.recognitionFailed(error)))
             }
         }
@@ -704,7 +732,17 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
             reportDialectUnavailableOnce(&dialectEmbeddingUnavailableReported,
                                          event: "dialect_embedding_unavailable",
                                          reason: "encoder_error")
-            print("[dialect_id] extractDialectEmbedding failed: \(error)")
+            #if DEBUG
+            // B1/T-049 (review fix): Debug-build-only, and content-free even
+            // here — a raw error object's description can carry a
+            // key-bearing URL, an upstream body or a path. The
+            // `dialect_embedding_unavailable` / "encoder_error" event above
+            // is the Release-side signal. This print sits inside
+            // `#if canImport(WhisperKit)`, which is NOT a Debug gate.
+            let nsError = error as NSError
+            print("[dialect_id] extractDialectEmbedding failed "
+                + "domain=\(nsError.domain) code=\(nsError.code)")
+            #endif
             return nil
         }
         #else
