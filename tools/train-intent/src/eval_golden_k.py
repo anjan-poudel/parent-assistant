@@ -60,7 +60,7 @@ import time
 from pathlib import Path
 
 from config import load_config
-from train_qlora import BASE_TAGS
+from train_qlora import BASE_TAGS, LABEL_ORDERS
 
 ROOT = Path(__file__).resolve().parent.parent
 PY = sys.executable
@@ -267,6 +267,15 @@ def main() -> None:
                         help="eval decode mode: gbnf (default) = the app's "
                              "commandJSONSchema grammar; off = legacy "
                              "unconstrained sampling")
+    parser.add_argument("--label-order", default="canonical",
+                        choices=list(LABEL_ORDERS),
+                        help="training label order handed to train_qlora.py "
+                             "for every run in this set: canonical (all "
+                             "pre-2026-09-13 runs) or schema (the app "
+                             "grammar's property order — see train_qlora "
+                             "SCHEMA_LABEL_FIELDS). Must match the arm being "
+                             "bake-off'd, or the k runs measure the wrong "
+                             "recipe")
     args, cfg = load_config(parser)
 
     if args.k < 1:
@@ -310,7 +319,8 @@ def main() -> None:
                   f"train(offset {r['idx']}) → export → eval gguf "
                   f"models/intent-ne-{tag}-q4_k_m.gguf")
             print(f"      {PY} src/train_qlora.py --base {args.base} "
-                  f"--out {tag} --seed-offset {r['idx']}")
+                  f"--out {tag} --seed-offset {r['idx']} "
+                  f"--label-order {args.label_order}")
             print(f"      {PY} src/export_gguf.py --model "
                   f"checkpoints/{tag}-final --tag {tag}")
             print(f"      {PY} src/eval_golden.py --backend gguf "
@@ -322,6 +332,7 @@ def main() -> None:
 
     log(f"set={prefix} base={args.base} k={k} seeds {seed_base}.."
         f"{seed_base + k - 1}; grammar {args.grammar}; "
+        f"label_order {args.label_order}; "
         f"determinism mode {cfg.get('training.deterministic', 'hard')} "
         "(per config training.deterministic)")
 
@@ -341,6 +352,7 @@ def main() -> None:
         entry["idx"] = r["idx"]
         entry["set"] = prefix
         entry["grammar"] = args.grammar
+        entry["label_order"] = args.label_order
         tag = f"{prefix}-s{r['seed']}"
         ckpt_final = ROOT / "checkpoints" / f"{tag}-final"
         gguf = ROOT / "models" / f"intent-ne-{tag}-q4_k_m.gguf"
@@ -351,7 +363,8 @@ def main() -> None:
             if not wait_gpu_free(args.no_wait):
                 return 2
             rc = stage([PY, "src/train_qlora.py", "--base", args.base,
-                        "--out", tag, "--seed-offset", str(r["idx"])],
+                        "--out", tag, "--seed-offset", str(r["idx"]),
+                        "--label-order", args.label_order],
                        ROOT / "logs" / f"krun_{tag}_train.log")
             if rc != 0:
                 save_state(prefix, state)
