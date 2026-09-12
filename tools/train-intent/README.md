@@ -60,16 +60,29 @@ clean text guarantees a distribution mismatch. So:
 `eval_golden.py` exits non-zero when any gate fails, so a bad checkpoint
 can't be shipped by accident.
 
-**Gate-fidelity caveat (2026-09-13 k-run):** the GGUF backend samples
-*unconstrained*, while the app decodes under
-`LlamaGrammar.commandJSONSchema` (GBNF), where malformed JSON is
-structurally impossible. qwen4b-s42 emitted `"confidence": .9`
-(JSON-invalid — the app cannot produce it) on 5/20 golden rows; the
-strict parser scores those as no-JSON → predicted `none`, which
-collapsed that seed's contact F1 to 0.286. Read single-seed deltas
-dominated by no-JSON rows as eval artifacts, not model quality, until
-the gguf backend mirrors the app grammar (or applies a documented
-repair); the gate is a lower bound on production behaviour.
+**Decode fidelity (2026-09-13, resolved):** the GGUF backend now decodes
+under the SAME grammar the app uses — `LlamaGrammar.commandJSONSchema`,
+extracted from the Swift source into `seeds/command_schema.json` and
+converted by llama.cpp's own JSON-Schema→GBNF converter
+(`src/command_grammar.py`). Every run prints the schema fingerprint it
+graded against, and every row of `eval/results.csv` records its decode
+mode; rows written before 2026-09-13 are `off` (unconstrained).
+
+The mirror matters because unconstrained sampling can emit JSON the app
+can never produce: qwen4b-s42 wrote `"confidence": .9` (invalid JSON) on
+5/20 rows, which the strict parser scores as no-JSON → `none`, collapsing
+that seed's contact F1 to 0.286. Those numbers were eval artifacts.
+
+**Gate-fidelity caveat (still true):** the mirror is faithful, not
+cost-free. `commandJSONSchema` compiles to a GBNF whose property ORDER is
+the schema's — `response` second, and four keys the golden corpus never
+contained (`actionType`, `actionUrl`, `pluginAction`, `pluginEntities`) —
+while every checkpoint trained before 2026-09-13 learned the canonical
+order with `response` last and no app-only keys. Decoding forces the
+trained keys to be re-emitted in an untrained order, and the checkpoint
+pays for it in real slot F1 (qwen4b-s43: contact 1.000 → 0.800, time
+1.000 → 0.833). Treat gbnf scores as production truth and use
+`train_qlora.py --label-order schema` to teach the grammar's shape.
 
 ## Training (stage 4, external)
 

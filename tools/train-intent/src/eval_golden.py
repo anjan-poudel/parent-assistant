@@ -272,6 +272,12 @@ def main() -> None:
                              "commandJSONSchema grammar, exactly as the "
                              "on-device runtime does; off = legacy "
                              "unconstrained sampling (A/B only)")
+    parser.add_argument("--diag", action="store_true",
+                        help="print every row whose SCORED fields (intent, "
+                             "contact, time) differ from gold — the "
+                             "microscope behind a failed slot gate; the "
+                             "response field is never scored and never "
+                             "printed here")
     args, cfg = load_config(parser)
     root = Path(__file__).parent.parent
 
@@ -370,6 +376,26 @@ def main() -> None:
         f.write(f"{label},{closed_acc:.3f},{contact_f1:.3f},{time_f1:.3f},"
                 f"{emergency_recall:.3f},{se_precision:.3f},{'|'.join(failed) or 'none'}"
                 f",{grammar_col}\n")
+
+    if args.diag:
+        # Per-row diff of the three SCORED fields under this decode mode.
+        # `response` is deliberately absent: golden_corpus rows carry
+        # response=None and the gate never reads it, so including it would
+        # surface noise the score does not contain.
+        print("\nper-row diffs (intent / contact / time; * = mismatch):")
+        for row, pred in zip(corpus, preds):
+            g_i, p_i = row["intent"], pred.get("intent", "none")
+            g_c, p_c = row["slots"].get("contact"), pred.get("contact")
+            g_t, p_t = row["slots"].get("time"), pred.get("time")
+            if (g_i, g_c, g_t) == (p_i, p_c, p_t):
+                continue
+            marks = (" *" if g_i != p_i else "",
+                     " *" if g_c != p_c else "",
+                     " *" if g_t != p_t else "")
+            print(f"  {row['id']:20s} intent {g_i} -> {p_i}{marks[0]} | "
+                  f"contact {g_c!r} -> {p_c!r}{marks[1]} | "
+                  f"time {g_t!r} -> {p_t!r}{marks[2]}")
+            print(f"      utt: {row['utterance']}")
 
     if failed:
         print(f"\nGATES FAILED: {failed} — this checkpoint must not ship")
