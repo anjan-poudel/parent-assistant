@@ -7,7 +7,11 @@ that doc is the *why*; this one is the *how*.
 ## The 60-second version
 
 1. Create `ios/ElderlyAssistant/Services/Plugins/YourPlugin.swift` conforming to `AssistantPlugin`.
-2. Register it in `AppCoordinator.init` next to the existing `pluginRegistry.register(...)` lines.
+2. Register it in `AppCoordinator.makePluginRegistry()` (`AppCoordinator.swift:1275-1285`) next to
+   the existing `registry.register(...)` lines. The registry itself is a lazy first-use factory
+   (`AppCoordinator.swift:1156`) and is deliberately NOT constructed in `init`
+   ([BOOT-REVIEW P0-1]): the built-ins are storage-backed services the first frame never touches.
+   Keep your registration inside the factory.
 3. Add its localization keys.
 4. Write tests against `FakeGeminiTransport`/`GeminiInMemoryStorage` like `NepaliCalendarPluginTests`.
 
@@ -40,12 +44,45 @@ transcript → IntentPrompt.build(activePlugins:)     // your promptFragment is 
            → LLM emits action "plugin",
              pluginAction "<one of your actionNames>",
              pluginEntities {keys you declared}
-           → CommandRouter (case .plugin — the ONLY core case, added once, forever)
+           → CommandRouter (case .plugin — the only plugin-action case in core's switch)
            → registry.plugin(handling:pluginAction, locale:)
            → your handle(PluginCommand, PluginExecutionContext)
            → PluginResult.spoken / .spokenAndPresented / .failed
            → coordinator speaks + shows outcome card (+ optional sheet with your view)
 ```
+
+`case .plugin` is the only case in `CommandRouter.dispatchInterpreted`'s switch that exists for
+plugins — but core names two plugin actions directly, and those are the only exceptions:
+
+- `appliance.identify` in `CommandRouter.handleGuide` (`CommandRouter.swift:2336`) — the guide
+  flow (spec §5) defers to the appliance plugin because the plugin owns appliance UX (photo +
+  grounding overlay, manuals).
+- `nepali_calendar.query` in `AppCoordinator.nepaliCalendarAnswer` (`AppCoordinator.swift:5349`) —
+  the calendar display surface asks the plugin for a spoken answer.
+
+Both are fixed core-owned flows that name a plugin action directly (not per-plugin hooks), and
+neither is the general interpreter dispatch path — adding a plugin never adds a case there.
+
+**Which brain recognises your plugin.** Plugin recognition is per brain, not
+brain-independent. The cloud Gemini brain composes your `promptFragment` into its prompt
+(`GeminiCommandInterpreter.swift:72-75`), so it can emit your action names. The on-device brains
+do **not** compose plugin fragments — the 1,024-token context cannot fit them
+(`LlamaCommandInterpreter.swift:319-326`; `LocalIntentInterpreter` builds its prompt without a
+registry) — so the on-device brain itself cannot emit your action names. That does not make
+plugin recognition impossible on the on-device stack: with the "Ask Gemini when I can't answer"
+opt-in, `applyVoiceEngineStack` enables the router's cloud layer (`AppCoordinator.swift:3691-3715`;
+the `GeminiCommandInterpreter` wired as `cloudBrain`, `AppCoordinator.swift:2153`) and
+`IntentRouter` escalates an abstained utterance to it (`IntentRouter.swift:177-248`), which does
+compose your fragment. Core's `.guide` flow also defers to `appliance.identify` on any brain
+(`CommandRouter.swift:2336`). Design your plugin for the cloud brain; the on-device brain alone
+cannot classify into it, so treat strictly-on-device recognition (no opt-in) as unavailable until
+the on-device context budget changes.
+
+`PluginCommand.transcript` is the **sanitised utterance** (`InputSanitiser` quarantine level,
+the same policy every interpreter applies before a prompt), built at the router's single
+dispatch boundary, so normal `.plugin` dispatch and the guide-deferral path hand you identical
+field semantics. It is empty only when no voice utterance is in flight (screen-initiated calls
+such as the calendar display pass `""` and carry their input as an entity).
 
 `PluginExecutionContext` hands you the shared `GeminiClient` (same cost/observability
 chokepoint as everything else — use it, don't create your own client), the locale, and
@@ -70,9 +107,9 @@ Check language via `locale.language.languageCode?.identifier == "ne"` (see
   and the deterministic keyword layer stay in core permanently (constitution: emergency
   must not depend on anything that can fail to load/apply). If your feature touches
   those, it doesn't belong in a plugin.
-- **No silent stubs.** If your plugin isn't ready, `handle` returns
-  `.failed(spokenApology:)` with an honest message (see `ApplianceHelperPlugin`),
-  never a fake success.
+- **No silent stubs.** If your plugin cannot serve a request, `handle` returns
+  `.failed(spokenApology:)` with an honest localised message (see
+  `ApplianceHelperPlugin`'s unconfigured-client path), never a fake success.
 - **Own your storage.** Plugin-local caches go through `EncryptedLocalStorage` keyed
   under your `pluginID` (see `NepaliCalendarPlugin`'s cache), never new global state
   in `AppCoordinator`.
@@ -86,11 +123,35 @@ Check language via `locale.language.languageCode?.identifier == "ne"` (see
 
 ## Reference implementations
 
+Four plugins are registered in `AppCoordinator.makePluginRegistry()`
+(`AppCoordinator.swift:1275-1285`). Three are built inside the factory; `RoutinePlugin` is
+constructed eagerly in `init` (`AppCoordinator.swift:1432`) and only registered by the factory
+(`:1279`):
+
 - **`NepaliCalendarPlugin`** — the geography-plugin proof case: Nepali-only gating,
   search-grounded answers, year-scoped local cache.
-- **`ApplianceHelperPlugin`** — the honest skeleton: registers intent vocabulary now so
-  questions classify correctly, returns an explicit "not ready yet" until the vision
-  pipeline lands.
+- **`ApplianceHelperPlugin`** — the live appliance helper: `handle` opens the camera surface
+  (`spokenAndPresented`) and `ApplianceHelperView` drives capture → identify → overlay through
+  `ApplianceHelperSession` (`ApplianceHelperPlugin.swift:69-106`; tests at
+  `ApplianceHelperPluginTests.swift:73, 88`). Its only honest failure is the unconfigured
+  client: with no Gemini key it returns `.failed` with `plugin.applianceHelper.notConfigured`
+  (`ApplianceHelperPlugin.swift:70-74`).
+- **`RoutinePlugin`** — generalised routine reminders (`routine.set` / `routine.query`) backed
+  by `RoutineScheduler`; medication-shaped reminders deliberately stay in core.
+- **`YouTubePlugin`** — the interpreter-side twin of the router's deterministic YouTube stage;
+  both share `YouTubeTool` (`YouTubePlugin.swift:20-23`) so the two paths cannot drift.
+
+## Invariants
+
+- **Compile-time registration only.** Plugins are a fixed list compiled into the app
+  (`PluginRegistry.swift:7-9`). There is no dynamic loading — no `dlopen`, no
+  `NSClassFromString`, no bundle loading; the collision rule above is the runtime backstop for
+  the fixed list, not a loading mechanism. Adding a plugin is one Swift file plus one
+  `register(...)` line in `AppCoordinator.makePluginRegistry()`. Lifting this invariant would
+  mean a reviewed dynamic-loading API and a trust model that do not exist today.
+- **iOS-only runtime.** The plugin runtime ships only in the iOS app
+  (`ios/ElderlyAssistant/Services/Plugins/`). Android contains no plugin code — no registry, no
+  `AssistantPlugin`, no plugin action names. This guide describes the iOS implementation only.
 
 ## Testing pattern
 

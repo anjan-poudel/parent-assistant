@@ -62,7 +62,13 @@ struct PluginIntentContribution {
 struct PluginCommand {
     /// One of the plugin's own actionNames, as emitted by the LLM.
     let actionName: String
-    /// The sanitised transcript, as CommandRouter already produces.
+    /// The sanitised transcript (`InputSanitiser` quarantine level — the
+    /// same policy every interpreter applies before a prompt), built at
+    /// the dispatch boundary so every path carries the same field
+    /// semantics. Non-empty only when the command came from a voice
+    /// utterance; screen-initiated calls (e.g. the calendar display)
+    /// pass "". Plugins may use it as a last-resort carrier — see
+    /// `ApplianceHelperPlugin.extractQuestion`.
     let transcript: String
     /// Whatever entities the plugin's own prompt fragment asked the LLM
     /// to extract, keyed by the field names it declared.

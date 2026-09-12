@@ -2299,12 +2299,9 @@ final class CommandRouter {
             return
         }
         emit(eventType: "command_plugin_dispatched", outcome: "success")
-        let pluginCommand = PluginCommand(
-            actionName: actionName,
-            transcript: "",
-            entities: command.pluginEntities ?? [:],
-            confidence: command.confidence
-        )
+        let pluginCommand = makePluginCommand(actionName: actionName,
+                                              entities: command.pluginEntities ?? [:],
+                                              confidence: command.confidence)
         let execContext = PluginExecutionContext(
             locale: locale,
             geminiClient: geminiClient,
@@ -2328,13 +2325,11 @@ final class CommandRouter {
     /// human, never executed on-device. Defers to the appliance plugin
     /// when it can serve the topic (2026-09-05 integration #4 — the
     /// plugin owns appliance UX: photo + grounding overlay, manuals);
-    /// the understand call's steps remain the fallback until the plugin
-    /// matures past its skeleton, so appliance questions work TODAY and
-    /// upgrade automatically when the plugin lands.
+    /// the understand call's steps remain the honest fallback when the
+    /// plugin cannot serve (no registry/client, or `handle` fails).
     private func handleGuide(_ command: InterpretedCommand) {
         emit(eventType: "command_guide", outcome: "info")
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
-        let sourceTranscript = pendingTranscript ?? ""
         guard let registry = pluginRegistry,
               let geminiClient,
               let topic = command.topic, !topic.isEmpty,
@@ -2342,10 +2337,9 @@ final class CommandRouter {
             speakGuideSteps(command)
             return
         }
-        let pluginCommand = PluginCommand(actionName: "appliance.identify",
-                                          transcript: sourceTranscript,
-                                          entities: ["appliance": topic],
-                                          confidence: command.confidence)
+        let pluginCommand = makePluginCommand(actionName: "appliance.identify",
+                                              entities: ["appliance": topic],
+                                              confidence: command.confidence)
         let execContext = PluginExecutionContext(locale: locale,
                                                  geminiClient: geminiClient,
                                                  observabilityBus: observabilityBus)
@@ -2354,8 +2348,9 @@ final class CommandRouter {
             let result = await plugin.handle(pluginCommand, context: execContext)
             await MainActor.run {
                 if case .failed = result {
-                    // Plugin not ready (skeleton) — steps are the honest
-                    // answer today.
+                    // The plugin could not serve (e.g. unconfigured
+                    // client) — the understand call's steps are the
+                    // honest fallback.
                     self.speakGuideSteps(command)
                     return
                 }
@@ -2366,6 +2361,26 @@ final class CommandRouter {
                 self.speak(text: result.spokenText)
             }
         }
+    }
+
+    /// Single `PluginCommand` construction point for every dispatch
+    /// path (plugin contract, T-042). The transcript is the SANITISED
+    /// utterance — `InputSanitiser.sanitise(_:level: .quarantine)`, the
+    /// same policy the three interpreters apply before any prompt — so
+    /// the normal `.plugin` path and the guide-deferral path hand
+    /// plugins identical field semantics. Never the raw text and never
+    /// an unconditional "": empty only when no voice utterance is in
+    /// flight (screen-initiated callers such as
+    /// `AppCoordinator.nepaliCalendarAnswer` build their own command).
+    /// The raw transcript is deliberately NOT logged here (NFR-016).
+    private func makePluginCommand(actionName: String,
+                                   entities: [String: String],
+                                   confidence: Double) -> PluginCommand {
+        PluginCommand(actionName: actionName,
+                      transcript: InputSanitiser.sanitise(pendingTranscript ?? "",
+                                                          level: .quarantine),
+                      entities: entities,
+                      confidence: confidence)
     }
 
     private func speakGuideSteps(_ command: InterpretedCommand) {

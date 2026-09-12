@@ -5349,6 +5349,9 @@ self.noteTalkContractChanged()
         guard let plugin = pluginRegistry.plugin(handling: "nepali_calendar.query",
                                                  locale: activeLocale),
               geminiConfigStore.isConfigured else { return nil }
+        // Screen-initiated call, not a voice turn: the contract's
+        // transcript field is the sanitised utterance and stays empty
+        // here — the question travels in the plugin's own entity.
         let command = PluginCommand(actionName: "nepali_calendar.query",
                                     transcript: "",
                                     entities: ["question": question],
