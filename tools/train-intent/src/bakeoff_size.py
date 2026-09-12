@@ -20,6 +20,13 @@ from pathlib import Path
 
 EMBED_HINTS = ("word_embeddings", "tok_embeddings", "vocab_embeddings")
 
+# Training heads that HF checkpoints ship but the shipping encoder body must
+# NOT pay for. mmBERT-small, for example, stores `decoder.weight` (the tied
+# MLM decoder, 98.3M params) and `head.{dense,norm}` — counting those as
+# "non-embedding encoder parameters" overstates the on-device artifact by 70%.
+HEAD_PREFIXES = ("decoder.", "head.", "lm_head", "cls.", "classifier",
+                 "pooler", "score.", "prediction", "embeddings_project")
+
 CANDIDATES = {
     "C1": "ai4bharat/IndicBERT-v3-270M",
     "C2": "jhu-clsp/mmBERT-small",
@@ -60,13 +67,27 @@ def _tensor_shapes(root: Path) -> tuple[dict[str, tuple], str, int]:
     raise FileNotFoundError(f"no weight file in {root}")
 
 
+def _is_head(key: str) -> bool:
+    """True for training-head tensors that do not ship in the encoder body."""
+    bare = key
+    for p in ("model.", "bert.", "roberta.", "xlm_roberta.", "deberta.", "encoder."):
+        if bare.startswith(p):
+            bare = bare[len(p):]
+            break
+    return bare.startswith(HEAD_PREFIXES)
+
+
 def compose(repo_id: str, cache_dir: str | None = None) -> dict:
     root = _download(repo_id, cache_dir)
     cfg = json.loads((root / "config.json").read_text())
     shapes, fmt, nbytes = _tensor_shapes(root)
 
     total = sum(int(math.prod(s)) for s in shapes.values())
-    embed = sum(int(math.prod(s)) for k, s in shapes.items()
+    body = {k: s for k, s in shapes.items() if not _is_head(k)}
+    heads = {k: s for k, s in shapes.items() if _is_head(k)}
+    body_total = sum(int(math.prod(s)) for s in body.values())
+    head_total = sum(int(math.prod(s)) for s in heads.values())
+    embed = sum(int(math.prod(s)) for k, s in body.items()
                 if any(h in k for h in EMBED_HINTS))
     dtypes = {v for v in cfg.values() if isinstance(v, str) and v in
               ("float32", "bfloat16", "float16")}
@@ -77,16 +98,21 @@ def compose(repo_id: str, cache_dir: str | None = None) -> dict:
         "checkpoint_file_bytes": nbytes,
         "config_dtype": sorted(dtypes),
         "total_params": total,
+        "encoder_body_params": body_total,
+        "non_encoder_head_params": head_total,
+        "non_encoder_head_keys": sorted(heads)[:8],
         "embedding_table_params": embed,
-        "non_embedding_params": total - embed,
+        "body_non_embedding_params": body_total - embed,
         "vocab_size": cfg.get("vocab_size"),
         "hidden_size": cfg.get("hidden_size"),
         "num_layers": cfg.get("num_hidden_layers"),
         "model_type": cfg.get("model_type"),
-        "embedding_share_int8": round(embed / total, 4) if total else None,
-        "projected_int8_bytes": total,                       # 1 byte/param
-        "projected_int8_mb": round(total / 1e6, 1),
-        "projected_int8_encoder_body_mb": round((total - embed) / 1e6, 1),
+        "embedding_share_int8": round(embed / body_total, 4) if body_total else None,
+        "projected_int8_bytes": body_total,                  # 1 byte/param
+        "projected_int8_mb": round(body_total / 1e6, 1),
+        "projected_int8_encoder_body_mb": round((body_total - embed) / 1e6, 1),
+        "weight_budget_note": ("int8 1 byte/param; attention/embedding tables "
+                               "excluded from weight count per spec §10"),
     }
 
 
@@ -103,8 +129,10 @@ def main() -> None:
             rows.append({"id": cid, **compose(CANDIDATES[cid], args.cache_dir)})
             r = rows[-1]
             print(f"{cid} {r['repo']}: total={r['total_params']/1e6:.1f}M "
-                  f"non-embed={r['non_embedding_params']/1e6:.1f}M vocab={r['vocab_size']} "
-                  f"embed_share={r['embedding_share_int8']} int8={r['projected_int8_mb']}MB")
+                  f"body={r['encoder_body_params']/1e6:.1f}M "
+                  f"heads={r['non_encoder_head_params']/1e6:.1f}M "
+                  f"vocab={r['vocab_size']} embed_share={r['embedding_share_int8']} "
+                  f"int8_body={r['projected_int8_mb']}MB")
         except Exception as e:
             rows.append({"id": cid, "repo": CANDIDATES[cid], "error": f"{type(e).__name__}: {e}"})
             print(f"{cid} {CANDIDATES[cid]}: UNMEASURED ({type(e).__name__}: {e})")

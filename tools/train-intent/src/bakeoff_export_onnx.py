@@ -87,16 +87,33 @@ def main() -> None:
               "repo": meta.get("backbone"), "conversion": None, "quantization": None,
               "verification": None, "latency": None}
     fp32_path = str(Path(args.out).with_suffix(".fp32.onnx"))
+    # ModernBERT (C2: FA2/SDPA attention, RoPE, GLU) may not export with its
+    # fused attention. Retrying with eager attention is a legitimate export-time
+    # configuration — the exported graph is what ships and is verified against
+    # PyTorch below; if both attempts fail, that failure is the finding (K3).
     t0 = time.time()
-    try:
-        export_fp32(model, tok, max_len, fp32_path)
-        report["conversion"] = {"status": "ok",
-                                "fp32_mb": round(Path(fp32_path).stat().st_size / 1e6, 1),
-                                "seconds": round(time.time() - t0, 1)}
-    except Exception as e:  # noqa: BLE001 — the failure IS the finding
-        report["conversion"] = {"status": "FAILED", "error": f"{type(e).__name__}: {e}"}
+    export_error, export_attn = None, None
+    for attn in (None, "eager"):
+        if attn is not None:
+            try:
+                model.backbone.set_attn_implementation(attn)
+            except Exception as e:  # noqa: BLE001
+                export_error = f"set_attn_implementation({attn}): {type(e).__name__}: {e}"
+                continue
+        try:
+            export_fp32(model, tok, max_len, fp32_path)
+            export_attn = attn or "model default"
+            break
+        except Exception as e:  # noqa: BLE001
+            export_error = f"{type(e).__name__}: {e}"
+    report["conversion"] = ({"status": "ok", "attn_implementation": export_attn,
+                             "fp32_mb": round(Path(fp32_path).stat().st_size / 1e6, 1),
+                             "seconds": round(time.time() - t0, 1)}
+                            if export_attn else
+                            {"status": "FAILED", "error": export_error})
+    if not export_attn:
         Path(args.report).write_text(json.dumps(report, indent=2, ensure_ascii=False))
-        print(f"[onnx] CONVERSION FAILED: {type(e).__name__}: {e}")
+        print(f"[onnx] CONVERSION FAILED: {export_error}")
         sys.exit(2)
 
     try:

@@ -1,0 +1,57 @@
+{
+  "model_dir": "/tmp/t033/models/trained/C3",
+  "repo": "cartesinus/multilingual_minilm-amazon-massive-intent",
+  "conversion": {
+    "status": "ok",
+    "shape_mode": "flexible",
+    "mlpackage_mb": 235.2
+  },
+  "compile": {
+    "status": "ok",
+    "returncode": 0,
+    "stderr": "",
+    "mlmodelc_mb": 235.2
+  },
+  "packaging": {
+    "zip": "/tmp/t033/models/coreml-C3b/t033-encoder-mlmodelc.zip",
+    "zip_mb": 217.0,
+    "top_level_entries": [
+      "t033-encoder.mlmodelc"
+    ],
+    "matches_modelstore_shape": true
+  },
+  "quantization": {
+    "status": "ok",
+    "dtype": "int8",
+    "mlpackage_mb": 118.6
+  },
+  "verification": {
+    "rows": 20,
+    "intent_agreement": 1.0,
+    "slot_tag_agreement": 1.0,
+    "quantized_model_used": true
+  },
+  "latency": {
+    "p50_ms": 178.56,
+    "p95_ms": 206.69,
+    "mean_ms": 169.76,
+    "n": 400,
+    "note": "x86_64 Mac CPU_ONLY proxy — conservative vs iPhone-class A-series/ANE; device-class number UNMEASURED (no device)"
+  },
+  "runtime": "CoreML mlprogram / xcrun coremlcompiler",
+  "trace": {
+    "status": "ok",
+    "attn_implementation": "model default",
+    "error": null
+  },
+  "packaging_int8": {
+    "status": "ok",
+    "mlmodelc_mb": 118.7,
+    "zip": "/tmp/t033/models/coreml-C3b/t033-encoder-int8-mlmodelc.zip",
+    "zip_mb": 109.1,
+    "top_level_entries": [
+      "t033-encoder-int8.mlmodelc"
+    ],
+    "matches_modelstore_shape": true
+  }
+}

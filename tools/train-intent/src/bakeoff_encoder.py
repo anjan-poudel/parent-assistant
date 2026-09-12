@@ -16,10 +16,24 @@ This is spike code, not the T-035 design — it exists to answer the GO/NO-GO.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import torch
 import torch.nn as nn
+
+# Intel-Mac CoreML export shim. torch 2.2.2 is the last release with macOS
+# x86_64 wheels and has no Dynamo on Python 3.12, but transformers'
+# modeling_modernbert.py applies @torch.compile(dynamic=True) at import time —
+# so importing ModernBERT dies there. Compilation is irrelevant to a traced /
+# exported graph (and would interfere with torch.jit.trace anyway), so on the
+# export host the env var below replaces torch.compile with an identity
+# decorator. Not used on the CUDA box, which has torch 2.6.
+if os.environ.get("T033_PATCH_TORCH_COMPILE") == "1":  # pragma: no cover
+    def _identity_compile(fn=None, **_kwargs):
+        return fn if callable(fn) else (lambda f: f)
+
+    torch.compile = _identity_compile
 
 TAGS = ["O", "B-contact", "I-contact", "B-time", "I-time"]
 TAG2ID = {t: i for i, t in enumerate(TAGS)}
@@ -110,7 +124,11 @@ def load_model(model_dir: str | Path, map_location="cpu"):
     meta = ckpt["meta"]
     # Prefer the recorded local backbone path; fall back to the Hub id when
     # the checkpoint is loaded on a different machine (e.g. Mac for CoreML).
-    local = meta.get("backbone_local") or ""
+    # T033_BACKBONE_OVERRIDE points at a local backbone directory (used on the
+    # export host, where the recorded server path does not exist and the
+    # original .bin checkpoint is refused by transformers on torch < 2.6
+    # (CVE-2025-32434 guard) — the override dir carries safetensors instead).
+    local = os.environ.get("T033_BACKBONE_OVERRIDE") or meta.get("backbone_local") or ""
     backbone = local if local and Path(local).exists() else meta["backbone"]
     model = JointEncoder(backbone, num_intents=len(meta["intents"]))
     model.load_state_dict(ckpt["state_dict"])

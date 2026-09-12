@@ -177,6 +177,61 @@ def predict_encoder_t033(utterance: str, model_dir: str) -> dict:
                            predict_encoder_t033._tok, predict_encoder_t033._meta)
 
 
+def predict_onnx_t033(utterance: str, model_dir: str, onnx_path: str) -> dict:
+    """T-033 encoder exported to ONNX — scored exactly like the torch backend.
+
+    This scores the artefact that would actually ship on Android (the int8
+    ONNX), with the same tokenizer, decode and metric code as every other
+    backend. Decode helpers are imported from bakeoff_encoder so the ONNX and
+    torch paths cannot drift. Model loading is cached across rows."""
+    import numpy as np
+    import onnxruntime as ort
+    from transformers import AutoTokenizer
+
+    from bakeoff_encoder import TAG2ID, spans_from_tags
+
+    if not hasattr(predict_onnx_t033, "_sess"):
+        meta = json.loads((Path(model_dir) / "meta.json").read_text(encoding="utf-8"))
+        so = ort.SessionOptions()
+        so.intra_op_num_threads = 4
+        so.log_severity_level = 3
+        predict_onnx_t033._sess = ort.InferenceSession(
+            onnx_path, sess_options=so, providers=["CPUExecutionProvider"])
+        predict_onnx_t033._tok = AutoTokenizer.from_pretrained(model_dir)
+        predict_onnx_t033._meta = meta
+    sess = predict_onnx_t033._sess
+    tok = predict_onnx_t033._tok
+    meta = predict_onnx_t033._meta
+
+    words = utterance.split() or [utterance]
+    max_len = int(meta.get("max_len", 64))
+    enc = tok(words, is_split_into_words=True, truncation=True,
+              max_length=max_len, return_tensors="np")
+    wids = enc.word_ids(0)                      # BatchEncoding before detach
+    out = sess.run(None, {"input_ids": enc["input_ids"].astype(np.int64),
+                          "attention_mask": enc["attention_mask"].astype(np.int64)})
+    logits, slot_logits = out[0][0], out[1][0]
+    exp = np.exp(logits - logits.max())
+    probs = exp / exp.sum()
+    idx = int(np.argmax(probs))
+    intent = meta["intents"][idx]
+
+    token_tags = np.argmax(slot_logits, axis=-1).tolist()
+    first_tag: dict[int, int] = {}
+    for pos, wi in enumerate(wids):
+        if wi is not None and wi not in first_tag:
+            first_tag[wi] = token_tags[pos]
+    word_tag = [first_tag.get(i, TAG2ID["O"]) for i in range(len(words))]
+
+    return {
+        "action": intent,
+        "intent": intent,
+        "confidence": round(float(probs[idx]), 4),
+        "contact": spans_from_tags(words, word_tag, "contact"),
+        "time": spans_from_tags(words, word_tag, "time"),
+    }
+
+
 def predict_gemini(utterance: str, cfg: dict) -> dict:
     from google import genai
     from google.genai import types
@@ -228,8 +283,11 @@ def slot_f1(golds: list[str | None], preds: list[str | None]) -> float:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--backend", required=True,
-                        choices=["echo", "gguf", "encoder", "gemini"])
+                        choices=["echo", "gguf", "encoder", "onnx", "gemini"])
     parser.add_argument("--model-path", default="")
+    parser.add_argument("--onnx-path", default="",
+                        help="int8 ONNX artifact for --backend onnx (tokenizer and "
+                             "intent allowlist are read from --model-path)")
     parser.add_argument("--label", default="", help="row label for results.csv")
     parser.add_argument("--manifest-out", default="",
                         help="append a JSONL run manifest (command, config/dataset/"
@@ -248,6 +306,8 @@ def main() -> None:
             pred = predict_gguf(row["utterance"], cfg, args.model_path)
         elif args.backend == "encoder":
             pred = predict_encoder_t033(row["utterance"], args.model_path)
+        elif args.backend == "onnx":
+            pred = predict_onnx_t033(row["utterance"], args.model_path, args.onnx_path)
         else:
             pred = predict_gemini(row["utterance"], cfg)
         preds.append(pred)
@@ -326,7 +386,11 @@ def main() -> None:
                 datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "config_sha256": _sha256(str(Path(args.config).resolve())),
             "corpus_sha256": _sha256(str(root / "eval" / "golden_corpus.jsonl")),
-            "checkpoint_sha256": _model_digest(args.model_path),
+            "checkpoint_sha256": (_sha256(args.onnx_path)
+                                  if args.backend == "onnx" and args.onnx_path
+                                  else _model_digest(args.model_path)),
+            "source_checkpoint_sha256": _model_digest(args.model_path),
+            "onnx_sha256": _sha256(args.onnx_path) if args.onnx_path else None,
             "metrics": {"closed_intent_accuracy": round(closed_acc, 4),
                         "contact_f1": round(contact_f1, 4), "time_f1": round(time_f1, 4),
                         "emergency_recall": round(emergency_recall, 4),

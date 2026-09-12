@@ -1,0 +1,6 @@
+label,closed_acc,contact_f1,time_f1,emergency_recall,se_precision,gates_failed
+smoke-C3,0.353,0.000,0.000,0.000,0.455,closed_intent_accuracy|contact_f1|time_f1|emergency_recall|side_effect_precision
+T033-C3-minilm-s42,0.882,0.333,1.000,1.000,1.000,closed_intent_accuracy|contact_f1
+T033-C2-mmbert-s42,1.000,0.333,0.833,1.000,1.000,contact_f1|time_f1
+T033-C2-mmbert-int8-onnx-s42,0.824,0.333,0.727,0.000,1.000,closed_intent_accuracy|contact_f1|time_f1|emergency_recall
+T033-C3-minilm-int8-onnx-s42,0.882,0.333,1.000,1.000,1.000,closed_intent_accuracy|contact_f1
