@@ -127,15 +127,18 @@ def main() -> None:
                            "top_level_entries": sorted(top),
                            "matches_modelstore_shape": top == {compiled.name}}
 
-    # --- int8 weight quantization (best-effort) -----------------------------
+    # --- int8 weight quantization (best-effort; coremltools 9 API) ----------
     try:
         from coremltools.optimize.coreml import (OpLinearQuantizerConfig,
+                                                 OptimizationConfig,
                                                  linear_quantize_weights)
-        cfg = OpLinearQuantizerConfig(mode="linear_symmetric", dtype="int8")
+        cfg = OptimizationConfig(
+            global_config=OpLinearQuantizerConfig(mode="linear_symmetric", dtype="int8"))
         qmodel = linear_quantize_weights(mlmodel, config=cfg)
         qpkg = out / "t033-encoder-int8.mlpackage"
         qmodel.save(str(qpkg))
-        report["quantization"] = {"status": "ok", "mlpackage_mb": round(dir_size_mb(qpkg), 1)}
+        report["quantization"] = {"status": "ok", "dtype": "int8",
+                                  "mlpackage_mb": round(dir_size_mb(qpkg), 1)}
         mlmodel_for_latency = str(qpkg)
     except Exception as e:  # noqa: BLE001
         report["quantization"] = {"status": "FAILED", "error": f"{type(e).__name__}: {e}"}

@@ -52,16 +52,19 @@ def quantize(fp32_path: str, int8_path: str) -> str:
     return int8_path
 
 
-def run_ort(path: str, ids, mask, n_threads: int):
-    import numpy as np
+def make_session(path: str, n_threads: int):
     import onnxruntime as ort
     so = ort.SessionOptions()
     so.intra_op_num_threads = n_threads
     so.log_severity_level = 3
-    sess = ort.InferenceSession(path, sess_options=so,
+    return ort.InferenceSession(path, sess_options=so,
                                 providers=["CPUExecutionProvider"])
-    return sess, sess.run(None, {"input_ids": np.asarray(ids),
-                                 "attention_mask": np.asarray(mask)})
+
+
+def run_ort(sess, ids, mask):
+    import numpy as np
+    return sess.run(None, {"input_ids": np.asarray(ids),
+                           "attention_mask": np.asarray(mask)})
 
 
 def main() -> None:
@@ -107,37 +110,38 @@ def main() -> None:
     path_for_runtime = args.out if report["quantization"]["status"] == "ok" else fp32_path
 
     # --- verification: ORT vs PyTorch on the golden corpus -------------------
-    from bakeoff_encoder import TAG2ID, spans_from_tags
-    intent_ok = slot_ok = total_tok = 0
     intents = meta["intents"]
-    for r in rows:
-        words = r["utterance"].split() or [r["utterance"]]
-        enc = tok(words, is_split_into_words=True, truncation=True,
-                  max_length=max_len, return_tensors="pt")
-        with torch.no_grad():
-            li, ls = model(enc["input_ids"], enc["attention_mask"])
-        oi, osl = run_ort(path_for_runtime, enc["input_ids"].numpy(),
-                          enc["attention_mask"].numpy(), n_threads=4)[0:2]
-        if intents[int(np.argmax(oi[0]))] == intents[int(torch.argmax(li[0]))]:
-            intent_ok += 1
-        pt_tags = ls[0].argmax(-1).tolist()
-        onnx_tags = np.argmax(osl[0], axis=-1).tolist()
-        n = min(len(pt_tags), len(onnx_tags))
-        total_tok += n
-        slot_ok += sum(int(a == b) for a, b in zip(pt_tags[:n], onnx_tags[:n]))
-    report["verification"] = {
-        "rows": len(rows), "intent_agreement": round(intent_ok / max(len(rows), 1), 4),
-        "slot_tag_agreement": round(slot_ok / max(total_tok, 1), 4)}
+    report["verification"] = {}
+    verify_paths = [("fp32", fp32_path)]
+    if report["quantization"]["status"] == "ok":
+        verify_paths.append(("int8", args.out))
+    for tag, path in verify_paths:
+        intent_ok = slot_ok = total_tok = 0
+        verify_sess = make_session(path, 4)
+        for r in rows:
+            words = r["utterance"].split() or [r["utterance"]]
+            enc = tok(words, is_split_into_words=True, truncation=True,
+                      max_length=max_len, return_tensors="pt")
+            with torch.no_grad():
+                li, ls = model(enc["input_ids"], enc["attention_mask"])
+            oi, osl = run_ort(verify_sess, enc["input_ids"].numpy(),
+                              enc["attention_mask"].numpy())
+            if intents[int(np.argmax(oi[0]))] == intents[int(torch.argmax(li[0]))]:
+                intent_ok += 1
+            pt_tags = ls[0].argmax(-1).tolist()
+            onnx_tags = np.argmax(osl[0], axis=-1).tolist()
+            n = min(len(pt_tags), len(onnx_tags))
+            total_tok += n
+            slot_ok += sum(int(a == b) for a, b in zip(pt_tags[:n], onnx_tags[:n]))
+        report["verification"][tag] = {
+            "rows": len(rows),
+            "intent_agreement": round(intent_ok / max(len(rows), 1), 4),
+            "slot_tag_agreement": round(slot_ok / max(total_tok, 1), 4)}
 
     # --- latency: interpret p50/p95 over the golden corpus distribution -----
     lat = {}
-    import onnxruntime as ort
     for threads in (1, 4):
-        so = ort.SessionOptions()
-        so.intra_op_num_threads = threads
-        so.log_severity_level = 3
-        sess = ort.InferenceSession(path_for_runtime, sess_options=so,
-                                    providers=["CPUExecutionProvider"])
+        sess = make_session(path_for_runtime, threads)
         times = []
         for _ in range(args.reps):
             for r in rows:

@@ -1,0 +1,63 @@
+[
+  {
+    "id": "C2",
+    "repo": "jhu-clsp/mmBERT-small",
+    "local_path": "/mnt/nvme2/huggingface/hub/models--jhu-clsp--mmBERT-small/snapshots/abc32620dd4f6ab06f5fbe905dc25f310618e09f",
+    "weight_format": "pytorch_bin",
+    "checkpoint_file_bytes": 563633326,
+    "config_dtype": [
+      "float32"
+    ],
+    "total_params": 239201536,
+    "embedding_table_params": 98304000,
+    "non_embedding_params": 140897536,
+    "vocab_size": 256000,
+    "hidden_size": 384,
+    "num_layers": 22,
+    "model_type": "modernbert",
+    "embedding_share_int8": 0.411,
+    "projected_int8_bytes": 239201536,
+    "projected_int8_mb": 239.2,
+    "projected_int8_encoder_body_mb": 140.9
+  },
+  {
+    "id": "C3",
+    "repo": "cartesinus/multilingual_minilm-amazon-massive-intent",
+    "local_path": "/mnt/nvme2/huggingface/hub/models--cartesinus--multilingual_minilm-amazon-massive-intent/snapshots/08dc481605729de194f9139713d4eb20f4b80706",
+    "weight_format": "safetensors",
+    "checkpoint_file_bytes": 470735174,
+    "config_dtype": [
+      "float32"
+    ],
+    "total_params": 117677372,
+    "embedding_table_params": 96014208,
+    "non_embedding_params": 21663164,
+    "vocab_size": 250037,
+    "hidden_size": 384,
+    "num_layers": 12,
+    "model_type": "bert",
+    "embedding_share_int8": 0.8159,
+    "projected_int8_bytes": 117677372,
+    "projected_int8_mb": 117.7,
+    "projected_int8_encoder_body_mb": 21.7
+  },
+  {
+    "id": "C4",
+    "repo": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "local_path": "/mnt/nvme2/huggingface/hub/models--sentence-transformers--paraphrase-multilingual-MiniLM-L12-v2/snapshots/e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+    "weight_format": "safetensors",
+    "checkpoint_file_bytes": 470641600,
+    "config_dtype": [],
+    "total_params": 117654272,
+    "embedding_table_params": 96014208,
+    "non_embedding_params": 21640064,
+    "vocab_size": 250037,
+    "hidden_size": 384,
+    "num_layers": 12,
+    "model_type": "bert",
+    "embedding_share_int8": 0.8161,
+    "projected_int8_bytes": 117654272,
+    "projected_int8_mb": 117.7,
+    "projected_int8_encoder_body_mb": 21.6
+  }
+]

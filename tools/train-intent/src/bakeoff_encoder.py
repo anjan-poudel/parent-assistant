@@ -93,6 +93,11 @@ class JointEncoder(nn.Module):
 def save_model(model: JointEncoder, tokenizer, out_dir: str | Path, meta: dict) -> None:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    # Persist the resolved local backbone path so evaluation never refetches
+    # from the Hub (transformers records it in config._name_or_path when a
+    # checkpoint is loaded from the cache).
+    meta.setdefault("backbone_local",
+                    str(getattr(model.backbone.config, "_name_or_path", "") or ""))
     torch.save({"state_dict": model.state_dict(), "meta": meta}, out / "model.pt")
     tokenizer.save_pretrained(out)
     (out / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False))
@@ -103,7 +108,11 @@ def load_model(model_dir: str | Path, map_location="cpu"):
     d = Path(model_dir)
     ckpt = torch.load(d / "model.pt", map_location=map_location, weights_only=False)
     meta = ckpt["meta"]
-    model = JointEncoder(meta["backbone"], num_intents=len(meta["intents"]))
+    # Prefer the recorded local backbone path; fall back to the Hub id when
+    # the checkpoint is loaded on a different machine (e.g. Mac for CoreML).
+    local = meta.get("backbone_local") or ""
+    backbone = local if local and Path(local).exists() else meta["backbone"]
+    model = JointEncoder(backbone, num_intents=len(meta["intents"]))
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
     tok = AutoTokenizer.from_pretrained(str(d))
@@ -122,13 +131,14 @@ def predict_encoder(utterance: str, model: JointEncoder, tok, meta: dict,
     max_len = int(meta.get("max_len", 64))
     enc = tok(words, is_split_into_words=True, truncation=True,
               max_length=max_len, return_tensors="pt")
-    enc = {k: v.to(device) for k, v in enc.items()}
-    logits, slot_logits = model(enc["input_ids"], enc["attention_mask"])
+    wids = enc.word_ids(0)                      # BatchEncoding before detach
+    input_ids = enc["input_ids"].to(device)
+    attention_mask = enc["attention_mask"].to(device)
+    logits, slot_logits = model(input_ids, attention_mask)
     probs = torch.softmax(logits.float(), dim=-1)[0]
     conf, idx = float(probs.max()), int(probs.argmax())
     intent = meta["intents"][idx]
 
-    wids = enc.word_ids(0)
     token_tags = slot_logits.argmax(-1)[0].tolist()
     first_tag: dict[int, int] = {}
     for pos, wi in enumerate(wids):

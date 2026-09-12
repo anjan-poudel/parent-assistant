@@ -1,0 +1,233 @@
+{
+  "C2": {
+    "repo": "jhu-clsp/mmBERT-small",
+    "registers": {
+      "elder_fragmented": {
+        "n": 200,
+        "mean_tokens_per_word": 2.639,
+        "p95_tokens_per_word": 4.0,
+        "mean_tokens_per_utterance": 14.2,
+        "p95_tokens_per_utterance": 25,
+        "vocab_size": 256000
+      },
+      "romanized": {
+        "n": 200,
+        "mean_tokens_per_word": 2.021,
+        "p95_tokens_per_word": 3.0,
+        "mean_tokens_per_utterance": 11.3,
+        "p95_tokens_per_utterance": 20,
+        "vocab_size": 256000
+      },
+      "devanagari": {
+        "n": 200,
+        "mean_tokens_per_word": 2.737,
+        "p95_tokens_per_word": 3.833,
+        "mean_tokens_per_utterance": 14.6,
+        "p95_tokens_per_utterance": 24,
+        "vocab_size": 256000
+      },
+      "code_switched": {
+        "n": 200,
+        "mean_tokens_per_word": 2.18,
+        "p95_tokens_per_word": 3.2,
+        "mean_tokens_per_utterance": 13.6,
+        "p95_tokens_per_utterance": 25,
+        "vocab_size": 256000
+      },
+      "stt_noised:devanagari": {
+        "n": 200,
+        "mean_tokens_per_word": 2.977,
+        "p95_tokens_per_word": 4.2,
+        "mean_tokens_per_utterance": 13.6,
+        "p95_tokens_per_utterance": 23,
+        "vocab_size": 256000
+      },
+      "stt_noised:romanized": {
+        "n": 200,
+        "mean_tokens_per_word": 2.916,
+        "p95_tokens_per_word": 4.0,
+        "mean_tokens_per_utterance": 13.7,
+        "p95_tokens_per_utterance": 22,
+        "vocab_size": 256000
+      },
+      "stt_noised:code_switched": {
+        "n": 200,
+        "mean_tokens_per_word": 2.872,
+        "p95_tokens_per_word": 4.0,
+        "mean_tokens_per_utterance": 13.2,
+        "p95_tokens_per_utterance": 21,
+        "vocab_size": 256000
+      },
+      "stt_noised:elder_fragmented": {
+        "n": 200,
+        "mean_tokens_per_word": 2.933,
+        "p95_tokens_per_word": 4.0,
+        "mean_tokens_per_utterance": 13.8,
+        "p95_tokens_per_utterance": 24,
+        "vocab_size": 256000
+      },
+      "stt_noised": {
+        "n": 800,
+        "mean_tokens_per_word": 2.925,
+        "p95_tokens_per_word": 4.0,
+        "mean_tokens_per_utterance": 13.6,
+        "p95_tokens_per_utterance": 23,
+        "vocab_size": 256000
+      }
+    }
+  },
+  "C3": {
+    "repo": "cartesinus/multilingual_minilm-amazon-massive-intent",
+    "registers": {
+      "elder_fragmented": {
+        "n": 200,
+        "mean_tokens_per_word": 1.907,
+        "p95_tokens_per_word": 2.8,
+        "mean_tokens_per_utterance": 10.2,
+        "p95_tokens_per_utterance": 17,
+        "vocab_size": 250002
+      },
+      "romanized": {
+        "n": 200,
+        "mean_tokens_per_word": 1.848,
+        "p95_tokens_per_word": 2.667,
+        "mean_tokens_per_utterance": 10.2,
+        "p95_tokens_per_utterance": 17,
+        "vocab_size": 250002
+      },
+      "devanagari": {
+        "n": 200,
+        "mean_tokens_per_word": 1.784,
+        "p95_tokens_per_word": 2.667,
+        "mean_tokens_per_utterance": 9.3,
+        "p95_tokens_per_utterance": 15,
+        "vocab_size": 250002
+      },
+      "code_switched": {
+        "n": 200,
+        "mean_tokens_per_word": 1.665,
+        "p95_tokens_per_word": 2.429,
+        "mean_tokens_per_utterance": 10.3,
+        "p95_tokens_per_utterance": 18,
+        "vocab_size": 250002
+      },
+      "stt_noised:devanagari": {
+        "n": 200,
+        "mean_tokens_per_word": 2.251,
+        "p95_tokens_per_word": 3.4,
+        "mean_tokens_per_utterance": 10.1,
+        "p95_tokens_per_utterance": 17,
+        "vocab_size": 250002
+      },
+      "stt_noised:romanized": {
+        "n": 200,
+        "mean_tokens_per_word": 2.147,
+        "p95_tokens_per_word": 3.25,
+        "mean_tokens_per_utterance": 9.9,
+        "p95_tokens_per_utterance": 16,
+        "vocab_size": 250002
+      },
+      "stt_noised:code_switched": {
+        "n": 200,
+        "mean_tokens_per_word": 2.106,
+        "p95_tokens_per_word": 3.2,
+        "mean_tokens_per_utterance": 9.5,
+        "p95_tokens_per_utterance": 16,
+        "vocab_size": 250002
+      },
+      "stt_noised:elder_fragmented": {
+        "n": 200,
+        "mean_tokens_per_word": 2.216,
+        "p95_tokens_per_word": 3.333,
+        "mean_tokens_per_utterance": 10.2,
+        "p95_tokens_per_utterance": 17,
+        "vocab_size": 250002
+      },
+      "stt_noised": {
+        "n": 800,
+        "mean_tokens_per_word": 2.18,
+        "p95_tokens_per_word": 3.333,
+        "mean_tokens_per_utterance": 9.9,
+        "p95_tokens_per_utterance": 17,
+        "vocab_size": 250002
+      }
+    }
+  },
+  "C4": {
+    "repo": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "registers": {
+      "elder_fragmented": {
+        "n": 200,
+        "mean_tokens_per_word": 1.907,
+        "p95_tokens_per_word": 2.8,
+        "mean_tokens_per_utterance": 10.2,
+        "p95_tokens_per_utterance": 17,
+        "vocab_size": 250002
+      },
+      "romanized": {
+        "n": 200,
+        "mean_tokens_per_word": 1.848,
+        "p95_tokens_per_word": 2.667,
+        "mean_tokens_per_utterance": 10.2,
+        "p95_tokens_per_utterance": 17,
+        "vocab_size": 250002
+      },
+      "devanagari": {
+        "n": 200,
+        "mean_tokens_per_word": 1.784,
+        "p95_tokens_per_word": 2.667,
+        "mean_tokens_per_utterance": 9.3,
+        "p95_tokens_per_utterance": 15,
+        "vocab_size": 250002
+      },
+      "code_switched": {
+        "n": 200,
+        "mean_tokens_per_word": 1.665,
+        "p95_tokens_per_word": 2.429,
+        "mean_tokens_per_utterance": 10.3,
+        "p95_tokens_per_utterance": 18,
+        "vocab_size": 250002
+      },
+      "stt_noised:devanagari": {
+        "n": 200,
+        "mean_tokens_per_word": 2.251,
+        "p95_tokens_per_word": 3.4,
+        "mean_tokens_per_utterance": 10.1,
+        "p95_tokens_per_utterance": 17,
+        "vocab_size": 250002
+      },
+      "stt_noised:romanized": {
+        "n": 200,
+        "mean_tokens_per_word": 2.147,
+        "p95_tokens_per_word": 3.25,
+        "mean_tokens_per_utterance": 9.9,
+        "p95_tokens_per_utterance": 16,
+        "vocab_size": 250002
+      },
+      "stt_noised:code_switched": {
+        "n": 200,
+        "mean_tokens_per_word": 2.106,
+        "p95_tokens_per_word": 3.2,
+        "mean_tokens_per_utterance": 9.5,
+        "p95_tokens_per_utterance": 16,
+        "vocab_size": 250002
+      },
+      "stt_noised:elder_fragmented": {
+        "n": 200,
+        "mean_tokens_per_word": 2.216,
+        "p95_tokens_per_word": 3.333,
+        "mean_tokens_per_utterance": 10.2,
+        "p95_tokens_per_utterance": 17,
+        "vocab_size": 250002
+      },
+      "stt_noised": {
+        "n": 800,
+        "mean_tokens_per_word": 2.18,
+        "p95_tokens_per_word": 3.333,
+        "mean_tokens_per_utterance": 9.9,
+        "p95_tokens_per_utterance": 17,
+        "vocab_size": 250002
+      }
+    }
+  }
+}
