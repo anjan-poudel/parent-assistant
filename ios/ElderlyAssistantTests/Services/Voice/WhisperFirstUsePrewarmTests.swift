@@ -49,6 +49,9 @@ final class WhisperFirstUsePrewarmTests: XCTestCase {
             observabilityBus: NullObservabilityBus())
         // Bench hook: makes `isAvailable` true without a real artifact.
         recognizer.modelFolderURL = URL(fileURLWithPath: "/tmp/bench-model")
+        // The prewarm skips the simulator by doctrine — force the DEVICE
+        // path so the seam is exercisable in the test environment.
+        recognizer.firstUsePrewarmSimulatorOverride = false
         var prewarmCount = 0
         recognizer.firstUsePrewarmOverride = { prewarmCount += 1 }
 
@@ -69,6 +72,8 @@ final class WhisperFirstUsePrewarmTests: XCTestCase {
         let bus = RecordingObservabilityBus()
         let recognizer = WhisperKitSpeechRecognizer(observabilityBus: bus)
         recognizer.modelFolderURL = URL(fileURLWithPath: "/tmp/bench-model")
+        // Force the device path — the simulator skip is doctrine.
+        recognizer.firstUsePrewarmSimulatorOverride = false
 
         let done = expectation(description: "listening session ends")
         recognizer.startListening(timeout: 30) { result in

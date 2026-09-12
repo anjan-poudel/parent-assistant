@@ -62,6 +62,11 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     /// background prewarm at listening start (the policy decision is
     /// real; only the load is replaced). Bench/tests only.
     var firstUsePrewarmOverride: (() -> Void)?
+    /// [LAT-EVIDENCE] Bench/test override for the simulator gate: the
+    /// prewarm skips the simulator by doctrine (the CPU-only prepare
+    /// never helps a sim conversation) — tests force the DEVICE path
+    /// with `false` so the seam is exercisable on the simulator.
+    var firstUsePrewarmSimulatorOverride: Bool?
 
     #if canImport(WhisperKit)
     /// [LAT-EVIDENCE] Dedupe for concurrent loads: the non-gating
@@ -154,9 +159,10 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         // Non-gating: the transcribe never waits; loadKit joins the
         // in-flight load when the prepare is still running.
         #if canImport(WhisperKit)
-        let isSimulator = WhisperKit.isRunningOnSimulator
+        let isSimulator = firstUsePrewarmSimulatorOverride
+            ?? WhisperKit.isRunningOnSimulator
         #else
-        let isSimulator = true
+        let isSimulator = firstUsePrewarmSimulatorOverride ?? true
         #endif
         if WhisperFirstUsePrewarmPolicy.shouldPrewarm(
             isModelLoaded: isModelLoaded,

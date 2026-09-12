@@ -213,7 +213,7 @@ final class IntentRouter: CommandInterpreter {
                         .lastInferenceFailureReason != nil {
                         // The legacy ladder escalates any nil, but a
                         // FAILURE escalation is logged honestly.
-                        self.emitInterpreterSelected(.cloudAfterLocalFailure)
+                        self.emitLocalFailedFallback()
                     }
                     self.escalateToCloud(transcript: transcript, context: context,
                                          completion: completion)
@@ -229,7 +229,7 @@ final class IntentRouter: CommandInterpreter {
                     // when a key + budget allow, the cloud answers with
                     // the honest reason event instead of a bare
                     // apology.
-                    self.emitInterpreterSelected(.cloudAfterLocalFailure)
+                    self.emitLocalFailedFallback()
                     self.escalateToCloud(transcript: transcript, context: context,
                                          completion: completion)
                 } else {
@@ -378,6 +378,26 @@ final class IntentRouter: CommandInterpreter {
             metadata: [
                 "interpreter": selection.interpreterName,
                 "reason": selection.reason.rawValue
+            ]
+        ))
+    }
+
+    /// [LAT-EVIDENCE] The honest reason event for a failure-driven
+    /// escalation: the local brain FAILED (timeout / truncated output
+    /// after its retry) and the cloud answers this turn —
+    /// `interpreter_selected` with interpreter "gemini" and reason
+    /// `local_failed_fallback` (the same wire shape as the selector's
+    /// own events, so a dashboard reads them uniformly).
+    private func emitLocalFailedFallback() {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "intent_router",
+            eventType: "interpreter_selected",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: [
+                "interpreter": "gemini",
+                "reason": InterpreterSelectionReason.localFailedFallback.rawValue
             ]
         ))
     }
