@@ -3,10 +3,13 @@
 Trains a small multilingual base (Gemma 3 1B / Qwen 3 1.7B) on
 data/train.jsonl (+ valid.jsonl) produced by build_dataset.py.
 
-Training text = seeds/prompt_template.txt with {transcript} filled,
-followed by the row's intent/v2 JSON and the base model's end-of-turn
-token — the SAME prompt the app sends (IntentPrompt.build), so the
-fine-tune teaches the distribution the app actually produces at
+Training text = seeds/prompt_template.txt with all three placeholders
+filled ({language_hint}, {medications}, {transcript} — see
+intent_prompt.render_prompt), followed by the row's intent/v2 JSON in
+the app's canonical key names (`intent`/`response`; the pre-2026-09-12
+`action`/`reply` wire shape is not taught) and the base model's
+end-of-turn token — the SAME prompt the app sends (IntentPrompt.build),
+so the fine-tune teaches the distribution the app actually produces at
 inference time (training/inference prompt identity is a hard
 requirement, spec README §Training). The per-family end-of-turn token
 is appended in to_text — bake-off round 1 (2026-09-07) failed the §10
@@ -40,6 +43,7 @@ import os
 from pathlib import Path
 
 from config import load_config
+from intent_prompt import render_prompt
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -67,8 +71,17 @@ EOT_TOKENS = {
     "qwen4b": "<|im_end|>",
 }
 
-LABEL_FIELDS = ["action", "entryId", "contact", "time", "medication", "message",
-                "callType", "requestedApp", "topic", "steps", "confidence", "reply"]
+# Schema-key reconciliation (2026-09-12): the app's canonical wire shape is
+# `intent`/`response` (IntentPrompt.swift's structured-response contract —
+# LlamaCommandInterpreter.parse maps them onto the model and still ACCEPTS
+# the legacy action/reply shape, but the fine-tune must emit the canonical
+# names). Key ORDER is unchanged from the previous iteration (the renamed
+# fields keep their old positions: action→intent, reply→response) so a
+# bake-off delta is attributable to the slim template + schema names, not a
+# format reshuffle; entities stay ahead of the long spoken `response` field
+# so a degenerate reply can never truncate the slot fields.
+LABEL_FIELDS = ["intent", "entryId", "contact", "time", "medication", "message",
+                "callType", "requestedApp", "topic", "steps", "confidence", "response"]
 
 
 def load_rows(path: Path) -> list[dict]:
@@ -78,8 +91,9 @@ def load_rows(path: Path) -> list[dict]:
 
 
 def to_text(row: dict, template: str, terminator: str = "") -> str:
-    """Training text: raw prompt template + JSON label + the base model's
-    end-of-turn token.
+    """Training text: raw prompt template (all three placeholders filled —
+    {language_hint}, {medications}, {transcript}) + JSON label + the base
+    model's end-of-turn token.
 
     Bake-off round 1 (2026-09-07, §10 eval) proved the no-terminator
     format is fatal: with no end-of-generation token the models never
@@ -90,7 +104,7 @@ def to_text(row: dict, template: str, terminator: str = "") -> str:
     loss teaches the model to stop after the closing brace.
     """
     label = {f: row[f] for f in LABEL_FIELDS}
-    return (template.replace("{transcript}", row["utterance"]) + "\n"
+    return (render_prompt(template, row["utterance"]) + "\n"
             + json.dumps(label, ensure_ascii=False) + terminator)
 
 

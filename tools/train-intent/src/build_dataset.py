@@ -74,14 +74,17 @@ from pathlib import Path
 
 from config import load_config
 
+# Canonical app wire shape (2026-09-12 reconciliation): `intent`/`response`
+# (IntentPrompt.swift's structured-response contract), not the legacy
+# action/reply names the pre-reconciliation rows carried.
 SCHEMA_FIELDS = {
-    "action": str, "entryId": (str, type(None)), "contact": (str, type(None)),
+    "intent": str, "entryId": (str, type(None)), "contact": (str, type(None)),
     "time": (str, type(None)), "medication": (str, type(None)),
     "message": (str, type(None)), "callType": (str, type(None)),
     "requestedApp": (str, type(None)), "topic": (str, type(None)),
-    "steps": (list, type(None)), "confidence": (int, float), "reply": str,
+    "steps": (list, type(None)), "confidence": (int, float), "response": str,
 }
-VALID_ACTIONS = {"ack_med", "call", "emergency", "set_reminder", "health_query",
+VALID_INTENTS = {"ack_med", "call", "emergency", "set_reminder", "health_query",
                  "music", "send_message", "guide", "create_calendar_event",
                  "suggest_video", "query", "none"}
 
@@ -120,6 +123,18 @@ def lossless_key(text: str) -> str:
     return " ".join(stripped.split())
 
 
+# Schema-key reconciliation (2026-09-12): the label keys were renamed
+# action→intent / reply→response with row CONTENT unchanged. draw_key
+# hashes the full row JSON, so without canonicalization the rename flips
+# every row's key and the anchored draw re-selects the mixture wholesale
+# (measured on the first post-rename rebuild: 2061 of 2686 rows swapped —
+# exactly the old-for-old churn the anchored draw exists to prevent, and
+# it would have made the iteration's bake-off delta uninterpretable).
+# Hashing the LEGACY-keyed form of the row keeps every pre/post-rename row
+# on the same key; a genuine label/slot edit still changes it.
+LEGACY_LABEL_KEYS = {"intent": "action", "response": "reply"}
+
+
 def draw_key(row: dict, seed, namespace: str) -> bytes:
     """Content-addressed selection key (iteration-4 anchored draw).
 
@@ -130,16 +145,18 @@ def draw_key(row: dict, seed, namespace: str) -> bytes:
         keeps its key forever and can only leave a take by being pushed
         past the boundary by genuinely new rows whose keys sort in;
       * no shared RNG stream, so no draw's size can shift another draw.
-    Keys are 64-bit blake2b digests of the full row JSON, so two rows
-    that differ in ANY field (label, slots, source, register) draw
-    independently."""
-    content = json.dumps(row, sort_keys=True, ensure_ascii=False)
+    Keys are 64-bit blake2b digests of the full row JSON in its
+    legacy-canonical key form (see LEGACY_LABEL_KEYS), so two rows that
+    differ in ANY content field (label value, slots, source, register)
+    draw independently while a pure schema-key rename does not re-draw."""
+    canonical = {LEGACY_LABEL_KEYS.get(k, k): v for k, v in row.items()}
+    content = json.dumps(canonical, sort_keys=True, ensure_ascii=False)
     return hashlib.blake2b(f"{seed}|{namespace}|{content}".encode("utf-8"),
                            digest_size=8).digest()
 
 
 def valid_row(row: dict) -> bool:
-    if row.get("action") not in VALID_ACTIONS:
+    if row.get("intent") not in VALID_INTENTS:
         return False
     if not row.get("utterance"):
         return False
@@ -209,7 +226,7 @@ def main() -> None:
 
     # Per-bucket label-conflict guard + dedupe (lossless key, anchored
     # winner). CONFLICT GUARD FIRST: when several copies of the SAME
-    # utterance disagree on the action, every copy is dropped — teaching
+    # utterance disagree on the intent, every copy is dropped — teaching
     # one arbitrary label for a text that occurs with two is noise
     # (measured: 703 noised keys carry contradictory labels; the two
     # whisper variants of different parents collapse onto one
@@ -220,10 +237,10 @@ def main() -> None:
     kept: dict[str, list[dict]] = {}
     for bucket in BUCKET_NAMES:
         rows = list(buckets[bucket])
-        by_action: dict[str, set] = {}
+        by_intent: dict[str, set] = {}
         for row in rows:
-            by_action.setdefault(lossless_key(row["utterance"]), set()).add(row["action"])
-        conflict_keys = {k for k, acts in by_action.items() if len(acts) > 1}
+            by_intent.setdefault(lossless_key(row["utterance"]), set()).add(row["intent"])
+        conflict_keys = {k for k, acts in by_intent.items() if len(acts) > 1}
         rows = [r for r in rows if lossless_key(r["utterance"]) not in conflict_keys]
         keyed = sorted((draw_key(r, seed, f"dedupe-{bucket}"), r) for r in rows)
         best: dict[str, dict] = {}

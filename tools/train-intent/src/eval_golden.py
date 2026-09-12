@@ -30,13 +30,17 @@ appended, so the models never learned a terminator. Eval therefore:
     preamble were being cut before their closing brace);
   - applies a per-family repeat penalty (qwen 1.05: temperature-0 greedy
     repetition attractors — qwen gc-emergency-003 emitted the correct
-    {"action":"emergency"...} but repeated its reply phrase forever and
+    emergency JSON but repeated its response phrase forever and
     never closed the brace at penalty 1.0; gemma stays 1.0 — higher
     penalties perturb fine-grained slots at the margin);
   - n_ctx 4096 (longest prompt is ~1224 tokens; 956 cap needs headroom);
   - parses the FIRST complete JSON object anywhere in the output
     (skipping template-echo preamble / stacked objects / trailing prose),
     instead of slicing first-brace-to-last-brace.
+  - reads the app's canonical `intent` key (schema reconciliation
+    2026-09-12: the train side emits intent/response, not the legacy
+    action/reply) and renders the prompt through intent_prompt.render_prompt
+    so all three template placeholders are filled exactly as training does.
 """
 from __future__ import annotations
 
@@ -49,6 +53,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from config import load_config
+from intent_prompt import render_prompt
 
 CLOSED_INTENTS = {"ack_med", "call", "emergency", "set_reminder",
                   "health_query", "music", "send_message", "guide",
@@ -63,8 +68,8 @@ def _repeat_penalty(model_path: str) -> float:
     """Per-family repeat penalty.
 
     At penalty 1.0 the temperature-0 qwen leg falls into a repetition
-    attractor on gc-emergency-003 (the correct {"action":"emergency"…}
-    JSON never reaches its closing brace because the reply phrase loops
+    attractor on gc-emergency-003 (the correct {"intent":"emergency"…}
+    JSON never reaches its closing brace because the response phrase loops
     forever); 1.05 breaks the loop and the JSON completes. Gemma shows no
     such loop, and probing showed penalties perturb fine-grained slots at
     the margin (gemma contact माइया → माइयालाई at 1.15; qwen's
@@ -94,7 +99,7 @@ def _stop_strings(model_path: str) -> list[str]:
 
 
 def predict_echo(utterance: str, cfg: dict) -> dict:
-    return {"action": "none", "confidence": 0.0}
+    return {"intent": "none", "confidence": 0.0}
 
 
 def _first_complete_json(text: str) -> dict | None:
@@ -104,15 +109,21 @@ def _first_complete_json(text: str) -> dict | None:
     The output is expected to START with the model's JSON object, but some
     rows begin by echoing/continuing the prompt template first; every brace
     candidate is tried until one parses as a complete object with an
-    "action" field. Returns None when no complete object exists (the model
-    refused / echoed forever / degenerated without emitting JSON)."""
+    "intent" field. Returns None when no complete object exists (the model
+    refused / echoed forever / degenerated without emitting JSON).
+
+    STRICT on the canonical key (schema reconciliation 2026-09-12): the app
+    parser also accepts the legacy `action`/`reply` wire shape, but the
+    gate must prove the fine-tune EMITS the app's canonical `intent`, not
+    that the harness can paper over its absence — a legacy-shaped
+    completion counts as no-JSON here."""
     decoder = json.JSONDecoder()
     for m in re.finditer(r"\{", text):
         try:
             obj, _ = decoder.raw_decode(text, m.start())
         except json.JSONDecodeError:
             continue
-        if isinstance(obj, dict) and isinstance(obj.get("action"), str):
+        if isinstance(obj, dict) and isinstance(obj.get("intent"), str):
             return obj
     return None
 
@@ -141,7 +152,7 @@ def predict_gguf(utterance: str, cfg: dict, model_path: str) -> dict:
         # utterance + 192 max_tokens reached 1214 tokens (ValueError).
         # 4096 leaves room for the 1224-token longest prompt + cap 956.
         predict_gguf._template = template
-    prompt = predict_gguf._template.replace("{transcript}", utterance)
+    prompt = render_prompt(predict_gguf._template, utterance)
     out = predict_gguf._llm(prompt, max_tokens=GGUF_MAX_TOKENS,
                             temperature=GGUF_TEMPERATURE,
                             repeat_penalty=_repeat_penalty(model_path),
@@ -150,10 +161,10 @@ def predict_gguf(utterance: str, cfg: dict, model_path: str) -> dict:
     obj = _first_complete_json(text)
     if obj is None:
         # No complete JSON object — model refused/echoed/degenerated. Count
-        # as an abstention (action none) but surface the raw output.
+        # as an abstention (intent none) but surface the raw output.
         print(f"[gguf] NO-JSON output for {utterance[:60]!r}: {text[:300]!r}",
               file=sys.stderr)
-        return {"action": "none", "confidence": 0.0}
+        return {"intent": "none", "confidence": 0.0}
     return obj
 
 
@@ -166,7 +177,7 @@ def predict_gemini(utterance: str, cfg: dict) -> dict:
     template = (Path(__file__).parent.parent / "seeds" / "prompt_template.txt").read_text(encoding="utf-8")
     resp = predict_gemini._client.models.generate_content(
         model=str(cfg["gemini.model"]),
-        contents=template.replace("{transcript}", utterance),
+        contents=render_prompt(template, utterance),
         config=types.GenerateContentConfig(response_mime_type="application/json"),
     )
     return json.loads(resp.text)
@@ -215,7 +226,7 @@ def main() -> None:
     calibration: dict[int, list[int]] = defaultdict(list)
 
     for row, pred in zip(corpus, preds):
-        gold_intent, pred_intent = row["intent"], pred.get("action", "none")
+        gold_intent, pred_intent = row["intent"], pred.get("intent", "none")
         per_intent_total[gold_intent] += 1
         if pred_intent == gold_intent:
             per_intent_correct[gold_intent] += 1

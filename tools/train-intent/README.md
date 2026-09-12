@@ -2,8 +2,9 @@
 
 Trains the **small (~1B) multilingual intent model** for the intent engine
 (spec: `docs/superpowers/specs/2026-09-05-intent-engine-finetuned-llm-design.md`
-§8–§10). The model maps STT transcripts → `intent/v2` JSON (action + slots +
-calibrated confidence) and runs on-device as `IntentRouter`'s local brain.
+§8–§10). The model maps STT transcripts → `intent/v2` JSON (intent + response
++ slots + calibrated confidence — the app's canonical wire names) and runs
+on-device as `IntentRouter`'s local brain.
 
 Teacher = **Gemini 2.5 Flash** (the same behavior the cloud path already
 has — the local model distills the interpreter we trust). Base candidates:
@@ -68,7 +69,11 @@ lr 1.5e-4, 3 epochs, bf16, all-linear targets, seq len 1024.
 Chat format: the training prompt mirrors `IntentPrompt.build` (see
 `seeds/prompt_template.txt`) — **training and inference must use the
 identical prompt**, or the fine-tune teaches a distribution the app never
-sends.
+sends. The template's three placeholders (`{language_hint}`,
+`{medications}`, `{transcript}`) are filled by `src/intent_prompt.py`
+(`render_prompt`), which training and BOTH eval backends share; labels use
+the app's canonical `intent`/`response` keys (not the legacy
+`action`/`reply` names).
 
 ## Smoke test
 
