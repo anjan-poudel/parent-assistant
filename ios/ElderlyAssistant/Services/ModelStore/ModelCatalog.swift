@@ -614,7 +614,11 @@ enum ModelCatalog {
             downloadURL: URL(string: "http://192.168.1.117:8765/intent-ne-qwen3-4b-nepali-q4_k_m.gguf")!,
             sizeBytes: 2_529_263_424,
             sha256: "eb5ce8059636e36123a86f8fc65b952122e91da573adc54eb18829bd515d6305",
-            minDeviceRAMBytes: 6_000_000_000,
+            // 4B Q4_K_M: 2.5 GB file, ~3.5-4 GB live. os_proc_available_memory
+            // is the CURRENT free budget, not total RAM — a 6 GB floor
+            // reads ~3-4 GB available mid-session and blocks the download.
+            // 4 GB floor = testable on 6 GB devices; tight but workable.
+            minDeviceRAMBytes: 4_000_000_000,
             dependsOn: nil
         ),
         ModelCatalogEntry(
