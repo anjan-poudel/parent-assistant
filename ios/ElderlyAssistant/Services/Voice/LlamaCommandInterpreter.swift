@@ -40,6 +40,19 @@ protocol CommandInterpreter: AnyObject {
                    completion: @escaping (InterpretedCommand?) -> Void)
 }
 
+/// [LAT-EVIDENCE] (2026-09-12) A local interpreter that distinguishes a
+/// FAILED inference (timeout / truncated output — both retried once by
+/// the interpreter itself) from an ABSTENTION. `IntentRouter` consults
+/// it after a nil local result: a failure escalates to the cloud with
+/// the honest `local_failed_fallback` selection event instead of a bare
+/// apology, an abstention keeps today's semantics exactly.
+protocol InterpreterFailureReporting: AnyObject {
+    /// The honest reason the LAST attempt failed — "inference_timeout"
+    /// or "truncated_json" — cleared when the next interpret starts.
+    /// Event metadata, never user copy.
+    var lastInferenceFailureReason: String? { get }
+}
+
 /// Runtime context handed to the LLM as part of the prompt so it can
 /// answer questions like "what's my medication schedule".
 struct InterpreterContext {
@@ -276,7 +289,8 @@ final class NullCommandInterpreter: CommandInterpreter {
 ///
 /// The `#if canImport(LLM)` guard keeps the file compilable in Phase 1
 /// without either being present.
-final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming {
+final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
+    InterpreterFailureReporting {
 
     struct Config {
         let confidenceThreshold: Double
@@ -297,6 +311,11 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming {
     private let modelStore: ModelStore
     private let observabilityBus: ObservabilityBus
     private let config: Config
+    /// [LAT-EVIDENCE] The honest reason the LAST inference failed
+    /// ("inference_timeout" / "inference_empty_output") — the router
+    /// consults it after a nil result to escalate to the cloud instead
+    /// of a bare apology. Cleared at the start of each interpret.
+    private(set) var lastInferenceFailureReason: String?
     /// Optional — retained for wiring compatibility (`AppCoordinator`
     /// passes the shared registry). Plugin capability fragments are NOT
     /// composed into the on-device prompt: this runtime's context is
@@ -413,6 +432,9 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming {
     func interpret(transcript: String,
                    context: InterpreterContext,
                    completion: @escaping (InterpretedCommand?) -> Void) {
+        // [LAT-EVIDENCE] A fresh attempt starts clean — the failure
+        // reason belongs to the LAST attempt only.
+        lastInferenceFailureReason = nil
         guard isAvailable else {
             DispatchQueue.main.async { completion(nil) }
             return
@@ -735,9 +757,13 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming {
                     // Report it honestly as a failure so an overflow can
                     // never masquerade as a successful inference again.
                     emit("inference_empty_output", outcome: "failure")
+                    // [LAT-EVIDENCE] A runtime failure is a FAILURE, not
+                    // an abstention — the router escalates to the cloud.
+                    lastInferenceFailureReason = "inference_empty_output"
                     completion(nil)
                 case .timedOut:
                     emit("inference_timeout", outcome: "failure")
+                    lastInferenceFailureReason = "inference_timeout"
                     completion(nil)
                 }
             }

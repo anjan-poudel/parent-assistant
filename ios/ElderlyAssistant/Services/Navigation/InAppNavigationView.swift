@@ -14,7 +14,7 @@ import MapKit
 /// Lifecycle: the session pipeline (locate → geocode → calculate) runs
 /// when the sheet appears (the coordinator calls `session.start()` when it
 /// presents); `.ready` auto-speaks the steps once; Repeat speaks them
-/// again, Stop cuts speech, and Close (or a swipe-dismiss) ends the
+/// again, Stop cuts speech, and Back (or a swipe-dismiss) ends the
 /// session via `stop()`.
 struct InAppNavigationView: View {
     @ObservedObject var session: InAppNavigationSession
@@ -59,7 +59,19 @@ struct InAppNavigationView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(alignment: .center) {
+        HStack(alignment: .center, spacing: 12) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.str("common.back", locale: locale))
+
             VStack(alignment: .leading, spacing: 2) {
                 Text("directions.inApp.title")
                     .font(DesignTokens.greetingFont(size: 24))
@@ -70,17 +82,6 @@ struct InAppNavigationView: View {
                     .lineLimit(1)
             }
             Spacer()
-            Button {
-                dismiss()
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 30))
-                    .foregroundColor(DesignTokens.textSecondary)
-                    .frame(minWidth: DesignTokens.minTapTargetSize,
-                           minHeight: DesignTokens.minTapTargetSize)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(L10n.str("directions.inApp.close", locale: locale))
         }
         .padding(.horizontal)
         .padding(.vertical, 6)

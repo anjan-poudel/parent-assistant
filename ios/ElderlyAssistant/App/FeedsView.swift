@@ -539,6 +539,19 @@ struct FeedMediaPlayerSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(DesignTokens.textPrimary)
+                        .frame(minWidth: DesignTokens.minTapTargetSize,
+                               minHeight: DesignTokens.minTapTargetSize)
+                        .background(DesignTokens.card)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("feeds.close"))
                 Text("feeds.playingTitle")
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                     .foregroundStyle(DesignTokens.textSecondary)
@@ -547,17 +560,6 @@ struct FeedMediaPlayerSheet: View {
                     .foregroundStyle(DesignTokens.textPrimary)
                     .lineLimit(2)
                 Spacer(minLength: 8)
-                Button {
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 28))
-                        .foregroundStyle(DesignTokens.textSecondary)
-                        .accessibilityLabel(Text("feeds.close"))
-                }
-                .buttonStyle(.plain)
-                .frame(minWidth: DesignTokens.minTapTargetSize,
-                       minHeight: DesignTokens.minTapTargetSize)
             }
             .padding(16)
 
@@ -580,7 +582,7 @@ struct FeedMediaPlayerSheet: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(theme: coordinator.appTheme).ignoresSafeArea())
+        .background(VoiceBridgeBackground(theme: coordinator.appTheme))
         .onAppear {
             guard let urlString = item.mediaURL, let url = URL(string: urlString) else {
                 return

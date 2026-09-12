@@ -54,6 +54,11 @@ enum InterpreterSelectionReason: String, Equatable {
     /// Cloud was selected but failed mid-request (network, timeout,
     /// parse, below the rephrase floor) — fell back to local.
     case cloudFailedFallback = "cloud_failed_fallback"
+    /// [LAT-EVIDENCE] (2026-09-12) The local brain FAILED (inference
+    /// timeout / truncated output, both after its one retry) and the
+    /// cloud answers this turn — the honest reason a failure-driven
+    /// escalation happened instead of a bare apology.
+    case localFailedFallback = "local_failed_fallback"
 }
 
 /// The pure selection rule. Cloud wins exactly when a key is configured

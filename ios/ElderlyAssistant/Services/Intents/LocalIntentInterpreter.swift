@@ -21,15 +21,32 @@ import LLM
 /// Conforms to `CommandInterpreter` exactly like the LLaMA interpreter it
 /// replaces as local brain — the router and band policy don't know or
 /// care which model answered.
-final class LocalIntentInterpreter: CommandInterpreter {
+///
+/// [LAT-EVIDENCE] (2026-09-12) Device log: `inference_timeout
+/// outcome=failure` after ~3 s + `JSON Decoding failed ... Unexpected
+/// end of file` — the 3 s timeout contradicted the coupled-numbers
+/// family (llama ≤ 10 s) and clipped real generations; the truncated
+/// decode produced a bare apology. The fix:
+///   - the timeout aligns to 10 s (the llama family bound),
+///   - a timeout OR a truncated/malformed JSON output retries ONCE (a
+///     truncated decode is often transient),
+///   - after a still-failing attempt the interpreter reports the honest
+///     failure reason through `InterpreterFailureReporting`, and
+///     `IntentRouter` escalates to the cloud when one is configured
+///     (`local_failed_fallback`) — never a bare apology.
+final class LocalIntentInterpreter: CommandInterpreter, InterpreterFailureReporting {
 
     struct Config {
         let confidenceThreshold: Double
         let maxTokens: Int
+        /// [LAT-EVIDENCE] 10 s — the coupled-numbers llama family bound
+        /// (was 3 s, which timed out real generations; the retry runs
+        /// under the SAME bound, so the local leg is 2 × 10 s worst
+        /// case, still under the 60 s voice watchdog).
         let timeoutSeconds: Double
         static let `default` = Config(confidenceThreshold: 0.4,
                                       maxTokens: 192,
-                                      timeoutSeconds: 3)
+                                      timeoutSeconds: 10)
     }
 
     private let modelStore: ModelStore
@@ -44,6 +61,11 @@ final class LocalIntentInterpreter: CommandInterpreter {
 
     /// Test seam: replaces the llama.cpp call entirely.
     var generateOverride: ((String) async throws -> String)?
+
+    /// [LAT-EVIDENCE] The honest reason the LAST attempt failed —
+    /// "inference_timeout" or "truncated_json" — cleared at the start of
+    /// each interpret. The router reads it after a nil result.
+    private(set) var lastInferenceFailureReason: String?
 
     var isAvailable: Bool {
         if generateOverride != nil { return true }
@@ -70,6 +92,8 @@ final class LocalIntentInterpreter: CommandInterpreter {
     func interpret(transcript: String,
                    context: InterpreterContext,
                    completion: @escaping (InterpretedCommand?) -> Void) {
+        // [LAT-EVIDENCE] A fresh attempt starts clean.
+        lastInferenceFailureReason = nil
         guard isAvailable else {
             DispatchQueue.main.async { completion(nil) }
             return
@@ -81,28 +105,41 @@ final class LocalIntentInterpreter: CommandInterpreter {
         }
         let prompt = IntentPrompt.build(transcript: clean, context: context)
         inferenceQueue.async { [weak self] in
-            self?.runInference(prompt: prompt) { json in
-                let parsed = LlamaCommandInterpreter.parse(json: json)
-                if let p = parsed, p.confidence < (self?.config.confidenceThreshold ?? 0.4) {
-                    DispatchQueue.main.async { completion(nil) }
-                } else {
-                    DispatchQueue.main.async { completion(parsed) }
-                }
+            guard let self else { return }
+            self.runAttempt(prompt: prompt, attempt: 0) { [weak self] result in
+                guard let self else { return }
+                self.settleAttempt(prompt: prompt, attempt: 0, result: result,
+                                   completion: completion)
             }
         }
     }
 
-    // MARK: - Inference (guarded, with timeout)
+    // MARK: - Attempts + retry ([LAT-EVIDENCE])
 
-    private func runInference(prompt: String,
-                              completion: @escaping (String?) -> Void) {
+    /// One inference attempt's terminal state.
+    private enum AttemptResult {
+        /// The generation produced raw text (validity is decided at
+        /// parse time).
+        case rawOutput(String)
+        /// The generation threw (the real path's truncated-JSON decode
+        /// class) — or the seam threw.
+        case generationFailed
+        /// The attempt outlived the 10 s bound.
+        case timedOut
+    }
+
+    /// Runs ONE generation attempt (seam or real llama.cpp) and reports
+    /// its terminal state.
+    private func runAttempt(prompt: String,
+                            attempt: Int,
+                            completion: @escaping (AttemptResult) -> Void) {
         if let generateOverride {
             Task {
                 do {
                     let out = try await generateOverride(prompt)
-                    completion(out)
+                    completion(.rawOutput(out))
                 } catch {
-                    completion(nil)
+                    completion(.generationFailed)
                 }
             }
             return
@@ -110,7 +147,7 @@ final class LocalIntentInterpreter: CommandInterpreter {
         #if canImport(LLM)
         guard let modelURL = modelStore.path(for: modelId) else {
             emit("model_path_missing", outcome: "failure")
-            completion(nil)
+            completion(.generationFailed)
             return
         }
         do {
@@ -142,7 +179,7 @@ final class LocalIntentInterpreter: CommandInterpreter {
                                         repetitionLookback: OnDeviceSampling.repetitionLookback,
                                         maxTokenCount: 1024) else {
                     emit("model_load_failed", outcome: "failure")
-                    completion(nil)
+                    completion(.generationFailed)
                     return
                 }
                 llm = created
@@ -151,7 +188,7 @@ final class LocalIntentInterpreter: CommandInterpreter {
             }
 
             Task {
-                await withTaskGroup(of: String??.self) { group in
+                let result = await withTaskGroup(of: AttemptResult.self) { group in
                     group.addTask {
                         do {
                             // Grammar-constrained decoding (spec §8 /
@@ -160,32 +197,99 @@ final class LocalIntentInterpreter: CommandInterpreter {
                             // — malformed JSON is structurally impossible.
                             let output = try await llm.respond(
                                 to: prompt, as: StructuredIntent.self)
-                            return output.rawOutput as String??
+                            return .rawOutput(output.rawOutput ?? "")
                         } catch {
-                            return nil
+                            // [LAT-EVIDENCE] The truncated-decode class:
+                            // `JSON Decoding failed ... Unexpected end of
+                            // file` — a failed generation, retried once.
+                            return .generationFailed
                         }
                     }
                     group.addTask {
                         try? await Task.sleep(nanoseconds: UInt64(self.config.timeoutSeconds * 1_000_000_000))
-                        return nil
+                        return .timedOut
                     }
-                    let result = await group.next() ?? nil
+                    let first = await group.next() ?? .timedOut
                     group.cancelAll()
-                    if let output = (result ?? nil) as? String?, let output {
-                        self.emit("inference_done", outcome: "success")
-                        completion(output)
-                    } else {
-                        self.emit("inference_timeout", outcome: "failure")
-                        completion(nil)
-                    }
+                    return first
                 }
+                completion(result)
             }
         }
         #else
         _ = prompt
         emit("inference_unavailable", outcome: "info")
-        completion(nil)
+        completion(.generationFailed)
         #endif
+    }
+
+    /// Decides what one attempt's terminal state means: parse + band, or
+    /// ONE retry on the failure classes, or the honest final failure.
+    private func settleAttempt(prompt: String,
+                               attempt: Int,
+                               result: AttemptResult,
+                               completion: @escaping (InterpretedCommand?) -> Void) {
+        switch result {
+        case .rawOutput(let json):
+            if let parsed = LlamaCommandInterpreter.parse(json: json) {
+                if parsed.confidence < config.confidenceThreshold {
+                    // Honest abstention — no retry, no failure.
+                    DispatchQueue.main.async { completion(nil) }
+                } else {
+                    emit("inference_done", outcome: "success")
+                    DispatchQueue.main.async { completion(parsed) }
+                }
+            } else if Self.isTruncatedJSON(json) {
+                // [LAT-EVIDENCE] A brace-led partial emission — the
+                // device-log truncated class. Retry once; a second
+                // truncation is an honest failure the router escalates.
+                retryOrFail(prompt: prompt, attempt: attempt,
+                            reason: "truncated_json",
+                            completion: completion)
+            } else {
+                // Complete garbage — an abstention, exactly as before.
+                DispatchQueue.main.async { completion(nil) }
+            }
+        case .generationFailed:
+            retryOrFail(prompt: prompt, attempt: attempt,
+                        reason: "truncated_json",
+                        completion: completion)
+        case .timedOut:
+            retryOrFail(prompt: prompt, attempt: attempt,
+                        reason: "inference_timeout",
+                        completion: completion)
+        }
+    }
+
+    private func retryOrFail(prompt: String,
+                             attempt: Int,
+                             reason: String,
+                             completion: @escaping (InterpretedCommand?) -> Void) {
+        guard attempt == 0 else {
+            emit(reason == "inference_timeout" ? "inference_timeout" : "inference_truncated",
+                 outcome: "failure",
+                 metadata: ["reason": reason])
+            lastInferenceFailureReason = reason
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
+        emit("inference_retry", outcome: "info", metadata: ["reason": reason])
+        runAttempt(prompt: prompt, attempt: 1) { [weak self] result in
+            guard let self else { return }
+            self.settleAttempt(prompt: prompt, attempt: 1, result: result,
+                               completion: completion)
+        }
+    }
+
+    /// [LAT-EVIDENCE] Truncation heuristic: the output began as a JSON
+    /// value but never completed (the device-log `Unexpected end of
+    /// file` class) — a partial emission is a failure, not an
+    /// abstention. Complete garbage (no leading brace/bracket) keeps the
+    /// pre-existing abstention semantics.
+    static func isTruncatedJSON(_ raw: String) -> Bool {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return trimmed.hasPrefix("{") || trimmed.hasPrefix("[")
     }
 
     // MARK: - JSON Schema (grammar-constrained decoding)
@@ -226,14 +330,16 @@ final class LocalIntentInterpreter: CommandInterpreter {
 
     // MARK: - Observability (no transcript/output content — C9)
 
-    private func emit(_ eventType: String, outcome: String) {
+    private func emit(_ eventType: String,
+                      outcome: String,
+                      metadata: [String: String] = [:]) {
         observabilityBus.emit(ObservabilityEvent(
             component: "local_intent_interpreter",
             eventType: eventType,
             durationMs: nil,
             outcome: outcome,
             errorCode: nil,
-            metadata: [:]
+            metadata: metadata
         ))
     }
 }

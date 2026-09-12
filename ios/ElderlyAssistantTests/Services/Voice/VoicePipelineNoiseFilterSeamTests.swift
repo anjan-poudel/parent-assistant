@@ -32,6 +32,29 @@ final class VoicePipelineNoiseFilterSeamTests: XCTestCase {
         func setVoiceProcessingEnabled(_ enabled: Bool) throws {}
     }
 
+    /// Holds permission callbacks so two overlapping start attempts can be
+    /// completed out of order without touching real audio hardware.
+    private final class DeferredPermissionSession: AudioSessionControlling {
+        var isInputAvailable = false
+        var notificationSource: AnyObject? { nil }
+        private var callbacks: [(Bool) -> Void] = []
+
+        func requestRecordPermission(_ callback: @escaping (Bool) -> Void) {
+            callbacks.append(callback)
+        }
+        func setCategory(_ category: AVAudioSession.Category,
+                         mode: AVAudioSession.Mode,
+                         options: AVAudioSession.CategoryOptions) throws {}
+        func setActive(_ active: Bool,
+                       options: AVAudioSession.SetActiveOptions) throws {}
+        func setMode(_ mode: AVAudioSession.Mode) throws {}
+        func setVoiceProcessingEnabled(_ enabled: Bool) throws {}
+
+        func resolve(_ index: Int, granted: Bool) {
+            callbacks[index](granted)
+        }
+    }
+
     private final class RecordingBus: ObservabilityBus {
         private(set) var events: [ObservabilityEvent] = []
         func emit(_ event: ObservabilityEvent) {
@@ -48,9 +71,11 @@ final class VoicePipelineNoiseFilterSeamTests: XCTestCase {
         private(set) var fedBuffers: [AVAudioPCMBuffer] = []
         private(set) var fedSamples: [Int16] = []
         private(set) var startCalls = 0
+        private(set) var authorizationCalls = 0
         private var completion: ((Result<String, RecognitionError>) -> Void)?
 
         func requestAuthorization(_ callback: @escaping (Bool) -> Void) {
+            authorizationCalls += 1
             callback(true)
         }
 
@@ -223,6 +248,43 @@ final class VoicePipelineNoiseFilterSeamTests: XCTestCase {
         var rng = LCG(state: seed)
         return (0..<count).map { _ in
             Int16(Float.random(in: -1...1, using: &rng) * amplitude * 32_768.0)
+        }
+    }
+
+    func testNewestStartAttemptIgnoresOlderPermissionCallback() {
+        let bus = RecordingBus()
+        let controller = DeferredPermissionSession()
+        let recognizer = FakeRecognizer()
+        let defaults = UserDefaults(suiteName: "start-generation-\(UUID().uuidString)")!
+        let session = AudioSessionManager(observabilityBus: bus,
+                                          audioSession: controller,
+                                          defaults: defaults)
+        let pipeline = VoicePipeline(
+            audioSession: session,
+            audioEngine: AVAudioEngine(),
+            wakeWordEngine: NullWakeWordEngine(),
+            speechRecognizer: recognizer,
+            router: CommandRouter(coordinator: MockVoiceCommandCoordinator(),
+                                  observabilityBus: bus),
+            observabilityBus: bus)
+
+        var firstCompletions = 0
+        var secondCompletions = 0
+        pipeline.start { _ in firstCompletions += 1 }
+        pipeline.start { _ in secondCompletions += 1 }
+
+        // Newest attempt fails normally. The older success then arrives late
+        // and must not authorize speech, install a tap, or mutate state.
+        controller.resolve(1, granted: false)
+        controller.resolve(0, granted: true)
+
+        XCTAssertEqual(secondCompletions, 1)
+        XCTAssertEqual(firstCompletions, 0)
+        XCTAssertEqual(recognizer.authorizationCalls, 0)
+        if case .error = pipeline.state {
+            // Expected: newest attempt's failure remains authoritative.
+        } else {
+            XCTFail("stale first callback changed the newest attempt's state")
         }
     }
 

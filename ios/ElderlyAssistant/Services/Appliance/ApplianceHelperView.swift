@@ -53,15 +53,17 @@ struct ApplianceHelperView: View {
                         .font(DesignTokens.greetingFont(size: 20))
                         .foregroundColor(DesignTokens.textPrimary)
                 }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundColor(DesignTokens.textSecondary)
-                            .accessibilityLabel(Text("appliance.dismiss"))
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(DesignTokens.textPrimary)
+                            .accessibilityHidden(true)
                     }
+                    .buttonStyle(.plain)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
+                    .accessibilityLabel(Text("appliance.dismiss"))
                 }
             }
         }

@@ -186,6 +186,14 @@ final class IntentRouter: CommandInterpreter {
     /// The legacy local-first ladder: the local brain (layer 4) answers
     /// when available; its abstention (or a mid-band tier-free drop, when
     /// `canEscalate`) escalates to the cloud brain (layer 5).
+    ///
+    /// [LAT-EVIDENCE] A local brain that FAILED — inference timeout or
+    /// truncated output, both after the interpreter's own retry, per
+    /// `InterpreterFailureReporting` — escalates to the cloud whenever
+    /// one is configured (the LAT-M3 selector's key + budget
+    /// readiness), even where an abstention would not: a failure is
+    /// never a bare apology while a cloud can answer. The escalation
+    /// carries the honest `local_failed_fallback` selection event.
     private func interpretLocalLadder(transcript: String,
                                       context: InterpreterContext,
                                       canEscalate: Bool,
@@ -201,6 +209,27 @@ final class IntentRouter: CommandInterpreter {
                                                                 final: !canEscalate) {
                     completion(accepted)
                 } else if canEscalate {
+                    if (local as? InterpreterFailureReporting)?
+                        .lastInferenceFailureReason != nil {
+                        // The legacy ladder escalates any nil, but a
+                        // FAILURE escalation is logged honestly.
+                        self.emitLocalFailedFallback()
+                    }
+                    self.escalateToCloud(transcript: transcript, context: context,
+                                         completion: completion)
+                } else if (local as? InterpreterFailureReporting)?
+                            .lastInferenceFailureReason != nil,
+                          self.cloudEnabled,
+                          self.cloudBrain?.isAvailable == true,
+                          self.geminiKeyConfigured?() ?? false,
+                          self.geminiCostAllows?() ?? false {
+                    // The cloud-first `.local` lane: the selector
+                    // refused the cloud for THIS turn, but a failed
+                    // local brain re-checks the same readiness inputs —
+                    // when a key + budget allow, the cloud answers with
+                    // the honest reason event instead of a bare
+                    // apology.
+                    self.emitLocalFailedFallback()
                     self.escalateToCloud(transcript: transcript, context: context,
                                          completion: completion)
                 } else {
@@ -349,6 +378,26 @@ final class IntentRouter: CommandInterpreter {
             metadata: [
                 "interpreter": selection.interpreterName,
                 "reason": selection.reason.rawValue
+            ]
+        ))
+    }
+
+    /// [LAT-EVIDENCE] The honest reason event for a failure-driven
+    /// escalation: the local brain FAILED (timeout / truncated output
+    /// after its retry) and the cloud answers this turn —
+    /// `interpreter_selected` with interpreter "gemini" and reason
+    /// `local_failed_fallback` (the same wire shape as the selector's
+    /// own events, so a dashboard reads them uniformly).
+    private func emitLocalFailedFallback() {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "intent_router",
+            eventType: "interpreter_selected",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: [
+                "interpreter": "gemini",
+                "reason": InterpreterSelectionReason.localFailedFallback.rawValue
             ]
         ))
     }

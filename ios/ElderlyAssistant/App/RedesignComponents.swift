@@ -14,6 +14,74 @@ extension Color {
     }
 }
 
+
+/// Layered VoiceBridge canvas from the supplied Home reference: warm white
+/// at the focal center, broad dusty-rose ribbons at the edges, and enough
+/// calm space behind text. Static shapes avoid motion and raster scaling.
+struct VoiceBridgeBackground: View {
+    let theme: AppTheme
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [DesignTokens.brandCanvasTop,
+                         DesignTokens.brandCanvasBottom],
+                startPoint: .top,
+                endPoint: .bottom)
+            // Preserve a trace of the selected Appearance preset without
+            // allowing a saved blue/sage theme to erase the pink identity.
+            Color(theme: theme).opacity(0.10)
+            VoiceBridgeFlowWave(baseline: 0.34, crest: 0.20)
+                .fill(LinearGradient(
+                    colors: [DesignTokens.brandBlush.opacity(0.35),
+                             DesignTokens.brandDustyRose.opacity(0.72)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing))
+                .opacity(0.52)
+            VoiceBridgeFlowWave(baseline: 0.61, crest: 0.14)
+                .fill(LinearGradient(
+                    colors: [DesignTokens.brandDeepRose.opacity(0.55),
+                             DesignTokens.brandBlush.opacity(0.18)],
+                    startPoint: .trailing,
+                    endPoint: .leading))
+                .scaleEffect(x: -1, y: 1)
+                .opacity(0.34)
+            VoiceBridgeFlowWave(baseline: 0.83, crest: 0.11)
+                .fill(DesignTokens.brandGradient)
+                .opacity(0.13)
+            RadialGradient(
+                colors: [.white.opacity(0.80), .clear],
+                center: UnitPoint(x: 0.50, y: 0.47),
+                startRadius: 0,
+                endRadius: 330)
+        }
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
+    }
+}
+
+/// Broad filled ribbon whose upper boundary crosses the screen in one soft
+/// curve. Multiple low-opacity instances create the reference's layered X.
+private struct VoiceBridgeFlowWave: Shape {
+    let baseline: CGFloat
+    let crest: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: 0, y: rect.height * baseline))
+        path.addCurve(
+            to: CGPoint(x: rect.width, y: rect.height * (baseline - 0.05)),
+            control1: CGPoint(x: rect.width * 0.22,
+                              y: rect.height * (baseline + crest)),
+            control2: CGPoint(x: rect.width * 0.72,
+                              y: rect.height * (baseline - crest)))
+        path.addLine(to: CGPoint(x: rect.width, y: rect.height))
+        path.addLine(to: CGPoint(x: 0, y: rect.height))
+        path.closeSubpath()
+        return path
+    }
+}
+
 /// Shared visual components introduced by the 2026-09-03 UI redesign
 /// (docs/superpowers/specs/2026-09-03-ui-visual-redesign-design.md).
 /// Every piece here is wired to real `AppCoordinator` state — none of it
@@ -83,8 +151,7 @@ struct FaceAvatar: View {
 
     var body: some View {
         Circle()
-            .fill(LinearGradient(colors: [DesignTokens.warmGlowStart, DesignTokens.warmGlowEnd],
-                                  startPoint: .topLeading, endPoint: .bottomTrailing))
+            .fill(DesignTokens.brandGradient)
             .frame(width: diameter, height: diameter)
             .overlay(
                 Text(initial)
@@ -414,22 +481,42 @@ struct OutcomeCardView: View {
 
     private var collapsedChip: some View {
         Button(action: onTapChip) {
-            HStack(spacing: 6) {
-                Circle().fill(DesignTokens.accent).frame(width: 6, height: 6)
-                Text(outcome.text)
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                    .lineLimit(2)
-                Image(systemName: "chevron.up")
-                    // Caption-token disclosure chevron (DESIGN-REVIEW).
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+            HStack(spacing: 14) {
+                Circle()
+                    .fill(DesignTokens.userBubble)
+                    .frame(width: 52, height: 52)
+                    .overlay(
+                        Image(systemName: outcome.icon)
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(DesignTokens.accent)
+                    )
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("home.activity.title")
+                        .font(DesignTokens.warmFont(
+                            size: DesignTokens.minBodyPointSize,
+                            weight: .bold))
+                        .foregroundStyle(DesignTokens.accent)
+                    Text(outcome.text)
+                        .font(.system(size: DesignTokens.minCaptionPointSize,
+                                      weight: .semibold))
+                        .foregroundStyle(DesignTokens.textPrimary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(DesignTokens.accent)
+                    .frame(width: 44, height: 44)
+                    .background(DesignTokens.userBubble)
+                    .clipShape(Circle())
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+            .padding(16)
+            .frame(maxWidth: .infinity)
             .background(DesignTokens.card)
-            .clipShape(Capsule())
-            .shadow(color: .black.opacity(0.08), radius: 6, y: 2)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius,
+                                        style: .continuous))
+            .shadow(color: DesignTokens.brandWine.opacity(0.12), radius: 12, y: 5)
         }
         .buttonStyle(.plain)
     }
@@ -543,26 +630,27 @@ struct ConversationHistorySheet: View {
                     .frame(width: 36, height: 4)
                     .frame(maxWidth: .infinity)
                     .padding(.top, 8)
-                // Title row with an explicit ✕ (2026-09-08 back/close
-                // audit): the sheet's drag indicator is hidden and a
-                // swipe-down is the only dismissal otherwise — an elder
-                // must never be stranded on the history sheet.
+                // Explicit leading back control: the sheet's drag indicator
+                // is hidden and swipe-down is the only dismissal otherwise,
+                // so an elder must never be stranded on the history sheet.
                 HStack(alignment: .center, spacing: 12) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(DesignTokens.textPrimary)
+                            .frame(minWidth: DesignTokens.minTapTargetSize,
+                                   minHeight: DesignTokens.minTapTargetSize)
+                            .background(DesignTokens.card)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("common.close"))
                     Text("home.conversation.title")
                         .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
                         .foregroundStyle(DesignTokens.textPrimary)
                     Spacer(minLength: 0)
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundStyle(DesignTokens.textSecondary)
-                            .accessibilityLabel(Text("common.close"))
-                    }
-                    .buttonStyle(.plain)
-                    .frame(minWidth: DesignTokens.minTapTargetSize,
-                           minHeight: DesignTokens.minTapTargetSize)
                 }
                 if visibleRows.isEmpty {
                     Text("home.conversation.empty")
@@ -581,7 +669,7 @@ struct ConversationHistorySheet: View {
             }
             .padding(20)
         }
-        .background(Color(theme: coordinator.appTheme).ignoresSafeArea())
+        .background(VoiceBridgeBackground(theme: coordinator.appTheme))
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.hidden)
     }

@@ -1,72 +1,53 @@
 import Foundation
 
-// MARK: - Invariance boot contract ([LAT-M1], 2026-09-11)
+// MARK: - Background engine readiness contract ([LAT-M1], 2026-09-11)
 //
-// The invariance contract the latency-compliance plan requires: the speak
-// button is enabled IF AND ONLY IF
+// This state machine measures whether startup warm work and KWS setup have
+// settled. It is background-engine telemetry only: manual Talk readiness is
+// published independently and never waits for this contract.
 //
-//    pipeline started
-//    ∧ whisper warm settled (ready, or skipped with an honest reason)
+// The tracked settlement signals are:
+//
+//    whisper warm settled (ready, skipped, or failed)
 //    ∧ primary reply-voice warm settled
 //    ∧ llama interpreter warm settled
 //    ∧ KWS hot-swap settled
 //
-// so request #1 runs on the same warm engines as request #50. This
-// machine is the pure, unit-tested half of that contract (no clock, no
-// queues — same doctrine as `ManualTalkReadinessState`); the coordinator
-// feeds it and publishes the COMBINED readiness through
-// `TalkBootContract.combine`.
+// Budget semantics:
 //
-// Budget semantics ([LAT-M1] conversion of the old 4 s "expire and
-// enable"):
+//  - `WarmStartPlanner.bootWarmBudgetSeconds` bounds the startup
+//    `.warmingEngines` stage. Slow warm work may finish detached.
+//  - Budget expiry does not mutate this state; only actual outcomes and the
+//    watchdog settle features.
+//  - A warm step that fails (or outlives the watchdog) is recorded as cold so
+//    diagnostics can report which engine was unavailable at settlement.
+//  - A warm step that never settles cannot leave the telemetry pending
+//    forever: `noteTalkWatchdogExpired` settles all remaining features.
 //
-//  - `WarmStartPlanner.bootWarmBudgetSeconds` still bounds the SPINNER's
-//    `.warmingEngines` stage — a slow warm finishes detached, and boot
-//    reaches `.ready` on schedule (the startup-perf contract is intact).
-//  - The TALK BUTTON does not follow the budget: it stays disabled with
-//    the honest preparing label + per-feature status until every feature
-//    settles — budget expiry alone NEVER enables it (no silent enable).
-//  - A warm step that FAILS (or outlives the talk watchdog) settles the
-//    contract DEGRADED: the button enables with a banner naming the cold
-//    features — the first conversation honestly pays those loads.
-//  - A warm step that never settles cannot block forever: the
-//    coordinator's talk watchdog (see `noteTalkWatchdogExpired`) fails
-//    still-pending features.
+// [CONTRACT-FIX] Never-stuck telemetry guarantee:
 //
-// [CONTRACT-FIX] The never-stuck guarantee (device field report, the
-// speak button stuck disabled with the preparing label):
-//
-//  - The watchdog's deadline runs on an INDEPENDENT scheduler — never the
-//    warm queue — so a warm hung on its own serial queue can never delay
-//    settlement past the deadline (`TalkBootWatchdog`; the coordinator
-//    arms it on main). First arm wins: progress notes and retry re-plans
-//    never extend the deadline.
-//  - The watchdog fire re-reads CURRENT state: it only settles features
-//    that are still `.pending`, so a settle signal that landed just
-//    before the deadline is honored, never overwritten.
-//  - A publisher that never emits is not fatal: warm outcomes have a
-//    runner-level per-step timeout (`WarmStartRunner`, seam_timeout),
-//    and the KWS path settles on EVERY exit of the deferred build —
-//    including "no pipeline to swap into" — plus the watchdog skip.
-//    Manual Talk never depends on a signal that can never arrive.
+//  - The watchdog's deadline runs on an independent scheduler, never the warm
+//    queue, so a warm hung on its serial queue cannot delay settlement
+//    (`TalkBootWatchdog`; the coordinator arms it on main). First arm wins:
+//    progress notes and retry re-plans never extend the deadline.
+//  - The watchdog fire re-reads current state and only settles features still
+//    `.pending`, preserving an outcome that landed just before the deadline.
+//  - Warm outcomes also have a runner-level per-step timeout
+//    (`WarmStartRunner`, seam_timeout), and the KWS path settles on every exit
+//    of the deferred build, including "no pipeline to swap into".
 //
 // Settlement rules:
 //
 //  - `.skip` actions (simulator, gemini_stack, model_missing,
-//    preference_off) are SETTLED — a skipped feature satisfies the
-//    contract exactly like a ready one: the skip is the planner's honest
-//    "this engine is not part of THIS launch's first conversation".
-//  - Settled states are sticky EXCEPT the honest upgrades: a retry warm
-//    outcome (the degraded-capability recovery path) upgrades
-//    `.failed` → `.ready`, and a late real settle upgrades
-//    `.skipped(reason: "watchdog")`. Nothing else moves a settled
-//    feature.
-//  - KWS NEVER degrades manual Talk (the startup-r2 doctrine): a Null
-//    engine settle is `.skipped(reason: "null_engine")` — satisfied, no
-//    banner; a KWS build still pending at the watchdog falls back to the
-//    Null behavior the same way (`.skipped(reason: "watchdog")`).
+//    preference_off) are settled with the planner's reason.
+//  - Settled states are sticky except honest upgrades: a retry warm outcome
+//    upgrades `.failed` to `.ready`, and a late real settle upgrades
+//    `.skipped(reason: "watchdog")`. Nothing else moves a settled feature.
+//  - KWS absence is not a cold engine classification: a Null-engine settle is
+//    `.skipped(reason: "null_engine")`, and a KWS build still pending at the
+//    watchdog is `.skipped(reason: "watchdog")`.
 
-/// The features the contract gates on.
+/// Background engine features whose startup settlement is measured.
 enum TalkBootFeature: String, CaseIterable, Equatable, Hashable {
     case whisper
     case primaryTTS
@@ -93,8 +74,7 @@ enum TalkBootFeatureStatus: Equatable {
     }
 }
 
-/// The preparing label's per-feature snapshot (published while the
-/// contract is still open).
+/// A per-feature snapshot for readiness telemetry while settlement is open.
 struct TalkBootProgress: Equatable {
     let statuses: [TalkBootFeature: TalkBootFeatureStatus]
     /// Still-pending features, in `TalkBootFeature` case order — the
@@ -102,21 +82,17 @@ struct TalkBootProgress: Equatable {
     let pendingFeatures: [TalkBootFeature]
 }
 
-/// The degraded settle: the hero is enabled, but these features are cold.
+/// The cold-engine classification after settlement.
 struct TalkBootDegradation: Equatable {
     let coldFeatures: [TalkBootFeature]
 }
 
-/// The pure boot-completion machine.
+/// The pure background-engine settlement machine.
 struct TalkBootContractState: Equatable {
 
-    /// The coordinator's talk watchdog: a warm step (or the KWS build)
-    /// still pending this long after the warm phase began fails the
-    /// contract honestly instead of blocking the button forever. Long
-    /// enough for the slowest real settle (serialized whisper + llama +
-    /// TTS warms at their measured device speeds), short enough that a
-    /// hung load degrades to today's behavior (first conversation pays
-    /// the load) instead of a dead button.
+    /// The settlement watchdog interval. Long enough for serialized whisper,
+    /// llama, and TTS warms at measured device speeds; short enough to ensure
+    /// telemetry cannot remain pending indefinitely after a hung load.
     static let talkWatchdogSeconds: TimeInterval = 30.0
 
     static let preferenceOffReason = "preference_off"
@@ -144,12 +120,12 @@ struct TalkBootContractState: Equatable {
         statuses.values.allSatisfy(\.isSettled)
     }
 
-    /// Complete with no cold features — the button may enable clean.
+    /// Complete with no failed warm features.
     var isSatisfied: Bool {
         isComplete && statuses.values.allSatisfy { !$0.isFailure }
     }
 
-    /// The failed features (ordered) — the degraded banner's payload.
+    /// Failed warm features in stable display order.
     var coldFeatures: [TalkBootFeature] {
         TalkBootFeature.allCases.filter { statuses[$0]?.isFailure == true }
     }
@@ -162,10 +138,8 @@ struct TalkBootContractState: Equatable {
         TalkBootProgress(statuses: statuses, pendingFeatures: pendingFeatures)
     }
 
-    /// The warm-engine → contract-feature mapping. TTS voice steps are
-    /// ALWAYS the primary (the planner defers/skips the secondary out of
-    /// the boot slot; a hand-built plan's secondary voice would still map
-    /// here — see `noteWarmPlanStep`'s post-boot defensive settle).
+    /// The warm-engine to tracked-feature mapping. TTS voice steps map to the
+    /// primary feature; `noteWarmPlanStep` defensively settles post-boot work.
     static func feature(for engine: WarmStartEngine) -> TalkBootFeature? {
         switch engine {
         case .whisperKit, .whisperCpp: return .whisper
@@ -176,13 +150,8 @@ struct TalkBootContractState: Equatable {
 
     // MARK: - Transitions
 
-    /// Feeds one plan step (ANY phase — the coordinator feeds the full
-    /// plan before it splits the slices). Plan-time settle: a skip is
-    /// settled now (it never reaches the runner); a boot-phase warm stays
-    /// pending until its outcome; a post-boot warm settles defensively
-    /// (the planner never puts the PRIMARY in the post-boot slot today —
-    /// the simulator defers TTS warms as skips — so this branch cannot
-    /// gate the button on a post-boot load).
+    /// Feeds one plan step. A skip settles immediately, a boot-phase warm stays
+    /// pending until its outcome, and a post-boot warm settles defensively.
     mutating func noteWarmPlanStep(_ step: WarmStartStep) {
         guard let feature = Self.feature(for: step.engine) else { return }
         switch step.action {
@@ -206,11 +175,8 @@ struct TalkBootContractState: Equatable {
         }
     }
 
-    /// The warm preference is OFF (empty plan): the warm features are
-    /// not part of this launch's first conversation BY CHOICE — settled,
-    /// not failed, and the button never waits on them. Idempotent: only
-    /// features that are still pending AND have no boot warm running
-    /// settle here.
+    /// Settles warm features omitted by an empty preference-disabled plan.
+    /// Idempotent: only pending features with no boot warm running are changed.
     mutating func settleUnplannedWarmFeatures() {
         for feature in [TalkBootFeature.whisper, .primaryTTS, .llama] {
             guard statuses[feature] == .pending,
@@ -233,19 +199,15 @@ struct TalkBootContractState: Equatable {
         }
     }
 
-    /// The deferred KWS build settled. A real engine (the hot-swap
-    /// landed) is `.ready`; the honest Null fallback is `.skipped` — the
-    /// wake-word doctrine: manual Talk must come up even with a Null
-    /// engine, and it is never a Talk degradation.
+    /// Records deferred KWS settlement. A real hot-swap is `.ready`; the Null
+    /// fallback is a non-failure `.skipped` classification.
     mutating func noteKWSApplied(isReal: Bool) {
         guard statuses[.kws] != .ready else { return }
         statuses[.kws] = isReal ? .ready : .skipped(reason: Self.nullEngineReason)
     }
 
-    /// The coordinator's talk watchdog fired: warm features still
-    /// pending FAIL (cold — the first conversation pays their loads),
-    /// while a pending KWS falls back to the Null behavior (skipped —
-    /// wake word never degrades manual Talk).
+    /// Settles remaining telemetry at the watchdog deadline. Pending warm
+    /// features fail as cold; pending KWS falls back to a non-failure skip.
     mutating func noteTalkWatchdogExpired() {
         for feature in TalkBootFeature.allCases {
             guard statuses[feature] == .pending else { continue }
@@ -267,33 +229,13 @@ struct TalkBootContractState: Equatable {
     }
 }
 
-// MARK: - The published conjunction
-
-/// Combines the pipeline-start machine with the boot contract into the
-/// ONE readiness value the Talk hero gates on.
-enum TalkBootContract {
-    static func combine(pipeline: VoicePipelineReadiness,
-                        contract: TalkBootContractState) -> VoicePipelineReadiness {
-        // The pipeline's start callback is the foundation: until it
-        // succeeds (or fails), the contract is irrelevant.
-        guard case .ready = pipeline else { return pipeline }
-        if contract.isComplete {
-            return contract.isSatisfied
-                ? .ready
-                : .degraded(TalkBootDegradation(coldFeatures: contract.coldFeatures))
-        }
-        return .loading(.preparingEngines(contract.progress))
-    }
-}
 
 // MARK: - The watchdog seam ([CONTRACT-FIX])
 
-/// The talk contract's settlement backstop. The deadline is scheduled on
-/// an INDEPENDENT scheduler — never the warm queue — so a warm hung on
-/// its own serial queue (or any publisher that never emits) can never
-/// delay settlement past the deadline. Idempotent: the deadline is
-/// measured from the FIRST arm; later arms keep the original deadline
-/// (progress notes and retry re-plans must not extend the wait).
+/// The background readiness contract's settlement backstop. Its deadline is
+/// scheduled on an independent scheduler, never the warm queue, so a hung warm
+/// or silent publisher cannot delay telemetry settlement. First arm wins;
+/// later arms retain the original deadline.
 final class TalkBootWatchdog {
     private let scheduler: DispatchQueue
     private var workItem: DispatchWorkItem?
@@ -301,11 +243,9 @@ final class TalkBootWatchdog {
     /// True while a fire is scheduled.
     var isArmed: Bool { workItem != nil }
 
-    /// - Parameter scheduler: where the deadline runs. Defaults to main
-    ///   (the coordinator's settle path is main-confined); tests inject
-    ///   their own queue. Must NEVER be the warm queue — a hung warm
-    ///   occupies it, which is exactly the state the watchdog must
-    ///   survive.
+    /// - Parameter scheduler: where the deadline runs. Defaults to main;
+    ///   tests inject their own queue. It must not be the warm queue whose
+    ///   blockage this watchdog is designed to survive.
     init(scheduler: DispatchQueue = .main) {
         self.scheduler = scheduler
     }

@@ -78,79 +78,51 @@ struct HomeView: View {
     var body: some View {
         NavigationStack(path: $navPath) {
             ZStack {
-                // Skinnable background (2026-09-07) — the theme's cream is
-                // today's DesignTokens.background; see `AppTheme`.
-                Color(theme: coordinator.appTheme).ignoresSafeArea()
-                VStack(spacing: 12) {
-                    // [P1-7] Every section below is a real view with a
-                    // narrow, value-typed interface (`HomeSubviews.swift`)
-                    // applied with `.equatable()`. HomeView still observes
-                    // the coordinator — it is what BUILDS the models — but
-                    // an unrelated publish now stops at the section's own
-                    // `==`: the section compares equal and its body never
-                    // runs (see `HomePresentationState.swift`).
+                VoiceBridgeBackground(theme: coordinator.appTheme)
+                VStack(spacing: 0) {
                     HomeTopBar(dateLine: homePresentation.dateLine,
                                calendarLine: coordinator.homeCalendarLine,
                                notificationCount: homePresentation.notificationCount) {
                         navPath.append(LeafDestination.updates)
                     }
                     .equatable()
-                    // Quick access ABOVE the Talk hero (home-redesign v3,
-                    // 2026-09-08): the favourites are one-tap launch
-                    // tiles, not reading matter — the user asked for them
-                    // above the hero, and they render only while at least
-                    // one favourite exists.
-                    if !homePresentation.favoriteApps.isEmpty {
-                        QuickAccessStrip(apps: homePresentation.favoriteApps) { app in
-                            coordinator.performAppLaunch(app)
-                        }
-                        .equatable()
-                    }
-                    // [REBALANCE] One flexible spacer above the stage —
-                    // Home's only empty space. A VStack splits its
-                    // leftover height between flexible children, so this
-                    // spacer and the scroll region below share it and the
-                    // talk stage settles near the vertical centre of the
-                    // free area: the hero no longer clings to the top bar
-                    // (design review: "vertically center the Talk stage …
-                    // keep empty space for focus"). It is one flexible
-                    // Spacer, never a dashboard row, and it collapses to
-                    // its 8pt minimum on SE-sized screens, where the
-                    // scroll region then absorbs the overflow exactly as
-                    // before.
-                    Spacer(minLength: 8)
-                    // [HOME-TIMER-CHIP] (2026-09-11) The active-timer
-                    // chip in the hero's empty area: the nearest running
-                    // timer's remaining time + one-tap STOP. Renders
-                    // nothing (no space) while no timer runs — the free
-                    // area above the hero stays free.
-                    HomeTimerChipView(service: coordinator.alarmTimersService) { id in
-                        coordinator.cancelTimer(id: id)
-                    }
-                    .equatable()
-                    // The talk stage is FIXED chrome (home-redesign v3):
-                    // hero + the small status/rotating texts under it sit
-                    // between the top bar and the outcome region, so the
-                    // speak button is always in the viewport on every
-                    // phone size.
-                    talkStage
-                        .equatable()
-                    // Everything BELOW the hero — the transient setup
-                    // nudge (only while onboarding steps remain) and the
-                    // live-caption/outcome text — is ONE scroll region.
-                    // This region between the hero and the pinned bottom
-                    // cluster (history chip + dock, see the safeAreaInset
-                    // below) is the only part of Home that ever clips: on
-                    // an iPhone SE-sized viewport the lower content
-                    // scrolls while the hero, chip and dock never leave
-                    // the screen.
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+
+                    // One vertical scroll owns every movable Home section.
+                    // The previous nested feedback scroller had almost no
+                    // height above the fixed two-row dock, so activity cards
+                    // rendered behind it and were awkward to pan.
                     ScrollView(showsIndicators: false) {
-                        feedbackRegion
+                        VStack(spacing: 16) {
+                            if !homePresentation.favoriteApps.isEmpty {
+                                QuickAccessStrip(apps: homePresentation.favoriteApps) { app in
+                                    coordinator.performAppLaunch(app)
+                                }
+                                .equatable()
+                            }
+
+                            HomeTimerChipView(service: coordinator.alarmTimersService) { id in
+                                coordinator.cancelTimer(id: id)
+                            }
                             .equatable()
+
+                            talkStage
+                                .equatable()
+
+                            feedbackRegion
+                                .equatable()
+
+                            if showsPinnedHistoryChip,
+                               !homePresentation.setup.isVisible {
+                                historyChip
+                            }
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                        .padding(.bottom, 20)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 8)
             }
             // Dock pinned to the bottom edge (home-redesign 2026-09-08):
             // previously the dock was the last child of the fixed VStack,
@@ -158,15 +130,11 @@ struct HomeView: View {
             // off the viewport on small screens. As a `safeAreaInset` it
             // always owns the bottom of the screen and the scroll region
             // above it absorbs overflow instead.
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                // Fixed bottom cluster (visual-polish 2026-09-08): the
-                // history chip rides ABOVE the dock, 6pt off its top edge,
-                // both pinned — the scroll region between the hero and
-                // this cluster is the only part of Home that clips.
-                VStack(spacing: 6) {
-                    if showsPinnedHistoryChip {
-                        historyChip
-                    }
+            .safeAreaInset(edge: .bottom, spacing: 16) {
+                // The compact destination rail stays pinned. Conversation
+                // history now lives in the scroll flow above it, so it can
+                // never cover a setup or outcome card on shorter screens.
+                VStack(spacing: 0) {
                     HomeDock(contactName: homePresentation.primaryContactName,
                              onAppliance: {
                                  coordinator.presentApplianceHelper(question: nil)
@@ -251,6 +219,7 @@ struct HomeView: View {
     }
 
     // MARK: - Presentation models ([P1-7] — narrow inputs for the split)
+
 
     /// The Home chrome's inputs (top bar, quick-access row, setup strip),
     /// assembled once per render and handed to the extracted views as
@@ -362,14 +331,10 @@ struct HomeView: View {
         }
     }
 
-    /// Pinned history affordance (visual-polish 2026-09-08): the chip
-    /// moved OUT of the scroll region to sit between it and the dock —
-    /// "closer to the dock menus" — so older conversations stay one
-    /// fixed tap away regardless of scroll position. Visibility mirrors
-    /// the chip's old in-scroll rule exactly: shown while there is
-    /// history to open, no fresh outcome card is already offering the
-    /// sheet, and the stage is not mid-capture (the live pill owns the
-    /// moment). Tapping opens the same history sheet as before.
+    /// Conversation-history affordance in Home's lower scroll flow. It
+    /// remains close to the destination rail without overlaying setup or
+    /// outcome cards. Shown only when history exists, no fresh outcome is
+    /// already offering the sheet, and voice capture is not active.
     private var showsPinnedHistoryChip: Bool {
         guard coordinator.lastOutcome == nil,
               !coordinator.conversationHistory.isEmpty else { return false }
@@ -517,16 +482,30 @@ struct TalkButton: View {
         !readiness.isTalkEnabled || session.state == .awaitingConfirmation
     }
 
-    /// [P0-2 UX fix] The disc's fill. While the pipeline start is in
-    /// flight (or it failed), the session state is `.stopped`, whose
-    /// dimmed grey-blue tint reads as a light grey disc under white text
-    /// — unreadable (user feedback, 2026-09-11). Loading and failed
-    /// render the SOLID brand pink instead — the artwork's own scheme
-    /// (pink disc, white spinner + label, like the logo) — so the white
-    /// glyphs keep their contrast and the disc never flashes grey → blue
-    /// at readiness.
+    /// Idle and startup use the supplied glossy burgundy VoiceBridge face.
+    /// Runtime work/speaking/error states retain their semantic colors.
+    private var usesBrandFace: Bool {
+        isLoading || session.state == .idle
+    }
+
     private var discTint: Color {
-        (isLoading || failure != nil) ? DesignTokens.brandPink : visuals.tint
+        if failure != nil { return DesignTokens.stateError }
+        return usesBrandFace ? DesignTokens.talkMid : visuals.tint
+    }
+
+    private var discFill: AnyShapeStyle {
+        guard usesBrandFace else { return AnyShapeStyle(discTint) }
+        return AnyShapeStyle(RadialGradient(
+            colors: [DesignTokens.talkHighlight,
+                     DesignTokens.talkMid,
+                     DesignTokens.talkDeep],
+            center: UnitPoint(x: 0.27, y: 0.19),
+            startRadius: 0,
+            endRadius: DesignTokens.talkButtonDiameter * 0.72))
+    }
+
+    private var heroGlowTint: Color {
+        usesBrandFace ? DesignTokens.brandPink : visuals.tint
     }
 
     /// The hold-to-reset affordance is live only in a reset-eligible state,
@@ -561,6 +540,9 @@ struct TalkButton: View {
                     if isBreathing && !isPressingForReset && readiness.isTalkEnabled {
                         breathingRings
                     }
+                    if usesBrandFace && !isPressingForReset {
+                        brandGlassRings
+                    }
                     if visuals.showsHalo && !isPressingForReset {
                         // Steady state-color halo through every mid-cycle
                         // state (listening → transcribing → understanding
@@ -569,7 +551,7 @@ struct TalkButton: View {
                         // speaking — the hero visibly "shrank" mid-turn
                         // (call-UI fix, 2026-09-07).
                         Circle()
-                            .stroke(visuals.tint.opacity(0.28), lineWidth: 10)
+                            .stroke(heroGlowTint.opacity(0.30), lineWidth: 10)
                             .frame(width: DesignTokens.talkButtonDiameter + 28,
                                    height: DesignTokens.talkButtonDiameter + 28)
                     }
@@ -588,15 +570,20 @@ struct TalkButton: View {
                     // hero's own spinner + label is the loading UI, and
                     // capability diagnostics live in Settings.
                     Circle()
-                        .fill(discTint)
+                        .fill(discFill)
                         .frame(width: DesignTokens.talkButtonDiameter,
                                height: DesignTokens.talkButtonDiameter)
-                        .shadow(color: discTint.opacity(0.4), radius: 10, y: 4)
+                        .shadow(color: discTint.opacity(0.34), radius: 16, y: 7)
                         .overlay(heroContent)
                     if isPressingForReset {
                         resetProgressRing
                     }
                 }
+                // Decorative rings draw outside the hit target but do not
+                // claim 262pt of layout height. This keeps the compact
+                // activity card visible above the fixed two-row dock.
+                .frame(width: DesignTokens.talkButtonDiameter,
+                       height: DesignTokens.talkButtonDiameter)
             }
             .buttonStyle(.plain)
             // Enabled only once the pipeline's start callback succeeded
@@ -644,14 +631,13 @@ struct TalkButton: View {
                 onPressingChanged: handleHoldPressing(_:)
             ))
 
-            // Warm rounded status line ("I'm ready", hold hint, error
-            // captions) — short human-facing microcopy (visual-polish
-            // 2026-09-08).
-            Text(statusTextLine)
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .medium))
-                .foregroundStyle(DesignTokens.textSecondary)
-                .multilineTextAlignment(.center)
-
+            if !statusTextLine.isEmpty {
+                Text(statusTextLine)
+                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                                weight: .medium))
+                    .foregroundStyle(DesignTokens.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
             // [P0-2] The ONE recovery a failed boot-time start offers —
             // and only then. It replaces the old "tap the dead hero to
             // retry" path, which could not distinguish "not ready yet"
@@ -742,16 +728,9 @@ struct TalkButton: View {
         .buttonStyle(.plain)
     }
 
-    /// Status line under the hero: the live hold hint while a reset
-    /// press is underway, else the ONE failure explanation while the
-    /// pipeline start failed, else EMPTY while it is still loading (the
-    /// stage label lives inside the disc — and the state's own text would
-    /// claim "I'm ready" before the callback says so), else the caller's
-    /// override (error caption / post-reset notice), else the state's own
-    /// status text. The hold hint wins over everything — while the finger
-    /// is down the line must say what the press will DO
-    /// (TALK-CRASH-FIX, 2026-09-07); a disabled hero can never hold, so
-    /// the two never collide.
+    /// Only exceptional information lives outside the button: reset-hold
+    /// guidance, an actionable startup failure, or voice-off/error detail.
+    /// Normal ready/listening/speaking labels already live inside the hero.
     private var statusTextLine: String {
         if isPressingForReset {
             return L10n.str("voice.resetHold", locale: locale)
@@ -760,7 +739,13 @@ struct TalkButton: View {
         if let failure {
             return TalkReadinessCopy.failureExplanation(failure, locale: locale)
         }
-        return statusOverride ?? session.state.statusText(locale: locale)
+        switch session.state {
+        case .error, .stopped:
+            return statusOverride ?? session.state.statusText(locale: locale)
+        case .idle, .listening, .transcribing, .understanding,
+             .speaking, .awaitingConfirmation:
+            return ""
+        }
     }
 
     /// Long-press tracking (called on main): arms the hold hint + ring
@@ -808,21 +793,31 @@ struct TalkButton: View {
         }
     }
 
-    /// Two concentric rings that breathe outward and fade — the
-    /// "signature" motion element (redesign spec §2). The rings breathe
-    /// in the ACTIVE state's color (visual-polish 2026-09-08): blue
-    /// rings at rest, amber while listening — the light follows the
-    /// traffic-light family, never a fixed amber. Respects
-    /// `accessibilityReduceMotion` (checked by the caller before this is
-    /// even placed in the view tree).
+    /// Static frosted annuli around the branded idle/startup face. State
+    /// text and color still carry meaning when Reduce Motion is enabled.
+    private var brandGlassRings: some View {
+        ZStack {
+            Circle()
+                .fill(DesignTokens.brandBlush.opacity(0.16))
+                .frame(width: DesignTokens.talkButtonDiameter + 52,
+                       height: DesignTokens.talkButtonDiameter + 52)
+                .overlay(Circle().stroke(.white.opacity(0.78), lineWidth: 2))
+            Circle()
+                .stroke(DesignTokens.brandBlush.opacity(0.72), lineWidth: 2)
+                .frame(width: DesignTokens.talkButtonDiameter + 26,
+                       height: DesignTokens.talkButtonDiameter + 26)
+        }
+        .shadow(color: DesignTokens.brandBlush.opacity(0.55), radius: 18)
+    }
+
     private var breathingRings: some View {
         ZStack {
             Circle()
-                .stroke(visuals.tint.opacity(breathe ? 0.05 : 0.35), lineWidth: 2)
+                .stroke(heroGlowTint.opacity(breathe ? 0.05 : 0.35), lineWidth: 2)
                 .frame(width: breathe ? DesignTokens.talkButtonDiameter + 90 : DesignTokens.talkButtonDiameter + 20,
                        height: breathe ? DesignTokens.talkButtonDiameter + 90 : DesignTokens.talkButtonDiameter + 20)
             Circle()
-                .stroke(visuals.tint.opacity(breathe ? 0.02 : 0.22), lineWidth: 2)
+                .stroke(heroGlowTint.opacity(breathe ? 0.02 : 0.22), lineWidth: 2)
                 .frame(width: breathe ? DesignTokens.talkButtonDiameter + 130 : DesignTokens.talkButtonDiameter + 40,
                        height: breathe ? DesignTokens.talkButtonDiameter + 130 : DesignTokens.talkButtonDiameter + 40)
         }

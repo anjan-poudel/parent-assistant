@@ -5,6 +5,31 @@ import CoreML
 import WhisperKit
 #endif
 
+// MARK: - First-use prewarm policy ([LAT-EVIDENCE], 2026-09-12)
+//
+// Device evidence: with the boot warm skipped, the FIRST transcribe paid
+// the one-time CoreML/ANE specialization INSIDE the turn
+// (`transcribed duration_ms=10633` for 2.7 s audio). The fix: at the
+// start of a listening session, when the weights are not resident (the
+// boot warm was skipped, or the post-turn hold lapsed), a background
+// `prepare` runs on the whisper queue so the specialization compiles
+// while the user speaks — off the turn path. NON-GATING: the transcribe
+// never waits on it; when it is still running at `finish()`, `loadKit`
+// joins the in-flight load instead of constructing a second instance
+// (a duplicate would double the ~1.5 GB footprint).
+//
+/// The pure first-use prewarm decision.
+enum WhisperFirstUsePrewarmPolicy {
+    static func shouldPrewarm(isModelLoaded: Bool,
+                              isAvailable: Bool,
+                              isSimulator: Bool) -> Bool {
+        // The simulator skip mirrors the boot warm doctrine
+        // (OnDeviceSTTSelection): the CPU-only WhisperKit prepare is a
+        // minutes-scale load that never helps a sim conversation.
+        !isModelLoaded && isAvailable && !isSimulator
+    }
+}
+
 /// ANE-accelerated recognizer on the WhisperKit runtime (memory:
 /// ios-stt-runtime-decision — the vendored whisper.cpp predates Metal,
 /// WhisperKit is the maintained CoreML/ANE path for 128-mel models).
@@ -32,6 +57,29 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     // model that WhisperKit downloads itself (e.g. "large-v3-turbo").
     var modelFolderURL: URL?
     var modelName: String?
+
+    /// [LAT-EVIDENCE] Test seam: when non-nil, runs INSTEAD of the real
+    /// background prewarm at listening start (the policy decision is
+    /// real; only the load is replaced). Bench/tests only.
+    var firstUsePrewarmOverride: (() -> Void)?
+    /// [LAT-EVIDENCE] Bench/test override for the simulator gate: the
+    /// prewarm skips the simulator by doctrine (the CPU-only prepare
+    /// never helps a sim conversation) — tests force the DEVICE path
+    /// with `false` so the seam is exercisable on the simulator.
+    var firstUsePrewarmSimulatorOverride: Bool?
+
+    #if canImport(WhisperKit)
+    /// [LAT-EVIDENCE] Dedupe for concurrent loads: the non-gating
+    /// first-use prewarm and the first transcribe may both reach
+    /// `loadKit` — the transcribe JOINS the in-flight load (see the
+    /// header) instead of constructing a second instance.
+    private final class LoadBox {
+        let task: Task<WhisperKit, Error>
+        init(_ task: Task<WhisperKit, Error>) { self.task = task }
+    }
+    private let loadStateLock = NSLock()
+    private var pendingLoadBox: LoadBox?
+    #endif
 
     /// Held as `Any?` so this file compiles without the package; cast to
     /// `WhisperKit.WhisperKit` inside the guards.
@@ -103,6 +151,32 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         listeningActive = true
         utteranceBuffer.removeAll()
         self.completion = completion
+
+        // [LAT-EVIDENCE] First-use prewarm: when the boot warm was
+        // skipped (or the post-turn hold released the weights), begin a
+        // background prepare NOW — before the first transcribe — so the
+        // one-time CoreML/ANE specialization compiles off the turn path.
+        // Non-gating: the transcribe never waits; loadKit joins the
+        // in-flight load when the prepare is still running.
+        #if canImport(WhisperKit)
+        let isSimulator = firstUsePrewarmSimulatorOverride
+            ?? WhisperKit.isRunningOnSimulator
+        #else
+        let isSimulator = firstUsePrewarmSimulatorOverride ?? true
+        #endif
+        if WhisperFirstUsePrewarmPolicy.shouldPrewarm(
+            isModelLoaded: isModelLoaded,
+            isAvailable: isAvailable,
+            isSimulator: isSimulator) {
+            if let firstUsePrewarmOverride {
+                firstUsePrewarmOverride()
+            } else {
+                emit("first_use_prewarm", errorCode: nil, outcome: "started")
+                inferenceQueue.async { [weak self] in
+                    self?.prepare()
+                }
+            }
+        }
 
         // Hard cap in case VAD doesn't fire finish().
         let work = DispatchWorkItem { [weak self] in
@@ -201,8 +275,10 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
 
     // MARK: - Inference (guarded)
 
-    /// Preloads the model off the critical path: call at hot-swap time so
-    /// the first utterance doesn't pay the load + CoreML specialization.
+    /// Preloads the model off the critical path: call at hot-swap time
+    /// ([STARTUP-R2]) and at first use ([LAT-EVIDENCE] — the
+    /// listening-start prewarm when the boot warm was skipped) so the
+    /// first utterance doesn't pay the load + CoreML specialization.
     func prepare() {
         warm()
     }
@@ -269,11 +345,52 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     }
 
     /// Loads (or reuses) the WhisperKit instance for a descriptor.
+    /// [LAT-EVIDENCE] Concurrent loaders JOIN one in-flight load: the
+    /// non-gating first-use prewarm and the first transcribe may race to
+    /// the load — a second construction would double the ~1.5 GB
+    /// footprint. A failed load clears the pending slot so a later
+    /// attempt starts fresh (a stale failure can never poison every
+    /// future load).
     private func loadKit(descriptor: String, config: WhisperKitConfig) async throws -> WhisperKit {
         if let existing = kitInstance as? WhisperKit,
            loadedDescriptor == descriptor {
             return existing
         }
+        let box: LoadBox
+        loadStateLock.lock()
+        if let pending = pendingLoadBox {
+            box = pending
+            loadStateLock.unlock()
+        } else {
+            let created = Task<WhisperKit, Error> { [weak self] in
+                guard let self else { throw CancellationError() }
+                return try await self.createKit(descriptor: descriptor, config: config)
+            }
+            let fresh = LoadBox(created)
+            pendingLoadBox = fresh
+            box = fresh
+            loadStateLock.unlock()
+        }
+        do {
+            let kit = try await box.task.value
+            clearPendingLoad(box)
+            return kit
+        } catch {
+            clearPendingLoad(box)
+            throw error
+        }
+    }
+
+    private func clearPendingLoad(_ box: LoadBox) {
+        loadStateLock.lock()
+        if pendingLoadBox === box { pendingLoadBox = nil }
+        loadStateLock.unlock()
+    }
+
+    /// The one real construction (behind the dedupe): builds the kit,
+    /// caches it, and reports the load.
+    private func createKit(descriptor: String,
+                           config: WhisperKitConfig) async throws -> WhisperKit {
         let loadStart = CFAbsoluteTimeGetCurrent()
         let created = try await WhisperKit(config)
         let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)

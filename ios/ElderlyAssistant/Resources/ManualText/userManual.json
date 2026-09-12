@@ -4,12 +4,12 @@
     "titleEn": "About this manual",
     "titleNe": "यो पुस्तिकाबारे",
     "paragraphsEn": [
-      "The app on your home screen is called Elderly Assistant; the assistant who speaks to you is called Sahayak (सहायक — helper). This manual explains everything Sahayak can do, how to do each thing by voice and by touch, and what Sahayak will honestly never do.",
+      "The app on your home screen is called VoiceBridge AI; the assistant who speaks to you is called Sahayak (सहायक — helper). This manual explains everything Sahayak can do, how to do each thing by voice and by touch, and what Sahayak will honestly never do.",
       "Every button, every screen, and every spoken sentence also exists in Nepali (नेपाली). You can speak to Sahayak in either language at any time; Sahayak replies in the language chosen in Settings → Language & region.",
       "Each feature below follows the same four-part pattern: what it does, how to do it by voice, how to do it by touch, and what it will never do."
     ],
     "paragraphsNe": [
-      "तपाईंको होम स्क्रिनको एपको नाम Elderly Assistant हो; तपाईंसँग बोल्ने सहायकको नाम सहायक (Sahayak) हो। यो पुस्तिकामा सहायकले गर्न सक्ने सबै काम, हरेक काम आवाजबाट र हातले गर्ने तरिका, र — त्यत्तिकै महत्त्वपूर्ण — सहायकले इमानदारीपूर्वक कहिल्यै नगर्ने कुराहरू लेखिएका छन्।",
+      "तपाईंको होम स्क्रिनको एपको नाम VoiceBridge AI हो; तपाईंसँग बोल्ने सहायकको नाम सहायक (Sahayak) हो। यो पुस्तिकामा सहायकले गर्न सक्ने सबै काम, हरेक काम आवाजबाट र हातले गर्ने तरिका, र — त्यत्तिकै महत्त्वपूर्ण — सहायकले इमानदारीपूर्वक कहिल्यै नगर्ने कुराहरू लेखिएका छन्।",
       "हरेक बटन, हरेक स्क्रिन र हरेक बोलिने वाक्य अंग्रेजीमा पनि छ। तपाईं जुनसुकै बेला जुनसुकै भाषामा सहायकसँग बोल्न सक्नुहुन्छ; सहायकले सेटिङ → भाषा र क्षेत्र मा रोजेको भाषामा जवाफ दिन्छ।",
       "तलका हरेक सुविधा एउटै चार-भागको ढाँचामा छन्: के गर्छ, आवाजबाट कसरी गर्ने, हातले कसरी गर्ने, र कहिल्यै के गर्दैन।"
     ],
@@ -26,10 +26,10 @@
       "• Step 2 — Allow permissions. Microphone (so Sahayak can hear you) and Notifications (for medication reminders). Tap Allow on each.",
       "• Step 3 — Family and friends. Type the person to notify if something goes wrong — name, phone number, relationship, Messenger username. You can add people later in Settings.",
       "• Step 4 — Connect Gemini AI. A family member may paste an API key here. Skipping is fine — medicines, alarms, timers, the news and emergency phrases all work without it. Then tap Go to Home.",
-      "The Talk button is a traffic light. Blue (breathing rings) = resting, “Talk — I'm ready”. Amber, three deepening shades = working: Listening… → Writing… → Thinking…. Green = Speaking. Red = something failed — the line under the button says exactly what, and a Try again tap retries. Dim blue = voice off. Big Yes/No buttons appear whenever Sahayak asks you to confirm something.",
-      "• Tap once when blue: starts listening. • Tap while working or speaking: cancels the turn. • Press and hold for 2 seconds: resets the voice completely — a white ring fills up, then you hear “Voice reset. I'm ready.”",
+      "The Talk button uses a distinct colour for each state. Glossy burgundy with pink breathing rings = resting, “Talk — I'm ready”. Amber, three deepening shades = working: Listening… → Writing… → Thinking…. Green = Speaking. Red = something failed — the line under the button says exactly what, and a Try again tap retries. Dim blue = voice off. Big Yes/No buttons appear whenever Sahayak asks you to confirm something.",
+      "• Tap once when burgundy: starts listening. • Tap while working or speaking: cancels the turn. • Press and hold for 2 seconds: resets the voice completely — a white ring fills up, then you hear “Voice reset. I'm ready.”",
       "Three sentences that always work: “Set a timer for 5 minutes” (टाइमर ५ मिनेट), “Read me the news” (समाचार सुनाऊ), and “Call my daughter” (छोरीलाई फोन गर — Sahayak asks you to confirm before dialing; the person must be saved in Family & friends first).",
-      "Home screen tour, top to bottom: the top bar holds the Settings gear, the greeting and live clock (taps into Calendar), the bell (opens Updates, badge always matches), and the red-edged Emergency triangle — which is on every screen. Under the Talk button a small pill rotates example phrases you can imitate. After each exchange a card shows what you said and what Sahayak replied (folds into a chip after a few seconds; some actions have Undo).",
+      "Home screen tour, top to bottom: the top bar holds the Settings gear, today's date and tithi (tap to open Calendar), the bell (opens Updates, badge always matches), and the red-edged Emergency triangle — which is on every screen. Under the Talk button a small pill rotates example phrases you can imitate. After each exchange a card shows what you said and what Sahayak replied (folds into a chip after a few seconds; some actions have Undo).",
       "The dock at the bottom has six tiles: Medication (pill), Reminders (clock), Call (phone — or your first family contact's face), Show Me (camera — appliance help), Directions (map), Feeds (stacked cards).",
       "Updates (the bell): three sections — Notifications (today's briefing, medication status and other active panels), Today (the Nepali date with tithi and festivals, plus “Next: … at …” — the very next thing you must not miss), and Activity (a read-only log of recent conversations, newest first)."
     ],
@@ -40,10 +40,10 @@
       "• चरण २ — अनुमति दिनुहोस्। माइक्रोफोन (सहायकले तपाईंलाई सुन्न) र सूचनाहरू (औषधिको सम्झनाका लागि)। दुवैमा 'दिनुहोस्' थिच्नुहोस्।",
       "• चरण ३ — परिवार र साथीहरू। समस्या परेमा खबर पाउने मान्छेको नाम, फोन नम्बर, नाता र म्यासेन्जर नाम लेख्नुहोस्। पछि सेटिङबाट पनि थप्न सकिन्छ।",
       "• चरण ४ — जेमिनी AI जोड्नुहोस्। परिवारको कसैले यहाँ API कुञ्जी राख्न सक्नुहुन्छ। छाड्दा पनि हुन्छ — औषधि, अलार्म, टाइमर, समाचार र आपतकालीन वाक्यहरू सबै योबिना चल्छन्। अनि 'घर जानुहोस्' थिच्नुहोस्।",
-      "बोल्ने बटन एउटा ट्राफिक-लाइट हो। निलो (सास फेर्ने घेरासहित) = आराममा, 'बोल्नुहोस् — तयार छु'। एम्बर, तीन गाढा रङ = काम हुँदैछ: सुन्दै छु… → लेख्दै छु… → बुझ्दै छु…। हरियो = बोल्दै छु। रातो = केही बिग्रियो — बटनमुनिको पङ्क्तिले ठ्याक्कै के भन्छ, र 'फेरि प्रयास गर्नुहोस्' थिच्दा फेरि सुरु हुन्छ। हल्का निलो = आवाज बन्द। सहायकले पुष्टि सोध्दा ठूला हो/होइन बटन देखिन्छन्।",
-      "• निलो हुँदा एक पटक थिच्नुहोस्: सुन्न सुरु हुन्छ। • काम वा बोलाइ चल्दा थिच्नुहोस्: त्यो पालो रद्द हुन्छ। • २ सेकेन्ड थिचिराख्नुहोस्: आवाज पूरै रिसेट हुन्छ — सेतो घेरा भरिन्छ, अनि 'आवाज रिसेट भयो। म तयार छु।' सुनिन्छ।",
+      "बोल्ने बटनले हरेक अवस्थाका लागि छुट्टै रङ देखाउँछ। चम्किलो बरगन्डी र गुलाबी सास फेर्ने घेरा = आराममा, 'बोल्नुहोस् — तयार छु'। एम्बर, तीन गाढा रङ = काम हुँदैछ: सुन्दै छु… → लेख्दै छु… → बुझ्दै छु…। हरियो = बोल्दै छु। रातो = केही बिग्रियो — बटनमुनिको पङ्क्तिले ठ्याक्कै के भन्छ, र 'फेरि प्रयास गर्नुहोस्' थिच्दा फेरि सुरु हुन्छ। हल्का निलो = आवाज बन्द। सहायकले पुष्टि सोध्दा ठूला हो/होइन बटन देखिन्छन्।",
+      "• बरगन्डी हुँदा एक पटक थिच्नुहोस्: सुन्न सुरु हुन्छ। • काम वा बोलाइ चल्दा थिच्नुहोस्: त्यो पालो रद्द हुन्छ। • २ सेकेन्ड थिचिराख्नुहोस्: आवाज पूरै रिसेट हुन्छ — सेतो घेरा भरिन्छ, अनि 'आवाज रिसेट भयो। म तयार छु।' सुनिन्छ।",
       "सधैं काम गर्ने तीन वाक्य: 'टाइमर ५ मिनेट' (Set a timer for 5 minutes), 'समाचार सुनाऊ' (Read me the news), र 'छोरीलाई फोन गर' (Call my daughter — सहायकले फोन गर्नुअघि पुष्टि सोध्छ; मान्छे पहिले परिवार र साथीहरूमा बचत भएको हुनुपर्छ)।",
-      "होम स्क्रिनको भ्रमण, माथिदेखि तलसम्म: माथिको पट्टीमा सेटिङको गियर, अभिवादन र चलिरहने घडी (थिच्दा पात्रो खुल्छ), घण्टी (अपडेटहरू खोल्छ; संख्याको चिन्ह सधैं मिल्छ), र रातो किनारा भएको आपतकालीन त्रिकोण — जुन हरेक स्क्रिनमा हुन्छ। बोल्ने बटनमुनि सानो पिल्लामा भन्न सकिने उदाहरण वाक्यहरू घुमिरहन्छन्। हरेक कुराकानीपछि एउटा कार्डले तपाईंले भनेको र सहायकले भनेको देखाउँछ (केही सेकेन्डपछि एउटा पङ्क्तिमा खुम्चिन्छ; कुनै काममा 'पूर्ववत' (Undo) पनि हुन्छ)।",
+      "होम स्क्रिनको भ्रमण, माथिदेखि तलसम्म: माथिको पट्टीमा सेटिङको गियर, आजको मिति र तिथि (थिच्दा पात्रो खुल्छ), घण्टी (अपडेटहरू खोल्छ; संख्याको चिन्ह सधैं मिल्छ), र रातो किनारा भएको आपतकालीन त्रिकोण — जुन हरेक स्क्रिनमा हुन्छ। बोल्ने बटनमुनि सानो पिल्लामा भन्न सकिने उदाहरण वाक्यहरू घुमिरहन्छन्। हरेक कुराकानीपछि एउटा कार्डले तपाईंले भनेको र सहायकले भनेको देखाउँछ (केही सेकेन्डपछि एउटा पङ्क्तिमा खुम्चिन्छ; कुनै काममा 'पूर्ववत' (Undo) पनि हुन्छ)।",
       "तलको डकमा छवटा बटन छन्: औषधि (चक्की), सम्झना (घडी), फोन (फोन — वा पहिलो परिवारको सदस्यको अनुहार), देखाउनुहोस् (क्यामेरा — उपकरण सहायता), बाटो (नक्सा), फिड (थुप्रो कार्ड)।",
       "अपडेटहरू (घण्टी): तीन खण्ड — सूचनाहरू (आजको ब्रीफिङ, औषधिको अवस्था र अरू सक्रिय सूचनाहरू), आज (तिथि र चाडपर्वसहितको नेपाली मिति, साथै 'अर्को: … बजे' — सबैभन्दा पहिले नछुटाउनुपर्ने कुरा), र गतिविधि (हालैका कुराकानीहरूको पढ्ने-मात्र लग, नयाँ पहिला)।"
     ],
@@ -186,7 +186,7 @@
     "titleEn": "Calendar — the Nepali calendar and mirroring",
     "titleNe": "पात्रो — नेपाली पात्रो र मिररिङ",
     "paragraphsEn": [
-      "The Calendar screen (tap the greeting and clock at the top of Home) shows: today in the Nepali calendar — the Bikram Sambat date in Nepali numerals (for example “आइतबार, भदौ २१, २०८३”), the tithi for every day, and the English date beneath. The conversion is fully offline (1978–2099 BS); outside that range it honestly says the Nepali date is unavailable rather than guessing.",
+      "The Calendar screen (tap today's date at the top of Home) shows: today in the Nepali calendar — the Bikram Sambat date in Nepali numerals (for example “आइतबार, भदौ २१, २०८३”), the tithi for every day, and the English date beneath. The conversion is fully offline (1978–2099 BS); outside that range it honestly says the Nepali date is unavailable rather than guessing.",
       "Festival today (with its tithi when one falls on the day), the next five upcoming festivals with “in N days” (Devanagari numerals in Nepali), and Today's routine — the same merged schedule as Reminders.",
       "Festival notifications: every festival notifies on the day (08:00); the important ones (Dashain, Tihar, Teej, Laxmi Puja, Chhath, New Year…) also notify N days early — N is set in Settings → Medication schedule → Festival reminders (0–7, default 2).",
       "Settings → Calendar — three switches, each with an honest status line beneath:",
@@ -196,7 +196,7 @@
       "What it will never do: fabricate a Nepali date outside the verified table; warn about a festival on the wrong day (a fixed curated date catalog, lunar-sighted ones marked); pretend two-way sync is working when full calendar access wasn't granted."
     ],
     "paragraphsNe": [
-      "पात्रो स्क्रिन (होमको माथि अभिवादन र घडी थिच्नुहोस्) मा देखिन्छ: आज नेपाली पात्रोमा — नेपाली अंकमा विक्रम संवत्को मिति (जस्तै 'आइतबार, भदौ २१, २०८३'), हरेक दिनको तिथि, र तल अंग्रेजी मिति। रूपान्तरण पूरै अफलाइन छ (१९७८–२०९९ संवत्); त्यो दायराभन्दा बाहिर अनुमान नगरी 'नेपाली मिति उपलब्ध छैन' भनिन्छ।",
+      "पात्रो स्क्रिन (होमको माथि आजको मिति थिच्नुहोस्) मा देखिन्छ: आज नेपाली पात्रोमा — नेपाली अंकमा विक्रम संवत्को मिति (जस्तै 'आइतबार, भदौ २१, २०८३'), हरेक दिनको तिथि, र तल अंग्रेजी मिति। रूपान्तरण पूरै अफलाइन छ (१९७८–२०९९ संवत्); त्यो दायराभन्दा बाहिर अनुमान नगरी 'नेपाली मिति उपलब्ध छैन' भनिन्छ।",
       "आजको चाडपर्व (तिथिसहित, चाडपर्व परेको दिन), आउँदा पाँच चाडपर्व 'N दिनमा' भन्नेसहित (नेपालीमा देवनागरी अंक), र आजको दिनचर्या — सम्झना स्क्रिनकै मिलाइएको तालिका।",
       "चाडपर्वका सूचना: हरेक चाडपर्वको दिनमा एउटा सूचना आउँछ (बिहान ८:००); महत्त्वपूर्णहरूको (दशैं, तिहार, तीज, लक्ष्मी पूजा, छठ, नयाँ वर्ष…) N दिन अगाडि पनि — N सेटिङ → औषधि तालिका → चाडपर्वको सम्झना मा मिलाइन्छ (०–७, सुरुमा २)।",
       "सेटिङ → पात्रो — तीनवटा स्विच, हरेकमुनि इमानदार अवस्थाको पङ्क्ति:",
@@ -478,7 +478,7 @@
     "titleEn": "Glossary",
     "titleNe": "शब्दावली",
     "paragraphsEn": [
-      "• Sahayak (सहायक) — the assistant's name, Nepali for “helper”. The app itself is titled Elderly Assistant.",
+      "• Sahayak (सहायक) — the assistant's name, Nepali for “helper”. The app itself is titled VoiceBridge AI.",
       "• Wake word / wake phrase — the phrase that wakes Sahayak without any button: “ये कान्छी” (yeah kanchhi).",
       "• STT (speech-to-text) — turning your spoken words into written text, Sahayak's “ears”. Runs with Whisper models on the phone, or Gemini in the cloud.",
       "• TTS (text-to-speech) — turning written replies into spoken words, Sahayak's “voice”. On-device Piper voices, falling back to the iPhone's own voice.",
@@ -498,7 +498,7 @@
       "• App language — the language setting (English/Nepali) that drives the whole interface and spoken replies."
     ],
     "paragraphsNe": [
-      "• सहायक (Sahayak) — सहायकको नाम; नेपालीमा 'सहायक'। एपको नाम भने Elderly Assistant हो।",
+      "• सहायक (Sahayak) — सहायकको नाम; नेपालीमा 'सहायक'। एपको नाम भने VoiceBridge AI हो।",
       "• वेक वर्ड / वेक वाक्य — बिनाबटन सहायकलाई ब्युँझाउने वाक्य: 'ये कान्छी' (yeah kanchhi)।",
       "• STT (बोली-देखि-पाठ) — तपाईंका बोलेका शब्दलाई लेखिएको पाठमा बदल्ने, सहायकको 'कान'। फोनमा Whisper मोडेलले, वा क्लाउडमा जेमिनीले चल्छ।",
       "• TTS (पाठ-देखि-बोली) — लेखिएको जवाफलाई बोलीमा बदल्ने, सहायकको 'आवाज'। यन्त्रमै भएका Piper आवाजहरू, आईफोनकै आवाजको सहारासहित।",

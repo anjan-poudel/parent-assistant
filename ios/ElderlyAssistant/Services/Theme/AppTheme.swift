@@ -1,15 +1,11 @@
 import Foundation
 
-/// Warm preset themes for the app background (skinnable home, 2026-09-07).
+/// Light background presets for the app.
 ///
-/// The SCREEN BACKGROUND is the only themed surface: text stays
-/// `DesignTokens.textPrimary` (near-black) and cards stay white, so the
-/// light presets keep the existing WCAG AA contrast by construction. The
-/// one caveat is `dusk` — a muted warm NIGHT tone, still deliberately kept
-/// slightly lighter than the near-black text that sits on it (its RGB is
-/// ~0.85 per channel vs ~0.24/0.18/0.14 for textPrimary; the luminance gap
-/// is pinned by AppThemeTests). A photo-picker background is a noted
-/// future option — preset colors only today.
+/// VoiceBridge's warm white is the default canvas. Optional presets tint
+/// only the screen background; navy text, white cards and magenta actions
+/// remain stable so the brand hierarchy and accessible contrast survive
+/// every selection.
 enum AppTheme: String, CaseIterable, Identifiable {
     case cream, sage, sky, lavender, dusk, lightPink
 
@@ -21,28 +17,20 @@ enum AppTheme: String, CaseIterable, Identifiable {
     /// without importing SwiftUI (repo pattern).
     var background: (red: Double, green: Double, blue: Double) {
         switch self {
-        case .cream:    return (0.980, 0.953, 0.914)   // #FAF3E9 — today's DesignTokens.background
-        case .sage:     return (0.925, 0.949, 0.914)
-        case .sky:      return (0.914, 0.941, 0.953)
-        case .lavender: return (0.941, 0.925, 0.953)
-        case .dusk:     return (0.855, 0.847, 0.820)   // muted warm night — see contrast note above
-        // [REBRAND] Very light pink — a light tint of the brand pink
-        // #C73D74 (the launch-screen artwork's background), so the
-        // skinnable background stays in the brand family. Green ≥ 0.9
-        // keeps the pastel-lightness pin (AppThemeTests).
-        case .lightPink: return (0.972, 0.905, 0.925)  // #F8E7EC
+        case .cream:    return (1.000, 1.000, 1.000)   // #FFFFFF — VoiceBridge light background
+        case .sage:     return (0.945, 0.969, 0.949)
+        case .sky:      return (0.941, 0.961, 0.984)
+        case .lavender: return (0.965, 0.945, 0.976)
+        case .dusk:     return (0.875, 0.871, 0.890)
+        case .lightPink: return (1.000, 0.941, 0.957)  // #FFF0F4 — brand tint
         }
     }
 
     /// Localized display-name key per theme.
     var nameKey: String { "theme.\(rawValue)" }
 
-    /// Non-failable decode for the coordinator's launch restore: a missing
-    /// key or a raw value naming no case falls back to `.cream` (the
-    /// launch default). `init(rawValue:)` stays failable — an unknown raw
-    /// string genuinely does NOT decode (pinned by AppThemeTests) — only
-    /// this restore path swallows it, so a stale persisted value can never
-    /// wedge the app (same house rule as `voiceEngineStack`/wake word).
+    /// Non-failable decode for launch restore: a missing or unknown value
+    /// falls back to the VoiceBridge warm-white preset.
     init(rawOrDefault raw: String?) {
         self = raw.flatMap(AppTheme.init(rawValue:)) ?? .cream
     }

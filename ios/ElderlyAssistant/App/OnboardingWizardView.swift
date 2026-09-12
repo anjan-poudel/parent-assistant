@@ -30,9 +30,7 @@ struct OnboardingWizardView: View {
 
     var body: some View {
         ZStack {
-            // Skinnable background (2026-09-07) — follows the theme the
-            // rest of the app uses; see `AppTheme`.
-            Color(theme: coordinator.appTheme).ignoresSafeArea()
+            VoiceBridgeBackground(theme: coordinator.appTheme)
             VStack(spacing: 0) {
                 header
                 Spacer(minLength: 0)
@@ -48,25 +46,27 @@ struct OnboardingWizardView: View {
     // MARK: - Header (skip top-right, back top-left)
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 8) {
             Button(action: goBack) {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(DesignTokens.textPrimary)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
                     .background(DesignTokens.card)
                     .clipShape(Circle())
             }
+            .buttonStyle(.plain)
             .accessibilityLabel(Text("common.back"))
-            Spacer()
+            Spacer(minLength: 8)
             Button(action: skipCurrentStep) {
                 Text("onboarding.skip")
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(DesignTokens.accent)
                     .padding(.horizontal, 12)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
             }
+            .buttonStyle(.plain)
         }
     }
 
