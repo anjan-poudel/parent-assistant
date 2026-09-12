@@ -2,7 +2,7 @@
 
 ## Project Purpose
 
-Build an AI-powered, highly personalizable, personal assistant app for elderly users — particularly those from non-English-speaking backgrounds — that runs as a 24/7 always-on service on iOS and Android smartphones.
+Build an AI-powered, highly personalizable, personal assistant app for elderly users — particularly those from non-English-speaking backgrounds — that runs as a 24/7 safety service on iOS smartphones for the MVP (Android is deferred to v2; see Architecture Constraint 4).
 The assistant bridges the digital divide by replacing complex smartphone UI interactions with natural voice conversation.
 It manages daily routines (medications, reminders, calendar), enables social connectivity (WhatsApp messaging and calls, Facebook), provides entertainment (YouTube, music, bhajan), reads news and notifications aloud, and acts as an emergency safety net by monitoring health metrics and alerting family or emergency services when thresholds are exceeded.
 
@@ -18,12 +18,12 @@ Affected parties: emergency services and pre-nominated family contacts who recei
 
 ## Platform & Tech Stack
 
-Platforms: iOS (iPhone) and Android smartphones. The app must run as a 24/7 always-on background service on both platforms.
+Platforms: iOS (iPhone) for the MVP — a native Swift/SwiftUI app. Android is deferred to v2. On iOS the safety-critical background behaviour required is that medication and other safety reminders fire reliably; always-on wake-word activation is deferred to v2 (Architecture Constraint 4).
 
 Technology constraints (fixed — see Architecture Constraints):
 - All AI inference must run on-device. No cloud LLM calls.
-- Cross-platform framework: **React Native** (iOS + Android from a single codebase)
-- On-device LLM: **LLaMA** (specific variant — e.g. LLaMA 3.2 3B/8B — to be selected by architect based on device RAM constraints)
+- Implementation platform: **native Swift / SwiftUI** (iOS MVP). Android is deferred to v2; the cross-platform framework question is re-opened then (Open Decision 4).
+- On-device LLM (brain): **on-device transformer selected by benchmark**; the shipped default is a Qwen 3 4B Nepali intent fine-tune (`ModelCatalog.intentQwen4BS43`, referenced by `AppCoordinator.defaultBrainModelID`). LLaMA variants remain candidates (Open Decision 3).
 
 Required integrations:
 - Google Calendar API (calendar and scheduling)
@@ -41,7 +41,7 @@ Required integrations:
 
 The following constraints are non-negotiable. They must be enforced in all design and implementation decisions.
 
-1. All AI inference on-device only. No cloud LLM API calls. User voice, conversations, health data, and personal profiles must never leave the device for AI processing. Network access is permitted only for third-party integrations (Calendar API, WhatsApp, YouTube, Facebook) and encrypted remote configuration push.
+1. All AI inference on-device only. No cloud LLM API calls. User voice, conversations, health data, and personal profiles must never leave the device for AI processing. Network access is permitted only for third-party integrations (Calendar API, WhatsApp, YouTube, Facebook) and encrypted remote configuration push. **Recorded exception:** the cloud voice stack (Open Decision 12) is a consent-gated exception covering voice transcription only. It is not hypothetical and not off-by-default: the shipped engine stack falls back to the cloud engine (`?? .gemini`, `ios/ElderlyAssistant/App/AppCoordinator.swift:1612-1613`), so this exception is what makes the shipped behaviour conformant, and the consent/disclosure requirements in Open Decision 12 are binding.
 
 2. Remote configuration must be end-to-end encrypted. Family members push config (schedules, contacts, reminders, thresholds) to the parent's phone. The remote config channel must use end-to-end encryption so that no intermediate server can read the configuration payload.
 
@@ -71,7 +71,7 @@ Accessibility:
 - Localisation: all UI strings must be externalised for translation. At minimum, support the primary user's configured language for all TTS (text-to-speech) output.
 
 Privacy:
-- No personal data (voice, health, contacts, conversations) transmitted to cloud for AI processing.
+- No personal data (voice, health, contacts, conversations) transmitted to cloud for AI processing, except under the recorded cloud voice-stack exception (Open Decision 12), which requires explicit user consent and plain-language disclosure. The shipped default engine stack is the cloud engine, so the consent/disclosure obligation attaches to the default path, not only to an opt-in.
 - Health data accessed via HealthKit/Health Connect must follow platform data minimisation principles — request only the specific data types required.
 - Remote config payloads must be end-to-end encrypted (key held only on the two devices).
 - Logs must not contain PII (names, health values, contacts). Log sanitiser required.
@@ -90,6 +90,11 @@ Quality:
 - All paired review enabled on implementation tasks (safety-critical project).
 - Max rework iterations on implement: 5 (sufficient for complex multi-platform code).
 
+Release gates (recorded 2026-09-13 from final-sign-off flip-condition 4):
+- **Release-build log-surface gate.** `ios/tools/check-release-log-safety.sh` must pass. It is wired into `ios/build.sh` ahead of every test scope, so no unit or Release gate can run with a re-introduced raw transcript print or raw error-body print. It is a build-blocking gate, not a report.
+- **Pre-release device check.** On a Release build on a real device, confirm that no transcript content, key material, or raw upstream body appears in the device console or in a sysdiagnose capture. The result is recorded in the release checklist before submission.
+- **Post-deploy monitoring.** A log-volume anomaly alert (alert on anomalous console/telemetry volume attributable to transcript or error paths) and an explicit crash/telemetry retention window must be defined and owned before the first App Store submission. Owner: Anjan Poudel (project owner). Review by 2026-10-13, aligned with Open Decision 11.
+
 ## Open Decisions
 
 The following decisions could not be determined from the provided brief. They must be resolved before running `/sdd-run`.
@@ -98,9 +103,9 @@ The following decisions could not be determined from the provided brief. They mu
 
 2. **GDPR applicability.** If the app is distributed to users in the EU or UK, GDPR applies to health and biometric data. Assumed: GDPR compliance is deferred to a future release. The architecture must not make decisions that would block future GDPR compliance (e.g. data export, right to erasure). Confirm or correct before running /sdd-run.
 
-3. ~~**On-device LLM model selection.**~~ **RESOLVED:** LLaMA. Architect to select specific variant (e.g. LLaMA 3.2 3B or 8B) based on device RAM and performance benchmarks.
+3. ~~**On-device LLM model selection.**~~ **RESOLVED:** LLaMA. Architect to select specific variant (e.g. LLaMA 3.2 3B or 8B) based on device RAM and performance benchmarks. **Amended 2026-09-13:** the shipped default brain is a Qwen 3 4B Nepali intent fine-tune (`ModelCatalog.intentQwen4BS43`); this records the selection actually shipped rather than a new decision. LLaMA variants remain candidates.
 
-4. ~~**Cross-platform framework vs. native.**~~ **RESOLVED:** React Native (single codebase for iOS + Android).
+4. ~~**Cross-platform framework vs. native.**~~ **RESOLVED (amended 2026-09-13): native Swift / SwiftUI for the iOS MVP.** The original answer (React Native, single codebase for iOS + Android) is superseded: the shipped product is a native Swift/SwiftUI iOS app and Android is deferred to v2. The cross-platform question is re-opened when Android work starts.
 
 5. ~~**Remote configuration push channel mechanism.**~~ **RESOLVED:** Double Ratchet over an in-house minimum-trust "config broker" relay; APNs/FCM used only for wake-up. Broker never sees plaintext. See `docs/remote-config-channel-design.md` for full design, including how `FamilyNotifier` is rewired around it. Open items #1–#4 in that doc are for architect follow-up but do not block implementation of the L1 skeleton.
 
@@ -114,12 +119,18 @@ The following decisions could not be determined from the provided brief. They mu
 
 10. ~~**Voice activation keyword.**~~ **RESOLVED FOR iOS MVP:** Wake word is deferred to v2. The iOS MVP uses scheduled auto-activation plus a large "Talk to Assistant" control. Research continues on a Nepali on-device KWS path.
 
-11. ~~**Security-test blocking findings B3–B7.**~~ **DESCOPED BY HUMAN DECISION (2026-09-13).** `security-test.md` returned `SECURITY-NO_GO` (reviewed at rev `fb6e03c`) with blocking findings B1–B7. The developer accepted the residual risk of B3–B7 and removed them from the scope of `final-sign-off`:
+11. ~~**Security-test blocking findings B3–B7.**~~ **DESCOPED BY HUMAN DECISION (2026-09-13). Review by: 2026-10-13 (30 days). Owner: Anjan Poudel (project owner).** `specs/security-test.md` returned `SECURITY-NO_GO` (reviewed at rev `fb6e03c`) with blocking findings B1–B7. The developer accepted the residual risk of B3–B7 and removed them from the scope of `final-sign-off`:
     - **B3** — sensitive-action biometric/PIN gate not wired (`SpeakerBiometricService.swift` NOT WIRED; no PIN, no lockout); sensitive commands execute on confirmation alone.
     - **B4/B6** — no emergency-call module; health/family alert stubs return success silently instead of failing visibly.
     - **B5** — remote-config chain absent (encrypted push unimplemented) and model downloads served over cleartext LAN HTTP (`ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:546,651`), against the TLS 1.2+ bullet in Standards.
-    - **B7** — the default cloud voice stack (Gemini) sits against the Privacy bullet's "no user data leaves the device for AI processing".
-    Consequences: the security-test categories *Auth bypass*, *Emergency call trigger validation* and *Encrypted config payload verification* are closed by decision, not by remediation; the report's scope statement (re-test if those features ship) stands. **B1** (raw Release-build transcript prints) and **B2** (API key / raw upstream error body reaching logs via `error_code`) are **not** descoped and remain blocking; their remediation is T-049/T-050 (defined, not yet implemented). This entry records risk acceptance — it is not evidence that the findings are fixed.
+    - **B7** — the default cloud voice stack (Gemini) sits against the Privacy bullet's "no user data leaves the device for AI processing". Recorded as an explicit exception with a consent/disclosure amendment under Open Decision 12.
+    Consequences: the security-test categories *Auth bypass*, *Emergency call trigger validation* and *Encrypted config payload verification* are closed by decision, not by remediation; the report's scope statement (re-test if those features ship) stands. **B1** (raw Release-build transcript prints) and **B2** (API key / raw upstream error body reaching logs via `error_code`) were **not** descoped. Their remediation landed as T-049/T-050 (`02f22dd`, `b64385b`, `5513323`, on `master` via `57abb2e`) and the `security-test` re-run at that revision returned **SECURITY-GO**. This entry records risk acceptance for B3–B7 — it is not evidence that those findings are fixed, and the time box above requires this acceptance to be re-reviewed by 2026-10-13.
+
+12. ~~**Cloud voice-stack exception (B7).**~~ **RECORDED AS AN EXCEPTION WITH CONSENT AMENDMENT (2026-09-13). Owner: Anjan Poudel (project owner).** The shipped stack offers a cloud voice engine (Gemini) alongside on-device engines. This sits against Architecture Constraint 1 and the Privacy standard ("no user data leaves the device for AI processing"), so it is recorded here as a deliberate, bounded exception rather than left as a silent divergence:
+    - **Scope:** voice transcription (and only that) may be sent to the configured cloud voice provider when the cloud engine stack is active — which is the shipped default (`?? .gemini`, `ios/ElderlyAssistant/App/AppCoordinator.swift:1612-1613`). On-device engines remain a first-class, selectable peer; no health data, contacts, or profile content is included.
+    - **Consent and disclosure:** the cloud path requires explicit user consent and plain-language disclosure at the point of selection, plus a visible indicator while a cloud engine is active. A user must be able to switch back to an on-device engine without losing assistant functionality.
+    - **Credential handling:** the provider key travels in a header, never in a URL, and never reaches logs (B2/T-050 is the binding precedent).
+    - **Review:** consent/disclosure copy and the engine-selection UX are to be reviewed before the first App Store submission, and this exception re-reviewed with Open Decision 11 by 2026-10-13.
 
 ## Agent Principles
 
