@@ -342,6 +342,103 @@ FIELD_OF_SLOT = {"app": "requestedApp", "symptom": "topic", "song": "topic"}
 UNCHECKED = {"condition", "condition_l", "distress", "state", "refuse"}
 DECORATOR_ANCHOR = 2     # axes before the bank axes: lead, polite
 
+# --- teacher-label repair ([DISTILL] phase-2) ------------------------------
+# The teacher's slot habits on synthesized frames contradict the corpus's own
+# convention in measurable ways (measure with src/audit_distill_labels.py):
+# 6.2% of the phase-2 rows carry a `time` that drops or swaps the utterance's
+# qualifier (`बिहान ७ बजे` -> `७ बजे`, `सवा ५` -> `साढे ५ बजे` — 5:15 taught
+# as 5:30) against 0.9% in the pre-distill corpus and 0 of 20 in the golden
+# corpus, and some contacts come back romanized (`सुनिता` -> `sunita`) where
+# the corpus keeps Devanagari. Phase-2 arm A showed the student copies the
+# habit straight into the gate (time F1 0.500 -> 0.000 unconstrained), so
+# these two fields are taken from the UTTERANCE — the frame wrote the phrase
+# verbatim, and the utterance cannot be wrong about itself. The teacher keeps
+# every field the frame did not dictate.
+TIME_BANK_SORTED = sorted(BANKS["time"], key=len, reverse=True)
+NEPALI_DIGITS = str.maketrans("०१२३४५६७८९", "0123456789")
+ROMAN2DEV = {lat: dev for dev, lat in
+             list(zip(BANKS["name"], BANKS["name_l"]))
+             + list(zip(BANKS["rel"], BANKS["rel_l"]))}
+
+
+def norm_text(value) -> str:
+    return " ".join(str(value).translate(NEPALI_DIGITS).split())
+
+
+def canonical_time(phrase: str) -> str:
+    """Bank time phrase -> corpus form: a clock time keeps a trailing बजे
+    (bank `साढे ६` -> `साढे ६ बजे`, matching the golden corpus's
+    `साढे ७ बजे`); a day-scale phrase (`भोलि बिहान`) is left as it is."""
+    if phrase.endswith("बजे") or not any(c.isdigit() for c in phrase):
+        return phrase
+    return phrase + " बजे"
+
+
+def repair_time(utterance: str, value):
+    """Rewrite ONLY a time label that contradicts the utterance's own
+    qualifiers (see audit_distill_labels.qualifier_mismatch); the label then
+    becomes the phrase the utterance actually says. A teacher value that
+    keeps the qualifiers is left alone even when it is longer than the bank
+    phrase — `हरेक दिन बिहान ७ बजे` is a better reminder time than the bank's
+    `बिहान ७ बजे`, and an over-eager repair would drop the recurrence."""
+    from audit_distill_labels import qualifier_mismatch
+
+    if not value or qualifier_mismatch(utterance, value) is None:
+        return value
+    u = norm_text(utterance)
+    for phrase in TIME_BANK_SORTED:
+        if norm_text(phrase) in u:
+            return canonical_time(phrase)
+    return value
+
+
+# A contact is a name, not a clause. The corpus labels a name as the
+# transcript writes it (`nati lai call gar na` -> `nati`, `Buba lai ...` ->
+# `Buba`; see the audit's contact@* rows — only 3/1481 pre-distill contacts
+# carry a space-separated case marker), so any contact longer than two
+# tokens, or containing a verb, is a teacher mislabel regardless of that
+# convention: the phase-2 teacher put the entire clause
+# `सन्देश पठाउ सञ्जु लाई` in `contact` on 3 send_message rows.
+CONTACT_MAX_TOKENS = 2
+CONTACT_VERBS = ("पठाउ", "पठा", "भन", "गर", "कल", "फोन")
+
+
+def bank_name_in(utterance: str) -> str:
+    """The longest bank name/relationship the utterance itself names."""
+    u = norm_text(utterance)
+    best = ""
+    for name in list(BANKS["name"]) + list(BANKS["rel"]):
+        if len(name) > len(best) and norm_text(name) in u:
+            best = name
+    return best
+
+
+def repair_contact(utterance: str, value):
+    """Two contact mislabels, both checked against the corpus's own rule
+    (the label is the name AS THE TRANSCRIPT WRITES IT):
+
+    1. a romanized bank name the utterance says in Devanagari is written
+       back in Devanagari (`सुनितालाई...` labelled `sunita` — the corpus
+       labels that transcript `सुनिता`);
+    2. a whole clause in the field (`सन्देश पठाउ सञ्जु लाई`) is replaced by
+       the bank name the utterance actually names.
+
+    Anything else is left exactly as the teacher wrote it: the corpus
+    mixes Devanagari and romanized contact labels by register, so
+    "Devanagari everywhere" would be an over-correction."""
+    if not value or not isinstance(value, str):
+        return value
+    v = value.strip()
+    dev = ROMAN2DEV.get(v.lower())
+    if dev and norm_text(dev) in norm_text(utterance):
+        return dev
+    if (len(v.split()) > CONTACT_MAX_TOKENS
+            or any(tok in CONTACT_VERBS for tok in v.split())):
+        name = bank_name_in(utterance)
+        if name:
+            return name
+    return value
+
 # Per-intent take. Shape follows what the gates measure: closed-intent
 # accuracy is dominated by call/reminder/message, the emergency gate by
 # pleas (incl. the plea+pain boundary), and the two slot F1 gates by
@@ -577,6 +674,10 @@ def to_row(row: dict, seed: int) -> dict | None:
         else:
             value = obj.get(field)
         out[field] = value
+    # Repair the two fields the teacher proved unreliable on synthesized
+    # frames (time qualifiers, contact script) — see TIME_BANK_SORTED.
+    out["time"] = repair_time(row["utterance"], out["time"])
+    out["contact"] = repair_contact(row["utterance"], out["contact"])
     out["response"] = pick_response(row["intent"], out, seed)
     out["id"] = hashlib.sha256(
         f"{SOURCE_PREFIX}|{row['register']}|{row['intent']}|{row['utterance']}"
@@ -586,9 +687,47 @@ def to_row(row: dict, seed: int) -> dict | None:
     return out
 
 
+def revalidate(path: Path) -> None:
+    """Apply the label repair to an ALREADY-labelled distill file — no
+    teacher, no GPU. The untouched teacher rows are written once to
+    <name>_teacher_raw.jsonl so the difference between what the teacher said
+    and what the student is taught stays auditable, and the repaired file is
+    re-audited with the same qualifier check that found the problem."""
+    from audit_distill_labels import qualifier_errors
+
+    rows = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+    raw_path = path.with_name(path.stem + "_teacher_raw.jsonl")
+    if not raw_path.exists():
+        raw_path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n"
+                                    for r in rows), encoding="utf-8")
+    changed = Counter()
+    for r in rows:
+        before = (r.get("time"), r.get("contact"))
+        r["time"] = repair_time(r["utterance"], r.get("time"))
+        r["contact"] = repair_contact(r["utterance"], r.get("contact"))
+        changed["time"] += r["time"] != before[0]
+        changed["contact"] += r["contact"] != before[1]
+    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n"
+                            for r in rows), encoding="utf-8")
+    left = qualifier_errors(rows)
+    print(f"[distill/revalidate] {len(rows)} rows; repaired "
+          f"time {changed['time']}, contact {changed['contact']}; "
+          f"teacher originals -> {raw_path.name}")
+    print(f"[distill/revalidate] qualifier contradictions left: {len(left)} "
+          f"(was 105 before the repair)")
+    for r, said, wrote in left[:5]:
+        print(f"    {r['intent']:14s} utt={r['utterance'][:44]!r} "
+              f"time={r['time']!r} (said {said}, wrote {wrote})")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--teacher", default=TEACHER_DEFAULT)
+    parser.add_argument("--revalidate", action="store_true",
+                        help="repair an existing data/distill.jsonl in place "
+                             "(time from the utterance's bank phrase, "
+                             "contacts back to Devanagari) and re-audit; "
+                             "no teacher, no GPU")
     parser.add_argument("--probe", type=int, default=0,
                         help="label only N rows spread across intents, "
                              "print a table, write nothing")
@@ -598,6 +737,11 @@ def main() -> None:
 
     seed = int(cfg.get("mixture.seed", 42))
     template = (ROOT / "seeds" / "prompt_template.txt").read_text(encoding="utf-8")
+
+    if args.revalidate:
+        revalidate(OUT_PATH)
+        return
+
     chosen = select(seed, _existing_keys(), golden_keys())
     if args.limit:
         chosen = chosen[:args.limit]
