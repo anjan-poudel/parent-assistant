@@ -114,6 +114,17 @@ to 0. Note that `draw_key` hashes the FULL row JSON, so a repaired label
 re-draws that row's key: the repaired rebuild has the same 4307 rows but
 a new file order, and 5 repaired rows cross the 5% train/valid boundary.
 
+A second, separate defect is coverage, not correctness: the synthesized
+emergency frames are dominated by pain templates. Against the corpus mix,
+falls are 16 vs 1 and chest pain 16 vs 1, while pain-dominant rows are 7 vs
+49 (7x) -- and the one emergency row the canonical-order distilled arm
+missed is exactly the fall plea (म लडेँ, उठ्न सकिन -> none).
+INTENT_TARGETS balances the COUNT per intent but nothing balances the
+trigger phrasing WITHIN an intent, so the frame pool decides the
+sub-class prior. Fix on the generator side (sample frames to the corpus
+trigger mix): dropping the pain surplus cannot restore the falls and
+chest phrasings it starved.
+
 ## Training (stage 4, external)
 
 Recommended: unsloth or axolotl QLoRA on the 4090 box (same machine as
