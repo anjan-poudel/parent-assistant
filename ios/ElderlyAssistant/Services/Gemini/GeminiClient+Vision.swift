@@ -112,9 +112,12 @@ extension GeminiClient {
             return guidance
         } catch {
             if !emittedFailure {
+                // T-050/B2: content-free code, never the error's
+                // description (it embeds the failing URL — see
+                // `ErrorCodeMapper`).
                 emit(eventType, outcome: "failure",
                      durationMs: Int(Date().timeIntervalSince(start) * 1000),
-                     errorCode: String(describing: error))
+                     errorCode: ErrorCodeMapper.code(for: error))
             }
             throw error
         }

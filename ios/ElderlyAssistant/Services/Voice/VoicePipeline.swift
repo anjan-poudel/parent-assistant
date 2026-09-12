@@ -851,9 +851,15 @@ final class VoicePipeline {
                 // [TURN-TIMING] The router's synchronous decision is made.
                 self.turnTracer?.mark("router_done")
             case .failure(let err):
+                // T-050/B2: a content-free code (domain + code), never
+                // the error's description — a transport error's
+                // description embeds the failing URL.
+                let code = ErrorCodeMapper.code(for: err)
                 self.emit("recognition_failed", outcome: "failure",
-                          errorCode: String(describing: err))
-                let msg = "STT: \(err)"
+                          errorCode: code)
+                // The error callback is surfaced to the UI/logs as a
+                // label: same content-free code, prefixed for context.
+                let msg = "STT: \(code)"
                 DispatchQueue.main.async { self.onSTTError?(msg) }
                 // [TURN-TIMING] No reply can exist — close the turn.
                 self.turnTracer?.endTurn()

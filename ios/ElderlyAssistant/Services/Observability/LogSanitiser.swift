@@ -14,8 +14,28 @@ import Foundation
 ///  - unknown keys are dropped rather than logged, so a caller adding a new
 ///    field cannot leak PII by accident,
 ///  - values on allowed keys are still scrubbed for obvious PII patterns
-///    (phone numbers, e-mails, blood-pressure readings) as defence in depth.
+///    (phone numbers, e-mails, blood-pressure readings) as defence in depth,
+///  - the top-level `error_code` is bounded to a code shape (see
+///    `boundErrorCode`) — [T-050/B2] it was the one content-bearing field
+///    copied through unscrubbed, which is how a key-bearing URL reached the
+///    console.
 struct LogSanitiser {
+
+    /// Longest `error_code` preserved verbatim at the bus boundary.
+    static let maxErrorCodeLength = 64
+
+    /// Codes are identifier-shaped: letters, digits and `._:-,;`.
+    /// Anything else — spaces, `=`, quotes, `/`, `@`, braces, i.e. the
+    /// shape an `Error` or `URL` description arrives in — is not a code
+    /// and is replaced with `[redacted]` rather than logged.
+    ///
+    /// [T-050 / finding B2] `error_code` is a top-level event field copied
+    /// through with no scrub, which is how `String(describing: URLError)`
+    /// carried a key-bearing URL to the console. Emitters are fixed to
+    /// pass content-free codes (`ErrorCodeMapper`); this bound is the
+    /// defence in depth that holds for emitters not yet written.
+    private static let safeErrorCodePattern = try! NSRegularExpression(
+        pattern: #"^[A-Za-z0-9][A-Za-z0-9._:,;\-]*$"#)
 
     /// Keys known to carry non-PII values. Anything else is dropped.
     static let allowedKeys: Set<String> = [
@@ -56,9 +76,25 @@ struct LogSanitiser {
             eventType: event.eventType,
             durationMs: event.durationMs,
             outcome: event.outcome,
-            errorCode: event.errorCode,
+            errorCode: boundErrorCode(event.errorCode),
             metadata: cleanMetadata
         )
+    }
+
+    /// Bounds a top-level `error_code` (T-050). Order matters: scrub first
+    /// (phone / e-mail / BP shapes), then require the code charset — a
+    /// value that fails it is not a code at all, so it is replaced rather
+    /// than logged. A charset-valid but over-long value is truncated
+    /// (still content-free by charset, and codes are short by design).
+    private func boundErrorCode(_ errorCode: String?) -> String? {
+        guard let errorCode, !errorCode.isEmpty else { return nil }
+        let scrubbed = scrubValue(errorCode)
+        let range = NSRange(scrubbed.startIndex..<scrubbed.endIndex, in: scrubbed)
+        guard Self.safeErrorCodePattern.firstMatch(in: scrubbed, options: [],
+                                                   range: range) != nil else {
+            return "[redacted]"
+        }
+        return String(scrubbed.prefix(Self.maxErrorCodeLength))
     }
 
     private func scrubValue(_ value: String) -> String {

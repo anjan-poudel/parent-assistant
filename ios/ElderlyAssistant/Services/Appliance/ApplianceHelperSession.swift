@@ -186,8 +186,10 @@ final class ApplianceHelperSession: ObservableObject {
                 imageData: prepared.jpegData, mimeType: "image/jpeg",
                 question: question, languageHint: languageHint)
         } catch {
+            // T-050/B2: content-free code, never the error's description
+            // (it embeds the failing URL — see `ErrorCodeMapper`).
             emit("appliance_identify_failed", outcome: "failure",
-                 errorCode: String(describing: error))
+                 errorCode: ErrorCodeMapper.code(for: error))
             state = .unavailable(message: Self.failureMessage(for: error, locale: locale))
             return
         }

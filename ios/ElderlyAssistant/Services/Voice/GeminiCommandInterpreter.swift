@@ -104,7 +104,11 @@ final class GeminiCommandInterpreter: CommandInterpreter {
                     }
                 }
             } catch {
-                self.emit("interpret_failed", outcome: "failure", errorCode: String(describing: error))
+                // T-050/B2: content-free code, never the error's
+                // description (it embeds the failing URL — see
+                // `ErrorCodeMapper`).
+                self.emit("interpret_failed", outcome: "failure",
+                          errorCode: ErrorCodeMapper.code(for: error))
                 await MainActor.run {
                     guard let geminiError = error as? GeminiClient.GeminiClientError,
                           case .dailyCapReached = geminiError else {

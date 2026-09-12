@@ -177,3 +177,193 @@ tracked modifications as before the review).
 The earlier unit-gate result stands unchanged: the correction pass touched documentation only, so
 the `ios/build.sh test:unit` run (2672 tests, 2 pre-existing unrelated failures, all
 task-relevant tests passed) remains valid and was deliberately not re-run.
+
+---
+
+# T-049 + T-050 Implementation Notes — Release transcript prints (B1) + API-key/error-code log leak (B2)
+
+- **Description:** security rework of findings B1 and B2 from `.ai-sdd/outputs/security-test.md`
+  (SECURITY-NO_GO), one commit per task.
+- **Tasks:** T-049 (`plan-tasks/tasks/TG-02-voice-interface/T-049-release-build-transcript-prints.md`,
+  finding B1); T-050 (`plan-tasks/tasks/TG-01-foundation-infrastructure/T-050-api-key-error-code-log-leak.md`,
+  finding B2).
+- **Worktree:** `/Users/anjan/workspace/projects/elderly-ai-assistant/.claude/worktrees/sec-rework-b1-b2`
+- **Branch:** `worktree-sec-rework-b1-b2`, base HEAD `87ccbee` (master tip)
+- **Date:** 2026-09-13
+- **Commits:** `02f22dd` (T-049); the T-050 commit on this branch is the one titled
+  `iOS: T-050 keep the Gemini API key and upstream bodies out of logs` (final SHA in the
+  hand-back report — not self-cited here to avoid a circular reference).
+
+## T-049 — finding B1: Release-compiled transcript prints
+
+**Mechanism chosen** (of the options the task allows): `#if DEBUG` guards — the construct the two
+Gemini engines already use (`GeminiSpeechRecognizer.swift:122-125, 129-135`;
+`GeminiCommandInterpreter.swift:62-70`) — **plus** a content-free reduction of the raw-error
+prints. `project.yml` sets `SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG` for the Debug
+configuration only, so a guarded print is not compiled into Release at all: the transcript cannot
+reach *any* Release sink, present or future. A test-only guard was rejected as the primary
+mechanism because the unit suite itself runs in Debug, where a re-introduced unguarded print
+still reads as "present and working".
+
+| File:line | Change |
+|---|---|
+| `ios/ElderlyAssistant/Services/Voice/WhisperSpeechRecognizer.swift:819` | `print("[whisper_stt] transcript=" + joined)` wrapped in `#if DEBUG` with a comment recording why (WER-review aid; NFR-016 content; bypasses the sanitised bus). |
+| `ios/ElderlyAssistant/Services/Voice/WhisperKitSpeechRecognizer.swift:495` | Same wrap for `print("[whisperkit_stt] transcript=" + joined)`. |
+| `WhisperKitSpeechRecognizer.swift:501-508` | Raw-`error` print replaced by `#if DEBUG` + `domain=\(nsError.domain) code=\(nsError.code)` (content-free even in Debug). |
+| `WhisperSpeechRecognizer.swift:836-845` | Raw-`error` print reduced to `domain` + numeric `code` and left **unguarded on purpose**: the bus event (`errorCode: "whisper_error"`) carries the Release-side signal, while attempt/duration diagnostics survive in Release and they are PII-free. This site was not on the task's list; the AC ("no raw error object … printed by either engine") covers it, so it was fixed with the same shape. |
+
+**Preserved in Release (PII-free, intentionally still compiled in):**
+`WhisperSpeechRecognizer.swift:789` and `:809-812` (`empty_transcript attempt=…`;
+`transcribed attempt=… duration_ms=… audio_seconds=… chars=…`) and
+`WhisperKitSpeechRecognizer.swift:482, 487` (`empty_transcript duration_ms=…`;
+`transcribed duration_ms=… chars=…`). Counts and durations, never content.
+
+**Regression guard (landed, not deferred):** `ios/tools/check-unguarded-transcript-prints.sh`
+— a source gate wired into every test run from `ios/build.sh` `run_tests()` (fails the run before
+the scope `case`). It walks `ios/ElderlyAssistant/**/*.swift`, tracks the `#if` stack per file in
+awk (a `#else` inside a `#if DEBUG` region flips the region to *not* Debug, so the guard cannot
+be defeated by an `#else` that holds the print), skips comment lines, and flags
+`print(`/`NSLog(`/`os_log(` lines that mention `transcript` as a word of its own (bare
+`empty_transcript` event names are not content; `transcript=` is). It also exits 1 if either
+engine file is missing, so the guard cannot silently pass once the code it guards has moved.
+
+Proof the guard can fail (a guard that cannot fail is not a guard):
+- synthetic regression — an unguarded `print("[whisper_stt] transcript=…")` added to a copy of the
+  tree → exit 1 with the exact `file:line`;
+- missing engine file → exit 1 with "guarded engine file is missing";
+- real tree → exit 0, printed in both gate runs as
+  `✓ no transcript-content print can be compiled into a non-Debug configuration`.
+
+**Android verification (verified, not assumed):** `android/` has 20 Kotlin files and **no STT or
+speech-recognition code at all** (`grep -ri whisper|stt|speech` → no sources), so there is no
+counterpart of this fix on Android. The only transcript-shaped string in the tree is iOS-side.
+
+## T-050 — finding B2: the API key and raw upstream bodies must not reach a log sink
+
+**The leak of record:** the key rode in the request URL query (`…?key=<API_KEY>`), a transport
+failure rethrew URLSession's `URLError` (whose description embeds the failing URL), the emitter
+sites stringified it with `String(describing: error)` into `error_code`, and `LogSanitiser`
+copied `error_code` through unscrubbed. Four independent fixes:
+
+**(a) The key travels in a header, never a URL** — `GeminiClient.swift:233-254` (streaming) and
+`:400-416` (unary): both URL builders dropped `?key=…` / `&key=…`, both requests now
+`setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")`. URLs are recorded by error
+descriptions, proxies and crash reports; headers are not. The URL-shape-asserting tests were
+updated to assert the header and the absence of `key=` (`GeminiKeyLogBoundaryTests`, new).
+
+**(b) One shared mapping helper, six `String(describing: error)` sites replaced** — new
+`ios/ElderlyAssistant/Services/Observability/ErrorCodeMapper.swift`:
+`static func code(for: Error) -> String` consults the `LogSafeErrorCode` protocol first (domain
+error types name themselves: `GeminiClientError` → `not_configured`/`invalid_url`/
+`invalid_response`/`http_<status>`/`empty_response`/`blocked_by_provider`/`daily_cap_reached`;
+`RecognitionError` → e.g. `timed_out`, `recognition_failed`) and otherwise falls back to the
+`NSError` bridge: `url_error_<code>` for `NSURLErrorDomain` (so `-1004` unreachable host /
+`-1001` timeout stay diagnosable), else a charset-filtered domain token + numeric code. It never
+reads `localizedDescription`, `String(describing:)`, `userInfo` or any URL. Call sites are one
+line each:
+
+| Site | Was | Now |
+|---|---|---|
+| `GeminiSpeechRecognizer.swift:144` | `String(describing: error)` | `ErrorCodeMapper.code(for: error)` |
+| `GeminiCommandInterpreter.swift:111` | `String(describing: error)` | `ErrorCodeMapper.code(for: error)` |
+| `VoicePipeline.swift:857-864` | `String(describing: err)` **and** `let msg = "STT: \(err)"` | `let code = ErrorCodeMapper.code(for: err)`; `errorCode: code`; `msg = "STT: \(code)"` |
+| `GeminiClient+Vision.swift:120` | `String(describing: error)` | `ErrorCodeMapper.code(for: error)` |
+| `ApplianceHelperSession.swift:192` | `String(describing: error)` | `ErrorCodeMapper.code(for: error)` |
+| `NepaliCalendarPlugin.swift:92` | `String(describing: error)` | `ErrorCodeMapper.code(for: error)` |
+
+**(c) The boundary now bounds `error_code` whatever an emitter does** —
+`LogSanitiser.swift:24-38, 79, 85-98`: `boundErrorCode(_:)` scrubs first (phone/e-mail/BP
+patterns), then requires a code charset (`^[A-Za-z0-9][A-Za-z0-9._:,;\-]*$`); a value that fails
+it is *not a code* and becomes `"[redacted]"`; a charset-valid value is capped at
+`maxErrorCodeLength = 64`. The allow-list (`:41-55`), the unscrubbed `stages` guarantee, router
+event codes (`jsonRemnant`, `dup_source`, `reason.rawValue`), plugin collision lists (comma-joined),
+`"429"` and `"a,b"` all still pass verbatim (regression tests).
+
+**(d) The raw upstream body is dropped** — `GeminiClientError.httpError(status:body:)` became
+`httpError(status: Int)` (`GeminiClient.swift:50-57`); the throw at `:444` no longer builds a
+`String(data:)`; the `gemini_http_error` event still carries the status (`errorCode: "429"`), so
+diagnostics survive without upstream text. The two pattern-matching tests
+(`GeminiClientTests.swift:59`, `GeminiCostGovernorTests.swift:291`) were updated
+compile-driven; assertion strength is unchanged.
+
+**Tests added (19, all passing in the gate run — verified per-test in the `.xcresult`):**
+
+| Test | Proves |
+|---|---|
+| `GeminiKeyLogBoundaryTests` (9) | unary + streaming requests carry the key in `x-goog-api-key` and not in the URL; `ErrorCodeMapper` emits content-free codes and never reads descriptions (a `LocalizedError` whose `errorDescription` carries the sentinel maps to a code without it); the interpreter (`interpret_failed`) and STT (`transcribe_failed`) emitter sites map a key-bearing `URLError` to `url_error_-1004`/`url_error_-1001`; a *rogue* future emitter that stringifies a key-bearing error is still bounded at the `ConsoleObservabilityBus` sink; an HTTP 429 whose body contains the sentinel keeps the status and loses the body. |
+| `LogSanitiserTests` (10) | the existing contract (allow-list/drop, `stages` verbatim, PII scrub, top-level fields unchanged) plus the new bound: content-free codes verbatim, nil/empty → nil, a key-bearing `URLError` *description* → `[redacted]` (with a sanity assertion that the raw description really does contain the sentinel), bare URL and quoted descriptions redacted, over-long code-shaped value truncated to 64. |
+
+**How the end-to-end test exercises the real path** —
+`testForcedTransportFailureLeaksNoKeyMaterialToTheConsoleSink`: a real `GeminiClient` configured
+with the sentinel key, a transport that fails exactly the way URLSession does (throws `URLError`
+carrying the attempted request URL in `NSURLErrorFailingURLErrorKey`/`…URLStringErrorKey`), and
+the real `ConsoleObservabilityBus` (`LogSanitiser` + `print`) as the sink, driven through the real
+`identifyAppliance` → `send` → error-handling path. Process stdout is redirected to a temp file
+with `dup`/`dup2`/`fflush` around the call, and the assertions are made against the *printed
+line*, not an in-memory event copy — with anti-vacuous-capture guards
+(`logged.contains("gemini_vision_identify")` and `errorCode=url_error_`) so a silent capture
+cannot pass. NFR-016: the sentinel `sentinel-not-a-real-key-000` is deliberately not key-shaped,
+and the upstream bodies in the tests are synthetic.
+
+**Android verification (verified, not assumed):** `android/` has no Gemini client
+(`grep -ri gemini|generativelanguage` → 0 matches) and no URL-borne key, so (a), (b) and (d) have
+no counterpart. Its only `error_code` emitters are `null` and the constant
+`"fcm_delivery_failed"` (`FamilyNotifier.kt:32`), and `LogcatObservabilityBus`
+(`PreferencesEncryptedStorage.kt:70-78`, still a documented dev stub pending T-004) logs only
+component/eventType/outcome/metadata — never `errorCode` — so (c) has no counterpart either.
+
+## Gate — exact command and raw result
+
+```
+cd /Users/anjan/workspace/projects/elderly-ai-assistant/.claude/worktrees/sec-rework-b1-b2/ios
+./build.sh test:unit
+```
+
+Result: `Executed 2691 tests, with 6 tests skipped and 3 failures (0 unexpected) in 311.921 s`
+→ **2683 passed, 2 distinct failing tests, 6 skipped**; exit 65.
+
+Both failing tests are **pre-existing at the base `87ccbee` and unrelated to this rework**, and
+were not touched (the coordinator confirmed this and instructed not to edit them):
+
+- `BrainModelSelectionTests.testAvailableBrainEntriesIsTheCuratedList()`
+  (`…swift:18`) — expects 4 brain ids; `ModelCatalog.availableBrainEntries` (`ModelCatalog.swift:812-818`)
+  now lists 5, headed by `intentQwen4BS43` = `intent-ne-qwen4b-s43-q4km`.
+- `InterpreterAvailabilityTests.testDefaultBrainModelIsTheRealHostedLlamaArtifact()`
+  (`…swift:172, 182`) — expects `intentQwenS43`; `AppCoordinator.swift:1170` sets
+  `defaultBrainModelID = ModelCatalog.intentQwen4BS43` (a LAN/local URL, hence the second failure).
+
+Root cause: commit `34c81b9` ("ship the gate-passing 4B intent brain (slim, seed 43)"), which is an
+**ancestor of the base** `87ccbee`. Proof of non-causation without a bisect: those four files
+(`ModelCatalog.swift`, `AppCoordinator.swift`, the two test files) are byte-identical on this
+branch to `87ccbee` — `git diff 87ccbee -- <the four files>` is 0 lines — and
+`git diff --name-only 87ccbee..HEAD` contains no file under `Services/ModelStore`, `App/` or the
+two test files. The base therefore already fails these assertions; deciding which brain is the
+default is a product call outside T-049/T-050 (it sits next to the descoped B5 LAN-URL finding),
+and weakening the assertions to force green was explicitly not done.
+
+All 19 new tests passed in the same run (checked per-test in
+`Test-ElderlyAssistant-2026.09.13_05-21-17-+1000.xcresult`, not inferred from the aggregate), as
+did the pre-existing Gemini, LogSanitiser, STT and voice suites.
+
+**Precondition handled:** this fresh worktree lacked the three gitignored model resources
+`project.yml` validates. Symlinking them (`kws`, `tts/*`, `whisper-medium-ne-q5_1.bin`) got the
+build through but the simulator installer rejected the bundle —
+`invalid symlink at …/ElderlyAssistant.app/tts/en_US-lessac-medium-int8`, `MIInstallerErrorDomain
+Code=70` — so the fix was: real copies for `kws` (5.3 MB) and the two `tts/` voice dirs (75 MB),
+and a **hardlink** for the 559 MB `whisper-medium-ne-q5_1.bin` (no extra disk; this is the
+existing repo practice — the main checkout's copy already had link count 19). Nothing under the
+main checkout was written; no gitignored resource is tracked or committed.
+
+## Open items / residual risk
+
+- The B1 guard is scoped to the two known engine files by name (plus a missing-file failure). A
+  *third* on-device STT engine added later would not be covered until it is added to
+  `ENGINE_FILES` — named follow-up, not silently assumed.
+- The `LogSanitiser` bound protects `error_code` only; metadata values are still pattern-scrubbed
+  (unchanged, defence in depth). A future *new* allow-listed key carrying free text would need its
+  own treatment — that is the pre-existing design, not a regression.
+- `GeminiClientError.blockedByProvider(reason:)` still holds provider text as an associated value
+  but is never mapped into `error_code` (the dedicated `gemini_blocked` event carries the provider
+  enum `blockReason`, itself charset-shaped and bounded at the sink).
+- No secret material was added to tests or fixtures (NFR-016); no assertion was weakened, skipped
+  or deleted.

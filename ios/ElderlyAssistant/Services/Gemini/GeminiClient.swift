@@ -50,7 +50,11 @@ final class GeminiClient {
         case notConfigured
         case invalidURL
         case invalidResponse
-        case httpError(status: Int, body: String?)
+        /// HTTP failure from the upstream API. Carries the status ONLY —
+        /// the raw upstream body was dropped (T-050/B2: it was retained
+        /// here and stringified into `error_code` at the emitter sites,
+        /// putting upstream internals on the console).
+        case httpError(status: Int)
         case emptyResponse
         case blockedByProvider(reason: String)
         /// Cost governance (open item #5, 2026-09-06): the day's Gemini
@@ -226,8 +230,12 @@ final class GeminiClient {
         if let costGovernor, !costGovernor.allowsCall() {
             throw GeminiClientError.dailyCapReached
         }
+        // T-050/B2: the key travels in the `x-goog-api-key` header, never
+        // in the URL. A URL is recorded by every error description that
+        // mentions it (URLError carries the failing URL in its userInfo),
+        // by proxies and by crash reports; a header is not.
         guard let url = URL(string:
-            "https://generativelanguage.googleapis.com/v1beta/models/\(configStore.model):streamGenerateContent?alt=sse&key=\(apiKey)"
+            "https://generativelanguage.googleapis.com/v1beta/models/\(configStore.model):streamGenerateContent?alt=sse"
         ) else {
             throw GeminiClientError.invalidURL
         }
@@ -243,6 +251,7 @@ final class GeminiClient {
         var request = URLRequest(url: url, timeoutInterval: config.timeoutSeconds)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.httpBody = try JSONEncoder().encode(body)
 
         let start = Date()
@@ -391,8 +400,12 @@ final class GeminiClient {
         if let costGovernor, !costGovernor.allowsCall() {
             throw GeminiClientError.dailyCapReached
         }
+        // T-050/B2: header auth — see `understandStreaming`. This is the
+        // single unary transport path (`transcribe`, `generateJSON`,
+        // `understand`, vision), so no other request builder carries the
+        // key.
         guard let url = URL(string:
-            "https://generativelanguage.googleapis.com/v1beta/models/\(configStore.model):generateContent?key=\(apiKey)"
+            "https://generativelanguage.googleapis.com/v1beta/models/\(configStore.model):generateContent"
         ) else {
             throw GeminiClientError.invalidURL
         }
@@ -400,6 +413,7 @@ final class GeminiClient {
         var request = URLRequest(url: url, timeoutInterval: config.timeoutSeconds)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         request.httpBody = try JSONEncoder().encode(body)
 
         let start = Date()
@@ -425,8 +439,9 @@ final class GeminiClient {
         guard (200..<300).contains(http.statusCode) else {
             emit("gemini_http_error", outcome: "failure", durationMs: durationMs,
                  errorCode: String(http.statusCode))
-            throw GeminiClientError.httpError(status: http.statusCode,
-                                              body: String(data: data, encoding: .utf8))
+            // T-050/B2: status only — `data` is the raw upstream body and
+            // is deliberately not retained or stringified into logs.
+            throw GeminiClientError.httpError(status: http.statusCode)
         }
 
         let decoded = try JSONDecoder().decode(GeminiResponse.self, from: data)
@@ -471,6 +486,26 @@ final class GeminiClient {
             errorCode: errorCode,
             metadata: metadata
         ))
+    }
+}
+
+// MARK: - Log-safe error codes (T-050)
+
+extension GeminiClient.GeminiClientError: LogSafeErrorCode {
+    /// Content-free codes for `error_code` (see `ErrorCodeMapper`). The
+    /// `blockedByProvider` reason is deliberately NOT folded in here — it
+    /// is upstream text; the dedicated `gemini_blocked` event carries it
+    /// as a provider enum. Every other case is a compile-time constant.
+    var logSafeErrorCode: String {
+        switch self {
+        case .notConfigured: return "not_configured"
+        case .invalidURL: return "invalid_url"
+        case .invalidResponse: return "invalid_response"
+        case .httpError(let status): return "http_\(status)"
+        case .emptyResponse: return "empty_response"
+        case .blockedByProvider: return "blocked_by_provider"
+        case .dailyCapReached: return "daily_cap_reached"
+        }
     }
 }
 

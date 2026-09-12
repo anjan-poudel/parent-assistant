@@ -56,7 +56,7 @@ final class GeminiClientTests: XCTestCase {
         do {
             _ = try await client.generateJSON(prompt: "x")
             XCTFail("expected httpError")
-        } catch GeminiClient.GeminiClientError.httpError(let status, _) {
+        } catch GeminiClient.GeminiClientError.httpError(let status) {
             XCTAssertEqual(status, 429)
         } catch {
             XCTFail("unexpected error: \(error)")
