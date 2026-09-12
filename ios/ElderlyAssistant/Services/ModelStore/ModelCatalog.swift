@@ -170,6 +170,9 @@ enum ModelCatalog {
     /// of the Gemma/Qwen bake-off in tools/train-intent/, exported to
     /// GGUF. PLACEHOLDER until the bake-off produces a release artifact.
     static let intentNepali1B     = ModelID("intent-ne-1b-q4km")
+    /// v14 slim-template retrain (seed 43) — NEW artifact id so devices
+    /// cached on the v12 seed-42 file download it fresh.
+    static let intentQwenS43       = ModelID("intent-ne-qwen-s43-q4km")
     /// The GEMMA leg of the bake-off (2026-09-07): the QLoRA fine-tune
     /// over google/gemma-3-1b-it, merged to fp16 and exported Q4_K_M
     /// (`intent-ne-gemma-q4_k_m.gguf`, release v7). A real, hosted
@@ -513,13 +516,29 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: intentNepali1B,
             kind: .llamaBase,
-            displayName: "Brain — Qwen 1.7B · Nepali fine-tune (slim, seed 43)",
+            displayName: "Brain — Qwen 1.7B · Nepali fine-tune (seed 42, superseded)",
             // Qwen3-1.7B QLoRA intent fine-tune, seed 43 of the
             // SLIM-template deterministic k=3 bake-off (2026-09-12):
             // 696-token template + reconciled intent/response schema.
             // Gates: closed 0.941 (one row short), emergency 1.000,
             // side-effect 1.000 — best available on-device brain.
             // Supersedes v12 seed-42 and the Gemma v7 brain.
+            filename: "intent-ne-qwen-s42-q4_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v12/intent-ne-qwen-s42-q4_k_m.gguf")!,
+            sizeBytes: 1_107_408_576,
+            sha256: "136392b324b2e24503b8376cdb8332d8909192644d910a3b8ec83c0db227a42d",
+            minDeviceRAMBytes: 3_000_000_000,
+            dependsOn: nil
+        ),
+        ModelCatalogEntry(
+            id: intentQwenS43,
+            kind: .llamaBase,
+            displayName: "Brain — Qwen 1.7B · Nepali fine-tune (slim, seed 43)",
+            // Qwen3-1.7B QLoRA intent fine-tune, seed 43 of the SLIM-
+            // template deterministic k=3 bake-off (2026-09-12): 696-token
+            // template + reconciled intent/response schema. Gates: closed
+            // 0.941 (one row short), emergency 1.000, side-effect 1.000 —
+            // best available on-device brain.
             filename: "intent-ne-qwen-s43-q4_k_m.gguf",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v14/intent-ne-qwen-s43-q4_k_m.gguf")!,
             sizeBytes: 1_107_408_576,
@@ -772,7 +791,7 @@ enum ModelCatalog {
     ///   - `llama3_2_1B` / `llama3_2_3B` — the pre-Qwen LLaMA brains
     ///     (legacy; Qwen 3 supersedes both sizes).
     static let availableBrainEntries: [ModelCatalogEntry] = [
-        intentNepali1B,
+        intentQwenS43,
         qwen4BNepali,
         qwen3_4BInstruct,
         qwen3_1_7BInstruct
