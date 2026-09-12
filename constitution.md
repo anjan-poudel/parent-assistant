@@ -31,7 +31,6 @@ Required integrations:
 - WhatsApp (messaging and voice/video calls via supported API or deep link)
 - YouTube (video playback)
 - Facebook (social feed and messaging)
-- On-device LLaMA model (variant to be confirmed by architect — must run on mid-range smartphones, e.g. iPhone 12 / Android 6GB RAM)
 - On-device voice recognition with accent and regional dialect support (Nepali at launch)
 - Voice biometric authentication (primary)
 - PIN authentication (fallback)
@@ -122,7 +121,7 @@ The following decisions could not be determined from the provided brief. They mu
 11. ~~**Security-test blocking findings B3–B7.**~~ **DESCOPED BY HUMAN DECISION (2026-09-13). Review by: 2026-10-13 (30 days). Owner: Anjan Poudel (project owner).** `specs/security-test.md` returned `SECURITY-NO_GO` (reviewed at rev `fb6e03c`) with blocking findings B1–B7. The developer accepted the residual risk of B3–B7 and removed them from the scope of `final-sign-off`:
     - **B3** — sensitive-action biometric/PIN gate not wired (`SpeakerBiometricService.swift` NOT WIRED; no PIN, no lockout); sensitive commands execute on confirmation alone.
     - **B4/B6** — no emergency-call module; health/family alert stubs return success silently instead of failing visibly.
-    - **B5** — remote-config chain absent (encrypted push unimplemented) and model downloads served over cleartext LAN HTTP (`ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:546,651`), against the TLS 1.2+ bullet in Standards.
+    - **B5** — remote-config chain absent (encrypted push unimplemented) and model downloads served over cleartext LAN HTTP (`ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:654`, the `qwen4BNepali` LAN-only entry), against the TLS 1.2+ bullet in Standards.
     - **B7** — the default cloud voice stack (Gemini) sits against the Privacy bullet's "no user data leaves the device for AI processing". Recorded as an explicit exception with a consent/disclosure amendment under Open Decision 12.
     Consequences: the security-test categories *Auth bypass*, *Emergency call trigger validation* and *Encrypted config payload verification* are closed by decision, not by remediation; the report's scope statement (re-test if those features ship) stands. **B1** (raw Release-build transcript prints) and **B2** (API key / raw upstream error body reaching logs via `error_code`) were **not** descoped. Their remediation landed as T-049/T-050 (`02f22dd`, `b64385b`, `5513323`, on `master` via `57abb2e`) and the `security-test` re-run at that revision returned **SECURITY-GO**. This entry records risk acceptance for B3–B7 — it is not evidence that those findings are fixed, and the time box above requires this acceptance to be re-reviewed by 2026-10-13.
 
