@@ -9,3 +9,5 @@
 | [TG-05](TG-05-voice-session/index.md) | Voice Session | 1 task (T-022) | ~6–10 days | PENDING |
 | [TG-06](TG-06-safety-critical-services/index.md) | Safety-Critical Services | 3 tasks (T-024, T-026, T-028) | ~9–15 days | PENDING |
 | [TG-07](TG-07-remote-configuration/index.md) | Remote Configuration | 3 tasks (T-030, T-031, T-032) | ~14–22 days | PENDING |
+| [TG-08](TG-08-nepali-intent-encoder/index.md) | Nepali Intent Encoder | 6 tasks (T-033–T-038) | ~31–55 days | PENDING |
+| [TG-09](TG-09-plugin-recognition-contract/index.md) | Plugin Recognition & Contract | 6 tasks (T-039–T-044) | ~21–38 days | PENDING |
