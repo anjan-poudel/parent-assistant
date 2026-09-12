@@ -15,6 +15,7 @@ Implements all voice pipeline components: wake word detection (openWakeWord), au
 | [T-009](T-009-stt-engine/) | STTEngine (Whisper.cpp) | M+M | T-007, T-004 | MEDIUM |
 | [T-011](T-011-accent-tuner.md) | AccentTuner | M | T-009, T-010, T-002, T-003 | MEDIUM |
 | [T-012](T-012-tts-engine/) | TTSEngine (Coqui/Piper) | M+M | T-007, T-004 | MEDIUM |
+| [T-049](T-049-release-build-transcript-prints.md) | Release-build transcript prints in the on-device STT engines (rework — security-test B1) | S | T-009, T-004 | HIGH |
 
 ## Group effort estimate
 

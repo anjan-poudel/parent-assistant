@@ -2,10 +2,11 @@
 
 ## Summary
 - Task groups: 9 (Jira Epics)
-- Total tasks: 37 parent tasks (48 task IDs: T-001–T-048)
+- Total tasks: 39 parent tasks (50 task IDs: T-001–T-050)
 - Subtasks: 26 subtasks (platform splits)
-- Estimated effort: 39–64 days (full parallel — the TG-08 ML track is the longest chain; TG-09 and T-046–T-048 are iOS-side work inside the existing app stream) / 133–221 days (sequential)
+- Estimated effort: 39–64 days (full parallel — the TG-08 ML track is the longest chain; TG-09 and T-046–T-050 are iOS-side work inside the existing app stream) / 133–221 days (sequential)
 - Critical path: T-033 → T-034 → T-035 → T-036 → T-037 → T-038 (TG-08; conditional on the T-033 GO/NO-GO and gated at entry by T-009 and T-021)
+- Rework stream: T-049, T-050 (+3–6 days) — the B1/B2 remediation tasks raised by the `security-test` SECURITY-NO_GO (`specs/security-test.md`). Both are iOS-side and HIGH risk, neither extends the critical path, and both are prerequisites in substance (not in the dependency graph) for `final-sign-off`, whose gate the failed security test blocks.
 
 ## Contents
 - [tasks/index.md](tasks/index.md) — all task groups
@@ -73,6 +74,8 @@ Sequential effort: ~12 days iOS.
 25. **HIGH — Wrong chat framing for the offered Nepali brains (T-046, EXPEDITE):** `LlamaCommandInterpreter.chatFormat(for:)` (LlamaCommandInterpreter.swift:490-515) maps only `qwen3_1_7BInstruct` and `qwen3_4BInstruct` to the Qwen3 `<|im_start|>` scheme (switch case 492) and sends every other id to the default branch (503-514), the LLaMA 3.2 framing the function's own doc comment calls "gibberish" to Qwen models (486-489). The default brain `intentQwenS43` (AppCoordinator.swift:1170; entry ModelCatalog.swift:533-548; first curated entry at 794) and the offered `qwen4BNepali` (entry 622-641; offered at 795) are both Qwen3-derived — the v14 Qwen3-1.7B QLoRA fine-tune and the assembled Qwen3-4B Nepali model — and the hidden but still-resolvable `intentNepali1B` (516-532; AppCoordinator.swift:1176-1179) shares that lineage. The fine-tunes were trained on raw text with no chat-template wrap (tools/train-intent/src/train_qlora.py:45-58; eval_golden.py:120-126) while the runtime builds the prompt with chat special tokens (LlamaCommandInterpreter.swift:522-537, 620-627, 699-703), and the only chat-format test covers the two stock Qwen3 ids (BrainModelSelectionTests.swift:96-111 at `2061566`). Wrong framing degrades the JSON/intent output the router consumes, including emergency classification, before the keyword-net backstop — T-046 fixes it with a per-id determination, an offline reproduce-then-fix check, and an every-offered-id regression test.
 26. **MEDIUM — Catalogue/default comments contradict the code (T-047):** four named drifts at `2061566` — the `intentNepali1B` declaration comment still calls the id a pre-bake-off PLACEHOLDER while its entry (ModelCatalog.swift:516-532) is the real-but-superseded v12 seed-42 artifact and that entry's comment (520-525) describes the seed-43/slim-template workload belonging to `intentQwenS43` (533-548); the hidden `llama3_2_1B` comment (501-507) still claims to be the auto-download default (false: AppCoordinator.swift:1170); the hidden-STT rationale (764-766) contradicts the FLEURS numbers recorded at 370-372 and 391-393; and the default-brain doc comment (AppCoordinator.swift:1158-1169) still describes LLaMA 3.2 1B / bartowski / ~807 MB with "v12, seed 42". T-047 reconciles all four and sweeps Swift, `docs/`, the plan artifacts, `Localizable.xcstrings` and README for related stale LLaMA-3.2-as-default / v12-seed-42 / skeleton-style claims, recording the sweep method and result — comments only, no behaviour or constants.
 27. **MEDIUM — Two deferred decisions are undocumented (T-048):** the LAN-only `qwen4BNepali` (ModelCatalog.swift:632) is offered in the shipped picker (795; consumers SettingsView.swift:3216, 3225) with no decision on hosting vs hiding, against the "anything offered must be fetchable" rule (AppCoordinator.swift:1255-1263), the App Store/Play compliance constraints (constitution.md:61-64) and FR-007 (requirements.md:40-42); and the interpreter construction default `llama3_2_1B` (LlamaCommandInterpreter.swift:386) diverges from the app default `intentQwenS43` (AppCoordinator.swift:1170), pinned by a test (BrainModelSelectionTests.swift:145-161 at `2061566`). T-048 decides both and either names an implementation follow-up task or records an explicit Open Decision (constitution.md:93) — an undocumented divergence is not an outcome.
+28. **HIGH — Release builds print the recognised transcript (T-049):** `WhisperSpeechRecognizer.swift:815` and `WhisperKitSpeechRecognizer.swift:488` print the utterance verbatim, and `WhisperKitSpeechRecognizer.swift:493` prints the raw error object. Neither file contains a `#if DEBUG` region — only `#if canImport(SwiftWhisper)` (3, 186, 544, 932) and `#if canImport(WhisperKit)` (4, 71, 104, 161, 293, 319, 417, 646) — and `SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG` is set only in the Debug configuration (project.pbxproj:2702, closed by `name = Debug;` at 2706; Release at 2708 does not set it), so both prints ship. They bypass `LogSanitiser` and `ConsoleObservabilityBus` (AppCoordinator.swift:7049, print at 7066) entirely: on the on-device stack every medication name, symptom, family name and emergency phrase reaches the device console, retrievable via sysdiagnose, against NFR-016 and the constitution's Privacy bullet. The correctly guarded Gemini pattern already exists to copy (`GeminiSpeechRecognizer.swift:122-125`, `:129-135`; `GeminiCommandInterpreter.swift:62-70`). The adjacent metadata prints (`WhisperSpeechRecognizer.swift:809-812`, `WhisperKitSpeechRecognizer.swift:487`) are PII-free and must survive. Reported as B1 of the `security-test` SECURITY-NO_GO.
+29. **HIGH — The Gemini API key and raw upstream bodies reach the console (T-050):** the key sits in the request URL query (`GeminiClient.swift:230`, `:395`), transport failures rethrow the untouched `URLError` that carries that URL (`:258-263`, `:413-418`), six sites stringify it with `String(describing: error)` into `error_code` (`GeminiSpeechRecognizer.swift:139`, `GeminiCommandInterpreter.swift:107`, `VoicePipeline.swift:855`, `GeminiClient+Vision.swift:117`, `ApplianceHelperSession.swift:190`, `NepaliCalendarPlugin.swift:90`), and `LogSanitiser` copies `errorCode` unscrubbed (`:59`) because `error_code` is allow-listed (`:30`) and the scrub pass (`:64-76`, patterns `:37-47`) runs only over allow-listed metadata and matches only phone/e-mail/blood-pressure shapes. `error_code` is therefore the one content-bearing field no allow-list decision and no scrub pattern ever touches. The `security-test` repro shows `String(describing: URLError)` containing `...key=SECRET_API_KEY_VALUE, NSErrorFailingURLStringKey=https://…`, so a mere offline/DNS/TLS/timeout failure leaks the key. `GeminiClientError.httpError(status:body:)` (`:53`, thrown `:428-429`) retains the raw upstream body and is stringified at the same sites. Gate is green while both defects ship — tests do not cover the error path's content. Reported as B2 of the `security-test` SECURITY-NO_GO.
 
 ## Security blockers
 
@@ -88,14 +91,18 @@ No new security BLOCKERs are introduced by T-045. The task reads the catalogue/d
 
 No new security BLOCKERs are introduced by T-046–T-048. T-046 keeps `InputSanitiser.sanitise(.quarantine)` as the sole transcript entry into the prompt (NFR-013) and does not touch the keyword safety net or the router stage order (FR-009); T-047 changes comments only; T-048 keeps the on-device-only constraint (FR-007) and the auto-download default on a real hosted artifact.
 
+**T-049 and T-050 are remediation tasks, not new BLOCKERs** — they close findings B1 and B2 of `specs/security-test.md`, where the `security-test` task returned **SECURITY-NO_GO**. T-049 removes transcript content from Release output without removing the PII-free counts and timings that make on-device STT diagnosable. T-050 restores the sanitiser's guarantee at the `LogSanitiser` boundary rather than by emitter-by-emitter discipline, so the next emitter inherits the safe behaviour. Neither touches the keyword safety net, the router stage order or the emergency path (FR-009); T-050's binding of `errorCode` must not weaken the existing allow-list behaviour for the sanitiser's other keys, and T-049 must not re-create the leak in its own tests (NFR-016).
+
+**The security test's remaining findings stay open.** B3 (sensitive-action authentication unwired; BLOCKER-1/2 still open), B4/B6 (no emergency-call module; APNs/FCM alert stubs return success silently), B5 (remote-config chain absent; cleartext LAN model URLs against NFR-011) and B7 (constitution Privacy bullet vs. the default cloud voice stack) are **not** covered by T-049 or T-050. They are recorded here so that landing the rework stream is not mistaken for a passing security posture: `final-sign-off` remains blocked until those findings are either remediated under their own tasks or explicitly descoped by a human decision recorded as an Open Decision (constitution.md:93).
+
 ---
 
 ## Task Group Summary
 
 | Group | Title | Tasks | Subtasks | Key Risk |
 |-------|-------|-------|----------|----------|
-| [TG-01](tasks/TG-01-foundation-infrastructure/index.md) | Foundation & Infrastructure | 3 | 2 (T-002) | MEDIUM |
-| [TG-02](tasks/TG-02-voice-interface/index.md) | Voice Interface | 5 | 8 (T-005, T-007, T-009, T-012) | MEDIUM |
+| [TG-01](tasks/TG-01-foundation-infrastructure/index.md) | Foundation & Infrastructure | 4 | 2 (T-002) | MEDIUM/HIGH |
+| [TG-02](tasks/TG-02-voice-interface/index.md) | Voice Interface | 6 | 8 (T-005, T-007, T-009, T-012) | MEDIUM/HIGH |
 | [TG-03](tasks/TG-03-on-device-ai/index.md) | On-Device AI | 7 | 2 (T-018) | HIGH |
 | [TG-04](tasks/TG-04-authentication-security/index.md) | Authentication & Security | 3 | 2 (T-014) | HIGH |
 | [TG-05](tasks/TG-05-voice-session/index.md) | Voice Session | 1 | 2 (T-022) | HIGH |
@@ -103,7 +110,7 @@ No new security BLOCKERs are introduced by T-046–T-048. T-046 keeps `InputSani
 | [TG-07](tasks/TG-07-remote-configuration/index.md) | Remote Configuration | 3 | 2 (T-032) | HIGH/MEDIUM |
 | [TG-08](tasks/TG-08-nepali-intent-encoder/index.md) | Nepali Intent Encoder | 6 | 2 (T-037) | HIGH (GO/NO-GO gate) |
 | [TG-09](tasks/TG-09-plugin-recognition-contract/index.md) | Plugin Recognition & Contract | 6 | 0 | HIGH (governance + doc-contract) |
-| **Total** | | **37** | **26** | |
+| **Total** | | **39** | **26** | |
 
 ---
 
@@ -147,3 +154,5 @@ No new security BLOCKERs are introduced by T-046–T-048. T-046 keeps `InputSani
 | T-046 | FR-007, FR-008, NFR-002 |
 | T-047 | FR-007, FR-008 |
 | T-048 | FR-007, FR-008 |
+| T-049 | NFR-013, NFR-016 |
+| T-050 | NFR-010, NFR-011, NFR-016 |
