@@ -111,9 +111,33 @@ final class LogSanitiserTests: XCTestCase {
     }
 
     func testOverlongButCodeShapedValueIsTruncated() {
-        let long = String(repeating: "a", count: 200)
+        // Separator-joined words: legal code shape (longest run 4), so the
+        // bound is the length cap, not the run rule.
+        let long = String(repeating: "word_", count: 40)
         let clean = sanitiser.sanitise(event(errorCode: long))
         XCTAssertEqual(clean.errorCode?.count, LogSanitiser.maxErrorCodeLength)
         XCTAssertEqual(clean.errorCode, String(long.prefix(LogSanitiser.maxErrorCodeLength)))
+    }
+
+    /// A pasted API key is charset-valid, so the charset rule alone would
+    /// pass it; the unbroken-run rule is what stops it. Shape only — the
+    /// value below is a run of one letter, deliberately not key-shaped
+    /// (NFR-016).
+    func testKeyShapedUnbrokenAlphanumericRunIsRedacted() {
+        let keyShaped = String(repeating: "A", count: 40)
+        XCTAssertGreaterThan(keyShaped.count, LogSanitiser.maxUnbrokenRunLength)
+        XCTAssertEqual(sanitiser.sanitise(event(errorCode: keyShaped)).errorCode,
+                       "[redacted]",
+                       "an unbroken 32+-character alphanumeric token is a key shape, not a code")
+    }
+
+    func testRunLengthBoundaryIsInclusiveOfShorterRuns() {
+        // One character below the limit: still treated as a code shape and
+        // preserved verbatim (the boundary is documented, not accidental).
+        let shortRun = String(repeating: "b", count: LogSanitiser.maxUnbrokenRunLength - 1)
+        XCTAssertEqual(sanitiser.sanitise(event(errorCode: shortRun)).errorCode, shortRun)
+        // At the limit the run rule fires.
+        let atLimit = String(repeating: "b", count: LogSanitiser.maxUnbrokenRunLength)
+        XCTAssertEqual(sanitiser.sanitise(event(errorCode: atLimit)).errorCode, "[redacted]")
     }
 }

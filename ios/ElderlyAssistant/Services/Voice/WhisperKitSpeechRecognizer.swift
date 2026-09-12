@@ -304,7 +304,18 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
                 _ = try await self.loadKit(descriptor: descriptor, config: config)
                 completion?(.ready)
             } catch {
-                print("[whisperkit_stt] warm failed: \(error)")
+                #if DEBUG
+                // B1/T-049 (review fix): Debug-build-only, and content-free
+                // even here — a raw error object's description can carry a
+                // key-bearing URL, an upstream body or a path. The
+                // completion's "load_failed" reason is the Release-side
+                // signal. Same construct as the inference-failure print
+                // below. This print sits inside `#if canImport(WhisperKit)`,
+                // which is NOT a Debug gate.
+                let nsError = error as NSError
+                print("[whisperkit_stt] warm failed domain=\(nsError.domain) "
+                    + "code=\(nsError.code)")
+                #endif
                 completion?(.failed(reason: "load_failed"))
             }
         }
@@ -721,7 +732,17 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
             reportDialectUnavailableOnce(&dialectEmbeddingUnavailableReported,
                                          event: "dialect_embedding_unavailable",
                                          reason: "encoder_error")
-            print("[dialect_id] extractDialectEmbedding failed: \(error)")
+            #if DEBUG
+            // B1/T-049 (review fix): Debug-build-only, and content-free even
+            // here — a raw error object's description can carry a
+            // key-bearing URL, an upstream body or a path. The
+            // `dialect_embedding_unavailable` / "encoder_error" event above
+            // is the Release-side signal. This print sits inside
+            // `#if canImport(WhisperKit)`, which is NOT a Debug gate.
+            let nsError = error as NSError
+            print("[dialect_id] extractDialectEmbedding failed "
+                + "domain=\(nsError.domain) code=\(nsError.code)")
+            #endif
             return nil
         }
         #else

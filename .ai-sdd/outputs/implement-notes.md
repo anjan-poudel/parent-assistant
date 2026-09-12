@@ -218,21 +218,22 @@ still reads as "present and working".
 `WhisperKitSpeechRecognizer.swift:482, 487` (`empty_transcript duration_ms=…`;
 `transcribed duration_ms=… chars=…`). Counts and durations, never content.
 
-**Regression guard (landed, not deferred):** `ios/tools/check-unguarded-transcript-prints.sh`
-— a source gate wired into every test run from `ios/build.sh` `run_tests()` (fails the run before
-the scope `case`). It walks `ios/ElderlyAssistant/**/*.swift`, tracks the `#if` stack per file in
-awk (a `#else` inside a `#if DEBUG` region flips the region to *not* Debug, so the guard cannot
-be defeated by an `#else` that holds the print), skips comment lines, and flags
-`print(`/`NSLog(`/`os_log(` lines that mention `transcript` as a word of its own (bare
-`empty_transcript` event names are not content; `transcript=` is). It also exits 1 if either
-engine file is missing, so the guard cannot silently pass once the code it guards has moved.
+**Regression guard (landed, not deferred; widened after review):**
+`ios/tools/check-release-log-safety.sh` (entry point) + `ios/tools/check-release-log-safety.py`
+(the scanner) — a source gate wired into every test run from `ios/build.sh` `run_tests()` (fails
+the run before the scope `case`). Version 1 was the awk
+`tools/check-unguarded-transcript-prints.sh`; the paired review falsified two raw-error prints it
+did not cover, and the widened v2 is described in the review fix pass below. v1's properties that
+carry over: it walks all of `ElderlyAssistant/**/*.swift`, tracks the `#if` stack per file (a
+`#else` inside a `#if DEBUG` region flips the region to *not* Debug, so the guard cannot be
+defeated by an `#else` that holds the print), and exits 1 if either engine file is missing, so it
+cannot silently pass once the code it guards has moved.
 
-Proof the guard can fail (a guard that cannot fail is not a guard):
+Proof the guard can fail (a guard that cannot fail is not a guard), v1 evidence:
 - synthetic regression — an unguarded `print("[whisper_stt] transcript=…")` added to a copy of the
   tree → exit 1 with the exact `file:line`;
 - missing engine file → exit 1 with "guarded engine file is missing";
-- real tree → exit 0, printed in both gate runs as
-  `✓ no transcript-content print can be compiled into a non-Debug configuration`.
+- real tree → exit 0, printed in both gate runs.
 
 **Android verification (verified, not assumed):** `android/` has 20 Kotlin files and **no STT or
 speech-recognition code at all** (`grep -ri whisper|stt|speech` → no sources), so there is no
@@ -356,9 +357,10 @@ main checkout was written; no gitignored resource is tracked or committed.
 
 ## Open items / residual risk
 
-- The B1 guard is scoped to the two known engine files by name (plus a missing-file failure). A
-  *third* on-device STT engine added later would not be covered until it is added to
-  `ENGINE_FILES` — named follow-up, not silently assumed.
+- The B1 guard v2 (see the review fix pass below for the corrected scope): the transcript rule
+  sweeps every `*.swift` under `ElderlyAssistant/`, so a *third* on-device STT engine file added
+  later IS covered for transcript content; what it would not get until it is listed in
+  `ENGINE_FILES` is the raw-error rule. Remaining evasions are enumerated in the fix-pass section.
 - The `LogSanitiser` bound protects `error_code` only; metadata values are still pattern-scrubbed
   (unchanged, defence in depth). A future *new* allow-listed key carrying free text would need its
   own treatment — that is the pre-existing design, not a regression.
@@ -367,3 +369,109 @@ main checkout was written; no gitignored resource is tracked or committed.
   enum `blockReason`, itself charset-shaped and bounded at the sink).
 - No secret material was added to tests or fixtures (NFR-016); no assertion was weakened, skipped
   or deleted.
+
+---
+
+## Review fix pass — paired review NO_GO at 0.90 (2026-09-13)
+
+Verdict on the first hand-back: T-050 ready; T-049 falsified — two Release-compiled raw-`error`
+prints survived, because v1 of the guard only looked for transcript-worded prints. Fixed on the
+same branch in a **new** commit (`iOS: T-049 guard the remaining raw-error prints and widen the
+guard`); `02f22dd` and `b64385b` are untouched.
+
+### 1. The two falsified prints
+
+Both sit inside `#if canImport(WhisperKit)`, which is not a Debug gate, so both compiled into
+Release. Both were fixed exactly like the earlier `:501-508` site.
+
+| Site | Was | Now |
+|---|---|---|
+| `WhisperKitSpeechRecognizer.swift:307` (`warm()` catch) | `print("[whisperkit_stt] warm failed: \(error)")` | `#if DEBUG` + `domain=\(nsError.domain) code=\(nsError.code)`; the completion's `"load_failed"` reason is the Release-side signal. Runtime-reachable: `AppCoordinator.swift:4203`, `WarmStart.swift:440`. |
+| `WhisperKitSpeechRecognizer.swift:724` (`extractDialectEmbedding` catch) | `print("[dialect_id] extractDialectEmbedding failed: \(error)")` | `#if DEBUG` + content-free `domain`/`code`; the `dialect_embedding_unavailable` / `"encoder_error"` event is the Release-side signal. |
+
+Sweep after the fix: every print-ish call in both engine files (`print|debugPrint|NSLog|os_log|fputs`)
+renders only `domain`/`code` or PII-free counts/durations
+(`WhisperSpeechRecognizer.swift:843-844`; `WhisperKitSpeechRecognizer.swift:316-317, 519-520, 743-744`).
+
+### 2. Guard v2 — coverage and remaining gaps
+
+`tools/check-release-log-safety.py` (new scanner) + `tools/check-release-log-safety.sh` (thin
+entry point; `build.sh` updated). Statement accumulation across lines, a `#if` region stack, and
+one-hop transcript taint make the shapes that defeated v1 checkable; the raw-error rules run on
+`ENGINE_FILES` only, because the review put other subsystems' raw-error prints (`Speaker.swift:510`,
+the alarm/scheduler files) explicitly out of scope.
+
+| Evasion (from the review's v1 results) | v2 |
+|---|---|
+| plain `print`, `#else` branch, `NSLog`, `os_log`, `print(transcript)`, new engine file | caught |
+| print split across lines | caught (paren-balanced statement accumulation) |
+| variable-built string (`let leak = … transcript …; print(leak)`) | caught, one-hop + file-order chains; a longer chain or a value passed through a function/collection is not |
+| `debugPrint`, `fputs` | caught |
+| uppercase `TRANSCRIPT` | caught (case-insensitive word match) |
+| camelCase `rawTranscript` | caught (camel-case suffix rule); a snake_case event name (`empty_transcript`) is still not flagged |
+| raw `\(error)` / `\(err)` / `\(nsError)` interpolation, `print(error)`, `String(describing:)`, `.localizedDescription` | caught in the engine files |
+| `error` reaching a print through a string built in another file, a struct property, `String(describing:)` inside an interpolation of an interpolation, or `#if` conditions other than `#if DEBUG` (e.g. `#if canImport`) mistaken for Debug | **not caught — documented gaps.** Content in a *Debug* region is deliberately not flagged. |
+
+Recorded gap that matters most: the raw-error rule is scoped to the two listed engine files, so a
+*third* engine added later gets the tree-wide transcript rule but not the raw-error rule until it
+is added to `ENGINE_FILES`. The guard still fails if a listed engine file is missing.
+
+Guard v2 evidence (run by hand, then a green gate):
+- fixed tree → exit 0, `✓ no transcript content or raw error object can be printed in a non-Debug
+  configuration`;
+- 11-case transcript evasion file → 11 violations, `#if DEBUG` region correctly silent, and the
+  content-free `\(nsError.domain) code=\(nsError.code)` line correctly silent;
+- 6-case raw-error file appended to a real engine file → 6 violations (interpolation, bare
+  argument, `String(describing:)`, `.localizedDescription`, `os_log(…, nsError)`), content-free
+  domain/code line silent → file restored.
+
+### 3. LogSanitiser — tightened, not merely re-worded
+
+Choice: tighten. `LogSanitiser.boundErrorCode` now runs scrub → code charset → **unbroken-run
+rule** → 64-char cap: `maxUnbrokenRunLength = 32`, and a value containing a 32+-character
+unbroken alphanumeric run is `"[redacted]"`. Rationale: a Google API key (`AIza…`, 39 alphanumeric
+characters) is charset-valid and was passing verbatim; the longest run in the live code vocabulary
+is 9 (`delivery` in `fcm_delivery_failed`), so 32 separates the two with margin. The comment that
+overclaimed ("the defence in depth that holds for emitters not yet written") is corrected to state
+what the bound is — a shape bound, not an entropy proof.
+
+Residual, recorded honestly: a secret shorter than 32 characters, or one the code charset splits
+into sub-32 runs (e.g. `-`/`_`-separated), still passes — so nothing secret may be passed as
+`error_code` in the first place; `ErrorCodeMapper` is the construction-time guarantee and this is
+the last-resort shape bound.
+
+Existing guarantees re-asserted after the tightening: `GeminiKeyLogBoundaryTests` (key never in a
+URL or in a sink output, `http_429`/`url_error_-1004` codes) and `LogSanitiserTests`
+(allow-listed metadata, `stages` verbatim, `url_error_-1004`, `fcm_delivery_failed`-shaped codes,
+comma-joined plugin codes, `"429"`, `"a,b"`, nil/empty → nil, description/URL redaction) all pass,
+plus two new boundary tests for the run rule.
+
+### 4. Re-run of the gate after the fix pass
+
+Command (canonical, from the worktree root): `./ios/build.sh test:unit` — run once at the final
+revision, in background, log kept at `/tmp/sec-rework-gate4.log`.
+
+```
+  ✓ seniOS.xcodeproj regenerated
+Checking source privacy guards...
+  ✓ no transcript content or raw error object can be printed in a non-Debug configuration
+...
+	 Executed 2693 tests, with 6 tests skipped and 3 failures (0 unexpected) in 246.135 (252.522) seconds
+Failing tests:
+	BrainModelSelectionTests.testAvailableBrainEntriesIsTheCuratedList()
+	InterpreterAvailabilityTests.testDefaultBrainModelIsTheRealHostedLlamaArtifact()
+** TEST FAILED **
+```
+
+`GATE_EXIT=65`. 2693 = 2691 from the pre-fix gate + 2 new `LogSanitiser` boundary tests. Failing
+set extracted per-test from the run's own
+`Test-ElderlyAssistant-2026.09.13_05-47-48-+1000.xcresult`: exactly the two pre-existing
+brain-catalogue failures (`3 failures` is the aggregate record count; the same test is recorded
+twice — root-caused in §"Gate" above to `34c81b9`), no new failures. Every test touched by this
+pass was verified `Passed` in the same `.xcresult`:
+`testKeyShapedUnbrokenAlphanumericRunIsRedacted`, `testRunLengthBoundaryIsInclusiveOfShorterRuns`,
+`testOverlongButCodeShapedValueIsTruncated`, `testKeyBearingURLErrorDescriptionIsRedacted`,
+`testForcedTransportFailureLeaksNoKeyMaterialToTheConsoleSink`,
+`testRogueEmitterStringifyingAKeyBearingErrorIsBoundedAtTheConsoleSink`,
+`testContentFreeErrorCodesPassThroughUnchanged`, `testAllowListedMetadataKeysSurviveAndUnknownKeysAreDropped`,
+`testStagesMetadataIsPreservedVerbatim`.

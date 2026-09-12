@@ -406,12 +406,13 @@ run_tests() {
 
     # Source-level privacy guards run before every test gate (B1/T-049):
     # the unit suite runs in Debug, where a re-introduced Release-compiled
-    # transcript print still reads as "present and working" — so this class
-    # of defect cannot be caught by a test that only exercises the binary.
+    # transcript print (or raw-error print) still reads as "present and
+    # working" — so this class of defect cannot be caught by a test that
+    # only exercises the binary.
     echo ""
     echo "Checking source privacy guards..."
-    "${PROJECT_DIR}/tools/check-unguarded-transcript-prints.sh" || {
-        echo "ERROR: transcript-print guard failed — see above." >&2
+    "${PROJECT_DIR}/tools/check-release-log-safety.sh" || {
+        echo "ERROR: Release-log privacy guard failed — see above." >&2
         exit 1
     }
 

@@ -15,10 +15,10 @@ import Foundation
 ///    field cannot leak PII by accident,
 ///  - values on allowed keys are still scrubbed for obvious PII patterns
 ///    (phone numbers, e-mails, blood-pressure readings) as defence in depth,
-///  - the top-level `error_code` is bounded to a code shape (see
-///    `boundErrorCode`) — [T-050/B2] it was the one content-bearing field
-///    copied through unscrubbed, which is how a key-bearing URL reached the
-///    console.
+///  - the top-level `error_code` is bounded to a code shape and a maximum
+///    unbroken-run length (see `boundErrorCode`) — [T-050/B2] it was the one
+///    content-bearing field copied through unscrubbed, which is how a
+///    key-bearing URL reached the console.
 struct LogSanitiser {
 
     /// Longest `error_code` preserved verbatim at the bus boundary.
@@ -32,10 +32,25 @@ struct LogSanitiser {
     /// [T-050 / finding B2] `error_code` is a top-level event field copied
     /// through with no scrub, which is how `String(describing: URLError)`
     /// carried a key-bearing URL to the console. Emitters are fixed to
-    /// pass content-free codes (`ErrorCodeMapper`); this bound is the
-    /// defence in depth that holds for emitters not yet written.
+    /// pass content-free codes (`ErrorCodeMapper`); this bound catches the
+    /// shapes a future emitter is most likely to hand over by accident (a
+    /// rendered error or URL, a bare key-shaped token). It is a *shape*
+    /// bound, not an entropy proof: a secret that is shorter than the run
+    /// limit, or that the code charset splits into sub-limit runs, still
+    /// passes verbatim — so nothing secret may be passed as `error_code`
+    /// in the first place.
     private static let safeErrorCodePattern = try! NSRegularExpression(
         pattern: #"^[A-Za-z0-9][A-Za-z0-9._:,;\-]*$"#)
+
+    /// Longest unbroken alphanumeric run tolerated in an `error_code`.
+    /// Codes are short words joined by `_` / `-` / `,` (the longest run in
+    /// the live vocabulary is `delivery`); a Google API key is one unbroken
+    /// 39-character run (`AIza…`). 32 sits between the two.
+    static let maxUnbrokenRunLength = 32
+
+    /// Built from `maxUnbrokenRunLength` so the two cannot drift apart.
+    private static let longRunPattern = try! NSRegularExpression(
+        pattern: "[A-Za-z0-9]{\(maxUnbrokenRunLength),}")
 
     /// Keys known to carry non-PII values. Anything else is dropped.
     static let allowedKeys: Set<String> = [
@@ -84,14 +99,23 @@ struct LogSanitiser {
     /// Bounds a top-level `error_code` (T-050). Order matters: scrub first
     /// (phone / e-mail / BP shapes), then require the code charset — a
     /// value that fails it is not a code at all, so it is replaced rather
-    /// than logged. A charset-valid but over-long value is truncated
-    /// (still content-free by charset, and codes are short by design).
+    /// than logged, then reject a key-shaped unbroken run (a pasted API
+    /// key is charset-valid), and finally cap the length. A charset-valid,
+    /// run-legal but over-long value is truncated — still content-free by
+    /// shape, and codes are short by design.
     private func boundErrorCode(_ errorCode: String?) -> String? {
         guard let errorCode, !errorCode.isEmpty else { return nil }
         let scrubbed = scrubValue(errorCode)
         let range = NSRange(scrubbed.startIndex..<scrubbed.endIndex, in: scrubbed)
         guard Self.safeErrorCodePattern.firstMatch(in: scrubbed, options: [],
                                                    range: range) != nil else {
+            return "[redacted]"
+        }
+        guard Self.longRunPattern.firstMatch(in: scrubbed, options: [],
+                                             range: range) == nil else {
+            // One unbroken 32+-character alphanumeric token: a key or a
+            // hash, never a code — truncating it would still log most of
+            // the secret.
             return "[redacted]"
         }
         return String(scrubbed.prefix(Self.maxErrorCodeLength))
