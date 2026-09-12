@@ -513,18 +513,17 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: intentNepali1B,
             kind: .llamaBase,
-            displayName: "Brain — Qwen 1.7B · Nepali fine-tune (seed 42)",
-            // Qwen3-1.7B QLoRA intent fine-tune, seed 42 of the
-            // deterministic k=3 bake-off (2026-09-12, anchored dataset,
-            // seeded training). Emergency gate PASSES for this seed;
-            // closed-intent/time remain below ship gates — EXPERIMENTAL,
-            // published as the best available on-device brain while the
-            // 4B capacity test runs. Supersedes the Gemma v7 brain (which
-            // fails the emergency hard gate).
-            filename: "intent-ne-qwen-s42-q4_k_m.gguf",
-            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v12/intent-ne-qwen-s42-q4_k_m.gguf")!,
+            displayName: "Brain — Qwen 1.7B · Nepali fine-tune (slim, seed 43)",
+            // Qwen3-1.7B QLoRA intent fine-tune, seed 43 of the
+            // SLIM-template deterministic k=3 bake-off (2026-09-12):
+            // 696-token template + reconciled intent/response schema.
+            // Gates: closed 0.941 (one row short), emergency 1.000,
+            // side-effect 1.000 — best available on-device brain.
+            // Supersedes v12 seed-42 and the Gemma v7 brain.
+            filename: "intent-ne-qwen-s43-q4_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v14/intent-ne-qwen-s43-q4_k_m.gguf")!,
             sizeBytes: 1_107_408_576,
-            sha256: "136392b324b2e24503b8376cdb8332d8909192644d910a3b8ec83c0db227a42d",
+            sha256: "c2135f786ace9c1020a27bb115600d90f9e3c4d788c995730b379b67e1ae74ef",
             minDeviceRAMBytes: 3_000_000_000,
             dependsOn: nil
         ),
