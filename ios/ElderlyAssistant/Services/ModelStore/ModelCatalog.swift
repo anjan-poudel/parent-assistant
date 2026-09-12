@@ -203,7 +203,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperMediumFinetunedNepali,
             kind: .whisperBase,
-            displayName: "Nepali — Medium (default)",
+            displayName: "Nepali STT — Medium (v3, bundled default)",
             filename: "whisper-medium-ne-q5_1.bin",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v3/whisper-medium-ne-q5_1.bin")!,
             // Stock-medium fine-tune (checkpoint-5028, 2026-09-03).
@@ -217,7 +217,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperMediumV5,
             kind: .whisperBase,
-            displayName: "Nepali — Medium v5",
+            displayName: "Nepali STT — v5",
             // finetune-medium-v5-final (2026-09-09): 3 epochs on the
             // expanded 162k-row manifest (complete SLR54 + FLEURS +
             // slr43/143), fleurs-weight 25. FLEURS WER 28.23 / CER 8.89 —
@@ -233,7 +233,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperMediumV6,
             kind: .whisperBase,
-            displayName: "Nepali — Medium v6 (best accuracy)",
+            displayName: "Nepali STT — v6 (best accuracy)",
             // finetune-medium-v6-final (2026-09-11): 3 epochs on the
             // 399k-row manifest (IndicVoices 237k conversational +
             // complete SLR54 + FLEURS). FLEURS WER 25.28 / CER 8.14 —
@@ -249,6 +249,12 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperFinetunedNepali,
             kind: .whisperBase,
+            // HIDDEN from the picker/downloads (2026-09-12, catalog
+            // declutter): the q5_0 export of the small fine-tune. Its
+            // q8_0 sibling (`whisperFinetunedNepaliQ8`) is the same
+            // checkpoint at better quality, so this one is no longer
+            // offered — kept in `all` so a device that cached it can
+            // still delete it.
             displayName: "Nepali — Small",
             filename: "whisper-finetuned-ne-q5_1.bin",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v2/whisper-finetuned-ne-q5_1.bin")!,
@@ -269,7 +275,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperFinetunedNepaliQ8,
             kind: .whisperBase,
-            displayName: "Nepali — Small (more accurate)",
+            displayName: "Nepali STT — Small",
             filename: "whisper-finetuned-ne-q8_0.bin",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v2/whisper-finetuned-ne-q8_0.bin")!,
             // Same checkpoint, q8_0 — best accuracy, +110 MB download.
@@ -282,6 +288,10 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperSmallNepali,
             kind: .whisperBase,
+            // HIDDEN from the picker/downloads (2026-09-12, catalog
+            // declutter): the mid-training distill the stage-4 small
+            // fine-tune superseded. Kept in `all` for cached-device
+            // deletion.
             displayName: "Nepali — Small (old version)",
             filename: "whisper-distill-ne-q5_1.bin",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v1/whisper-distill-ne-q5_1.bin")!,
@@ -295,6 +305,11 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperLargeV3Nepali,
             kind: .whisperBase,
+            // HIDDEN from the picker/downloads (2026-09-12, catalog
+            // declutter): CPU-only Large — ~1.2 GB and minutes per
+            // utterance with no ANE path, while the v5/v6 medium
+            // fine-tunes beat it on accuracy AND speed. Kept in `all`
+            // for cached-device deletion.
             displayName: "Nepali — Large (original)",
             // Self-converted from kiranpantha/whisper-large-v3-nepali —
             // the only popular Nepali fine-tune that keeps the standard
@@ -323,6 +338,11 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperLargeV3NepaliV2,
             kind: .whisperBase,
+            // HIDDEN from the picker/downloads (2026-09-12, catalog
+            // declutter): the teacher-v2 fine-tune never beat its own
+            // base on the FLEURS harness (34.51 vs the base it was
+            // trained from) and runs on the CPU-only Large path. Kept in
+            // `all` for cached-device deletion.
             displayName: "Nepali — Large (new version)",
             // finetune-teacher-v2-final (2026-09-06): 3 epochs on the
             // canonicalized+noise-aug mix, started from the kiranpantha
@@ -340,7 +360,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperKitNepali,
             kind: .whisperBase,
-            displayName: "Nepali — Large · WhisperKit (fine-tuned)",
+            displayName: "Nepali STT — Large · fine-tuned (ANE)",
             // finetune-teacher-v2-final, 6-bit palettized CoreML (+2-bit
             // sparse outliers, group 64) — q6 zip is 1.12 GB vs 2.9 GB
             // fp16. FLEURS WER 34.51 (base scores 39.63 on the same set).
@@ -361,7 +381,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperKitNepaliLargeBase,
             kind: .whisperBase,
-            displayName: "Nepali — Large · WhisperKit (original)",
+            displayName: "Nepali STT — Large · original (ANE)",
             // kiranpantha/whisper-large-v3-nepali base, same 6-bit
             // palettization recipe as the fine-tuned sibling above.
             // FLEURS WER 39.63 on the shared harness (teacher-v2: 34.51).
@@ -380,7 +400,12 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperKitNepaliMedium,
             kind: .whisperBase,
-            displayName: "Nepali — Medium · WhisperKit (fast)",
+            // HIDDEN from the picker/downloads (2026-09-12, catalog
+            // declutter): superseded by the v6 ANE build
+            // (`whisperKitMediumV6`) — same medium class, better
+            // accuracy on the same fast path. Kept in `all` so a device
+            // that cached it can still delete it.
+            displayName: "Nepali STT — Medium · fast (ANE, v3)",
             // WhisperKit directory delivery — `filename`/`downloadURL` are
             // struct-required but unused; the zip URL below is the real one.
             filename: "whisperkit-ne-medium",
@@ -399,7 +424,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperKitMediumV5,
             kind: .whisperBase,
-            displayName: "Nepali — Medium v5 · WhisperKit (best + fast)",
+            displayName: "Nepali STT — v5 · fast (ANE)",
             // finetune-medium-v5-final, 6-bit palettized CoreML (group 64,
             // 2-bit sparse outliers) — FLEURS WER 28.23 / CER 8.89, the
             // best measured accuracy, on the ANE fast path. CoreML spec
@@ -421,7 +446,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperKitMediumV6,
             kind: .whisperBase,
-            displayName: "Nepali — Medium v6 · WhisperKit (best + fast)",
+            displayName: "Nepali STT — v6 · fast (ANE)",
             // finetune-medium-v6-final, 6-bit palettized CoreML (group 64,
             // 2-bit sparse outliers) — FLEURS WER 25.28 / CER 8.14, the
             // best measured accuracy, on the ANE fast path. CoreML spec
@@ -441,7 +466,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperSmallMultilingual,
             kind: .whisperBase,
-            displayName: "Multilingual — Small",
+            displayName: "Multilingual STT — Small (fallback)",
             filename: "ggml-small-q5_1.bin",
             downloadURL: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin")!,
             sizeBytes: 190_085_487,
@@ -456,7 +481,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: whisperBaseEn,
             kind: .whisperBase,
-            displayName: "English — Base (smallest)",
+            displayName: "English STT — Small",
             filename: "ggml-whisper-base-en-q5_1.bin",
             downloadURL: URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin")!,
             sizeBytes: 59_721_011,
@@ -467,7 +492,14 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: llama3_2_1B,
             kind: .llamaBase,
-            displayName: "Assistant brain — 1B",
+            // HIDDEN from the picker (2026-09-12, catalog declutter): the
+            // pre-Qwen reasoning brain. NOTE: it is still the auto-download
+            // default (`AppCoordinator.defaultBrainModelID`), which now
+            // means a fresh install fetches a brain the picker no longer
+            // offers — moving that default (to the intent fine-tune?) is a
+            // separate product decision, deliberately not made here. Kept
+            // in `all` so a device that cached it can still delete it.
+            displayName: "Brain — LLaMA 1B (legacy)",
             filename: "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
             downloadURL: URL(string: "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf")!,
             sizeBytes: 807_694_464,
@@ -478,7 +510,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: intentNepali1B,
             kind: .llamaBase,
-            displayName: "Intent engine (Nepali, Qwen 1.7B)",
+            displayName: "Brain — Qwen 1.7B · Nepali fine-tune (seed 42)",
             // Qwen3-1.7B QLoRA intent fine-tune, seed 42 of the
             // deterministic k=3 bake-off (2026-09-12, anchored dataset,
             // seeded training). Emergency gate PASSES for this seed;
@@ -496,7 +528,11 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: intentGemma1B,
             kind: .llamaBase,
-            displayName: "Assistant brain — Gemma 1B (Nepali)",
+            // HIDDEN from the picker (2026-09-12, catalog declutter):
+            // fails the emergency hard gate — the one gate the household
+            // safety story cannot trade away. Kept in `all` so a device
+            // that cached it can still delete it.
+            displayName: "Brain — Gemma 1B · Nepali (fails emergency gate)",
             // GEMMA leg of the bake-off (tools/train-intent, tag gemma):
             // QLoRA fine-tune merged into google/gemma-3-1b-it (fp16) then
             // converted + quantized Q4_K_M with llama.cpp 9e0e220
@@ -516,7 +552,10 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: llama3_2_3B,
             kind: .llamaBase,
-            displayName: "Assistant brain — 3B",
+            // HIDDEN from the picker (2026-09-12, catalog declutter): the
+            // pre-Qwen 3B-class brain, superseded by Qwen3 4B. Kept in
+            // `all` so a device that cached it can still delete it.
+            displayName: "Brain — LLaMA 3B (legacy)",
             filename: "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
             downloadURL: URL(string: "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf")!,
             sizeBytes: 2_019_377_696,
@@ -527,7 +566,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: qwen3_1_7BInstruct,
             kind: .llamaBase,
-            displayName: "Assistant brain — Qwen3 1.7B",
+            displayName: "Brain — Qwen 3 1.7B (stock)",
             // lm-kit mirror of the official Qwen3-1.7B-Instruct (2507)
             // GGUF — Apache-2.0, standard Q4_K_M, converted with a
             // mid-2025 llama.cpp (standard qwen3 arch, loads on b10068).
@@ -545,7 +584,7 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: qwen3_4BInstruct,
             kind: .llamaBase,
-            displayName: "Assistant brain — Qwen3 4B",
+            displayName: "Brain — Qwen 3 4B (stock)",
             // mradermacher mirror of the official instruct GGUF (standard
             // Q4_K_M, not unsloth dynamic quants — loads on the vendored
             // llama.cpp b10068). sha256 + size pinned from the HuggingFace
@@ -663,30 +702,56 @@ enum ModelCatalog {
         all.filter { $0.kind == kind }
     }
 
-    /// The STT engines a user can actually select or download from the
-    /// Settings "AI मोडेल" screen: every `.whisperBase` catalog entry
-    /// that has a real, hosted artifact. Excludes `whisperKitNepali`,
-    /// the teacher-conversion PLACEHOLDER — its download/zip URLs are
-    /// `.invalid` stubs and its sha256 is all-zero, and its entry's
-    /// comment forbids enabling download until a real artifact exists.
-    ///
-    /// Order matches `all` (default first, Nepali sizes then WhisperKit,
-    /// fallbacks last) — the picker and the downloads list both iterate
-    /// this so the two surfaces always agree.
-    static let availableSTTEntries: [ModelCatalogEntry] = {
-        // No exclusions: the teacher WhisperKit placeholder is now a real
-        // q6 artifact (2026-09-06), and every other catalog STT engine —
-        // including the CPU-only large-v3 ggml models — stays selectable
-        // per the user's "pick ANY engine" field report; the honest size
-        // labels carry the speed trade-off.
-        entries(kind: .whisperBase)
-    }()
+    // MARK: - Curated pickers (catalog declutter, 2026-09-12)
 
-    /// The brain models the Settings picker can select: every `.llamaBase`
-    /// entry with a real, hosted artifact. The former `intentNepali1B`
-    /// placeholder is now the released Qwen fine-tune (v12, 2026-09-12),
-    /// so no exclusions remain.
-    static let availableBrainEntries: [ModelCatalogEntry] = {
-        entries(kind: .llamaBase)
-    }()
+    /// The two lists below are CURATED — deliberately not "everything of
+    /// this kind". A household should see the best options first, not the
+    /// whole history of the training runs. Superseded / unsafe entries
+    /// stay in `all` (a device that cached one must still be able to see
+    /// and delete it) but are no longer offered; the Settings screen adds
+    /// an installed hidden entry back as a management row only when it is
+    /// actually on disk — see `AIModelsSettingsView.managedRows`.
+    ///
+    /// Order is preference order: v6 first (best accuracy), then the ANE
+    /// fast path, then the bundled default, then the fallbacks.
+
+    /// The STT engines the Settings "AI मोडेल" screen offers, best first.
+    ///
+    /// Hidden (in `all`, not offered):
+    ///   - `whisperKitNepaliMedium` — superseded by the v6 ANE build
+    ///     (same medium class, better accuracy, same fast path).
+    ///   - `whisperLargeV3Nepali` / `whisperLargeV3NepaliV2` — Large on
+    ///     the CPU path: ~1.2 GB and minutes per utterance, and the v2
+    ///     fine-tune never beat its own base on the FLEURS harness.
+    ///   - `whisperFinetunedNepali` — the q5_0 small; the q8_0 export is
+    ///     the same checkpoint at better quality.
+    ///   - `whisperSmallNepali` — the mid-training distill the small
+    ///     fine-tune superseded.
+    static let availableSTTEntries: [ModelCatalogEntry] = [
+        whisperMediumV6,
+        whisperKitMediumV6,
+        whisperMediumV5,
+        whisperKitMediumV5,
+        whisperKitNepali,
+        whisperKitNepaliLargeBase,
+        whisperMediumFinetunedNepali,
+        whisperFinetunedNepaliQ8,
+        whisperSmallMultilingual,
+        whisperBaseEn
+    ].compactMap { entry(for: $0) }
+
+    /// The brain models the Settings picker offers: the Nepali intent
+    /// fine-tune (the v12 bake-off winner) and the two stock Qwen 3
+    /// sizes, biggest first.
+    ///
+    /// Hidden (in `all`, not offered):
+    ///   - `intentGemma1B` — fails the emergency hard gate, the one gate
+    ///     the household safety story cannot trade away.
+    ///   - `llama3_2_1B` / `llama3_2_3B` — the pre-Qwen LLaMA brains
+    ///     (legacy; Qwen 3 supersedes both sizes).
+    static let availableBrainEntries: [ModelCatalogEntry] = [
+        intentNepali1B,
+        qwen3_4BInstruct,
+        qwen3_1_7BInstruct
+    ].compactMap { entry(for: $0) }
 }

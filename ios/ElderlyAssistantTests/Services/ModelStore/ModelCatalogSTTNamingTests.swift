@@ -1,12 +1,14 @@
 import XCTest
 @testable import ElderlyAssistant
 
-/// Guards the Settings STT-engine list + naming contract (STT-picker task):
-/// the picker offers EVERY catalog STT engine (cached or not) and the
-/// downloads list covers the same set, placeholder-only entries stay out
-/// of both, and display names are short, mutually distinct, and honest
-/// for a non-technical user — language + plain-word size + runtime where
-/// it matters, no raw filenames/quantization codes, exactly one "default".
+/// Guards the Settings STT-engine list + naming contract. Since the
+/// catalog declutter (2026-09-12) the picker/downloads list is CURATED:
+/// it offers the best options in preference order, while superseded /
+/// CPU-only / lower-quality duplicates stay in the catalog (`all`) but
+/// are not offered — a cached one still needs a deletable row. Names are
+/// short, mutually distinct, and honest for a non-technical user —
+/// language + size or version + runtime where it matters, no raw
+/// filenames/quantization codes, exactly one "default".
 final class ModelCatalogSTTNamingTests: XCTestCase {
 
     private var allSTTEntries: [ModelCatalogEntry] {
@@ -28,28 +30,36 @@ final class ModelCatalogSTTNamingTests: XCTestCase {
                        + duplicates(in: names).joined(separator: ", "))
     }
 
-    // MARK: - (b) Each name carries a language word AND a size word
+    // MARK: - (b) Each name carries a language word AND a class word
 
-    func testSTTDisplayNamesCarryLanguageAndSizeWords() {
+    func testSTTDisplayNamesCarryLanguageAndClassWords() {
         let languageWords = ["nepali", "english", "multilingual"]
-        let sizeWords = ["small", "medium", "large"]
+        // Size OR version: the renaming scheme (2026-09-12) replaced the
+        // medium-v5/v6 size words with the version the fine-tune is
+        // known by — that IS the honest class marker for those rows.
+        let classWords = ["small", "medium", "large", "v5", "v6"]
         for entry in allSTTEntries {
             let name = entry.displayName.lowercased()
             XCTAssertTrue(languageWords.contains { name.contains($0) },
                           "'\(entry.displayName)' must name its language "
                           + "(Nepali / English / Multilingual)")
-            XCTAssertTrue(sizeWords.contains { name.contains($0) },
+            XCTAssertTrue(classWords.contains { name.contains($0) },
                           "'\(entry.displayName)' must carry a plain-word size "
-                          + "(Small / Medium / Large), not a model code")
+                          + "(Small / Medium / Large) or version (v5 / v6), "
+                          + "not a model code")
         }
     }
 
     func testSTTDisplayNamesExposeNoRawIdentifiers() {
-        let forbidden = ["ggml", ".bin", "q5", "q8", "q4", "ane",
-                         "kiranpantha", "stt —", "distill", "legacy"]
+        let forbidden = ["ggml", ".bin", "q5", "q8", "q4",
+                         "kiranpantha", "distill", "legacy"]
         // ("fine-tun" dropped 2026-09-06: the teacher's displayName
         // legitimately says "fine-tuned" — the word describes what the
-        // model IS for the household, not an internal token.)
+        // model IS for the household, not an internal token. "stt —" and
+        // "ane" dropped 2026-09-12: the renaming scheme prefixes every
+        // row with the modality ("Nepali STT — …") and states the runtime
+        // where it matters ("· fast (ANE)"). "legacy" stays forbidden
+        // here — only the hidden LLaMA brains carry it.)
         for entry in allSTTEntries {
             let name = entry.displayName.lowercased()
             for token in forbidden {
@@ -68,32 +78,55 @@ final class ModelCatalogSTTNamingTests: XCTestCase {
                        + marked.map { $0.id.rawValue }.joined(separator: ", "))
     }
 
-    // MARK: - Selectable/downloadable set covers the catalog, minus placeholders
+    // MARK: - Curation: what the picker/downloads list offers
 
-    func testAvailableSTTEntriesOffersEveryPickableEngine() {
-        let available = ModelCatalog.availableSTTEntries
-        let offered = Set(available.map(\.id))
-        // No exclusions: the teacher WhisperKit placeholder became a real
-        // q6 artifact (2026-09-06), so every catalog STT engine — the
-        // teacher included — must be offered.
-        let expected = Set(allSTTEntries.map(\.id))
-        XCTAssertEqual(offered, expected,
-                       "Picker/downloads must offer every catalog STT engine "
-                       + "that has a real artifact")
-        // Regression: engines the old requiredModelIds list omitted from
-        // the Settings screen entirely (cached or otherwise).
-        for id in [ModelCatalog.whisperFinetunedNepali,
-                   ModelCatalog.whisperSmallNepali,
-                   ModelCatalog.whisperBaseEn,
-                   ModelCatalog.whisperKitNepaliMedium] {
-            XCTAssertTrue(offered.contains(id), "\(id.rawValue) must be offered")
-        }
+    /// The declutter rule (2026-09-12): the list is CURATED and in
+    /// preference order — v6 first (best accuracy), then the ANE fast
+    /// path, then the bundled default, then the fallbacks.
+    func testAvailableSTTEntriesIsTheCuratedListInPreferenceOrder() {
+        XCTAssertEqual(ModelCatalog.availableSTTEntries.map(\.id),
+                       [ModelCatalog.whisperMediumV6,
+                        ModelCatalog.whisperKitMediumV6,
+                        ModelCatalog.whisperMediumV5,
+                        ModelCatalog.whisperKitMediumV5,
+                        ModelCatalog.whisperKitNepali,
+                        ModelCatalog.whisperKitNepaliLargeBase,
+                        ModelCatalog.whisperMediumFinetunedNepali,
+                        ModelCatalog.whisperFinetunedNepaliQ8,
+                        ModelCatalog.whisperSmallMultilingual,
+                        ModelCatalog.whisperBaseEn],
+                       "The picker/downloads list is curated: best options "
+                       + "first, superseded engines gone (they stay in `all`)")
     }
 
-    func testAvailableSTTEntriesDefaultComesFirst() {
-        XCTAssertEqual(ModelCatalog.availableSTTEntries.first?.id,
-                       ModelCatalog.whisperMediumFinetunedNepali,
-                       "The bundled default should lead the picker")
+    /// Superseded / CPU-only / duplicate-quality engines must not be
+    /// offered — but must stay in the catalog so a device that cached one
+    /// can still see and delete it.
+    func testSupersededSTTEnginesAreNotOfferedButStayDeletable() {
+        let offered = Set(ModelCatalog.availableSTTEntries.map(\.id))
+        let hidden = [ModelCatalog.whisperKitNepaliMedium,   // superseded by v6 ANE
+                      ModelCatalog.whisperLargeV3Nepali,     // CPU-only Large
+                      ModelCatalog.whisperLargeV3NepaliV2,   // CPU-only, never beat its base
+                      ModelCatalog.whisperFinetunedNepali,   // q5_0 of the q8 small
+                      ModelCatalog.whisperSmallNepali]       // mid-training distill
+        for id in hidden {
+            XCTAssertFalse(offered.contains(id),
+                           "\(id.rawValue) is decluttered — must not be offered")
+            XCTAssertNotNil(ModelCatalog.entry(for: id),
+                            "\(id.rawValue) must stay in `all` so a cached "
+                            + "device can still delete it")
+        }
+        XCTAssertEqual(offered.count + hidden.count, allSTTEntries.count,
+                       "curated + hidden must account for every STT entry — "
+                       + "a new engine has to be classified deliberately")
+    }
+
+    func testTheBundledDefaultIsStillOffered() {
+        // v6 leads on accuracy now, so the bundled default is no longer
+        // first — but it must remain selectable (and marked as default).
+        XCTAssertTrue(ModelCatalog.availableSTTEntries.contains {
+            $0.id == ModelCatalog.whisperMediumFinetunedNepali
+        })
     }
 
     // MARK: - L10n catalog agrees with the canonical English names
@@ -113,6 +146,20 @@ final class ModelCatalogSTTNamingTests: XCTestCase {
         XCTAssertEqual(Set(names).count, names.count,
                        "Nepali picker rows must stay distinguishable too: "
                        + duplicates(in: names).joined(separator: ", "))
+    }
+
+    // MARK: - Settings section headers (STT/brain split, 2026-09-12)
+
+    func testSettingsSectionHeadersAreLocalizedEnAndNe() {
+        // The split surfaces ("Speech recognition" / "Assistant brain")
+        // must read in the household's language like every other row.
+        for key in ["settings.stt.section", "settings.brain.section"] {
+            let en = L10n.str(key, locale: Locale(identifier: "en"))
+            let ne = L10n.str(key, locale: Locale(identifier: "ne-NP"))
+            XCTAssertNotEqual(en, key, "\(key) must have an English value")
+            XCTAssertNotEqual(ne, key, "\(key) must have a Nepali value")
+            XCTAssertNotEqual(en, ne, "\(key) must actually be translated")
+        }
     }
 
     // MARK: - Picker option-label helper (installed vs not-yet-downloaded)

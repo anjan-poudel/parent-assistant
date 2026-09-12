@@ -3118,16 +3118,21 @@ struct AIModelsSettingsView: View {
     var body: some View {
         LeafScreen(titleKey: "settings.ai.title") {
             VStack(spacing: 20) {
+                // [CATALOG-DECLUTTER 2026-09-12] STT and brain models are
+                // two separate surfaces: one picker + one downloads list
+                // each. They used to share a single picker card and one
+                // mixed downloads card, which read as an undifferentiated
+                // blob of "models" to a non-technical user.
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("settings.ai.selection")
+                    Text("settings.stt.section")
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                         .foregroundStyle(DesignTokens.textPrimary)
-                    // Every catalog STT engine is offered — cached AND
+                    // Every curated STT engine is offered — cached AND
                     // not-yet-downloaded alike (a cached-only list hid
                     // everything but the user's 1–2 installed models).
                     // Picking an engine that isn't installed starts its
-                    // download (see `sttSelection`); the downloads card
-                    // below shows per-row progress.
+                    // download (see `sttSelection`); the rows below show
+                    // per-row progress.
                     Picker("settings.ai.selection",
                            selection: sttSelection) {
                         Text("settings.ai.automatic").tag(Optional<ModelID>.none)
@@ -3145,6 +3150,17 @@ struct AIModelsSettingsView: View {
                             .font(.system(size: DesignTokens.minCaptionPointSize))
                             .foregroundStyle(DesignTokens.textSecondary)
                     }
+                    modelRows(managedRows(ModelCatalog.availableSTTEntries,
+                                          kind: .whisperBase))
+                    HStack(spacing: 6) {
+                        Image(systemName: "waveform.badge.magnifyingglass")
+                            .foregroundStyle(DesignTokens.textSecondary)
+                        Text(L10n.fmt("model.sttInUse", locale: coordinator.appLanguage.locale,
+                                     L10n.str(coordinator.activeSTTNameKey,
+                                              locale: coordinator.appLanguage.locale)))
+                            .font(.system(size: DesignTokens.minCaptionPointSize))
+                            .foregroundStyle(DesignTokens.textSecondary)
+                    }
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -3152,16 +3168,16 @@ struct AIModelsSettingsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
 
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("settings.brain.selection")
+                    Text("settings.brain.section")
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                         .foregroundStyle(DesignTokens.textPrimary)
-                    // Every real brain artifact is offered — cached AND
+                    // Every curated brain artifact is offered — cached AND
                     // not-yet-downloaded alike (the STT picker's lesson:
                     // a cached-only list hides everything but 1–2 rows).
                     // Picking one that isn't installed starts its
                     // download (`brainModelPreference`'s didSet does
-                    // that, same contract as the STT picker); the
-                    // downloads card below shows per-row progress.
+                    // that, same contract as the STT picker); the rows
+                    // below show per-row progress.
                     Picker("settings.brain.selection",
                            selection: brainSelection) {
                         Text("settings.ai.automatic").tag(Optional<ModelID>.none)
@@ -3174,50 +3190,22 @@ struct AIModelsSettingsView: View {
                     }
                     .pickerStyle(.menu)
                     .tint(DesignTokens.accent)
+                    modelRows(managedRows(ModelCatalog.availableBrainEntries,
+                                          kind: .llamaBase))
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(DesignTokens.card)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
 
+                // TTS / VAD / KWS management — deliberately left as it
+                // was by the STT/brain split (the voice rows this screen
+                // has always managed).
                 VStack(alignment: .leading, spacing: 12) {
                     Text("settings.ai.downloads")
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                         .foregroundStyle(DesignTokens.textPrimary)
-                    ForEach(coordinator.requiredModelIds, id: \.rawValue) { id in
-                        if let entry = ModelCatalog.entry(for: id) {
-                            ModelManagementRow(
-                                entry: entry,
-                                state: downloadState(for: id),
-                                onStart: { downloads.start(id) },
-                                onCancel: { downloads.cancel(id) },
-                                onDelete: {
-                                    try? coordinator.modelStore.delete(id)
-                                    downloads.reset(id)
-                                    if coordinator.sttModelPreference == id {
-                                        coordinator.sttModelPreference = nil
-                                    }
-                                    // Deleting the brain the picker is
-                                    // currently set to falls back to the
-                                    // default (same truthfulness rule as
-                                    // the STT handling above).
-                                    if coordinator.brainModelPreference == id {
-                                        coordinator.brainModelPreference = nil
-                                    }
-                                }
-                            )
-                            Divider()
-                        }
-                    }
-                    HStack(spacing: 6) {
-                        Image(systemName: "waveform.badge.magnifyingglass")
-                            .foregroundStyle(DesignTokens.textSecondary)
-                        Text(L10n.fmt("model.sttInUse", locale: coordinator.appLanguage.locale,
-                                     L10n.str(coordinator.activeSTTNameKey,
-                                              locale: coordinator.appLanguage.locale)))
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary)
-                    }
+                    modelRows(voiceManagedEntries)
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -3278,6 +3266,67 @@ struct AIModelsSettingsView: View {
             downloads.start(id)
         case .queued, .downloading, .verifying, .completed:
             break   // already in flight (or just finished)
+        }
+    }
+
+    /// Download/management rows for one section: the curated entries the
+    /// picker offers, plus any hidden entry of the same kind that is
+    /// actually installed on THIS device.
+    ///
+    /// The declutter rule (2026-09-12) is "not offered, but still
+    /// deletable": a superseded / legacy model left the curated lists —
+    /// it must never read as a choice — yet a device that already cached
+    /// one has to keep a row for it, otherwise the owner can never free
+    /// the space. Catalog entries are never removed, so the install check
+    /// is the only gate here.
+    private func managedRows(_ curated: [ModelCatalogEntry],
+                             kind: ModelKind) -> [ModelCatalogEntry] {
+        let offered = Set(curated.map(\.id))
+        let installedHidden = ModelCatalog.entries(kind: kind)
+            .filter { !offered.contains($0.id) && isInstalled($0.id) }
+        return curated + installedHidden
+    }
+
+    /// The non-model assets this screen has always managed (TTS / VAD /
+    /// KWS rows) — untouched by the STT/brain split. STT and brain rows
+    /// now live in their own sections above, so they are filtered out
+    /// here (resolved to entries up front, since a row needs the model).
+    private var voiceManagedEntries: [ModelCatalogEntry] {
+        coordinator.requiredModelIds.compactMap { id in
+            guard let entry = ModelCatalog.entry(for: id) else { return nil }
+            guard entry.kind != .whisperBase, entry.kind != .llamaBase else {
+                return nil
+            }
+            return entry
+        }
+    }
+
+    /// One management row per entry, with the download/delete actions the
+    /// screen has always wired (deleting the model the picker currently
+    /// points at falls back to the automatic default).
+    @ViewBuilder
+    private func modelRows(_ entries: [ModelCatalogEntry]) -> some View {
+        ForEach(entries, id: \.id) { entry in
+            ModelManagementRow(
+                entry: entry,
+                state: downloadState(for: entry.id),
+                onStart: { downloads.start(entry.id) },
+                onCancel: { downloads.cancel(entry.id) },
+                onDelete: {
+                    try? coordinator.modelStore.delete(entry.id)
+                    downloads.reset(entry.id)
+                    if coordinator.sttModelPreference == entry.id {
+                        coordinator.sttModelPreference = nil
+                    }
+                    // Deleting the brain the picker is currently
+                    // set to falls back to the default (same
+                    // truthfulness rule as the STT handling above).
+                    if coordinator.brainModelPreference == entry.id {
+                        coordinator.brainModelPreference = nil
+                    }
+                }
+            )
+            Divider()
         }
     }
 

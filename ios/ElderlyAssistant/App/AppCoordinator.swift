@@ -4024,10 +4024,28 @@ self.noteTalkContractChanged()
     }
 
     /// Catalog key naming the active STT (resolved in the UI's locale).
+    ///
+    /// Every Whisper-family engine the picker can select needs a case
+    /// here — a fall-through labels the row "SFSpeechRecognizer (English
+    /// fallback)", which is simply wrong for any of them (the v5/v6 ids
+    /// used to land there). The `stt.name.*` values mirror the catalog
+    /// `model.name.*` names (catalog declutter, 2026-09-12).
     private func sttNameKey(for id: ModelID?) -> String {
         switch id {
         case ModelCatalog.whisperKitNepaliMedium:
             return "stt.name.whisperKitNepali"
+        case ModelCatalog.whisperKitMediumV6:
+            return "stt.name.whisperKitMediumV6"
+        case ModelCatalog.whisperKitMediumV5:
+            return "stt.name.whisperKitMediumV5"
+        case ModelCatalog.whisperKitNepali:
+            return "stt.name.whisperKitTeacher"
+        case ModelCatalog.whisperKitNepaliLargeBase:
+            return "stt.name.whisperKitLargeBase"
+        case ModelCatalog.whisperMediumV6:
+            return "stt.name.whisperMediumV6"
+        case ModelCatalog.whisperMediumV5:
+            return "stt.name.whisperMediumV5"
         case ModelCatalog.whisperMediumFinetunedNepali:
             return "stt.name.whisperMediumFinetunedNepali"
         case ModelCatalog.whisperFinetunedNepali:
