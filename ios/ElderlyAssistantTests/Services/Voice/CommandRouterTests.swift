@@ -829,6 +829,23 @@ final class CommandRouterIntentToolsTests: XCTestCase {
                        "provable arithmetic must never reach the LLM interpreter")
     }
 
+    /// [REGRESSION-AUDIT] (2026-09-13) Bounded WAIT (1 ms poll, ≤5 s) for the
+    /// async calculator speak path — a single `Task.yield()` loses to
+    /// main-actor contention in full-suite runs (utterances still empty at
+    /// assert time in the 2026-09-13 01:12 and 01:40 gates).
+    private func awaitSpokenReply(
+        _ speaker: MockSpeaker,
+        file: StaticString = #filePath, line: UInt = #line
+    ) async {
+        var waited: UInt64 = 0
+        while speaker.utterances.isEmpty && waited < 5_000_000_000 {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+            waited += 1_000_000
+        }
+        XCTAssertFalse(speaker.utterances.isEmpty,
+                       "the spoken reply never committed", file: file, line: line)
+    }
+
     func testCalculatorReplySpokenInCoordinatorsLocale() async {
         let coordinator = MockVoiceCommandCoordinator()
         let speaker = MockSpeaker()
@@ -837,7 +854,7 @@ final class CommandRouterIntentToolsTests: XCTestCase {
                                    speaker: speaker, interpreter: FakeCommandInterpreter())
 
         _ = router.route(transcript: "१० र ४ घटाउनुहोस्")
-        await Task.yield()
+        await awaitSpokenReply(speaker)
 
         XCTAssertEqual(speaker.utterances.map(\.text), ["१० घटाउ ४ बराबर ६ हुन्छ।"])
         XCTAssertEqual(speaker.utterances.first?.locale, Locale(identifier: "ne-NP"))
@@ -854,7 +871,7 @@ final class CommandRouterIntentToolsTests: XCTestCase {
                                    speaker: speaker, interpreter: interpreter)
 
         _ = router.route(transcript: "१० लाई ० ले भाग गर")
-        await Task.yield()
+        await awaitSpokenReply(speaker)
 
         let expected = L10n.str("calculator.error.divByZero", locale: ne)
         XCTAssertEqual(coordinator.genericReplies, [expected],
