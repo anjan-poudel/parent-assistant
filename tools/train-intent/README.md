@@ -60,6 +60,17 @@ clean text guarantees a distribution mismatch. So:
 `eval_golden.py` exits non-zero when any gate fails, so a bad checkpoint
 can't be shipped by accident.
 
+**Gate-fidelity caveat (2026-09-13 k-run):** the GGUF backend samples
+*unconstrained*, while the app decodes under
+`LlamaGrammar.commandJSONSchema` (GBNF), where malformed JSON is
+structurally impossible. qwen4b-s42 emitted `"confidence": .9`
+(JSON-invalid — the app cannot produce it) on 5/20 golden rows; the
+strict parser scores those as no-JSON → predicted `none`, which
+collapsed that seed's contact F1 to 0.286. Read single-seed deltas
+dominated by no-JSON rows as eval artifacts, not model quality, until
+the gguf backend mirrors the app grammar (or applies a documented
+repair); the gate is a lower bound on production behaviour.
+
 ## Training (stage 4, external)
 
 Recommended: unsloth or axolotl QLoRA on the 4090 box (same machine as

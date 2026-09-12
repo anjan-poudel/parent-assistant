@@ -202,9 +202,10 @@ def summarize(runs: list[dict], k: int) -> int:
     done = [r for r in runs if r.get("metrics")]
     if done:
         row = []
-        for k in GATE_KEYS:
-            vals = [r["metrics"][k] for r in done
-                    if k in r["metrics"] and r["metrics"][k] == r["metrics"][k]]
+        for gk in GATE_KEYS:
+            vals = [r["metrics"][gk] for r in done
+                    if gk in r["metrics"]
+                    and r["metrics"][gk] == r["metrics"][gk]]
             row.append(sum(vals) / len(vals) if vals else float("nan"))
         print("-" * len(hdr))
         vals = " ".join(f"{v:>6.3f}" for v in row)
