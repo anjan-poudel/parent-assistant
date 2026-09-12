@@ -2,9 +2,9 @@
 
 ## Summary
 - Task groups: 9 (Jira Epics)
-- Total tasks: 33 parent tasks (44 task IDs: T-001–T-044)
+- Total tasks: 34 parent tasks (45 task IDs: T-001–T-045)
 - Subtasks: 26 subtasks (platform splits)
-- Estimated effort: 39–64 days (full parallel — the TG-08 ML track is the longest chain; TG-09 is iOS-side work inside the existing app stream) / 128–214 days (sequential)
+- Estimated effort: 39–64 days (full parallel — the TG-08 ML track is the longest chain; TG-09 is iOS-side work inside the existing app stream) / 129–216 days (sequential)
 - Critical path: T-033 → T-034 → T-035 → T-036 → T-037 → T-038 (TG-08; conditional on the T-033 GO/NO-GO and gated at entry by T-009 and T-021)
 
 ## Contents
@@ -69,6 +69,7 @@ Sequential effort: ~12 days iOS.
 21. **MEDIUM — `docs/plugin-architecture.md` is wrong on load-bearing facts (T-042, T-044):** registration is claimed in `AppCoordinator.init` (doc line 10) but is a lazy first-use factory (AppCoordinator.swift:1150-1156, factory at 1275-1285); `ApplianceHelperPlugin` is described as a "not ready" skeleton (doc lines 90-93) while shipping the live camera/vision flow (ApplianceHelperPlugin.swift:69-106; tests at ApplianceHelperPluginTests.swift:73, 88); the localization key `plugin.applianceHelper.notReady` (Localizable.xcstrings:7687) is dead (no Swift usage); the reference list names 2 of the 4 registered plugins.
 22. **MEDIUM — "The ONLY core case" is not strictly true, and a second recognition path exists (T-040, T-041):** core hard-codes `"appliance.identify"` (CommandRouter.swift:2341) and `"nepali_calendar.query"` (AppCoordinator.swift:5349), and YouTube requests are also reachable by the deterministic marker stage (CommandRouter.swift:888) executing through `YouTubeTool` (CommandRouter.swift:1873-1929), bypassing `YouTubePlugin`. T-040 records a disposition per case; T-042 corrects the wording; T-041 keeps the deterministic stage.
 23. **MEDIUM — Compile-time-only and iOS-only plugin reality is undocumented (T-040, T-044):** registration is a fixed compile-time list (PluginRegistry.swift:7-9), no dynamic-loading API exists in the app sources, and the Android tree contains no plugin code (only Gradle `plugins` blocks match a search). Written down as contract in T-040 and pinned by T-044.
+24. **MEDIUM — Brain catalogue/default contract red on master (T-045):** the iOS aggregate gate (`ios/build.sh test:unit`) fails on two unit tests — `BrainModelSelectionTests.testAvailableBrainEntriesIsTheCuratedList` and `InterpreterAvailabilityTests.testDefaultBrainModelIsTheRealHostedLlamaArtifact` — since `7d42852` added `qwen4BNepali` to `availableBrainEntries` (ModelCatalog.swift:774-779; LAN-only URL at 613, RAM floor lowered to 4 GB at 620 by `09b037e`) and switched `AppCoordinator.defaultBrainModelID` to `intentNepali1B` (AppCoordinator.swift:1170; artifact replaced with v14 seed-43 by `d19a8de`). T-045 must prove per test whether the expectation is stale or the assertion caught a real production defect (a shipped picker offering a LAN-only model; default-brain artifact/wiring or doc drift); a caught defect routes to its own production fix — never a weakened, skipped or deleted assertion, and the gate stays red until that fix lands.
 
 ## Security blockers
 
@@ -80,6 +81,8 @@ No new security BLOCKERs are introduced by TG-08. The encoder keeps the on-devic
 
 No new security BLOCKERs are introduced by TG-09. The plugin boundary keeps emergency dispatch, medication acknowledgement/reminders and the deterministic keyword net in core (constitution; plugin design §5), the transcript fix applies quarantine-level sanitisation at the dispatch boundary (NFR-013), plugin confirmation governance removes the confirm-before-execute hole (T-043), and plugin observability remains PII-free (NFR-016).
 
+No new security BLOCKERs are introduced by T-045. The task reads the catalogue/default wiring only, and if it routes a production fix, the fix keeps the on-device model constraint (FR-007).
+
 ---
 
 ## Task Group Summary
@@ -88,14 +91,14 @@ No new security BLOCKERs are introduced by TG-09. The plugin boundary keeps emer
 |-------|-------|-------|----------|----------|
 | [TG-01](tasks/TG-01-foundation-infrastructure/index.md) | Foundation & Infrastructure | 3 | 2 (T-002) | MEDIUM |
 | [TG-02](tasks/TG-02-voice-interface/index.md) | Voice Interface | 5 | 8 (T-005, T-007, T-009, T-012) | MEDIUM |
-| [TG-03](tasks/TG-03-on-device-ai/index.md) | On-Device AI | 3 | 2 (T-018) | HIGH |
+| [TG-03](tasks/TG-03-on-device-ai/index.md) | On-Device AI | 4 | 2 (T-018) | HIGH |
 | [TG-04](tasks/TG-04-authentication-security/index.md) | Authentication & Security | 3 | 2 (T-014) | HIGH |
 | [TG-05](tasks/TG-05-voice-session/index.md) | Voice Session | 1 | 2 (T-022) | HIGH |
 | [TG-06](tasks/TG-06-safety-critical-services/index.md) | Safety-Critical Services | 3 | 6 (T-024, T-026, T-028) | HIGH (SAFETY CRITICAL) |
 | [TG-07](tasks/TG-07-remote-configuration/index.md) | Remote Configuration | 3 | 2 (T-032) | HIGH/MEDIUM |
 | [TG-08](tasks/TG-08-nepali-intent-encoder/index.md) | Nepali Intent Encoder | 6 | 2 (T-037) | HIGH (GO/NO-GO gate) |
 | [TG-09](tasks/TG-09-plugin-recognition-contract/index.md) | Plugin Recognition & Contract | 6 | 0 | HIGH (governance + doc-contract) |
-| **Total** | | **33** | **26** | |
+| **Total** | | **34** | **26** | |
 
 ---
 
@@ -135,3 +138,4 @@ No new security BLOCKERs are introduced by TG-09. The plugin boundary keeps emer
 | T-042 | FR-008, NFR-013, NFR-016, NFR-023 |
 | T-043 | FR-009, FR-012, NFR-016, NFR-023 |
 | T-044 | FR-008, FR-009, NFR-013, NFR-016, NFR-023 |
+| T-045 | FR-007, FR-008, NFR-001, NFR-002 |

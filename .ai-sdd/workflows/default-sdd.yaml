@@ -98,7 +98,9 @@ tasks:
     depends_on: [plan-tasks]
     overlays:
       # Safety-critical: paired agentic review required on all implementation output.
-      review: { mode: "paired", enabled: true }
+      # challenger_agent is required by the paired-mode schema and must differ from
+      # the driver agent (dev), per docs/overlays.md.
+      review: { mode: "paired", enabled: true, challenger_agent: reviewer }
       # Elevated confidence threshold for safety-critical features.
       confidence: { enabled: true, threshold: 0.85 }
     # Extended rework budget for multi-platform safety-critical code.
