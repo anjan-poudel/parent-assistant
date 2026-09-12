@@ -7,16 +7,31 @@ final class BrainModelSelectionTests: XCTestCase {
 
     // MARK: - Catalog surface
 
-    func testAvailableBrainEntriesListsEveryRealBrainArtifact() {
+    /// The picker list is CURATED (catalog declutter, 2026-09-12): the
+    /// Nepali intent fine-tune plus the two stock Qwen 3 sizes. The
+    /// pre-Qwen LLaMA brains are legacy and the Gemma fine-tune fails the
+    /// emergency hard gate — neither may read as a choice.
+    func testAvailableBrainEntriesIsTheCuratedList() {
         XCTAssertEqual(ModelCatalog.availableBrainEntries.map(\.id),
-                       [ModelCatalog.llama3_2_1B,
-                        ModelCatalog.intentGemma1B,
-                        ModelCatalog.llama3_2_3B,
-                        ModelCatalog.qwen3_1_7BInstruct,
-                        ModelCatalog.qwen3_4BInstruct])
-        // The fine-tune entry is now a real artifact (v12, 2026-09-12) —
-        // it IS selectable alongside the other brains.
-        XCTAssertTrue(ModelCatalog.availableBrainEntries.contains { $0.id == ModelCatalog.intentNepali1B })
+                       [ModelCatalog.intentNepali1B,
+                        ModelCatalog.qwen3_4BInstruct,
+                        ModelCatalog.qwen3_1_7BInstruct])
+    }
+
+    /// Hidden brains stay in the catalog so a device that cached one can
+    /// still see and delete it (the picker just must not offer it).
+    func testHiddenBrainsStayInTheCatalogButAreNotOffered() {
+        let offered = Set(ModelCatalog.availableBrainEntries.map(\.id))
+        for id in [ModelCatalog.intentGemma1B,
+                   ModelCatalog.llama3_2_1B,
+                   ModelCatalog.llama3_2_3B] {
+            XCTAssertFalse(offered.contains(id),
+                           "\(id.rawValue) is decluttered — must not be offered")
+            XCTAssertNotNil(ModelCatalog.entry(for: id),
+                            "\(id.rawValue) must stay in `all` so a cached "
+                            + "device can still delete it")
+            XCTAssertEqual(ModelCatalog.entry(for: id)?.kind, .llamaBase)
+        }
     }
 
     func testGemmaIntentBrainEntryPinsRealArtifact() {
@@ -34,9 +49,11 @@ final class BrainModelSelectionTests: XCTestCase {
         XCTAssertTrue(entry.downloadURL.absoluteString
             .contains("github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v7"))
         XCTAssertTrue(entry.downloadURL.absoluteString.hasSuffix("intent-ne-gemma-q4_k_m.gguf"))
-        // Real, hosted artifact → the picker must offer it (downloadable
-        // through the same flow as every other brain).
-        XCTAssertTrue(ModelCatalog.availableBrainEntries.contains { $0.id == ModelCatalog.intentGemma1B })
+        // HIDDEN since the catalog declutter (2026-09-12): the artifact is
+        // real, but the model fails the emergency hard gate, so it must
+        // not be offered. It stays in `all` for cached-device deletion.
+        XCTAssertFalse(ModelCatalog.availableBrainEntries.contains { $0.id == ModelCatalog.intentGemma1B })
+        XCTAssertNotNil(ModelCatalog.entry(for: ModelCatalog.intentGemma1B))
     }
 
     // MARK: - L10n naming for the Gemma brain

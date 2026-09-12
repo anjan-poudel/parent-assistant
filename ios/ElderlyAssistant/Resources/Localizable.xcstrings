@@ -6443,19 +6443,36 @@
         }
       }
     },
+    "model.name.intent-ne-1b-q4km" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Brain — Qwen 1.7B · Nepali fine-tune (seed 42)"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "दिमाग — Qwen १.७B · नेपाली फाइन-ट्युन (seed ४२)"
+          }
+        }
+      }
+    },
     "model.name.intent-ne-gemma-q4km" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Assistant brain — Gemma 1B (Nepali)"
+            "value" : "Brain — Gemma 1B · Nepali (fails emergency gate)"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "सहायक दिमाग मोडेल — Gemma १B (नेपाली)"
+            "value" : "दिमाग — Gemma १B · नेपाली (आपत्कालीन गेट फेल)"
           }
         }
       }
@@ -6466,13 +6483,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Assistant reasoning (1B)"
+            "value" : "Brain — LLaMA 1B (legacy)"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "सहायक तर्क मोडल (१B)"
+            "value" : "दिमाग — LLaMA १B (पुरानो)"
           }
         }
       }
@@ -6483,13 +6500,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Assistant reasoning (3B)"
+            "value" : "Brain — LLaMA 3B (legacy)"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "सहायक तर्क मोडल (३B)"
+            "value" : "दिमाग — LLaMA ३B (पुरानो)"
           }
         }
       }
@@ -6517,13 +6534,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Assistant reasoning (Qwen3 1.7B)"
+            "value" : "Brain — Qwen 3 1.7B (stock)"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "सहायक तर्क मोडल (Qwen3 १.७B)"
+            "value" : "दिमाग — Qwen 3 १.७B (स्टक)"
           }
         }
       }
@@ -6534,13 +6551,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Assistant reasoning (Qwen3 4B)"
+            "value" : "Brain — Qwen 3 4B (stock)"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "सहायक तर्क मोडल (Qwen3 ४B)"
+            "value" : "दिमाग — Qwen 3 ४B (स्टक)"
           }
         }
       }
@@ -6568,13 +6585,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "English — Base (smallest)"
+            "value" : "English STT — Small"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "अंग्रेजी — आधार (सबैभन्दा सानो)"
+            "value" : "अंग्रेजी STT — सानो"
           }
         }
       }
@@ -6619,13 +6636,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Nepali — Small (more accurate)"
+            "value" : "Nepali STT — Small"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "नेपाली — सानो (थप सटीक)"
+            "value" : "नेपाली STT — सानो"
           }
         }
       }
@@ -6670,13 +6687,47 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Nepali — Medium (default)"
+            "value" : "Nepali STT — Medium (v3, bundled default)"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "नेपाली — मध्यम (पूर्वनिर्धारित)"
+            "value" : "नेपाली STT — मध्यम (v3, पूर्वनिर्धारित)"
+          }
+        }
+      }
+    },
+    "model.name.whisper-medium-v5-q5_1" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nepali STT — v5"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "नेपाली STT — v5"
+          }
+        }
+      }
+    },
+    "model.name.whisper-medium-v6-q5_1" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nepali STT — v6 (best accuracy)"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "नेपाली STT — v6 (उत्कृष्ट शुद्धता)"
           }
         }
       }
@@ -6687,13 +6738,30 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Multilingual — Small"
+            "value" : "Multilingual STT — Small (fallback)"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "बहुभाषी — सानो"
+            "value" : "बहुभाषी STT — सानो (फलब्याक)"
+          }
+        }
+      }
+    },
+    "model.name.whisperkit-ne-large-base" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nepali STT — Large · original (ANE)"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "नेपाली STT — ठूलो · मूल (ANE)"
           }
         }
       }
@@ -6704,13 +6772,64 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Nepali — Medium · WhisperKit (fast)"
+            "value" : "Nepali STT — Medium · fast (ANE, v3)"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "नेपाली — मध्यम · WhisperKit (छिटो)"
+            "value" : "नेपाली STT — मध्यम · छिटो (ANE, v3)"
+          }
+        }
+      }
+    },
+    "model.name.whisperkit-ne-medium-v5-q6" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nepali STT — v5 · fast (ANE)"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "नेपाली STT — v5 · छिटो (ANE)"
+          }
+        }
+      }
+    },
+    "model.name.whisperkit-ne-medium-v6-q6" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nepali STT — v6 · fast (ANE)"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "नेपाली STT — v6 · छिटो (ANE)"
+          }
+        }
+      }
+    },
+    "model.name.whisperkit-ne-teacher" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nepali STT — Large · fine-tuned (ANE)"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "नेपाली STT — ठूलो · फाइन-ट्युन (ANE)"
           }
         }
       }
@@ -9333,6 +9452,23 @@
         }
       }
     },
+    "settings.brain.section" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Assistant brain"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सहायक दिमाग"
+          }
+        }
+      }
+    },
     "settings.calendar.title" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10948,6 +11084,23 @@
         }
       }
     },
+    "settings.stt.section" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Speech recognition"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आवाज पहिचान"
+          }
+        }
+      }
+    },
     "settings.title" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12416,13 +12569,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "English — Base (smallest)"
+            "value" : "English STT — Small"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "अंग्रेजी — आधार (सबैभन्दा सानो)"
+            "value" : "अंग्रेजी STT — सानो"
           }
         }
       }
@@ -12450,13 +12603,64 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Nepali — Small (more accurate)"
+            "value" : "Nepali STT — Small"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "नेपाली — सानो (थप सटीक)"
+            "value" : "नेपाली STT — सानो"
+          }
+        }
+      }
+    },
+    "stt.name.whisperKitLargeBase" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nepali STT — Large · original (ANE)"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "नेपाली STT — ठूलो · मूल (ANE)"
+          }
+        }
+      }
+    },
+    "stt.name.whisperKitMediumV5" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nepali STT — v5 · fast (ANE)"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "नेपाली STT — v5 · छिटो (ANE)"
+          }
+        }
+      }
+    },
+    "stt.name.whisperKitMediumV6" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nepali STT — v6 · fast (ANE)"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "नेपाली STT — v6 · छिटो (ANE)"
           }
         }
       }
@@ -12467,13 +12671,30 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Nepali — Medium · WhisperKit (fast)"
+            "value" : "Nepali STT — Medium · fast (ANE, v3)"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "नेपाली — मध्यम · WhisperKit (छिटो)"
+            "value" : "नेपाली STT — मध्यम · छिटो (ANE, v3)"
+          }
+        }
+      }
+    },
+    "stt.name.whisperKitTeacher" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nepali STT — Large · fine-tuned (ANE)"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "नेपाली STT — ठूलो · फाइन-ट्युन (ANE)"
           }
         }
       }
@@ -12518,13 +12739,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Nepali — Medium (default)"
+            "value" : "Nepali STT — Medium (v3, bundled default)"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "नेपाली — मध्यम (पूर्वनिर्धारित)"
+            "value" : "नेपाली STT — मध्यम (v3, पूर्वनिर्धारित)"
           }
         }
       }
@@ -12535,13 +12756,47 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Multilingual — Small"
+            "value" : "Multilingual STT — Small (fallback)"
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "बहुभाषी — सानो"
+            "value" : "बहुभाषी STT — सानो (फलब्याक)"
+          }
+        }
+      }
+    },
+    "stt.name.whisperMediumV5" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nepali STT — v5"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "नेपाली STT — v5"
+          }
+        }
+      }
+    },
+    "stt.name.whisperMediumV6" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nepali STT — v6 (best accuracy)"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "नेपाली STT — v6 (उत्कृष्ट शुद्धता)"
           }
         }
       }
