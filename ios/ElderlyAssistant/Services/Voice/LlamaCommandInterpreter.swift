@@ -472,7 +472,18 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// package types — so the format choice and prompt bytes are
     /// unit-testable without the runtime linked.
     struct ChatFormat: Equatable {
-        enum Kind: Equatable { case llama3, qwen3 }
+        enum Kind: Equatable {
+            case llama3
+            case qwen3
+            /// NO chat-template wrap at all: the user turn is the bare
+            /// `IntentPrompt` text. This is the shape the intent fine-tunes
+            /// were trained on — `train_qlora.py`'s `to_text` tokenizes the
+            /// raw prompt template plus the JSON label, and the golden-corpus
+            /// eval documents the matching contract ("never pass the prompt
+            /// through a chat template here"). Training/inference prompt
+            /// identity is a hard requirement (`IntentPrompt` doc).
+            case raw
+        }
         let kind: Kind
         let systemPrefix: String
         let systemSuffix: String
@@ -483,13 +494,67 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         let stopSequence: String
     }
 
-    /// Which chat format the model id needs. Only Qwen3-family brains
-    /// diverge today (their `<|im_start|>` scheme — LLaMA 3.2's
-    /// `<|begin_of_text|>` headers would be gibberish to them and vice
-    /// versa); everything else keeps the shipped LLaMA 3.2 scheme.
+    /// The framing each catalog id was MEASURED to require — one row per id
+    /// the app can resolve, not a model-FAMILY guess (T-046, 2026-09-13).
+    ///
+    /// Before this table, `chatFormat(for:)` switched on exactly the two
+    /// stock Qwen3 ids and sent everything else — including the two
+    /// Qwen3-derived intent fine-tunes the picker offers, and the shipped
+    /// default brain — to the LLaMA 3.2 branch, a scheme their checkpoints
+    /// were never trained on.
+    ///
+    /// Evidence lives beside this task and is re-runnable:
+    /// `tools/train-intent/src/framing_check.py` scores every id under all
+    /// three candidate framings against the held-out golden corpus through
+    /// the app's own decode grammar (the `commandJSONSchema` GBNF the
+    /// on-device runtime samples through), recording per-row outcomes,
+    /// prompt token counts against the 1,024-token context, and emergency
+    /// rows per framing. Result tables:
+    /// `tools/train-intent/eval/framing_summary.json` and
+    /// `framing_rows.jsonl`.
+    ///
+    /// A hidden id that a stale stored preference can still resolve is
+    /// listed here too — `resolvedBrainModelID` returns any id that still
+    /// has a catalog entry, so "not offered" is not "not reachable".
+    static let measuredFramings: [ModelID: ChatFormat.Kind] = [
+        // — offered picker brains (ModelCatalog.availableBrainEntries) —
+        ModelCatalog.intentQwen4BS43: .raw,
+        ModelCatalog.intentQwenS43:   .raw,
+        ModelCatalog.qwen4BNepali:    .raw,
+        ModelCatalog.qwen3_4BInstruct: .qwen3,
+        ModelCatalog.qwen3_1_7BInstruct: .qwen3,
+        // — hidden but still resolvable through a stored preference —
+        ModelCatalog.intentNepali1B:  .raw,
+        ModelCatalog.llama3_2_1B:     .llama3,
+        ModelCatalog.llama3_2_3B:     .llama3
+    ]
+
+    /// The framing recorded for `id`, or nil when the id has no measured
+    /// determination — see `measuredFramings` for what "measured" means and
+    /// `chatFormat(for:)` for what happens to an id that lands here.
+    static func measuredFraming(for id: ModelID) -> ChatFormat.Kind? {
+        measuredFramings[id]
+    }
+
+    /// Which chat format the model id requires: the MEASURED determination
+    /// when the id has one, else the shipped LLaMA 3.2 scheme.
+    ///
+    /// The fallback exists for ids the catalog keeps but this task did not
+    /// measure — `intentGemma1B` (hidden, and already disqualified by the
+    /// emergency hard gate; its Gemma 3 `<start_of_turn>` template is a
+    /// fourth scheme `ChatFormat` cannot express, filed as its own follow-up
+    /// rather than hacked in here). It is NOT a silent default for offered
+    /// brains: `BrainModelSelectionTests.testEveryOfferedBrainHasAMeasuredFraming`
+    /// fails for any OFFERED id that reaches it.
     static func chatFormat(for id: ModelID) -> ChatFormat {
-        switch id {
-        case ModelCatalog.qwen3_1_7BInstruct, ModelCatalog.qwen3_4BInstruct:
+        chatFormat(kind: measuredFramings[id] ?? .llama3)
+    }
+
+    /// The concrete format for a kind — the single place each scheme's bytes
+    /// are written down.
+    static func chatFormat(kind: ChatFormat.Kind) -> ChatFormat {
+        switch kind {
+        case .qwen3:
             return ChatFormat(
                 kind: .qwen3,
                 systemPrefix: "<|im_start|>system\n",
@@ -500,7 +565,28 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                 botSuffix: "<|im_end|>",
                 stopSequence: "<|im_end|>"
             )
-        default:
+        case .raw:
+            // No affixes at all. The system turn is deliberately NOT sent:
+            // training never had one (the system content is already inside
+            // the template text), so adding one would be the very
+            // training/inference mismatch this table exists to remove.
+            //
+            // The stop sequence is the Qwen3 family EOS the fine-tunes were
+            // taught to emit after the JSON label (`train_qlora.py` appends
+            // it per family). It is inert on the path this interpreter
+            // actually uses — `generateWithConstraints` terminates on the
+            // grammar and the model's own end tokens and never consults the
+            // `Template`'s stop sequence (see `LLMCore`) — but an empty
+            // string here would be a landmine for the unused streaming
+            // paths, so it stays explicit.
+            return ChatFormat(
+                kind: .raw,
+                systemPrefix: "", systemSuffix: "",
+                userPrefix: "", userSuffix: "",
+                botPrefix: "", botSuffix: "",
+                stopSequence: "<|endoftext|>"
+            )
+        case .llama3:
             return ChatFormat(
                 kind: .llama3,
                 systemPrefix: "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n",
@@ -518,7 +604,9 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// BYTE-IDENTICAL to the shipped literal (the model is tuned to this
     /// exact framing; a formatting change would silently shift its
     /// instruction-following). The Qwen3 branch mirrors Qwen3-Instruct's
-    /// official chat template.
+    /// official chat template. The raw branch is the prompt ALONE — no
+    /// wrapper, no system turn — because that is the text the fine-tunes
+    /// were trained on (see `ChatFormat.Kind.raw`).
     static func formattedPrompt(prompt: String, system: String, format: ChatFormat) -> String {
         switch format.kind {
         case .llama3:
@@ -533,6 +621,12 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             return "<|im_start|>system\n\(system)<|im_end|>\n"
                 + "<|im_start|>user\n\(prompt)<|im_end|>\n"
                 + "<|im_start|>assistant\n"
+        case .raw:
+            // Deliberately ignores `system`: training appended the label to
+            // the bare template with no system turn, and `IntentPrompt.build`
+            // already opens with the assistant's identity and rules. Adding
+            // the system message here would re-introduce the mismatch.
+            return prompt
         }
     }
 
