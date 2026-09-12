@@ -1,0 +1,43 @@
+{
+  "model_dir": "models/C3-cartesinus-minilm",
+  "onnx_path": "models/C3-minilm-int8.onnx",
+  "repo": "cartesinus/multilingual_minilm-amazon-massive-intent",
+  "conversion": {
+    "status": "ok",
+    "attn_implementation": "model default",
+    "fp32_mb": 470.3,
+    "seconds": 4.3
+  },
+  "quantization": {
+    "status": "ok",
+    "int8_mb": 118.1
+  },
+  "verification": {
+    "fp32": {
+      "rows": 20,
+      "intent_agreement": 1.0,
+      "slot_tag_agreement": 1.0
+    },
+    "int8": {
+      "rows": 20,
+      "intent_agreement": 1.0,
+      "slot_tag_agreement": 0.9777
+    }
+  },
+  "latency": {
+    "threads_1": {
+      "p50_ms": 4.65,
+      "p95_ms": 19.51,
+      "mean_ms": 6.08,
+      "n": 400,
+      "note": "desktop x86-64 CPU proxy — NOT the oldest supported device class"
+    },
+    "threads_4": {
+      "p50_ms": 3.25,
+      "p95_ms": 12.39,
+      "mean_ms": 4.16,
+      "n": 400,
+      "note": "desktop x86-64 CPU proxy — NOT the oldest supported device class"
+    }
+  }
+}

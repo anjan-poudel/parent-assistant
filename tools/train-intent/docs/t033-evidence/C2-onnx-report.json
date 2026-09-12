@@ -1,0 +1,43 @@
+{
+  "model_dir": "models/C2-mmbert-small",
+  "onnx_path": "models/C2-mmbert-int8.onnx",
+  "repo": "jhu-clsp/mmBERT-small",
+  "conversion": {
+    "status": "ok",
+    "attn_implementation": "model default",
+    "fp32_mb": 562.5,
+    "seconds": 3.5
+  },
+  "quantization": {
+    "status": "ok",
+    "int8_mb": 141.4
+  },
+  "verification": {
+    "fp32": {
+      "rows": 20,
+      "intent_agreement": 1.0,
+      "slot_tag_agreement": 1.0
+    },
+    "int8": {
+      "rows": 20,
+      "intent_agreement": 0.85,
+      "slot_tag_agreement": 0.9773
+    }
+  },
+  "latency": {
+    "threads_1": {
+      "p50_ms": 6.7,
+      "p95_ms": 10.21,
+      "mean_ms": 7.14,
+      "n": 400,
+      "note": "desktop x86-64 CPU proxy — NOT the oldest supported device class"
+    },
+    "threads_4": {
+      "p50_ms": 3.95,
+      "p95_ms": 5.37,
+      "mean_ms": 4.09,
+      "n": 400,
+      "note": "desktop x86-64 CPU proxy — NOT the oldest supported device class"
+    }
+  }
+}

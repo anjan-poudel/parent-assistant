@@ -1,0 +1,93 @@
+[
+  {
+    "id": "C1",
+    "repo": "ai4bharat/IndicBERT-v3-270M",
+    "error": "GatedRepoError: 401 Client Error. (Request ID: Root=1-6aa5c561-228ee5a3701cc27229342295;1b87b38d-3ef8-41e5-b9c9-6ee8fc3227dd)\n\nCannot access gated repo for url https://huggingface.co/ai4bharat/IndicBERT-v3-270M/resolve/0fc678697635496683188faeb582dcd741416da4/config.json.\nAccess to model ai4bharat/IndicBERT-v3-270M is restricted. You must have access to it and be authenticated to access it. Please log in."
+  },
+  {
+    "id": "C2",
+    "repo": "jhu-clsp/mmBERT-small",
+    "local_path": "/mnt/nvme2/huggingface/hub/models--jhu-clsp--mmBERT-small/snapshots/abc32620dd4f6ab06f5fbe905dc25f310618e09f",
+    "weight_format": "pytorch_bin",
+    "checkpoint_file_bytes": 563633326,
+    "config_dtype": [
+      "float32"
+    ],
+    "total_params": 239201536,
+    "encoder_body_params": 140493696,
+    "non_encoder_head_params": 98707840,
+    "non_encoder_head_keys": [
+      "decoder.bias",
+      "decoder.weight",
+      "head.dense.weight",
+      "head.norm.weight"
+    ],
+    "embedding_table_params": 98304000,
+    "body_non_embedding_params": 42189696,
+    "vocab_size": 256000,
+    "hidden_size": 384,
+    "num_layers": 22,
+    "model_type": "modernbert",
+    "embedding_share_int8": 0.6997,
+    "projected_int8_bytes": 140493696,
+    "projected_int8_mb": 140.5,
+    "projected_int8_encoder_body_mb": 42.2,
+    "weight_budget_note": "int8 1 byte/param; attention/embedding tables excluded from weight count per spec §10"
+  },
+  {
+    "id": "C3",
+    "repo": "cartesinus/multilingual_minilm-amazon-massive-intent",
+    "local_path": "/mnt/nvme2/huggingface/hub/models--cartesinus--multilingual_minilm-amazon-massive-intent/snapshots/08dc481605729de194f9139713d4eb20f4b80706",
+    "weight_format": "safetensors",
+    "checkpoint_file_bytes": 470735174,
+    "config_dtype": [
+      "float32"
+    ],
+    "total_params": 117677372,
+    "encoder_body_params": 117506432,
+    "non_encoder_head_params": 170940,
+    "non_encoder_head_keys": [
+      "bert.pooler.dense.bias",
+      "bert.pooler.dense.weight",
+      "classifier.bias",
+      "classifier.weight"
+    ],
+    "embedding_table_params": 96014208,
+    "body_non_embedding_params": 21492224,
+    "vocab_size": 250037,
+    "hidden_size": 384,
+    "num_layers": 12,
+    "model_type": "bert",
+    "embedding_share_int8": 0.8171,
+    "projected_int8_bytes": 117506432,
+    "projected_int8_mb": 117.5,
+    "projected_int8_encoder_body_mb": 21.5,
+    "weight_budget_note": "int8 1 byte/param; attention/embedding tables excluded from weight count per spec §10"
+  },
+  {
+    "id": "C4",
+    "repo": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "local_path": "/mnt/nvme2/huggingface/hub/models--sentence-transformers--paraphrase-multilingual-MiniLM-L12-v2/snapshots/e8f8c211226b894fcb81acc59f3b34ba3efd5f42",
+    "weight_format": "safetensors",
+    "checkpoint_file_bytes": 470641600,
+    "config_dtype": [],
+    "total_params": 117654272,
+    "encoder_body_params": 117506432,
+    "non_encoder_head_params": 147840,
+    "non_encoder_head_keys": [
+      "pooler.dense.bias",
+      "pooler.dense.weight"
+    ],
+    "embedding_table_params": 96014208,
+    "body_non_embedding_params": 21492224,
+    "vocab_size": 250037,
+    "hidden_size": 384,
+    "num_layers": 12,
+    "model_type": "bert",
+    "embedding_share_int8": 0.8171,
+    "projected_int8_bytes": 117506432,
+    "projected_int8_mb": 117.5,
+    "projected_int8_encoder_body_mb": 21.5,
+    "weight_budget_note": "int8 1 byte/param; attention/embedding tables excluded from weight count per spec §10"
+  }
+]

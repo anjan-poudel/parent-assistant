@@ -1,0 +1,77 @@
+{
+  "model_dir": "/tmp/t033/models/trained/C2",
+  "repo": "jhu-clsp/mmBERT-small",
+  "conversion": {
+    "status": "ok",
+    "shape_mode": "flexible",
+    "mlpackage_mb": 281.3
+  },
+  "compile": {
+    "status": "skipped",
+    "reason": "--skip-fp16-package"
+  },
+  "packaging": {
+    "status": "skipped",
+    "reason": "--skip-fp16-package"
+  },
+  "quantization": {
+    "status": "ok",
+    "dtype": "int8",
+    "mlpackage_mb": 141.8
+  },
+  "verification": {
+    "rows": 20,
+    "intent_agreement": 1.0,
+    "slot_tag_agreement": 1.0,
+    "quantized_model_used": true
+  },
+  "latency": {
+    "p50_ms": 39.31,
+    "p95_ms": 49.19,
+    "mean_ms": 40.5,
+    "n": 400,
+    "passes": [
+      {
+        "p50_ms": 38.86,
+        "p95_ms": 49.19,
+        "mean_ms": 40.41,
+        "n": 400
+      },
+      {
+        "p50_ms": 39.31,
+        "p95_ms": 49.3,
+        "mean_ms": 40.5,
+        "n": 400
+      },
+      {
+        "p50_ms": 39.38,
+        "p95_ms": 48.86,
+        "mean_ms": 40.51,
+        "n": 400
+      }
+    ],
+    "median_pass": {
+      "p50_ms": 39.31,
+      "p95_ms": 49.19
+    },
+    "min_p50_ms": 38.86,
+    "max_p50_ms": 39.38,
+    "note": "x86_64 Mac CPU_ONLY proxy — conservative vs iPhone-class A-series/ANE; device-class number UNMEASURED (no device); median of repeated passes"
+  },
+  "runtime": "CoreML mlprogram / xcrun coremlcompiler",
+  "trace": {
+    "status": "ok",
+    "attn_implementation": "model default",
+    "error": null
+  },
+  "packaging_int8": {
+    "status": "ok",
+    "mlmodelc_mb": 141.9,
+    "zip": "/tmp/t033/models/coreml-C2/t033-encoder-int8-mlmodelc.zip",
+    "zip_mb": 130.4,
+    "top_level_entries": [
+      "t033-encoder-int8.mlmodelc"
+    ],
+    "matches_modelstore_shape": true
+  }
+}
