@@ -542,10 +542,13 @@ enum ModelCatalog {
             // deterministic k=3 bake-off — ALL FIVE GATES PASSED
             // (closed >=0.95, slots >=0.90, emergency 1.00, side-effect
             // >=0.97). The first ship-gate-passing on-device brain.
-            filename: "intent-ne-qwen4b-s43-q4_k_m.gguf",
-            downloadURL: URL(string: "http://192.168.1.117:8765/intent-ne-qwen4b-s43-q4_k_m.gguf")!,
-            sizeBytes: 2_497_278_752,
-            sha256: "5a29688902f14d8eb4497198a6169e364bf71e19fc676115d10a37ddd0862afd",
+            // Q3_K_M for sub-2GiB GitHub distribution (v15). Q3 gates:
+            // closed 1.000, emergency 1.000, se 1.000, time 0.909,
+            // contact 0.833 (Q4 = 1.000 — Q4 is the ship target).
+            filename: "intent-ne-qwen4b-s43-q3_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v15/intent-ne-qwen4b-s43-q3_k_m.gguf")!,
+            sizeBytes: 2_075_616_032,
+            sha256: "c48e94d0931732d3e6ae14f45f955d20ee5474a83f8e127e8b972ed920999d10",
             minDeviceRAMBytes: 4_000_000_000,
             dependsOn: nil
         ),
