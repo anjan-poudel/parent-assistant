@@ -17,3 +17,9 @@ qwen-s44,0.765,0.800,0.800,1.000,1.000,closed_intent_accuracy|contact_f1|time_f1
 qwen4b-s42,0.706,0.286,1.000,1.000,1.000,closed_intent_accuracy|contact_f1
 qwen4b-s43,1.000,1.000,1.000,1.000,1.000,none
 qwen4b-s44,0.941,1.000,1.000,0.667,1.000,closed_intent_accuracy|emergency_recall
+qwen-s42-gbnf,0.882,0.571,0.833,1.000,1.000,closed_intent_accuracy|contact_f1|time_f1,gbnf
+qwen4b-s42-gbnf,1.000,0.800,0.833,1.000,1.000,contact_f1|time_f1,gbnf
+qwen4b-s43-gbnf,1.000,0.800,0.833,1.000,1.000,contact_f1|time_f1,gbnf
+qwen4b-s44-gbnf,0.941,0.800,1.000,0.667,1.000,closed_intent_accuracy|contact_f1|emergency_recall,gbnf
+qwen-s43-gbnf,0.471,0.462,0.000,0.333,1.000,closed_intent_accuracy|contact_f1|time_f1|emergency_recall,gbnf
+qwen-s44-gbnf,0.824,0.444,0.000,1.000,1.000,closed_intent_accuracy|contact_f1|time_f1,gbnf

@@ -83,6 +83,24 @@ EOT_TOKENS = {
 LABEL_FIELDS = ["intent", "entryId", "contact", "time", "medication", "message",
                 "callType", "requestedApp", "topic", "steps", "confidence", "response"]
 
+# The app's decode-grammar property order (LlamaGrammar.commandJSONSchema,
+# mirrored byte-for-byte in seeds/command_schema.json — see command_grammar.py
+# and the phase-1 report). The GBNF that grammar compiles to emits the
+# properties in THIS order and REQUIRES all sixteen, while every training
+# label above is written in LABEL_FIELDS order with twelve keys — so at
+# decode the model is forced to emit `response` second, then invent
+# actionType/actionUrl/pluginAction/pluginEntities mid-object, before it can
+# reach the entity keys it was actually taught. `--label-order schema` moves
+# the label into the grammar's exact shape (the four app-only keys as null)
+# so the fine-tune's target text is what the constrained sampler will accept
+# — the mismatch is a DECODE-TIME distribution shift, and this flag is the
+# training-side fix for it.
+SCHEMA_LABEL_FIELDS = ["intent", "response", "confidence", "actionType",
+                       "actionUrl", "entryId", "contact", "time", "medication",
+                       "message", "callType", "requestedApp", "topic", "steps",
+                       "pluginAction", "pluginEntities"]
+LABEL_ORDERS = ("canonical", "schema")
+
 
 def load_rows(path: Path) -> list[dict]:
     if not path.exists():
@@ -90,7 +108,8 @@ def load_rows(path: Path) -> list[dict]:
     return [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()]
 
 
-def to_text(row: dict, template: str, terminator: str = "") -> str:
+def to_text(row: dict, template: str, terminator: str = "",
+            label_order: str = "canonical") -> str:
     """Training text: raw prompt template (all three placeholders filled —
     {language_hint}, {medications}, {transcript}) + JSON label + the base
     model's end-of-turn token.
@@ -103,7 +122,11 @@ def to_text(row: dict, template: str, terminator: str = "") -> str:
     `<end_of_turn>`, qwen `<|im_end|>` — see EOT_TOKENS), so the CLM
     loss teaches the model to stop after the closing brace.
     """
-    label = {f: row[f] for f in LABEL_FIELDS}
+    fields = SCHEMA_LABEL_FIELDS if label_order == "schema" else LABEL_FIELDS
+    # .get, not []: the schema-order label carries four keys the corpus rows
+    # do not have (they are exactly the app's app-only action/plugin keys),
+    # which the label writes as null.
+    label = {f: row.get(f) for f in fields}
     return (render_prompt(template, row["utterance"]) + "\n"
             + json.dumps(label, ensure_ascii=False) + terminator)
 
@@ -206,6 +229,13 @@ def main() -> None:
     parser.add_argument("--seed-offset", type=int, default=0,
                         help="run seed = config training.seed + offset "
                              "(eval_golden_k.py runs offsets 0..k-1)")
+    parser.add_argument("--label-order", default="canonical",
+                        choices=list(LABEL_ORDERS),
+                        help="canonical = LABEL_FIELDS order (all prior "
+                             "runs); schema = the app grammar's property "
+                             "order with the app-only keys as null, so the "
+                             "train target matches what the GBNF sampler "
+                             "forces at decode (see SCHEMA_LABEL_FIELDS)")
     args, cfg = load_config(parser)
 
     import torch
@@ -223,7 +253,8 @@ def main() -> None:
     seed = int(cfg.get("training.seed", 42)) + args.seed_offset
     mode = _configure_determinism(
         seed, str(cfg.get("training.deterministic", "hard")).lower())
-    print(f"[train] seed={seed} determinism={mode} base={args.base}")
+    print(f"[train] seed={seed} determinism={mode} base={args.base} "
+          f"label_order={args.label_order}")
 
     tag = args.out or args.base
     out_dir = ROOT / "checkpoints" / tag
@@ -260,8 +291,8 @@ def main() -> None:
     print(f"[train] terminator={terminator!r} (single token id {term_ids[0]}, "
           f"EOG ids {sorted(eog_ids)})")
 
-    train_ds = Dataset.from_list([{"text": to_text(r, template, terminator)} for r in train_rows])
-    eval_ds = Dataset.from_list([{"text": to_text(r, template, terminator)} for r in valid_rows]) or None
+    train_ds = Dataset.from_list([{"text": to_text(r, template, terminator, args.label_order)} for r in train_rows])
+    eval_ds = Dataset.from_list([{"text": to_text(r, template, terminator, args.label_order)} for r in valid_rows]) or None
 
     bnb = BitsAndBytesConfig(load_in_4bit=True,
                              bnb_4bit_quant_type="nf4",
