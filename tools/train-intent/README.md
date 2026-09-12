@@ -123,7 +123,15 @@ INTENT_TARGETS balances the COUNT per intent but nothing balances the
 trigger phrasing WITHIN an intent, so the frame pool decides the
 sub-class prior. Fix on the generator side (sample frames to the corpus
 trigger mix): dropping the pain surplus cannot restore the falls and
-chest phrasings it starved.
+chest phrasings it starved. It is a LATENT defect, not the cause of the
+arm-A emergency miss: the schema-order arm passed emergency 1.000 on
+the same skewed frames, so the decode-order fix was sufficient there.
+
+**Eval-label inconsistency, not a model error (2026-09-13):** the
+corpus fills `time` on 41/98 (42%) of `query` rows, four of them
+near-identical weather questions labelled `भोलि`; the golden corpus
+expects `time: null` for `भोलि मौसम कस्तो हुन्छ`. A model that follows
+the training convention is scored as a time false positive.
 
 ## Training (stage 4, external)
 
@@ -146,3 +154,26 @@ the app's canonical `intent`/`response` keys (not the legacy
 python src/build_dataset.py --smoke    # validates + splits data/sample.jsonl only
 python src/eval_golden.py --backend echo   # dry-runs the harness (echo backend = utterance in, none out)
 ```
+
+**Gate headroom on the 20-row golden set (2026-09-13, phase 2):** the gates
+are computed by `eval_golden.py` over `eval/golden_corpus.jsonl` (20 rows),
+and their headroom is far tighter than the thresholds suggest:
+
+- `closed_intent_accuracy >= 0.95` is measured only over `CLOSED_INTENTS`
+  (10 intents). The golden set's denominator is **17**: `query` (1 row) and
+  `none` (2 rows) are excluded. `>= 0.95` of 17 requires **17/17** — a single
+  wrong intent fails the gate (16/17 = 0.941). So the abstention boundary —
+  including `gc-ack-002` (`औषधि खाएको छैन`, gold `none`) — is invisible to
+  every gate: a model can answer an abstention row with an action intent and
+  no gate moves, unless the predicted intent is `call`/`send_message`
+  (side-effect precision).
+- `slot_f1 >= 0.90` is a whitespace-token F1 over present slots. `time` has
+  only **2 gold rows / 6 gold tokens**: with all 6 matched, one stray token
+  passes (12/13 = 0.923) but a single spurious multi-token time fails
+  (12/16 = 0.750, which is what the schema arm scored). `contact` has 6 gold
+  rows / 6 tokens: one stray token passes (0.923), two fail (0.857).
+- The corpus/`eval` time convention differs (see above): if `gc-query-001`
+  matched the corpus's own 42% rule, the schema arm's time F1 would have
+  been 0.923 — a PASS — so one of its two time false positives is an
+  eval-label artifact and the remaining one (a spurious time on a health
+  query) is the only genuine time defect.
