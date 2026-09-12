@@ -132,6 +132,7 @@
 		4B1186A99DD1B243EAD5F19D /* HistoryTimeFormatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30FB125BFE6F1924719372DA /* HistoryTimeFormatTests.swift */; };
 		4BA5711244583491C1C92DD8 /* SpeakerEmbedder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D94018BD4D7E1D72BAA1650C /* SpeakerEmbedder.swift */; };
 		4BBA578A55DAD020DFFDA474 /* IntentCommandCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 040169ACAC28343657CF901A /* IntentCommandCacheTests.swift */; };
+		4BD39078BC8531E1C886778B /* WhisperFirstUsePrewarmTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 553C9F03C7C3BEFF0FDB6A2F /* WhisperFirstUsePrewarmTests.swift */; };
 		4CD61219095C8B1191AAD44D /* NoIOInInitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68E3D36479D589E2823ED330 /* NoIOInInitTests.swift */; };
 		4CFBAB72E6DD1CF440157E1D /* FeedServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 573576FF9D08E597CC160495 /* FeedServiceTests.swift */; };
 		4D35DCD2E6B0CED4FA39B9A3 /* GoldenCorpus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F4B490AD8898085B8F0895A /* GoldenCorpus.swift */; };
@@ -300,6 +301,7 @@
 		AF589ADE0665DD8433BCC200 /* StartupDataBatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4565222B482D35D3233C2498 /* StartupDataBatchTests.swift */; };
 		AFA35E445E49A49F01D8F2B8 /* PiperVoiceSpeakerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6D0122346CB9657139E6909 /* PiperVoiceSpeakerTests.swift */; };
 		B077987B5623105525365732 /* TimerAlarmEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EDA2D35E433C9B6200F167F /* TimerAlarmEngine.swift */; };
+		B0D5D07D489F52CE1C3EA398 /* IntentRouterLocalFailureFallbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72E21D0D77581263F91D291B /* IntentRouterLocalFailureFallbackTests.swift */; };
 		B0DB371B38805A29A5D859A9 /* timer-alarm-bell.wav in Resources */ = {isa = PBXBuildFile; fileRef = F839609F2F906E517A513FBF /* timer-alarm-bell.wav */; };
 		B0E7FB06E4B5F6028742BFAB /* HomeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8BC9CD50AB850816DCB32A0 /* HomeWidget.swift */; };
 		B0FAA9361B4E1A999B112E34 /* SpokenTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 357BB0A805BFD53734B0F7B4 /* SpokenTime.swift */; };
@@ -648,6 +650,7 @@
 		52F50C83B482A19F5DC8B6CE /* CalendarSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSyncService.swift; sourceTree = "<group>"; };
 		54C3513A2DF368011B7B7C45 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
 		553B22C3EBAF6EEA126300DA /* ModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelCatalog.swift; sourceTree = "<group>"; };
+		553C9F03C7C3BEFF0FDB6A2F /* WhisperFirstUsePrewarmTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperFirstUsePrewarmTests.swift; sourceTree = "<group>"; };
 		555715A05089F9CC4FF22103 /* MorningBriefingStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MorningBriefingStoreTests.swift; sourceTree = "<group>"; };
 		5570777B135C237FC06BB290 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
 		55896246FC287039698A984D /* FeedModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedModels.swift; sourceTree = "<group>"; };
@@ -710,6 +713,7 @@
 		72315EBD991FBD531F4B0F54 /* NotificationReaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationReaderTests.swift; sourceTree = "<group>"; };
 		7294DB0D9166528EB32040F2 /* ApplianceCropGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceCropGeometryTests.swift; sourceTree = "<group>"; };
 		72C5C43EBC5D2DD7F1640B75 /* ScriptConsistencyGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScriptConsistencyGateTests.swift; sourceTree = "<group>"; };
+		72E21D0D77581263F91D291B /* IntentRouterLocalFailureFallbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentRouterLocalFailureFallbackTests.swift; sourceTree = "<group>"; };
 		75747630F6D45352363F7E84 /* ViewCaches.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewCaches.swift; sourceTree = "<group>"; };
 		761B34D47FF201AD2EE5E94C /* NewsReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsReader.swift; sourceTree = "<group>"; };
 		77F2970D06739B3D7DE4A75D /* RoutineScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineScheduler.swift; sourceTree = "<group>"; };
@@ -1455,6 +1459,7 @@
 				71087481932AB5E88C9FF39D /* WakeWordUserRecordingProbeTests.swift */,
 				A3DBD918C01E5949FAD2002A /* WarmStartTests.swift */,
 				6ED036AAD2D08726E1F50E09 /* WeatherToolTests.swift */,
+				553C9F03C7C3BEFF0FDB6A2F /* WhisperFirstUsePrewarmTests.swift */,
 				0BC86AD5E0D8C9FE1AAE7633 /* WhisperKitSpeechRecognizerTests.swift */,
 				1D48C33AF32E7C9599EF8140 /* WhisperPostTurnPolicyTests.swift */,
 				5E3EEA3E69C5ECA0B8EE1DBA /* WhisperSpeechRecognizerTests.swift */,
@@ -1888,6 +1893,7 @@
 				040169ACAC28343657CF901A /* IntentCommandCacheTests.swift */,
 				719AA0AA9C2BB68B77B82DD2 /* IntentLogStoreTests.swift */,
 				35BB076904A5D3983FE128ED /* IntentRouterCloudFirstTests.swift */,
+				72E21D0D77581263F91D291B /* IntentRouterLocalFailureFallbackTests.swift */,
 				8D87582512DE55C58DC23865 /* IntentRouterTests.swift */,
 				85ED77D882328D44E3F08B23 /* IntentSchemaV2Tests.swift */,
 				CCCCDEF7C01C244CC0942BA3 /* IntentTestHelpers.swift */,
@@ -2411,6 +2417,7 @@
 				45C7D93F774317633EEA0D5B /* IntentLogStoreTests.swift in Sources */,
 				AA62756932C412DFA9021A13 /* IntentPromptTests.swift in Sources */,
 				9AA3D3FCDA39CD501CAAB061 /* IntentRouterCloudFirstTests.swift in Sources */,
+				B0D5D07D489F52CE1C3EA398 /* IntentRouterLocalFailureFallbackTests.swift in Sources */,
 				A24DCFCE46533C02662FBBFB /* IntentRouterTests.swift in Sources */,
 				D8FA717DE7FFBBB66310949A /* IntentSchemaV2Tests.swift in Sources */,
 				069A7F7014D12FEE7CCC5DF8 /* IntentTestHelpers.swift in Sources */,
@@ -2511,6 +2518,7 @@
 				850EFBBBA4BFEDD70C73B849 /* WakeWordUserRecordingProbeTests.swift in Sources */,
 				73AEF3359D4BE0C14D2A6031 /* WarmStartTests.swift in Sources */,
 				9775343496AF770345F48F67 /* WeatherToolTests.swift in Sources */,
+				4BD39078BC8531E1C886778B /* WhisperFirstUsePrewarmTests.swift in Sources */,
 				60B6B9E66B41FFFD756699BB /* WhisperKitSpeechRecognizerTests.swift in Sources */,
 				DF7FD289DB740C607DD58A10 /* WhisperPostTurnPolicyTests.swift in Sources */,
 				D591B79C10F7D608353FA1F7 /* WhisperSpeechRecognizerTests.swift in Sources */,

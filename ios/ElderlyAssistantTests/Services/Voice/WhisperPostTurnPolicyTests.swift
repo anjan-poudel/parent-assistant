@@ -5,45 +5,42 @@ import XCTest
 /// pure probe decision table and the TTL-hold owner with an injected
 /// clock (no real sleeps — the same doctrine as `StartupBootTests`).
 ///
-/// Pinned rules:
-///  - ample headroom → HOLD the weights (back-to-back turns skip the
-///    reload); the TTL runs from the LAST transcript (re-arm extends),
-///  - marginal headroom → release now + re-warm after the turn,
-///  - critical headroom → release and stay released (jetsam safety),
-///  - the hold fires its expiry callback EXACTLY once, at/past the TTL.
+/// [LAT-EVIDENCE] (2026-09-12) Pins reshaped by device evidence —
+/// turn 2 paid a 135 s reload (`MILCompilerForANE error: failed to
+/// compile ANE model`) because the [LAT-M1] hold gate
+/// (`footprint + llama headroom`) is unreachable on device and the
+/// re-warm re-probed against the same gate (`rewarm outcome=skipped`).
+/// New pinned rules:
+///  - the weights are HELD whenever THEY fit under the current
+///    ceiling — the llama-headroom tier is gone (marginal no longer
+///    forces a release),
+///  - critical RAM (the weights do not fit) → release only,
+///  - post-turn residency NEVER depends on the warm-start preference
+///    (the toggle gates BOOT warm only) — `ResidencyConfig` has no
+///    warm input by construction,
+///  - when the TTL hold lapses the weights are released AND a
+///    background re-warm is required (never skipped by policy) — the
+///    `WhisperResidencyCycle` pin, with an injected clock.
 final class WhisperPostTurnPolicyTests: XCTestCase {
 
     private let footprint: UInt64 = 1_600_000_000
-    private let headroom = WhisperPostTurnPolicy.llamaRuntimeHeadroomBytes
 
-    // MARK: - Decision table
+    // MARK: - Decision table ([LAT-EVIDENCE])
 
-    func testAmpleHeadroomHolds() {
-        XCTAssertEqual(
-            WhisperPostTurnPolicy.decide(
-                availableBytes: footprint + headroom,
-                whisperFootprintBytes: footprint),
-            .hold)
-        XCTAssertEqual(
-            WhisperPostTurnPolicy.decide(
-                availableBytes: footprint + headroom + 1,
-                whisperFootprintBytes: footprint),
-            .hold)
-    }
-
-    func testMarginalHeadroomReleasesAndReWarms() {
-        // Fits the weights, but not the llama runtime too — release now,
-        // re-warm after the turn.
+    func testWeightsFitHolds() {
+        // The [LAT-M1] `footprint + llama headroom` gate never held on
+        // device (the probe's ceiling is typically 1–3 GB); the hold
+        // now fires whenever the weights themselves fit.
         XCTAssertEqual(
             WhisperPostTurnPolicy.decide(
                 availableBytes: footprint,
                 whisperFootprintBytes: footprint),
-            .releaseAndReWarm)
+            .hold)
         XCTAssertEqual(
             WhisperPostTurnPolicy.decide(
-                availableBytes: footprint + headroom - 1,
+                availableBytes: footprint + 1,
                 whisperFootprintBytes: footprint),
-            .releaseAndReWarm)
+            .hold)
     }
 
     func testCriticalHeadroomReleasesOnly() {
@@ -60,14 +57,156 @@ final class WhisperPostTurnPolicyTests: XCTestCase {
                        "the TTL pins at 60 s — back-to-back turns inside a minute skip the reload")
     }
 
-    // MARK: - TTL hold (injected clock)
+    // MARK: - Transcript action ([LAT-EVIDENCE])
+
+    private func residencyConfig(stack: VoiceEngineStack = .onDevice,
+                                 whisperKitIsActiveSTT: Bool = true,
+                                 whisperKitAvailable: Bool = true,
+                                 isModelLoaded: Bool = true) -> WhisperPostTurnPolicy.ResidencyConfig {
+        WhisperPostTurnPolicy.ResidencyConfig(
+            stack: stack,
+            whisperKitIsActiveSTT: whisperKitIsActiveSTT,
+            whisperKitAvailable: whisperKitAvailable,
+            isModelLoaded: isModelLoaded)
+    }
+
+    func testResidencyHoldsIndependentOfWarmPreference() {
+        // The warm-start toggle gates the BOOT warm only
+        // (`WarmStartPlanner.plan(for:)`). `ResidencyConfig` has NO warm
+        // input by construction, so the coordinator's hold decision
+        // cannot depend on the toggle — device evidence: with warm-start
+        // OFF the weights were released after turn 1 and turn 2 paid the
+        // cold load. A config with the weights resident + fitting holds
+        // regardless of any toggle state.
+        let action = WhisperPostTurnPolicy.transcriptAction(
+            config: residencyConfig(),
+            availableBytes: footprint,
+            whisperFootprintBytes: footprint)
+        XCTAssertEqual(action, .hold)
+    }
+
+    func testTranscriptActionCriticalReleasesOnly() {
+        XCTAssertEqual(
+            WhisperPostTurnPolicy.transcriptAction(
+                config: residencyConfig(),
+                availableBytes: footprint - 1,
+                whisperFootprintBytes: footprint),
+            .releaseOnly)
+    }
+
+    func testTranscriptActionNotApplicableWhenNothingLoaded() {
+        XCTAssertEqual(
+            WhisperPostTurnPolicy.transcriptAction(
+                config: residencyConfig(isModelLoaded: false),
+                availableBytes: footprint * 2,
+                whisperFootprintBytes: footprint),
+            .notApplicable,
+            "a fallback STT served the turn — nothing to hold or re-warm")
+    }
+
+    func testTranscriptActionNotApplicableOutsideWhisperKitStack() {
+        XCTAssertEqual(
+            WhisperPostTurnPolicy.transcriptAction(
+                config: residencyConfig(stack: .gemini),
+                availableBytes: footprint * 2,
+                whisperFootprintBytes: footprint),
+            .notApplicable)
+        XCTAssertEqual(
+            WhisperPostTurnPolicy.transcriptAction(
+                config: residencyConfig(whisperKitIsActiveSTT: false),
+                availableBytes: footprint * 2,
+                whisperFootprintBytes: footprint),
+            .notApplicable)
+        XCTAssertEqual(
+            WhisperPostTurnPolicy.transcriptAction(
+                config: residencyConfig(whisperKitAvailable: false),
+                availableBytes: footprint * 2,
+                whisperFootprintBytes: footprint),
+            .notApplicable)
+    }
+
+    // MARK: - Residency cycle: expiry re-warm ([LAT-EVIDENCE])
 
     private var now: Date!
     private var fired = 0
+    private var released = 0
+    private var reWarmRequests = 0
 
     private func tick(_ seconds: TimeInterval) {
         now = now.addingTimeInterval(seconds)
     }
+
+    private func makeCycle() -> WhisperResidencyCycle {
+        WhisperResidencyCycle(clock: { [weak self] in
+            self?.now ?? Date(timeIntervalSince1970: 0)
+        }, onRelease: { [weak self] in
+            self?.released += 1
+        }, onReWarmRequired: { [weak self] in
+            self?.reWarmRequests += 1
+        })
+    }
+
+    func testHoldExpiryReleasesAndRequiresReWarm() {
+        // The [LAT-EVIDENCE] core pin: when the TTL hold lapses, the
+        // weights are released AND the background re-warm is REQUIRED —
+        // never skipped by policy (the re-warm's own probe is the only
+        // gate), so the next turn is warm again.
+        now = Date(timeIntervalSince1970: 1_000_000)
+        let cycle = makeCycle()
+        cycle.arm()
+
+        tick(WhisperPostTurnPolicy.ttlSeconds - 1)
+        XCTAssertFalse(cycle.hold.expireIfNeeded(now: now))
+        XCTAssertEqual(released, 0)
+        XCTAssertEqual(reWarmRequests, 0)
+
+        tick(1)
+        XCTAssertTrue(cycle.hold.expireIfNeeded(now: now))
+        XCTAssertFalse(cycle.hold.isHolding)
+        XCTAssertEqual(released, 1, "expiry releases the weights exactly once")
+        XCTAssertEqual(reWarmRequests, 1, "expiry REQUIRES the background re-warm — not skipped")
+
+        // A second expiry call is a no-op.
+        tick(10)
+        XCTAssertFalse(cycle.hold.expireIfNeeded(now: now))
+        XCTAssertEqual(released, 1)
+        XCTAssertEqual(reWarmRequests, 1)
+    }
+
+    func testReWarmedWeightsReArmTheCycle() {
+        // The re-warm success re-arms the same TTL hold: the cycle
+        // repeats, so the weights stay resident between turns whenever
+        // the probe allows.
+        now = Date(timeIntervalSince1970: 1_000_000)
+        let cycle = makeCycle()
+        cycle.arm()
+        tick(WhisperPostTurnPolicy.ttlSeconds)
+        XCTAssertTrue(cycle.hold.expireIfNeeded(now: now))
+
+        // The background re-warm finished — re-arm.
+        cycle.arm()
+        XCTAssertTrue(cycle.hold.isHolding)
+        tick(WhisperPostTurnPolicy.ttlSeconds)
+        XCTAssertTrue(cycle.hold.expireIfNeeded(now: now))
+        XCTAssertEqual(released, 2)
+        XCTAssertEqual(reWarmRequests, 2)
+    }
+
+    func testCancelClearsWithoutExpirySideEffects() {
+        now = Date(timeIntervalSince1970: 1_000_000)
+        let cycle = makeCycle()
+        cycle.arm()
+        cycle.cancel()
+        XCTAssertFalse(cycle.hold.isHolding)
+
+        tick(WhisperPostTurnPolicy.ttlSeconds * 2)
+        XCTAssertFalse(cycle.hold.expireIfNeeded(now: now))
+        XCTAssertEqual(released, 0)
+        XCTAssertEqual(reWarmRequests, 0,
+                       "a cancelled hold never releases or re-warms — another path released the weights")
+    }
+
+    // MARK: - TTL hold (injected clock)
 
     private func makeHold() -> WhisperWeightsHold {
         WhisperWeightsHold(clock: { [weak self] in

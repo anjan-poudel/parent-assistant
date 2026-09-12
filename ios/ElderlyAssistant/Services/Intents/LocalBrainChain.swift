@@ -25,7 +25,7 @@ import Foundation
 /// despite the STT transcribing correctly. This chain restores the LLaMA
 /// path for exactly those configurations without disturbing the
 /// fine-tuned model's future role.
-final class LocalBrainChain: CommandInterpreter {
+final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
 
     private let preferred: CommandInterpreter
     private let standIn: CommandInterpreter
@@ -37,6 +37,19 @@ final class LocalBrainChain: CommandInterpreter {
 
     var isAvailable: Bool {
         preferred.isAvailable || standIn.isAvailable
+    }
+
+    /// [LAT-EVIDENCE] Forwards the inner interpreter's failure reason —
+    /// whichever one served the last turn (the preferred model when
+    /// available, else the stand-in) — so the router sees through the
+    /// chain and escalates a FAILED local brain to the cloud.
+    var lastInferenceFailureReason: String? {
+        if preferred.isAvailable {
+            return (preferred as? InterpreterFailureReporting)?
+                .lastInferenceFailureReason
+        }
+        return (standIn as? InterpreterFailureReporting)?
+            .lastInferenceFailureReason
     }
 
     func interpret(transcript: String,

@@ -232,7 +232,12 @@ final class VoicePipeline {
     /// Gemini HTTP timeout 25 s, voice watchdog 60 s — re-checked
     /// together whenever one changes; the watchdog must exceed max
     /// capture + Gemini HTTP = 47 s).
-    private static let turnPendingSafetySeconds: TimeInterval = 35
+    ///
+    /// [LAT-EVIDENCE] 35 → 45: the local leg is now 2 × 10 s worst case
+    /// (the interpreter's 10 s bound + its one retry — the coupled
+    /// llama-family bound), + 25 s Gemini escalation = 45 s, still
+    /// below the 60 s voice watchdog.
+    private static let turnPendingSafetySeconds: TimeInterval = 45
 
     /// Armed while a route's async reply is outstanding: the pipeline
     /// holds `.routing` instead of calling `resumeWakeListening()`. The

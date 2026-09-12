@@ -701,14 +701,18 @@ final class AppCoordinator: ObservableObject {
     /// The settle event (`talk_boot_contract`) fired at most once per
     /// contract.
     private var talkContractSettled = false
-    /// [LAT-M1] The TTL-hold owner for post-turn whisper weights — see
-    /// `WhisperWeightsHold` / `WhisperPostTurnPolicy`.
-    private let whisperWeightsHold = WhisperWeightsHold()
-    /// A post-turn whisper re-warm is owed to the NEXT conversation (set
-    /// by the release path at `recordTranscript`, run when the turn
-    /// finalizes — after the reply speech, when the LLM's memory has
-    /// settled).
-    private var pendingPostTurnReWarm = false
+    /// [LAT-M1/LAT-EVIDENCE] The post-turn whisper residency cycle —
+    /// TTL-hold after each held transcript, release + background re-warm
+    /// when the TTL lapses (see `WhisperResidencyCycle` /
+    /// `WhisperPostTurnPolicy`). The re-warm is NEVER gated on the
+    /// warm-start preference — the toggle gates the BOOT warm only.
+    private lazy var whisperResidencyCycle = WhisperResidencyCycle(
+        onRelease: { [weak self] in
+            DispatchQueue.main.async { self?.releaseHeldWhisperWeights() }
+        },
+        onReWarmRequired: { [weak self] in
+            DispatchQueue.main.async { self?.runBackgroundWhisperReWarm() }
+        })
     /// [STARTUP-R2] True once the deferred KWS build has been scheduled
     /// (or run) this launch — the one-shot guard for the post-ready
     /// wake-word build.
@@ -1079,7 +1083,17 @@ final class AppCoordinator: ObservableObject {
         observabilityBus: observabilityBus,
         config: LocalIntentInterpreter.Config(confidenceThreshold: 0.4,
                                               maxTokens: 192,
-                                              timeoutSeconds: 3)
+                                              // [LAT-EVIDENCE] 3 s
+                                              // contradicted the
+                                              // coupled-numbers family
+                                              // (llama ≤ 10 s) and timed
+                                              // out real generations —
+                                              // the device log showed
+                                              // `inference_timeout` at
+                                              // ~3 s with truncated
+                                              // JSON. 10 s aligns with
+                                              // the llama bound.
+                                              timeoutSeconds: 10)
     )
     /// Set once in `start()`. `geminiCommandInterpreter` is the concrete
     /// Gemini-backed interpreter — one of the two optional BRAINS behind
@@ -2001,10 +2015,6 @@ final class AppCoordinator: ObservableObject {
         turnTracer.onTurnFinalized = { [weak self] stages, _ in
             DispatchQueue.main.async {
                 self?.applyTurnTimingCaption(stages)
-                // [LAT-M1] The turn is over (reply speech done) — run a
-                // owed post-turn whisper re-warm now that the LLM's
-                // memory has settled.
-                self?.runPostTurnWhisperReWarmIfPending()
             }
         }
         // [LAT-M2] Ack fast lane: one shared file-backed pre-ack cache —
@@ -4051,17 +4061,16 @@ self.noteTalkContractChanged()
 
     /// Called by CommandRouter with the raw transcript so the Home
     /// conversation card can display it. Avoids depending on the
-    /// TTS/notification path for visible feedback. Also drops the Whisper
-    /// context — its ~1.5 GB (large-v3) would otherwise stay resident
-    /// while LLaMA runs and crash llama.cpp's output buffer reservation
-    /// on 6 GB devices.
+    /// TTS/notification path for visible feedback.
     ///
-    /// [LAT-M1] The whisper release now goes through the post-turn
-    /// policy (`WhisperPostTurnPolicy`): TTL-hold when the RAM probe
-    /// allows (back-to-back turns skip the reload), release + post-turn
-    /// re-warm when it doesn't, and the unconditional release (today's
-    /// exact behavior) when the policy is off, the stack is not
-    /// WhisperKit, or the probe is critical.
+    /// [LAT-M1/LAT-EVIDENCE] The whisper release goes through the
+    /// post-turn policy (`WhisperPostTurnPolicy.transcriptAction`):
+    /// TTL-hold whenever the weights fit under the current RAM ceiling
+    /// (back-to-back turns skip the reload), release-only when the
+    /// probe is critical, and the unconditional release (today's exact
+    /// behavior) when the policy does not apply. The warm-start
+    /// preference is NOT consulted — it gates the BOOT warm only;
+    /// post-turn residency is the invariance contract.
     func recordTranscript(_ text: String) {
         applyPostTranscriptWhisperPolicy()
         DispatchQueue.main.async { [weak self] in
@@ -4100,91 +4109,66 @@ self.noteTalkContractChanged()
         // whisper.cpp loads a FRESH context per attempt by design — a
         // held context could never be reused. It always releases.
         whisperSpeechRecognizer.releaseModel()
-        let wantsPolicy = warmStartEnabled
-            && voiceEngineStack == .onDevice
-            && whisperKitIsActiveSTT
-            && whisperKitSpeechRecognizer.isAvailable
-        guard wantsPolicy else {
-            whisperWeightsHold.cancel()
-            pendingPostTurnReWarm = false
-            whisperKitSpeechRecognizer.releaseModel()
-            return
-        }
-        // Nothing loaded (a fallback STT served the turn) — there is
-        // nothing to hold or re-warm; today's release applies.
-        guard whisperKitSpeechRecognizer.isModelLoaded else {
-            whisperWeightsHold.cancel()
-            whisperKitSpeechRecognizer.releaseModel()
-            return
-        }
-        switch WhisperPostTurnPolicy.decide(
+        // [LAT-EVIDENCE] The warm-start preference is deliberately NOT
+        // an input — the toggle gates the BOOT warm only; post-turn
+        // residency is the invariance contract's back-to-back half.
+        let action = WhisperPostTurnPolicy.transcriptAction(
+            config: WhisperPostTurnPolicy.ResidencyConfig(
+                stack: voiceEngineStack,
+                whisperKitIsActiveSTT: whisperKitIsActiveSTT,
+                whisperKitAvailable: whisperKitSpeechRecognizer.isAvailable,
+                isModelLoaded: whisperKitSpeechRecognizer.isModelLoaded),
             availableBytes: MemoryProbe.availableProcessMemoryBytes,
-            whisperFootprintBytes: Self.whisperFootprintBytes) {
+            whisperFootprintBytes: Self.whisperFootprintBytes)
+        switch action {
         case .hold:
             // The probe allows the weights to stay resident across the
             // LLM inference of this turn: hold them for the TTL so a
             // back-to-back turn reuses the instance and skips the load.
-            whisperWeightsHold.arm(ttl: WhisperPostTurnPolicy.ttlSeconds) {
-                [weak self] in
-                DispatchQueue.main.async {
-                    self?.releaseHeldWhisperWeights()
-                }
-            }
+            // The TTL expiry releases and re-warms in the background.
+            whisperResidencyCycle.arm()
             emitWhisperWeightsEvent(
                 eventType: "post_transcript", outcome: "held",
                 metadata: ["ttl_s": "\(Int(WhisperPostTurnPolicy.ttlSeconds))"])
-        case .releaseAndReWarm:
-            // Tight RAM: release now (the crash-safety contract), then
-            // re-warm after the turn so the NEXT conversation isn't cold.
-            whisperWeightsHold.cancel()
-            whisperKitSpeechRecognizer.releaseModel()
-            emitWhisperWeightsEvent(
-                eventType: "post_transcript", outcome: "released",
-                metadata: ["reason": "ram_headroom"])
-            schedulePostTurnWhisperReWarm()
         case .releaseOnly:
             // Critically tight: release and stay released — a reload
             // would endanger the app. The next turn pays the load.
-            whisperWeightsHold.cancel()
+            whisperResidencyCycle.cancel()
             whisperKitSpeechRecognizer.releaseModel()
             emitWhisperWeightsEvent(
                 eventType: "post_transcript", outcome: "released",
                 metadata: ["reason": "ram_critical"])
+        case .notApplicable:
+            // Not the on-device WhisperKit stack, or nothing loaded (a
+            // fallback STT served the turn) — today's release applies.
+            whisperResidencyCycle.cancel()
+            whisperKitSpeechRecognizer.releaseModel()
         }
     }
 
-    /// The TTL lapsed with no new transcript: the weights go back to the
-    /// pre-warm RAM contract (the next turn pays the load).
+    /// The TTL lapsed with no new transcript: release the weights (the
+    /// re-warm half runs separately via the residency cycle's
+    /// `onReWarmRequired` — the next turn must not pay the cold load).
     private func releaseHeldWhisperWeights() {
         whisperKitSpeechRecognizer.releaseModel()
         emitWhisperWeightsEvent(eventType: "ttl_expired", outcome: "released")
     }
 
-    /// Marks the post-turn re-warm as owed. It RUNS when the turn
-    /// finalizes — the reply speech has ended and the LLM's memory has
-    /// settled, so the reload can never race the inference that forced
-    /// the release.
-    private func schedulePostTurnWhisperReWarm() {
-        pendingPostTurnReWarm = true
-    }
-
-    /// The turn-finalize hook's re-warm half (main-confined): re-probes
-    /// at execution time — the ceiling may have recovered once the
-    /// LLM/TTS work settled; if not, the skip is honest. On success the
-    /// re-warmed weights are held under the same TTL.
-    private func runPostTurnWhisperReWarmIfPending() {
-        guard pendingPostTurnReWarm else { return }
-        pendingPostTurnReWarm = false
-        guard warmStartEnabled,
-              voiceEngineStack == .onDevice,
+    /// [LAT-EVIDENCE] The background re-warm (runs when the TTL hold
+    /// lapses, main-confined): re-probes at execution time — only a
+    /// critical ceiling skips it (the safety valve), and the warm-start
+    /// preference NEVER gates it. On success the re-warmed weights
+    /// re-arm the same TTL hold, so the residency cycle repeats and the
+    /// next turn is warm.
+    private func runBackgroundWhisperReWarm() {
+        guard voiceEngineStack == .onDevice,
               whisperKitIsActiveSTT,
               whisperKitSpeechRecognizer.isAvailable else { return }
         guard MemoryProbe.availableProcessMemoryBytes
-                >= Self.whisperFootprintBytes
-                    + WhisperPostTurnPolicy.llamaRuntimeHeadroomBytes else {
+                >= Self.whisperFootprintBytes else {
             emitWhisperWeightsEvent(
                 eventType: "rewarm", outcome: "skipped",
-                metadata: ["reason": "ram_headroom"])
+                metadata: ["reason": "ram_critical"])
             return
         }
         emitWhisperWeightsEvent(eventType: "rewarm", outcome: "started")
@@ -4195,15 +4179,9 @@ self.noteTalkContractChanged()
                 case .ready:
                     self.emitWhisperWeightsEvent(
                         eventType: "rewarm", outcome: "ready")
-                    // The weights are resident again — hold them for the
-                    // same TTL so back-to-back turns skip the load.
-                    self.whisperWeightsHold.arm(
-                        ttl: WhisperPostTurnPolicy.ttlSeconds
-                    ) { [weak self] in
-                        DispatchQueue.main.async {
-                            self?.releaseHeldWhisperWeights()
-                        }
-                    }
+                    // The weights are resident again — re-arm the same
+                    // TTL hold so back-to-back turns skip the load.
+                    self.whisperResidencyCycle.arm()
                 case .failed(let reason):
                     self.emitWhisperWeightsEvent(
                         eventType: "rewarm", outcome: "failed",

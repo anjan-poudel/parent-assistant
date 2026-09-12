@@ -1,40 +1,47 @@
 import Foundation
 
-// MARK: - Post-turn whisper weights policy ([LAT-M1], 2026-09-11)
+// MARK: - Post-turn whisper weights policy ([LAT-M1] 2026-09-11,
+// [LAT-EVIDENCE] 2026-09-12)
 //
-// The invariance contract's back-to-back half: after `recordTranscript`
-// releases the whisper weights (the RAM contract — llama.cpp's context
-// reservation crashes on tight devices with Whisper resident), the NEXT
-// turn must not pay the cold load. Two-layer policy:
+// The invariance contract's back-to-back half: after `recordTranscript`,
+// the whisper weights must stay RESIDENT across turns so the NEXT turn
+// never pays the cold load (device evidence: turn 2 paid a 135 s reload
+// with `MILCompilerForANE error: failed to compile ANE model`).
 //
-//  1. TTL-HOLD (PRIMARY) — instead of an unconditional release, the
-//     weights are HELD for `ttlSeconds` after the last transcript. A
-//     back-to-back turn inside the TTL reuses the resident instance
-//     (`WhisperKitSpeechRecognizer.loadKit` returns the cached kit) and
-//     skips the load entirely; the TTL then re-arms from the new
-//     transcript. The hold is allowed ONLY when the RAM probe says the
-//     whisper weights + the llama runtime fit under the process's
-//     available-memory ceiling — the probe is the safety gate that keeps
-//     the hold from recreating the 6 GB crash class.
+// [LAT-EVIDENCE] Device-log findings that reshape the policy:
 //
-//  2. RE-WARM (FALLBACK) — when the probe refuses the hold, the weights
-//     are released at the transcript (today's behavior) and a background
-//     re-warm is scheduled for after the turn finalizes (the reply
-//     speech has ended and the LLM's memory has settled), re-probed at
-//     execution time. The re-warmed weights are then held under the same
-//     TTL.
+//  1. The [LAT-M1] hold gate — `available >= footprint + llama headroom`
+//     — NEVER held on device: `os_proc_available_memory()` reports the
+//     app's CURRENT ceiling (typically 1–3 GB), so a 2.8 GB hold gate
+//     (1.6 GB weights + 1.2 GB "llama headroom") is unreachable. The log
+//     shows the consequence: `post_transcript outcome=released
+//     (ram_headroom)` after turn 1, then `rewarm outcome=skipped
+//     (ram_headroom)` when the re-warm re-probed against the SAME gate.
+//     The hold is now: HELD whenever the whisper weights themselves fit
+//     under the current ceiling; RELEASED ONLY when RAM is critical
+//     (`available < footprint` — a reload would endanger the app). The
+//     probe is the safety valve, and it moves with OS pressure.
 //
-// Both paths are gated on the warm-start preference (the same settings
-// disclosure as the boot warm: extra idle memory for faster
-// conversations) and only run for the on-device stack's WhisperKit
-// choice — whisper.cpp loads a FRESH context per attempt by design (a
-// held context could never be reused), so it always releases exactly as
+//  2. When the TTL hold lapses, the weights are released AND a
+//     background re-warm MUST follow (never skipped by policy) — the
+//     re-warm's own probe is the only gate — so the next turn is warm
+//     again. The re-warmed weights re-arm the same TTL hold.
+//
+//  3. The warm-start preference gates the BOOT warm ONLY
+//     (`WarmStartPlanner.plan(for:)`). Post-turn residency is the
+//     invariance contract's back-to-back half and must NOT depend on the
+//     toggle — `ResidencyConfig` below has no warm input by
+//     construction, pinned by tests.
+//
+// The policy runs only for the on-device stack's WhisperKit choice —
+// whisper.cpp loads a FRESH context per attempt by design (a held
+// context could never be reused), so it always releases exactly as
 // before.
 //
 // Honest limits: the probe (`MemoryProbe.availableProcessMemoryBytes`)
 // measures the app's CURRENT ceiling — it varies with the OS's pressure,
-// so the same device may hold sometimes and release others. A release is
-// never a regression: it is today's exact behavior.
+// so the same device may hold sometimes and release others. A release
+// is never a regression: it is today's exact behavior.
 
 /// The pure decision + TTL policy (no IO — the coordinator probes).
 enum WhisperPostTurnPolicy {
@@ -43,41 +50,76 @@ enum WhisperPostTurnPolicy {
     /// transcript before they are released again (the TTL-hold window
     /// for back-to-back turns). Chosen so a normal back-and-forth
     /// conversation (a reply plays, the user answers) lands well inside
-    /// the hold, while idle RAM returns to the pre-warm contract.
+    /// the hold.
     static let ttlSeconds: TimeInterval = 60.0
-
-    /// Estimated llama.cpp runtime footprint the hold must leave room
-    /// for (1B Q4 weights ~0.8 GB + context/compute buffers + iOS
-    /// headroom). An ESTIMATE by design — the probe's ceiling already
-    /// moves with OS pressure, so a fixed generous margin is the honest
-    /// comparator.
-    static let llamaRuntimeHeadroomBytes: UInt64 = 1_200_000_000
 
     enum Decision: Equatable {
         /// Keep the weights resident (TTL-hold).
         case hold
-        /// Release now, re-warm after the turn finalizes.
-        case releaseAndReWarm
-        /// Release now and skip the re-warm — the ceiling is so tight a
-        /// reload would endanger the app (jetsam risk); the next turn
-        /// pays the load.
+        /// Release now and stay released — the ceiling is so tight the
+        /// weights themselves do not fit (a reload would endanger the
+        /// app, jetsam risk); the next turn pays the load.
         case releaseOnly
     }
 
-    /// The pure decision table: the probe result + the whisper
-    /// footprint decide whether the weights may stay resident across the
-    /// LLM inference of the current turn (hold), must go but may return
-    /// after the turn (releaseAndReWarm), or must stay gone
-    /// (releaseOnly).
+    /// [LAT-EVIDENCE] The pure decision table: the weights stay held
+    /// whenever THEY fit under the current ceiling; only a critical
+    /// ceiling releases them. The [LAT-M1] `footprint + llama headroom`
+    /// hold gate is gone — unreachable on device (see the header) — and
+    /// so is the middle `releaseAndReWarm` tier: a marginal ceiling no
+    /// longer forces a release + finalize-time re-warm.
     static func decide(availableBytes: UInt64,
                        whisperFootprintBytes: UInt64) -> Decision {
-        if availableBytes >= whisperFootprintBytes + llamaRuntimeHeadroomBytes {
-            return .hold
+        availableBytes >= whisperFootprintBytes ? .hold : .releaseOnly
+    }
+
+    /// [LAT-EVIDENCE] Pure inputs to the post-transcript decision (the
+    /// coordinator resolves them; no IO here). NOTE: `warmStartEnabled`
+    /// is deliberately ABSENT — the warm toggle gates the BOOT warm
+    /// only (`WarmStartPlanner`); post-turn residency must not depend
+    /// on it (device evidence: with the toggle off the weights were
+    /// released and the next turn paid the cold load).
+    struct ResidencyConfig: Equatable {
+        /// The active voice-engine stack.
+        var stack: VoiceEngineStack
+        /// The coordinator's WhisperKit-is-the-active-STT check (only
+        /// the on-device stack's ANE recognizer can hold weights).
+        var whisperKitIsActiveSTT: Bool
+        /// WhisperKit's own availability (installed catalog artifact).
+        var whisperKitAvailable: Bool
+        /// Whether the model is resident — a fallback STT serving the
+        /// turn leaves nothing to hold or re-warm.
+        var isModelLoaded: Bool
+    }
+
+    /// What `recordTranscript` does with the whisper weights.
+    enum TranscriptAction: Equatable {
+        /// Keep the weights resident and arm the TTL hold.
+        case hold
+        /// Critical RAM — release and stay released (the next turn pays
+        /// the load).
+        case releaseOnly
+        /// The policy does not apply (wrong stack, not the active STT,
+        /// not loaded) — today's unconditional release applies.
+        case notApplicable
+    }
+
+    /// The pure post-transcript decision: applies only for the
+    /// on-device stack's live WhisperKit recognizer with weights
+    /// resident; then hold unless the probe is critical.
+    static func transcriptAction(
+        config: ResidencyConfig,
+        availableBytes: UInt64,
+        whisperFootprintBytes: UInt64) -> TranscriptAction {
+        guard config.stack == .onDevice,
+              config.whisperKitIsActiveSTT,
+              config.whisperKitAvailable else { return .notApplicable }
+        guard config.isModelLoaded else { return .notApplicable }
+        switch decide(availableBytes: availableBytes,
+                      whisperFootprintBytes: whisperFootprintBytes) {
+        case .hold: return .hold
+        case .releaseOnly: return .releaseOnly
         }
-        if availableBytes >= whisperFootprintBytes {
-            return .releaseAndReWarm
-        }
-        return .releaseOnly
     }
 }
 
@@ -152,5 +194,52 @@ final class WhisperWeightsHold {
         self.onExpire = nil
         callback?()
         return true
+    }
+}
+
+// MARK: - Residency cycle (TTL hold + expiry re-warm, [LAT-EVIDENCE])
+
+/// Owns the post-turn residency cycle: each held transcript arms the TTL
+/// hold; when it lapses the weights are released AND the background
+/// re-warm is REQUIRED — never skipped by policy (the re-warm's own
+/// probe is the only gate, and the warm-start preference NEVER gates it)
+/// — so the next turn is warm again. The coordinator supplies the two
+/// side effects; tests drive the whole cycle with an injected clock (no
+/// real sleeps) and pin that expiry releases exactly once and requests
+/// the re-warm exactly once.
+final class WhisperResidencyCycle {
+
+    /// The underlying TTL hold (exposed so the coordinator can also
+    /// inspect/cancel it directly).
+    let hold: WhisperWeightsHold
+
+    private let onRelease: () -> Void
+    private let onReWarmRequired: () -> Void
+
+    init(clock: @escaping () -> Date = { Date() },
+         onRelease: @escaping () -> Void,
+         onReWarmRequired: @escaping () -> Void) {
+        self.hold = WhisperWeightsHold(clock: clock)
+        self.onRelease = onRelease
+        self.onReWarmRequired = onReWarmRequired
+    }
+
+    /// Arms the TTL from the last transcript. When it lapses the weights
+    /// are released and a re-warm is owed to the background.
+    func arm() {
+        hold.arm(ttl: WhisperPostTurnPolicy.ttlSeconds) { [weak self] in
+            self?.holdExpired()
+        }
+    }
+
+    /// Clears the hold WITHOUT the expiry side effects — the weights
+    /// were released by another path (a policy change, a critical probe).
+    func cancel() {
+        hold.cancel()
+    }
+
+    private func holdExpired() {
+        onRelease()
+        onReWarmRequired()
     }
 }

@@ -20,6 +20,10 @@ enum InterpreterSelection: Equatable {
     case cloud
     /// The local interpreter (the llama chain) answers, for `reason`.
     case local(reason: InterpreterSelectionReason)
+    /// [LAT-EVIDENCE] The local brain FAILED (timeout / truncated
+    /// output after its retry) and the cloud answers this turn — the
+    /// honest `local_failed_fallback` reason.
+    case cloudAfterLocalFailure
 
     /// The honest reason this selection happened — logged as the
     /// `reason` metadata of the `interpreter_selected` event.
@@ -27,6 +31,7 @@ enum InterpreterSelection: Equatable {
         switch self {
         case .cloud: return .cloudConfigured
         case .local(let reason): return reason
+        case .cloudAfterLocalFailure: return .localFailedFallback
         }
     }
 
@@ -34,7 +39,7 @@ enum InterpreterSelection: Equatable {
     /// `interpreter` metadata ("gemini" / "llama").
     var interpreterName: String {
         switch self {
-        case .cloud: return "gemini"
+        case .cloud, .cloudAfterLocalFailure: return "gemini"
         case .local: return "llama"
         }
     }
@@ -54,6 +59,11 @@ enum InterpreterSelectionReason: String, Equatable {
     /// Cloud was selected but failed mid-request (network, timeout,
     /// parse, below the rephrase floor) — fell back to local.
     case cloudFailedFallback = "cloud_failed_fallback"
+    /// [LAT-EVIDENCE] (2026-09-12) The local brain FAILED (inference
+    /// timeout / truncated output, both after its one retry) and the
+    /// cloud answers this turn — the honest reason a failure-driven
+    /// escalation happened instead of a bare apology.
+    case localFailedFallback = "local_failed_fallback"
 }
 
 /// The pure selection rule. Cloud wins exactly when a key is configured
