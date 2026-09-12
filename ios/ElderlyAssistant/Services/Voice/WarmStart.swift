@@ -43,11 +43,9 @@ import Foundation
 //    warm request would cost tokens. On the Gemini STT stack the whisper
 //    warm is skipped ("gemini_stack"); TTS warm still applies — the reply
 //    voice is always on-device Piper.
-//  - The wake-word engine needs no warm: it is fully loaded during the
-//    boot's `.preparingVoice` phase (main thread — the sherpa ONNX
-//    runtime segfaults off-main on the x86_64 simulator). The Talk button
-//    uses the same STT/TTS engines with listening off, so the wake-word
-//    preference does not gate warming.
+//  - The wake-word engine has no warm step here. Its expensive ONNX session
+//    is built separately after manual Talk is live, then hot-swapped into the
+//    idle pipeline; wake-word readiness never gates an explicit Talk tap.
 //  - RAM honesty: warm holds the loaded weights until the first
 //    transcript, when `recordTranscript` drops them exactly as before
 //    (`releaseModel`) — warm changes WHEN the load happens, not the

@@ -2,7 +2,7 @@ import XCTest
 @testable import ElderlyAssistant
 
 /// Guards the startup instrumentation ([BOOT-REVIEW P0 item 1],
-/// 2026-09-10). The review asks for SEVEN separate intervals and is
+/// 2026-09-10). The review asks for EIGHT separate intervals and is
 /// explicit that they must not be collapsed into one "startup complete"
 /// number — a slow boot has to be attributable to a phase. The name list
 /// below is therefore the contract: it is what an Instruments trace is
@@ -28,11 +28,11 @@ final class StartupSignpostsTests: XCTestCase {
         super.tearDown()
     }
 
-    // MARK: - The seven metrics, uncollapsed
+    // MARK: - The eight metrics, uncollapsed
 
-    func testExactlySevenMetricsAreDeclared() {
-        XCTAssertEqual(StartupInterval.allCases.count, 7)
-        XCTAssertEqual(Set(StartupSignposts.metricNames).count, 7,
+    func testExactlyEightMetricsAreDeclared() {
+        XCTAssertEqual(StartupInterval.allCases.count, 8)
+        XCTAssertEqual(Set(StartupSignposts.metricNames).count, 8,
                        "two metrics sharing a name would collapse in the trace")
     }
 
@@ -47,6 +47,7 @@ final class StartupSignpostsTests: XCTestCase {
             "kws-session-ready",
             "voice-pipeline-callback-completed",
             "warm-engines-completed",
+            "manual-talk-ready",
         ])
     }
 

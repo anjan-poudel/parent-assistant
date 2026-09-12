@@ -3,7 +3,7 @@ import os
 
 // MARK: - Startup instrumentation (startup review P0, 2026-09-10)
 //
-// SEVEN separate OSSignposter intervals — one per startup metric the
+// EIGHT separate OSSignposter intervals — one per startup metric the
 // review asks for. They are deliberately NOT collapsed into a single
 // "startup complete" duration: a slow boot has to be attributable to a
 // phase (bootstrap init vs. data restoration vs. voice start vs. KWS
@@ -19,6 +19,8 @@ import os
 //  6. voice-pipeline-callback-completed
 //                               — start request → completion callback.
 //  7. warm-engines-completed    — warm phase → warm settled (or watchdog).
+//  8. manual-talk-ready         — AppCoordinator.start() → voice start
+//                               callback succeeds or fails.
 //
 // Intervals 4 and 6 are adjacent, not overlapping: 4 measures how long
 // the boot took to ASK the voice stack to start, 6 measures how long the
@@ -38,6 +40,7 @@ enum StartupInterval: String, CaseIterable {
     case kwsSessionReady = "kws-session-ready"
     case voicePipelineCallbackCompleted = "voice-pipeline-callback-completed"
     case warmEnginesCompleted = "warm-engines-completed"
+    case manualTalkReady = "manual-talk-ready"
 
     /// `beginInterval`/`endInterval` take a `StaticString`; the raw value
     /// is a `String`, so the signpost names are spelled once here.
@@ -52,6 +55,7 @@ enum StartupInterval: String, CaseIterable {
         case .voicePipelineCallbackCompleted:
             return "voice-pipeline-callback-completed"
         case .warmEnginesCompleted: return "warm-engines-completed"
+        case .manualTalkReady: return "manual-talk-ready"
         }
     }
 }

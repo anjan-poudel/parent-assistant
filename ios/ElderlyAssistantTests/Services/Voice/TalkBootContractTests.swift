@@ -1,23 +1,18 @@
 import XCTest
 @testable import ElderlyAssistant
 
-/// [LAT-M1] Unit tests for the invariance boot contract machine
-/// (`TalkBootContractState`) and its published conjunction
-/// (`TalkBootContract.combine`). The contract pinned here:
+/// [LAT-M1] Unit tests for background engine readiness telemetry
+/// (`TalkBootContractState`). This contract measures warm/KWS settlement and
+/// never gates manual Talk; `ManualTalkReadinessState` is published
+/// independently. The state doctrine pinned here:
 ///
-///  - speak-enabled ⇔ pipeline started ∧ whisper warm settled ∧ primary
-///    TTS warm settled ∧ llama warm settled ∧ KWS settled,
-///  - a SKIP settles its feature (the planner's honest reason — the
-///    simulator skip, gemini_stack, model_missing, preference off) and
-///    satisfies the contract,
-///  - a FAILED warm settles DEGRADED: enabled with the honest cold-
-///    feature payload — never silent, never blocked forever,
-///  - the warm budget expiring does NOT enable the button — only real
-///    settles (and the talk watchdog) move the contract,
-///  - the talk watchdog fails still-pending warm features (cold) but
-///    only SKIPS a pending KWS (wake word never degrades manual Talk),
-///  - a retry warm outcome upgrades a failed feature honestly.
-final class TalkBootContractTests: XCTestCase {
+///  - every tracked feature settles as ready, skipped, or failed,
+///  - a SKIP preserves the planner's honest reason and is not cold,
+///  - a FAILED warm records an honest cold-feature classification,
+///  - budget expiry alone does not settle an in-flight feature,
+///  - the watchdog fails pending warm features but skips pending KWS,
+///  - retry and late real outcomes can upgrade watchdog/failure states.
+final class TalkBootBackgroundReadinessTests: XCTestCase {
 
     // MARK: - Helpers
 
@@ -74,13 +69,13 @@ final class TalkBootContractTests: XCTestCase {
                        .skipped(reason: TalkBootContractState.preferenceOffReason))
         XCTAssertEqual(contract.statuses[.llama],
                        .skipped(reason: TalkBootContractState.preferenceOffReason))
-        // KWS remains — the button waits only on the KWS settle.
+        // KWS remains independently pending in the telemetry.
         XCTAssertEqual(contract.pendingFeatures, [.kws])
     }
 
-    // MARK: - The speak-enabled conjunction
+    // MARK: - Settlement completeness
 
-    func testSpeakEnabledRequiresEveryFeature() {
+    func testSettlementCompletesOnlyAfterEveryFeature() {
         var contract = TalkBootContractState()
         for step in plan([
             step(.whisperKit), step(.llamaInterpreter),
@@ -88,40 +83,25 @@ final class TalkBootContractTests: XCTestCase {
         ]) {
             contract.noteWarmPlanStep(step)
         }
-        // One feature at a time — the contract is never complete early.
         contract.noteWarmOutcome(feature: .whisper, result: .ready)
         XCTAssertFalse(contract.isComplete)
         contract.noteWarmOutcome(feature: .primaryTTS, result: .ready)
         XCTAssertFalse(contract.isComplete)
         contract.noteWarmOutcome(feature: .llama, result: .ready)
-        XCTAssertFalse(contract.isComplete, "KWS still pending")
+        XCTAssertFalse(contract.isComplete, "KWS telemetry is still pending")
         contract.noteKWSApplied(isReal: true)
+        XCTAssertEqual(contract.statuses[.whisper], .ready)
+        XCTAssertEqual(contract.statuses[.primaryTTS], .ready)
+        XCTAssertEqual(contract.statuses[.llama], .ready)
+        XCTAssertEqual(contract.statuses[.kws], .ready)
         XCTAssertTrue(contract.isComplete)
         XCTAssertTrue(contract.isSatisfied)
         XCTAssertTrue(contract.coldFeatures.isEmpty)
     }
 
-    func testCombineReadyRequiresContractSatisfied() {
-        let pipeline: VoicePipelineReadiness = .ready
-        // Contract still open → preparing, NOT enabled.
-        var preparing = TalkBootContractState()
-        preparing.noteKWSApplied(isReal: true)  // KWS done, warms pending
-        XCTAssertEqual(TalkBootContract.combine(pipeline: pipeline,
-                                                contract: preparing),
-                       .loading(.preparingEngines(preparing.progress)))
+    // MARK: - Honest cold-engine classification
 
-        // Contract satisfied → ready.
-        var satisfied = TalkBootContractState()
-        settleAllWarm(&satisfied)
-        satisfied.noteKWSApplied(isReal: true)
-        XCTAssertEqual(TalkBootContract.combine(pipeline: pipeline,
-                                                contract: satisfied),
-                       .ready)
-    }
-
-    // MARK: - Honest degradation (never silent, never blocked forever)
-
-    func testWarmFailureSettlesDegradedWithColdFeatures() {
+    func testWarmFailureSettlesWithColdFeatureClassification() {
         var contract = TalkBootContractState()
         for step in plan([
             step(.whisperKit), step(.llamaInterpreter),
@@ -137,34 +117,23 @@ final class TalkBootContractTests: XCTestCase {
 
         XCTAssertTrue(contract.isComplete)
         XCTAssertFalse(contract.isSatisfied)
+        XCTAssertEqual(contract.statuses[.whisper],
+                       .failed(reason: "load_failed"))
         XCTAssertEqual(contract.coldFeatures, [.whisper])
-
-        // The published value is DEGRADED — enabled with the banner
-        // payload, not `.ready` and not `.loading`.
-        let published = TalkBootContract.combine(pipeline: .ready,
-                                                 contract: contract)
-        XCTAssertEqual(published,
-                       .degraded(TalkBootDegradation(coldFeatures: [.whisper])))
-        XCTAssertTrue(published.isTalkEnabled,
-                      "a degraded hero is ENABLED — the first conversation honestly pays the load")
     }
 
-    func testBudgetExpiryAloneKeepsTheButtonDisabled() {
-        // [LAT-M1] The 4 s warm budget may advance the SPINNER, but the
-        // contract itself only moves on real settles (or the talk
-        // watchdog). A budget expiry with warms still in flight = still
-        // preparing = still disabled — no silent enable.
+    func testBudgetExpiryAloneDoesNotSettlePendingWarmWork() {
+        // No budget transition exists in this pure state machine: without a
+        // warm outcome or watchdog event, the feature remains pending.
         var contract = TalkBootContractState()
         for step in plan([step(.whisperKit)]) {
             contract.noteWarmPlanStep(step)
         }
         contract.noteKWSApplied(isReal: true)
         XCTAssertFalse(contract.isComplete)
-        let published = TalkBootContract.combine(pipeline: .ready,
-                                                 contract: contract)
-        XCTAssertTrue(published.isLoading,
-                      "budget expiry never enables — the button stays disabled with honest progress")
-        XCTAssertFalse(published.isTalkEnabled)
+        XCTAssertEqual(contract.pendingFeatures,
+                       [.whisper, .primaryTTS, .llama])
+        XCTAssertTrue(contract.coldFeatures.isEmpty)
     }
 
     func testTalkWatchdogFailsPendingWarmFeaturesButOnlySkipsKWS() {
@@ -185,28 +154,22 @@ final class TalkBootContractTests: XCTestCase {
                        .failed(reason: TalkBootContractState.watchdogReason))
         XCTAssertEqual(contract.statuses[.kws],
                        .skipped(reason: TalkBootContractState.watchdogReason),
-                       "a pending KWS falls back to Null behavior — wake word never degrades manual Talk")
+                       "pending KWS falls back to a non-failure Null classification")
+        XCTAssertFalse(contract.isSatisfied)
         XCTAssertEqual(contract.coldFeatures, [.whisper])
-
-        let published = TalkBootContract.combine(pipeline: .ready,
-                                                 contract: contract)
-        XCTAssertTrue(published.isTalkEnabled)
-        XCTAssertEqual(published.degradation?.coldFeatures, [.whisper])
     }
 
-    func testNullKWSSettlesSatisfiedWithoutDegradation() {
+    func testNullKWSSettlesSatisfiedWithoutColdFeatures() {
         var contract = TalkBootContractState()
         settleAllWarm(&contract)
         contract.noteKWSApplied(isReal: false)
 
         XCTAssertTrue(contract.isComplete)
         XCTAssertTrue(contract.isSatisfied,
-                      "a Null wake-word engine is a satisfied skip, never a Talk failure")
+                      "a Null wake-word engine is a settled non-failure skip")
         XCTAssertTrue(contract.coldFeatures.isEmpty)
-
-        let published = TalkBootContract.combine(pipeline: .ready,
-                                                 contract: contract)
-        XCTAssertEqual(published, .ready)
+        XCTAssertEqual(contract.statuses[.kws],
+                       .skipped(reason: TalkBootContractState.nullEngineReason))
     }
 
     // MARK: - Recovery upgrades
@@ -221,8 +184,8 @@ final class TalkBootContractTests: XCTestCase {
         XCTAssertTrue(contract.isComplete)
         XCTAssertEqual(contract.coldFeatures, [.llama])
 
-        // The degraded-state recovery re-runs the warm; success clears
-        // the degradation honestly (never by a timer).
+        // A retry re-runs the failed warm; success clears the cold-feature
+        // classification honestly rather than via a timer.
         contract.noteWarmOutcome(feature: .llama, result: .ready)
         XCTAssertTrue(contract.isSatisfied)
         XCTAssertTrue(contract.coldFeatures.isEmpty)
@@ -287,11 +250,9 @@ final class TalkBootContractTests: XCTestCase {
         XCTAssertEqual(TalkBootContractState.feature(for: .llamaInterpreter), .llama)
     }
 
-    func testPostBootWarmDefensivelySkipsInsteadOfGating() {
-        // A hand-built plan can never put the PRIMARY TTS in the
-        // post-boot slot through the planner (the simulator defers TTS
-        // warms as SKIPS) — pin the defensive settle so a future planner
-        // change can never gate the button on a post-boot load.
+    func testPostBootWarmDefensivelySkipsInsteadOfRemainingPending() {
+        // The planner does not put primary TTS in the post-boot slot today;
+        // pin the defensive settlement for hand-built or future plans.
         var contract = TalkBootContractState()
         contract.noteWarmPlanStep(step(
             .ttsVoice(ModelCatalog.piperNepali), phase: .postBoot))
@@ -299,45 +260,24 @@ final class TalkBootContractTests: XCTestCase {
                        .skipped(reason: TalkBootContractState.postBootSlotReason))
     }
 
-    // MARK: - Published value passing-through
 
-    func testCombinePassesThroughPipelineFailuresAndLoading() {
-        var contract = TalkBootContractState()
-        settleAllWarm(&contract)
-        contract.noteKWSApplied(isReal: true)
-
-        XCTAssertEqual(
-            TalkBootContract.combine(
-                pipeline: .failed(.pipelineStartFailed(reason: "mic")),
-                contract: contract),
-            .failed(.pipelineStartFailed(reason: "mic")),
-            "a failed pipeline start is the published failure — the contract is irrelevant")
-        XCTAssertEqual(
-            TalkBootContract.combine(pipeline: .loading(.starting),
-                                     contract: contract),
-            .loading(.starting),
-            "while the start callback is in flight the published stage is .starting")
-    }
+    // MARK: - Watchdog settlement
 
     func testTalkWatchdogBoundsTheWait() {
-        // The contract watchdog must be short enough that a hung warm
-        // degrades promptly, and the preparing hero must carry the
-        // per-feature progress the caption renders.
+        // The watchdog remains a bounded telemetry settlement backstop and
+        // outlives the normal boot warm budget.
         XCTAssertLessThanOrEqual(TalkBootContractState.talkWatchdogSeconds, 45,
-                                 "the talk watchdog must never block the button for minutes")
+                                 "background readiness must not remain pending for minutes")
         XCTAssertGreaterThan(TalkBootContractState.talkWatchdogSeconds,
                              WarmStartPlanner.bootWarmBudgetSeconds,
-                             "the talk watchdog must outlive the boot warm budget — budget expiry alone never degrades")
+                             "the watchdog must outlive the boot warm budget")
     }
 
     // MARK: - Never-stuck guarantees ([CONTRACT-FIX])
 
-    func testAllSilentPublishersSettleDegradedEnabledAtWatchdog() {
-        // Every feature publisher is a no-op that never emits: the plan
-        // was fed, but no warm outcome and no KWS settle ever arrives.
-        // The watchdog is the ONLY input — and it must settle the
-        // contract DEGRADED (enabled + banner), never leave the button
-        // disabled.
+    func testAllSilentPublishersSettleColdFeaturesAtWatchdog() {
+        // No warm outcome or KWS settle arrives. The watchdog is the only
+        // input and must settle every telemetry field.
         var contract = TalkBootContractState()
         for step in plan([
             step(.whisperKit), step(.llamaInterpreter),
@@ -359,21 +299,15 @@ final class TalkBootContractTests: XCTestCase {
                        .failed(reason: TalkBootContractState.watchdogReason))
         XCTAssertEqual(contract.statuses[.kws],
                        .skipped(reason: TalkBootContractState.watchdogReason),
-                       "a silent KWS falls back to the Null behavior — wake word never degrades manual Talk")
-
-        let published = TalkBootContract.combine(pipeline: .ready,
-                                                 contract: contract)
-        XCTAssertTrue(published.isTalkEnabled,
-                      "the all-silent watchdog settle is ENABLED (degraded with the honest banner) — never stuck disabled")
-        XCTAssertEqual(published.degradation?.coldFeatures,
+                       "silent KWS falls back to a non-failure Null classification")
+        XCTAssertFalse(contract.isSatisfied)
+        XCTAssertEqual(contract.coldFeatures,
                        [.whisper, .primaryTTS, .llama])
     }
 
     func testKWSNoSignalAloneFallsBackToNullSkipNotFailure() {
-        // The warms settle clean; ONLY the KWS never emits (device build
-        // wedged on the off-main queue). The watchdog's KWS fallback is a
-        // satisfied skip — the published value is `.ready`, never a Talk
-        // degradation.
+        // The warms settle cleanly while KWS never emits. The watchdog records
+        // KWS as a satisfied skip rather than a cold engine.
         var contract = TalkBootContractState()
         settleAllWarm(&contract)
         XCTAssertEqual(contract.pendingFeatures, [.kws])
@@ -383,17 +317,12 @@ final class TalkBootContractTests: XCTestCase {
         XCTAssertEqual(contract.statuses[.kws],
                        .skipped(reason: TalkBootContractState.watchdogReason))
         XCTAssertTrue(contract.isSatisfied,
-                      "a pending KWS degrades to the Null behavior — wake word never degrades manual Talk")
+                      "pending KWS settles to the Null classification")
         XCTAssertTrue(contract.coldFeatures.isEmpty)
-        XCTAssertEqual(TalkBootContract.combine(pipeline: .ready,
-                                                contract: contract),
-                       .ready)
     }
 
-    func testNoInputsAtAllStillSettlesAtWatchdog() {
-        // Not even a plan was fed (a boot path that never reached the
-        // warm phase): the contract cannot wait forever on inputs that
-        // can never arrive — the watchdog settles every feature.
+    func testNoInputsAtAllStillSettleAtWatchdog() {
+        // Even when no plan was fed, the watchdog settles every tracked field.
         var contract = TalkBootContractState()
         XCTAssertEqual(contract.pendingFeatures,
                        [.whisper, .primaryTTS, .llama, .kws])
@@ -402,17 +331,13 @@ final class TalkBootContractTests: XCTestCase {
 
         XCTAssertTrue(contract.isComplete)
         XCTAssertTrue(contract.pendingFeatures.isEmpty)
-        let published = TalkBootContract.combine(pipeline: .ready,
-                                                 contract: contract)
-        XCTAssertTrue(published.isTalkEnabled,
-                      "no-input contracts settle ENABLED at the deadline")
+        XCTAssertEqual(contract.coldFeatures,
+                       [.whisper, .primaryTTS, .llama])
     }
 
-    func testPreferenceOffFullFlowSettlesReadyOnceKWSApplies() {
-        // Warm-start OFF: the empty plan settles whisper/primaryTTS/llama
-        // as preference_off (including llama — the coordinator's planner
-        // reasons must reach ALL warm features), and the KWS settle
-        // completes the contract clean.
+    func testPreferenceOffFullFlowSettlesSatisfiedOnceKWSApplies() {
+        // Warm-start OFF classifies whisper/primaryTTS/llama as intentional
+        // skips; the KWS outcome completes the telemetry cleanly.
         var contract = TalkBootContractState()
         contract.settleUnplannedWarmFeatures()
         XCTAssertEqual(contract.statuses[.whisper],
@@ -427,15 +352,12 @@ final class TalkBootContractTests: XCTestCase {
 
         XCTAssertTrue(contract.isComplete)
         XCTAssertTrue(contract.isSatisfied)
-        XCTAssertEqual(TalkBootContract.combine(pipeline: .ready,
-                                                contract: contract),
-                       .ready)
+        XCTAssertTrue(contract.coldFeatures.isEmpty)
     }
 
     func testPreferenceOffWithSilentKWSStillSettlesAtWatchdog() {
-        // Preference off AND the deferred KWS build never reports: the
-        // watchdog settles the last pending feature as the Null skip —
-        // the button enables clean, never waits.
+        // Preference off plus a silent deferred KWS build settles the final
+        // field as a watchdog skip.
         var contract = TalkBootContractState()
         contract.settleUnplannedWarmFeatures()
 
@@ -443,19 +365,14 @@ final class TalkBootContractTests: XCTestCase {
 
         XCTAssertTrue(contract.isComplete)
         XCTAssertTrue(contract.isSatisfied,
-                      "preference-off warm features are settled skips; the silent KWS becomes the Null skip — never a failure")
+                      "preference-off warms and silent KWS are settled skips")
         XCTAssertEqual(contract.statuses[.kws],
                        .skipped(reason: TalkBootContractState.watchdogReason))
-        XCTAssertEqual(TalkBootContract.combine(pipeline: .ready,
-                                                contract: contract),
-                       .ready)
     }
 
     func testWatchdogDeadlineLeavesNothingPending() {
-        // The hard upper bound: after the watchdog's deadline event (the
-        // injected clock), NOTHING is pending — no publisher silence,
-        // warm hang or KWS wedge can hold the contract past
-        // `talkWatchdogSeconds`.
+        // After the injected watchdog deadline, no publisher silence, warm
+        // hang, or KWS wedge can leave telemetry pending.
         var contract = TalkBootContractState()
         for step in plan([
             step(.whisperKit), step(.llamaInterpreter),
@@ -467,81 +384,23 @@ final class TalkBootContractTests: XCTestCase {
         contract.noteTalkWatchdogExpired()
 
         XCTAssertTrue(contract.pendingFeatures.isEmpty,
-                      "at the deadline every feature is settled — the contract can never wait past the watchdog")
+                      "the deadline settles every tracked feature")
         XCTAssertTrue(contract.isComplete)
-        // The settle happens AT the deadline — not before: until the
-        // watchdog fires, the contract stays honestly open.
         var stillOpen = TalkBootContractState()
         for step in plan([step(.whisperKit)]) {
             stillOpen.noteWarmPlanStep(step)
         }
         XCTAssertFalse(stillOpen.isComplete,
-                       "before the deadline the contract stays open — the button is disabled honestly, never silently enabled")
+                       "before the watchdog event, pending telemetry stays open")
     }
 
-    // MARK: - Copy (catalog binding, both shipped languages)
-
-    func testPreparingAndDegradedCopyResolvesInBothLanguages() {
-        // The new preparing/degraded strings must resolve in both shipped
-        // languages (same catalog-binding discipline as
-        // WarmStartTests' settings-copy test) — a key that falls back to
-        // its own name would render as machine text on Home.
-        let ne = Locale(identifier: "ne-NP")
-        let en = Locale(identifier: "en-US")
-
-        var preparing = TalkBootContractState()
-        for step in plan([step(.whisperKit), step(.llamaInterpreter)]) {
-            preparing.noteWarmPlanStep(step)
-        }
-        preparing.noteKWSApplied(isReal: true)
-
-        let caption = TalkReadinessCopy.preparingEnginesCaption(
-            preparing.progress, locale: en)
-        XCTAssertFalse(caption.isEmpty)
-        XCTAssertFalse(caption.hasPrefix("voice.readiness."))
-        XCTAssertTrue(TalkReadinessCopy.preparingEnginesCaption(
-            preparing.progress, locale: ne).contains("·"),
-                      "the pending features join into the caption in Nepali too")
-
-        let degradation = TalkBootDegradation(coldFeatures: [.llama, .whisper])
-        let banner = TalkReadinessCopy.degradedCaption(degradation, locale: en)
-        XCTAssertFalse(banner.isEmpty)
-        XCTAssertFalse(banner.hasPrefix("voice.readiness."))
-        let neBanner = TalkReadinessCopy.degradedCaption(degradation, locale: ne)
-        XCTAssertFalse(neBanner.hasPrefix("voice.readiness."))
-        XCTAssertTrue(neBanner.contains("दिमाग"),
-                      "the Nepali banner names the cold brain feature")
-
-        XCTAssertEqual(TalkReadinessCopy.loadingLabel(.preparingEngines(preparing.progress),
-                                                      locale: en),
-                       L10n.str("voice.readiness.loading.preparingEngines", locale: en))
-        XCTAssertFalse(TalkReadinessCopy.loadingLabel(.preparingEngines(preparing.progress),
-                                                      locale: ne).hasPrefix("voice.readiness."))
-    }
-
-    func testExtraLineOnlyAppearsWhilePreparingOrDegraded() {
-        let ne = Locale(identifier: "ne-NP")
-        XCTAssertNil(TalkReadinessCopy.extraLine(.ready, locale: ne))
-        XCTAssertNil(TalkReadinessCopy.extraLine(.loading(.starting), locale: ne))
-        XCTAssertNil(TalkReadinessCopy.extraLine(
-            .failed(.pipelineStartFailed(reason: "x")), locale: ne))
-
-        var preparing = TalkBootContractState()
-        XCTAssertNotNil(TalkReadinessCopy.extraLine(
-            .loading(.preparingEngines(preparing.progress)), locale: ne),
-            "an open contract shows the preparing caption")
-        XCTAssertNotNil(TalkReadinessCopy.extraLine(
-            .degraded(TalkBootDegradation(coldFeatures: [.llama])), locale: ne),
-            "a degraded settle shows the cold-feature banner")
-    }
 }
 
 // MARK: - The watchdog seam ([CONTRACT-FIX])
 
-/// The never-stuck guarantee's scheduler half: the watchdog must fire on
-/// its OWN scheduler even when the warm queue is occupied by a hung warm
-/// (the no-shared-queue-deadlock proof), the deadline must never extend
-/// past the first arm, and a cancel must disarm.
+/// The scheduler half of the settlement guarantee: the watchdog fires on its
+/// own scheduler while the warm queue is occupied, retains the first deadline,
+/// and can be cancelled.
 final class TalkBootWatchdogTests: XCTestCase {
 
     /// A seam that NEVER reports — its warm occupies the serial warm
@@ -555,12 +414,8 @@ final class TalkBootWatchdogTests: XCTestCase {
     }
 
     func testWatchdogFiresOnItsOwnSchedulerWhileWarmQueueOccupied() {
-        // The warm queue is OCCUPIED by the hung seam (its block never
-        // returns) and the runner's per-step timeout is disabled — the
-        // ONLY thing that can settle the contract is the watchdog on
-        // its independent scheduler. If the watchdog shared the warm
-        // queue it would never fire and the button would stay disabled
-        // forever — this test pins the fix.
+        // The warm queue is occupied by a hung seam and runner timeout is off.
+        // Only the watchdog's independent scheduler can settle the state.
         let warmQueue = DispatchQueue(label: "contractfix.test.warm")
         let watchdogQueue = DispatchQueue(label: "contractfix.test.watchdog")
         let runner = WarmStartRunner(
@@ -578,6 +433,7 @@ final class TalkBootWatchdogTests: XCTestCase {
         for step in plan {
             contract.noteWarmPlanStep(step)
         }
+        contract.settleUnplannedWarmFeatures()
 
         let watchdog = TalkBootWatchdog(scheduler: watchdogQueue)
         let fired = expectation(description:
@@ -588,13 +444,11 @@ final class TalkBootWatchdogTests: XCTestCase {
         }
         wait(for: [fired], timeout: 2)
 
-        XCTAssertTrue(contract.isComplete)
         XCTAssertEqual(contract.statuses[.whisper],
                        .failed(reason: TalkBootContractState.watchdogReason))
-        let published = TalkBootContract.combine(pipeline: .ready,
-                                                 contract: contract)
-        XCTAssertTrue(published.isTalkEnabled,
-                      "the independent watchdog settles the contract even though the warm queue is still occupied by the hung warm")
+        XCTAssertEqual(contract.coldFeatures, [.whisper])
+        XCTAssertTrue(contract.isComplete,
+                      "the independent watchdog settles state while warm work is hung")
         // The warm queue is STILL occupied (the seam never returned), so
         // the runner's completion can never have been delivered — the
         // settle came ONLY from the independent watchdog.

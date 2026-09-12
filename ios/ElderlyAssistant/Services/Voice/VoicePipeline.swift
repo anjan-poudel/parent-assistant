@@ -78,6 +78,10 @@ final class VoicePipeline {
     private let processingQueue = DispatchQueue(label: "voice.pipeline.processing",
                                                 qos: .userInteractive)
 
+    /// Invalidates callbacks from an older start attempt. A timeout may
+    /// expose Retry while the permission callback is still alive; only the
+    /// newest attempt may install the mic tap or mutate pipeline state.
+    private var startGeneration = 0
     /// Max time the user can keep talking before capture is force-ended
     /// (VAD normally ends it much sooner). Also the `timeout` handed to
     /// `SpeechRecognizerProtocol.startListening`.
@@ -405,26 +409,30 @@ final class VoicePipeline {
     }
 
     func start(completion: @escaping (Result<Void, Error>) -> Void) {
+        startGeneration += 1
+        let generation = startGeneration
         audioSession.activate { [weak self] result in
+            guard let self, self.startGeneration == generation else { return }
             switch result {
             case .failure(let err):
-                self?.state = .error("audio session: \(err)")
+                self.state = .error("audio session: \(err)")
                 completion(.failure(err))
             case .success:
-                self?.speechRecognizer.requestAuthorization { granted in
+                self.speechRecognizer.requestAuthorization { [weak self] granted in
+                    guard let self, self.startGeneration == generation else { return }
                     guard granted else {
-                        self?.state = .error("speech recognition denied")
+                        self.state = .error("speech recognition denied")
                         completion(.failure(RecognitionError.notAuthorized))
                         return
                     }
                     do {
-                        try self?.installMicTap()
-                        try self?.wakeWordEngine.start()
-                        self?.state = .idle
-                        self?.emit("pipeline_started", outcome: "success")
+                        try self.installMicTap()
+                        try self.wakeWordEngine.start()
+                        self.state = .idle
+                        self.emit("pipeline_started", outcome: "success")
                         completion(.success(()))
                     } catch {
-                        self?.state = .error("mic tap: \(error)")
+                        self.state = .error("mic tap: \(error)")
                         completion(.failure(error))
                     }
                 }
@@ -433,6 +441,7 @@ final class VoicePipeline {
     }
 
     func stop() {
+        startGeneration += 1
         // Invalidate any in-flight capture BEFORE tearing the recognizer
         // down: its completion (settled by the cancel below, possibly
         // synchronously) must not run the post-capture tail against a
