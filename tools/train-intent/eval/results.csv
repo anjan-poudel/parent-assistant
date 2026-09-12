@@ -23,3 +23,8 @@ qwen4b-s43-gbnf,1.000,0.800,0.833,1.000,1.000,contact_f1|time_f1,gbnf
 qwen4b-s44-gbnf,0.941,0.800,1.000,0.667,1.000,closed_intent_accuracy|contact_f1|emergency_recall,gbnf
 qwen-s43-gbnf,0.471,0.462,0.000,0.333,1.000,closed_intent_accuracy|contact_f1|time_f1|emergency_recall,gbnf
 qwen-s44-gbnf,0.824,0.444,0.000,1.000,1.000,closed_intent_accuracy|contact_f1|time_f1,gbnf
+qwen4b-s43-gbnf-diag,1.000,0.800,0.833,1.000,1.000,contact_f1|time_f1,gbnf
+qwen4b-s43-off-diag,1.000,1.000,1.000,1.000,1.000,none,off
+qwen4b-s43-q3,1.000,0.833,0.909,1.000,1.000,contact_f1,gbnf
+qwen-student-s42-gbnf,0.824,0.444,0.526,0.667,1.000,closed_intent_accuracy|contact_f1|time_f1|emergency_recall,gbnf
+qwen-student-s42-off,0.824,0.800,0.000,0.667,1.000,closed_intent_accuracy|contact_f1|time_f1|emergency_recall,off

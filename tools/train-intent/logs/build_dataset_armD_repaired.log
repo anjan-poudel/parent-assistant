@@ -1,0 +1,9 @@
+[build] stt_noised: dropped 703 conflicting-label keys
+[build] clean_devanagari: dropped 1 conflicting-label keys
+[build] kept 4533 rows (train 4307, valid 226)
+[build] dropped: {'schema': 12, 'leak': 14}
+[build] mixture by bucket (incl. distill): stt_noised 1696 (37.4%), clean_devanagari 1891 (41.7%), romanized_codeswitched 946 (20.9%)
+[build] mixture targets: stt_noised 60%, clean_devanagari 25%, romanized_codeswitched 15%
+[build] distill add-on: 1706 rows (cap 2600, supply 1706); §9.2 ratio over the non-distill portion: stt_noised 60.0%, clean_devanagari 25.0%, romanized_codeswitched 15.0%
+[build] noised: 55 rows byte-equal to a clean row dropped as dup_clean
+[build] NOTE: leakage rows were REFUSED — investigate gen_teacher overlap with the golden corpus

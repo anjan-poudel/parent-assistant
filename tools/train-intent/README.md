@@ -84,6 +84,36 @@ pays for it in real slot F1 (qwen4b-s43: contact 1.000 → 0.800, time
 1.000 → 0.833). Treat gbnf scores as production truth and use
 `train_qlora.py --label-order schema` to teach the grammar's shape.
 
+**Three-way shape disagreement (2026-09-13, phase 2):** the caveat above
+is not only about the grammar. The prompt the app actually sends — the
+one-shot example in `IntentPrompt.build`, mirrored byte-for-byte in
+`seeds/prompt_template.txt` — is ITSELF a schema-order, five-key object
+(`intent`, `response`, `confidence`, `actionType`, `actionUrl`) that
+stops at `actionUrl`, while the decode grammar REQUIRES all sixteen keys
+and the canonical labels teach twelve with `response` last. A 1.7B
+student resolves that disagreement by copying the prompt: the
+canonical-order distilled arm emitted exactly those five keys and
+stopped (unconstrained decode), which is the prompt's example shape, not
+a base-model artifact. Train in the grammar's shape (`--label-order
+schema`) so the target the model is graded on is the target the prompt
+asks for.
+
+**Distillation add-on (phase 2):** `gen_distill.py` labels synthesized
+frames with the passing 4B teacher and adds them ON TOP of the mixture
+(`mixture.distill_target`, cap 2600; §9.2 conformance is checked over the
+non-distill portion, which keeps its exact 60/25/15). The delivered
+overall mix is 37.4/41.7/20.9 instead — the add-on's 1706 clean rows
+dilute STT-noised exposure from 60% to 37%, so an arm that adds them is
+not comparable to a baseline on the noisy axis. The teacher's labels are
+audited before use (`audit_distill_labels.py`): 105/1706 time labels
+contradicted the utterance's own qualifier (`सवा ५` labelled `साढे ५
+बजे`) and 11 contacts were mislabels. `gen_distill.py --revalidate`
+repairs only those rows offline (no teacher, no GPU), keeps the raw
+teacher rows in `data/distill_teacher_raw.jsonl` for audit, and re-audits
+to 0. Note that `draw_key` hashes the FULL row JSON, so a repaired label
+re-draws that row's key: the repaired rebuild has the same 4307 rows but
+a new file order, and 5 repaired rows cross the 5% train/valid boundary.
+
 ## Training (stage 4, external)
 
 Recommended: unsloth or axolotl QLoRA on the 4090 box (same machine as
