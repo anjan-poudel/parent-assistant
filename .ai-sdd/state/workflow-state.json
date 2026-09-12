@@ -3,7 +3,7 @@
   "workflow": "elderly-ai-assistant-sdd",
   "project": "/Users/anjan/workspace/projects/ai/ai-sdd/ai-sdd-claude/examples/elderly-ai-assistant",
   "started_at": "2026-03-03T10:23:35.799Z",
-  "updated_at": "2026-09-12T22:12:25.552Z",
+  "updated_at": "2026-09-12T22:43:44.654Z",
   "tasks": {
     "define-requirements": {
       "status": "COMPLETED",
@@ -109,15 +109,15 @@
     },
     "final-sign-off": {
       "status": "COMPLETED",
-      "started_at": "2026-09-12T22:12:24.367Z",
-      "completed_at": "2026-09-12T22:12:25.552Z",
+      "started_at": "2026-09-12T22:43:43.379Z",
+      "completed_at": "2026-09-12T22:43:44.654Z",
       "outputs": [
         {
           "path": "specs/final-sign-off.md",
           "contract": "review_report"
         }
       ],
-      "iterations": 0
+      "iterations": 1
     }
   }
 }
