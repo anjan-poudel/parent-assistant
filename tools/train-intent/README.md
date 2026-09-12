@@ -177,3 +177,18 @@ and their headroom is far tighter than the thresholds suggest:
   been 0.923 — a PASS — so one of its two time false positives is an
   eval-label artifact and the remaining one (a spurious time on a health
   query) is the only genuine time defect.
+
+**Grammar-mirror verification (2026-09-13):** the training box's iOS tree is a
+2026-09-02 snapshot that predates the grammar wiring, so every server-side
+`--grammar gbnf` run logs `[command_grammar] WARNING: ... carries no
+commandJSONSchema literal ... grading the checked-in schema 9432361c7bc3aa86
+unverified against Swift`. That is a checkout-age fact, not drift. The check
+itself passes in the dev checkout, which does carry the literal:
+
+    INTENT_SCHEMA_STRICT=1 INTENT_SWIFT_PATH=<dev checkout>/ios/.../LlamaCommandInterpreter.swift \
+      python3 -c "from command_grammar import load_schema; load_schema()"   # no exception
+
+Result: `seeds/command_schema.json` is byte-identical to the `commandJSONSchema`
+literal (fingerprint `9432361c7bc3aa86`, 16 required keys in schema order with
+`response` second and `pluginAction`/`pluginEntities` last, 2730 chars of GBNF
+from llama.cpp's own converter).
