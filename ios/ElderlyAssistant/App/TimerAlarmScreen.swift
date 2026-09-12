@@ -1,17 +1,9 @@
 import SwiftUI
 
-/// [TIMER-ALARM] (2026-09-10) The full-screen timer-alarm UI — the
-/// foreground ringing experience for UN-path timers (pre-iOS-26 /
-/// AlarmKit-denied). Elderly-first per the app's design tokens: one deep
-/// alarm-red screen (`DesignTokens.stateError` — the app's "stop" light,
-/// ≥5.7:1 with white glyphs), a huge bell, the finished line, and a
-/// SINGLE large STOP button. No other controls — a ringing alarm offers
-/// exactly one answer.
-///
-/// The STOP button is the only exit: it ends the looping bell and expires
-/// the timer row (coordinator's `stopTimerAlarm`). The fullScreenCover
-/// hosting this screen is not interactively dismissable on iPhone, so
-/// the alarm cannot be swiped away without stopping it — deliberate.
+/// Full-screen foreground timer alarm. Both exits stop the ringing timer:
+/// the large STOP action is primary, while the required leading back
+/// chevron gives every non-Home screen a consistent escape path. Neither
+/// path can dismiss the alert while leaving its bell running.
 struct TimerAlarmScreen: View {
     let timer: TimerItem
     let onStop: () -> Void
@@ -21,6 +13,22 @@ struct TimerAlarmScreen: View {
             DesignTokens.stateError
                 .ignoresSafeArea()
             VStack(spacing: 20) {
+                HStack {
+                    Button(action: onStop) {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 26, weight: .bold))
+                            .foregroundStyle(DesignTokens.stateError)
+                            .frame(minWidth: DesignTokens.minTapTargetSize,
+                                   minHeight: DesignTokens.minTapTargetSize)
+                            .background(Color.white)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("common.back"))
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
                 Spacer()
                 Image(systemName: "bell.fill")
                     .font(.system(size: 100, weight: .bold))

@@ -26,28 +26,35 @@ struct LeafScreen<Content: View>: View {
 
     var body: some View {
         ZStack {
-            Color(theme: coordinator.appTheme).ignoresSafeArea()
+            VoiceBridgeBackground(theme: coordinator.appTheme)
             VStack(spacing: 0) {
+                // Navigation controls stay separate from the large screen
+                // title below.
                 HStack(spacing: 12) {
                     Button(action: { dismiss() }) {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 26, weight: .bold))
+                            .font(.system(size: 24, weight: .bold))
                             .foregroundStyle(DesignTokens.textPrimary)
                             .frame(minWidth: DesignTokens.minTapTargetSize,
                                    minHeight: DesignTokens.minTapTargetSize)
                             .background(DesignTokens.card)
                             .clipShape(Circle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel(Text("common.back"))
-                    Text(LocalizedStringKey(titleKey))
-                        .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                        .foregroundStyle(DesignTokens.textPrimary)
-                    Spacer()
+                    Spacer(minLength: 8)
                     EmergencyIconButton()
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
-                .padding(.bottom, 12)
+
+                Text(LocalizedStringKey(titleKey))
+                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
 
                 ScrollView {
                     content

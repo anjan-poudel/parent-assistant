@@ -45,14 +45,11 @@ final class DesignTokensTests: XCTestCase {
     }
 }
 
-// MARK: - Traffic-light palette (visual-polish 2026-09-08)
+// MARK: - Voice-state palette
 //
-// The hero renders WHITE glyphs on each state fill, so the pins below
-// enforce the promise made in DesignTokens: every fill holds ≥4.5:1
-// against white and ≥3:1 against the cream background (WCAG 1.4.3/1.4.11
-// as implemented by the pure sRGB math below). The pin tests read the
-// live token components (via `cgColor`) so a palette edit that breaks a
-// promise fails here without duplicated literals to drift.
+// The hero renders white glyphs on each state fill. These checks preserve
+// contrast after the VoiceBridge rebrand while semantic state colours stay
+// independent from the magenta/coral identity palette.
 
 private extension DesignTokensTests {
     struct RGBA: Equatable { let r: Double; let g: Double; let b: Double }
@@ -106,11 +103,10 @@ private extension DesignTokensTests {
 
 extension DesignTokensTests {
 
-    /// Traffic-light fills — rest blue, wait ambers, go green, stop red —
-    /// all carry white hero glyphs at ≥4.5:1.
+    /// Semantic state fills all carry white hero glyphs at ≥4.5:1.
     func testVoiceStateFillsHoldWhiteGlyphContrast() {
         let states: [(String, Color)] = [
-            ("stateIdle #3B6EA5", DesignTokens.stateIdle),
+            ("stateIdle #163D73", DesignTokens.stateIdle),
             ("stateStopped #4E627A", DesignTokens.stateStopped),
             ("stateListening #A8620C", DesignTokens.stateListening),
             ("stateTranscribing #8F5208", DesignTokens.stateTranscribing),
@@ -123,8 +119,7 @@ extension DesignTokensTests {
         }
     }
 
-    /// Every state fill stays separable from the cream background — a
-    /// resting blue or listening amber must never sink into #FAF3E9.
+    /// Every state fill stays separable from the warm-white background.
     func testVoiceStateFillsSeparateFromCreamBackground() {
         for color in [DesignTokens.stateIdle, DesignTokens.stateStopped,
                       DesignTokens.stateListening, DesignTokens.stateTranscribing,
@@ -135,11 +130,10 @@ extension DesignTokensTests {
         }
     }
 
-    /// Exact pins — the traffic-light table as of visual-polish 2026-09-08
-    /// (hex → sRGB): rest blue 3B6EA5, dimmed blue 4E627A, amber ramp
-    /// A8620C → 8F5208 → 7A4A0F, go green 2E7A18, stop red C02F2A.
+    /// Exact semantic pins. The idle navy aligns with VoiceBridge; the
+    /// amber/green/red traffic states retain their established meanings.
     func testVoiceStatePaletteIsPinned() {
-        assertPinned(DesignTokens.stateIdle, r: 0.231, g: 0.431, b: 0.647)
+        assertPinned(DesignTokens.stateIdle, r: 0.086, g: 0.239, b: 0.451)
         assertPinned(DesignTokens.stateStopped, r: 0.306, g: 0.384, b: 0.478)
         assertPinned(DesignTokens.stateListening, r: 0.659, g: 0.384, b: 0.047)
         assertPinned(DesignTokens.stateTranscribing, r: 0.561, g: 0.322, b: 0.031)
@@ -218,12 +212,11 @@ extension DesignTokensTests {
         }
     }
 
-    /// The three persistent daily actions wear the brand accent, and the
-    /// neutral category stays on the warm secondary tone — pinned so the
-    /// consolidation cannot silently undo itself.
+    /// Persistent daily actions wear VoiceBridge maroon; neutral category
+    /// icons use brand navy and voice actions use the rest-state blue.
     func testBrandActionAndNeutralRolesArePinned() {
-        assertPinned(DesignTokens.BadgeTint.meds.tint, r: 0.165, g: 0.498, b: 0.384)     // accent
-        assertPinned(DesignTokens.BadgeTint.settings.tint, r: 0.541, g: 0.459, b: 0.384) // textSecondary
-        assertPinned(DesignTokens.BadgeTint.apps.tint, r: 0.231, g: 0.431, b: 0.647)     // stateIdle
+        assertPinned(DesignTokens.BadgeTint.meds.tint, r: 0.733, g: 0.118, b: 0.302)
+        assertPinned(DesignTokens.BadgeTint.settings.tint, r: 0.043, g: 0.122, b: 0.267)
+        assertPinned(DesignTokens.BadgeTint.apps.tint, r: 0.086, g: 0.239, b: 0.451)
     }
 }

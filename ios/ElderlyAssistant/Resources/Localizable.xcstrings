@@ -4981,6 +4981,23 @@
         }
       }
     },
+    "home.activity.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Today’s information"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आजको जानकारी"
+          }
+        }
+      }
+    },
     "home.hint.call" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -15161,125 +15178,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "कुनै टाइमर चलिरहेको छैन।"
-          }
-        }
-      }
-    },
-    "voice.feature.brain" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "brain"
-          }
-        },
-        "ne" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "दिमाग"
-          }
-        }
-      }
-    },
-    "voice.feature.speech" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "speech"
-          }
-        },
-        "ne" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "बोली"
-          }
-        }
-      }
-    },
-    "voice.feature.voice" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "voice"
-          }
-        },
-        "ne" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "आवाज"
-          }
-        }
-      }
-    },
-    "voice.feature.wakeWord" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "wake word"
-          }
-        },
-        "ne" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "वेक शब्द"
-          }
-        }
-      }
-    },
-    "voice.readiness.degraded.caption" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Starting without %@ — the first conversation may be a little slower."
-          }
-        },
-        "ne" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ बिना सुरु भयो — पहिलो कुराकानी अलि ढिलो हुन सक्छ।"
-          }
-        }
-      }
-    },
-    "voice.readiness.loading.preparingEngines" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Getting everything ready…"
-          }
-        },
-        "ne" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "सबै तयार हुँदैछ…"
-          }
-        }
-      }
-    },
-    "voice.readiness.preparing.caption" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Preparing: %@"
-          }
-        },
-        "ne" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "तयार हुँदै: %@"
           }
         }
       }

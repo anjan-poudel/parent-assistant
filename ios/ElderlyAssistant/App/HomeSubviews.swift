@@ -45,11 +45,8 @@ struct HomeTopBar: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            // Settings stays LEFT-anchored at the leading edge with the
-            // date line centered between it and the emergency button, so
-            // the gear can never be confused with emergency (2026-09-07).
-            // A balancing invisible 44pt sits beside it (the notifications
-            // bell joined the trailing cluster on 2026-09-08).
+            // Settings stays leading; Updates and Emergency remain grouped
+            // at the trailing edge while the date keeps the center target.
             NavigationLink(value: LeafDestination.settings) {
                 IconBadge(systemImage: "gearshape.fill", tint: .settings, diameter: 32)
                     .frame(width: 44, height: 44)
@@ -57,6 +54,8 @@ struct HomeTopBar: View {
             .buttonStyle(.plain)
             .accessibilityLabel(Text(LocalizedStringKey("home.hub.settings")))
             .frame(width: 44, alignment: .leading)
+            // Balance the two trailing controls so the date remains at the
+            // physical screen center instead of drifting toward Settings.
             Color.clear.frame(width: 44, height: 44)
             Spacer(minLength: 4)
             // The date area doubles as the calendar's entry point
@@ -80,25 +79,22 @@ struct HomeTopBar: View {
         .padding(.top, 8)
     }
 
-    /// The primary date (default calendar) on the greeting font, the
-    /// enabled overlays joined beneath it in caption size.
+    /// Compact date content; the whole center target opens Calendar.
     @ViewBuilder
     private var dateLineView: some View {
-        if let line = dateLine {
-            VStack(alignment: .center, spacing: 2) {
+        VStack(alignment: .center, spacing: 3) {
+            if let line = dateLine {
                 Text(line.primary)
-                    .font(DesignTokens.greetingFont(size: 18))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                                weight: .bold))
+                    .foregroundStyle(DesignTokens.textPrimary)
                     .multilineTextAlignment(.center)
-                    // [DESIGN-REVIEW] No minimumScaleFactor on essential
-                    // localized text — the date/greeting wraps instead
-                    // (Nepali at XXXL stays legible).
                     .lineLimit(2)
                 if !line.overlays.isEmpty {
                     Text(line.overlays.joined(separator: " • "))
                         .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
                                                    weight: .medium))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundStyle(DesignTokens.textSecondary)
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
                 }
@@ -146,6 +142,7 @@ struct QuickAccessStrip: View {
             }
             .padding(.vertical, 2)
         }
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     /// 56pt badge + name on a 92pt-wide tile, ≥44pt tall — one combined
@@ -273,21 +270,6 @@ struct TalkStage: View {
                                // therefore never "recover" merely because
                                // startup has not completed.
                                onRecover: onRecover)
-                    // [LAT-M1] The boot contract's honest line under the
-                    // hero: the per-feature preparing caption while the
-                    // contract is open, the cold-feature banner once it
-                    // settles degraded. Nothing in any other state.
-                    if let extraLine = TalkReadinessCopy.extraLine(voice.readiness,
-                                                                   locale: locale) {
-                        Text(extraLine)
-                            .font(DesignTokens.warmFont(
-                                size: DesignTokens.minCaptionPointSize,
-                                weight: .medium))
-                            .foregroundColor(DesignTokens.textSecondary)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .padding(.horizontal, 16)
-                    }
                     if visuals.showsHintCarousel {
                         HintCarousel()
                     }
@@ -488,19 +470,14 @@ struct FeedbackRegion: View {
     let onOpenHistory: () -> Void
     /// Dismiss the outcome card for good (coordinator's `dismissOutcome`).
     let onDismissOutcome: () -> Void
-
-    @State private var outcomeExpanded = true
+    @State private var outcomeExpanded = false
 
     var body: some View {
         VStack(spacing: 12) {
-            // [REBALANCE] At most ONE contextual instruction/outcome line
-            // under the hero (design review): while a freshly-landed
-            // outcome card is EXPANDED it owns the region, and the
-            // optional-setup nudge waits its turn — it returns with the
-            // card's collapse (6s later). Dismissing the card (X) clears
-            // the coordinator's `lastOutcome`, so the stand-down ends
-            // permanently and the strip returns for the session.
-            if setup.isVisible, !showsExpandedOutcome {
+            // One contextual card at a time. An activity/outcome is more
+            // relevant than optional setup and must never be pushed behind
+            // the fixed dock; setup returns after the outcome is dismissed.
+            if setup.isVisible, outcome == nil {
                 SetupStrip(setup: setup, action: onResumeSetup)
             }
             feedback
@@ -509,10 +486,6 @@ struct FeedbackRegion: View {
         .padding(.vertical, 4)
     }
 
-    /// A freshly-landed outcome card is on screen and expanded.
-    private var showsExpandedOutcome: Bool {
-        outcome != nil && outcomeExpanded
-    }
 
     @ViewBuilder
     private var feedback: some View {
@@ -537,7 +510,11 @@ struct FeedbackRegion: View {
                                 onTapChip: onOpenHistory,
                                 onDismiss: onDismissOutcome)
                 .task(id: outcome.id) {
-                    outcomeExpanded = true
+                    // Informational outcomes are compact immediately. Only
+                    // a genuinely undoable action earns the expanded card,
+                    // and only during its short undo window.
+                    outcomeExpanded = outcome.undo != nil
+                    guard outcome.undo != nil else { return }
                     try? await Task.sleep(nanoseconds: 6_000_000_000)
                     guard !Task.isCancelled else { return }
                     withAnimation(.easeInOut) { outcomeExpanded = false }
@@ -627,14 +604,10 @@ private struct SetupStrip: View {
 
 // MARK: - Dock (redesign spec §3.1)
 
-/// The shortcut dock — Home is the only screen that shows it. THREE
-/// persistent shortcuts (Medication, Phone, Reminders) plus a labeled
-/// "More" tile that opens the secondary surface holding the rest
-/// (Appliance, Directions, Feeds): the two-row dock gave six destinations
-/// equal priority, and for an elderly audience three daily shortcuts plus
-/// one clearly labeled secondary surface ranks them honestly. One row of
-/// four same-weight tiles also buys every target a practical 56pt instead
-/// of the bare 44pt minimum.
+/// Home's six manual-documented destinations in the established two-row
+/// dock: secondary tools above, daily actions closest to the thumb below.
+/// Three equal-width tiles per row keep every destination visible without
+/// horizontal scrolling.
 struct HomeDock: View {
     /// The top family contact's name — its face replaces the generic
     /// phone icon on the call tile when one is configured (redesign spec
@@ -645,11 +618,7 @@ struct HomeDock: View {
     let onAppliance: () -> Void
 
     var body: some View {
-        VStack(spacing: 4) {
-            // Secondary row — Appliance, Directions, Feeds, on TOP. Kept
-            // VISIBLE (user feedback, 2026-09-11): the review's "More"
-            // sheet hid these behind an extra tap; the two-row layout is
-            // restored with the secondary destinations above.
+        VStack(spacing: 8) {
             HStack(spacing: 6) {
                 applianceItem
                 dockItem(.directions, icon: "map.fill", tint: .directions,
@@ -657,37 +626,26 @@ struct HomeDock: View {
                 dockItem(.feed, icon: "rectangle.stack.fill", tint: .feeds,
                          titleKey: "home.hub.feeds")
             }
-            // Very light grooved divider between the rows (user feedback,
-            // 2026-09-11): a hairline dark groove with a hairline light
-            // highlight just below — the classic embossed separator, kept
-            // subtle so it reads as texture, not a border.
-            groovedDivider
-            // Primary row — Medication, Phone, Reminders, on the BOTTOM
-            // (closest to the thumb; user feedback, 2026-09-11).
+            Rectangle()
+                .fill(DesignTokens.brandBlush)
+                .frame(height: 2)
+                .padding(.horizontal, 16)
             HStack(spacing: 6) {
-                dockItem(.meds, icon: "pills.fill", tint: .meds, titleKey: "home.hub.meds")
+                dockItem(.meds, icon: "pills.fill", tint: .meds,
+                         titleKey: "home.hub.meds")
                 callItem
-                dockItem(.reminders, icon: "clock.fill", tint: .reminders, titleKey: "home.hub.reminders")
+                dockItem(.reminders, icon: "clock.fill", tint: .reminders,
+                         titleKey: "home.hub.reminders")
             }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 10)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 22))
+        .padding(.vertical, 12)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius,
+                                    style: .continuous))
+        .shadow(color: DesignTokens.brandWine.opacity(0.10), radius: 14, y: 6)
     }
 
-    /// The dock's light grooved row separator.
-    private var groovedDivider: some View {
-        VStack(spacing: 0) {
-            Rectangle()
-                .fill(.black.opacity(0.06))
-                .frame(height: 1)
-            Rectangle()
-                .fill(.white.opacity(0.35))
-                .frame(height: 1)
-        }
-        .padding(.horizontal, 16)
-    }
 
     private func dockItem(_ destination: LeafDestination, icon: String,
                           tint: DesignTokens.BadgeTint, titleKey: String) -> some View {

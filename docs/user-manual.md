@@ -1,7 +1,7 @@
-# Sahayak — User Manual
+# VoiceBridge AI — Sahayak User Manual
 
 **The voice-first assistant for everyday life.** The app on your home screen is called
-**Elderly Assistant**; the assistant who speaks to you is called **Sahayak** (सहायक — "helper").
+**VoiceBridge AI**; the assistant who speaks to you is called **Sahayak** (सहायक — "helper").
 This manual explains everything Sahayak can do for you, how to do each thing by voice and by
 touch, and — just as important — what Sahayak will honestly *never* do.
 
@@ -33,7 +33,7 @@ Throughout this manual, every feature follows the same four-part pattern:
 ### 1.1 Installing
 
 Sahayak runs on any iPhone with iOS 16 or newer. Install it the way you install any app
-(usually a family member sets this up for you). The app is named **Elderly Assistant**.
+(usually a family member sets this up for you). The app is named **VoiceBridge AI**.
 It needs a microphone — that is how it hears you.
 
 ### 1.2 First launch — the welcome wizard
@@ -53,14 +53,14 @@ any time).
 After the wizard finishes (or is skipped), the voice feature switches on and the home
 screen appears.
 
-### 1.3 The Talk button — a traffic light that tells you what it is doing
+### 1.3 The Talk button — its colour tells you what it is doing
 
-The big round button in the middle of the home screen is how you talk. It is always the same
-traffic-light code:
+The big round button in the middle of the home screen is how you talk. Each state has a
+distinct colour and written label:
 
 | Colour | State | Button says | What it means |
 |---|---|---|---|
-| **Blue** (soft blue, breathing rings) | Resting | "Talk" / "I'm ready" | Sahayak is awake and waiting for you. Tap (or say the wake phrase) and speak. |
+| **Burgundy and pink** (glossy face, breathing rings) | Resting | "Talk" / "I'm ready" | Sahayak is awake and waiting for you. Tap (or say the wake phrase) and speak. |
 | **Amber** (three deepening shades) | Working | "Listening…" → "Writing…" → "Thinking…" | Sahayak heard you: first listening, then writing your words down, then understanding them. |
 | **Green** | Speaking | "Speaking" | Sahayak is replying to you out loud. |
 | **Red** | Something wrong | "Try again" | Something failed — the small line under the button says exactly what (e.g. microphone is off). An *Open Settings* button appears when the fix is there. |
@@ -69,7 +69,7 @@ traffic-light code:
 
 Three touch tricks worth learning early:
 
-- **Tap once** when it is blue → starts listening.
+- **Tap once** when it is burgundy → starts listening.
 - **Tap once while it is working or speaking** → cancels the current turn (an escape hatch —
   the same thing happens automatically after 40 seconds if it ever gets stuck).
 - **Press and hold for 2 seconds** → resets the voice completely. A white ring fills up
@@ -94,8 +94,8 @@ From top to bottom:
 
 - **Top bar** — from left to right:
   - **Settings gear** — opens all settings.
-  - **Greeting and clock** ("Good morning, 8:05" / "शुभ प्रभात…") — taps into the
-    **Calendar** screen. The clock ticks every minute, live.
+  - **Today's date** — shows the active calendar date and tithi; tap it to open the
+    **Calendar** screen.
   - **Bell** — opens **Updates**. A small number badge shows how many notification panels
     are waiting; it always matches what the Updates screen lists.
   - **Emergency triangle** — the red-edged warning triangle. It is on *every* screen, not
@@ -327,7 +327,7 @@ safety-critical).
 
 ### 4c. Calendar — the Nepali calendar and the two-way mirror
 
-**What it does.** The Calendar screen (tap the greeting/clock at the top of Home) shows:
+**What it does.** The Calendar screen (tap today's date at the top of Home) shows:
 
 - **Today in the Nepali calendar** — Bikram Sambat date in Nepali numerals (e.g.
   "आइतबार, भदौ २१, २०८३"), the **tithi** for every day, and the English date beneath.
@@ -662,7 +662,7 @@ Open Settings with the gear at the top-left of Home. In order:
 
 | Term | Plain meaning |
 |---|---|
-| **Sahayak (सहायक)** | The assistant's name — Nepali for "helper". The app itself is titled **Elderly Assistant**. |
+| **Sahayak (सहायक)** | The assistant's name — Nepali for "helper". The app itself is titled **VoiceBridge AI**. |
 | **Wake word / wake phrase** | The phrase that wakes Sahayak without any button: **"ये कान्छी"** ("yeah kanchhi"). |
 | **STT (speech-to-text)** | Turning your spoken words into written text — Sahayak's "ears". Runs with Whisper models on the phone, or Gemini in the cloud. |
 | **TTS (text-to-speech)** | Turning written replies into spoken words — Sahayak's "voice". Uses on-device Piper voices; falls back to the iPhone's own voice. |

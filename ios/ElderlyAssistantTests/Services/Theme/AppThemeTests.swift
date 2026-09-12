@@ -47,30 +47,22 @@ final class AppThemeTests: XCTestCase {
         }
     }
 
-    /// The cream preset IS today's `DesignTokens.background` — the theme
-    /// must never silently drift from the existing look it replaces.
+    /// The default preset is the VoiceBridge white app background.
     func testCreamMatchesDesignTokensBackground() {
-        XCTAssertEqual(AppTheme.cream.background.red, 0.980, accuracy: 0.0005)
-        XCTAssertEqual(AppTheme.cream.background.green, 0.953, accuracy: 0.0005)
-        XCTAssertEqual(AppTheme.cream.background.blue, 0.914, accuracy: 0.0005)
+        XCTAssertEqual(AppTheme.cream.background.red, 1.000, accuracy: 0.0005)
+        XCTAssertEqual(AppTheme.cream.background.green, 1.000, accuracy: 0.0005)
+        XCTAssertEqual(AppTheme.cream.background.blue, 1.000, accuracy: 0.0005)
     }
 
     // MARK: - Dusk contrast note
     //
-    // `dusk` is a MUTED warm night tone — the one background that is not
-    // a light pastel. Text stays `DesignTokens.textPrimary` (#3D2F24,
-    // RGB 0.239/0.184/0.141 — near-black) on every theme, so dusk was
-    // deliberately kept *slightly lighter than the text* instead of going
-    // truly dark: the contrast pair below stays comfortably readable
-    // while still reading as "night". The pin below guards the ORDERING
-    // (background luminance > text luminance) with Rec.709 luma weights —
-    // the same formula on gamma-encoded sRGB components; the full WCAG
-    // ratio is enforced in the visual redesign pass that will restyle
-    // dusk's cards if the palette ever goes darker.
+    // `dusk` remains a muted light neutral. VoiceBridge navy text is used
+    // on every theme, so this preset deliberately stays lighter than the
+    // text instead of becoming a true dark mode.
     func testDuskIsLighterThanTextPrimary() {
-        let textPrimary: (red: Double, green: Double, blue: Double) = (0.239, 0.184, 0.141)
+        let textPrimary: (red: Double, green: Double, blue: Double) = (0.027, 0.106, 0.322)
         XCTAssertGreaterThan(luma(AppTheme.dusk.background), luma(textPrimary),
-                             "dusk must stay lighter than the near-black text on it")
+                             "dusk must stay lighter than VoiceBridge navy text")
     }
 
     /// Dusk is the DARKEST preset — every other background must be

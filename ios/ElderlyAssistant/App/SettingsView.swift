@@ -47,32 +47,36 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-            Color(theme: coordinator.appTheme).ignoresSafeArea()
+            VoiceBridgeBackground(theme: coordinator.appTheme)
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
                     Button(action: { dismiss() }) {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 26, weight: .bold))
+                            .font(.system(size: 24, weight: .bold))
                             .foregroundStyle(DesignTokens.textPrimary)
                             .frame(minWidth: DesignTokens.minTapTargetSize,
                                    minHeight: DesignTokens.minTapTargetSize)
                             .background(DesignTokens.card)
                             .clipShape(Circle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel(Text("common.back"))
-                    Text("settings.title")
-                        .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                        .foregroundStyle(DesignTokens.textPrimary)
-                        .onLongPressGesture(minimumDuration: 1.5) {
-                            showHiddenAIModels = true
-                        }
-                    Spacer()
+                    Spacer(minLength: 8)
                     EmergencyIconButton()
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
-                .padding(.bottom, 16)
 
+                Text("settings.title")
+                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
+                    .onLongPressGesture(minimumDuration: 1.5) {
+                        showHiddenAIModels = true
+                    }
                 ScrollView {
                     VStack(spacing: 12) {
                         // [BOOT-REVIEW, design item] Capability
@@ -1733,15 +1737,32 @@ private struct FamilyContactWizardSheet: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+        ZStack {
+            VoiceBridgeBackground(theme: coordinator.appTheme)
+            VStack(spacing: 0) {
                 header
-                progressRow
-                stepContent
-                footerButtons
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+
+                Text("settings.family.title")
+                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        progressRow
+                        stepContent
+                        footerButtons
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 32)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onAppear {
             loadDraft()
@@ -1767,7 +1788,7 @@ private struct FamilyContactWizardSheet: View {
                 dismiss()
             } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(DesignTokens.textPrimary)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
@@ -1776,10 +1797,8 @@ private struct FamilyContactWizardSheet: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text("common.back"))
-            Text("settings.family.title")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
-            Spacer()
+            Spacer(minLength: 8)
+            EmergencyIconButton()
         }
     }
 
@@ -2783,22 +2802,39 @@ private struct PlacesEditorSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    field(placeholderKey: "settings.places.name", text: $name)
-                    field(placeholderKey: "settings.places.address", text: $address)
-                        .textInputAutocapitalization(.words)
-                    categoryPicker
-                    if category == .home {
-                        defaultHomeToggle
+        ZStack {
+            VoiceBridgeBackground(theme: coordinator.appTheme)
+            VStack(spacing: 0) {
+                header
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+
+                Text(editingPlace == nil
+                     ? LocalizedStringKey("settings.places.add")
+                     : LocalizedStringKey("settings.places.edit"))
+                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 12)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        field(placeholderKey: "settings.places.name", text: $name)
+                        field(placeholderKey: "settings.places.address", text: $address)
+                            .textInputAutocapitalization(.words)
+                        categoryPicker
+                        if category == .home {
+                            defaultHomeToggle
+                        }
+                        saveButton
                     }
-                    saveButton
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 32)
                 }
             }
         }
-        .padding(20)
         .onAppear { loadDraft() }
     }
 
@@ -2808,7 +2844,7 @@ private struct PlacesEditorSheet: View {
                 dismiss()
             } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(DesignTokens.textPrimary)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
@@ -2817,12 +2853,8 @@ private struct PlacesEditorSheet: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text("common.back"))
-            Text(editingPlace == nil
-                 ? LocalizedStringKey("settings.places.add")
-                 : LocalizedStringKey("settings.places.edit"))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
-            Spacer()
+            Spacer(minLength: 8)
+            EmergencyIconButton()
         }
     }
 
@@ -3529,31 +3561,33 @@ struct TTSVoicesSettingsView: View {
 
     var body: some View {
         ZStack {
-            // LeafScreen-style chrome, own background (skinnable home,
-            // 2026-09-07): this screen predates LeafScreen and keeps its
-            // full-screen layout, so the theme reads here directly.
-            Color(theme: coordinator.appTheme).ignoresSafeArea()
+            VoiceBridgeBackground(theme: coordinator.appTheme)
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
                     Button(action: { dismiss() }) {
                         Image(systemName: "chevron.left")
-                            .font(.system(size: 26, weight: .bold))
+                            .font(.system(size: 24, weight: .bold))
                             .foregroundStyle(DesignTokens.textPrimary)
                             .frame(minWidth: DesignTokens.minTapTargetSize,
                                    minHeight: DesignTokens.minTapTargetSize)
                             .background(DesignTokens.card)
                             .clipShape(Circle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel(Text("common.back"))
-                    Text("settings.voices.title")
-                        .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                        .foregroundStyle(DesignTokens.textPrimary)
-                    Spacer()
+                    Spacer(minLength: 8)
                     EmergencyIconButton()
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
-                .padding(.bottom, 16)
+
+                Text("settings.voices.title")
+                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
 
                 ScrollView {
                     VStack(spacing: 12) {
