@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "properties": {
+    "intent": {"type": "string", "enum": ["ack_med", "call", "emergency",
+      "set_reminder", "health_query", "music", "send_message", "guide",
+      "create_calendar_event", "suggest_video", "query", "none"]},
+    "response": {"type": "string"},
+    "confidence": {"type": "number"},
+    "actionType": {"type": ["string", "null"]},
+    "actionUrl": {"type": ["string", "null"]},
+    "entryId": {"type": ["string", "null"]},
+    "contact": {"type": ["string", "null"]},
+    "time": {"type": ["string", "null"]},
+    "medication": {"type": ["string", "null"]},
+    "message": {"type": ["string", "null"]},
+    "callType": {"type": ["string", "null"]},
+    "requestedApp": {"type": ["string", "null"]},
+    "topic": {"type": ["string", "null"]},
+    "steps": {"type": ["array", "null"], "items": {"type": "string"}},
+    "pluginAction": {"type": ["string", "null"]},
+    "pluginEntities": {"type": ["object", "null"],
+      "additionalProperties": {"type": "string"}}
+  },
+  "required": ["intent", "response", "confidence", "actionType",
+    "actionUrl", "entryId", "contact", "time", "medication", "message",
+    "callType", "requestedApp", "topic", "steps", "pluginAction",
+    "pluginEntities"]
+}

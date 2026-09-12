@@ -30,10 +30,23 @@ Safety:
 
 Usage (from tools/train-intent/, GPU free or --no-wait after v6 frees it):
     .venv/bin/python src/eval_golden_k.py --base qwen --k 3
+    .venv/bin/python src/eval_golden_k.py --base qwen --tag-prefix qwen-student --k 3
 Flags:
     --no-wait   abort with rc 2 instead of waiting when the GPU is busy
     --fresh     wipe the selected runs' checkpoints/artifacts/state first
     --dry-run   print the exact plan and exit without running anything
+
+--tag-prefix (added 2026-09-13, phase-2 distillation) names a run set
+independently of the BASE MODEL: tags/state/artifacts become
+<prefix>-s<seed> instead of <base>-s<seed>, so a second experiment on the
+same base (a data-distilled student) gets its own checkpoints, GGUF tags
+and krun_state file instead of colliding with — or silently resuming
+from — the existing run set. Default is the base tag: unchanged behavior.
+
+The eval leg runs eval_golden.py under the app grammar (--grammar gbnf,
+its default; see command_grammar.py). A finished run is SKIPPED, so
+changing the grammar does not re-grade an existing run set — pass --fresh
+when the point is to re-evaluate one.
 """
 from __future__ import annotations
 
@@ -136,8 +149,9 @@ def parse_eval_log(log_path: Path) -> tuple[dict[str, float], str]:
     return metrics, "eval did not reach a verdict — see log"
 
 
-def load_state(base: str) -> dict:
-    path = ROOT / "eval" / f"krun_state_{base}.json"
+def load_state(name: str) -> dict:
+    """Per run-SET state (name = tag prefix; the base tag by default)."""
+    path = ROOT / "eval" / f"krun_state_{name}.json"
     if not path.exists():
         return {"runs": {}}
     try:
@@ -147,19 +161,19 @@ def load_state(base: str) -> dict:
         return {"runs": {}}
 
 
-def save_state(base: str, state: dict) -> None:
-    path = ROOT / "eval" / f"krun_state_{base}.json"
+def save_state(name: str, state: dict) -> None:
+    path = ROOT / "eval" / f"krun_state_{name}.json"
     tmp = Path(str(path) + ".tmp")
     tmp.write_text(json.dumps(state, indent=1) + "\n", encoding="utf-8")
     tmp.replace(path)
 
 
-def wipe_run(base: str, seed: int) -> None:
+def wipe_run(name: str, seed: int) -> None:
     """Delete every artifact a seed's run could own — used by --fresh to
     guarantee a genuinely new trajectory (train_qlora would otherwise
     resume from an existing checkpoint dir, and export would skip on a
     stale GGUF)."""
-    tag = f"{base}-s{seed}"
+    tag = f"{name}-s{seed}"
     for d, prefix in ((ROOT / "checkpoints", f"{tag}-"),
                       (ROOT / "models", f"intent-ne-{tag}-")):
         if not d.exists():
@@ -180,7 +194,8 @@ def summarize(runs: list[dict], k: int) -> int:
     col_hdr = ("closed", "contact", "time", "emerg", "seprec")
     print()
     print("=" * 80)
-    print(f"k-run gate results: base={runs[0]['base']} seeds "
+    print(f"k-run gate results: set={runs[0].get('set', runs[0]['base'])} "
+          f"(base={runs[0]['base']}) seeds "
           f"{runs[0]['seed']}..{runs[-1]['seed']} (k={len(runs)})")
     hdr = (f"{'run':>4} {'seed':>6} {'mode':>5}  "
            + " ".join(f"{m:>6}" for m in col_hdr) + "  gates")
@@ -244,12 +259,23 @@ def main() -> None:
                              "(true re-runs, not resumes)")
     parser.add_argument("--dry-run", action="store_true",
                         help="print the plan and exit without running")
+    parser.add_argument("--tag-prefix", default="",
+                        help="name this run set independently of the base "
+                             "model: tags/state/artifacts become "
+                             "<prefix>-s<seed> (default: the base tag)")
+    parser.add_argument("--grammar", default="gbnf", choices=["gbnf", "off"],
+                        help="eval decode mode: gbnf (default) = the app's "
+                             "commandJSONSchema grammar; off = legacy "
+                             "unconstrained sampling")
     args, cfg = load_config(parser)
 
     if args.k < 1:
         parser.error("--k must be >= 1")
     seed_base = int(cfg.get("training.seed", 42))
     k = args.k
+    # Run-set name: the tag prefix when given (second experiment on the
+    # same base), else the base tag — the pre-2026-09-13 behavior.
+    prefix = args.tag_prefix or args.base
 
     for split in ("train", "valid"):
         if not (ROOT / "data" / f"{split}.jsonl").exists():
@@ -258,22 +284,25 @@ def main() -> None:
     if (ROOT / "eval" / "golden_corpus.jsonl").stat().st_size == 0:
         sys.exit("eval/golden_corpus.jsonl empty — nothing to gate on")
 
-    runs = [{"idx": i, "seed": seed_base + i, "base": args.base}
+    runs = [{"idx": i, "seed": seed_base + i, "base": args.base,
+             "set": prefix}
             for i in range(k)]
-    state = load_state(args.base)
+    state = load_state(prefix)
     state.setdefault("runs", {})
     run_entries = state["runs"]
 
     if args.dry_run:
-        print(f"[krun] DRY RUN — would execute for base={args.base} "
-              f"(seeds {seed_base}..{seed_base + k - 1}, determinism mode "
-              f"{cfg.get('training.deterministic', 'hard')}, gates: "
+        print(f"[krun] DRY RUN — would execute for set={prefix} "
+              f"(base={args.base}, seeds {seed_base}..{seed_base + k - 1}, "
+              f"determinism mode "
+              f"{cfg.get('training.deterministic', 'hard')}, grammar "
+              f"{args.grammar}, gates: "
               f"closed>={cfg['gates.closed_intent_accuracy']} "
               f"slots>={cfg['gates.slot_f1']} "
               f"emergency=={cfg['gates.emergency_recall']} "
               f"se>={cfg['gates.side_effect_precision']}):")
         for r in runs:
-            tag = f"{args.base}-s{r['seed']}"
+            tag = f"{prefix}-s{r['seed']}"
             entry = run_entries.get(str(r["seed"]))
             status = ("done (skipped)" if entry and entry.get("done")
                       else "resume" if entry else "fresh")
@@ -286,20 +315,21 @@ def main() -> None:
                   f"checkpoints/{tag}-final --tag {tag}")
             print(f"      {PY} src/eval_golden.py --backend gguf "
                   f"--model-path models/intent-ne-{tag}-q4_k_m.gguf "
-                  f"--label {tag}")
-        print(f"  state: eval/krun_state_{args.base}.json — re-run the same "
+                  f"--label {tag} --grammar {args.grammar}")
+        print(f"  state: eval/krun_state_{prefix}.json — re-run the same "
               "command to resume; add --fresh to start over")
         return 0
 
-    log(f"base={args.base} k={k} seeds {seed_base}..{seed_base + k - 1}; "
+    log(f"set={prefix} base={args.base} k={k} seeds {seed_base}.."
+        f"{seed_base + k - 1}; grammar {args.grammar}; "
         f"determinism mode {cfg.get('training.deterministic', 'hard')} "
         "(per config training.deterministic)")
 
     if args.fresh:
         for r in runs:
             run_entries.pop(str(r["seed"]), None)
-            wipe_run(args.base, r["seed"])
-        save_state(args.base, state)
+            wipe_run(prefix, r["seed"])
+        save_state(prefix, state)
 
     for r in runs:
         entry = run_entries.get(str(r["seed"]))
@@ -309,10 +339,12 @@ def main() -> None:
             continue
         entry = run_entries.setdefault(str(r["seed"]), {})
         entry["idx"] = r["idx"]
-        tag = f"{args.base}-s{r['seed']}"
+        entry["set"] = prefix
+        entry["grammar"] = args.grammar
+        tag = f"{prefix}-s{r['seed']}"
         ckpt_final = ROOT / "checkpoints" / f"{tag}-final"
         gguf = ROOT / "models" / f"intent-ne-{tag}-q4_k_m.gguf"
-        save_state(args.base, state)
+        save_state(prefix, state)
 
         # ---- 1. train (GPU-gated; resumes from its own checkpoint) ----
         if not (ckpt_final / "adapter_config.json").exists():
@@ -322,7 +354,7 @@ def main() -> None:
                         "--out", tag, "--seed-offset", str(r["idx"])],
                        ROOT / "logs" / f"krun_{tag}_train.log")
             if rc != 0:
-                save_state(args.base, state)
+                save_state(prefix, state)
                 sys.exit(f"train leg for {tag} failed (rc {rc}) — see "
                          f"logs/krun_{tag}_train.log; fix and re-run to "
                          "resume")
@@ -332,7 +364,7 @@ def main() -> None:
             m = re.search(r"determinism=(\w+)", train_log.read_text(
                 encoding="utf-8", errors="replace"))
             entry["mode"] = m.group(1) if m else "?"
-        save_state(args.base, state)
+        save_state(prefix, state)
 
         # ---- 2. export (CPU-only by design; skips completed steps) ----
         if not gguf.exists():
@@ -340,13 +372,14 @@ def main() -> None:
                         str(ckpt_final), "--tag", tag, "--base", args.base],
                        ROOT / "logs" / f"krun_{tag}_export.log")
             if rc != 0:
-                save_state(args.base, state)
+                save_state(prefix, state)
                 sys.exit(f"export for {tag} failed (rc {rc}) — see "
                          f"logs/krun_{tag}_export.log; re-run to resume")
 
         # ---- 3. eval on the exported GGUF (CPU) ----
         rc = stage([PY, "src/eval_golden.py", "--backend", "gguf",
-                    "--model-path", str(gguf), "--label", tag],
+                    "--model-path", str(gguf), "--label", tag,
+                    "--grammar", args.grammar],
                    ROOT / "logs" / f"krun_{tag}_eval.log")
         metrics, failed = parse_eval_log(ROOT / "logs"
                                          / f"krun_{tag}_eval.log")
@@ -362,14 +395,14 @@ def main() -> None:
             log(f"run {r['idx']} (seed {r['seed']}): gates failed "
                 f"[{failed}] — recorded, continuing")
         else:
-            save_state(args.base, state)
+            save_state(prefix, state)
             sys.exit(f"eval for {tag} crashed (rc {rc}) — see "
                      f"logs/krun_{tag}_eval.log; re-run to resume")
         r.update(entry)
-        save_state(args.base, state)
+        save_state(prefix, state)
 
     code = summarize(runs, k)
-    log(f"state: eval/krun_state_{args.base}.json (re-run the same "
+    log(f"state: eval/krun_state_{prefix}.json (re-run the same "
         "command to resume)")
     sys.exit(code)
 
