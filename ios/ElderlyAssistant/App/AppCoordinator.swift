@@ -1165,7 +1165,9 @@ final class AppCoordinator: ObservableObject {
     /// selectability (2026-09-06) the Settings "AI मोडेल" screen offers
     /// every `ModelCatalog.availableBrainEntries` model; the LIVE
     /// choice is `resolvedBrainModelID`.
-    static let defaultBrainModelID = ModelCatalog.llama3_2_1B
+    // The Qwen 1.7B intent fine-tune (v12, seed 42) is the default
+    // brain — the legacy LLaMA 1B is hidden from the picker now.
+    static let defaultBrainModelID = ModelCatalog.intentNepali1B
 
     /// The brain model the interpreter actually uses: the stored
     /// preference when it names a real catalog entry, else the default.
