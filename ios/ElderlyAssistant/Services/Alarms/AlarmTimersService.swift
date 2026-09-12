@@ -207,7 +207,7 @@ final class UNNotificationCenterScheduler: LocalNotificationScheduling {
         do {
             return try await center.requestAuthorization(options: [.alert, .sound, .badge])
         } catch {
-            print("[AlarmScheduler] Authorization request failed: \(error)")
+            print("[AlarmScheduler] Authorization request failed: \(ErrorCodeMapper.code(for: error))")
             return false
         }
     }
@@ -426,7 +426,7 @@ final class AlarmScheduler {
         )
         notifications.add(request) { error in
             if let error {
-                print("[AlarmScheduler] Failed to arm timer \(timer.id): \(error)")
+                print("[AlarmScheduler] Failed to arm timer \(timer.id): \(ErrorCodeMapper.code(for: error))")
             }
         }
     }

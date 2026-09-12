@@ -99,7 +99,7 @@ final class AlarmKitSystemScheduler: AlarmKitTimerScheduling {
             @unknown default: return .notDetermined
             }
         } catch {
-            print("[AlarmKitSystemScheduler] Authorization request failed: \(error)")
+            print("[AlarmKitSystemScheduler] Authorization request failed: \(ErrorCodeMapper.code(for: error))")
             return .denied
         }
     }

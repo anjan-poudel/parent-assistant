@@ -277,7 +277,7 @@ final class AlarmKitAlarmBackend: AlarmSchedulingBackend {
                     title: title, snoozeLabel: snoozeLabel
                 )
             } catch {
-                print("[AlarmKitAlarmBackend] System refused alarm \(alarm.id) (\(error)) — arming the UN fallback.")
+                print("[AlarmKitAlarmBackend] System refused alarm \(alarm.id) (\(ErrorCodeMapper.code(for: error))) — arming the UN fallback.")
                 self.armUNFallback(for: alarm)
             }
         }
@@ -301,7 +301,7 @@ final class AlarmKitAlarmBackend: AlarmSchedulingBackend {
         do {
             try manager.cancelSystemAlarm(id: id)
         } catch {
-            print("[AlarmKitAlarmBackend] Failed to cancel alarm \(id): \(error)")
+            print("[AlarmKitAlarmBackend] Failed to cancel alarm \(id): \(ErrorCodeMapper.code(for: error))")
         }
     }
 
@@ -315,7 +315,7 @@ final class AlarmKitAlarmBackend: AlarmSchedulingBackend {
             UNAlarmRequestFactory.snoozeRequest(for: alarm, timeInterval: timeInterval, locale: locale)
         ) { error in
             if let error {
-                print("[AlarmKitAlarmBackend] Failed to arm snooze for alarm \(alarm.id): \(error)")
+                print("[AlarmKitAlarmBackend] Failed to arm snooze for alarm \(alarm.id): \(ErrorCodeMapper.code(for: error))")
             }
         }
     }
@@ -336,7 +336,7 @@ final class AlarmKitAlarmBackend: AlarmSchedulingBackend {
             try manager.countdownSystemAlarm(id: id)
             return true
         } catch {
-            print("[AlarmKitAlarmBackend] System snooze failed for \(id): \(error) — falling back to the one-shot.")
+            print("[AlarmKitAlarmBackend] System snooze failed for \(id): \(ErrorCodeMapper.code(for: error)) — falling back to the one-shot.")
             return false
         }
     }
@@ -351,7 +351,7 @@ final class AlarmKitAlarmBackend: AlarmSchedulingBackend {
             UNAlarmRequestFactory.dailyRepeatRequest(for: alarm, locale: locale)
         ) { error in
             if let error {
-                print("[AlarmKitAlarmBackend] UN fallback arm failed for \(alarm.id): \(error)")
+                print("[AlarmKitAlarmBackend] UN fallback arm failed for \(alarm.id): \(ErrorCodeMapper.code(for: error))")
             }
         }
     }

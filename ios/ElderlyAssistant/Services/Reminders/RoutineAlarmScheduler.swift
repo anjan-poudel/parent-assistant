@@ -85,7 +85,7 @@ final class UNRoutineNotificationScheduler: RoutineAlarmScheduling {
         )
         center.add(request) { error in
             if let error = error {
-                print("[UNRoutineNotificationScheduler] Failed to schedule: \(error)")
+                print("[UNRoutineNotificationScheduler] Failed to schedule: \(ErrorCodeMapper.code(for: error))")
             }
         }
     }
