@@ -98,6 +98,20 @@ exists anywhere in the file.
    (trainer_state.json records args; add `pip freeze` output if you want
    full provenance).
 
+5. **Hard mode has never actually engaged on this box** (found 2026-09-13,
+   during the Phase-2 student run). `_probe_hard_determinism` sets
+   `requires_grad` on a `Linear4bit` weight to prove a 4-bit linear can
+   backprop under `use_deterministic_algorithms`; bnb stores that weight
+   in an integer dtype, so the call raises *"only Tensors of floating
+   point dtype can require gradients"* — a probe bug, not a determinism
+   verdict — and the probe reports the op family as incompatible. Every
+   training log to date (gemma s42; qwen s42/s43/s44; qwen4b
+   s42/s43/s44; the Phase-2 student) reads `deterministic=soft`, so all
+   published numbers are soft-mode numbers and stay mutually comparable.
+   Fixing the probe would flip the effective mode mid-experiment, so the
+   fix is deliberately deferred to a bake-off boundary; until then items
+   1-2 are the governing variance model.
+
 ## Verified evidence (CPU-only, no GPU used)
 
 Measured in a CPU sandbox (`/tmp/dtest`, copies of the committed pool;
