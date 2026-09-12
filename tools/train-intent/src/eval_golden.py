@@ -13,6 +13,10 @@ The corpus is HELD OUT — build_dataset.py refuses to train on it.
 Backends:
   --backend echo              dry-run harness (predicts "none" for all)
   --backend gguf PATH         local model via llama-cpp-python
+  --backend encoder PATH      T-033 joint intent+slot encoder checkpoint dir
+                              (see bakeoff_encoder.load_model) — added by the
+                              T-033 spike as a harness backend; the harness
+                              itself stays owned by T-038
   --backend gemini            Gemini flash-lite (baseline comparator; the
                               gate "within −3 pts of Gemini" uses this run)
 
@@ -41,11 +45,13 @@ appended, so the models never learned a terminator. Eval therefore:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import sys
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 from config import load_config
@@ -157,6 +163,20 @@ def predict_gguf(utterance: str, cfg: dict, model_path: str) -> dict:
     return obj
 
 
+def predict_encoder_t033(utterance: str, model_dir: str) -> dict:
+    """T-033 joint intent+slot encoder (shared-pass), harness-compatible dict.
+
+    The encoder predicts `action` + `contact`/`time` spans directly; the
+    harness scores it exactly like any other backend. Model loading is cached
+    across rows."""
+    from bakeoff_encoder import load_model, predict_encoder
+    if not hasattr(predict_encoder_t033, "_model"):
+        predict_encoder_t033._model, predict_encoder_t033._tok, predict_encoder_t033._meta = \
+            load_model(model_dir)
+    return predict_encoder(utterance, predict_encoder_t033._model,
+                           predict_encoder_t033._tok, predict_encoder_t033._meta)
+
+
 def predict_gemini(utterance: str, cfg: dict) -> dict:
     from google import genai
     from google.genai import types
@@ -170,6 +190,25 @@ def predict_gemini(utterance: str, cfg: dict) -> dict:
         config=types.GenerateContentConfig(response_mime_type="application/json"),
     )
     return json.loads(resp.text)
+
+
+def _sha256(path: str) -> str | None:
+    p = Path(path)
+    if not p.exists() or not p.is_file():
+        return None
+    h = hashlib.sha256()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _model_digest(model_path: str) -> str | None:
+    """Checkpoint digest: model.pt in an encoder dir (T-033) else the file."""
+    p = Path(model_path)
+    if p.is_dir() and (p / "model.pt").exists():
+        return _sha256(str(p / "model.pt"))
+    return _sha256(model_path)
 
 
 def slot_f1(golds: list[str | None], preds: list[str | None]) -> float:
@@ -188,9 +227,13 @@ def slot_f1(golds: list[str | None], preds: list[str | None]) -> float:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--backend", required=True, choices=["echo", "gguf", "gemini"])
+    parser.add_argument("--backend", required=True,
+                        choices=["echo", "gguf", "encoder", "gemini"])
     parser.add_argument("--model-path", default="")
     parser.add_argument("--label", default="", help="row label for results.csv")
+    parser.add_argument("--manifest-out", default="",
+                        help="append a JSONL run manifest (command, config/dataset/"
+                             "checkpoint hashes) — T-033 DoD evidence")
     args, cfg = load_config(parser)
     root = Path(__file__).parent.parent
 
@@ -203,6 +246,8 @@ def main() -> None:
             pred = predict_echo(row["utterance"], cfg)
         elif args.backend == "gguf":
             pred = predict_gguf(row["utterance"], cfg, args.model_path)
+        elif args.backend == "encoder":
+            pred = predict_encoder_t033(row["utterance"], args.model_path)
         else:
             pred = predict_gemini(row["utterance"], cfg)
         preds.append(pred)
@@ -270,6 +315,26 @@ def main() -> None:
             f.write("label,closed_acc,contact_f1,time_f1,emergency_recall,se_precision,gates_failed\n")
         f.write(f"{label},{closed_acc:.3f},{contact_f1:.3f},{time_f1:.3f},"
                 f"{emergency_recall:.3f},{se_precision:.3f},{'|'.join(failed) or 'none'}\n")
+
+    if args.manifest_out:
+        # Companion evidence row (T-033 DoD): exact command, config/dataset/
+        # checkpoint hashes. Written beside results.csv so the append-only CSV
+        # schema stays unchanged for existing consumers (T-038 owns it).
+        manifest = {
+            "label": label, "backend": args.backend, "model_path": args.model_path,
+            "command": " ".join(sys.argv), "timestamp_utc":
+                datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "config_sha256": _sha256(str(Path(args.config).resolve())),
+            "corpus_sha256": _sha256(str(root / "eval" / "golden_corpus.jsonl")),
+            "checkpoint_sha256": _model_digest(args.model_path),
+            "metrics": {"closed_intent_accuracy": round(closed_acc, 4),
+                        "contact_f1": round(contact_f1, 4), "time_f1": round(time_f1, 4),
+                        "emergency_recall": round(emergency_recall, 4),
+                        "side_effect_precision": round(se_precision, 4),
+                        "gates_failed": failed},
+        }
+        with open(args.manifest_out, "a", encoding="utf-8") as f:
+            f.write(json.dumps(manifest, ensure_ascii=False) + "\n")
 
     if failed:
         print(f"\nGATES FAILED: {failed} — this checkpoint must not ship")
