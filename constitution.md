@@ -114,6 +114,13 @@ The following decisions could not be determined from the provided brief. They mu
 
 10. ~~**Voice activation keyword.**~~ **RESOLVED FOR iOS MVP:** Wake word is deferred to v2. The iOS MVP uses scheduled auto-activation plus a large "Talk to Assistant" control. Research continues on a Nepali on-device KWS path.
 
+11. ~~**Security-test blocking findings B3–B7.**~~ **DESCOPED BY HUMAN DECISION (2026-09-13).** `security-test.md` returned `SECURITY-NO_GO` (reviewed at rev `fb6e03c`) with blocking findings B1–B7. The developer accepted the residual risk of B3–B7 and removed them from the scope of `final-sign-off`:
+    - **B3** — sensitive-action biometric/PIN gate not wired (`SpeakerBiometricService.swift` NOT WIRED; no PIN, no lockout); sensitive commands execute on confirmation alone.
+    - **B4/B6** — no emergency-call module; health/family alert stubs return success silently instead of failing visibly.
+    - **B5** — remote-config chain absent (encrypted push unimplemented) and model downloads served over cleartext LAN HTTP (`ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:546,651`), against the TLS 1.2+ bullet in Standards.
+    - **B7** — the default cloud voice stack (Gemini) sits against the Privacy bullet's "no user data leaves the device for AI processing".
+    Consequences: the security-test categories *Auth bypass*, *Emergency call trigger validation* and *Encrypted config payload verification* are closed by decision, not by remediation; the report's scope statement (re-test if those features ship) stands. **B1** (raw Release-build transcript prints) and **B2** (API key / raw upstream error body reaching logs via `error_code`) are **not** descoped and remain blocking; their remediation is T-049/T-050 (defined, not yet implemented). This entry records risk acceptance — it is not evidence that the findings are fixed.
+
 ## Agent Principles
 
 Binding for all agents in this workflow. Enforced via `standards/SddAgentPrinciples.md`.
