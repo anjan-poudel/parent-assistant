@@ -163,6 +163,9 @@ enum ModelCatalog {
     /// (Qwen3's dense line has no 3B; 4B is the nearest size). Standard
     /// qwen3 arch — loads on the vendored llama.cpp b10068 runtime.
     static let qwen3_4BInstruct   = ModelID("qwen3-4b-instruct-2507-q4km")
+    /// sidskarki's Nepali-specialized Qwen3-4B (extended Devanagari
+    /// tokenizer + CPT + SFT) — assembled + Q4_K_M; LAN-hosted for testing.
+    static let qwen4BNepali       = ModelID("intent-ne-qwen3-4b-nepali-q4km")
     /// The fine-tuned intent model (spec 2026-09-05 §8): ~1B QLoRA output
     /// of the Gemma/Qwen bake-off in tools/train-intent/, exported to
     /// GGUF. PLACEHOLDER until the bake-off produces a release artifact.
@@ -599,6 +602,22 @@ enum ModelCatalog {
             dependsOn: nil
         ),
         ModelCatalogEntry(
+            id: qwen4BNepali,
+            kind: .llamaBase,
+            displayName: "Brain — Qwen 4B · Nepali",
+            // sidskarki/qwen3-4b-nepali assembled (base + 167k-vocab
+            // Devanagari tokenizer extension + SFT LoRA merged + CPT
+            // embedding restore), GGUF Q4_K_M. Served from the home
+            // server for TESTING (LAN-only URL); public hosting needs a
+            // >2GiB route — parts sit on release v13.
+            filename: "intent-ne-qwen3-4b-nepali-q4_k_m.gguf",
+            downloadURL: URL(string: "http://192.168.1.117:8765/intent-ne-qwen3-4b-nepali-q4_k_m.gguf")!,
+            sizeBytes: 2_529_263_424,
+            sha256: "eb5ce8059636e36123a86f8fc65b952122e91da573adc54eb18829bd515d6305",
+            minDeviceRAMBytes: 6_000_000_000,
+            dependsOn: nil
+        ),
+        ModelCatalogEntry(
             id: sileroVAD,
             kind: .vad,
             displayName: "Voice activity detection",
@@ -751,6 +770,7 @@ enum ModelCatalog {
     ///     (legacy; Qwen 3 supersedes both sizes).
     static let availableBrainEntries: [ModelCatalogEntry] = [
         intentNepali1B,
+        qwen4BNepali,
         qwen3_4BInstruct,
         qwen3_1_7BInstruct
     ].compactMap { entry(for: $0) }
