@@ -173,6 +173,10 @@ enum ModelCatalog {
     /// v14 slim-template retrain (seed 43) — NEW artifact id so devices
     /// cached on the v12 seed-42 file download it fresh.
     static let intentQwenS43       = ModelID("intent-ne-qwen-s43-q4km")
+    /// 4B slim-template retrain seed 43 — the FIRST gate-passing brain
+    /// (all five gates, 2026-09-13). LAN-hosted for testing; parts on
+    /// GitHub for later distribution (>2 GiB).
+    static let intentQwen4BS43     = ModelID("intent-ne-qwen4b-s43-q4km")
     /// The GEMMA leg of the bake-off (2026-09-07): the QLoRA fine-tune
     /// over google/gemma-3-1b-it, merged to fp16 and exported Q4_K_M
     /// (`intent-ne-gemma-q4_k_m.gguf`, release v7). A real, hosted
@@ -531,6 +535,21 @@ enum ModelCatalog {
             dependsOn: nil
         ),
         ModelCatalogEntry(
+            id: intentQwen4BS43,
+            kind: .llamaBase,
+            displayName: "Brain — Qwen 4B · intent fine-tune (slim, seed 43)",
+            // Qwen3-4B QLoRA intent fine-tune, seed 43 of the SLIM-template
+            // deterministic k=3 bake-off — ALL FIVE GATES PASSED
+            // (closed >=0.95, slots >=0.90, emergency 1.00, side-effect
+            // >=0.97). The first ship-gate-passing on-device brain.
+            filename: "intent-ne-qwen4b-s43-q4_k_m.gguf",
+            downloadURL: URL(string: "http://192.168.1.117:8765/intent-ne-qwen4b-s43-q4_k_m.gguf")!,
+            sizeBytes: 2_497_278_752,
+            sha256: "5a29688902f14d8eb4497198a6169e364bf71e19fc676115d10a37ddd0862afd",
+            minDeviceRAMBytes: 4_000_000_000,
+            dependsOn: nil
+        ),
+        ModelCatalogEntry(
             id: intentQwenS43,
             kind: .llamaBase,
             displayName: "Brain — Qwen 1.7B · Nepali fine-tune (slim, seed 43)",
@@ -791,6 +810,7 @@ enum ModelCatalog {
     ///   - `llama3_2_1B` / `llama3_2_3B` — the pre-Qwen LLaMA brains
     ///     (legacy; Qwen 3 supersedes both sizes).
     static let availableBrainEntries: [ModelCatalogEntry] = [
+        intentQwen4BS43,
         intentQwenS43,
         qwen4BNepali,
         qwen3_4BInstruct,
