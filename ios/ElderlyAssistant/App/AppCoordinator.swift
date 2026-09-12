@@ -1167,7 +1167,7 @@ final class AppCoordinator: ObservableObject {
     /// choice is `resolvedBrainModelID`.
     // The Qwen 1.7B intent fine-tune (v12, seed 42) is the default
     // brain — the legacy LLaMA 1B is hidden from the picker now.
-    static let defaultBrainModelID = ModelCatalog.intentNepali1B
+    static let defaultBrainModelID = ModelCatalog.intentQwenS43
 
     /// The brain model the interpreter actually uses: the stored
     /// preference when it names a real catalog entry, else the default.
