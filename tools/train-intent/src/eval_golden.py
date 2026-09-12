@@ -75,6 +75,40 @@ GGUF_MAX_TOKENS = 956        # was 700; rows with a preamble echo need the room
 GGUF_TEMPERATURE = 0.0       # deterministic; keep
 GRAMMAR_MODES = ("gbnf", "off")  # gbnf = app grammar (default); off = legacy
 
+RESULTS_HEADER = ("label,closed_acc,contact_f1,time_f1,emergency_recall,"
+                  "se_precision,gates_failed,grammar")
+RESULTS_FIELDS = len(RESULTS_HEADER.split(","))
+
+
+def _ensure_results_schema(path: Path) -> bool:
+    """Return True when the caller must write the header (file is new).
+
+    eval/results.csv predates the grammar column: its header still lists
+    seven fields while every row written since 2026-09-13 has eight, which
+    makes the file unparseable as a single table. Migrate in place — rewrite
+    the header and backfill the short rows with `off`, which is what they
+    were: every pre-2026-09-13 gguf run sampled unconstrained (the backend
+    had no grammar yet). Idempotent; a conforming file is left untouched.
+    """
+    if not path.exists():
+        return True
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if lines and lines[0] == RESULTS_HEADER and all(
+            not ln.strip() or len(ln.split(",")) == RESULTS_FIELDS
+            for ln in lines[1:]):
+        return False
+    fixed = [RESULTS_HEADER]
+    for ln in lines[1:]:
+        if not ln.strip():
+            continue
+        fields = ln.split(",")
+        if len(fields) == RESULTS_FIELDS - 1:
+            fields.append("off")
+        fixed.append(",".join(fields))
+    path.write_text("\n".join(fixed) + "\n", encoding="utf-8")
+    print(f"[eval] migrated {path.name}: header + grammar=off backfill")
+    return False
+
 
 def _repeat_penalty(model_path: str) -> float:
     """Per-family repeat penalty.
@@ -326,10 +360,10 @@ def main() -> None:
     }
     failed = [name for name, (got, want) in gates.items() if got < want]
     results_path = root / "eval" / "results.csv"
-    new = not results_path.exists()
+    new = _ensure_results_schema(results_path)
     with open(results_path, "a", encoding="utf-8") as f:
         if new:
-            f.write("label,closed_acc,contact_f1,time_f1,emergency_recall,se_precision,gates_failed\n")
+            f.write(RESULTS_HEADER + "\n")
         # Trailing `grammar` column (added 2026-09-13): rows written before
         # that date carry 7 fields and were all effectively "off" — the
         # gguf backend sampled unconstrained then.
