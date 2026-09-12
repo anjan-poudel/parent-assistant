@@ -66,6 +66,15 @@ struct ModelCatalogEntry: Codable, Identifiable {
     /// — iOS 18+ at runtime. The download service refuses below that.
     let requiresiOS18: Bool
 
+    /// ISO 639-1 language codes this model is usable in (`["ne"]`,
+    /// `["en"]`). Empty = the model is language-neutral: multilingual
+    /// engines (whisper-small-multilingual, the stock Qwen/LLaMA brains)
+    /// and the language-independent VAD/KWS artifacts. The app language
+    /// drives model selection through this tag — a `["ne"]` model is never
+    /// left selected after the app switches to English
+    /// (`LanguageModelResolver`, 2026-09-13).
+    let languages: [String]
+
     init(id: ModelID,
          kind: ModelKind,
          displayName: String,
@@ -81,7 +90,8 @@ struct ModelCatalogEntry: Codable, Identifiable {
          whisperKitZipURL: URL? = nil,
          whisperKitZipBytes: Int64 = 0,
          bundledResourceName: String? = nil,
-         requiresiOS18: Bool = false) {
+         requiresiOS18: Bool = false,
+         languages: [String] = []) {
         self.id = id
         self.kind = kind
         self.displayName = displayName
@@ -98,6 +108,7 @@ struct ModelCatalogEntry: Codable, Identifiable {
         self.whisperKitZipBytes = whisperKitZipBytes
         self.bundledResourceName = bundledResourceName
         self.requiresiOS18 = requiresiOS18
+        self.languages = languages
     }
 
     var id_: ModelID { id }
@@ -222,7 +233,9 @@ enum ModelCatalog {
             minDeviceRAMBytes: 3_500_000_000,
             dependsOn: nil,
             coreMLEncoderBundledName: nil,
-            bundledResourceName: "whisper-medium-ne-q5_1"
+            bundledResourceName: "whisper-medium-ne-q5_1",
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: whisperMediumV5,
@@ -238,7 +251,9 @@ enum ModelCatalog {
             sha256: "4516cbcc98d8308fed342d051ee97b56c30df2a4f3a7620d82ed6b5ee51f7d71",
             minDeviceRAMBytes: 3_500_000_000,
             dependsOn: nil,
-            coreMLEncoderBundledName: nil
+            coreMLEncoderBundledName: nil,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: whisperMediumV6,
@@ -254,7 +269,9 @@ enum ModelCatalog {
             sha256: "23d428d7d21e14c46be8cffaa356e69db286da0a9cd9cf3ae09c9b1f122410fd",
             minDeviceRAMBytes: 3_500_000_000,
             dependsOn: nil,
-            coreMLEncoderBundledName: nil
+            coreMLEncoderBundledName: nil,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: whisperFinetunedNepali,
@@ -280,7 +297,9 @@ enum ModelCatalog {
             // (its I/O contract is exacting). CPU transcription is stable
             // while the WhisperKit runtime migration replaces this path.
             coreMLEncoderDownloadURL: nil,
-            coreMLEncoderZipBytes: 0
+            coreMLEncoderZipBytes: 0,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: whisperFinetunedNepaliQ8,
@@ -293,7 +312,9 @@ enum ModelCatalog {
             sha256: "e771949af7c643c0ff102ac54bc46b53e58676116747abcf63073ada561437e2",
             minDeviceRAMBytes: 3_000_000_000,
             dependsOn: nil,
-            coreMLEncoderBundledName: nil
+            coreMLEncoderBundledName: nil,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: whisperSmallNepali,
@@ -310,7 +331,9 @@ enum ModelCatalog {
             sha256: "2eb3d790b4945525afa81a70a18b0b766f63f9f8ff9113ff1ac62a2495e9d01f",
             minDeviceRAMBytes: 2_500_000_000,
             dependsOn: nil,
-            coreMLEncoderBundledName: nil
+            coreMLEncoderBundledName: nil,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: whisperLargeV3Nepali,
@@ -343,7 +366,9 @@ enum ModelCatalog {
             // emits fp32/fp16 (no palettization) and the fp16 encoder
             // hangs on-device (see the plan doc §9). Runs on CPU — slow
             // but functional. The distilled small model is the fast path.
-            coreMLEncoderBundledName: nil
+            coreMLEncoderBundledName: nil,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: whisperLargeV3NepaliV2,
@@ -365,7 +390,9 @@ enum ModelCatalog {
             sha256: "fee6d4ca08689761ffa4d9702c32f0886fef244241c39bfca8b3473c64fcce0b",
             minDeviceRAMBytes: 4_500_000_000,
             dependsOn: nil,
-            coreMLEncoderBundledName: nil
+            coreMLEncoderBundledName: nil,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: whisperKitNepali,
@@ -386,7 +413,9 @@ enum ModelCatalog {
             dependsOn: nil,
             whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v6/whisperkit-ne-teacher-v2-q6.zip")!,
             whisperKitZipBytes: 1_199_427_423,
-            requiresiOS18: true
+            requiresiOS18: true,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: whisperKitNepaliLargeBase,
@@ -405,7 +434,9 @@ enum ModelCatalog {
             dependsOn: nil,
             whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v6/whisperkit-ne-large-base-q6.zip")!,
             whisperKitZipBytes: 1_225_257_321,
-            requiresiOS18: true
+            requiresiOS18: true,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: whisperKitNepaliMedium,
@@ -429,7 +460,9 @@ enum ModelCatalog {
             minDeviceRAMBytes: 4_000_000_000,
             dependsOn: nil,
             whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v4/whisperkit-ne-medium.zip")!,
-            whisperKitZipBytes: 1_413_743_470
+            whisperKitZipBytes: 1_413_743_470,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: whisperKitMediumV5,
@@ -451,7 +484,9 @@ enum ModelCatalog {
             dependsOn: nil,
             whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v9/whisperkit-ne-medium-v5-q6.zip")!,
             whisperKitZipBytes: 642_347_390,
-            requiresiOS18: true
+            requiresiOS18: true,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: whisperKitMediumV6,
@@ -471,7 +506,9 @@ enum ModelCatalog {
             dependsOn: nil,
             whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v11/whisperkit-ne-medium-v6-q6.zip")!,
             whisperKitZipBytes: 642_434_570,
-            requiresiOS18: true
+            requiresiOS18: true,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: whisperSmallMultilingual,
@@ -486,7 +523,9 @@ enum ModelCatalog {
             // Drop `ggml-small-q5_1-encoder.mlmodelc/` into
             // ElderlyAssistant/Resources/CoreML/ per the coreml plan
             // §4. Absent = model still works, just on CPU.
-            coreMLEncoderBundledName: "ggml-small-encoder"
+            coreMLEncoderBundledName: "ggml-small-encoder",
+            // Language-neutral: multilingual / any-language artifact.
+            languages: []
         ),
         ModelCatalogEntry(
             id: whisperBaseEn,
@@ -497,7 +536,9 @@ enum ModelCatalog {
             sizeBytes: 59_721_011,
             sha256: "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f",
             minDeviceRAMBytes: 1_000_000_000,
-            dependsOn: nil
+            dependsOn: nil,
+            // Language tag (2026-09-13): en-only model.
+            languages: ["en"]
         ),
         ModelCatalogEntry(
             id: llama3_2_1B,
@@ -515,7 +556,9 @@ enum ModelCatalog {
             sizeBytes: 807_694_464,
             sha256: "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
             minDeviceRAMBytes: 3_000_000_000,
-            dependsOn: nil
+            dependsOn: nil,
+            // Language-neutral: multilingual / any-language artifact.
+            languages: []
         ),
         ModelCatalogEntry(
             id: intentNepali1B,
@@ -532,7 +575,9 @@ enum ModelCatalog {
             sizeBytes: 1_107_408_576,
             sha256: "136392b324b2e24503b8376cdb8332d8909192644d910a3b8ec83c0db227a42d",
             minDeviceRAMBytes: 3_000_000_000,
-            dependsOn: nil
+            dependsOn: nil,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: intentQwen4BS43,
@@ -550,7 +595,9 @@ enum ModelCatalog {
             sizeBytes: 2_075_616_032,
             sha256: "c48e94d0931732d3e6ae14f45f955d20ee5474a83f8e127e8b972ed920999d10",
             minDeviceRAMBytes: 4_000_000_000,
-            dependsOn: nil
+            dependsOn: nil,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: intentQwenS43,
@@ -566,7 +613,9 @@ enum ModelCatalog {
             sizeBytes: 1_107_408_576,
             sha256: "c2135f786ace9c1020a27bb115600d90f9e3c4d788c995730b379b67e1ae74ef",
             minDeviceRAMBytes: 3_000_000_000,
-            dependsOn: nil
+            dependsOn: nil,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: intentGemma1B,
@@ -590,7 +639,9 @@ enum ModelCatalog {
             // 1B-class Q4 brain with the same compact 1,024-token context
             // as the LLaMA 1B entry — same memory gate as that sibling.
             minDeviceRAMBytes: 3_000_000_000,
-            dependsOn: nil
+            dependsOn: nil,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: llama3_2_3B,
@@ -604,7 +655,9 @@ enum ModelCatalog {
             sizeBytes: 2_019_377_696,
             sha256: "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
             minDeviceRAMBytes: 5_500_000_000,
-            dependsOn: nil
+            dependsOn: nil,
+            // Language-neutral: multilingual / any-language artifact.
+            languages: []
         ),
         ModelCatalogEntry(
             id: qwen3_1_7BInstruct,
@@ -622,7 +675,9 @@ enum ModelCatalog {
             // ~2.2B params at Q4: 1.3 GB file, live footprint ~2 GB —
             // one gate step above the LLaMA 1B entry.
             minDeviceRAMBytes: 3_500_000_000,
-            dependsOn: nil
+            dependsOn: nil,
+            // Language-neutral: multilingual / any-language artifact.
+            languages: []
         ),
         ModelCatalogEntry(
             id: qwen3_4BInstruct,
@@ -639,7 +694,9 @@ enum ModelCatalog {
             // 4.4B-param Q4_K_M: ~2.5 GB file, live footprint ~3.5–4.5 GB —
             // one gate step above the LLaMA 3B entry.
             minDeviceRAMBytes: 6_000_000_000,
-            dependsOn: nil
+            dependsOn: nil,
+            // Language-neutral: multilingual / any-language artifact.
+            languages: []
         ),
         ModelCatalogEntry(
             id: qwen4BNepali,
@@ -659,7 +716,9 @@ enum ModelCatalog {
             // reads ~3-4 GB available mid-session and blocks the download.
             // 4 GB floor = testable on 6 GB devices; tight but workable.
             minDeviceRAMBytes: 4_000_000_000,
-            dependsOn: nil
+            dependsOn: nil,
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: sileroVAD,
@@ -670,7 +729,9 @@ enum ModelCatalog {
             sizeBytes: 885_098,
             sha256: "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf",
             minDeviceRAMBytes: 500_000_000,
-            dependsOn: nil
+            dependsOn: nil,
+            // Language-neutral: multilingual / any-language artifact.
+            languages: []
         ),
         // TTS voices are sherpa-layout DIRECTORIES (model.onnx + tokens.txt
         // + espeak-ng-data/), bundled into the app under
@@ -688,7 +749,9 @@ enum ModelCatalog {
             sha256: "",
             minDeviceRAMBytes: 500_000_000,
             dependsOn: nil,
-            bundledResourceName: "ne_NP-google-medium-int8"
+            bundledResourceName: "ne_NP-google-medium-int8",
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: piperNepaliChitwan,
@@ -708,7 +771,9 @@ enum ModelCatalog {
             sha256: "deb1592efb99c02d38ba34443215ae94bf67ed77ecafd2e3320acffb27ae3204",
             minDeviceRAMBytes: 500_000_000,
             dependsOn: nil,
-            bundledResourceName: "ne_NP-chitwan-medium-int8"
+            bundledResourceName: "ne_NP-chitwan-medium-int8",
+            // Language tag (2026-09-13): ne-only model.
+            languages: ["ne"]
         ),
         ModelCatalogEntry(
             id: piperEnglishUS,
@@ -720,7 +785,9 @@ enum ModelCatalog {
             sha256: "",
             minDeviceRAMBytes: 500_000_000,
             dependsOn: nil,
-            bundledResourceName: "en_US-lessac-medium-int8"
+            bundledResourceName: "en_US-lessac-medium-int8",
+            // Language tag (2026-09-13): en-only model.
+            languages: ["en"]
         ),
         // Wake-word model — sherpa-layout DIRECTORY (encoder/decoder/
         // joiner .int8.onnx + tokens.txt + bpe.model + keywords.txt),
@@ -753,7 +820,9 @@ enum ModelCatalog {
             // ~5 MB of int8 onnx + 250 KB text — no meaningful RAM gate.
             minDeviceRAMBytes: 500_000_000,
             dependsOn: nil,
-            bundledResourceName: "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"
+            bundledResourceName: "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01",
+            // Language-neutral: multilingual / any-language artifact.
+            languages: []
         )
     ]
 
@@ -819,4 +888,51 @@ enum ModelCatalog {
         qwen3_4BInstruct,
         qwen3_1_7BInstruct
     ].compactMap { entry(for: $0) }
+
+    /// The reply voices the language-aware default lookup draws from —
+    /// curated the same way as the two lists above (the shipped voices,
+    /// not everything of kind `.tts`). Order is the Nepali preference
+    /// order: google-medium (the locale default), chitwan, then the
+    /// English voice.
+    static let availableTTSEntries: [ModelCatalogEntry] = [
+        piperNepali,
+        piperNepaliChitwan,
+        piperEnglishUS
+    ].compactMap { entry(for: $0) }
+
+    // MARK: - Language-aware defaults (2026-09-13)
+
+    /// The curated list a kind's language default is drawn from: the
+    /// pickers' own lists (their order IS the preference order), so a
+    /// reordering in Settings moves the language default with it. Kinds
+    /// with no curated list (VAD / KWS / LoRAs) fall back to the whole
+    /// catalog for that kind.
+    static func curatedEntries(kind: ModelKind) -> [ModelCatalogEntry] {
+        switch kind {
+        case .whisperBase: return availableSTTEntries
+        case .llamaBase:   return availableBrainEntries
+        case .tts:         return availableTTSEntries
+        case .whisperLoRA, .llamaLoRA, .kws, .vad: return entries(kind: kind)
+        }
+    }
+
+    /// The default entry of `kind` for an ISO 639-1 `language` code.
+    ///
+    /// Preference order (documented + pinned by
+    /// `ModelCatalogLanguageTests`):
+    ///   1. the first curated entry tagged with EXACTLY this language
+    ///      (a per-language purpose-built model always beats a general one),
+    ///   2. the first curated entry tagged with NO language (`[]` = the
+    ///      multilingual / any-language artifacts — they work in the new
+    ///      language, just not tailored to it),
+    ///   3. the first curated entry (the list's own preference order — the
+    ///      honest answer when the catalog ships nothing for the language).
+    /// Nil only when the kind has no curated entry at all.
+    static func defaultEntry(kind: ModelKind, language: String) -> ModelCatalogEntry? {
+        let curated = curatedEntries(kind: kind)
+        let code = language.lowercased()
+        return curated.first { $0.languages.contains(code) }
+            ?? curated.first { $0.languages.isEmpty }
+            ?? curated.first
+    }
 }

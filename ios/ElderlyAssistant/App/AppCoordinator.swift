@@ -56,6 +56,12 @@ final class AppCoordinator: ObservableObject {
         didSet {
             appLanguage.persist()
             syncServiceLocales()
+            // Model preferences only churn on a REAL change: re-tapping the
+            // already-selected language must not override a deliberate
+            // model pick (e.g. an English STT chosen while running Nepali).
+            if appLanguage != oldValue {
+                syncModelPreferencesToLanguage()
+            }
         }
     }
 
@@ -83,6 +89,58 @@ final class AppCoordinator: ObservableObject {
         // [NEWS-READER] (2026-09-08) The news digest composes in the app
         // language too — same injection pattern.
         newsReader?.locale = activeLocale
+    }
+
+    /// Language-aware model selection (2026-09-13): the app language picks
+    /// the models too, not just the strings.
+    ///
+    /// Runs on every app-language change (from `appLanguage`'s didSet,
+    /// next to `syncServiceLocales()`) and re-resolves the three stored
+    /// model preferences through `LanguageModelResolver`:
+    ///   - STT (`sttModelPreference`),
+    ///   - brain (`brainModelPreference`),
+    ///   - reply voice (`ResponseVoiceSelection`, the `ttsResponseVoiceSelection`
+    ///     UserDefaults payload).
+    ///
+    /// A preference whose model is tagged for other languages only
+    /// switches to the per-kind default for the new language (a Nepali
+    /// Whisper engine cannot transcribe English, and vice versa). A
+    /// language-neutral (`[]`) or matching model is left exactly alone —
+    /// a user's chosen intent brain survives every switch to a language it
+    /// serves. A `nil` preference ("Automatic") is never touched: it is
+    /// the user's statement that the app should decide.
+    ///
+    /// Writes go through the published properties, so the existing
+    /// side-effect chains run unchanged: the STT pick reaches the
+    /// recognizer (`sttModelPreference` didSet), the brain pick hot-swaps
+    /// the interpreter and starts the model's download when it is not
+    /// cached (`brainModelPreference` didSet — the same contract as a
+    /// manual pick), and the voice pick persists + sanitation-checks
+    /// through `ResponseVoiceSelection`.
+    ///
+    /// Note this deliberately does NOT run at launch: the init-time
+    /// restore assigns the preferences directly (house pattern), and a
+    /// launch-time reconciliation — a language stored in a previous
+    /// version of the app against a now-incompatible model — is a separate
+    /// follow-up, not wired into the boot phases here.
+    private func syncModelPreferencesToLanguage() {
+        let language = appLanguage.rawValue
+        if let resolved = LanguageModelResolver.resolvedPreference(
+            current: sttModelPreference, language: language),
+           resolved != sttModelPreference {
+            sttModelPreference = resolved
+        }
+        if let resolved = LanguageModelResolver.resolvedPreference(
+            current: brainModelPreference, language: language),
+           resolved != brainModelPreference {
+            brainModelPreference = resolved
+        }
+        let voice = ResponseVoiceSelection.persisted()
+        if let resolved = LanguageModelResolver.resolvedVoicePreference(
+            current: voice, language: language),
+           resolved != voice {
+            ResponseVoiceSelection.apply(resolved)
+        }
     }
 
     /// First-run onboarding progress (spec §4.2). Persisted per step.
