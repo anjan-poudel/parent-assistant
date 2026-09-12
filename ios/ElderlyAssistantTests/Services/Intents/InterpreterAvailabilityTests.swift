@@ -15,10 +15,11 @@ import XCTest
 ///      the user's speech;
 ///  (b) HEALTH — a cached stand-in answers plain queries through the
 ///      real router as before;
-///  (c) WIRING — the assistant-brain model (the Qwen 1.7B intent
-///      fine-tune, a real hosted artifact) is auto-downloaded whenever
-///      the chain needs it and the model isn't cached, and
-///      `BrainReadiness.resolve` mirrors the router's exact layer ladder.
+///  (c) WIRING — the assistant-brain model (the gate-passing Qwen 4B
+///      seed-43 intent fine-tune, a real hosted artifact) is
+///      auto-downloaded whenever the chain needs it and the model isn't
+///      cached, and `BrainReadiness.resolve` mirrors the router's exact
+///      layer ladder.
 final class InterpreterAvailabilityTests: XCTestCase {
 
     private func ne(_ key: String) -> String {
@@ -163,26 +164,35 @@ final class InterpreterAvailabilityTests: XCTestCase {
     // MARK: - (c) Auto-download wiring + readiness derivation
 
     func testDefaultBrainModelIsTheRealHostedLlamaArtifact() {
-        // The auto-download target since 2026-09-12 is the Qwen 1.7B
-        // intent fine-tune (v14, seed 43) under its own `intentQwenS43`
-        // id (split from the superseded v12 seed-42 entry so cached
-        // devices re-download) — a REAL hosted artifact (GitHub release
-        // v14 GGUF), not a placeholder. Nothing to publish; this is pure
-        // wiring.
-        XCTAssertEqual(AppCoordinator.defaultBrainModelID, ModelCatalog.intentQwenS43)
+        // The auto-download target since 2026-09-13 is the gate-passing
+        // Qwen 4B slim-template seed-43 intent fine-tune
+        // (`intentQwen4BS43`) — the first brain to clear all five ship
+        // gates. It must ship from the hosted (https) GitHub release, not
+        // the LAN test URL the catalogue briefly carried for bake-off
+        // testing; the https pin below is what forces that swap, so it
+        // stays red until the entry moves off 192.168.1.117. Nothing to
+        // publish; this is pure wiring.
+        XCTAssertEqual(AppCoordinator.defaultBrainModelID, ModelCatalog.intentQwen4BS43)
         let entry = ModelCatalog.entry(for: AppCoordinator.defaultBrainModelID)
         XCTAssertNotNil(entry)
         let url = entry?.downloadURL.absoluteString ?? ""
         XCTAssertFalse(url.contains(".invalid"),
                        "the assistant-brain artifact must be a real hosted URL, not a placeholder")
         // Hosted means https: the catalogue also carries LAN-only test
-        // entries (e.g. qwen4BNepali on the home server) that would pass
-        // the placeholder check but must never become the auto-downloaded
-        // default.
+        // entries (e.g. qwen4BNepali on the home server, and this 4B
+        // brain's first LAN-testing URL) that would pass the placeholder
+        // check but must never become the auto-downloaded default. The
+        // https pin stays.
         XCTAssertTrue(url.hasPrefix("https://"),
                       "the default brain must come from a hosted (https) URL, not a LAN/local address")
         XCTAssertGreaterThan(entry?.sizeBytes ?? 0, 0)
         XCTAssertEqual(entry?.kind, .llamaBase)
+        // Real artifact, not a stub: a full-length, non-zero sha256 pin.
+        let sha = entry?.sha256 ?? ""
+        XCTAssertEqual(sha.count, 64,
+                       "the default brain's sha256 must be a full 64-hex pin")
+        XCTAssertNotEqual(sha, String(repeating: "0", count: 64),
+                          "the default brain's sha256 must be a real pin, not a zero stub")
     }
 
     func testAutoDownloadPolicyDownloadsWhenChainNeedsTheModel() {

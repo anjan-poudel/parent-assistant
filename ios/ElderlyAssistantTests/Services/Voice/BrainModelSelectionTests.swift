@@ -8,15 +8,18 @@ final class BrainModelSelectionTests: XCTestCase {
     // MARK: - Catalog surface
 
     /// The picker list is CURATED (catalog declutter, 2026-09-12): the
-    /// v14 slim-template seed-43 Nepali intent fine-tune (its own id so
-    /// cached v12 seed-42 devices re-download), the Nepali-specialized
-    /// Qwen 4B (added 2026-09-12 for LAN testing), plus the two stock
-    /// Qwen 3 sizes. The pre-Qwen LLaMA brains are legacy and the Gemma
-    /// fine-tune fails the emergency hard gate — neither may read as a
-    /// choice.
+    /// gate-passing Qwen 4B slim-template seed-43 intent fine-tune (added
+    /// 2026-09-13, the default brain), the v14 slim-template seed-43
+    /// Nepali 1.7B intent fine-tune (its own id so cached v12 seed-42
+    /// devices re-download), the Nepali-specialized Qwen 4B (added
+    /// 2026-09-12 for LAN testing), plus the two stock Qwen 3 sizes —
+    /// biggest first. The pre-Qwen LLaMA brains and the superseded v12
+    /// seed-42 fine-tune are legacy and the Gemma fine-tune fails the
+    /// emergency hard gate — none may read as a choice.
     func testAvailableBrainEntriesIsTheCuratedList() {
         XCTAssertEqual(ModelCatalog.availableBrainEntries.map(\.id),
-                       [ModelCatalog.intentQwenS43,
+                       [ModelCatalog.intentQwen4BS43,
+                        ModelCatalog.intentQwenS43,
                         ModelCatalog.qwen4BNepali,
                         ModelCatalog.qwen3_4BInstruct,
                         ModelCatalog.qwen3_1_7BInstruct])
@@ -27,6 +30,7 @@ final class BrainModelSelectionTests: XCTestCase {
     func testHiddenBrainsStayInTheCatalogButAreNotOffered() {
         let offered = Set(ModelCatalog.availableBrainEntries.map(\.id))
         for id in [ModelCatalog.intentGemma1B,
+                   ModelCatalog.intentNepali1B,
                    ModelCatalog.llama3_2_1B,
                    ModelCatalog.llama3_2_3B] {
             XCTAssertFalse(offered.contains(id),
