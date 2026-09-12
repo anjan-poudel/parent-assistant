@@ -123,3 +123,7 @@ tasks:
     depends_on: [security-test]
     # T2 gate: mandatory human sign-off before app is submitted to App Store
     # or Play Store. Produces compliance checklist and requirements traceability.
+    # Release gate: `ios/tools/check-release-log-safety.sh` must exit 0 — it is
+    # wired into ios/build.sh ahead of every test scope, so no unit or Release
+    # gate can pass while a raw transcript print or raw error-body print could
+    # compile into Release (T-049/T-050; constitution "Release gates").
