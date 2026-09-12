@@ -15,10 +15,10 @@ import XCTest
 ///      the user's speech;
 ///  (b) HEALTH — a cached stand-in answers plain queries through the
 ///      real router as before;
-///  (c) WIRING — the assistant-brain model (LLaMA 3.2 1B, a real hosted
-///      artifact) is auto-downloaded whenever the chain needs it and the
-///      model isn't cached, and `BrainReadiness.resolve` mirrors the
-///      router's exact layer ladder.
+///  (c) WIRING — the assistant-brain model (the Qwen 1.7B intent
+///      fine-tune, a real hosted artifact) is auto-downloaded whenever
+///      the chain needs it and the model isn't cached, and
+///      `BrainReadiness.resolve` mirrors the router's exact layer ladder.
 final class InterpreterAvailabilityTests: XCTestCase {
 
     private func ne(_ key: String) -> String {
@@ -163,16 +163,24 @@ final class InterpreterAvailabilityTests: XCTestCase {
     // MARK: - (c) Auto-download wiring + readiness derivation
 
     func testDefaultBrainModelIsTheRealHostedLlamaArtifact() {
-        // The auto-download target is the default LLM that shipped before
-        // the v2 pivot — a REAL hosted artifact (bartowski Q4_K_M GGUF),
-        // not the .invalid placeholder convention the fine-tuned intent
-        // model still uses. Nothing to publish; this is pure wiring.
-        XCTAssertEqual(AppCoordinator.defaultBrainModelID, ModelCatalog.llama3_2_1B)
+        // The auto-download target since 2026-09-12 is the Qwen 1.7B
+        // intent fine-tune (v14, seed 43) under its own `intentQwenS43`
+        // id (split from the superseded v12 seed-42 entry so cached
+        // devices re-download) — a REAL hosted artifact (GitHub release
+        // v14 GGUF), not a placeholder. Nothing to publish; this is pure
+        // wiring.
+        XCTAssertEqual(AppCoordinator.defaultBrainModelID, ModelCatalog.intentQwenS43)
         let entry = ModelCatalog.entry(for: AppCoordinator.defaultBrainModelID)
         XCTAssertNotNil(entry)
         let url = entry?.downloadURL.absoluteString ?? ""
         XCTAssertFalse(url.contains(".invalid"),
                        "the assistant-brain artifact must be a real hosted URL, not a placeholder")
+        // Hosted means https: the catalogue also carries LAN-only test
+        // entries (e.g. qwen4BNepali on the home server) that would pass
+        // the placeholder check but must never become the auto-downloaded
+        // default.
+        XCTAssertTrue(url.hasPrefix("https://"),
+                      "the default brain must come from a hosted (https) URL, not a LAN/local address")
         XCTAssertGreaterThan(entry?.sizeBytes ?? 0, 0)
         XCTAssertEqual(entry?.kind, .llamaBase)
     }

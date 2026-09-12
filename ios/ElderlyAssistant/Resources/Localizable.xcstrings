@@ -7684,23 +7684,6 @@
         }
       }
     },
-    "plugin.applianceHelper.notReady" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "That feature isn't ready yet — it will be able to guide you with your appliances soon."
-          }
-        },
-        "ne" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "त्यो सुविधा अहिले तयार छैन — चाँडै तपाईंलाई उपकरण चलाउन सिकाउनेछ।"
-          }
-        }
-      }
-    },
     "plugin.nepaliCalendar.name" : {
       "extractionState" : "manual",
       "localizations" : {

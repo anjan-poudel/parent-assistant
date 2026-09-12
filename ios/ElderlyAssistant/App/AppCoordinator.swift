@@ -1167,7 +1167,7 @@ final class AppCoordinator: ObservableObject {
     /// choice is `resolvedBrainModelID`.
     // The Qwen 1.7B intent fine-tune (v12, seed 42) is the default
     // brain — the legacy LLaMA 1B is hidden from the picker now.
-    static let defaultBrainModelID = ModelCatalog.intentQwenS43
+    static let defaultBrainModelID = ModelCatalog.intentQwen4BS43
 
     /// The brain model the interpreter actually uses: the stored
     /// preference when it names a real catalog entry, else the default.
@@ -5349,6 +5349,9 @@ self.noteTalkContractChanged()
         guard let plugin = pluginRegistry.plugin(handling: "nepali_calendar.query",
                                                  locale: activeLocale),
               geminiConfigStore.isConfigured else { return nil }
+        // Screen-initiated call, not a voice turn: the contract's
+        // transcript field is the sanitised utterance and stays empty
+        // here — the question travels in the plugin's own entity.
         let command = PluginCommand(actionName: "nepali_calendar.query",
                                     transcript: "",
                                     entities: ["question": question],

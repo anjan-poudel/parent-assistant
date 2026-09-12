@@ -8,12 +8,16 @@ final class BrainModelSelectionTests: XCTestCase {
     // MARK: - Catalog surface
 
     /// The picker list is CURATED (catalog declutter, 2026-09-12): the
-    /// Nepali intent fine-tune plus the two stock Qwen 3 sizes. The
-    /// pre-Qwen LLaMA brains are legacy and the Gemma fine-tune fails the
-    /// emergency hard gate — neither may read as a choice.
+    /// v14 slim-template seed-43 Nepali intent fine-tune (its own id so
+    /// cached v12 seed-42 devices re-download), the Nepali-specialized
+    /// Qwen 4B (added 2026-09-12 for LAN testing), plus the two stock
+    /// Qwen 3 sizes. The pre-Qwen LLaMA brains are legacy and the Gemma
+    /// fine-tune fails the emergency hard gate — neither may read as a
+    /// choice.
     func testAvailableBrainEntriesIsTheCuratedList() {
         XCTAssertEqual(ModelCatalog.availableBrainEntries.map(\.id),
-                       [ModelCatalog.intentNepali1B,
+                       [ModelCatalog.intentQwenS43,
+                        ModelCatalog.qwen4BNepali,
                         ModelCatalog.qwen3_4BInstruct,
                         ModelCatalog.qwen3_1_7BInstruct])
     }
