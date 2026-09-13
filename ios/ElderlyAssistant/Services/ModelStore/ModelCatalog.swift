@@ -658,9 +658,11 @@ enum ModelCatalog {
             kind: .llamaBase,
             displayName: "Brain — Qwen 4B · intent fine-tune (slim, seed 43)",
             // Qwen3-4B QLoRA intent fine-tune, seed 43 of the SLIM-template
-            // deterministic k=3 bake-off — ALL FIVE GATES PASSED
-            // (closed >=0.95, slots >=0.90, emergency 1.00, side-effect
-            // >=0.97). The first ship-gate-passing on-device brain.
+            // deterministic k=3 bake-off. GBNF-corrected (on-device-faithful)
+            // gates: closed-intent 1.000, emergency 1.000, side-effect
+            // 1.000 PASS; contact 0.800 / time 0.833 FAIL the slot gates
+            // (the earlier 20/20 was an unconstrained-decode artifact).
+            // Slot-fix retrain is the active next step.
             // Q3_K_M for sub-2GiB GitHub distribution (v15). Q3 gates:
             // closed 1.000, emergency 1.000, se 1.000, time 0.909,
             // contact 0.833 (Q4 = 1.000 — Q4 is the ship target).
