@@ -1780,9 +1780,9 @@
 		C4A83FDCCD371CE04E17C791 /* ModelStore */ = {
 			isa = PBXGroup;
 			children = (
+				E967B43510C7551AEADF9FBE /* IntentEncoderArtifactTests.swift */,
 				5B6CFEB5C2C9028ED09E4153 /* LanguageModelResolverTests.swift */,
 				F0B9AE2BCE28CF90E46EDE91 /* ModelCatalogLanguageTests.swift */,
-				E967B43510C7551AEADF9FBE /* IntentEncoderArtifactTests.swift */,
 				4B8D7DEC413B2AB3DF3B0511 /* ModelCatalogSTTNamingTests.swift */,
 				0DE0C8888C181B27FA3038C6 /* ModelStoreTests.swift */,
 				CE7E6C15D13A58EC3684BA2E /* TTSVoiceCatalogTests.swift */,
