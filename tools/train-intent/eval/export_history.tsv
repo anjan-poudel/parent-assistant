@@ -15,3 +15,6 @@ ts	tag	base_id	artifact	size_bytes	sha256	llama_cpp_sha
 2026-09-13 01:44:14	qwen4b-s43	Qwen/Qwen3-4B-Instruct-2507	intent-ne-qwen4b-s43-q4_k_m.gguf	2497278752	5a29688902f14d8eb4497198a6169e364bf71e19fc676115d10a37ddd0862afd	9e0e220594af405a62835dc3a27495729fd8506b
 2026-09-13 03:33:40	qwen4b-s44	Qwen/Qwen3-4B-Instruct-2507	intent-ne-qwen4b-s44-q4_k_m.gguf	2497278752	899e386614c97064f9e8820559ecc418437667339817ca7fecad1ce302f07b04	9e0e220594af405a62835dc3a27495729fd8506b
 2026-09-13 07:07:45	qwen-student	Qwen/Qwen3-1.7B	intent-ne-qwen-student-q4_k_m.gguf	1107408576	108c8f84651e2aca5b0e206fd6801b3449d182ce1495b7c897a94f12d5501338	9e0e220594af405a62835dc3a27495729fd8506b
+2026-09-13 08:40:06	qwen-student-schema	Qwen/Qwen3-1.7B	intent-ne-qwen-student-schema-q4_k_m.gguf	1107408608	4980aed8ebdb229d227a1459d1ef46e9b379ad9bfd2633dc5de2d4c0ae7e6da5	9e0e220594af405a62835dc3a27495729fd8506b
+2026-09-13 09:34:10	qwen-student-schema-nodistill	Qwen/Qwen3-1.7B	intent-ne-qwen-student-schema-nodistill-q4_k_m.gguf	1107408608	1a5afb7660a36f9beaf318e6c075653a83801dc8e641ebfb7a1296fd4d326fd5	9e0e220594af405a62835dc3a27495729fd8506b
+2026-09-13 11:21:44	qwen-student-schema-repaired	Qwen/Qwen3-1.7B	intent-ne-qwen-student-schema-repaired-q4_k_m.gguf	1107408608	b554c60cba184e8eea721389568aeb320896f85176143ebf6d784846f47222d1	9e0e220594af405a62835dc3a27495729fd8506b
