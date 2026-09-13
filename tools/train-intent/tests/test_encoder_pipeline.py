@@ -111,16 +111,19 @@ class TestWaiverFlags(unittest.TestCase):
         self.assertEqual(defaults.waive_reason, "")
 
     def test_refusal_matrix(self):
-        self.assertIsNone(waiver_refusal("", "", False, True))
-        self.assertIsNone(waiver_refusal("corpus_floor", "r", False, True))
-        self.assertIn("--waive-reason", waiver_refusal("corpus_floor", "", False, True))
+        self.assertIsNone(waiver_refusal("", False, "", False, True))
+        self.assertIsNone(waiver_refusal("corpus_floor", False, "r", False, True))
+        self.assertIsNone(waiver_refusal("", True, "r", False, True))
+        self.assertIn("--waive-reason",
+                      waiver_refusal("corpus_floor", False, "", False, True))
+        self.assertIn("--waive-reason", waiver_refusal("", True, "", False, True))
         # a waiver whose build stage will not run would vanish — refuse instead
         self.assertIn("build stage will not run",
-                      waiver_refusal("corpus_floor", "r", True, True))
+                      waiver_refusal("corpus_floor", False, "r", True, True))
         self.assertIn("build stage will not run",
-                      waiver_refusal("corpus_floor", "r", False, False))
+                      waiver_refusal("", True, "r", False, False))
         # a bare reason has nothing to record; the build stage accepts that too
-        self.assertIsNone(waiver_refusal("", "r", False, True))
+        self.assertIsNone(waiver_refusal("", False, "r", False, True))
 
     def test_only_the_build_command_carries_the_flags(self):
         cmd = build_stage_cmd(["/py", "-u"], ["s.jsonl"], Path("/w/build"),
@@ -130,6 +133,16 @@ class TestWaiverFlags(unittest.TestCase):
         self.assertEqual(cmd[i + 1], "corpus_floor,per_action_floor")
         j = cmd.index("--waive-reason")
         self.assertEqual(cmd[j + 1], "because")
+
+    def test_the_leak_waiver_is_build_only_and_needs_the_reason(self):
+        cmd = build_stage_cmd(["/py"], ["s.jsonl"], Path("/b"), Path("/r.json"),
+                              False, 0, "", "exact matches only", True)
+        self.assertIn("--waive-leak", cmd)
+        self.assertIn("--waive-reason", cmd)
+        self.assertNotIn("--waive-floor", cmd)
+        plain = build_stage_cmd(["/py"], ["s.jsonl"], Path("/b"), Path("/r.json"),
+                                False, 0, "", "unused reason", False)
+        self.assertNotIn("--waive", " ".join(plain))
 
     def test_no_waiver_means_no_flags_at_all(self):
         cmd = build_stage_cmd(["/py"], ["s.jsonl"], Path("/b"), Path("/r.json"),
@@ -144,7 +157,7 @@ class TestWaiverBlock(unittest.TestCase):
     """The run manifest's waiver record must reconcile with the build report."""
 
     @staticmethod
-    def _report(td) -> Path:
+    def _report(td, **extra) -> Path:
         rep = {
             "floors": {
                 "violations": [
@@ -160,6 +173,7 @@ class TestWaiverBlock(unittest.TestCase):
             "per_action_target": {"call": 100, "suggest_video": 150,
                                   "create_calendar_event": 150},
         }
+        rep.update(extra)
         p = Path(td) / "build_report.json"
         p.write_text(json.dumps(rep), encoding="utf-8")
         return p
@@ -194,10 +208,40 @@ class TestWaiverBlock(unittest.TestCase):
 
     def test_missing_report_records_itself_as_absent_not_as_a_pass(self):
         with tempfile.TemporaryDirectory() as td:
-            b = waiver_block(Path(td) / "missing.json", "corpus_floor", "r")
+            b = waiver_block(Path(td) / "missing.json", "corpus_floor", "r", True)
         self.assertFalse(b["recorded"])
         self.assertIsNone(b["build_report"]["sha256"])
         self.assertIn("dry run", b["note"])
+        self.assertTrue(b["leak_waiver"]["requested"])
+        self.assertFalse(b["leak_waiver"]["waived"])
+        self.assertIsNone(b["leak_waiver"]["counter"])
+
+    def test_a_waived_leak_counter_is_recorded_with_its_limit(self):
+        """The record must never read as 'contamination handled': the counter is
+        exact matches only, and the parent-derived rows are invisible to it."""
+        leak_waiver = {"requested": True, "waived": True, "counter": 105,
+                       "waive_reason": "internal-testing: exact matches excluded",
+                       "scope": "EXACT normalized-utterance matches only"}
+        with tempfile.TemporaryDirectory() as td:
+            p = self._report(td, counters={"leak": 105}, leak_waiver=leak_waiver)
+            b = waiver_block(p, "", "internal-testing: exact matches excluded", True)
+        lw = b["leak_waiver"]
+        self.assertTrue(lw["requested"])
+        self.assertTrue(lw["waived"])
+        self.assertEqual(lw["counter"], 105)
+        self.assertEqual(lw["waive_reason"], "internal-testing: exact matches excluded")
+        self.assertIn("EXACT", lw["scope"])
+        self.assertIn("NOT 'contamination handled'", lw["note"])
+        self.assertIn("clean_utterance", lw["note"])
+
+    def test_an_unwaived_counter_is_recorded_as_unwaived(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = self._report(td, counters={"leak": 105},
+                             leak_waiver={"requested": False, "waived": False,
+                                          "counter": 105, "waive_reason": ""})
+            b = waiver_block(p, "", "")
+        self.assertFalse(b["leak_waiver"]["waived"])
+        self.assertEqual(b["leak_waiver"]["counter"], 105)
 
 
 class TestStageSupervision(unittest.TestCase):
@@ -332,6 +376,38 @@ class TestPipelineCli(unittest.TestCase):
         self.assertIn("--waive-floor corpus_floor,stt_noised_floor,per_action_floor",
                       build)
         self.assertIn("--waive-reason internal-testing only", build)
+        for prefix in ("[stage] train:", "[stage] calibrate:", "[stage] eval:"):
+            self.assertNotIn("--waive", stage_line(prefix), prefix)
+
+    def test_waive_leak_without_a_reason_refuses_before_any_stage(self):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        p = subprocess.run([sys.executable, str(PIPELINE),
+                            "--sources", str(fixtures.FIXTURE_PATH),
+                            "--work-dir", td.name, "--waive-leak", "--dry-run"],
+                           capture_output=True, text=True)
+        self.assertEqual(p.returncode, 3, p.stdout + p.stderr)
+        self.assertIn("--waive-reason", p.stdout + p.stderr)
+        self.assertNotIn("[stage]", p.stdout)
+        self.assertFalse((Path(td.name) / "logs").exists())
+
+    def test_the_leak_waiver_reaches_the_build_stage_and_no_later_stage(self):
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        p = subprocess.run([sys.executable, str(PIPELINE),
+                            "--sources", str(fixtures.FIXTURE_PATH),
+                            "--work-dir", td.name, "--device", "cpu", "--waive-leak",
+                            "--waive-reason", "internal-testing: exact matches only",
+                            "--dry-run"], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        lines = p.stdout.splitlines()
+
+        def stage_line(prefix: str) -> str:
+            return next(ln for ln in lines if ln.startswith(prefix))
+
+        build = stage_line("[stage] build:")
+        self.assertIn("--waive-leak", build)
+        self.assertIn("--waive-reason internal-testing: exact matches only", build)
         for prefix in ("[stage] train:", "[stage] calibrate:", "[stage] eval:"):
             self.assertNotIn("--waive", stage_line(prefix), prefix)
 

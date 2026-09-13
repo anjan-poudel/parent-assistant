@@ -142,6 +142,55 @@ class TestGoldenCorpusRefusals(unittest.TestCase):
             self.assertEqual(report["kept"]["total"], 0)
 
 
+class TestLeakCounterWaiver(unittest.TestCase):
+    """E1 records the leak-counter waiver (exact matches only) — and requires a
+    reason, like the floor waiver it sits next to."""
+
+    @staticmethod
+    def _leaky_source(td) -> Path:
+        golden = [json.loads(line) for line in
+                  GOLDEN_CORPUS.read_text(encoding="utf-8").splitlines() if line.strip()]
+        src = Path(td) / "leaky.jsonl"
+        src.write_text(json.dumps({
+            "id": "leak-1", "utterance": golden[0]["utterance"],
+            "action": golden[0]["intent"], "register": "devanagari",
+            "source": "teacher:devanagari", "confidence": 0.9,
+        }, ensure_ascii=False) + "\n", encoding="utf-8")
+        return src
+
+    def test_waive_leak_requires_a_reason(self):
+        with tempfile.TemporaryDirectory() as td:
+            p, _ = run_builder([self._leaky_source(td)], Path(td) / "out",
+                               extra=["--waive-leak"])
+        self.assertEqual(p.returncode, 2, p.stdout + p.stderr)
+        self.assertIn("--waive-leak requires --waive-reason", p.stdout + p.stderr)
+
+    def test_the_counter_waiver_is_recorded_with_its_limit(self):
+        reason = "internal-testing: exact golden matches excluded"
+        with tempfile.TemporaryDirectory() as td:
+            _, report = run_builder([self._leaky_source(td)], Path(td) / "out",
+                                    extra=["--waive-leak", "--waive-reason", reason])
+        self.assertEqual(report["counters"]["leak"], 1)
+        lw = report["leak_waiver"]
+        self.assertTrue(lw["requested"])
+        self.assertTrue(lw["waived"])
+        self.assertEqual(lw["counter"], 1)
+        self.assertEqual(lw["waive_reason"], reason)
+        # the record must not dress the exclusion up as handled contamination
+        self.assertIn("EXACT", lw["scope"])
+        self.assertIn("invisible", lw["scope"])
+        self.assertIn("118", lw["note"])
+        self.assertIn("clean_utterance", lw["note"])
+
+    def test_without_the_flag_the_counter_is_recorded_unwaived(self):
+        with tempfile.TemporaryDirectory() as td:
+            _, report = run_builder([self._leaky_source(td)], Path(td) / "out",
+                                    extra=[])
+        self.assertEqual(report["counters"]["leak"], 1)
+        self.assertFalse(report["leak_waiver"]["waived"])
+        self.assertFalse(report["leak_waiver"]["requested"])
+
+
 class TestSourcePaths(unittest.TestCase):
     """A missing --sources path is a mistake, not an empty corpus."""
 

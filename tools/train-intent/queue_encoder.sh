@@ -57,12 +57,13 @@ while pgrep -f "train_finetune.py" >/dev/null \
 # silently dropping the decision.
 WAIVE=()
 if [ -n "${T036_WAIVE_FLOOR:-}" ]; then WAIVE+=(--waive-floor "$T036_WAIVE_FLOOR"); fi
+if [ "${T036_WAIVE_LEAK:-}" = "1" ]; then WAIVE+=(--waive-leak); fi
 if [ -n "${T036_WAIVE_REASON:-}" ]; then WAIVE+=(--waive-reason "$T036_WAIVE_REASON"); fi
 
 gpu_free
 echo "[encoder] $(date +%Y%m%d-%H%M%S) GPU free — starting full T-036 run -> $WORK_DIR"
 if [ ${#WAIVE[@]} -gt 0 ]; then
-  echo "[encoder] floor waiver requested: ${T036_WAIVE_FLOOR:-none} — the waiver is recorded in the run manifest and is internal-testing-only"
+  echo "[encoder] waiver requested: floors=${T036_WAIVE_FLOOR:-none} leak=${T036_WAIVE_LEAK:-0} — recorded in the run manifest and internal-testing-only; the leak counter covers exact golden matches only and the E2 row-level guard stays non-waivable"
 fi
 # The pipeline itself re-checks the card before the train leg (encoder.gpu.*)
 # and runs every stage in one supervised chain, so an interruption leaves a
