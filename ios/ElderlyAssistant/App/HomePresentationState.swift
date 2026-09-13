@@ -45,13 +45,61 @@ struct HomePresentationState: Equatable {
     var primaryContactName: String?
     /// The optional-setup strip's inputs.
     var setup: SetupPresentation
+    /// The last missed call to surface as an activity tile, or nil when
+    /// there is none to show (call-tracking task, 2026-09-13) — the
+    /// missed-call slice, resolved for the active locale.
+    var lastMissedCall: MissedCallPresentation?
 
     static let empty = HomePresentationState(
         dateLine: nil,
         notificationCount: 0,
         favoriteApps: [],
         primaryContactName: nil,
-        setup: .hidden)
+        setup: .hidden,
+        lastMissedCall: nil)
+}
+
+/// The Home missed-call activity tile's inputs (call-tracking task,
+/// 2026-09-13) — two resolved lines, exactly what the tile renders.
+///
+/// Resolved at RENDER time from the log entry, never stored: the entry
+/// keeps the raw timestamp and contact, and the strings below are
+/// recomputed for the active locale and the current moment (the same
+/// rule `HomeNotificationRow.text` follows for the Updates rows). A tile
+/// that stored "10 minutes ago" would freeze there.
+struct MissedCallPresentation: Equatable {
+    /// "Missed call: बुबा" — the label, plus the contact when the row has
+    /// one. A row the app cannot attribute (iOS masks the caller of calls
+    /// that involve other apps) keeps the label alone rather than
+    /// inventing a name.
+    var title: String
+    /// "१० मिनेट अघि" — the relative line (`HistoryTimeFormat`).
+    var time: String
+
+    /// The single-line form the tile reads aloud and the accessibility
+    /// label carries: "छुटेको कल: बुबा · १० मिनेट अघि".
+    var line: String { "\(title) · \(time)" }
+
+    /// Builds the tile's slice from a missed-call row.
+    static func resolve(_ entry: AppActivityEntry,
+                        now: Date,
+                        calendar: Calendar = .current,
+                        locale: Locale) -> MissedCallPresentation {
+        MissedCallPresentation(
+            title: title(for: entry, locale: locale),
+            time: HistoryTimeFormat.relativeString(for: entry.timestamp,
+                                                   now: now,
+                                                   calendar: calendar,
+                                                   locale: locale))
+    }
+
+    /// The tile's title line alone — shared with the activity rows'
+    /// VoiceOver labels so a sighted reader and a screen-reader user hear
+    /// the same description of the same row.
+    static func title(for entry: AppActivityEntry, locale: Locale) -> String {
+        let label = L10n.str("history.missedCall", locale: locale)
+        return entry.contactName.isEmpty ? label : "\(label): \(entry.contactName)"
+    }
 }
 
 /// The setup strip's inputs (design review: "ready vs optional setup").

@@ -4709,6 +4709,23 @@
         }
       }
     },
+    "history.missedCall" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Missed call"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "छुटेको कल"
+          }
+        }
+      }
+    },
     "history.openPhone" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4739,6 +4756,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "थप देखाउनुहोस्"
+          }
+        }
+      }
+    },
+    "history.timeHoursAgo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ hours ago"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ घण्टा अघि"
+          }
+        }
+      }
+    },
+    "history.timeHourAgo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ hour ago"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ घण्टा अघि"
+          }
+        }
+      }
+    },
+    "history.timeMinuteAgo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ minute ago"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ मिनेट अघि"
+          }
+        }
+      }
+    },
+    "history.timeMinutesAgo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ minutes ago"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ मिनेट अघि"
           }
         }
       }

@@ -1834,15 +1834,18 @@ struct CallView: View {
     /// rows say "call <name> back", message rows say "message <name>"
     /// (history.callbackLabel / history.messageLabel), so one gesture
     /// reads the row's action. An UNANSWERED row (missed-calls task,
-    /// 2026-09-07) announces what the row is and what its tap does —
-    /// "Unanswered call, Open Phone app" (history.unanswered /
-    /// history.openPhone) — mirror of HistoryView.rowAccessibilityLabel;
-    /// keep in step.
+    /// 2026-09-07; attribution, call-tracking task 2026-09-13) announces
+    /// what the row is and what its tap does — "Unanswered call, Open
+    /// Phone app" for the anonymous row, "Missed call: बुबा, Open Phone
+    /// app" when the app placed the call itself — mirror of
+    /// HistoryView.rowAccessibilityLabel; keep in step.
     private func recentActivityRowLabel(_ entry: AppActivityEntry) -> String {
         let locale = coordinator.activeLocale
         if entry.channel == .unanswered {
-            return "\(ActivityRowText.name(for: entry, locale: locale)), "
-                + L10n.str("history.openPhone", locale: locale)
+            let described = entry.contactName.isEmpty
+                ? L10n.str("history.unanswered", locale: locale)
+                : MissedCallPresentation.title(for: entry, locale: locale)
+            return "\(described), " + L10n.str("history.openPhone", locale: locale)
         }
         if entry.kind == .call {
             return L10n.fmt("history.callbackLabel", locale: locale, entry.contactName)
@@ -1850,14 +1853,16 @@ struct CallView: View {
         return L10n.fmt("history.messageLabel", locale: locale, entry.contactName)
     }
 
-    /// The row's time caption — the leaf's bucketing ("Just now" /
-    /// "Today" / "Yesterday" / short date) via `HistoryTimeFormat` with
-    /// the same pinned `now`/calendar/locale inputs HistoryView uses.
+    /// The row's caption — the shared composer (call-tracking task,
+    /// 2026-09-13), so this list and the Recent activity leaf can never
+    /// render the same row differently: "<kind> · <bucket>" for calls and
+    /// messages, and the explicit "Missed call · <bucket>" for an
+    /// unanswered row.
     private func recentActivityTimeText(_ entry: AppActivityEntry) -> String {
-        HistoryTimeFormat.displayString(for: entry.timestamp,
-                                        now: Date(),
-                                        calendar: Calendar.current,
-                                        locale: coordinator.activeLocale)
+        ActivityRowText.caption(for: entry,
+                                now: Date(),
+                                calendar: Calendar.current,
+                                locale: coordinator.activeLocale)
     }
 
     /// HistoryView's channel symbols, replicated as a small private

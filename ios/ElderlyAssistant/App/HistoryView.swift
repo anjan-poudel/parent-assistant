@@ -133,19 +133,10 @@ struct HistoryView: View {
     }
 
     private func caption(for entry: AppActivityEntry) -> String {
-        let locale = coordinator.activeLocale
-        let time = HistoryTimeFormat.displayString(for: entry.timestamp,
-                                                   now: Date(),
-                                                   calendar: Calendar.current,
-                                                   locale: locale)
-        if entry.channel == .unanswered {
-            // The name line already reads "Unanswered call" — a "Call"
-            // kind chip beneath it would repeat it. Time alone.
-            return time
-        }
-        let kind = L10n.str(entry.kind == .call ? "history.channel.call" : "history.channel.message",
-                            locale: locale)
-        return "\(kind) · \(time)"
+        ActivityRowText.caption(for: entry,
+                                now: Date(),
+                                calendar: Calendar.current,
+                                locale: coordinator.activeLocale)
     }
 
     /// Tap re-initiation, per the recorded channel (a row re-opens the
@@ -205,15 +196,20 @@ struct HistoryView: View {
     /// Screen-reader label: "Call <name> back" for call rows,
     /// "Message <name>" for message rows (history.callbackLabel /
     /// history.messageLabel), so one gesture reads the row's action. An
-    /// UNANSWERED row (missed-calls task, 2026-09-07) announces what the
-    /// row is AND what its tap does — "Unanswered call, Open Phone app"
-    /// (history.unanswered / history.openPhone) — because no name exists
-    /// to fold into a "call back" phrase.
+    /// UNANSWERED row (missed-calls task, 2026-09-07; attribution,
+    /// call-tracking task 2026-09-13) announces what the row is AND what
+    /// its tap does — "Unanswered call, Open Phone app" when anonymous,
+    /// "Missed call: बुबा, Open Phone app" when the app placed the call
+    /// itself — because no name exists to fold into a "call back" phrase
+    /// for the anonymous case, and the attributed case must not hide that
+    /// the call was missed.
     private func rowAccessibilityLabel(_ entry: AppActivityEntry) -> String {
         let locale = coordinator.activeLocale
         if entry.channel == .unanswered {
-            return "\(ActivityRowText.name(for: entry, locale: locale)), "
-                + L10n.str("history.openPhone", locale: locale)
+            let described = entry.contactName.isEmpty
+                ? L10n.str("history.unanswered", locale: locale)
+                : MissedCallPresentation.title(for: entry, locale: locale)
+            return "\(described), " + L10n.str("history.openPhone", locale: locale)
         }
         if entry.kind == .call {
             return L10n.fmt("history.callbackLabel", locale: locale, entry.contactName)
@@ -255,22 +251,53 @@ struct HistoryView: View {
     }
 }
 
-/// Row-name presentation shared by HistoryView and CallView's
-/// recentActivitySection (missed-calls task, 2026-09-07) — a sibling of
-/// `HistoryTimeFormat`, resolved at RENDER time so the row never stores
-/// a locale string.
+/// Row-name and caption presentation shared by HistoryView and CallView's
+/// recentActivitySection (missed-calls task, 2026-09-07; call-tracking
+/// task, 2026-09-13) — a sibling of `HistoryTimeFormat`, resolved at
+/// RENDER time so the row never stores a locale string. One home for
+/// both call surfaces: the Phone screen's list and the Recent activity
+/// leaf render the same rows and drifted apart when each composed its
+/// own caption.
 enum ActivityRowText {
-    /// The row's NAME line. `.unanswered` rows show the localized
-    /// "Unanswered call" label (`history.unanswered`) because their
-    /// stored `contactName` is EMPTY BY DESIGN: iOS masks the identity
-    /// AND the number of calls that involve other apps, so there is no
-    /// name to store and no number an address book could match. Every
-    /// other row shows its stored contact name.
+    /// The row's NAME line. An `.unanswered` row with NO stored name
+    /// shows the localized "Unanswered call" label (`history.unanswered`)
+    /// because the row is anonymous BY PLATFORM DESIGN: iOS masks the
+    /// identity AND the number of calls that involve other apps, so
+    /// there is no name to store and no number an address book could
+    /// match. An unanswered row that DOES store a name is the one case
+    /// the app could honestly fill (it placed the call — see
+    /// `OpenedCallAttributor`), and it shows that contact exactly like
+    /// every other row.
     static func name(for entry: AppActivityEntry, locale: Locale) -> String {
-        if entry.channel == .unanswered {
+        if entry.channel == .unanswered, entry.contactName.isEmpty {
             return L10n.str("history.unanswered", locale: locale)
         }
         return entry.contactName
+    }
+
+    /// The row's secondary line (call-tracking task, 2026-09-13): the
+    /// kind label plus the row's time bucket — "Call · Today",
+    /// "Message · Yesterday", and for a missed call the explicit
+    /// "Missed call · Today" (`history.missedCall`), which is what makes
+    /// a missed row tell itself apart in a list at a glance. The missed
+    /// label is NOT redundant with an anonymous row's name line
+    /// ("Unanswered call"): the name line says what the row IS, the
+    /// caption's label says which kind of call event it was, and the two
+    /// differ for attributed rows, whose name line is a real contact.
+    static func caption(for entry: AppActivityEntry,
+                        now: Date,
+                        calendar: Calendar = .current,
+                        locale: Locale) -> String {
+        let time = HistoryTimeFormat.displayString(for: entry.timestamp,
+                                                   now: now,
+                                                   calendar: calendar,
+                                                   locale: locale)
+        if entry.channel == .unanswered {
+            return "\(L10n.str("history.missedCall", locale: locale)) · \(time)"
+        }
+        let kind = L10n.str(entry.kind == .call ? "history.channel.call" : "history.channel.message",
+                            locale: locale)
+        return "\(kind) · \(time)"
     }
 }
 
@@ -321,6 +348,54 @@ enum HistoryTimeFormat {
         }
         // Older rows get a localized short date in the app's language.
         return shortDateFormatter(locale: locale).string(from: timestamp)
+    }
+
+    /// Minutes-aware "how long ago" line for the Home missed-call tile
+    /// (call-tracking task, 2026-09-13) — the same pure, `now`-injected
+    /// shape as `displayString`, plus the two buckets a missed call
+    /// actually needs: "N minutes ago" under an hour, "N hours ago" under
+    /// a day. Anything older falls through to `displayString`'s day
+    /// buckets (Today / Yesterday / short date), so the line never
+    /// pretends to precision it does not have.
+    ///
+    /// Numerals follow the app's spoken convention (SpokenTime): the
+    /// digits are Devanagari in Nepali, ASCII otherwise — the tile shows
+    /// a senior the same numerals the assistant speaks.
+    static func relativeString(for timestamp: Date,
+                               now: Date,
+                               calendar: Calendar = .current,
+                               locale: Locale = .current) -> String {
+        let interval = now.timeIntervalSince(timestamp)
+        if interval >= 0 {
+            if interval < 60 {
+                return L10n.str("history.timeNow", locale: locale)
+            }
+            if interval < 3600 {
+                let minutes = Int(interval / 60)
+                // Singular/plural are separate catalog keys: the English
+                // copy must read "1 minute ago", and the app resolves
+                // strings by key through `L10n`, not through the catalog's
+                // plural variations.
+                return L10n.fmt(minutes == 1 ? "history.timeMinuteAgo" : "history.timeMinutesAgo",
+                                locale: locale,
+                                digitString(minutes, locale: locale))
+            }
+            if interval < 24 * 3600 {
+                let hours = Int(interval / 3600)
+                return L10n.fmt(hours == 1 ? "history.timeHourAgo" : "history.timeHoursAgo",
+                                locale: locale,
+                                digitString(hours, locale: locale))
+            }
+        }
+        return displayString(for: timestamp, now: now, calendar: calendar, locale: locale)
+    }
+
+    /// A count in the app's numeral convention (SpokenTime/BikramSambat:
+    /// Devanagari under `ne`, ASCII otherwise).
+    private static func digitString(_ value: Int, locale: Locale) -> String {
+        locale.language.languageCode?.identifier == "ne"
+            ? BikramSambat.devanagariDigits(value)
+            : String(value)
     }
 
     /// DESIGN-REVIEW (P2): was a fresh `DateFormatter` per row, per body
