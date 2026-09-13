@@ -166,6 +166,16 @@ def score(rows: list[dict], prompts: Path | None) -> dict:
 def append_csv(path: Path, meta: dict, scored: dict, failed: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     new = not path.exists()
+    if not new:
+        # The ledger is the §10 evidence artifact: appending a row under a
+        # header from an older schema would silently mislabel columns.
+        existing = path.read_text(encoding="utf-8").splitlines()
+        header = existing[0] if existing else ""
+        expected = ",".join(CSV_FIELDS)
+        if header != expected:
+            die(f"{path}: header does not match this tool's schema — refusing to append.\n"
+                f"  file:     {header}\n  expected: {expected}\n"
+                "  migrate the file (or move it aside) before measuring")
     per_pass = scored["by_pass"]
     with open(path, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=CSV_FIELDS)

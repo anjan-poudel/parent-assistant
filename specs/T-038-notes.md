@@ -2,10 +2,10 @@
 
 - **Task:** `.ai-sdd/outputs/plan-tasks/tasks/TG-08-nepali-intent-encoder/T-038-eval-harness-device-verification.md`
 - **Branch:** `worktree-t038-eval-harness` (worktree `.claude/worktrees/t038-eval-harness`, base `840bcd7`) — branch tip, not merged, not pushed
-- **Commits:** `01a494f` implementation → `889e9a9` reviewer NO_GO report (`specs/T-038-review.md`) → `b3e59ee` review response; `run_fixture_sweep.sh` + this notes update sit on top (branch tip)
+- **Commits:** `01a494f` implementation → `889e9a9` reviewer NO_GO report (`specs/T-038-review.md`) → `b3e59ee` review response; fixture sweep, notes and the device-ledger header fix sit on top (branch tip)
 - **Deliverable type:** harness + fixtures + measurement scaffolding. **No Swift touched, the iOS gate (`./ios/build.sh test:unit`) was not run** — device integration is T-037's. No `.ai-sdd/` state touched, no `complete-task`, no GPU/training.
 - **Phase note:** groundwork. No encoder artifact exists yet, so every encoder/device number in the reports below is UNMEASURED; nothing here claims accuracy on a model that hasn't been trained.
-- **Change size vs base:** 30 files, +3338 / −63 (implementation + review report + review response).
+- **Change size vs base:** 30 files, +3376 / −63 (implementation + review report + review responses).
 
 ## Artifacts committed
 
@@ -20,7 +20,7 @@
 | `tools/train-intent/src/build_dataset.py` | Leak guard now holds out **both** eval files; missing guard file warns instead of being silent |
 | `tools/train-intent/src/measure_device.py` | Device latency/RAM harness (emit prompts, validate, coverage policy, score, evidence CSV) |
 | `tools/train-intent/eval/device/` | `device-eval-protocol.md` (protocol + exact `devicectl` commands + report template), `prompts.jsonl` (100 held-out prompts), `measurements.csv` (header) |
-| `tools/train-intent/tests/` | `test_eval_golden_gates.py`, `test_measure_device.py` — 52 tests, ~3 s, stdlib `unittest` |
+| `tools/train-intent/tests/` | `test_eval_golden_gates.py`, `test_measure_device.py` — 54 tests, ~3 s, stdlib `unittest` |
 | `tools/train-intent/README.md` | Ship-gate table, fixture recipe, baseline-binding rules, device section, tests |
 | `tools/train-intent/eval/results.csv` | One committed smoke run at the new corpus revision — **refreshed** in `b3e59ee`: the untagged `t038-smoke-echo-189` row was replaced by `t038-smoke-echo-189@c5e4c049` (same run, now corpus-tagged; the stale line is not kept as a duplicate) |
 
@@ -73,7 +73,7 @@ No phone is attached to this box, so no device number is claimed. What is delive
 
 - `src/measure_device.py` — `--emit-prompts` (deterministic 100-prompt set), `--replay` (validates the device JSONL contract: id, `pass` ∈ cold/warm, positive `latency_ms`, duplicate detection; scores nearest-rank p50/p95; gates ≤1000 ms / ≤2000 ms), appends an evidence row to `eval/device/measurements.csv`.
 - **Exit codes are 0 / 1 / 2**: 0 = gates passed on a complete run (or an explicit `--allow-partial` run), 1 = latency gate failed, 2 = input/validation error (stderr + message, so automation can tell bad data from a bad build).
-- **Coverage policy**: a §10 verdict requires `--prompts` (the committed 100-prompt set, `--min-prompts` default 100) with **every prompt in both passes**. Missing `--prompts`, unknown ids, incomplete coverage, or a sub-minimum prompt set are exit 2 — a one-row file can no longer pass vacuously. `--allow-partial` is the explicit override: it stamps `partial=true` in the CSV and prints `latency gates passed ON A PARTIAL RUN — not a §10 ship verdict`. The CSV persists `partial`, `prompt_count`, and per-pass `cold_n/cold_p50/cold_p95` + `warm_*` columns alongside the aggregate.
+- **Coverage policy**: a §10 verdict requires `--prompts` (the committed 100-prompt set, `--min-prompts` default 100) with **every prompt in both passes**. Missing `--prompts`, unknown ids, incomplete coverage, or a sub-minimum prompt set are exit 2 — a one-row file can no longer pass vacuously. `--allow-partial` is the explicit override: it stamps `partial=true` in the CSV and prints `latency gates passed ON A PARTIAL RUN — not a §10 ship verdict`. The CSV persists `partial`, `prompt_count`, and per-pass `cold_n/cold_p50/cold_p95` + `warm_*` columns alongside the aggregate; `append_csv` refuses (exit 2, stderr) to append to a ledger whose header does not match the current 22-column schema, and the committed `eval/device/measurements.csv` placeholder already carries that header.
 - `eval/device/device-eval-protocol.md` — cold/warm protocol, 3-run requirement, exact iOS commands (`ios/device-install.sh`, `xcrun devicectl device copy to/from` verified against the installed `devicectl`, `--console` capture), the UNMEASURED latency table, the encoder-vs-GGUF-vs-Gemini regression table skeleton, and a NO-GO-until-measured verdict block.
 - RAM is recorded (`peak_rss_mb`, observability only): spec §10 gates latency, not memory. No RAM gate was invented.
 
@@ -104,7 +104,7 @@ No phone is attached to this box, so no device number is claimed. What is delive
 
 ## Review response — `specs/T-038-review.md` (NO_GO 0.80, 4 majors + 2 minors)
 
-All six findings were accepted and fixed in `b3e59ee` (none rejected).
+All six findings were accepted and fixed in `b3e59ee` (none rejected); a seventh, post-verification defect (row 7 below) is fixed in the follow-up commit.
 
 | # | Finding | Change | Evidence |
 |---|---|---|---|
@@ -114,6 +114,7 @@ All six findings were accepted and fixed in `b3e59ee` (none rejected).
 | 4 | MAJOR: calibration had no min-sample policy | `calibration_min_n: 5` and `calibration_max_underfloor_fraction: 0.20` in `config.yaml`; only qualifying buckets carry gate weight; excluded buckets printed; over-budget underfloor mass trips the new `calibration_coverage` gate | `preds_calibration_coverage_fail.jsonl` + `test_…calibration_coverage_fixture`; sweep shows `0 scored bucket(s) … 6 excluded holding 100.0% of rows — OVER 20% underfloor gate`, `gates_failed=calibration_coverage` |
 | 5 | MINOR: fixture backend silently defaulted missing `action` to abstention and ignored unknown ids | Replayed predictions are validated before scoring: duplicate ids, `action` ∈ taxonomy, confidence numeric in [0,1], extra ids → all exit 2 with a specific stderr message | `test_…` fixture-preds validation tests (missing action / unknown id / bad confidence), each asserting exit 2 **and** the message |
 | 6 | MINOR: `validate_rows` only rejected cross-label overlaps | Same-label overlap and same-label adjacency are separate errors ("must be merged at authoring"); `author_golden_corpus.py` rejects adjacency too, with a parity test | `test_…same-label overlap/adjacency`; `author_golden_corpus.py --check` still exits 0 on the committed corpus (189 + 50 rows) |
+| 7 | POST-VERIFICATION (found by the orchestrator's independent re-run): the committed `eval/device/measurements.csv` placeholder still carried the old 14-column header, so the first real device row would land under stale labels — the §10 evidence ledger would be silently misaligned | Committed placeholder rewritten to the current 22-column `CSV_FIELDS` header; `append_csv()` now reads the existing header and `die()`s (exit 2, message `header does not match this tool's schema` with file vs expected header shown) instead of appending | `test_committed_ledger_header_matches_the_tool_schema` (committed header equals the tool's `CSV_FIELDS` join), `test_ledger_with_stale_header_refuses_to_append` (exit 2, message, file untouched); manual append check: a 20-row replay against a copy of the committed ledger exits 0 and `DictReader` parses `n/partial/prompt_count/cold_n/warm_n/gates_failed` correctly |
 
 **Smoke row refresh: YES.** The committed echo smoke row was regenerated at the current corpus revision and the stale untagged line (`t038-smoke-echo-189`) was **replaced** by `t038-smoke-echo-189@c5e4c049` in `eval/results.csv` — same backend, same corpus, now carrying the corpus tag; it is not duplicated in the ledger. The row still shows all eight gates failing (echo abstains on everything), which is the expected smoke behaviour.
 
@@ -124,10 +125,10 @@ cd tools/train-intent
 python3 -m py_compile src/eval_golden.py src/build_dataset.py src/measure_device.py \
     eval/author_golden_corpus.py tests/test_eval_golden_gates.py tests/test_measure_device.py
 python3 eval/author_golden_corpus.py --check          # committed corpus == authoring data
-python3 -m unittest discover -s tests                 # 52 tests, OK (~3 s, CPU only)
+python3 -m unittest discover -s tests                 # 54 tests, OK (~4 s, CPU only)
 bash eval/fixtures/run_fixture_sweep.sh               # 7 fixtures + unbound-legacy control, all as expected
 python3 src/eval_golden.py --backend echo --label t038-smoke-echo-189 \
     --manifest-out /tmp/t038-manifest.jsonl           # exit 1, gate list printed
 ```
 
-Final state at the notes commit: 52 tests OK, `py_compile` clean on six files, `--check` clean (189 + 50 rows), fixture sweep verified, no 40+ char hex run in the tree.
+Final state at the notes commit: 54 tests OK, `py_compile` clean on six files, `--check` clean (189 + 50 rows), fixture sweep verified, no 40+ char hex run in the tree.

@@ -264,6 +264,33 @@ class CliIntegrationTests(unittest.TestCase):
         corpus = [json.loads(l) for l in CORPUS.read_text(encoding="utf-8").splitlines()][:len(rows)]
         self.assertEqual(rows, [{"id": r["id"], "utterance": r["utterance"]} for r in corpus])
 
+    def test_committed_ledger_header_matches_the_tool_schema(self):
+        """eval/device/measurements.csv is the §10 evidence ledger the protocol
+        tells the next engineer to append to: its committed header must already
+        be this tool's schema, or the first real row lands under old labels."""
+        ledger = ROOT / "eval" / "device" / "measurements.csv"
+        header = ledger.read_text(encoding="utf-8").splitlines()[0]
+        self.assertEqual(header, ",".join(measure_device.CSV_FIELDS))
+
+    def test_ledger_with_stale_header_refuses_to_append(self):
+        """A ledger written by an older schema must not silently receive a
+        mislabelled row."""
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            prompts = td / "prompts.jsonl"
+            self.assertEqual(self.run_cli(["--emit-prompts", str(prompts),
+                                           "--limit", "10"]).returncode, 0)
+            ids = [json.loads(l)["id"] for l in prompts.read_text(encoding="utf-8").splitlines()]
+            stale = "ts,platform,device,os,build,source,sha256_12,n,p50_ms,p95_ms,peak_rss_mb,gate_p50_ms,gate_p95_ms,gates_failed\n"
+            csv_path = td / "measurements.csv"
+            csv_path.write_text(stale, encoding="utf-8")
+            proc = self.run_cli(["--replay", str(write_jsonl(td / "m.jsonl", cold_warm(ids, 200.0))),
+                                 "--prompts", str(prompts), "--min-prompts", "10",
+                                 "--results-csv", str(csv_path)])
+            self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+            self.assertIn("header does not match this tool's schema", proc.stderr)
+            self.assertEqual(csv_path.read_text(encoding="utf-8"), stale)  # untouched
+
 
 if __name__ == "__main__":
     unittest.main()

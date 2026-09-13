@@ -1,1 +1,1 @@
-ts,platform,device,os,build,source,sha256_12,n,p50_ms,p95_ms,peak_rss_mb,gate_p50_ms,gate_p95_ms,gates_failed
+ts,platform,device,os,build,source,sha256_12,partial,prompt_count,n,p50_ms,p95_ms,peak_rss_mb,cold_n,cold_p50_ms,cold_p95_ms,warm_n,warm_p50_ms,warm_p95_ms,gate_p50_ms,gate_p95_ms,gates_failed
