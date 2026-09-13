@@ -32,7 +32,12 @@ New in the encoder build (T-034):
     gibberish < 0.2, corrections 0.8–0.95), teacher-born edge rows priority-kept;
   - frame floors (T-034 §5.3): stt_noised share ≥ 0.55, corpus ≥ 8000 rows,
     per-action ≥ 0.25 × target — violation is a non-zero hold (exit 4) unless
-    explicitly waived with a recorded reason.
+    explicitly waived with a recorded reason;
+  - the leak counter (exact normalized-utterance matches against the golden
+    corpus) can be waived with a recorded reason too — but only the counter is
+    waivable (E2's row-level guard never is), and the record says "exact
+    matches were excluded", not "contamination handled": noised rows whose
+    `clean_utterance` parent is a golden utterance are invisible to both.
 
 Exit codes: 0 ok, 3 guard refusal, 4 floors not met.
 """
@@ -403,7 +408,17 @@ def main() -> int:
                         help="comma-separated floor names to waive: "
                              "corpus_floor,stt_noised_floor,per_action_floor")
     parser.add_argument("--waive-reason", default="",
-                        help="required with --waive-floor; recorded in the report")
+                        help="required with --waive-floor/--waive-leak; recorded "
+                             "in the report")
+    parser.add_argument("--waive-leak", action="store_true",
+                        help="waive the E2 refusal on a nonzero leak counter (ONLY "
+                             "the source-level counter — the row-level E2 guard is "
+                             "never waivable). The counter counts EXACT normalized-"
+                             "utterance matches against the golden corpus and "
+                             "cannot see noised rows whose clean_utterance parent "
+                             "is a golden utterance: 'waived' means 'exact matches "
+                             "were excluded', never 'contamination handled'. "
+                             "Requires --waive-reason")
     parser.add_argument("--max-source-rows", type=int, default=0,
                         help="debug: cap rows read per source")
     args, cfg = load_config(parser)
@@ -518,6 +533,9 @@ def main() -> int:
     if waived and not args.waive_reason and not args.smoke:
         print("[build-encoder] --waive-floor requires --waive-reason", file=sys.stderr)
         return 2
+    if args.waive_leak and not args.waive_reason and not args.smoke:
+        print("[build-encoder] --waive-leak requires --waive-reason", file=sys.stderr)
+        return 2
     unwaived = [v for v in violations
                 if not any(v.startswith(w) for w in waived)]
 
@@ -574,6 +592,23 @@ def main() -> int:
                    # usable_for_training is false — a waived floor is wiring
                    # evidence, never a trainable corpus.
                    "usable_for_training": (not unwaived) and not args.smoke},
+        # The leak counter is EXACTness: normalized-utterance equality against
+        # the golden corpus. It cannot see noised rows whose `clean_utterance`
+        # parent is a golden utterance (the row-level E2 guard does not see them
+        # either), so a waiver recorded here must never be read as
+        # "contamination handled" — only as "exact matches were excluded".
+        "leak_waiver": {
+            "requested": bool(args.waive_leak or args.smoke),
+            "waived": bool(args.waive_leak or args.smoke),
+            "counter": counters["leak"],
+            "waive_reason": args.waive_reason or ("smoke" if args.smoke else ""),
+            "scope": "EXACT normalized-utterance matches against the golden corpus "
+                     "only; parent-derived noised rows are invisible to this counter "
+                     "(and to the row-level guard)",
+            "note": "measured 2026-09-13 on the real corpora: teacher 67 exact hits "
+                    "/ 25 keys, noised 32 / 2 plus 118 rows whose clean_utterance "
+                    "parent is a golden utterance (22 keys), edge_cases 6 / 5",
+        },
         "outputs": {name: {"path": str(out_dir / f"{name}.jsonl"),
                            "sha256": sha256_file(out_dir / f"{name}.jsonl"),
                            "rows": len(split)}
@@ -590,6 +625,16 @@ def main() -> int:
         print(f"[build-encoder] SUPPLY-CAPPED: {', '.join(supply_capped)}")
     if violations:
         print("[build-encoder] floor violations: " + "; ".join(violations))
+    if counters["leak"]:
+        if args.waive_leak or args.smoke:
+            print(f"[build-encoder] leak counter WAIVED: {counters['leak']} exact "
+                  f"golden-corpus match(es) excluded ({args.waive_reason or 'smoke'}) "
+                  "— exact matches only; rows derived from a golden parent are NOT "
+                  "covered by this counter")
+        else:
+            print(f"[build-encoder] leak counter: {counters['leak']} exact golden "
+                  "match(es) excluded — E2 refuses this corpus unless the counter is "
+                  "waived (--waive-leak on the pipeline)")
     print(f"[build-encoder] report -> {report_path}")
     if unwaived:
         print("[build-encoder] HOLD: floors not met and not waived — "

@@ -123,7 +123,9 @@ encoder:
   artifact:
     # The T-035 contract names no artifact version: the release step must set one
     # before run_encoder_pipeline.py will publish (it refuses with the reason).
-    version: null
+    # Set for the 2026-09-13 internal-testing run: "0.1.0-internal" marks an
+    # artifact trained under a recorded supply-floor waiver (never a release).
+    version: "0.1.0-internal"
   # Path to the T-035 contract (relative to tools/train-intent/). null -> default.
   contract_path: null
   # Consumed contract revision (recorded, not read at run time — the file above

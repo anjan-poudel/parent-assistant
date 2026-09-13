@@ -545,8 +545,24 @@ def main(argv=None) -> int:
             raise GuardError(
                 f"build report not found ({report_path!s}) — the corpus has no "
                 "provenance; re-run build_encoder_dataset.py and pass --build-report.")
-        if build.get("counters", {}).get("leak", 0):
+        # The source-level leak counter is waivable ONLY through a waiver the E1
+        # build recorded (with its reason) — never by a flag on this stage. It
+        # counts exact normalized-utterance matches: "waived" means those exact
+        # rows were excluded, NOT that contamination was handled (noised rows
+        # derived from a golden parent are invisible to it).
+        leak_counter = build.get("counters", {}).get("leak", 0)
+        leak_waiver = build.get("leak_waiver", {}) or {}
+        if leak_counter and not leak_waiver.get("waived", False):
+            # The refusal message stays as it was (callers match on it); the
+            # actionable hint is a separate line.
+            print("[train] the source-level leak counter is waivable only via the "
+                  "pipeline's --waive-leak + --waive-reason (recorded in the build "
+                  "report); the row-level guard below is never waivable", flush=True)
             raise GuardError("build report records leaked rows — refusing this corpus")
+        if leak_counter:
+            print(f"[train] leak counter waived: {leak_counter} exact golden match(es) "
+                  f"excluded ({leak_waiver.get('waive_reason') or '?'}) — exact matches "
+                  "only; the row-level guard below is NEVER waivable", flush=True)
         if not build.get("floors", {}).get("usable_for_training", False) and not args.smoke:
             floors = build.get("floors", {})
             why = ("the build report is from a --smoke build (floors waived on purpose; "

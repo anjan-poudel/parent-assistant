@@ -378,3 +378,197 @@ Re-validation: the same CPU smoke pipeline was re-run on the server after these 
 - The full training run was **not launched** — no GPU leg, no published artifact, no
   `models/` output. `full_training_run_launched: false` is recorded in each smoke run manifest.
 - No merge, no push, no `.ai-sdd/` state touched, no `complete-task` from this session.
+
+## 8. Waiver plumbing + first full-run launch (worktree `t036-waiver`, 2026-09-13)
+
+### What was built (commits 9af1d59, 2c4214e)
+
+Commits on `worktree-t036-waiver` (base `e28165c`):
+
+- `9af1d59` — `--waive-floor` / `--waive-reason` in `run_encoder_pipeline.py`: refused with
+  EXIT_GUARD (3) before any stage when a waiver has no reason, or when the build stage will not
+  run (`--skip-build` / no `--sources`); forwarded **only** to the E1 build command
+  (`build_stage_cmd`); recorded in `run_manifest.json:waiver` with the build report's own keys
+  (`violations` / `waived` / `unwaived` / `waive_reason`) plus `violations_waived` and
+  `zero_row_actions`. An unwaived floor hold now surfaces as EXIT_FLOOR (4), not a generic
+  EXIT_STAGE. `queue_encoder.sh` forwards `T036_WAIVE_FLOOR` / `T036_WAIVE_REASON` (both unset =
+  the floor-enforcing default). No new publish-withholding reason: publication still requires the
+  calibration + harness gates on the artifact's own merits.
+- `2c4214e` — `encoder.artifact.version: "0.1.0-internal"` in `config.yaml` (release-step
+  decision; feeds `cfg_hash`), the matching deferral-test update, and a stale header line in
+  `queue_encoder.sh`.
+
+Tests (Mac, no torch): full `tools/train-intent` suite **172 tests, 167 pass, 5 fail, 4 skipped**.
+The 5 failures are **pre-existing**: the same suite on pristine `master` (archived to `/tmp`) gives
+the identical 5 failures out of 161. They are all one root cause — the golden corpus grew to 189
+rows in T-038 (`01a494f`) and now collides with the fixture rows and the leak-count expectations
+(`TestFixtureBuild.test_no_leak_into_training_rows`, `TestFixtureIntegrity`, two `TestCliRefusals`
+message assertions). 11 of the 17 new tests exercise the waiver parse/refusal/forwarding/audit path.
+
+### First full-run launch — build passed with the waiver, train leg refused
+
+Launched at 2026-09-13 12:04:39 server time, work dir
+`~/workspace/projects/rnd/t036-encoder/runs/t036-full-0.1.0-internal-20260913-120439`, sources
+`parent-assistant/tools/train-intent/data/{teacher,noised,edge_cases}.jsonl` (digests
+`3b81e3f4aa6b` / `cff510f31b8f` / `6d75b0460b57`), waiver names
+`corpus_floor,stt_noised_floor,per_action_floor`, reason = the instructed sentence verbatim,
+followed by the reproduced 2,561-row figures and the two zero-row actions
+(`create_calendar_event`, `suggest_video`).
+
+- E1 build: **exit 0 in 2.2 s**, `kept 2561 rows (train 2433, valid 128)`, printed
+  `floors waived: corpus_floor, stt_noised_floor, per_action_floor (...) — smoke/wiring use only`
+  and **no HOLD**. The waiver plumbing works end to end on the real corpora.
+- E2 train: **exit 3 in 0.1 s — `[guard] REFUSED: build report records leaked rows — refusing
+  this corpus`**. No GPU work, no CUDA leg, nothing published.
+- The refusal is `train_encoder.py`'s check on `build_report.counters.leak > 0`; this build's
+  counter is **leak = 105** — 105 source rows dropped by E1's leak guard because their normalized
+  utterance is in the (now 189-row) golden corpus. Those rows never entered `train.jsonl`; the
+  counter records exclusions, and the trainer refuses the corpus anyway.
+- Consequence: **any** run of this pipeline over these corpora dies at E2, waiver or not — the
+  earlier floor HOLD simply hid this second gate. The 5 pre-existing fixture failures are the same
+  collision at fixture scale.
+
+Open decision (not mine to take, nothing changed): either the leak counter becomes a recorded
+exclusion with an explicit waiver of its own, or the sources/golden corpus are de-overlapped; the
+guard's condition in `train_encoder.py` was left untouched.
+
+- Notes to self about the run: the waiver's reason string is stored verbatim in the run's
+  `build_report.json:floors.waive_reason`; no utterance text is in any log or manifest.
+
+## 9. Leak-counter waiver + fixture realignment (commits 8a4bb11, 91307a7, on top of 9af1d59)
+
+**Why.** The 12:04:39 run died at E2 on `train_encoder.py`'s unconditional refusal when the
+build report's `counters.leak > 0` (leak = 105: rows E1 had already excluded as exact
+golden matches). That made the real corpora untrainable with or without the floor waiver.
+
+**What was built (`8a4bb11`).** `--waive-leak` mirrors the floor waiver end to end:
+`build_encoder_dataset.py` records a `leak_waiver` block (requires `--waive-reason`) and
+prints the exclusion; `train_encoder.py` honors the recorded waiver and keeps the row-level
+belt-and-braces guard non-waivable, with its refusal message unchanged;
+`run_encoder_pipeline.py` refuses (EXIT_GUARD/3) before any stage when the reason is missing
+or the build stage will not run, forwards the flag only to E1, and records `leak_waiver` in
+`run_manifest.json` alongside the floor record; `queue_encoder.sh` forwards
+`T036_WAIVE_LEAK=1`. The help text, build-report `scope`/`note` and manifest note all state
+the limit measured by the coordinator: the counter is **exact normalized-utterance matches
+only** (teacher 67 hits / 25 keys, noised 32 / 2, edge_cases 6 / 5) and cannot see the 118
+noised rows whose `clean_utterance` parent is a golden utterance (22 keys) — so "waived"
+means "exact matches were excluded", never "contamination handled". The earlier rationale
+that "E1 already excluded the rows, so the counter documents exclusion, not contamination"
+holds for the exact 105 rows and NOT for the parent-derived ones; a waiver alone is not a
+de-overlap.
+
+**Fixture realignment (`91307a7`).** The T-038 golden-corpus expansion (`01a494f`, 189 rows)
+put six fixture utterances inside the held-out skeleton, which is why five tests had been red
+on master. The six rows were replaced with verified non-golden text and the JSONL
+regenerated — test data only; no guard or assertion changed. The suite is green again:
+**183 tests, all pass, 4 skipped** (torch-only) on the Mac.
+
+**Superseded:** the line that stood here ("no run launched from this round") is no longer
+true — the validation relaunch and the CoreML export both ran; see §10.
+
+## 10. Validation relaunch + CoreML export (coordinator-run, 2026-09-13)
+
+**Validation relaunch.** Run `t036-validate-8836350-20260913-121622`, launched at `8836350`
+(`encoder.artifact.version: 0.1.0-internal`) through `queue_encoder.sh` with
+`T036_WAIVE_FLOOR=corpus_floor,stt_noised_floor,per_action_floor`, `T036_WAIVE_LEAK=1` and a
+recorded reason, against the pre-cleaned derived sources
+(`runs/clean-9af1d59-20260913-120652/sources_clean`, `provenance.json` records the drop
+predicate). The queue gate re-checked the card itself and found it free (0%, 38 MiB).
+
+- Stage timings: build 2.15 s, train 41.83 s, calibrate 5.4 s, eval 6.96 s; pipeline **exit 5**
+  (publish gate withheld). Nothing published.
+- The **leak counter is 0** on the cleaned sources: the guard is satisfied on the merits, and
+  the leak waiver is recorded as belt-and-braces (`requested: true, waived: true, counter: 0`)
+  with the parent-derived scope/note, in both the build report and the run manifest.
+- Floors: 12 violations, all three classes waived with the reason verbatim; corpus 2,561 rows
+  (2,433 train / 128 valid), `stt_noised` 0.416, 2,450 distinct noised transcripts.
+- Gates: closed_intent 0.5287, contact_f1 0.0667, time_f1 0.0, emergency_recall 0.9375,
+  side_effect 0.6364, abstention 0.4138, calibration deviation 0.2644 — 9 failures; withheld for
+  harness gates plus calibration not measurable below the corpus floor.
+- Artifact sha256 prefix **26ee1ec9b5ce** — distinct from the `6d2989e95785` checkpoint that was
+  exported to CoreML, so the device zip is the earlier run's artifact, as instructed.
+
+**CoreML export.** `bakeoff_export_coreml.py` run on the Mac against the `6d2989e95785`
+artifact, with `T033_BACKBONE_OVERRIDE` pointed at the cached safetensors backbone and
+`--reps 5 --latency-passes 2` (reduced from the defaults to bound the CPU-only latency loop;
+the report records the real n).
+
+- Zip: `t033-encoder-int8-mlmodelc.zip`, sha256
+  `e0ff09231843c5a6e667db9f6a33d5994df9a2f37c9601f82e1a125073d7aaa5`, 109,086,647 bytes, one
+  top-level `t033-encoder-int8.mlmodelc` — the ModelStore shape.
+- Landed at `models/web/encoder-dev/` on the server (docroot side) and reported as the
+  `INTENT_ENCODER_SPIKE_ZIP` value from the Mac staging copy; `v0-coreml-report.json` sits
+  beside it and in the producing run dir.
+- Verification through the **int8** model, 189 golden rows: intent agreement 0.9894, slot-tag
+  agreement 0.9971. Inputs `Int32 1...64` flexible, matching the runner's wire contract.
+- Latency p50 25.93 ms / p95 31.32 ms, n=945, CPU_ONLY x86_64 proxy; device-class number
+  still UNMEASURED (no device). Not comparable with the T-033 report's 178.56 ms — the export
+  script's own comment documents 20.5 ms vs 178.6 ms for the same artifact under machine
+  contention, so that figure was contention-inflated.
+- Framed throughout as an internal-testing baseline: closed intent ~0.53, emergency recall
+  0.9375, publish withheld. Mechanics and baseline behaviour, not quality.
+
+**Install blocker (flagged for a decision).** The spike entry pins the *T-033* zip's hash, and
+`ModelStore.installCoreMLEncoder` verifies it unconditionally for `.intentEncoder`
+(`ModelStore.swift:242-247`), so the new zip fails `checksumMismatch` under the app's `.strict`
+default until the pin moves. A worktree task was dispatched to re-pin the sha256/sizeBytes and
+update the two test assertions; not merged here.
+
+**Platform question, resolved by measurement.** A device install could have failed if a
+host-compiled `.mlmodelc` were macOS-locked, so an iOS-targeted compile
+(`coremlcompiler compile --platform iOS`) was compared file by file against the shipped one:
+`model.mil`, `metadata.json`, `analytics/coremldata.bin` and `weights/weight.bin` are
+**byte-identical**, and the top-level `coremldata.bin` differs only in the *ordering* of two
+metadata entries (`conversion_date` / `source`). No platform marker, no arch-specific binary —
+the archive is MIL plus weights and is compiled for the device at load time.
+
+**Shipped bytes load in the CoreML runtime (verified).** The exporter verified against the
+`.mlpackage`, so the compiled directory inside the ZIP was untested until now. The zip was
+extracted to a scratch dir and the `.mlmodelc` loaded directly by the CoreML runtime
+(`MLModel(contentsOf:configuration:.cpuOnly)` on macOS): it **loads**, and a 3-token
+prediction returns `intent_logits [1, 12]` and `slot_logits [1, 3, 13]`, both Float16 and
+finite — the exact names, ranks and dtypes `CoreMLIntentEncoderModel` expects. What remains
+unverified is the ARM/ANE execution path (no device attached), not the artifact's shape or
+loadability.
+
+**Device-test caveat worth knowing before a tester session.** The app's runtime encoder path
+cannot serve an utterance today even with the artifact installed: `AppCoordinator` builds the
+interpreter with `UnavailableIntentEncoderTokenizer()` (`AppCoordinator.swift:1146`), whose
+`isReady` is hard false, so `IntentEncoderInterpreter.isAvailable` (line 242) stays false and
+the chain falls through to the LLaMA stand-in. No real Swift XLM-R tokenizer exists in the
+repo — the only implementations are `Unavailable…` (production) and `Stub…` (tests). The
+`INTENT_ENCODER` compilation condition is also not wired into any build configuration, and
+nothing in the app calls `installCoreMLEncoder` for the spike entry (the only callers are
+tests; `INTENT_ENCODER_SPIKE_ZIP` supplies a `downloadURL` that nothing follows for that
+entry). So what a device session can exercise today is the install mechanics themselves; an
+end-to-end utterance test still needs the tokenizer milestone.
+
+## 11. Why the corpus-regeneration job could not be launched as specified (measured)
+
+The requested "noised whisper passes targeting >=4,800 distinct surviving noised rows" cannot
+produce new rows with the pipeline as it stands, so the card was left idle rather than burned:
+
+- `stt_noise.py` is deterministic end to end. `synthesize()` receives no variant index and
+  passes no prosody or speaker variation; the hf transcriber calls `generate()` greedily. So
+  `variants_per_utterance: 2` writes two identical transcripts per utterance.
+- Measured on the server corpora: `noised.jsonl` is 29,304 rows but only **2,458 distinct**
+  texts, 2,048 of them duplicated. `config.yaml`'s own mixture comment already calls the
+  bucket "already fully used: 2458 distinct transcripts". Re-running can only re-attempt the
+  ~6.7k identical round-trips that are dropped every time.
+- The >=4,800 figure is 0.60 x `corpus_floor` 8,000. Reaching it needs more distinct source
+  utterances and/or diversity in the TTS/decode path (multiple voices, `--length_scale` /
+  `--noise_scale` per variant, sampling decode with a per-variant seed) — a code change, after
+  which the GPU pass is short.
+- The two zero-row actions are not a noise problem: `create_calendar_event` and
+  `suggest_video` are taxonomy `proposed` intents (600/500) with no seed templates in
+  `seeds/intents.yaml` and 0 teacher rows, so no STT pass can ever produce them.
+- The clean side is short too: 2,561 rows against the 8,000 floor, with set_reminder 48/300,
+  ack_med 11/200, guide 13/150, query 41/250.
+- Repo note: the corpus tooling lives in the separate `parent-assistant` repo, whose
+  `stt_noise.py` is newer (8,959 B, Sep 12) than this repo's copy (6,585 B, Sep 6), so a
+  diversity patch belongs there, not in this worktree.
+
+Card state at the time of writing: idle (0% util, 38 MiB, no compute processes), this repo's
+queue empty. The waiting GPU job is the `parent-assistant` repo's own: its HEAD records the
+`qwen-kr-repaired` k=3 eval stopped at step 155/405 with the GPU released to the encoder run
+and the resume command documented.

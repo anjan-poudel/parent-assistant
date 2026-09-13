@@ -41,6 +41,34 @@ def run_trainer(*args: str):
                           capture_output=True, text=True)
 
 
+LEAK_REASON = "internal-testing: exact golden matches excluded by the recorded waiver"
+
+
+def corpus_with_leak_counter(tmp: Path, leak: int = 105, waiver: bool = False,
+                             empty_valid: bool = False) -> Path:
+    """A fixture corpus whose report carries a nonzero leak counter — the shape
+    the real corpora produce — optionally with the waiver E1 records, and made
+    to look like a usable non-smoke report so the leak check is the only gate
+    these tests exercise."""
+    out = build_fixture_corpus(tmp)
+    rep = json.loads((out / "build_report.json").read_text(encoding="utf-8"))
+    rep["smoke"] = False
+    rep["floors"]["usable_for_training"] = True
+    rep["floors"]["waived"] = []
+    rep["floors"]["unwaived"] = []
+    rep["floors"]["waive_reason"] = ""
+    rep["counters"]["leak"] = leak
+    rep["leak_waiver"] = {
+        "requested": waiver, "waived": waiver, "counter": leak,
+        "waive_reason": LEAK_REASON if waiver else "",
+        "scope": "EXACT normalized-utterance matches against the golden corpus only",
+    }
+    (out / "build_report.json").write_text(json.dumps(rep), encoding="utf-8")
+    if empty_valid:
+        (out / "valid.jsonl").write_text("", encoding="utf-8")
+    return out
+
+
 class TestCliRefusals(unittest.TestCase):
     """The refusals a caller actually sees, with their exit codes."""
 
@@ -101,6 +129,65 @@ class TestCliRefusals(unittest.TestCase):
                         "--out-dir", str(self.corpus / "run"))
         self.assertEqual(p.returncode, 3)
         self.assertIn("missing", p.stdout + p.stderr)
+
+
+class TestLeakCounterWaiver(unittest.TestCase):
+    """The source-level leak counter is waivable ONLY through the waiver E1
+    records (with its reason). The row-level guard never is."""
+
+    def test_an_unwaived_counter_still_refuses_with_the_same_message(self):
+        with tempfile.TemporaryDirectory() as td:
+            corpus = corpus_with_leak_counter(Path(td), leak=105, waiver=False)
+            p = run_trainer("--train", str(corpus / "train.jsonl"),
+                            "--valid", str(corpus / "valid.jsonl"),
+                            "--build-report", str(corpus / "build_report.json"),
+                            "--out-dir", str(corpus / "run"), "--device", "cpu")
+        out = p.stdout + p.stderr
+        self.assertEqual(p.returncode, 3, out)
+        self.assertIn("build report records leaked rows — refusing this corpus", out)
+        self.assertIn("--waive-leak", out)          # the actionable hint
+        self.assertNotIn("leak counter waived:", out)
+
+    def test_a_recorded_waiver_lets_the_counter_through(self):
+        """Waived counter -> the leak gate passes; the run stops at the NEXT
+        guard (an empty valid split), which keeps this torch-free and proves the
+        gate itself moved."""
+        with tempfile.TemporaryDirectory() as td:
+            corpus = corpus_with_leak_counter(Path(td), leak=105, waiver=True,
+                                              empty_valid=True)
+            p = run_trainer("--train", str(corpus / "train.jsonl"),
+                            "--valid", str(corpus / "valid.jsonl"),
+                            "--build-report", str(corpus / "build_report.json"),
+                            "--out-dir", str(corpus / "run"), "--device", "cpu")
+        out = p.stdout + p.stderr
+        self.assertIn("leak counter waived: 105", out)
+        self.assertIn(LEAK_REASON, out)
+        self.assertNotIn("records leaked rows", out)
+        self.assertEqual(p.returncode, 3, out)
+        self.assertIn("empty after validation", out)
+
+    def test_the_row_level_guard_is_never_waivable(self):
+        """Even with the counter waiver active and recorded, a delivered row
+        whose normalized utterance is in the golden corpus is refused."""
+        golden = [json.loads(line) for line in
+                  GOLDEN_CORPUS.read_text(encoding="utf-8").splitlines() if line.strip()]
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            corpus = corpus_with_leak_counter(td, leak=105, waiver=True)
+            leaky = td / "leaky_train.jsonl"
+            leaky.write_text(json.dumps({"id": "leak-1",
+                                         "utterance": golden[0]["utterance"],
+                                         "action": golden[0]["intent"], "spans": []},
+                                        ensure_ascii=False) + "\n", encoding="utf-8")
+            p = run_trainer("--train", str(leaky),
+                            "--valid", str(corpus / "valid.jsonl"),
+                            "--build-report", str(corpus / "build_report.json"),
+                            "--out-dir", str(corpus / "run"), "--device", "cpu")
+        out = p.stdout + p.stderr
+        self.assertIn("leak counter waived: 105", out)   # the waiver WAS active
+        self.assertIn("NEVER waivable", out)
+        self.assertEqual(p.returncode, 3, out)
+        self.assertIn("golden corpus", out)
 
 
 class TestRowValidation(unittest.TestCase):
@@ -209,7 +296,13 @@ class TestResumeAndDistillationGuards(unittest.TestCase):
         for key in ("teacher", "temperature", "lambda_kd", "student_params_target"):
             self.assertIsNone(cfg["distillation"][key],
                               f"{key} must defer to the contract (null)")
-        self.assertIsNone(cfg["artifact"]["version"])
+        # The contract names no artifact version, so this is the one value the
+        # release step must supply (publish refuses on the null placeholder).
+        # Unset is the pre-release state; a set value must be a real version.
+        version = cfg["artifact"]["version"]
+        if version is not None:
+            self.assertEqual(require_t035(version, "encoder.artifact.version"),
+                             version)
         self.assertEqual(cfg["base_revision_prefix"],
                          load_rules().tokenizer_revision_prefix)
 

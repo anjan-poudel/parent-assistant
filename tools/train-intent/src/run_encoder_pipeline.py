@@ -18,6 +18,18 @@ Publication requires ALL of:
   - `encoder.artifact.version` is set (it is T-035-owned — with the `null`
     placeholder the pipeline refuses to publish and says why).
 
+Supply floors (`--waive-floor`) and the source-level leak counter
+(`--waive-leak`): forwarded to the E1 build stage and NOWHERE ELSE — the later
+stages read the recorded state from the build report. A waiver demands a reason
+(EXIT_GUARD otherwise, before anything runs), and the run manifest records the
+same keys as the build report (`waived` / `unwaived` / `violations` /
+`waive_reason`, plus the leak counter's `leak_waiver`) so the two audit records
+reconcile. The leak counter covers EXACT normalized-utterance matches only and
+is not a statement about rows derived from a golden parent, and E2's row-level
+guard is never waivable. A waiver does NOT relax publication: a waived guard is
+an explicitly recorded, internal-testing decision, and the artifact still has to
+clear the calibration + harness gates on its own merits.
+
 Consent (NFR-015): `--consent-export` is deliberately NOT implemented — the
 flag exists so a caller asking for real-user data gets an explicit refusal
 rather than a silent no-op. Real consented exports remain an ops/T-035 gate.
@@ -38,8 +50,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from pipeline_guards import (  # noqa: E402
-    EXIT_GUARD, EXIT_OK, EXIT_STAGE, GuardError, read_json, sha256_file,
-    utc_now, write_json,
+    EXIT_FLOOR, EXIT_GUARD, EXIT_OK, EXIT_STAGE, GuardError, read_json,
+    sha256_file, utc_now, write_json,
 )
 from encoder_contract import load_contract  # noqa: E402
 from encoder_rules import T035PendingError, load_rules, require_t035  # noqa: E402
@@ -162,6 +174,132 @@ def conformance_block(contract) -> dict:
     }
 
 
+def build_stage_cmd(py: list[str], sources: list[str], build_dir: Path,
+                    build_report: Path, smoke: bool, max_train: int,
+                    waive_floor: str = "", waive_reason: str = "",
+                    waive_leak: bool = False) -> list[str]:
+    """The E1 command — the ONE place the waiver flags may appear.
+
+    `train`/`calibrate`/`eval` never receive them: those stages read the
+    recorded state from the build report the waiver was written into, so
+    forwarding the flags further would create a second, unaudited copy.
+    """
+    cmd = list(py) + ["src/build_encoder_dataset.py", "--sources", *sources,
+                      "--out-dir", str(build_dir), "--report", str(build_report)]
+    if smoke:
+        cmd.append("--smoke")
+    if max_train:
+        cmd += ["--max-source-rows", str(max_train)]
+    if waive_floor or waive_leak:
+        if waive_floor:
+            cmd += ["--waive-floor", waive_floor]
+        if waive_leak:
+            cmd.append("--waive-leak")
+        if waive_reason:
+            cmd += ["--waive-reason", waive_reason]
+    return cmd
+
+
+def waiver_refusal(waive_floor: str, waive_leak: bool, waive_reason: str,
+                   skip_build: bool, has_sources: bool) -> str | None:
+    """Refusal message when the waiver flags cannot be honored (None == fine).
+
+    Stricter than the build stage in one corner: `--smoke` there auto-waives
+    without a reason, but a waiver passed to THIS pipeline always needs its
+    reason — in a smoke run the flags are inert anyway, so refusing costs
+    nothing and closes the "waived without a recorded decision" path entirely.
+    """
+    if not waive_floor and not waive_leak:
+        return None
+    if not waive_reason:
+        return ("--waive-floor/--waive-leak require --waive-reason: a waived guard "
+                "is an explicit, recorded decision (T-034 §5.3), never an implicit one")
+    if skip_build or not has_sources:
+        return ("--waive-floor/--waive-leak were given but the build stage will not "
+                "run (--skip-build / no --sources): the waiver would be forwarded "
+                "nowhere and recorded nowhere — drop the flags or let E1 run")
+    return None
+
+
+LEAK_WAIVER_NOTE = (
+    "a waived leak counter means EXACT normalized-utterance matches against the "
+    "golden corpus were excluded — it is NOT 'contamination handled': the counter "
+    "cannot see noised rows whose clean_utterance parent is a golden utterance "
+    "(measured 2026-09-13: teacher 67 exact hits / 25 keys; noised 32 / 2 plus 118 "
+    "parent-derived rows / 22 keys; edge_cases 6 / 5), and E2's row-level guard "
+    "(which does see the delivered rows) is never waivable")
+
+
+def waiver_block(build_report: Path, requested: str, reason: str,
+                 requested_leak: bool = False) -> dict:
+    """Audit record of the waiver(s) for the run manifest.
+
+    Keyed exactly like the build report's `floors` block (`violations` /
+    `waived` / `unwaived` / `waive_reason`) so the two records reconcile
+    line-for-line, plus `violations_waived` (the violation strings the waiver
+    actually covered), the zero-row actions — an action with no rows cannot have
+    been learned, and the manifest must not let a run read as if it were — and
+    the `leak_waiver` sub-record read back from the build report.
+    """
+    requested_floors = [w.strip() for w in (requested or "").split(",") if w.strip()]
+    block: dict = {
+        "requested_floors": requested_floors,
+        "requested_leak_waiver": bool(requested_leak),
+        "waive_reason": reason or "",
+        "recorded": False,
+        "build_report": {"path": str(build_report), "sha256": None},
+    }
+    if not Path(build_report).exists():
+        block["note"] = ("no build report to read (dry run?) — a waiver is only "
+                         "ever recorded by an executed build stage")
+        block["leak_waiver"] = {
+            "requested": bool(requested_leak), "waived": False, "counter": None,
+            "scope": "EXACT normalized-utterance matches only", "note": LEAK_WAIVER_NOTE,
+        }
+        return block
+    rep = read_json(Path(build_report))
+    floors = rep.get("floors", {}) or {}
+    violations = list(floors.get("violations", []) or [])
+    unwaived = list(floors.get("unwaived", []) or [])
+    unwaived_set = set(unwaived)
+    per_action = rep.get("per_action", {}) or {}
+    targets = rep.get("per_action_target", {}) or {}
+    zero_rows = sorted(a for a in targets if not per_action.get(a, 0))
+    lw = rep.get("leak_waiver", {}) or {}
+    block["leak_waiver"] = {
+        "requested": bool(requested_leak or lw.get("requested")),
+        "waived": bool(lw.get("waived")),
+        "counter": rep.get("counters", {}).get("leak", 0),
+        "waive_reason": lw.get("waive_reason") or reason or "",
+        "scope": lw.get("scope") or "EXACT normalized-utterance matches only",
+        "note": LEAK_WAIVER_NOTE,
+    }
+    block.update({
+        "violations": violations,
+        "waived": list(floors.get("waived", []) or []),
+        "violations_waived": [v for v in violations if v not in unwaived_set],
+        "unwaived": unwaived,
+        "waive_reason": floors.get("waive_reason") or reason or "",
+        "usable_for_training": bool(floors.get("usable_for_training")),
+        "zero_row_actions": zero_rows,
+        "recorded": True,
+        "build_report": {"path": str(build_report),
+                         "sha256": sha256_file(build_report)},
+    })
+    if zero_rows:
+        block["zero_row_actions_note"] = (
+            "these actions had 0 training rows after the waiver — the artifact "
+            "cannot have learned them and their harness gates are uninformative; "
+            "internal testing only")
+    block["note"] = (
+        "UNWAIVED floor violations remain — nothing here authorizes training"
+        if unwaived else
+        "waived floors are an explicit internal-testing decision recorded in the "
+        "build report; the artifact still has to clear the calibration and "
+        "harness gates on its own merits")
+    return block
+
+
 def publish_reasons(smoke: bool, harness_exit: int | None, calibration_passed,
                     unchanged: bool, no_publish: bool, skip_calibration: bool,
                     version) -> tuple[list[str], str | None]:
@@ -215,6 +353,22 @@ def parse_args(argv=None):
                    help="optional int8 ONNX export (T-037 owns on-device packaging)")
     p.add_argument("--publish-dir", default=None)
     p.add_argument("--no-publish", action="store_true")
+    p.add_argument("--waive-floor", default="",
+                   help="comma-separated supply floors to waive at the build stage "
+                        "(build stage only; never forwarded to train/calibrate/eval): "
+                        "corpus_floor,stt_noised_floor,per_action_floor")
+    p.add_argument("--waive-reason", default="",
+                   help="required with --waive-floor/--waive-leak; recorded verbatim "
+                        "in the run manifest and in the build report")
+    p.add_argument("--waive-leak", action="store_true",
+                   help="waive E2's refusal on a nonzero source-level leak counter "
+                        "(recorded in the build report; the flags never travel past "
+                        "the build stage). The counter covers EXACT normalized-"
+                        "utterance matches against the golden corpus only — noised "
+                        "rows derived from a golden parent are invisible to it (and "
+                        "to E2's row-level guard, which is never waivable) — so a "
+                        "waiver means 'exact matches were excluded', never "
+                        "'contamination handled'. Requires --waive-reason")
     p.add_argument("--consent-export", default=None,
                    help="REFUSED by design (NFR-015): real-user bundles are ops-gated")
     p.add_argument("--stage-timeout-seconds", type=float, default=None,
@@ -235,6 +389,11 @@ def main(argv=None) -> int:
               "user data only enters training through the consented export bundle "
               "path, which is an ops/T-035 gate; this pipeline will not ingest "
               "arbitrary rows.")
+        return EXIT_GUARD
+    refusal = waiver_refusal(args.waive_floor, args.waive_leak, args.waive_reason,
+                             args.skip_build, bool(args.sources))
+    if refusal:
+        print(f"[guard] REFUSED: {refusal}")
         return EXIT_GUARD
     try:
         rules = load_rules()
@@ -286,16 +445,19 @@ def main(argv=None) -> int:
 
     # ---- stage E1: build --------------------------------------------------
     if args.sources and not args.skip_build:
-        cmd = py + ["src/build_encoder_dataset.py", "--sources", *args.sources,
-                    "--out-dir", str(build_dir), "--report", str(build_report)]
-        if args.smoke:
-            cmd.append("--smoke")
-        if args.max_train:
-            cmd += ["--max-source-rows", str(args.max_train)]
+        cmd = build_stage_cmd(py, args.sources, build_dir, build_report, args.smoke,
+                              args.max_train, args.waive_floor, args.waive_reason,
+                              args.waive_leak)
         st = run_stage("build", cmd, log_dir, args.dry_run, **stage_opts)
         stages.append(st)
         if st.get("exit") not in (0, None):
             print("[pipeline] build failed — stopping before any GPU work")
+            held = (build_report.exists()
+                    and bool((read_json(build_report).get("floors", {}) or {}).get("unwaived")))
+            if held:
+                print("[pipeline] HOLD: floor violations remain UNWAIVED (T-034 §5.3) "
+                      "— this corpus is not trainable and no waiver covers it")
+                return EXIT_FLOOR
             return EXIT_STAGE
     elif not build_report.exists() and not args.dry_run:
         print(f"[guard] REFUSED: no build report at {build_report!s} and no --sources "
@@ -398,6 +560,8 @@ def main(argv=None) -> int:
 
     run_manifest = {
         "schema": "encoder-pipeline-run/v1",
+        "waiver": waiver_block(build_report, args.waive_floor, args.waive_reason,
+                               args.waive_leak),
         "created_utc": utc_now(),
         "work_dir": str(work),
         "smoke": bool(args.smoke),
