@@ -1,0 +1,2438 @@
+{
+  "task": "T-046 chat framing per offered brain id",
+  "generated_utc": "2026-09-13T01:47:20Z",
+  "policy": "Per id: reject a framing whose prompt exceeds the 1,024-token on-device context (none did — max measured prompt 838). Rank the rest by the leading key closed_intent_accuracy x rows_usable_on_device — a framing's correct-and-usable-on-device yield (intent matches gold AND the JSON parsed AND generation was not cut by the runtime budget), i.e. the app-visible outcome, not a literal row count — then by emergency recall, then by JSON parse rate. The first-registered rule ranked emergency recall first; at three emergency rows in the corpus that single-row key inverts the ranking on a runtime truncation artifact (qwen4BNepali: raw decodes 6 rows wrong vs 12 for llama3, but misses gc-emergency-001 by truncating at the runtime budget), so the applied order is the one recorded here. Scope of the verdict: the app's own intent fine-tunes are decided by the measurement (they were trained on exactly this prompt contract). The general-purpose brains (stock Qwen3 4B/1.7B, legacy LLaMA 1B/3B, Gemma 1B) are NOT: the corpus only exercises a contract they were never trained on, so it cannot certify a template change for them. Their published template stands, their measured rows are recorded here, and every case where a different framing scored higher is listed in framing_determination.json under `general_purpose_observations`.",
+  "gates": {
+    "closed_intent_accuracy": 0.95,
+    "slot_f1": 0.9,
+    "emergency_recall": 1.0,
+    "side_effect_precision": 0.97,
+    "max_gap_vs_gemini": 0.03
+  },
+  "source_lines": {
+    "swift_chat_format": {
+      "struct_and_kinds": "ios/ElderlyAssistant/Services/Voice/LlamaCommandInterpreter.swift:474-495",
+      "measured_framings_table": "ios/ElderlyAssistant/Services/Voice/LlamaCommandInterpreter.swift:529-540",
+      "measured_framing_for": "ios/ElderlyAssistant/Services/Voice/LlamaCommandInterpreter.swift:545-547",
+      "chat_format_for_id": "ios/ElderlyAssistant/Services/Voice/LlamaCommandInterpreter.swift:559-561",
+      "chat_format_kind_bytes": "ios/ElderlyAssistant/Services/Voice/LlamaCommandInterpreter.swift:565-611",
+      "formatted_prompt": "ios/ElderlyAssistant/Services/Voice/LlamaCommandInterpreter.swift:620-641"
+    },
+    "catalog_entries": {
+      "whisperMediumFinetunedNepali": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:214-226",
+      "whisperMediumV5": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:228-242",
+      "whisperMediumV6": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:244-258",
+      "whisperFinetunedNepali": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:260-284",
+      "whisperFinetunedNepaliQ8": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:286-297",
+      "whisperSmallNepali": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:299-314",
+      "whisperLargeV3Nepali": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:316-347",
+      "whisperLargeV3NepaliV2": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:349-369",
+      "whisperKitNepali": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:371-390",
+      "whisperKitNepaliLargeBase": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:392-409",
+      "whisperKitNepaliMedium": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:411-433",
+      "whisperKitMediumV5": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:435-455",
+      "whisperKitMediumV6": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:457-475",
+      "whisperSmallMultilingual": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:477-490",
+      "whisperBaseEn": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:492-501",
+      "llama3_2_1B": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:503-522",
+      "intentNepali1B": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:524-546",
+      "intentQwen4BS43": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:548-570",
+      "intentQwenS43": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:572-594",
+      "intentGemma1B": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:596-618",
+      "llama3_2_3B": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:620-632",
+      "qwen3_1_7BInstruct": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:634-650",
+      "qwen3_4BInstruct": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:652-667",
+      "qwen4BNepali": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:669-694",
+      "sileroVAD": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:696-705",
+      "piperNepali": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:713-723",
+      "piperNepaliChitwan": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:725-743",
+      "piperEnglishUS": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:745-755",
+      "sherpaKWSGigaSpeech": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:775-854"
+    },
+    "catalog_ids": {
+      "llama3_2_1B": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:158",
+      "qwen3_1_7BInstruct": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:161",
+      "qwen3_4BInstruct": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:165",
+      "qwen4BNepali": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:168",
+      "intentNepali1B": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:172",
+      "intentQwenS43": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:175",
+      "intentQwen4BS43": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:179",
+      "intentGemma1B": "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift:185"
+    },
+    "harness": "tools/train-intent/src/framing_check.py"
+  },
+  "measured_quant": {
+    "intent-ne-1b-q4km": {
+      "measured_model_file": "intent-ne-qwen-s42-q4_k_m.gguf",
+      "measured_model_sha256": "fc71a6126636c17b8182962cf4abfd4c6e83972bdce6904d658a1b2e97bc7f6f",
+      "quant": "Q4_K_M",
+      "catalog_shipped_file": "intent-ne-qwen-s42-q4_k_m.gguf",
+      "measured_artifact_is_the_shipped_one": true,
+      "previous_quant_measurement": null
+    },
+    "intent-ne-gemma-q4km": {
+      "measured_model_file": "intent-ne-gemma-q4_k_m.gguf",
+      "measured_model_sha256": "78d6392f95ceb3235994adb754a944c2b11061b897a7cc1fcaf88d0fe794df78",
+      "quant": "Q4_K_M",
+      "catalog_shipped_file": "intent-ne-gemma-q4_k_m.gguf",
+      "measured_artifact_is_the_shipped_one": true,
+      "previous_quant_measurement": null
+    },
+    "intent-ne-qwen-s43-q4km": {
+      "measured_model_file": "intent-ne-qwen-s43-q4_k_m.gguf",
+      "measured_model_sha256": "c2135f786ace9c1020a27bb115600d90f9e3c4d788c995730b379b67e1ae74ef",
+      "quant": "Q4_K_M",
+      "catalog_shipped_file": "intent-ne-qwen-s43-q4_k_m.gguf",
+      "measured_artifact_is_the_shipped_one": true,
+      "previous_quant_measurement": null
+    },
+    "intent-ne-qwen3-4b-nepali-q4km": {
+      "measured_model_file": "intent-ne-qwen3-4b-nepali-q4_k_m.gguf",
+      "measured_model_sha256": "eb5ce8059636e36123a86f8fc65b952122e91da573adc54eb18829bd515d6305",
+      "quant": "Q4_K_M",
+      "catalog_shipped_file": "intent-ne-qwen3-4b-nepali-q4_k_m.gguf",
+      "measured_artifact_is_the_shipped_one": true,
+      "previous_quant_measurement": null
+    },
+    "intent-ne-qwen4b-s43-q4km": {
+      "measured_model_file": "intent-ne-qwen4b-s43-q3_k_m.gguf",
+      "measured_model_sha256": "c48e94d0931732d3e6ae14f45f955d20ee5474a83f8e127e8b972ed920999d10",
+      "quant": "Q3_K_M",
+      "catalog_shipped_file": "intent-ne-qwen4b-s43-q3_k_m.gguf",
+      "measured_artifact_is_the_shipped_one": true,
+      "previous_quant_measurement": {
+        "note": "first pass measured intent-ne-qwen4b-s43-q4_k_m.gguf (sha 5a29688902f1...); superseded by the shipped-artifact re-measurement below",
+        "metrics": {
+          "llama3": {
+            "closed_intent_accuracy": 0.941,
+            "emergency_recall": 0.667,
+            "json_parse_rate": 1.0,
+            "rows_usable_on_device": 20
+          },
+          "qwen3": {
+            "closed_intent_accuracy": 0.941,
+            "emergency_recall": 1.0,
+            "json_parse_rate": 0.95,
+            "rows_usable_on_device": 19
+          },
+          "raw": {
+            "closed_intent_accuracy": 1.0,
+            "emergency_recall": 1.0,
+            "json_parse_rate": 1.0,
+            "rows_usable_on_device": 20
+          }
+        }
+      }
+    },
+    "llama-3.2-1b-instruct-q4km": {
+      "measured_model_file": "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+      "measured_model_sha256": "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
+      "quant": "Q4_K_M",
+      "catalog_shipped_file": "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+      "measured_artifact_is_the_shipped_one": true,
+      "previous_quant_measurement": null
+    },
+    "llama-3.2-3b-instruct-q4km": {
+      "measured_model_file": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+      "measured_model_sha256": "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
+      "quant": "Q4_K_M",
+      "catalog_shipped_file": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+      "measured_artifact_is_the_shipped_one": true,
+      "previous_quant_measurement": null
+    },
+    "qwen3-1.7b-instruct-q4km": {
+      "measured_model_file": "Qwen3-1.7B-Q4_K_M.gguf",
+      "measured_model_sha256": "b047d6617eba56dcfa3357566b06807f54b15816faf6182aabd12d7e2378e537",
+      "quant": "Q4_K_M",
+      "catalog_shipped_file": "Qwen3-1.7B-Q4_K_M.gguf",
+      "measured_artifact_is_the_shipped_one": true,
+      "previous_quant_measurement": null
+    },
+    "qwen3-4b-instruct-2507-q4km": {
+      "measured_model_file": "Qwen3-4B-Instruct-2507.Q4_K_M.gguf",
+      "measured_model_sha256": "edabe01d973c31dce0d71eaf7e44628021b23b9bd2cbb93059846dad1cc4e153",
+      "quant": "Q4_K_M",
+      "catalog_shipped_file": "Qwen3-4B-Instruct-2507.Q4_K_M.gguf",
+      "measured_artifact_is_the_shipped_one": true,
+      "previous_quant_measurement": null
+    }
+  },
+  "measured_artifact_checks": {
+    "all_measured_files_are_the_shipped_artifacts": true,
+    "method": "catalog filename parsed from each ModelCatalogEntry in ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift and compared with the model_file the summary records for the run"
+  },
+  "determination": {
+    "intent-ne-1b-q4km": {
+      "offered": false,
+      "provenance": "v12 Qwen3-1.7B QLoRA intent fine-tune, seed 42, superseded by seed 43 (ModelCatalog intentNepali1B entry comment)",
+      "model_file": "intent-ne-qwen-s42-q4_k_m.gguf",
+      "model_sha256": "fc71a6126636c17b8182962cf4abfd4c6e83972bdce6904d658a1b2e97bc7f6f",
+      "pre_fix_framing": "llama3",
+      "required_framing": "raw",
+      "ranking": [
+        "raw",
+        "qwen3",
+        "llama3"
+      ],
+      "keys": {
+        "raw": [
+          0,
+          17.648,
+          1.0,
+          1.0,
+          -727
+        ],
+        "qwen3": [
+          0,
+          14.5293,
+          0.6667,
+          0.95,
+          -810
+        ],
+        "llama3": [
+          0,
+          11.6478,
+          0.6667,
+          0.9,
+          -838
+        ]
+      },
+      "shipped_framing": "raw",
+      "shipped_reason": "hidden fine-tune: raw 0.882 / 1.000 / 20 usable vs pre-fix llama3 0.647 / 0.667 / 18; same lineage as the shipped default, reachable through a stale stored preference",
+      "changed": true,
+      "metrics": {
+        "qwen3": {
+          "closed_intent_accuracy": 0.7647,
+          "contact_f1": 0.5714,
+          "time_f1": 0.6667,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 777,
+          "prompt_tokens_max": 810,
+          "headroom_tokens_min": 214,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19
+        },
+        "llama3": {
+          "closed_intent_accuracy": 0.6471,
+          "contact_f1": 0.3529,
+          "time_f1": 0.6667,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.9,
+          "canonical_key_rate": 0.9,
+          "prompt_tokens_min": 805,
+          "prompt_tokens_max": 838,
+          "headroom_tokens_min": 186,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 2,
+          "rows_usable_on_device": 18
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.8824,
+          "contact_f1": 0.5714,
+          "time_f1": 0.8333,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 1.0,
+          "canonical_key_rate": 1.0,
+          "prompt_tokens_min": 694,
+          "prompt_tokens_max": 727,
+          "headroom_tokens_min": 297,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 0,
+          "rows_usable_on_device": 20
+        }
+      },
+      "per_intent": {
+        "qwen3": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            5,
+            5
+          ],
+          "emergency": [
+            2,
+            3
+          ],
+          "guide": [
+            1,
+            1
+          ],
+          "health_query": [
+            0,
+            2
+          ],
+          "music": [
+            2,
+            2
+          ],
+          "none": [
+            0,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            1,
+            2
+          ]
+        },
+        "llama3": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            5,
+            5
+          ],
+          "emergency": [
+            2,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            0,
+            2
+          ],
+          "music": [
+            2,
+            2
+          ],
+          "none": [
+            0,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            0,
+            2
+          ]
+        },
+        "raw": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            5,
+            5
+          ],
+          "emergency": [
+            3,
+            3
+          ],
+          "guide": [
+            1,
+            1
+          ],
+          "health_query": [
+            1,
+            2
+          ],
+          "music": [
+            2,
+            2
+          ],
+          "none": [
+            0,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            1,
+            2
+          ]
+        }
+      }
+    },
+    "intent-ne-gemma-q4km": {
+      "offered": false,
+      "provenance": "Gemma 3 1B QLoRA intent fine-tune — fails the emergency hard gate (ModelCatalog intentGemma1B entry comment)",
+      "model_file": "intent-ne-gemma-q4_k_m.gguf",
+      "model_sha256": "78d6392f95ceb3235994adb754a944c2b11061b897a7cc1fcaf88d0fe794df78",
+      "pre_fix_framing": "llama3",
+      "required_framing": "raw",
+      "ranking": [
+        "raw",
+        "llama3",
+        "qwen3"
+      ],
+      "keys": {
+        "raw": [
+          0,
+          12.9999,
+          0.6667,
+          0.85,
+          -688
+        ],
+        "llama3": [
+          0,
+          12.7062,
+          0.6667,
+          0.9,
+          -813
+        ],
+        "qwen3": [
+          0,
+          12.0003,
+          0.3333,
+          0.85,
+          -774
+        ]
+      },
+      "shipped_framing": "llama3",
+      "shipped_reason": "general-purpose AND unfixable-here: Gemma 3 needs its own <start_of_turn> template, which ChatFormat cannot express — routed as its own task (T-051); the id is hidden and not offered",
+      "changed": false,
+      "metrics": {
+        "llama3": {
+          "closed_intent_accuracy": 0.7059,
+          "contact_f1": 0.4211,
+          "time_f1": 0.25,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.9,
+          "canonical_key_rate": 0.9,
+          "prompt_tokens_min": 801,
+          "prompt_tokens_max": 813,
+          "headroom_tokens_min": 211,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 2,
+          "rows_usable_on_device": 18
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.7059,
+          "contact_f1": 0.4615,
+          "time_f1": 0.625,
+          "emergency_recall": 0.3333,
+          "emergency_correct": 1,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.85,
+          "canonical_key_rate": 0.85,
+          "prompt_tokens_min": 762,
+          "prompt_tokens_max": 774,
+          "headroom_tokens_min": 250,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 3,
+          "rows_usable_on_device": 17
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.7647,
+          "contact_f1": 0.4211,
+          "time_f1": 0.7143,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.85,
+          "canonical_key_rate": 0.85,
+          "prompt_tokens_min": 676,
+          "prompt_tokens_max": 688,
+          "headroom_tokens_min": 336,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 3,
+          "rows_usable_on_device": 17
+        }
+      },
+      "per_intent": {
+        "llama3": {
+          "ack_med": [
+            0,
+            1
+          ],
+          "call": [
+            4,
+            5
+          ],
+          "emergency": [
+            2,
+            3
+          ],
+          "guide": [
+            1,
+            1
+          ],
+          "health_query": [
+            1,
+            2
+          ],
+          "music": [
+            2,
+            2
+          ],
+          "none": [
+            0,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            1,
+            2
+          ]
+        },
+        "qwen3": {
+          "ack_med": [
+            0,
+            1
+          ],
+          "call": [
+            3,
+            5
+          ],
+          "emergency": [
+            1,
+            3
+          ],
+          "guide": [
+            1,
+            1
+          ],
+          "health_query": [
+            2,
+            2
+          ],
+          "music": [
+            2,
+            2
+          ],
+          "none": [
+            0,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            2,
+            2
+          ]
+        },
+        "raw": {
+          "ack_med": [
+            0,
+            1
+          ],
+          "call": [
+            4,
+            5
+          ],
+          "emergency": [
+            2,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            2,
+            2
+          ],
+          "music": [
+            2,
+            2
+          ],
+          "none": [
+            1,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            2,
+            2
+          ]
+        }
+      }
+    },
+    "intent-ne-qwen-s43-q4km": {
+      "offered": true,
+      "provenance": "Qwen3-1.7B QLoRA intent fine-tune, 696-token slim template, seed 43 (ModelCatalog intentQwenS43 entry comment)",
+      "model_file": "intent-ne-qwen-s43-q4_k_m.gguf",
+      "model_sha256": "c2135f786ace9c1020a27bb115600d90f9e3c4d788c995730b379b67e1ae74ef",
+      "pre_fix_framing": "llama3",
+      "required_framing": "qwen3",
+      "ranking": [
+        "qwen3",
+        "llama3",
+        "raw"
+      ],
+      "keys": {
+        "qwen3": [
+          0,
+          8.4123,
+          1.0,
+          0.65,
+          -810
+        ],
+        "llama3": [
+          0,
+          6.8822,
+          0.6667,
+          0.65,
+          -838
+        ],
+        "raw": [
+          0,
+          4.706,
+          0.3333,
+          0.5,
+          -727
+        ]
+      },
+      "shipped_framing": "qwen3",
+      "shipped_reason": "fine-tune: the Qwen3 wrap decoded best under the app's own grammar (closed 0.647 / emergency 1.000 / 13 usable) vs pre-fix llama3 (0.529 / 0.667 / 13) and bare (0.471 / 0.333 / 10)",
+      "changed": true,
+      "metrics": {
+        "llama3": {
+          "closed_intent_accuracy": 0.5294,
+          "contact_f1": 0.4286,
+          "time_f1": 0.5,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.65,
+          "canonical_key_rate": 0.65,
+          "prompt_tokens_min": 805,
+          "prompt_tokens_max": 838,
+          "headroom_tokens_min": 186,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 7,
+          "rows_usable_on_device": 13
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.6471,
+          "contact_f1": 0.6667,
+          "time_f1": 0.5,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.65,
+          "canonical_key_rate": 0.65,
+          "prompt_tokens_min": 777,
+          "prompt_tokens_max": 810,
+          "headroom_tokens_min": 214,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 7,
+          "rows_usable_on_device": 13
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.4706,
+          "contact_f1": 0.4615,
+          "time_f1": 0.0,
+          "emergency_recall": 0.3333,
+          "emergency_correct": 1,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.5,
+          "canonical_key_rate": 0.5,
+          "prompt_tokens_min": 694,
+          "prompt_tokens_max": 727,
+          "headroom_tokens_min": 297,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 10,
+          "rows_usable_on_device": 10
+        }
+      },
+      "per_intent": {
+        "llama3": {
+          "ack_med": [
+            0,
+            1
+          ],
+          "call": [
+            4,
+            5
+          ],
+          "emergency": [
+            2,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            0,
+            2
+          ],
+          "music": [
+            1,
+            2
+          ],
+          "none": [
+            1,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            1,
+            2
+          ]
+        },
+        "qwen3": {
+          "ack_med": [
+            0,
+            1
+          ],
+          "call": [
+            5,
+            5
+          ],
+          "emergency": [
+            3,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            0,
+            2
+          ],
+          "music": [
+            1,
+            2
+          ],
+          "none": [
+            1,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            1,
+            2
+          ]
+        },
+        "raw": {
+          "ack_med": [
+            0,
+            1
+          ],
+          "call": [
+            4,
+            5
+          ],
+          "emergency": [
+            1,
+            3
+          ],
+          "guide": [
+            1,
+            1
+          ],
+          "health_query": [
+            0,
+            2
+          ],
+          "music": [
+            1,
+            2
+          ],
+          "none": [
+            1,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            0,
+            2
+          ]
+        }
+      }
+    },
+    "intent-ne-qwen3-4b-nepali-q4km": {
+      "offered": true,
+      "provenance": "sidskarki Qwen3-4B Nepali: base + extended Devanagari tokenizer + SFT LoRA merged + CPT embedding restore (ModelCatalog qwen4BNepali entry comment)",
+      "model_file": "intent-ne-qwen3-4b-nepali-q4_k_m.gguf",
+      "model_sha256": "eb5ce8059636e36123a86f8fc65b952122e91da573adc54eb18829bd515d6305",
+      "pre_fix_framing": "llama3",
+      "required_framing": "raw",
+      "ranking": [
+        "raw",
+        "llama3",
+        "qwen3"
+      ],
+      "keys": {
+        "raw": [
+          0,
+          9.1767,
+          0.6667,
+          0.7,
+          -670
+        ],
+        "llama3": [
+          0,
+          3.2944,
+          1.0,
+          0.4,
+          -781
+        ],
+        "qwen3": [
+          0,
+          3.2944,
+          0.6667,
+          0.4,
+          -753
+        ]
+      },
+      "shipped_framing": "raw",
+      "shipped_reason": "fine-tune: bare halves the wrong rows (6 of 20 vs 12 under pre-fix llama3); closed 0.706 vs 0.412, usable 13 vs 8; the single emergency row it drops is a truncation, not a misclassification",
+      "changed": true,
+      "metrics": {
+        "llama3": {
+          "closed_intent_accuracy": 0.4118,
+          "contact_f1": 0.1818,
+          "time_f1": 0.4286,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.4,
+          "canonical_key_rate": 0.4,
+          "prompt_tokens_min": 758,
+          "prompt_tokens_max": 781,
+          "headroom_tokens_min": 243,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 12,
+          "rows_usable_on_device": 8
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.4118,
+          "contact_f1": 0.0,
+          "time_f1": 0.0,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.4,
+          "canonical_key_rate": 0.4,
+          "prompt_tokens_min": 730,
+          "prompt_tokens_max": 753,
+          "headroom_tokens_min": 271,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 12,
+          "rows_usable_on_device": 8
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.7059,
+          "contact_f1": 0.2069,
+          "time_f1": 0.2632,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.7,
+          "canonical_key_rate": 0.7,
+          "prompt_tokens_min": 647,
+          "prompt_tokens_max": 670,
+          "headroom_tokens_min": 354,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 7,
+          "rows_usable_on_device": 13
+        }
+      },
+      "per_intent": {
+        "llama3": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            2,
+            5
+          ],
+          "emergency": [
+            3,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            0,
+            2
+          ],
+          "music": [
+            0,
+            2
+          ],
+          "none": [
+            1,
+            2
+          ],
+          "query": [
+            0,
+            1
+          ],
+          "send_message": [
+            0,
+            1
+          ],
+          "set_reminder": [
+            1,
+            2
+          ]
+        },
+        "qwen3": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            3,
+            5
+          ],
+          "emergency": [
+            2,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            0,
+            2
+          ],
+          "music": [
+            1,
+            2
+          ],
+          "none": [
+            1,
+            2
+          ],
+          "query": [
+            0,
+            1
+          ],
+          "send_message": [
+            0,
+            1
+          ],
+          "set_reminder": [
+            0,
+            2
+          ]
+        },
+        "raw": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            4,
+            5
+          ],
+          "emergency": [
+            2,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            0,
+            2
+          ],
+          "music": [
+            2,
+            2
+          ],
+          "none": [
+            2,
+            2
+          ],
+          "query": [
+            0,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            2,
+            2
+          ]
+        }
+      }
+    },
+    "intent-ne-qwen4b-s43-q4km": {
+      "offered": true,
+      "provenance": "Qwen3-4B QLoRA intent fine-tune, slim-template seed 43 — the first gate-passing brain (ModelCatalog intentQwen4BS43 entry comment)",
+      "model_file": "intent-ne-qwen4b-s43-q3_k_m.gguf",
+      "model_sha256": "c48e94d0931732d3e6ae14f45f955d20ee5474a83f8e127e8b972ed920999d10",
+      "pre_fix_framing": "llama3",
+      "required_framing": "raw",
+      "ranking": [
+        "raw",
+        "qwen3",
+        "llama3"
+      ],
+      "keys": {
+        "raw": [
+          0,
+          20.0,
+          1.0,
+          1.0,
+          -727
+        ],
+        "qwen3": [
+          0,
+          17.8828,
+          1.0,
+          0.95,
+          -810
+        ],
+        "llama3": [
+          0,
+          15.8832,
+          1.0,
+          0.9,
+          -838
+        ]
+      },
+      "shipped_framing": "raw",
+      "shipped_reason": "fine-tune: raw is perfect (closed 1.000 / emergency 1.000 / 20 of 20 usable) vs pre-fix llama3 (0.941 / 0.667 / 20); trained on the bare template",
+      "changed": true,
+      "metrics": {
+        "llama3": {
+          "closed_intent_accuracy": 0.8824,
+          "contact_f1": 0.4444,
+          "time_f1": 0.9091,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.9,
+          "canonical_key_rate": 0.9,
+          "prompt_tokens_min": 805,
+          "prompt_tokens_max": 838,
+          "headroom_tokens_min": 186,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 2,
+          "rows_usable_on_device": 18
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.9412,
+          "contact_f1": 0.8,
+          "time_f1": 0.9091,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 777,
+          "prompt_tokens_max": 810,
+          "headroom_tokens_min": 214,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19
+        },
+        "raw": {
+          "closed_intent_accuracy": 1.0,
+          "contact_f1": 0.8333,
+          "time_f1": 0.9091,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 1.0,
+          "canonical_key_rate": 1.0,
+          "prompt_tokens_min": 694,
+          "prompt_tokens_max": 727,
+          "headroom_tokens_min": 297,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 0,
+          "rows_usable_on_device": 20
+        }
+      },
+      "per_intent": {
+        "llama3": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            5,
+            5
+          ],
+          "emergency": [
+            3,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            1,
+            2
+          ],
+          "music": [
+            2,
+            2
+          ],
+          "none": [
+            1,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            2,
+            2
+          ]
+        },
+        "qwen3": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            5,
+            5
+          ],
+          "emergency": [
+            3,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            2,
+            2
+          ],
+          "music": [
+            2,
+            2
+          ],
+          "none": [
+            1,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            2,
+            2
+          ]
+        },
+        "raw": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            5,
+            5
+          ],
+          "emergency": [
+            3,
+            3
+          ],
+          "guide": [
+            1,
+            1
+          ],
+          "health_query": [
+            2,
+            2
+          ],
+          "music": [
+            2,
+            2
+          ],
+          "none": [
+            1,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            2,
+            2
+          ]
+        }
+      }
+    },
+    "llama-3.2-1b-instruct-q4km": {
+      "offered": false,
+      "provenance": "legacy pre-Qwen LLaMA 3.2 1B Instruct (ModelCatalog llama3_2_1B entry)",
+      "model_file": "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+      "model_sha256": "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
+      "pre_fix_framing": "llama3",
+      "required_framing": "raw",
+      "ranking": [
+        "raw",
+        "qwen3",
+        "llama3"
+      ],
+      "keys": {
+        "raw": [
+          0,
+          11.764,
+          0.0,
+          1.0,
+          -678
+        ],
+        "qwen3": [
+          0,
+          4.9406,
+          0.0,
+          0.7,
+          -761
+        ],
+        "llama3": [
+          0,
+          4.5877,
+          0.0,
+          0.65,
+          -789
+        ]
+      },
+      "shipped_framing": "llama3",
+      "shipped_reason": "general-purpose legacy, unchanged; see general_purpose_observations",
+      "changed": false,
+      "metrics": {
+        "llama3": {
+          "closed_intent_accuracy": 0.3529,
+          "contact_f1": 0.0,
+          "time_f1": 0.1429,
+          "emergency_recall": 0.0,
+          "emergency_correct": 0,
+          "emergency_gold": 3,
+          "side_effect_precision": 0.6667,
+          "json_parse_rate": 0.65,
+          "canonical_key_rate": 0.65,
+          "prompt_tokens_min": 772,
+          "prompt_tokens_max": 789,
+          "headroom_tokens_min": 235,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 7,
+          "rows_usable_on_device": 13
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.3529,
+          "contact_f1": 0.0,
+          "time_f1": 0.1905,
+          "emergency_recall": 0.0,
+          "emergency_correct": 0,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.7,
+          "canonical_key_rate": 0.7,
+          "prompt_tokens_min": 744,
+          "prompt_tokens_max": 761,
+          "headroom_tokens_min": 263,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 6,
+          "rows_usable_on_device": 14
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.5882,
+          "contact_f1": 0.0,
+          "time_f1": 0.1481,
+          "emergency_recall": 0.0,
+          "emergency_correct": 0,
+          "emergency_gold": 3,
+          "side_effect_precision": 0.8333,
+          "json_parse_rate": 1.0,
+          "canonical_key_rate": 1.0,
+          "prompt_tokens_min": 661,
+          "prompt_tokens_max": 678,
+          "headroom_tokens_min": 346,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 0,
+          "rows_usable_on_device": 20
+        }
+      },
+      "per_intent": {
+        "llama3": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            3,
+            5
+          ],
+          "emergency": [
+            0,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            0,
+            2
+          ],
+          "music": [
+            1,
+            2
+          ],
+          "none": [
+            1,
+            2
+          ],
+          "query": [
+            0,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            0,
+            2
+          ]
+        },
+        "qwen3": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            3,
+            5
+          ],
+          "emergency": [
+            0,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            1,
+            2
+          ],
+          "music": [
+            0,
+            2
+          ],
+          "none": [
+            1,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            0,
+            2
+          ]
+        },
+        "raw": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            4,
+            5
+          ],
+          "emergency": [
+            0,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            2,
+            2
+          ],
+          "music": [
+            1,
+            2
+          ],
+          "none": [
+            0,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            1,
+            2
+          ]
+        }
+      }
+    },
+    "llama-3.2-3b-instruct-q4km": {
+      "offered": false,
+      "provenance": "legacy pre-Qwen LLaMA 3.2 3B Instruct (ModelCatalog llama3_2_3B entry)",
+      "model_file": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+      "model_sha256": "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
+      "pre_fix_framing": "llama3",
+      "required_framing": "qwen3",
+      "ranking": [
+        "qwen3",
+        "raw",
+        "llama3"
+      ],
+      "keys": {
+        "qwen3": [
+          0,
+          15.6465,
+          1.0,
+          0.95,
+          -761
+        ],
+        "raw": [
+          0,
+          15.294,
+          0.6667,
+          1.0,
+          -678
+        ],
+        "llama3": [
+          0,
+          12.2949,
+          0.6667,
+          0.95,
+          -789
+        ]
+      },
+      "shipped_framing": "llama3",
+      "shipped_reason": "general-purpose legacy, unchanged; see general_purpose_observations",
+      "changed": false,
+      "metrics": {
+        "llama3": {
+          "closed_intent_accuracy": 0.6471,
+          "contact_f1": 0.3636,
+          "time_f1": 0.4444,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 0.8333,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 772,
+          "prompt_tokens_max": 789,
+          "headroom_tokens_min": 235,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.8235,
+          "contact_f1": 0.3333,
+          "time_f1": 0.6,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 0.8333,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 744,
+          "prompt_tokens_max": 761,
+          "headroom_tokens_min": 263,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.7647,
+          "contact_f1": 0.3333,
+          "time_f1": 0.6667,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 0.8333,
+          "json_parse_rate": 1.0,
+          "canonical_key_rate": 1.0,
+          "prompt_tokens_min": 661,
+          "prompt_tokens_max": 678,
+          "headroom_tokens_min": 346,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 0,
+          "rows_usable_on_device": 20
+        }
+      },
+      "per_intent": {
+        "llama3": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            4,
+            5
+          ],
+          "emergency": [
+            2,
+            3
+          ],
+          "guide": [
+            1,
+            1
+          ],
+          "health_query": [
+            1,
+            2
+          ],
+          "music": [
+            0,
+            2
+          ],
+          "none": [
+            0,
+            2
+          ],
+          "query": [
+            0,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            1,
+            2
+          ]
+        },
+        "qwen3": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            4,
+            5
+          ],
+          "emergency": [
+            3,
+            3
+          ],
+          "guide": [
+            1,
+            1
+          ],
+          "health_query": [
+            1,
+            2
+          ],
+          "music": [
+            2,
+            2
+          ],
+          "none": [
+            0,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            1,
+            2
+          ]
+        },
+        "raw": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            4,
+            5
+          ],
+          "emergency": [
+            2,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            1,
+            2
+          ],
+          "music": [
+            2,
+            2
+          ],
+          "none": [
+            0,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            2,
+            2
+          ]
+        }
+      }
+    },
+    "qwen3-1.7b-instruct-q4km": {
+      "offered": true,
+      "provenance": "stock Qwen3-1.7B-Instruct (2507) GGUF, lm-kit mirror (ModelCatalog qwen3_1_7BInstruct entry comment)",
+      "model_file": "Qwen3-1.7B-Q4_K_M.gguf",
+      "model_sha256": "b047d6617eba56dcfa3357566b06807f54b15816faf6182aabd12d7e2378e537",
+      "pre_fix_framing": "qwen3",
+      "required_framing": "raw",
+      "ranking": [
+        "raw",
+        "qwen3",
+        "llama3"
+      ],
+      "keys": {
+        "raw": [
+          0,
+          3.1761,
+          0.6667,
+          0.45,
+          -727
+        ],
+        "qwen3": [
+          0,
+          1.4118,
+          0.0,
+          0.3,
+          -810
+        ],
+        "llama3": [
+          0,
+          0.1176,
+          0.0,
+          0.1,
+          -838
+        ]
+      },
+      "shipped_framing": "qwen3",
+      "shipped_reason": "general-purpose, unchanged: fails to decode under every expressible framing (best parse 0.450) — a capability limit, not a framing requirement; see general_purpose_observations",
+      "changed": false,
+      "metrics": {
+        "llama3": {
+          "closed_intent_accuracy": 0.0588,
+          "contact_f1": 0.25,
+          "time_f1": 0.6,
+          "emergency_recall": 0.0,
+          "emergency_correct": 0,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.1,
+          "canonical_key_rate": 0.1,
+          "prompt_tokens_min": 805,
+          "prompt_tokens_max": 838,
+          "headroom_tokens_min": 186,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 18,
+          "rows_usable_on_device": 2
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.2353,
+          "contact_f1": 0.1538,
+          "time_f1": 0.375,
+          "emergency_recall": 0.0,
+          "emergency_correct": 0,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.3,
+          "canonical_key_rate": 0.3,
+          "prompt_tokens_min": 777,
+          "prompt_tokens_max": 810,
+          "headroom_tokens_min": 214,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 14,
+          "rows_usable_on_device": 6
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.3529,
+          "contact_f1": 0.2667,
+          "time_f1": 0.0,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.45,
+          "canonical_key_rate": 0.45,
+          "prompt_tokens_min": 694,
+          "prompt_tokens_max": 727,
+          "headroom_tokens_min": 297,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 11,
+          "rows_usable_on_device": 9
+        }
+      },
+      "per_intent": {
+        "llama3": {
+          "ack_med": [
+            0,
+            1
+          ],
+          "call": [
+            0,
+            5
+          ],
+          "emergency": [
+            0,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            0,
+            2
+          ],
+          "music": [
+            0,
+            2
+          ],
+          "none": [
+            2,
+            2
+          ],
+          "query": [
+            0,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            0,
+            2
+          ]
+        },
+        "qwen3": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            2,
+            5
+          ],
+          "emergency": [
+            0,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            0,
+            2
+          ],
+          "music": [
+            0,
+            2
+          ],
+          "none": [
+            2,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            0,
+            1
+          ],
+          "set_reminder": [
+            1,
+            2
+          ]
+        },
+        "raw": {
+          "ack_med": [
+            0,
+            1
+          ],
+          "call": [
+            2,
+            5
+          ],
+          "emergency": [
+            2,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            1,
+            2
+          ],
+          "music": [
+            0,
+            2
+          ],
+          "none": [
+            2,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            0,
+            2
+          ]
+        }
+      }
+    },
+    "qwen3-4b-instruct-2507-q4km": {
+      "offered": true,
+      "provenance": "stock Qwen3-4B-Instruct-2507 GGUF, mradermacher mirror (ModelCatalog qwen3_4BInstruct entry comment)",
+      "model_file": "Qwen3-4B-Instruct-2507.Q4_K_M.gguf",
+      "model_sha256": "edabe01d973c31dce0d71eaf7e44628021b23b9bd2cbb93059846dad1cc4e153",
+      "pre_fix_framing": "qwen3",
+      "required_framing": "raw",
+      "ranking": [
+        "raw",
+        "qwen3",
+        "llama3"
+      ],
+      "keys": {
+        "raw": [
+          0,
+          16.7656,
+          0.6667,
+          0.95,
+          -727
+        ],
+        "qwen3": [
+          0,
+          15.6465,
+          0.6667,
+          0.95,
+          -810
+        ],
+        "llama3": [
+          0,
+          14.823,
+          1.0,
+          0.9,
+          -838
+        ]
+      },
+      "shipped_framing": "qwen3",
+      "shipped_reason": "general-purpose, unchanged: the three metrics each name a different framing (emergency 3/3 llama3, closed 0.882 raw, usable 19 qwen3/raw) — inconclusive, so the publisher's Qwen3 template stands; see general_purpose_observations",
+      "changed": false,
+      "metrics": {
+        "llama3": {
+          "closed_intent_accuracy": 0.8235,
+          "contact_f1": 1.0,
+          "time_f1": 0.8333,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.9,
+          "canonical_key_rate": 0.9,
+          "prompt_tokens_min": 805,
+          "prompt_tokens_max": 838,
+          "headroom_tokens_min": 186,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 2,
+          "rows_usable_on_device": 18
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.8235,
+          "contact_f1": 0.8333,
+          "time_f1": 0.6667,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 777,
+          "prompt_tokens_max": 810,
+          "headroom_tokens_min": 214,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.8824,
+          "contact_f1": 0.6667,
+          "time_f1": 1.0,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 694,
+          "prompt_tokens_max": 727,
+          "headroom_tokens_min": 297,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19
+        }
+      },
+      "per_intent": {
+        "llama3": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            5,
+            5
+          ],
+          "emergency": [
+            3,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            0,
+            2
+          ],
+          "music": [
+            2,
+            2
+          ],
+          "none": [
+            0,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            2,
+            2
+          ]
+        },
+        "qwen3": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            5,
+            5
+          ],
+          "emergency": [
+            2,
+            3
+          ],
+          "guide": [
+            0,
+            1
+          ],
+          "health_query": [
+            1,
+            2
+          ],
+          "music": [
+            2,
+            2
+          ],
+          "none": [
+            0,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            2,
+            2
+          ]
+        },
+        "raw": {
+          "ack_med": [
+            1,
+            1
+          ],
+          "call": [
+            5,
+            5
+          ],
+          "emergency": [
+            2,
+            3
+          ],
+          "guide": [
+            1,
+            1
+          ],
+          "health_query": [
+            1,
+            2
+          ],
+          "music": [
+            2,
+            2
+          ],
+          "none": [
+            0,
+            2
+          ],
+          "query": [
+            1,
+            1
+          ],
+          "send_message": [
+            1,
+            1
+          ],
+          "set_reminder": [
+            2,
+            2
+          ]
+        }
+      }
+    }
+  },
+  "general_purpose_observations": {
+    "intent-ne-gemma-q4km": {
+      "shipped": "llama3",
+      "measured_best": "raw",
+      "why_not_shipped": "general-purpose brain: the golden corpus exercises only the app's own intent contract, which this model was never trained on, so a corpus win does not certify a template change on free-form device utterances; the publisher's template stands and the row is recorded for a wider eval",
+      "metrics": {
+        "llama3": {
+          "closed_intent_accuracy": 0.7059,
+          "contact_f1": 0.4211,
+          "time_f1": 0.25,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.9,
+          "canonical_key_rate": 0.9,
+          "prompt_tokens_min": 801,
+          "prompt_tokens_max": 813,
+          "headroom_tokens_min": 211,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 2,
+          "rows_usable_on_device": 18
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.7059,
+          "contact_f1": 0.4615,
+          "time_f1": 0.625,
+          "emergency_recall": 0.3333,
+          "emergency_correct": 1,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.85,
+          "canonical_key_rate": 0.85,
+          "prompt_tokens_min": 762,
+          "prompt_tokens_max": 774,
+          "headroom_tokens_min": 250,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 3,
+          "rows_usable_on_device": 17
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.7647,
+          "contact_f1": 0.4211,
+          "time_f1": 0.7143,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.85,
+          "canonical_key_rate": 0.85,
+          "prompt_tokens_min": 676,
+          "prompt_tokens_max": 688,
+          "headroom_tokens_min": 336,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 3,
+          "rows_usable_on_device": 17
+        }
+      }
+    },
+    "llama-3.2-1b-instruct-q4km": {
+      "shipped": "llama3",
+      "measured_best": "raw",
+      "why_not_shipped": "general-purpose brain: the golden corpus exercises only the app's own intent contract, which this model was never trained on, so a corpus win does not certify a template change on free-form device utterances; the publisher's template stands and the row is recorded for a wider eval",
+      "metrics": {
+        "llama3": {
+          "closed_intent_accuracy": 0.3529,
+          "contact_f1": 0.0,
+          "time_f1": 0.1429,
+          "emergency_recall": 0.0,
+          "emergency_correct": 0,
+          "emergency_gold": 3,
+          "side_effect_precision": 0.6667,
+          "json_parse_rate": 0.65,
+          "canonical_key_rate": 0.65,
+          "prompt_tokens_min": 772,
+          "prompt_tokens_max": 789,
+          "headroom_tokens_min": 235,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 7,
+          "rows_usable_on_device": 13
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.3529,
+          "contact_f1": 0.0,
+          "time_f1": 0.1905,
+          "emergency_recall": 0.0,
+          "emergency_correct": 0,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.7,
+          "canonical_key_rate": 0.7,
+          "prompt_tokens_min": 744,
+          "prompt_tokens_max": 761,
+          "headroom_tokens_min": 263,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 6,
+          "rows_usable_on_device": 14
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.5882,
+          "contact_f1": 0.0,
+          "time_f1": 0.1481,
+          "emergency_recall": 0.0,
+          "emergency_correct": 0,
+          "emergency_gold": 3,
+          "side_effect_precision": 0.8333,
+          "json_parse_rate": 1.0,
+          "canonical_key_rate": 1.0,
+          "prompt_tokens_min": 661,
+          "prompt_tokens_max": 678,
+          "headroom_tokens_min": 346,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 0,
+          "rows_usable_on_device": 20
+        }
+      }
+    },
+    "llama-3.2-3b-instruct-q4km": {
+      "shipped": "llama3",
+      "measured_best": "qwen3",
+      "why_not_shipped": "general-purpose brain: the golden corpus exercises only the app's own intent contract, which this model was never trained on, so a corpus win does not certify a template change on free-form device utterances; the publisher's template stands and the row is recorded for a wider eval",
+      "metrics": {
+        "llama3": {
+          "closed_intent_accuracy": 0.6471,
+          "contact_f1": 0.3636,
+          "time_f1": 0.4444,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 0.8333,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 772,
+          "prompt_tokens_max": 789,
+          "headroom_tokens_min": 235,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.8235,
+          "contact_f1": 0.3333,
+          "time_f1": 0.6,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 0.8333,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 744,
+          "prompt_tokens_max": 761,
+          "headroom_tokens_min": 263,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.7647,
+          "contact_f1": 0.3333,
+          "time_f1": 0.6667,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 0.8333,
+          "json_parse_rate": 1.0,
+          "canonical_key_rate": 1.0,
+          "prompt_tokens_min": 661,
+          "prompt_tokens_max": 678,
+          "headroom_tokens_min": 346,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 0,
+          "rows_usable_on_device": 20
+        }
+      }
+    },
+    "qwen3-1.7b-instruct-q4km": {
+      "shipped": "qwen3",
+      "measured_best": "raw",
+      "why_not_shipped": "general-purpose brain: the golden corpus exercises only the app's own intent contract, which this model was never trained on, so a corpus win does not certify a template change on free-form device utterances; the publisher's template stands and the row is recorded for a wider eval",
+      "metrics": {
+        "llama3": {
+          "closed_intent_accuracy": 0.0588,
+          "contact_f1": 0.25,
+          "time_f1": 0.6,
+          "emergency_recall": 0.0,
+          "emergency_correct": 0,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.1,
+          "canonical_key_rate": 0.1,
+          "prompt_tokens_min": 805,
+          "prompt_tokens_max": 838,
+          "headroom_tokens_min": 186,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 18,
+          "rows_usable_on_device": 2
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.2353,
+          "contact_f1": 0.1538,
+          "time_f1": 0.375,
+          "emergency_recall": 0.0,
+          "emergency_correct": 0,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.3,
+          "canonical_key_rate": 0.3,
+          "prompt_tokens_min": 777,
+          "prompt_tokens_max": 810,
+          "headroom_tokens_min": 214,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 14,
+          "rows_usable_on_device": 6
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.3529,
+          "contact_f1": 0.2667,
+          "time_f1": 0.0,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.45,
+          "canonical_key_rate": 0.45,
+          "prompt_tokens_min": 694,
+          "prompt_tokens_max": 727,
+          "headroom_tokens_min": 297,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 11,
+          "rows_usable_on_device": 9
+        }
+      }
+    },
+    "qwen3-4b-instruct-2507-q4km": {
+      "shipped": "qwen3",
+      "measured_best": "raw",
+      "why_not_shipped": "general-purpose brain: the golden corpus exercises only the app's own intent contract, which this model was never trained on, so a corpus win does not certify a template change on free-form device utterances; the publisher's template stands and the row is recorded for a wider eval",
+      "metrics": {
+        "llama3": {
+          "closed_intent_accuracy": 0.8235,
+          "contact_f1": 1.0,
+          "time_f1": 0.8333,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.9,
+          "canonical_key_rate": 0.9,
+          "prompt_tokens_min": 805,
+          "prompt_tokens_max": 838,
+          "headroom_tokens_min": 186,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 2,
+          "rows_usable_on_device": 18
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.8235,
+          "contact_f1": 0.8333,
+          "time_f1": 0.6667,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 777,
+          "prompt_tokens_max": 810,
+          "headroom_tokens_min": 214,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.8824,
+          "contact_f1": 0.6667,
+          "time_f1": 1.0,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 694,
+          "prompt_tokens_max": 727,
+          "headroom_tokens_min": 297,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19
+        }
+      }
+    }
+  }
+}

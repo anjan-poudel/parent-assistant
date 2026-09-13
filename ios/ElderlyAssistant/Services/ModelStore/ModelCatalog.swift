@@ -608,12 +608,15 @@ enum ModelCatalog {
             id: llama3_2_1B,
             kind: .llamaBase,
             // HIDDEN from the picker (2026-09-12, catalog declutter): the
-            // pre-Qwen reasoning brain. NOTE: it is still the auto-download
-            // default (`AppCoordinator.defaultBrainModelID`), which now
-            // means a fresh install fetches a brain the picker no longer
-            // offers — moving that default (to the intent fine-tune?) is a
-            // separate product decision, deliberately not made here. Kept
-            // in `all` so a device that cached it can still delete it.
+            // pre-Qwen reasoning brain. Kept in `all` so a device that
+            // cached it can still delete it.
+            // CHAT FRAMING (T-046): LLaMA 3.2 — unchanged, and the shipped
+            // tree's byte-identity pin still covers it
+            // (`measuredFramings[llama3_2_1B] = .llama3`).
+            // The auto-download default is NOT this brain (a comment here
+            // claimed it was until T-046); `AppCoordinator.defaultBrainModelID`
+            // is `intentQwen4BS43`. T-047 reconciles the remaining catalogue
+            // prose.
             displayName: "Brain — LLaMA 1B (legacy)",
             filename: "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
             downloadURL: URL(string: "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf")!,
@@ -634,6 +637,13 @@ enum ModelCatalog {
             // Gates: closed 0.941 (one row short), emergency 1.000,
             // side-effect 1.000 — best available on-device brain.
             // Supersedes v12 seed-42 and the Gemma v7 brain.
+            // CHAT FRAMING (T-046, measured): `.raw` — the Qwen3-1.7B
+            // fine-tunes were trained on the bare prompt template with NO
+            // chat-template wrap (`train_qlora.py` to_text; the golden
+            // eval's matching contract is "never pass the prompt through a
+            // chat template here"). Still resolvable through a stale stored
+            // preference (`AppCoordinator.resolvedBrainModelID`), so it
+            // carries a `measuredFramings` row even though it is not offered.
             filename: "intent-ne-qwen-s42-q4_k_m.gguf",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v12/intent-ne-qwen-s42-q4_k_m.gguf")!,
             sizeBytes: 1_107_408_576,
@@ -654,6 +664,18 @@ enum ModelCatalog {
             // Q3_K_M for sub-2GiB GitHub distribution (v15). Q3 gates:
             // closed 1.000, emergency 1.000, se 1.000, time 0.909,
             // contact 0.833 (Q4 = 1.000 — Q4 is the ship target).
+            // CHAT FRAMING (T-046, measured on THIS shipped Q3_K_M artifact —
+            // the record's `measured_quant` maps the id to this filename and
+            // digest): `.raw` — the fine-tune was trained on the bare prompt
+            // template with NO chat-template wrap. Under the app's decode
+            // grammar, raw decodes 20/20 golden rows correct and usable
+            // (closed 1.000 / emergency 1.000) vs 18/20 for the pre-T-046
+            // LLaMA 3.2 branch (closed 0.882, two runtime truncations and one
+            // spurious emergency) and 19/20 for the Qwen3 wrap. Gate numbers
+            // above are grammar-off; the T-046 framing record carries the
+            // app-faithful per-framing rows. This is the shipped default
+            // brain, so it is the id the pre-T-046 `default:` branch
+            // mis-framed most consequentially.
             filename: "intent-ne-qwen4b-s43-q3_k_m.gguf",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v15/intent-ne-qwen4b-s43-q3_k_m.gguf")!,
             sizeBytes: 2_075_616_032,
@@ -672,6 +694,14 @@ enum ModelCatalog {
             // template + reconciled intent/response schema. Gates: closed
             // 0.941 (one row short), emergency 1.000, side-effect 1.000 —
             // best available on-device brain.
+            // CHAT FRAMING (T-046, measured): `.qwen3` — the one fine-tune
+            // the app-faithful check does NOT send the bare prompt: under the
+            // on-device grammar it decoded better wrapped in the official
+            // Qwen3 template (emergency 1.000 / closed 0.647 / 13 usable
+            // rows) than bare (0.333 / 0.471 / 10) or under the pre-T-046
+            // LLaMA 3.2 scheme (0.667 / 0.529 / 13). Gate numbers above are
+            // grammar-off; see the T-046 framing record for the per-framing
+            // rows. The pre-T-046 `default:` branch sent it LLaMA 3.2.
             filename: "intent-ne-qwen-s43-q4_k_m.gguf",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v14/intent-ne-qwen-s43-q4_k_m.gguf")!,
             sizeBytes: 1_107_408_576,
@@ -771,6 +801,13 @@ enum ModelCatalog {
             // embedding restore), GGUF Q4_K_M. Served from the home
             // server for TESTING (LAN-only URL); public hosting needs a
             // >2GiB route — parts sit on release v13.
+            // CHAT FRAMING (T-046, measured): `.raw` — under the on-device
+            // grammar the bare prompt halved the wrong rows (6 of 20, vs 12
+            // of 20 for the pre-T-046 LLaMA 3.2 scheme): closed 0.412 ->
+            // 0.706, parse 0.400 -> 0.700, usable 8 -> 13. The one
+            // emergency row it drops (gc-emergency-001) is a runtime
+            // truncation, not a misclassification — see the T-046 record's
+            // safety table.
             filename: "intent-ne-qwen3-4b-nepali-q4_k_m.gguf",
             downloadURL: URL(string: "http://192.168.1.117:8765/intent-ne-qwen3-4b-nepali-q4_k_m.gguf")!,
             sizeBytes: 2_529_263_424,

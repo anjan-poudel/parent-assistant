@@ -1,0 +1,1696 @@
+{
+  "task": "T-046 chat framing per offered brain id",
+  "generated_utc": "2026-09-13T01:47:20Z",
+  "what": "Every catalog id the app can resolve, scored under each candidate chat framing against tools/train-intent/eval/golden_corpus.jsonl through the app's own grammar-constrained GGUF decode path (tools/train-intent/src/framing_check.py).",
+  "grammar_modes": [
+    "gbnf"
+  ],
+  "meta": {
+    "corpus_sha256": "1f4c059cd9b10fe43d76ccadbe72edfa26144c8336f91a201148a227e0a06355",
+    "template_sha256": "df141760089c50b62e894aa0e1c0a72cc40c11e9c4361c3028d9a47f1936ee11",
+    "swift_source_sha256": "11f958ab8bd027df06fda28bddea3dd50a693d5a2fcfe9380b5ded3b18f602e5",
+    "system_prompt": "    You are Sahayak, a voice assistant for an elderly speaker. Reply with  ONLY one JSON object (no fences, no other text); its \"response\" must  be a non-empty spoken reply in the user's language.",
+    "n_ctx": 4096,
+    "runtime_n_ctx": 1024,
+    "grammar": "gbnf",
+    "grammar_fingerprint": "9432361c7bc3aa86",
+    "gates": {
+      "closed_intent_accuracy": 0.95,
+      "slot_f1": 0.9,
+      "emergency_recall": 1.0,
+      "side_effect_precision": 0.97,
+      "max_gap_vs_gemini": 0.03
+    },
+    "max_tokens": "runtime-budget",
+    "prompt_renderer": "intent_prompt.render_prompt"
+  },
+  "ids": {
+    "intent-ne-1b-q4km": {
+      "offered": false,
+      "provenance": "v12 Qwen3-1.7B QLoRA intent fine-tune, seed 42, superseded by seed 43 (ModelCatalog intentNepali1B entry comment)",
+      "model_file": "intent-ne-qwen-s42-q4_k_m.gguf",
+      "model_sha256": "fc71a6126636c17b8182962cf4abfd4c6e83972bdce6904d658a1b2e97bc7f6f",
+      "framings": {
+        "qwen3": {
+          "closed_intent_accuracy": 0.7647,
+          "contact_f1": 0.5714,
+          "time_f1": 0.6667,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 777,
+          "prompt_tokens_max": 810,
+          "headroom_tokens_min": 214,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              5,
+              5
+            ],
+            "emergency": [
+              2,
+              3
+            ],
+            "guide": [
+              1,
+              1
+            ],
+            "health_query": [
+              0,
+              2
+            ],
+            "music": [
+              2,
+              2
+            ],
+            "none": [
+              0,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              1,
+              2
+            ]
+          }
+        },
+        "llama3": {
+          "closed_intent_accuracy": 0.6471,
+          "contact_f1": 0.3529,
+          "time_f1": 0.6667,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.9,
+          "canonical_key_rate": 0.9,
+          "prompt_tokens_min": 805,
+          "prompt_tokens_max": 838,
+          "headroom_tokens_min": 186,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 2,
+          "rows_usable_on_device": 18,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              5,
+              5
+            ],
+            "emergency": [
+              2,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              0,
+              2
+            ],
+            "music": [
+              2,
+              2
+            ],
+            "none": [
+              0,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              0,
+              2
+            ]
+          }
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.8824,
+          "contact_f1": 0.5714,
+          "time_f1": 0.8333,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 1.0,
+          "canonical_key_rate": 1.0,
+          "prompt_tokens_min": 694,
+          "prompt_tokens_max": 727,
+          "headroom_tokens_min": 297,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 0,
+          "rows_usable_on_device": 20,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              5,
+              5
+            ],
+            "emergency": [
+              3,
+              3
+            ],
+            "guide": [
+              1,
+              1
+            ],
+            "health_query": [
+              1,
+              2
+            ],
+            "music": [
+              2,
+              2
+            ],
+            "none": [
+              0,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              1,
+              2
+            ]
+          }
+        }
+      }
+    },
+    "intent-ne-gemma-q4km": {
+      "offered": false,
+      "provenance": "Gemma 3 1B QLoRA intent fine-tune — fails the emergency hard gate (ModelCatalog intentGemma1B entry comment)",
+      "model_file": "intent-ne-gemma-q4_k_m.gguf",
+      "model_sha256": "78d6392f95ceb3235994adb754a944c2b11061b897a7cc1fcaf88d0fe794df78",
+      "framings": {
+        "llama3": {
+          "closed_intent_accuracy": 0.7059,
+          "contact_f1": 0.4211,
+          "time_f1": 0.25,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.9,
+          "canonical_key_rate": 0.9,
+          "prompt_tokens_min": 801,
+          "prompt_tokens_max": 813,
+          "headroom_tokens_min": 211,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 2,
+          "rows_usable_on_device": 18,
+          "per_intent": {
+            "ack_med": [
+              0,
+              1
+            ],
+            "call": [
+              4,
+              5
+            ],
+            "emergency": [
+              2,
+              3
+            ],
+            "guide": [
+              1,
+              1
+            ],
+            "health_query": [
+              1,
+              2
+            ],
+            "music": [
+              2,
+              2
+            ],
+            "none": [
+              0,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              1,
+              2
+            ]
+          }
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.7059,
+          "contact_f1": 0.4615,
+          "time_f1": 0.625,
+          "emergency_recall": 0.3333,
+          "emergency_correct": 1,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.85,
+          "canonical_key_rate": 0.85,
+          "prompt_tokens_min": 762,
+          "prompt_tokens_max": 774,
+          "headroom_tokens_min": 250,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 3,
+          "rows_usable_on_device": 17,
+          "per_intent": {
+            "ack_med": [
+              0,
+              1
+            ],
+            "call": [
+              3,
+              5
+            ],
+            "emergency": [
+              1,
+              3
+            ],
+            "guide": [
+              1,
+              1
+            ],
+            "health_query": [
+              2,
+              2
+            ],
+            "music": [
+              2,
+              2
+            ],
+            "none": [
+              0,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              2,
+              2
+            ]
+          }
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.7647,
+          "contact_f1": 0.4211,
+          "time_f1": 0.7143,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.85,
+          "canonical_key_rate": 0.85,
+          "prompt_tokens_min": 676,
+          "prompt_tokens_max": 688,
+          "headroom_tokens_min": 336,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 3,
+          "rows_usable_on_device": 17,
+          "per_intent": {
+            "ack_med": [
+              0,
+              1
+            ],
+            "call": [
+              4,
+              5
+            ],
+            "emergency": [
+              2,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              2,
+              2
+            ],
+            "music": [
+              2,
+              2
+            ],
+            "none": [
+              1,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              2,
+              2
+            ]
+          }
+        }
+      }
+    },
+    "intent-ne-qwen-s43-q4km": {
+      "offered": true,
+      "provenance": "Qwen3-1.7B QLoRA intent fine-tune, 696-token slim template, seed 43 (ModelCatalog intentQwenS43 entry comment)",
+      "model_file": "intent-ne-qwen-s43-q4_k_m.gguf",
+      "model_sha256": "c2135f786ace9c1020a27bb115600d90f9e3c4d788c995730b379b67e1ae74ef",
+      "framings": {
+        "llama3": {
+          "closed_intent_accuracy": 0.5294,
+          "contact_f1": 0.4286,
+          "time_f1": 0.5,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.65,
+          "canonical_key_rate": 0.65,
+          "prompt_tokens_min": 805,
+          "prompt_tokens_max": 838,
+          "headroom_tokens_min": 186,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 7,
+          "rows_usable_on_device": 13,
+          "per_intent": {
+            "ack_med": [
+              0,
+              1
+            ],
+            "call": [
+              4,
+              5
+            ],
+            "emergency": [
+              2,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              0,
+              2
+            ],
+            "music": [
+              1,
+              2
+            ],
+            "none": [
+              1,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              1,
+              2
+            ]
+          }
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.6471,
+          "contact_f1": 0.6667,
+          "time_f1": 0.5,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.65,
+          "canonical_key_rate": 0.65,
+          "prompt_tokens_min": 777,
+          "prompt_tokens_max": 810,
+          "headroom_tokens_min": 214,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 7,
+          "rows_usable_on_device": 13,
+          "per_intent": {
+            "ack_med": [
+              0,
+              1
+            ],
+            "call": [
+              5,
+              5
+            ],
+            "emergency": [
+              3,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              0,
+              2
+            ],
+            "music": [
+              1,
+              2
+            ],
+            "none": [
+              1,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              1,
+              2
+            ]
+          }
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.4706,
+          "contact_f1": 0.4615,
+          "time_f1": 0.0,
+          "emergency_recall": 0.3333,
+          "emergency_correct": 1,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.5,
+          "canonical_key_rate": 0.5,
+          "prompt_tokens_min": 694,
+          "prompt_tokens_max": 727,
+          "headroom_tokens_min": 297,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 10,
+          "rows_usable_on_device": 10,
+          "per_intent": {
+            "ack_med": [
+              0,
+              1
+            ],
+            "call": [
+              4,
+              5
+            ],
+            "emergency": [
+              1,
+              3
+            ],
+            "guide": [
+              1,
+              1
+            ],
+            "health_query": [
+              0,
+              2
+            ],
+            "music": [
+              1,
+              2
+            ],
+            "none": [
+              1,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              0,
+              2
+            ]
+          }
+        }
+      }
+    },
+    "intent-ne-qwen3-4b-nepali-q4km": {
+      "offered": true,
+      "provenance": "sidskarki Qwen3-4B Nepali: base + extended Devanagari tokenizer + SFT LoRA merged + CPT embedding restore (ModelCatalog qwen4BNepali entry comment)",
+      "model_file": "intent-ne-qwen3-4b-nepali-q4_k_m.gguf",
+      "model_sha256": "eb5ce8059636e36123a86f8fc65b952122e91da573adc54eb18829bd515d6305",
+      "framings": {
+        "llama3": {
+          "closed_intent_accuracy": 0.4118,
+          "contact_f1": 0.1818,
+          "time_f1": 0.4286,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.4,
+          "canonical_key_rate": 0.4,
+          "prompt_tokens_min": 758,
+          "prompt_tokens_max": 781,
+          "headroom_tokens_min": 243,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 12,
+          "rows_usable_on_device": 8,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              2,
+              5
+            ],
+            "emergency": [
+              3,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              0,
+              2
+            ],
+            "music": [
+              0,
+              2
+            ],
+            "none": [
+              1,
+              2
+            ],
+            "query": [
+              0,
+              1
+            ],
+            "send_message": [
+              0,
+              1
+            ],
+            "set_reminder": [
+              1,
+              2
+            ]
+          }
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.4118,
+          "contact_f1": 0.0,
+          "time_f1": 0.0,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.4,
+          "canonical_key_rate": 0.4,
+          "prompt_tokens_min": 730,
+          "prompt_tokens_max": 753,
+          "headroom_tokens_min": 271,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 12,
+          "rows_usable_on_device": 8,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              3,
+              5
+            ],
+            "emergency": [
+              2,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              0,
+              2
+            ],
+            "music": [
+              1,
+              2
+            ],
+            "none": [
+              1,
+              2
+            ],
+            "query": [
+              0,
+              1
+            ],
+            "send_message": [
+              0,
+              1
+            ],
+            "set_reminder": [
+              0,
+              2
+            ]
+          }
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.7059,
+          "contact_f1": 0.2069,
+          "time_f1": 0.2632,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.7,
+          "canonical_key_rate": 0.7,
+          "prompt_tokens_min": 647,
+          "prompt_tokens_max": 670,
+          "headroom_tokens_min": 354,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 7,
+          "rows_usable_on_device": 13,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              4,
+              5
+            ],
+            "emergency": [
+              2,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              0,
+              2
+            ],
+            "music": [
+              2,
+              2
+            ],
+            "none": [
+              2,
+              2
+            ],
+            "query": [
+              0,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              2,
+              2
+            ]
+          }
+        }
+      }
+    },
+    "intent-ne-qwen4b-s43-q4km": {
+      "offered": true,
+      "provenance": "Qwen3-4B QLoRA intent fine-tune, slim-template seed 43 — the first gate-passing brain (ModelCatalog intentQwen4BS43 entry comment)",
+      "pre_fix_framing": "llama3",
+      "model_file": "intent-ne-qwen4b-s43-q3_k_m.gguf",
+      "model_sha256": "c48e94d0931732d3e6ae14f45f955d20ee5474a83f8e127e8b972ed920999d10",
+      "framings": {
+        "llama3": {
+          "closed_intent_accuracy": 0.8824,
+          "contact_f1": 0.4444,
+          "time_f1": 0.9091,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.9,
+          "canonical_key_rate": 0.9,
+          "prompt_tokens_min": 805,
+          "prompt_tokens_max": 838,
+          "headroom_tokens_min": 186,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 2,
+          "rows_usable_on_device": 18,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              5,
+              5
+            ],
+            "emergency": [
+              3,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              1,
+              2
+            ],
+            "music": [
+              2,
+              2
+            ],
+            "none": [
+              1,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              2,
+              2
+            ]
+          }
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.9412,
+          "contact_f1": 0.8,
+          "time_f1": 0.9091,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 777,
+          "prompt_tokens_max": 810,
+          "headroom_tokens_min": 214,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              5,
+              5
+            ],
+            "emergency": [
+              3,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              2,
+              2
+            ],
+            "music": [
+              2,
+              2
+            ],
+            "none": [
+              1,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              2,
+              2
+            ]
+          }
+        },
+        "raw": {
+          "closed_intent_accuracy": 1.0,
+          "contact_f1": 0.8333,
+          "time_f1": 0.9091,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 1.0,
+          "canonical_key_rate": 1.0,
+          "prompt_tokens_min": 694,
+          "prompt_tokens_max": 727,
+          "headroom_tokens_min": 297,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 0,
+          "rows_usable_on_device": 20,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              5,
+              5
+            ],
+            "emergency": [
+              3,
+              3
+            ],
+            "guide": [
+              1,
+              1
+            ],
+            "health_query": [
+              2,
+              2
+            ],
+            "music": [
+              2,
+              2
+            ],
+            "none": [
+              1,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              2,
+              2
+            ]
+          }
+        }
+      }
+    },
+    "llama-3.2-1b-instruct-q4km": {
+      "offered": false,
+      "provenance": "legacy pre-Qwen LLaMA 3.2 1B Instruct (ModelCatalog llama3_2_1B entry)",
+      "model_file": "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+      "model_sha256": "6f85a640a97cf2bf5b8e764087b1e83da0fdb51d7c9fab7d0fece9385611df83",
+      "framings": {
+        "llama3": {
+          "closed_intent_accuracy": 0.3529,
+          "contact_f1": 0.0,
+          "time_f1": 0.1429,
+          "emergency_recall": 0.0,
+          "emergency_correct": 0,
+          "emergency_gold": 3,
+          "side_effect_precision": 0.6667,
+          "json_parse_rate": 0.65,
+          "canonical_key_rate": 0.65,
+          "prompt_tokens_min": 772,
+          "prompt_tokens_max": 789,
+          "headroom_tokens_min": 235,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 7,
+          "rows_usable_on_device": 13,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              3,
+              5
+            ],
+            "emergency": [
+              0,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              0,
+              2
+            ],
+            "music": [
+              1,
+              2
+            ],
+            "none": [
+              1,
+              2
+            ],
+            "query": [
+              0,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              0,
+              2
+            ]
+          }
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.3529,
+          "contact_f1": 0.0,
+          "time_f1": 0.1905,
+          "emergency_recall": 0.0,
+          "emergency_correct": 0,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.7,
+          "canonical_key_rate": 0.7,
+          "prompt_tokens_min": 744,
+          "prompt_tokens_max": 761,
+          "headroom_tokens_min": 263,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 6,
+          "rows_usable_on_device": 14,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              3,
+              5
+            ],
+            "emergency": [
+              0,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              1,
+              2
+            ],
+            "music": [
+              0,
+              2
+            ],
+            "none": [
+              1,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              0,
+              2
+            ]
+          }
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.5882,
+          "contact_f1": 0.0,
+          "time_f1": 0.1481,
+          "emergency_recall": 0.0,
+          "emergency_correct": 0,
+          "emergency_gold": 3,
+          "side_effect_precision": 0.8333,
+          "json_parse_rate": 1.0,
+          "canonical_key_rate": 1.0,
+          "prompt_tokens_min": 661,
+          "prompt_tokens_max": 678,
+          "headroom_tokens_min": 346,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 0,
+          "rows_usable_on_device": 20,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              4,
+              5
+            ],
+            "emergency": [
+              0,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              2,
+              2
+            ],
+            "music": [
+              1,
+              2
+            ],
+            "none": [
+              0,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              1,
+              2
+            ]
+          }
+        }
+      }
+    },
+    "llama-3.2-3b-instruct-q4km": {
+      "offered": false,
+      "provenance": "legacy pre-Qwen LLaMA 3.2 3B Instruct (ModelCatalog llama3_2_3B entry)",
+      "model_file": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+      "model_sha256": "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff",
+      "framings": {
+        "llama3": {
+          "closed_intent_accuracy": 0.6471,
+          "contact_f1": 0.3636,
+          "time_f1": 0.4444,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 0.8333,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 772,
+          "prompt_tokens_max": 789,
+          "headroom_tokens_min": 235,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              4,
+              5
+            ],
+            "emergency": [
+              2,
+              3
+            ],
+            "guide": [
+              1,
+              1
+            ],
+            "health_query": [
+              1,
+              2
+            ],
+            "music": [
+              0,
+              2
+            ],
+            "none": [
+              0,
+              2
+            ],
+            "query": [
+              0,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              1,
+              2
+            ]
+          }
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.8235,
+          "contact_f1": 0.3333,
+          "time_f1": 0.6,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 0.8333,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 744,
+          "prompt_tokens_max": 761,
+          "headroom_tokens_min": 263,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              4,
+              5
+            ],
+            "emergency": [
+              3,
+              3
+            ],
+            "guide": [
+              1,
+              1
+            ],
+            "health_query": [
+              1,
+              2
+            ],
+            "music": [
+              2,
+              2
+            ],
+            "none": [
+              0,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              1,
+              2
+            ]
+          }
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.7647,
+          "contact_f1": 0.3333,
+          "time_f1": 0.6667,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 0.8333,
+          "json_parse_rate": 1.0,
+          "canonical_key_rate": 1.0,
+          "prompt_tokens_min": 661,
+          "prompt_tokens_max": 678,
+          "headroom_tokens_min": 346,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 0,
+          "rows_usable_on_device": 20,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              4,
+              5
+            ],
+            "emergency": [
+              2,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              1,
+              2
+            ],
+            "music": [
+              2,
+              2
+            ],
+            "none": [
+              0,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              2,
+              2
+            ]
+          }
+        }
+      }
+    },
+    "qwen3-1.7b-instruct-q4km": {
+      "offered": true,
+      "provenance": "stock Qwen3-1.7B-Instruct (2507) GGUF, lm-kit mirror (ModelCatalog qwen3_1_7BInstruct entry comment)",
+      "model_file": "Qwen3-1.7B-Q4_K_M.gguf",
+      "model_sha256": "b047d6617eba56dcfa3357566b06807f54b15816faf6182aabd12d7e2378e537",
+      "framings": {
+        "llama3": {
+          "closed_intent_accuracy": 0.0588,
+          "contact_f1": 0.25,
+          "time_f1": 0.6,
+          "emergency_recall": 0.0,
+          "emergency_correct": 0,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.1,
+          "canonical_key_rate": 0.1,
+          "prompt_tokens_min": 805,
+          "prompt_tokens_max": 838,
+          "headroom_tokens_min": 186,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 18,
+          "rows_usable_on_device": 2,
+          "per_intent": {
+            "ack_med": [
+              0,
+              1
+            ],
+            "call": [
+              0,
+              5
+            ],
+            "emergency": [
+              0,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              0,
+              2
+            ],
+            "music": [
+              0,
+              2
+            ],
+            "none": [
+              2,
+              2
+            ],
+            "query": [
+              0,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              0,
+              2
+            ]
+          }
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.2353,
+          "contact_f1": 0.1538,
+          "time_f1": 0.375,
+          "emergency_recall": 0.0,
+          "emergency_correct": 0,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.3,
+          "canonical_key_rate": 0.3,
+          "prompt_tokens_min": 777,
+          "prompt_tokens_max": 810,
+          "headroom_tokens_min": 214,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 14,
+          "rows_usable_on_device": 6,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              2,
+              5
+            ],
+            "emergency": [
+              0,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              0,
+              2
+            ],
+            "music": [
+              0,
+              2
+            ],
+            "none": [
+              2,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              0,
+              1
+            ],
+            "set_reminder": [
+              1,
+              2
+            ]
+          }
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.3529,
+          "contact_f1": 0.2667,
+          "time_f1": 0.0,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.45,
+          "canonical_key_rate": 0.45,
+          "prompt_tokens_min": 694,
+          "prompt_tokens_max": 727,
+          "headroom_tokens_min": 297,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 11,
+          "rows_usable_on_device": 9,
+          "per_intent": {
+            "ack_med": [
+              0,
+              1
+            ],
+            "call": [
+              2,
+              5
+            ],
+            "emergency": [
+              2,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              1,
+              2
+            ],
+            "music": [
+              0,
+              2
+            ],
+            "none": [
+              2,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              0,
+              2
+            ]
+          }
+        }
+      }
+    },
+    "qwen3-4b-instruct-2507-q4km": {
+      "offered": true,
+      "provenance": "stock Qwen3-4B-Instruct-2507 GGUF, mradermacher mirror (ModelCatalog qwen3_4BInstruct entry comment)",
+      "model_file": "Qwen3-4B-Instruct-2507.Q4_K_M.gguf",
+      "model_sha256": "edabe01d973c31dce0d71eaf7e44628021b23b9bd2cbb93059846dad1cc4e153",
+      "framings": {
+        "llama3": {
+          "closed_intent_accuracy": 0.8235,
+          "contact_f1": 1.0,
+          "time_f1": 0.8333,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.9,
+          "canonical_key_rate": 0.9,
+          "prompt_tokens_min": 805,
+          "prompt_tokens_max": 838,
+          "headroom_tokens_min": 186,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 2,
+          "rows_usable_on_device": 18,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              5,
+              5
+            ],
+            "emergency": [
+              3,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              0,
+              2
+            ],
+            "music": [
+              2,
+              2
+            ],
+            "none": [
+              0,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              2,
+              2
+            ]
+          }
+        },
+        "qwen3": {
+          "closed_intent_accuracy": 0.8235,
+          "contact_f1": 0.8333,
+          "time_f1": 0.6667,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 777,
+          "prompt_tokens_max": 810,
+          "headroom_tokens_min": 214,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              5,
+              5
+            ],
+            "emergency": [
+              2,
+              3
+            ],
+            "guide": [
+              0,
+              1
+            ],
+            "health_query": [
+              1,
+              2
+            ],
+            "music": [
+              2,
+              2
+            ],
+            "none": [
+              0,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              2,
+              2
+            ]
+          }
+        },
+        "raw": {
+          "closed_intent_accuracy": 0.8824,
+          "contact_f1": 0.6667,
+          "time_f1": 1.0,
+          "emergency_recall": 0.6667,
+          "emergency_correct": 2,
+          "emergency_gold": 3,
+          "side_effect_precision": 1.0,
+          "json_parse_rate": 0.95,
+          "canonical_key_rate": 0.95,
+          "prompt_tokens_min": 694,
+          "prompt_tokens_max": 727,
+          "headroom_tokens_min": 297,
+          "rows_prompt_over_runtime_context": 0,
+          "rows_runtime_truncated": 1,
+          "rows_usable_on_device": 19,
+          "per_intent": {
+            "ack_med": [
+              1,
+              1
+            ],
+            "call": [
+              5,
+              5
+            ],
+            "emergency": [
+              2,
+              3
+            ],
+            "guide": [
+              1,
+              1
+            ],
+            "health_query": [
+              1,
+              2
+            ],
+            "music": [
+              2,
+              2
+            ],
+            "none": [
+              0,
+              2
+            ],
+            "query": [
+              1,
+              1
+            ],
+            "send_message": [
+              1,
+              1
+            ],
+            "set_reminder": [
+              2,
+              2
+            ]
+          }
+        }
+      }
+    }
+  },
+  "rows": 540
+}

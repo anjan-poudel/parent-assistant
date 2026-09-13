@@ -99,22 +99,148 @@ final class BrainModelSelectionTests: XCTestCase {
         XCTAssertTrue(entry.downloadURL.absoluteString.contains("Q4_K_M"))
     }
 
-    // MARK: - Chat format per model family
+    // MARK: - Chat format per brain id (T-046)
 
-    func testChatFormatIsQwen3OnlyForTheQwen3Brain() {
-        for qwenID in [ModelCatalog.qwen3_1_7BInstruct, ModelCatalog.qwen3_4BInstruct] {
-            let qwen = LlamaCommandInterpreter.chatFormat(for: qwenID)
-            XCTAssertEqual(qwen.kind, .qwen3, "\(qwenID) must speak the Qwen3 scheme")
-            XCTAssertEqual(qwen.systemPrefix, "<|im_start|>system\n")
-            XCTAssertEqual(qwen.stopSequence, "<|im_end|>")
+    /// The framing T-046 DETERMINED for each catalog id the app can
+    /// resolve, written out here independently of the production table so a
+    /// silent edit to `LlamaCommandInterpreter.measuredFramings` fails this
+    /// test instead of shipping.
+    ///
+    /// Provenance: `tools/train-intent/src/framing_check.py` scored every id
+    /// under the LLaMA 3.2, Qwen3 `<|im_start|>` and raw no-chat-template
+    /// framings against the held-out golden corpus through the app's own
+    /// decode grammar; the per-row outcomes and per-framing metrics are
+    /// committed at `tools/train-intent/eval/framing_summary.json` /
+    /// `framing_rows.jsonl`.
+    ///
+    /// Before T-046 every one of these ids was sent the LLaMA 3.2 scheme by
+    /// the `default:` branch — except the two stock Qwen3 ids, which were the
+    /// only ones the old two-case switch knew. The `.raw` ids are the
+    /// Qwen3-derived fine-tunes that decode as trained on the bare prompt
+    /// (`train_qlora.py` tokenizes the template with no chat-template wrap);
+    /// `intentQwenS43` is the one fine-tune whose measurement put the Qwen3
+    /// wrap ahead of the bare shape once the app's own decode grammar was in
+    /// the loop, so its row is `.qwen3` — per id, from the check, not by
+    /// family.
+    private static let determinedFramings: [(ModelID, LlamaCommandInterpreter.ChatFormat.Kind)] = [
+        (ModelCatalog.intentQwen4BS43, .raw),        // default brain, offered
+        (ModelCatalog.intentQwenS43, .qwen3),        // offered, measured wrap
+        (ModelCatalog.qwen4BNepali, .raw),           // offered
+        (ModelCatalog.qwen3_4BInstruct, .qwen3),     // offered (stock Qwen3)
+        (ModelCatalog.qwen3_1_7BInstruct, .qwen3),   // offered (stock Qwen3)
+        (ModelCatalog.intentNepali1B, .raw),         // hidden, stale pref
+        (ModelCatalog.llama3_2_1B, .llama3),         // hidden legacy LLaMA
+        (ModelCatalog.llama3_2_3B, .llama3)          // hidden legacy LLaMA
+    ]
+
+    /// Every OFFERED brain must carry a measured framing. An offered id with
+    /// no determination FAILS here rather than silently inheriting
+    /// `chatFormat(for:)`'s legacy fallback, and the failure names the id.
+    func testEveryOfferedBrainHasAMeasuredChatFraming() {
+        for entry in ModelCatalog.availableBrainEntries {
+            guard let kind = LlamaCommandInterpreter.measuredFraming(for: entry.id) else {
+                XCTFail("offered brain \(entry.id.rawValue) has no measured chat "
+                        + "framing — record one in "
+                        + "LlamaCommandInterpreter.measuredFramings before it is "
+                        + "offered (evidence: "
+                        + "tools/train-intent/src/framing_check.py)")
+                continue
+            }
+            XCTAssertEqual(LlamaCommandInterpreter.chatFormat(for: entry.id).kind, kind,
+                           "offered brain \(entry.id.rawValue) must speak its "
+                           + "measured scheme, not the default branch")
         }
+        // The determination table covers exactly the offered brains plus the
+        // hidden ones a stale stored preference can still resolve — no
+        // offered id may be missing from it.
+        let offered = Set(ModelCatalog.availableBrainEntries.map(\.id))
+        let determinedOffered = Set(Self.determinedFramings.map { $0.0 })
+        XCTAssertTrue(offered.isSubset(of: determinedOffered),
+                      "offered brains missing from the determination: "
+                      + offered.subtracting(determinedOffered)
+                        .map(\.rawValue).sorted().joined(separator: ", "))
+    }
 
-        for other in [ModelCatalog.llama3_2_1B, ModelCatalog.llama3_2_3B, ModelCatalog.intentNepali1B] {
-            let format = LlamaCommandInterpreter.chatFormat(for: other)
-            XCTAssertEqual(format.kind, .llama3, "\(other) must keep the LLaMA scheme")
-            XCTAssertEqual(format.systemPrefix,
-                           "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n")
-            XCTAssertEqual(format.stopSequence, "<|eot_id|>")
+    /// The production table matches the determination written down above,
+    /// per id, with the offending id named on failure.
+    func testMeasuredChatFramingMatchesTheDeterminationPerId() {
+        for (id, kind) in Self.determinedFramings {
+            XCTAssertEqual(LlamaCommandInterpreter.measuredFraming(for: id), kind,
+                           "\(id.rawValue): measured framing drifted from the "
+                           + "T-046 determination — re-run "
+                           + "tools/train-intent/src/framing_check.py before "
+                           + "changing it")
+            XCTAssertEqual(LlamaCommandInterpreter.chatFormat(for: id).kind, kind,
+                           "\(id.rawValue) must speak the determined scheme")
+        }
+        XCTAssertEqual(ModelCatalog.availableBrainEntries.count,
+                       Self.determinedFramings.filter { offeredIDs.contains($0.0) }.count,
+                       "the determination table and the picker list disagree")
+    }
+
+    private let offeredIDs: Set<ModelID> = Set(ModelCatalog.availableBrainEntries.map(\.id))
+
+    /// Byte-level pin per determined id: each scheme renders its own bytes
+    /// and no other scheme's special tokens leak in. The `.raw` ids must
+    /// render the prompt ALONE — no system turn, no wrapper — which is what
+    /// `train_qlora.py` trained on.
+    func testEveryDeterminedIdRendersItsOwnSchemeOnly() {
+        for (id, kind) in Self.determinedFramings {
+            let format = LlamaCommandInterpreter.chatFormat(for: id)
+            let rendered = LlamaCommandInterpreter.formattedPrompt(
+                prompt: "USR", system: "SYS", format: format)
+            let context = "\(id.rawValue) (\(kind))"
+            switch kind {
+            case .raw:
+                XCTAssertEqual(rendered, "USR",
+                               "\(context) must send the bare prompt")
+                for token in ["<|begin_of_text|>", "<|eot_id|>",
+                              "<|im_start|>", "<|im_end|>"] {
+                    XCTAssertFalse(rendered.contains(token),
+                                   "\(context) must not carry \(token)")
+                }
+                XCTAssertEqual(format.systemPrefix, "",
+                               "\(context) must not open a system turn")
+                XCTAssertEqual(format.userPrefix, "",
+                               "\(context) must not wrap the user turn")
+                XCTAssertEqual(format.botPrefix, "",
+                               "\(context) must not open a bot turn")
+                // The fine-tunes were taught to emit the family EOS after
+                // the JSON label; the stop sequence stays explicit rather
+                // than empty (inert on the constrained decode path, load-
+                // bearing for any streaming path).
+                XCTAssertEqual(format.stopSequence, "<|endoftext|>",
+                               "\(context) must keep the trained terminator")
+            case .llama3:
+                XCTAssertTrue(rendered.hasPrefix("\n<|begin_of_text|>"),
+                              "\(context) must keep the shipped LLaMA literal")
+                XCTAssertFalse(rendered.contains("<|im_start|>"),
+                               "\(context) must not carry Qwen3 tokens")
+                XCTAssertEqual(format.stopSequence, "<|eot_id|>",
+                               "\(context) stop token drifted")
+                XCTAssertEqual(
+                    format.systemPrefix,
+                    "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n",
+                    "\(context) system turn drifted")
+                XCTAssertEqual(format.botPrefix,
+                               "<|start_header_id|>assistant<|end_header_id|>\n\n",
+                               "\(context) bot turn drifted")
+            case .qwen3:
+                XCTAssertTrue(rendered.hasPrefix("<|im_start|>system\n"),
+                              "\(context) must follow the official Qwen3 template")
+                XCTAssertFalse(rendered.contains("<|begin_of_text|>"),
+                               "\(context) must not carry LLaMA tokens")
+                XCTAssertFalse(rendered.contains("<|eot_id|>"),
+                               "\(context) must not carry LLaMA tokens")
+                XCTAssertEqual(format.stopSequence, "<|im_end|>",
+                               "\(context) stop token drifted")
+                XCTAssertEqual(format.systemPrefix, "<|im_start|>system\n",
+                               "\(context) system turn drifted")
+                XCTAssertEqual(format.systemSuffix, "<|im_end|>\n",
+                               "\(context) system turn drifted")
+                XCTAssertEqual(format.botPrefix, "<|im_start|>assistant\n",
+                               "\(context) bot turn drifted")
+            }
         }
     }
 
