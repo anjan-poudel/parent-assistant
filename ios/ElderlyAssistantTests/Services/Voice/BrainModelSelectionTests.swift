@@ -201,11 +201,30 @@ final class BrainModelSelectionTests: XCTestCase {
                 }
                 XCTAssertEqual(format.systemPrefix, "",
                                "\(context) must not open a system turn")
+                XCTAssertEqual(format.userPrefix, "",
+                               "\(context) must not wrap the user turn")
+                XCTAssertEqual(format.botPrefix, "",
+                               "\(context) must not open a bot turn")
+                // The fine-tunes were taught to emit the family EOS after
+                // the JSON label; the stop sequence stays explicit rather
+                // than empty (inert on the constrained decode path, load-
+                // bearing for any streaming path).
+                XCTAssertEqual(format.stopSequence, "<|endoftext|>",
+                               "\(context) must keep the trained terminator")
             case .llama3:
                 XCTAssertTrue(rendered.hasPrefix("\n<|begin_of_text|>"),
                               "\(context) must keep the shipped LLaMA literal")
                 XCTAssertFalse(rendered.contains("<|im_start|>"),
                                "\(context) must not carry Qwen3 tokens")
+                XCTAssertEqual(format.stopSequence, "<|eot_id|>",
+                               "\(context) stop token drifted")
+                XCTAssertEqual(
+                    format.systemPrefix,
+                    "<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n",
+                    "\(context) system turn drifted")
+                XCTAssertEqual(format.botPrefix,
+                               "<|start_header_id|>assistant<|end_header_id|>\n\n",
+                               "\(context) bot turn drifted")
             case .qwen3:
                 XCTAssertTrue(rendered.hasPrefix("<|im_start|>system\n"),
                               "\(context) must follow the official Qwen3 template")
@@ -213,6 +232,14 @@ final class BrainModelSelectionTests: XCTestCase {
                                "\(context) must not carry LLaMA tokens")
                 XCTAssertFalse(rendered.contains("<|eot_id|>"),
                                "\(context) must not carry LLaMA tokens")
+                XCTAssertEqual(format.stopSequence, "<|im_end|>",
+                               "\(context) stop token drifted")
+                XCTAssertEqual(format.systemPrefix, "<|im_start|>system\n",
+                               "\(context) system turn drifted")
+                XCTAssertEqual(format.systemSuffix, "<|im_end|>\n",
+                               "\(context) system turn drifted")
+                XCTAssertEqual(format.botPrefix, "<|im_start|>assistant\n",
+                               "\(context) bot turn drifted")
             }
         }
     }

@@ -722,6 +722,16 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         // from the brain picker — LLaMA 3.2 and Qwen3 share this
         // call site).
         let format = Self.chatFormat(for: preferredBaseId)
+        // `.raw` note (T-046): the empty affixes make this Template render
+        // "system + user" with no wrapper, while `formattedPrompt` — the
+        // path the interpreter actually uses — sends the user turn ALONE
+        // (`systemPrompt` is deliberately dropped there; the fine-tunes
+        // never saw a system turn). The Template is inert on the
+        // `generateWithConstraints` path (`LLMCore` samples the string we
+        // hand it and never applies this template), so the two agree in
+        // production. It becomes a real inconsistency only if a future
+        // path calls `respond(to:)`/`getCompletion(from:)` for a `.raw`
+        // brain — route those through `formattedPrompt` first.
         let template = Template(
             system: (format.systemPrefix, format.systemSuffix),
             user: (format.userPrefix, format.userSuffix),

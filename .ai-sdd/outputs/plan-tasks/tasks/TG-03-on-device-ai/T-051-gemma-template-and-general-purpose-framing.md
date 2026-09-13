@@ -20,8 +20,8 @@ could not be acted on inside T-046 and are routed here.
 
 **(1) Gemma 3's template is a fourth scheme `ChatFormat` cannot express.**
 The Gemma intent fine-tune is a real hosted artifact (`intentGemma1B`
-`ModelCatalog.swift:185`, entry 596-611, GGUF arch `gemma3` per the entry
-comment at 606) but it is hidden because it fails the emergency hard gate. Its
+`ModelCatalog.swift:185`, entry 596-617, GGUF arch `gemma3` per the entry
+comment at 606-609) but it is hidden because it fails the emergency hard gate. Its
 reference template is `<bos><start_of_turn>user\n{…}<end_of_turn>\n<start_of_turn>model\n`
 — system content has no turn of its own and must be folded into the FIRST user
 turn. `ChatFormat` (`LlamaCommandInterpreter.swift:474-495`) is a fixed

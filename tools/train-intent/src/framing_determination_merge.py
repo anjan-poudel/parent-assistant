@@ -63,10 +63,12 @@ print(f"[merge] {len(rows)} unique rows ({dupes} duplicate lines dropped)")
 # artifact inverted the ranking.
 POLICY = (
     "Per id: reject a framing whose prompt exceeds the 1,024-token on-device "
-    "context (none did — max measured prompt 838). Rank the rest by rows "
-    "CORRECT AND USABLE on device (intent matches gold AND the JSON parsed "
-    "AND generation was not cut by the runtime budget) — the app-visible "
-    "outcome — then by emergency recall, then by JSON parse rate. "
+    "context (none did — max measured prompt 838). Rank the rest by the "
+    "leading key closed_intent_accuracy x rows_usable_on_device — a framing's "
+    "correct-and-usable-on-device yield (intent matches gold AND the JSON "
+    "parsed AND generation was not cut by the runtime budget), i.e. the "
+    "app-visible outcome, not a literal row count — then by emergency recall, "
+    "then by JSON parse rate. "
     "The first-registered rule ranked emergency recall first; at three "
     "emergency rows in the corpus that single-row key inverts the ranking on "
     "a runtime truncation artifact (qwen4BNepali: raw decodes 6 rows wrong "
@@ -186,7 +188,6 @@ spec.loader.exec_module(mod)
 
 
 def usable_first_key(name: str, framing: dict):
-    rows_total = sum(framing["per_intent"].values()) if False else None
     m = framing
     correct_and_usable = round(
         m["closed_intent_accuracy"] * (m["rows_usable_on_device"]), 4)

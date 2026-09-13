@@ -95,7 +95,12 @@ except ImportError:                                  # pragma: no cover
 # (symlinks are fine).
 MODEL_FILES: dict[str, str] = {
     # offered (ModelCatalog.availableBrainEntries)
-    "intent-ne-qwen4b-s43-q4km": "intent-ne-qwen4b-s43-q4_k_m.gguf",
+    # The SHIPPED artifact is the v15 Q3_K_M release (ModelCatalog entry
+    # sha256 c48e94d0..., 2,075,616,032 bytes) — the catalog ships Q3 for
+    # sub-2GiB distribution and the device runs the Q3, so the framing
+    # check must too. (The first measurement pass used the Q4 export and
+    # is recorded as the archive note in the determination table.)
+    "intent-ne-qwen4b-s43-q4km": "intent-ne-qwen4b-s43-q3_k_m.gguf",
     "intent-ne-qwen-s43-q4km": "intent-ne-qwen-s43-q4_k_m.gguf",
     "intent-ne-qwen3-4b-nepali-q4km": "intent-ne-qwen3-4b-nepali-q4_k_m.gguf",
     "qwen3-4b-instruct-2507-q4km": "Qwen3-4B-Instruct-2507.Q4_K_M.gguf",
@@ -456,8 +461,11 @@ def required_framing(entry: dict) -> dict:
     Pre-registered rule, applied identically to every id and every framing so
     the verdict is derived from the measurements rather than asserted:
 
-    1. A framing whose prompt overflows the runtime's 1,024-token context is
-       disqualified outright — on-device it produces no completion at all.
+    1. A framing whose prompt overflows the runtime's 1,024-token context
+       scores worst on the leading key (-overflow): on device it produces no
+       completion at all, so any framing that fits outranks it. (Implemented
+       as a key component, not a hard filter; no id overflowed here, so the
+       two readings coincide on this corpus.)
     2. Among the rest, rank by SAFETY FIRST: emergency recall, then the count
        of rows usable on device (parsed AND not cut by the runtime budget),
        then closed-intent accuracy, then JSON parse rate, then the smaller
