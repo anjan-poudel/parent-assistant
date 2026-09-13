@@ -60,10 +60,10 @@ final class IntentEncoderArtifactTests: XCTestCase {
             ModelCatalog.entry(for: ModelCatalog.intentEncoderSpike))
         XCTAssertEqual(entry.kind, .intentEncoder)
         XCTAssertEqual(entry.filename, "t033-encoder-int8.mlmodelc")
-        XCTAssertEqual(entry.sizeBytes, 109_075_268)
+        XCTAssertEqual(entry.sizeBytes, 109_086_647)
         XCTAssertEqual(entry.sha256.count, 64, "a full SHA-256 hex digest")
-        XCTAssertTrue(entry.sha256.hasPrefix("6056ba41ba37"),
-                      "the T-033 C3 export's measured zip hash")
+        XCTAssertTrue(entry.sha256.hasPrefix("e0ff09231843"),
+                      "the T-036 v0 export's measured zip hash")
         // No machine-specific path is committed. The default is a
         // reserved-TLD placeholder (RFC 2606 `.invalid` never resolves);
         // an internal tester points the entry at their own copy via the
