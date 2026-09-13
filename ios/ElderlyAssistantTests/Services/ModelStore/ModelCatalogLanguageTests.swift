@@ -110,13 +110,15 @@ final class ModelCatalogLanguageTests: XCTestCase {
     }
 
     func testNepaliDefaultsAreNepaliTagged() {
+        // The EXPLICIT map's ne pick (fix 1) — the bundled medium, chosen
+        // over the curated list's first entry (whisperMediumV6) so the
+        // auto-switch never starts a download on its own.
         let stt = ModelCatalog.defaultEntry(kind: .whisperBase, language: "ne")
-        XCTAssertEqual(stt?.id, ModelCatalog.whisperMediumV6,
-                       "first curated Nepali entry is the ne default (curated order)")
+        XCTAssertEqual(stt?.id, ModelCatalog.whisperMediumFinetunedNepali)
         XCTAssertEqual(stt?.languages, ["ne"])
         let brain = ModelCatalog.defaultEntry(kind: .llamaBase, language: "ne")
         XCTAssertEqual(brain?.id, ModelCatalog.intentQwen4BS43,
-                       "the intent fine-tune leads the curated brain list")
+                       "the map keeps the curated brain list's own ne leader")
     }
 
     func testDefaultEntryFallsBackToLanguageNeutralThenFirst() {
@@ -133,6 +135,32 @@ final class ModelCatalogLanguageTests: XCTestCase {
 
     func testDefaultEntryIsCaseInsensitive() {
         XCTAssertEqual(ModelCatalog.defaultEntry(kind: .whisperBase, language: "NE")?.id,
-                       ModelCatalog.whisperMediumV6)
+                       ModelCatalog.whisperMediumFinetunedNepali)
+        XCTAssertEqual(ModelCatalog.explicitDefaultEntry(kind: .llamaBase, language: "EN")?.id,
+                       ModelCatalog.qwen3_1_7BInstruct)
+    }
+
+    // MARK: - Explicit per-language map (fix 1)
+
+    func testExplicitMapAndGenericLookupAgreeOnTags() {
+        // Whatever the map answers must be tagged for the language it
+        // answers for — the map overrides the LOOKUP, never the tag rule.
+        for (kind, picks) in ModelCatalog.languageDefaultPicks {
+            for (code, id) in picks {
+                let entry = ModelCatalog.entry(for: id)
+                XCTAssertEqual(entry?.kind, kind)
+                XCTAssertTrue(entry?.languages.contains(code) ?? false
+                              || entry?.languages.isEmpty == true,
+                              "\(id.rawValue) must serve \(code)")
+            }
+        }
+    }
+
+    func testKindsWithoutAnExplicitPickStillResolve() {
+        // VAD / KWS / LoRAs are not in the map — the generic path answers.
+        XCTAssertNotNil(ModelCatalog.curatedEntries(kind: .vad).first)
+        XCTAssertNotNil(ModelCatalog.defaultEntry(kind: .vad, language: "ne"))
+        XCTAssertNotNil(ModelCatalog.defaultEntry(kind: .vad, language: "en"))
+        XCTAssertNil(ModelCatalog.explicitDefaultEntry(kind: .vad, language: "ne"))
     }
 }

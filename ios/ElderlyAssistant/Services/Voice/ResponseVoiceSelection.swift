@@ -93,6 +93,9 @@ enum ResponseVoiceSelection {
 
     private static let selectionKey = "ttsResponseVoiceSelection"
     private static let auditionKey = "ttsVoiceAuditionRequest"
+    /// Per-language memory of the user's OWN voice picks (2026-09-13,
+    /// fix 2) — see `remember(_:for:)`.
+    private static let preferenceByLanguageKey = "ttsVoicePreferenceByLanguage"
 
     /// How long a pending audition request stays valid. Bounded so a
     /// request whose sample never spoke (queue preempted, screen left)
@@ -127,6 +130,54 @@ enum ResponseVoiceSelection {
     /// Voice 1" row calls this so the default is never orphaned).
     static func clear(defaults: UserDefaults = .standard) {
         defaults.removeObject(forKey: selectionKey)
+    }
+
+    // MARK: Per-language memory of the user's own picks (2026-09-13, fix 2)
+
+    /// The voices the user has EXPLICITLY picked, keyed by the app
+    /// language they were picked in (ISO 639-1, lowercased). Stored under
+    /// `ttsVoicePreferenceByLanguage` as a JSON `[language: ResponseVoice]`
+    /// dictionary (the whole voice, not the bare id — a speaker choice like
+    /// google-medium's speaker 5 is part of the pick).
+    ///
+    /// Why this exists: the app-language switch (LanguageModelResolver)
+    /// has to move the reply voice away from a voice that cannot speak the
+    /// new language, and the switch back used to land on the DEFAULT for
+    /// the language — silently destroying a custom pick (e.g. chitwan) an
+    /// en→ne→en round trip never intended to touch. The remembered pick is
+    /// what the resolver prefers when returning to a language, and it is
+    /// only ever written on an explicit user pick (`remember`), never by
+    /// the automatic switch itself (otherwise the switch-back would
+    /// overwrite the very pick it is supposed to restore).
+    ///
+    /// Values are returned RAW (undecoded/unvalidated aside from JSON
+    /// decoding): a stale voice id must be ignored by the reader
+    /// (`LanguageModelResolver`), never deleted — storage the user did not
+    /// touch stays untouched.
+    static func rememberedVoices(defaults: UserDefaults = .standard) -> [String: ResponseVoice] {
+        decode([String: ResponseVoice].self,
+               key: preferenceByLanguageKey,
+               defaults: defaults) ?? [:]
+    }
+
+    /// Records an explicit pick of `voice` made while the app language was
+    /// `language`. Refuses (returns false) a voice sanitisation rejects, so
+    /// a non-catalog or out-of-range pick never enters the memory.
+    @discardableResult
+    static func remember(_ voice: ResponseVoice,
+                         for language: String,
+                         defaults: UserDefaults = .standard) -> Bool {
+        guard let clean = voice.sanitised() else { return false }
+        var map = rememberedVoices(defaults: defaults)
+        map[language.lowercased()] = clean
+        encode(map, key: preferenceByLanguageKey, defaults: defaults)
+        return true
+    }
+
+    /// Test seam: drops the per-language memory entirely (the main
+    /// selection is NOT touched — see `clear`).
+    static func clearRememberedVoices(defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: preferenceByLanguageKey)
     }
 
     // MARK: One-shot audition channel (preview; never the live voice)

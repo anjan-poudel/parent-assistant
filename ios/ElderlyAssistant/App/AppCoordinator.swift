@@ -116,7 +116,11 @@ final class AppCoordinator: ObservableObject {
     /// the interpreter and starts the model's download when it is not
     /// cached (`brainModelPreference` didSet — the same contract as a
     /// manual pick), and the voice pick persists + sanitation-checks
-    /// through `ResponseVoiceSelection`.
+    /// through `ResponseVoiceSelection`. The voice re-pick prefers the
+    /// language's REMEMBERED user choice over the default map (fix 2), so
+    /// an en→ne→en round trip returns to the household's own voice; that
+    /// memory is written only by the Settings picker (`remember`), never
+    /// by this automatic switch.
     ///
     /// Note this deliberately does NOT run at launch: the init-time
     /// restore assigns the preferences directly (house pattern), and a
@@ -137,7 +141,9 @@ final class AppCoordinator: ObservableObject {
         }
         let voice = ResponseVoiceSelection.persisted()
         if let resolved = LanguageModelResolver.resolvedVoicePreference(
-            current: voice, language: language),
+            current: voice,
+            language: language,
+            remembered: ResponseVoiceSelection.rememberedVoices()),
            resolved != voice {
             ResponseVoiceSelection.apply(resolved)
         }

@@ -916,10 +916,56 @@ enum ModelCatalog {
         }
     }
 
+    /// The EXPLICIT per-language auto-switch targets (2026-09-13, fix 1):
+    /// `kind` → language code → the model an app-language change switches
+    /// to. These are curated by hand precisely BECAUSE the generic lookup
+    /// below can land on a heavyweight entry: the derived defaults are the
+    /// pickers' preference order, which leads with the best-accuracy
+    /// downloads, so an en household that had a Nepali brain selected used
+    /// to trigger an implicit multi-GB download (qwen3-4B) it never asked
+    /// for. The map's picks are the small/bundled models instead:
+    ///   - STT `ne` → the BUNDLED medium fine-tune (`bundledResourceName`
+    ///     is set — the first-run install already put it on disk, so the
+    ///     switch downloads nothing);
+    ///   - STT `en` → whisper-base.en (60 MB, not the 190 MB multilingual);
+    ///   - brain `ne` → the intent fine-tune (the curated list's own pick);
+    ///   - brain `en` → Qwen3 1.7B (1.3 GB, not the 2.5 GB Qwen3 4B);
+    ///   - TTS `ne` / `en` → the locale voice of each language.
+    ///
+    /// Anything not listed here (other kinds — VAD/KWS/LoRAs — and any
+    /// future language) still resolves through the generic
+    /// exact → `[]` → first logic, so the map only ever OVERRIDES, never
+    /// narrows, what the catalog can answer.
+    static let languageDefaultPicks: [ModelKind: [String: ModelID]] = [
+        .whisperBase: [
+            "ne": whisperMediumFinetunedNepali,
+            "en": whisperBaseEn
+        ],
+        .llamaBase: [
+            "ne": intentQwen4BS43,
+            "en": qwen3_1_7BInstruct
+        ],
+        .tts: [
+            "ne": piperNepali,
+            "en": piperEnglishUS
+        ]
+    ]
+
+    /// The explicit pick for `kind` + `language`, when the map has one AND
+    /// the id still resolves to a live catalog entry (a removed entry must
+    /// fall through to the generic logic, never strand the resolver).
+    static func explicitDefaultEntry(kind: ModelKind, language: String) -> ModelCatalogEntry? {
+        guard let id = languageDefaultPicks[kind]?[language.lowercased()] else { return nil }
+        return entry(for: id)
+    }
+
     /// The default entry of `kind` for an ISO 639-1 `language` code.
     ///
     /// Preference order (documented + pinned by
     /// `ModelCatalogLanguageTests`):
+    ///   0. the EXPLICIT per-language pick (`languageDefaultPicks`) — the
+    ///      curated auto-switch target, consulted first so an app-language
+    ///      change lands on a small/bundled model (see the map's note),
     ///   1. the first curated entry tagged with EXACTLY this language
     ///      (a per-language purpose-built model always beats a general one),
     ///   2. the first curated entry tagged with NO language (`[]` = the
@@ -929,6 +975,9 @@ enum ModelCatalog {
     ///      honest answer when the catalog ships nothing for the language).
     /// Nil only when the kind has no curated entry at all.
     static func defaultEntry(kind: ModelKind, language: String) -> ModelCatalogEntry? {
+        if let explicit = explicitDefaultEntry(kind: kind, language: language) {
+            return explicit
+        }
         let curated = curatedEntries(kind: kind)
         let code = language.lowercased()
         return curated.first { $0.languages.contains(code) }

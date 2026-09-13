@@ -16,6 +16,7 @@ final class ResponseVoiceSelectionTests: XCTestCase {
     /// keys ever change, THIS test must change with them.
     private let selectionKey = "ttsResponseVoiceSelection"
     private let auditionKey = "ttsVoiceAuditionRequest"
+    private let preferenceByLanguageKey = "ttsVoicePreferenceByLanguage"
 
     // MARK: Fixtures
 
@@ -38,6 +39,7 @@ final class ResponseVoiceSelectionTests: XCTestCase {
         // earlier test or an app run on this simulator.
         ResponseVoiceSelection.clear(defaults: .standard)
         ResponseVoiceSelection.clearAudition(defaults: .standard)
+        ResponseVoiceSelection.clearRememberedVoices(defaults: .standard)
 
         tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("voice-selection-tests-\(UUID().uuidString)")
@@ -60,6 +62,7 @@ final class ResponseVoiceSelectionTests: XCTestCase {
         }
         ResponseVoiceSelection.clear(defaults: .standard)
         ResponseVoiceSelection.clearAudition(defaults: .standard)
+        ResponseVoiceSelection.clearRememberedVoices(defaults: .standard)
         try? FileManager.default.removeItem(at: tempRoot)
     }
 
@@ -144,6 +147,92 @@ final class ResponseVoiceSelectionTests: XCTestCase {
         XCTAssertFalse(ResponseVoiceSelection.isDefault(chitwan))
         XCTAssertFalse(ResponseVoiceSelection.isDefault(google5),
                        "a google-medium speaker change is a real choice too")
+    }
+
+    // MARK: - Per-language memory of explicit picks (fix 2)
+
+    func testRememberedVoicesStartEmptyAndRecordPerLanguage() {
+        XCTAssertEqual(ResponseVoiceSelection.rememberedVoices(defaults: suite), [:])
+        XCTAssertTrue(ResponseVoiceSelection.remember(chitwan, for: "ne", defaults: suite))
+        XCTAssertEqual(ResponseVoiceSelection.rememberedVoices(defaults: suite)["ne"],
+                       chitwan)
+        XCTAssertNil(ResponseVoiceSelection.rememberedVoices(defaults: suite)["en"],
+                     "a pick in one language never leaks into another")
+    }
+
+    func testRememberedVoicesKeepTheWholeVoiceIncludingTheSpeaker() {
+        XCTAssertTrue(ResponseVoiceSelection.remember(google5, for: "ne", defaults: suite))
+        XCTAssertEqual(ResponseVoiceSelection.rememberedVoices(defaults: suite)["ne"],
+                       google5,
+                       "the speaker is part of the pick — a speaker 5 choice "
+                       + "must not come back as speaker 0")
+    }
+
+    func testRememberedVoicesAreKeyedByLowercasedLanguage() {
+        XCTAssertTrue(ResponseVoiceSelection.remember(chitwan, for: "NE", defaults: suite))
+        XCTAssertEqual(ResponseVoiceSelection.rememberedVoices(defaults: suite)["ne"],
+                       chitwan)
+    }
+
+    func testRememberRefusesVoicesOutsideTheCatalog() {
+        let ghost = ResponseVoice(voiceID: ModelID("piper-ne-voice-that-never-existed"),
+                                  speakerID: 0)
+        XCTAssertFalse(ResponseVoiceSelection.remember(ghost, for: "ne", defaults: suite))
+        XCTAssertEqual(ResponseVoiceSelection.rememberedVoices(defaults: suite), [:],
+                       "a non-catalog pick must never enter the memory")
+    }
+
+    func testCorruptRememberedStorageReadsAsEmpty() {
+        suite.set(Data("not-json-at-all".utf8), forKey: preferenceByLanguageKey)
+        XCTAssertEqual(ResponseVoiceSelection.rememberedVoices(defaults: suite), [:],
+                       "undecodable storage must read as NO memory, not crash")
+    }
+
+    /// The end-to-end shape of fix 2, against the REAL resolver + storage
+    /// the coordinator drives: pick chitwan for ne → switch to en → switch
+    /// back to ne → chitwan (not the ne default).
+    func testLanguageRoundTripRestoresTheChitwanPick() throws {
+        // 1. The user explicitly picks chitwan while running Nepali.
+        XCTAssertTrue(ResponseVoiceSelection.apply(chitwan, defaults: suite))
+        XCTAssertTrue(ResponseVoiceSelection.remember(chitwan, for: "ne", defaults: suite))
+
+        // 2. ne → en: chitwan cannot speak English, and nothing is
+        //    remembered for en — the en default answers.
+        let toEnglish = LanguageModelResolver.resolvedVoicePreference(
+            current: ResponseVoiceSelection.persisted(defaults: suite),
+            language: "en",
+            remembered: ResponseVoiceSelection.rememberedVoices(defaults: suite))
+        XCTAssertEqual(toEnglish,
+                       ResponseVoice(voiceID: ModelCatalog.piperEnglishUS, speakerID: 0))
+        XCTAssertTrue(ResponseVoiceSelection.apply(try XCTUnwrap(toEnglish),
+                                                   defaults: suite))
+
+        // 3. en → ne: the remembered chitwan pick returns, NOT piperNepali.
+        let backToNepali = LanguageModelResolver.resolvedVoicePreference(
+            current: ResponseVoiceSelection.persisted(defaults: suite),
+            language: "ne",
+            remembered: ResponseVoiceSelection.rememberedVoices(defaults: suite))
+        XCTAssertEqual(backToNepali, chitwan,
+                       "the custom Nepali voice survives the en round trip")
+    }
+
+    func testFirstEverSwitchToEnglishUsesTheEnglishDefault() throws {
+        // No pick has ever been made: the automatic switch is the first
+        // voice write, and it must be the en default…
+        let toEnglish = LanguageModelResolver.resolvedVoicePreference(
+            current: ResponseVoice(voiceID: ModelCatalog.piperNepali, speakerID: 0),
+            language: "en",
+            remembered: ResponseVoiceSelection.rememberedVoices(defaults: suite))
+        XCTAssertEqual(toEnglish,
+                       ResponseVoice(voiceID: ModelCatalog.piperEnglishUS, speakerID: 0))
+
+        // …and it must NOT be recorded as a user pick: the coordinator's
+        // auto-switch writes `apply` only. If it remembered, the memory
+        // would be overwritten by the very switch it exists to undo.
+        XCTAssertTrue(ResponseVoiceSelection.apply(try XCTUnwrap(toEnglish),
+                                                   defaults: suite))
+        XCTAssertEqual(ResponseVoiceSelection.rememberedVoices(defaults: suite), [:],
+                       "the automatic switch must leave no user-pick memory")
     }
 
     // MARK: - One-shot audition channel

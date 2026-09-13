@@ -73,11 +73,22 @@ enum LanguageModelResolver {
     /// language became `language`. The TTS preference is a
     /// `ResponseVoice` (voice id + speaker id), so it needs its own shape
     /// of the same decision: an incompatible voice switches to the
-    /// new language's default voice at speaker 0; a compatible voice keeps
-    /// its chosen speaker. `nil` (no choice stored — the locale default
-    /// rules) and unknown voice ids are never touched.
+    /// new language's remembered pick or default voice; a compatible voice
+    /// keeps its chosen speaker. `nil` (no choice stored — the locale
+    /// default rules) and unknown voice ids are never touched.
+    ///
+    /// `remembered` is the per-language record of the user's OWN picks
+    /// (`ResponseVoiceSelection.rememberedVoices()`, keyed by ISO 639-1
+    /// code): when the new language has a remembered voice that still
+    /// resolves to a usable catalog voice, it wins over the default map —
+    /// an en→ne→en round trip restores the household's chitwan choice
+    /// instead of flattening it to the ne default. A remembered entry that
+    /// no longer fits (retired id, out-of-range speaker, wrong language)
+    /// is ignored — the default map answers instead — but is never
+    /// deleted from storage.
     static func resolvedVoicePreference(current: ResponseVoice?,
                                         language: String,
+                                        remembered: [String: ResponseVoice] = [:],
                                         catalog: [ModelCatalogEntry] = ModelCatalog.all) -> ResponseVoice? {
         guard let current,
               let entry = catalog.first(where: { $0.id == current.voiceID }) else {
@@ -85,6 +96,13 @@ enum LanguageModelResolver {
         }
         guard !isLanguageCompatible(entry, language: language) else {
             return current
+        }
+        if let preferred = remembered[language.lowercased()],
+           let preferredEntry = catalog.first(where: { $0.id == preferred.voiceID }),
+           preferredEntry.kind == .tts,
+           isLanguageCompatible(preferredEntry, language: language),
+           ResponseVoice.speakerIDs(for: preferred.voiceID).contains(preferred.speakerID) {
+            return preferred
         }
         guard let fallback = ModelCatalog.defaultEntry(kind: .tts, language: language) else {
             return current

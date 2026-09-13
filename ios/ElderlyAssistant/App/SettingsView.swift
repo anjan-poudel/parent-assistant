@@ -3807,6 +3807,10 @@ struct TTSVoicesSettingsView: View {
             return
         }
         guard ResponseVoiceSelection.apply(voice) else { return }
+        // Remember the pick per language (2026-09-13, fix 2): an
+        // en→ne→en app-language round trip must restore THIS voice, not
+        // flatten it to the language default.
+        ResponseVoiceSelection.remember(voice, for: coordinator.appLanguage.rawValue)
         justApplied = voice
         ResponseVoiceSelection.requestAudition(of: voice, for: sampleText)
         coordinator.speak(text: sampleText)
