@@ -38,14 +38,24 @@ model:
     return_offsets_mapping: false      # word_ids() is the mechanism
   student_size_target_params: [100000000, 120000000]   # 100-120M, from T-033 section 8
   param_accounting:
-    encoder_body: 117500000
-    intent_head: "Linear(384, 12)"
-    slot_head: "Linear(384, 13)"
+    encoder_body: 117506432            # C3 encoder_body_params, size_composition.json
+    intent_head: "Linear(384, 12)"     # 4620 params
+    slot_head: "Linear(384, 13)"       # 5005 params
+    heads_total: 9625                  # ~0.01M
     # Unlike T-033's size_composition.json, the heads ARE inference-time and DO ship.
+    # T-033's 170940 (bert.pooler.dense.* + classifier.*) is NOT this head count —
+    # those were excluded as training heads and do not exist here.
     heads_ship: true
+    t033_excluded_reference: 170940
 
 heads:
   shared_pass: true
+  # Both enumerated lists below ARE the logit order (meta.json:intents / meta.json:tags).
+  # This is a contract, NOT the Swift enum's declaration order: InterpretedCommand.Action
+  # declares `query` before `send_message`, and `plugin` (runtime-only) has no class at
+  # all. A reorder requires retraining, not a metadata edit. T-036 asserts element-wise
+  # equality against annotation_rules at build time.
+  logit_order: is_contract
   intent:
     pooling: "[CLS] == last_hidden_state[:, 0]"   # XLM-R position 0
     shape: [384, 12]
@@ -209,7 +219,7 @@ app_span_projection:
   # KNOWN CONSEQUENCE (integration item I-1, owner T-037):
   #   a generic phone word yields callType="voice" + requestedApp=nil, which
   #   MethodResolver.explicitMethod currently returns nil for
-  #   (MethodResolver.swift:88-90). The "होइन, फोन नै गर" correction therefore
+  #   (MethodResolver.swift:92-94, the guard). The "होइन, फोन नै गर" correction therefore
   #   needs either the corrections_overrides family to emit requestedApp="phone",
   #   or explicitMethod to read callType=="voice" as an explicit amendment.
 
@@ -300,6 +310,23 @@ runtime:
     install_slot: LocalBrainChain.preferred
     standin: LlamaCommandInterpreter
     context_consumed: false             # avoids train/inference skew
+  config:
+    # Every value is a parameter, not a constant buried in the implementation.
+    # Mirrors the incumbent's Config struct (LocalIntentInterpreter.swift:39-50).
+    confidenceThreshold: 0.4            # = IntentRouter.Config.rephraseThreshold; NOT new
+    maxSequenceLength: 64               # = meta_json.max_len
+    timeoutSeconds: 2.0                 # = p95 local-leg budget (intent-engine spec section 10)
+    maxRetries: 0                       # deterministic pass: a timeout retry cannot help
+    retryOnArtifactLoadRace: true       # one retry when the graph was still loading
+    retry_policy_rationale: >-
+      LocalIntentInterpreter retries once, but its trigger is truncated_json
+      (LocalIntentInterpreter.swift:289-293) - a sampling failure a retry can
+      plausibly fix. The encoder does not sample: a timeout re-runs identical work
+      for identical expected duration, and span_invalid is a decoding verdict, not a
+      transient. A blanket retry would spend 2 x timeoutSeconds inside NFR-002's
+      4 s budget for no expected recovery. Load race is the one genuine transient.
+    on_timeout: set_lastInferenceFailureReason_inference_timeout_then_complete_nil
+    on_abstention: complete_nil_without_failure_reason
 
 # ---------------------------------------------------------------------------
 # Ladder  (preserved; FR-007 long tail explicit)
@@ -408,7 +435,16 @@ gates:
   max_gap_vs_gemini: 0.03
   latency_p50_s: 1.0                     # UNMEASURED (T-033 K5 desktop proxy)
   latency_p95_s: 2.0
-  measured_today: [closed_intent_accuracy, slot_f1, emergency_recall_corpus]
+  # QUALIFIED - this key is NOT a gate pass. These three have a T-033 PROXY figure only:
+  # the legacy 20-row corpus, T-033's own checkpoint and dataset, BEFORE T-034's data
+  # rebuild. Two of the three proxies are BELOW their gates (closed 0.882 < 0.95,
+  # contact-portion slot F1 0.333 < 0.90; emergency recall 1.000 meets its gate).
+  # Re-measurement against the T-036 corpus with the shipped artifact is required.
+  proxy_measured_on_legacy_corpus:
+    closed_intent_accuracy: 0.882
+    slot_f1: 0.333
+    emergency_recall_corpus: 1.000
+  gate_passed: false                     # no gate has been passed; T-036/T-038 own that
   unmeasured_today: [emergency_recall_adversarial, side_effect_precision, abstention_precision, calibration_bucket_tolerance, max_gap_vs_gemini, latency_p50_s, latency_p95_s]
 
 consumers:

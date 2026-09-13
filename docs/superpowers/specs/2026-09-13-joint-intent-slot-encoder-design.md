@@ -39,8 +39,21 @@ Three properties are load-bearing and non-negotiable:
 
 Out of scope by decision: the proposal's MASSIVE-derived taxonomy, its resolved-value
 output style, its 0.75/0.95 confidence bands, and its SetFit option as the joint model
-(§14, §15). The LLM remains the long-tail brain (FR-007) — this component is a peer of
-the incumbent local GGUF, not a replacement for the cloud fallback.
+(§14, §15). The LLM remains the long-tail brain — this component is a peer of the
+incumbent local GGUF, not a replacement for the cloud fallback.
+
+**Requirement traceability.** FR-008 ("intent classification, entity extraction
+(names, dates, times, medications, contacts), and conversational response generation")
+is the requirement this component re-scopes: the encoder takes the classification and
+entity half and runs it on an on-device encoder rather than the LLM, while
+conversational response generation stays with the LLM long-tail path (`reply`, §7.3).
+FR-008 and FR-007 both name the *on-device LLM*; the design satisfies their substance —
+NLU and generation on-device — through two components instead of one, and adds no
+network call of its own. (FR-007's literal wording, "No cloud LLM API must be called at
+any time", is already in tension with the shipped `GeminiCommandInterpreter` cloud
+fallback; that is pre-existing and outside this task.) NFR-002's 4-second budget covers
+the classification leg; the encoder's own target is tighter and on-device (§15.4,
+p50 ≤ 1.0 s / p95 ≤ 2.0 s, currently UNMEASURED).
 
 ## 2. Ground truth read for this design
 
@@ -117,6 +130,25 @@ sanitised transcript
 | Intent | 12 logits over `taxonomy.labels` (`annotation_rules.yaml`) | the row's `action` |
 | Slot | 13 logits per token over `spans.bio.tags` | the row's `spans`, word-first projected (T-034 §4.3) |
 
+**Canonical logit order.** Class index *i* is `meta.json: intents[i]`, and that order is
+a contract, not a convenience. It is T-034's `taxonomy.labels` order, written out in
+full so no reader has to infer it from the Swift enum (which is in a *different* order —
+the enum puts `query` immediately after `music`, whereas the taxonomy places `query`
+after `suggest_video`, eleventh of twelve):
+
+```
+0 ack_med            1 call               2 emergency        3 set_reminder
+4 health_query       5 music              6 send_message     7 guide
+8 create_calendar_event                  9 suggest_video   10 query
+11 none
+```
+
+The same applies to the slot head: tag index *j* is `meta.json: tags[j]`, in T-034's
+`spans.bio.tags` order (`O` first, then `B-`/`I-` pairs for `contact`, `time`,
+`medication`, `message`, `topic`, `app`). Both lists are asserted element-wise against
+T-034 at build time. **Reordering either list silently changes every prediction** —
+retraining is required, not a metadata edit.
+
 **Divergences from the spike, stated.** The spike's slot head had **5 tags** (`O`,
 contact, time only — `bakeoff_encoder.py:38`); this design's head has **13 tags** for
 the six span labels T-034 defines. The intent head is unchanged in shape (the spike
@@ -138,7 +170,10 @@ discipline the incumbent model already follows for its prompt format
 2. Tokenize with `is_split_into_words=True`, `truncation=True`, `max_length=64`,
    `return_offsets_mapping` not required.
 3. `word_ids()` maps each subword back to its word. **First-subword tagging**: a word's
-   tag is the tag of its first subword (`bakeoff_encoder.py:161-165`, T-034 §4.3 step 2).
+   tag is the tag of its first subword (`bakeoff_encoder.py:161-165`; T-034 §4.3 does
+   the same in two steps — subword→word assignment at step 4, `B-`/`I-` projection at
+   step 5). T-034 steps 3 and 6 use `return_offsets_mapping`; the encoder uses
+   `word_ids()` instead — a named divergence, discussed with step 4 below.
 4. Decode: a run of `B-`/`I-` tags of one label becomes the union of those words' char
    intervals; the surface is `transcript[start:end]`.
 
@@ -187,9 +222,12 @@ Two artifacts per platform, both carrying the same metadata: the encoder graph, 
 `meta.json` with `intents[]` (ordered = logit order), `tags[]` (ordered = logit order),
 `max_len`, `calibration_temperature`, and the artifact digest. The heads are part of
 the shipped artifact — unlike T-033's size accounting, where `bert.pooler` and
-`classifier` were excluded as "training heads" (`size_composition.json`), the intent
+`classifier` were excluded as "training heads"
+(`size_composition.json` C3 `non_encoder_head_keys`, 170,940 params), the intent
 and slot heads **are** inference-time components here and their weights ship. They are
-0.2 M params against a 117.5 M body, so the T-033 size target is unaffected.
+small: `Linear(384,12)` = 4,620 and `Linear(384,13)` = 5,005, so **9,625 params
+(≈ 0.01 M)** on top of the 117,506,432-param body (`encoder_body_params`). The T-033
+student size target (100–120 M) is unaffected.
 
 ## 4. Distillation objective
 
@@ -361,14 +399,15 @@ handled by containment, which is how the shipped code already works
 `requestedApp` receives a **canonical lowercase token from a closed vocabulary**, not
 the verbatim span. This is a label projection, not a resolution: it names no target, no
 id, no number and no URL, and its values are exactly the schema's documented examples.
-Every span in the span set remains verbatim; only this one *field* is projected, and the
-projection is marked (b) above.
+Every span in the span set remains verbatim. Two *fields* are projected rather than
+copied — `requestedApp` and `callType` — and both are marked (b) above; neither can
+name a target, an id, a number or a URL. No other field departs from its span.
 
 **Consequence, recorded.** Because a generic method word now lands in `callType` and
 leaves `requestedApp` nil, `MethodResolver.explicitMethod` cannot today distinguish
 "the user said *phone*" from "the user named nothing" for a voice call: with
 `requestedApp == nil` and `callType == "voice"`, `isVideo` is false and the app branch is
-empty, so it returns `nil` (`MethodResolver.swift:88-90`). For the correction protocol
+empty, so it returns `nil` (`MethodResolver.swift:92-94`, the guard). For the correction protocol
 ("होइन, फोन नै गर", spec §7.2 at `:445-447`) that matters. Two resolutions are named for
 T-037, and this design does not pick one unilaterally:
 
@@ -427,8 +466,9 @@ says so plainly rather than leaving them to drift:
   LLM's, delivered through the existing path (`CommandRouter.swift:2115`, `:2143`,
   `:2146`, `:2271-2272`, `:2398`, all gated by `sanitisedModelReply`). For the
   **Action class** the router already speaks L10n templates (`speak(key:)`, e.g.
-  `:2204`), so `reply` is not load-bearing; the mapper sets a deterministic template or
-  an empty string, and never fabricates an answer.
+  `CommandRouter.swift:2196`; `speak(text: L10n.fmt(...))` at `:2204`), so `reply` is
+  not load-bearing; the mapper sets a deterministic template or an empty string, and
+  never fabricates an answer.
 
 The one nuance worth stating: a `message` span *can* be arbitrary user text, but the
 encoder is not *generating* it — it is copying a verbatim substring of the transcript it
@@ -467,7 +507,11 @@ proposed, never executed.
 
 `IntentRouter.Config.default` is `acceptThreshold 0.7`, `rephraseThreshold 0.4`
 (`IntentRouter.swift:56-58`). `bandChecked` (`:316-330`) is the only place the bands are
-applied. The encoder introduces **no new threshold**.
+applied **within `IntentRouter`'s own paths** — `CommandRouter` independently applies a
+`< 0.7` test of its own to interpreter outputs before dispatch
+(`CommandRouter.swift:1081-1085`, tier-`.free` → rephrase question). Both read the same
+0.7/0.4 constants; the encoder introduces **no new threshold** and does not touch
+either call site.
 
 | Calibrated confidence | `ConfirmationTier.confirm` action | `ConfirmationTier.free` action | Encoder behaviour | Router behaviour (`bandChecked`) |
 |---|---|---|---|---|
@@ -489,10 +533,16 @@ question, while a genuine timeout escalates with `local_failed_fallback`
 
 **Cache interaction.** `IntentCommandCache.isCacheable` allows exactly
 `{call, music, suggest_video}` (`IntentCommandCache.swift:51-65`). Those three are the
-only actions a cache hit can short-circuit, and the cache hit still goes through
-`bandChecked` and tier-1 confirmation. `emergency` and `ack_med` are explicitly **not**
-cacheable (`:55-57`), so the encoder's abstention can never be laundered through the
-cache either.
+only actions a cache hit can short-circuit. A cache hit **bypasses `bandChecked`
+entirely**: `IntentRouter.interpret` returns the cached command directly
+(`IntentRouter.swift:140-144`, before any `bandChecked` call site at `:150, :208, :278,
+:302, :341`). What keeps that safe is not the bands but the cache's write discipline —
+entries are written only after a confirmed, successful execution
+(`IntentRouter.swift:347-350`, `IntentCommandCache.swift:82-86`) — plus the fact that
+`emergency` and `ack_med` are explicitly **not** cacheable (`:55-57`) and tier-1
+confirmation still fires on every hit (`IntentCommandCache.swift:10-13`). The encoder's
+abstention therefore cannot be laundered through the cache either: an abstention is
+never written, and nothing the encoder emits can add a cacheable entry on its own.
 
 ## 10. Runtime integration — `CommandInterpreter` conformance
 
@@ -519,6 +569,39 @@ constraint `CommandRouter`'s turn-reply-pending token depends on
 input is the transcript alone. `context.pendingMedications` is display-name data the
 head was not trained on, and feeding it would create a train/inference skew. Stated
 rather than silently dropped.
+
+**Configuration (`IntentEncoderInterpreter.Config`).** Every value is a parameter, not a
+constant buried in the implementation, mirroring the incumbent's config struct
+(`LocalIntentInterpreter.swift:39-50`). T-036/T-037 implement against these names:
+
+```swift
+struct Config {
+    var confidenceThreshold: Double = 0.4   // = IntentRouter.Config.rephraseThreshold
+    var maxSequenceLength: Int = 64         // = meta.json max_len
+    var timeoutSeconds: Double = 2.0        // = the p95 local-leg budget (spec §10)
+    var maxRetries: Int = 0                 // see below — deterministic pass
+    var retryOnArtifactLoadRace: Bool = true// one retry when the graph was still loading
+}
+```
+
+**Retry policy: zero retries for inference, one for a load race — a reasoned divergence
+from the incumbent.** `LocalIntentInterpreter` retries once
+(`LocalIntentInterpreter.swift:264-282`), but its trigger is `truncated_json`
+(`:289-293`) — a *sampling* failure, where a retry can plausibly produce different
+output. The encoder does not sample: it is one deterministic forward pass, so re-running
+after a timeout re-runs the same work for the same expected duration, and a
+`span_invalid` result is a decoding verdict, not a transient. A blanket retry would
+therefore spend 2 × `timeoutSeconds` inside NFR-002's 4-second budget for no expected
+recovery. The one exception is a race where the artifact is still loading on first use:
+that is a genuine transient, so `retryOnArtifactLoadRace` allows exactly one retry after
+load completes. `timeoutSeconds` defaults to **2.0 s**, the p95 target from the
+intent-engine spec (`docs/superpowers/specs/2026-09-05-intent-engine-finetuned-llm-design.md`
+§10), not the LLM's 10 s — the encoder has no long-tail generation to wait for, so a
+pass that exceeds the p95 budget has already missed the latency requirement and
+escalating is the better outcome than waiting. It stays a `Config` value precisely so
+T-038's device measurements can re-tune it without touching the routing policy.
+Timeouts set `lastInferenceFailureReason = "inference_timeout"` and complete `nil`
+(F-1); abstention leaves it unset (§9).
 
 ### 10.1 Where it sits
 
@@ -606,7 +689,8 @@ as open risk **R-1** for the design owner.
 **The safety net makes it non-blocking in practice.** `routeSafetyNet(raw)` runs at
 `CommandRouter.swift:651-653`, *before* the interpreter fast path at `:1049`, and the
 comment at `:645-650` is explicit that a confident LLM answer is not sufficient reason
-to skip it. It covers emergency (16 phrases, `:1403-1408`), explicit med-ack
+to skip it. It covers emergency (17 phrases, `:1403-1408` — 7 English + 10 Nepali),
+explicit med-ack
 (`:1454-1469`) and — critically — **denial before ack** (`:1443-1452`), because refusal
 words contain ack words as substrings ("नखाए" ⊃ "खाए"). So:
 
@@ -624,7 +708,7 @@ ends in a wrong action.**
 
 | # | Failure class | Detection | Fallback | User-visible behaviour |
 |---|---|---|---|---|
-| F-1 | `inference_timeout` | forward pass exceeds the local-leg budget | set `lastInferenceFailureReason = "inference_timeout"`, complete `nil`; `IntentRouter` escalates to cloud when configured (LAT-EVIDENCE path, `IntentRouter.swift:211-219`) | cloud answers, else the router's re-prompt. Never a wrong action |
+| F-1 | `inference_timeout` | forward pass exceeds `Config.timeoutSeconds` (2.0 s, §10) with no retry | set `lastInferenceFailureReason = "inference_timeout"`, complete `nil`; `IntentRouter` escalates to cloud when configured (LAT-EVIDENCE path, `IntentRouter.swift:211-219`) | cloud answers, else the router's re-prompt. Never a wrong action |
 | F-2 | `artifact_unavailable` | `isAvailable == false` (not installed, CoreML compile failure, runtime not linked) | `LocalBrainChain` falls through to `standIn` (`LocalBrainChain.swift:38-40`, `:63-68`) | the incumbent local brain answers, exactly as today |
 | F-3 | `sanitised_empty` | `InputSanitiser.sanitise` returns empty | complete `nil` (the incumbent's own guard, `LocalIntentInterpreter.swift:102-105`) | the router's re-prompt |
 | F-4 | `span_invalid` | decoded span fails `transcript[start:end] == text`, is out of range, or overlaps a different label's span | drop the offending span if non-critical; **abstain (`nil`)** if it is the action's required span (`contact` for call/send_message, `time` for set_reminder) | re-prompt or cloud answer. A call with an unresolved contact never proceeds to planning |

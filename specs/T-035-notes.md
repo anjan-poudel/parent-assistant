@@ -29,8 +29,9 @@ as reviewable text, and applying it to the L2 artifact is an engine-owned step. 
    `bakeoff_encoder.py:91-104`. The two deltas are the 13-tag slot head (the spike had
    5) and slicing the transcript for span surfaces instead of re-joining words.
 2. **Spans are verbatim, resolution stays in code.** No contact id, phone number, URL or
-   resolved time can leave the encoder. The only non-verbatim value is `requestedApp`'s
-   canonical token, drawn from a closed vocabulary that names no target.
+   resolved time can leave the encoder. Two fields are closed-vocabulary projections
+   rather than copied spans — `requestedApp` and `callType` — and neither names a
+   target, id, number or URL.
 3. **The `app` span splits into `requestedApp` + `callType` by a code table.** This is
    the decision that reconciles the two acceptance scenarios (see "Conflicts resolved"
    #1). The matcher reuses the shipped vocabularies rather than inventing one.
@@ -71,7 +72,7 @@ as reviewable text, and applying it to the L2 artifact is an engine-owned step. 
    ("an app the user explicitly named (facetime/whatsapp/messenger/viber), else null",
    `LlamaCommandInterpreter.swift:106-111`) is the tie-breaker.
    **Follow-on consequence:** with `requestedApp == nil` and `callType == "voice"`,
-   `MethodResolver.explicitMethod` returns `nil` (`MethodResolver.swift:88-90`), so the
+   `MethodResolver.explicitMethod` returns `nil` (`MethodResolver.swift:92-94`), so the
    "होइन, फोन नै गर" correction needs a T-037 decision — recorded as **I-1** with both
    options named, deliberately not picked here.
 2. **Surface-exact spans vs "contact is the span छोरा".** T-034 pins affix-merged
@@ -119,6 +120,38 @@ as reviewable text, and applying it to the L2 artifact is an engine-owned step. 
 
 No test suite is added: this is a design deliverable, no repository code is modified,
 and coverage/percentage rules do not apply to documentation.
+
+## Review response
+
+Paired challenger review of `8bc8be9`: **GO, confidence 0.86**, report committed at
+`specs/T-035-review.md` (`bfa16bb`). Every finding below was re-verified against shipped
+code by this task before editing — none was accepted on the reviewer's word alone. The
+review file contains **8 minor bullets** plus the 1 major; the hand-off message said 9
+minor, a count discrepancy only (nothing is unmapped).
+
+| Finding | Verdict | Change |
+|---|---|---|
+| **[MAJOR]** Cache-hit band claim contradicts shipped code | **Accepted — confirmed at source.** `IntentRouter.interpret` returns the cached command at `IntentRouter.swift:140-144` with no `bandChecked` call (call sites `:150`, `:208`, `:278`, `:302`, `:341`); `CommandRouter.swift:1081-1085` applies its own `< 0.7` test, so "the only place the bands are applied" was wrong unqualified | Design §9 "Cache interaction" rewritten: a hit **bypasses `bandChecked`**, and the safety argument now rests where it actually rests — post-confirmation cache writes (`:347-350`, `IntentCommandCache.swift:82-86`), non-cacheable `emergency`/`ack_med` (`:55-57`), tier-1 confirmation on every hit (`:10-13`). The "only place" sentence is qualified to `IntentRouter`'s own paths and names the `CommandRouter` site |
+| 1. Emergency phrase count 16 → 17 | **Accepted — recounted at source**: 7 English + 10 Nepali in `CommandRouter.swift:1403-1408` | Design §11 now says 17, with the split shown |
+| 2. Head-size figure conflated with T-033's | **Accepted — recomputed and re-checked against evidence.** `Linear(384,12)` = 4,620 + `Linear(384,13)` = 5,005 = **9,625**; T-033's 170,940 is C3 `non_encoder_head_params` (`bert.pooler.dense.*` + `classifier.*`) | Design §3.5 states 9,625 (≈0.01 M) and names 170,940 as T-033's excluded set; contract `param_accounting` records `heads_total: 9625`, the exact body `117506432`, and `t033_excluded_reference: 170940` |
+| 3. "Only this one field is projected" | **Accepted** — `callType` is marked (b) in the design's own table | Design §7.1 now names both projections; notes decision #2 likewise |
+| 4. Loose citations | **Accepted — all three verified at source and corrected.** The `explicitMethod` guard is `:92-94` (not `:88-90`); `:2204` is `speak(text: L10n.fmt(...))`, `speak(key:)` e.g. `:2196`; = T-034 §4.3 subword projection is step 5 (step 4 is subword→word assignment) | Fixed in design §3.3, §7.1, §7.3; notes conflict #1; contract I-1 comment. The `return_offsets_mapping` divergence is unchanged in substance but now names T-034 steps 3 and 6 alongside the step-4/5 citation |
+| 5. Requirement traceability gap (FR-008 uncited) | **Accepted — read the requirements at source.** FR-007 and FR-008 both name the *on-device LLM*; FR-008's scope is classification + entity extraction + generation | Design §1 gained a "Requirement traceability" block mapping FR-008 (encoder takes the classification/entity half; generation stays with the LLM), FR-007 (on-device, no network call added) and NFR-002 (4 s budget covers the leg). It also records, without resolving, that FR-007's literal "No cloud LLM API must be called at any time" is already in tension with the shipped `GeminiCommandInterpreter` — pre-existing, outside T-035 |
+| 6. `gates.measured_today` misreadable | **Accepted** | Replaced in the contract by `proxy_measured_on_legacy_corpus` (0.882 / 0.333 / 1.000) plus explicit `gate_passed: false` and a comment that two proxies are *below* their gates |
+| 7. Encoder timeout/retry unspecified | **Accepted, with a reasoned policy rather than a copy of the incumbent's.** The incumbent's retry-once exists for `truncated_json` — a *sampling* failure (`LocalIntentInterpreter.swift:289-293`). The encoder does not sample, so a timeout retry re-runs identical work for identical duration and `span_invalid` is a decoding verdict, not a transient | Added `IntentEncoderInterpreter.Config` to design §10 (`confidenceThreshold 0.4`, `maxSequenceLength 64`, `timeoutSeconds 2.0` = the p95 local-leg budget, `maxRetries 0`, `retryOnArtifactLoadRace true`) and mirrored it at contract `runtime.config` with the rationale. F-1 updated to cite `Config.timeoutSeconds` |
+| 8. Amendment class list in enum order vs logit-order contract | **Accepted — the enum order is genuinely different** (`query` is 7th in the enum, 11th in the taxonomy) | Design §3.2 now prints the canonical order with indices and states reordering requires retraining; amendment §4.2.3 shows the indexed order and the full 13-tag order; contract gained `heads.logit_order: is_contract` |
+
+**Not changed, and why:** the review's "Could not verify" items need no edit — the
+lead-engineer approval is a process step this task does not claim, remote push state
+could not be checked offline (local refs still show `8bc8be9`/`bfa16bb` only on
+`worktree-t035-encoder-design`, master at `840bcd7`, no upstream configured), and T-034's
+consume-time assertion remains a T-036 action because `annotation_rules.yaml` is not on
+this branch.
+
+**Post-fix verification (re-run after every edit).** YAML parses; the 12-label /
+13-tag element-wise parity with T-034 and the `shape[1]` asserts still hold; no 40+
+char hex run in any of the four files; the withdrawn vocabulary still appears only as
+labelled quotation; `.ai-sdd/outputs/design-l2.md` still unmodified.
 
 ## Not grounded in code (recorded rather than papered over)
 
