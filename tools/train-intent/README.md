@@ -172,11 +172,19 @@ and their headroom is far tighter than the thresholds suggest:
   passes (12/13 = 0.923) but a single spurious multi-token time fails
   (12/16 = 0.750, which is what the schema arm scored). `contact` has 6 gold
   rows / 6 tokens: one stray token passes (0.923), two fail (0.857).
-- The corpus/`eval` time convention differs (see above): if `gc-query-001`
-  matched the corpus's own 42% rule, the schema arm's time F1 would have
-  been 0.923 — a PASS — so one of its two time false positives is an
-  eval-label artifact and the remaining one (a spurious time on a health
-  query) is the only genuine time defect.
+- The corpus/`eval` time convention differs (see above), but it is NOT the
+  decisive defect. Recomputing the schema arm's `time_f1` from its own
+  predictions (token F1, verified against the measured 0.750 = tp 6 / fp 4):
+  as measured 0.750 (fail); with `gc-query-001`'s gold time set to `भोलि`
+  to match the corpus convention, 0.824 (still fail — the fix adds a true
+  positive, not just removes a false one); only after removing the
+  multi-token hallucinated `दिउँसो ८ बजे` on `gc-health-002`, 0.923 (PASS).
+  So the gate's real blocker is the health-row hallucination; the eval-label
+  inconsistency costs one of the six tokens of tolerance the gate has, which
+  makes every convention-conformant one-token time (`भोलि`) a gate-risking
+  false positive. Aligning `eval/golden_corpus.jsonl` with the corpus
+  convention (or the corpus with the golden row) is still the right fix —
+  a gate that a correct answer can fail is not measuring the model.
 
 **Grammar-mirror verification (2026-09-13):** the training box's iOS tree is a
 2026-09-02 snapshot that predates the grammar wiring, so every server-side
