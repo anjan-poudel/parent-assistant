@@ -520,8 +520,28 @@ host-compiled `.mlmodelc` were macOS-locked, so an iOS-targeted compile
 `model.mil`, `metadata.json`, `analytics/coremldata.bin` and `weights/weight.bin` are
 **byte-identical**, and the top-level `coremldata.bin` differs only in the *ordering* of two
 metadata entries (`conversion_date` / `source`). No platform marker, no arch-specific binary —
-the archive is MIL plus weights and is compiled for the device at load time. The remaining
-unknown is only the load itself (no device was available to try it).
+the archive is MIL plus weights and is compiled for the device at load time.
+
+**Shipped bytes load in the CoreML runtime (verified).** The exporter verified against the
+`.mlpackage`, so the compiled directory inside the ZIP was untested until now. The zip was
+extracted to a scratch dir and the `.mlmodelc` loaded directly by the CoreML runtime
+(`MLModel(contentsOf:configuration:.cpuOnly)` on macOS): it **loads**, and a 3-token
+prediction returns `intent_logits [1, 12]` and `slot_logits [1, 3, 13]`, both Float16 and
+finite — the exact names, ranks and dtypes `CoreMLIntentEncoderModel` expects. What remains
+unverified is the ARM/ANE execution path (no device attached), not the artifact's shape or
+loadability.
+
+**Device-test caveat worth knowing before a tester session.** The app's runtime encoder path
+cannot serve an utterance today even with the artifact installed: `AppCoordinator` builds the
+interpreter with `UnavailableIntentEncoderTokenizer()` (`AppCoordinator.swift:1146`), whose
+`isReady` is hard false, so `IntentEncoderInterpreter.isAvailable` (line 242) stays false and
+the chain falls through to the LLaMA stand-in. No real Swift XLM-R tokenizer exists in the
+repo — the only implementations are `Unavailable…` (production) and `Stub…` (tests). The
+`INTENT_ENCODER` compilation condition is also not wired into any build configuration, and
+nothing in the app calls `installCoreMLEncoder` for the spike entry (the only callers are
+tests; `INTENT_ENCODER_SPIKE_ZIP` supplies a `downloadURL` that nothing follows for that
+entry). So what a device session can exercise today is the install mechanics themselves; an
+end-to-end utterance test still needs the tokenizer milestone.
 
 ## 11. Why the corpus-regeneration job could not be launched as specified (measured)
 
