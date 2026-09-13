@@ -96,17 +96,31 @@ final class IntentEncoderWiringTests: XCTestCase {
 
     func testTheGateIsOffInThisBuildSoTheShippedDefaultIsUnchanged() {
         // The unit-test target is built WITHOUT the INTENT_ENCODER
-        // condition: the encoder cannot be offered, and the wiring
-        // decision returns today's brain instance untouched.
+        // condition. This exercises the coordinator's real decisions
+        // (`IntentEncoderWiring.gatedEncoder` / `preferredLocalBrain` /
+        // `selectionEventMetadata`) — note the resolve closure counts its
+        // own invocations, so the launch-time lazy construction the review
+        // flagged would fail this test.
         XCTAssertFalse(IntentEncoderFeature.isEnabled)
 
+        var resolutions = 0
+        let offered = IntentEncoderWiring.gatedEncoder {
+            resolutions += 1
+            return nil   // stand-in for the lazy `intentEncoderInterpreter`
+        }
+        XCTAssertNil(offered)
+        XCTAssertEqual(resolutions, 0,
+                       "without the gate the coordinator must not even resolve "
+                       + "the lazy encoder")
+
         let fallback = StubCommandInterpreter(result: makeCommand(action: .query))
-        let offered: CommandInterpreter? =
-            IntentEncoderFeature.isEnabled ? StubCommandInterpreter() : nil
         let preferred = IntentEncoderWiring.preferredLocalBrain(encoder: offered,
                                                                 fallback: fallback)
         XCTAssertTrue(preferred === fallback,
                       "without the gate the coordinator installs the SAME fallback instance")
+        XCTAssertNil(IntentEncoderWiring.selectionEventMetadata(preferred: preferred,
+                                                                encoder: offered),
+                     "no selection event without the gate")
     }
 
     func testEncoderIsPreferredOnlyWhenOfferedAndAvailable() throws {
@@ -132,13 +146,44 @@ final class IntentEncoderWiringTests: XCTestCase {
             encoder: ready, fallback: fallback) === ready)
     }
 
-    func testEncoderSelectedWiringEventIsEmittedByTheCoordinatorDecision() {
-        // The coordinator emits `encoder_selected_as_local_brain` with the
-        // model id/version only when the encoder actually takes the slot.
-        // (The coordinator instance is not unit-constructible; this pins
-        // the metadata shape the wiring uses.)
-        XCTAssertEqual(IntentEncoderManifest.t033Spike.id, "t033-c3-minilm-int8")
-        XCTAssertEqual(IntentEncoderManifest.t033Spike.version, "t033-spike-1")
+    func testSelectionEventMetadataOnlyWhenTheOfferedEncoderTakesTheSlot() throws {
+        // `AppCoordinator` emits `encoder_selected_as_local_brain` through
+        // `IntentEncoderWiring.selectionEventMetadata` — the tested call
+        // is the shipped one, not a copy of it.
+        let store = try makeStore()
+        let fallback = StubCommandInterpreter(result: makeCommand(action: .query))
+
+        // Offered but NOT available (no artifact installed) → no event.
+        let unavailable = makeEncoder(store: store)
+        let preferredFallback = IntentEncoderWiring.preferredLocalBrain(
+            encoder: unavailable, fallback: fallback)
+        XCTAssertNil(IntentEncoderWiring.selectionEventMetadata(
+            preferred: preferredFallback, encoder: unavailable))
+
+        // Installed + ready tokenizer → the encoder takes the slot and the
+        // metadata is its own manifest identity (fixed vocabulary only).
+        try installArtifact(store: store)
+        let ready = makeEncoder(store: store)
+        let preferredEncoder = IntentEncoderWiring.preferredLocalBrain(
+            encoder: ready, fallback: fallback)
+        XCTAssertTrue(preferredEncoder === ready)
+        let metadata = try XCTUnwrap(IntentEncoderWiring.selectionEventMetadata(
+            preferred: preferredEncoder, encoder: ready))
+        XCTAssertEqual(metadata["model_id"], "t033-c3-minilm-int8")
+        XCTAssertEqual(metadata["model_version"], "t033-spike-1")
+        XCTAssertEqual(metadata.count, 2, "no other keys — no content")
+
+        // Gate off: the coordinator never even resolves the encoder, so
+        // there is nothing to emit (the resolve closure must not run).
+        var resolutions = 0
+        let offered = IntentEncoderWiring.gatedEncoder(isEnabled: false) {
+            resolutions += 1
+            return ready
+        }
+        XCTAssertNil(offered)
+        XCTAssertEqual(resolutions, 0)
+        XCTAssertNil(IntentEncoderWiring.selectionEventMetadata(
+            preferred: preferredEncoder, encoder: offered))
     }
 
     // MARK: LocalBrainChain semantics

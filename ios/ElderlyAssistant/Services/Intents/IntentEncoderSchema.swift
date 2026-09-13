@@ -95,6 +95,27 @@ struct IntentEncoderManifest: Equatable {
     let tags: [String]
     /// The `max_len` the exporter traced the model with (RangeDim 1...max).
     let maxSequenceLength: Int
+    /// Contract `calibration_temperature` (`applied_in: interpreter_code`):
+    /// the intent logits are DIVIDED by this before the softmax, so the
+    /// confidence the 0.4/0.7 band policy sees is the calibrated one.
+    /// Defaults to 1.0 — the identity, correct for an uncalibrated artifact
+    /// such as the T-033 spike. A non-finite or non-positive value falls
+    /// back to 1.0 at the decode site rather than producing NaNs.
+    let calibrationTemperature: Double
+
+    init(id: String,
+         version: String,
+         intents: [String],
+         tags: [String],
+         maxSequenceLength: Int,
+         calibrationTemperature: Double = 1.0) {
+        self.id = id
+        self.version = version
+        self.intents = intents
+        self.tags = tags
+        self.maxSequenceLength = maxSequenceLength
+        self.calibrationTemperature = calibrationTemperature
+    }
 
     /// What a decoded tag id means.
     enum TagDecode: Equatable {
@@ -163,10 +184,15 @@ struct IntentEncoderManifest: Equatable {
     ///    does not list it and `ModelCatalog` marks it
     ///    internal-testing / spike.
     ///
-    /// Label order is verbatim from the training run's `meta.json`
-    /// (`/tmp/t033/models/trained/C3/meta.json`, reproduced in
-    /// `tools/train-intent/docs/t033-evidence/C3-coreml-report.json`) —
-    /// intents alphabetical, tags `O` first, then contact/time B/I pairs.
+    /// Label order is verbatim from the training run's `meta.json` and is
+    /// committed, checkable in-repo, at
+    /// `tools/train-intent/docs/t033-evidence/C3-label-order.json`
+    /// (the earlier pointer at `C3-coreml-report.json` was wrong — that
+    /// report carries no `intents`/`tags` keys): intents alphabetical,
+    /// tags `O` first, then contact/time B/I pairs, `max_len` 64.
+    /// `calibrationTemperature` is the explicit 1.0 identity — the spike
+    /// is uncalibrated, and inventing a temperature for it would be a
+    /// fabricated confidence.
     static let t033Spike = IntentEncoderManifest(
         id: "t033-c3-minilm-int8",
         version: "t033-spike-1",
@@ -175,6 +201,7 @@ struct IntentEncoderManifest: Equatable {
             "music", "none", "query", "send_message", "set_reminder"
         ],
         tags: ["O", "B-contact", "I-contact", "B-time", "I-time"],
-        maxSequenceLength: 64
+        maxSequenceLength: 64,
+        calibrationTemperature: 1.0
     )
 }

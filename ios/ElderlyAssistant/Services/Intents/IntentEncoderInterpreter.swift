@@ -141,6 +141,11 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
         /// criteria — on expiry the interpreter reports
         /// "inference_timeout" and returns nil so the router's existing
         /// escalation path runs unchanged.
+        ///
+        /// FORWARD-PASS budget only: the graph load is resolved BEFORE
+        /// this clock is armed (contract F-1 detects
+        /// `forward_pass_exceeds_local_leg_budget`), so a slow successful
+        /// load can never be reported as an inference timeout.
         let timeoutSeconds: Double
         /// Exactly ONE extra attempt when loading the graph failed, for
         /// the artifact-install race (contract `retryOnArtifactLoadRace`).
@@ -218,6 +223,13 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
         return modelStore.coreMLBundleFinalURL(for: modelId)
     }
 
+    /// The label-set identity of the manifest this instance was built with
+    /// — fixed vocabulary (model id / version only), used by the wiring
+    /// event in `AppCoordinator`. Never user content.
+    var manifestIdentity: (id: String, version: String) {
+        (manifest.id, manifest.version)
+    }
+
     /// True only when the artifact is installed, a tokenizer can actually
     /// encode, and the model has not been released for memory pressure.
     /// False is normal: the chain falls through to the LLaMA stand-in, and
@@ -282,30 +294,60 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
             return
         }
 
-        // One-shot guard: the synchronous prediction and the timeout timer
-        // race, and exactly one of them may complete.
+        // One-shot guard shared by BOTH timed phases below: whichever
+        // finishes first completes the turn, the later one is a no-op.
         let attempt = AttemptToken()
-
-        // Timeout is enforced on the CALLER side (CoreML prediction cannot
-        // be cancelled mid-flight): if the bound expires first, the turn
-        // completes as a failure and the late result is discarded. The
-        // interpreter never blocks the session past `timeoutSeconds`.
-        timeoutQueue.asyncAfter(deadline: .now() + config.timeoutSeconds) { [weak self] in
-            guard let self else { return }
-            attempt.finish {
-                self.lastInferenceFailureReason = "inference_timeout"
-                self.emit("encoder_inference_timeout", outcome: "failure",
-                          durationMs: Self.elapsedMs(since: started),
-                          errorCode: "inference_timeout")
-                DispatchQueue.main.async { completion(nil) }
-            }
-        }
 
         inferenceQueue.async { [weak self] in
             guard let self else { return }
             let manifest = self.manifest
+
+            // PHASE 1 — graph load, OUTSIDE the timed section.
+            //
+            // `config.timeoutSeconds` is the FORWARD-PASS budget (T-035
+            // contract F-1 detects `forward_pass_exceeds_local_leg_budget`,
+            // and `inference_timeout` is reserved for it). Loading the
+            // ~118 MB graph is I/O-bound and happens on the first use after
+            // launch and after every memory-pressure unload; charging it to
+            // the inference budget discarded a successful load and reported
+            // a spurious `inference_timeout`. Load failures keep their own
+            // machine reasons (`model_load_failed_*`).
+            let runner: IntentEncoderModelRunning
             do {
-                let runner = try self.runnerForPrediction(wasUnloaded: wasUnloaded)
+                runner = try self.runnerForPrediction(wasUnloaded: wasUnloaded)
+            } catch let error as IntentEncoderModelError {
+                attempt.finish {
+                    self.fail(Self.reason(for: error), started: started,
+                              completion: completion)
+                }
+                return
+            } catch {
+                attempt.finish {
+                    self.fail("inference_failed", started: started,
+                              completion: completion)
+                }
+                return
+            }
+
+            // PHASE 2 — the forward pass, bounded by the inference budget.
+            // The timer is armed HERE, after the load, so it covers only
+            // the prediction. Timeout is enforced on the CALLER side
+            // (CoreML prediction cannot be cancelled mid-flight): if the
+            // bound expires first the turn completes as a failure and the
+            // late result is discarded.
+            self.timeoutQueue.asyncAfter(
+                deadline: .now() + self.config.timeoutSeconds) { [weak self] in
+                guard let self else { return }
+                attempt.finish {
+                    self.lastInferenceFailureReason = "inference_timeout"
+                    self.emit("encoder_inference_timeout", outcome: "failure",
+                              durationMs: Self.elapsedMs(since: started),
+                              errorCode: "inference_timeout")
+                    DispatchQueue.main.async { completion(nil) }
+                }
+            }
+
+            do {
                 let logits = try runner.predict(tokenIds: tokenization.tokenIds,
                                                 attentionMask: tokenization.attentionMask)
                 let outcome = IntentEncoderDecoder.decode(
@@ -573,8 +615,13 @@ enum IntentEncoderDecoder {
                        tokenization: IntentEncoderTokenization,
                        sanitisedTranscript: String) -> IntentEncoderDecodeOutcome {
         // 1. Intent. Softmax is computed in Double to match the Python
-        //    harness closely enough for the band policy.
-        guard let best = argmaxSoftmax(logits.intentLogits),
+        //    harness closely enough for the band policy. The manifest's
+        //    `calibrationTemperature` (contract `calibration_temperature`,
+        //    `applied_in: interpreter_code`) divides the logits first, so
+        //    the confidence the band policy compares against 0.4/0.7 is
+        //    the calibrated one; 1.0 is the identity.
+        guard let best = argmaxSoftmax(logits.intentLogits,
+                                       temperature: manifest.calibrationTemperature),
               let intentRaw = manifest.intent(at: best.index) else {
             return .abstain(.unknownIntent)
         }
@@ -739,15 +786,25 @@ enum IntentEncoderDecoder {
 
     // MARK: - Numeric helpers (pure, testable)
 
-    static func argmaxSoftmax(_ logits: [Float]) -> (index: Int, probability: Double)? {
+    /// Temperature-scaled softmax: the logits are DIVIDED by `temperature`
+    /// before the max-subtraction and exponentiation (contract
+    /// `calibration_temperature`). 1.0 is the identity. Any positive
+    /// temperature leaves the argmax unchanged (the scaling is monotone)
+    /// and only reshapes the probability; a non-finite or non-positive
+    /// temperature falls back to 1.0 rather than producing NaNs.
+    static func argmaxSoftmax(_ logits: [Float],
+                              temperature: Double = 1.0)
+    -> (index: Int, probability: Double)? {
         guard !logits.isEmpty else { return nil }
-        var maxValue = logits[0]
-        for value in logits where value > maxValue { maxValue = value }
+        let scale = (temperature.isFinite && temperature > 0) ? temperature : 1.0
+        let scaled = logits.map { Double($0) / scale }
+        var maxValue = scaled[0]
+        for value in scaled where value > maxValue { maxValue = value }
         var sum = 0.0
         var bestIndex = 0
         var bestValue = -Double.greatestFiniteMagnitude
-        for (index, value) in logits.enumerated() {
-            let exponented = exp(Double(value - maxValue))
+        for (index, value) in scaled.enumerated() {
+            let exponented = exp(value - maxValue)
             sum += exponented
             if exponented > bestValue {
                 bestValue = exponented

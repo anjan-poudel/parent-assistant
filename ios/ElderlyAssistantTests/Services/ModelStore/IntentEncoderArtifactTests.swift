@@ -64,8 +64,26 @@ final class IntentEncoderArtifactTests: XCTestCase {
         XCTAssertEqual(entry.sha256.count, 64, "a full SHA-256 hex digest")
         XCTAssertTrue(entry.sha256.hasPrefix("6056ba41ba37"),
                       "the T-033 C3 export's measured zip hash")
-        XCTAssertEqual(entry.downloadURL.scheme, "file",
-                       "internal delivery only — no device-reachable URL is invented")
+        // No machine-specific path is committed. The default is a
+        // reserved-TLD placeholder (RFC 2606 `.invalid` never resolves);
+        // an internal tester points the entry at their own copy via the
+        // environment override.
+        XCTAssertEqual(entry.downloadURL.host, "invalid.invalid",
+                       "non-routable placeholder — never a device-reachable URL")
+        XCTAssertEqual(entry.downloadURL.path,
+                       "/t033-spike/t033-encoder-int8-mlmodelc.zip")
+        XCTAssertFalse(entry.downloadURL.absoluteString.contains("/Users/"),
+                       "a personal home-directory path must not be committed")
+        let override = ModelCatalog.intentEncoderSpikeZipURL(
+            environment: ["INTENT_ENCODER_SPIKE_ZIP": "/tmp/t033-encoder-int8-mlmodelc.zip"])
+        XCTAssertEqual(override.scheme, "file")
+        XCTAssertEqual(override.path, "/tmp/t033-encoder-int8-mlmodelc.zip")
+        let placeholder = ModelCatalog.intentEncoderSpikeZipURL(environment: [:])
+        XCTAssertEqual(ModelCatalog.intentEncoderSpikeZipURL(
+            environment: ["INTENT_ENCODER_SPIKE_ZIP": "   "]),
+            placeholder,
+            "a blank override falls back to the placeholder")
+        XCTAssertEqual(placeholder.host, "invalid.invalid")
         XCTAssertEqual(entry.dependsOn, nil)
         XCTAssertTrue(ModelKind.intentEncoder.isDirectoryArtifact)
         XCTAssertFalse(ModelKind.whisperBase.isDirectoryArtifact,

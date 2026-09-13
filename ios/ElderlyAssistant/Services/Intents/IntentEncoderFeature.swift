@@ -59,4 +59,32 @@ enum IntentEncoderWiring {
         guard let encoder, encoder.isAvailable else { return fallback }
         return encoder
     }
+
+    /// The coordinator's gate decision, extracted so the SHIPPED call site
+    /// — not a copy of it — is what the tests exercise (`AppCoordinator`
+    /// calls this function directly).
+    ///
+    /// `resolve` is the caller's lazy factory and is invoked ONLY when the
+    /// compilation condition is present: a non-gated build must never even
+    /// construct the interpreter, which is the invariant documented at the
+    /// lazy var's declaration.
+    static func gatedEncoder(isEnabled: Bool = IntentEncoderFeature.isEnabled,
+                             resolve: () -> IntentEncoderInterpreter?)
+    -> IntentEncoderInterpreter? {
+        guard isEnabled else { return nil }
+        return resolve()
+    }
+
+    /// Metadata for the `encoder_selected_as_local_brain` event when the
+    /// OFFERED encoder is the instance that actually took the `preferred`
+    /// slot; nil otherwise (gate off, or offered but unavailable). The
+    /// values are the instance's own manifest identity — fixed vocabulary,
+    /// never user content.
+    static func selectionEventMetadata(preferred: CommandInterpreter?,
+                                       encoder: IntentEncoderInterpreter?)
+    -> [String: String]? {
+        guard let encoder, preferred === encoder else { return nil }
+        return ["model_id": encoder.manifestIdentity.id,
+                "model_version": encoder.manifestIdentity.version]
+    }
 }

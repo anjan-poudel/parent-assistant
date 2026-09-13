@@ -261,9 +261,17 @@ final class ModelStore {
                                      "encoder zip did not contain an .mlmodelc directory"])
         }
         try? fileManager.removeItem(at: dest)
-        // A CoreML-only entry has no ggml file to have created the parent
-        // directory already; ensure it exists before the move.
-        try ensureDirectory(dest.deletingLastPathComponent())
+        // A CoreML-only entry (`.intentEncoder`) has no ggml file to have
+        // created its parent directory (the kind's own ModelStore folder),
+        // so ensure it exists before the move. Deliberately scoped to that
+        // kind: on the Whisper-companion path the parent is the ggml
+        // model's own directory, and creating it early would let an
+        // encoder install succeed in the anomalous "encoder before its
+        // Whisper model" ordering, leaving an orphan encoder dir — the
+        // pre-existing failure is the safer behaviour there.
+        if entry.kind == .intentEncoder {
+            try ensureDirectory(dest.deletingLastPathComponent())
+        }
         try fileManager.moveItem(at: extracted, to: dest)
         emit("coreml_encoder_installed", outcome: "success", modelId: id,
              errorCode: nil)

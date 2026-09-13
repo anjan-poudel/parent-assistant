@@ -69,6 +69,9 @@ final class StubIntentEncoderModel: IntentEncoderModelRunning {
     var predictError: Error?
     /// Simulates a slow graph (timeout tests).
     var predictDelay: TimeInterval = 0
+    /// Simulates a slow GRAPH LOAD (the inference budget must not cover
+    /// it — review finding on timeout scope).
+    var loadDelay: TimeInterval = 0
     var logits = IntentEncoderLogits(intentLogits: [], slotLogits: [])
 
     private(set) var loadCount = 0
@@ -80,6 +83,7 @@ final class StubIntentEncoderModel: IntentEncoderModelRunning {
     func load() throws {
         if let loadError { throw loadError }
         loadCount += 1
+        if loadDelay > 0 { Thread.sleep(forTimeInterval: loadDelay) }
         isLoaded = true
     }
 
@@ -686,6 +690,75 @@ final class IntentEncoderInterpreterTests: XCTestCase {
         XCTAssertTrue(events("encoder_load_retry").isEmpty)
     }
 
+    // MARK: Timeout scope (regression for the review's MAJOR finding)
+
+    func testSlowGraphLoadIsNotChargedToTheInferenceBudget() throws {
+        // The inference budget bounds the FORWARD PASS only. The first use
+        // after launch (or after a memory-pressure unload) loads the graph;
+        // that load must not be timed by `timeoutSeconds`, or a successful
+        // load is discarded and reported as a spurious `inference_timeout`.
+        let store = try makeStore()
+        _ = try installArtifact(store: store)
+        let tokenizer = StubIntentEncoderTokenizer()
+        let spy = IntentEncoderRunnerSpy()
+        let manifest = testManifest(intents: ["query", "none"])
+        let clean = InputSanitiser.sanitise("केही सोध्नु छ", level: .quarantine)
+        let tokenization = try XCTUnwrap(tokenizer.tokenize(
+            sanitisedTranscript: clean, maxSequenceLength: 64))
+        let model = StubIntentEncoderModel()
+        model.loadDelay = 0.4            // ≫ the 0.05 s inference budget
+        model.logits = IntentEncoderLogits(
+            intentLogits: [6, -6],
+            slotLogits: tokenization.tokenIds.map { _ in [0, 0] })
+        spy.make = { model }
+
+        let interpreter = makeInterpreter(
+            store: store, tokenizer: tokenizer, spy: spy, manifest: manifest,
+            config: IntentEncoderInterpreter.Config(confidenceThreshold: 0.4,
+                                                    timeoutSeconds: 0.05))
+        let command = try XCTUnwrap(interpret(interpreter, "केही सोध्नु छ"))
+
+        XCTAssertEqual(command.action, .query,
+                       "a load slower than the inference budget still serves")
+        XCTAssertNil(interpreter.lastInferenceFailureReason)
+        XCTAssertTrue(events("encoder_inference_timeout").isEmpty,
+                      "a successful load is never an inference timeout")
+        XCTAssertEqual(model.loadCount, 1)
+        XCTAssertEqual(model.predictCount, 1)
+    }
+
+    func testSlowPredictionStillTimesOutAfterASlowLoad() throws {
+        // The other half: once the load is done, a slow forward pass must
+        // still complete the turn on the budget with `inference_timeout`.
+        let store = try makeStore()
+        _ = try installArtifact(store: store)
+        let spy = IntentEncoderRunnerSpy()
+        let model = StubIntentEncoderModel()
+        model.loadDelay = 0.15
+        model.predictDelay = 0.4
+        model.logits = IntentEncoderLogits(intentLogits: [6, -6],
+                                           slotLogits: [[0, 0]])
+        spy.make = { model }
+        let interpreter = makeInterpreter(
+            store: store, tokenizer: StubIntentEncoderTokenizer(), spy: spy,
+            manifest: testManifest(intents: ["query", "none"]),
+            config: IntentEncoderInterpreter.Config(confidenceThreshold: 0.4,
+                                                    timeoutSeconds: 0.1))
+
+        let started = Date()
+        XCTAssertNil(interpret(interpreter, "केही सोध्नु छ"))
+        let elapsed = Date().timeIntervalSince(started)
+
+        XCTAssertLessThan(elapsed, 0.15 + 0.4,
+                          "the turn ends on the budget after the load, "
+                          + "not on the slow forward pass")
+        XCTAssertEqual(interpreter.lastInferenceFailureReason, "inference_timeout")
+        XCTAssertEqual(events("encoder_inference_timeout").count, 1)
+        XCTAssertEqual(model.loadCount, 1)
+        XCTAssertEqual(model.predictCount, 1, "the timed-out pass runs once")
+        XCTAssertNil(events("encoder_inference_done").first)
+    }
+
     // MARK: Memory pressure
 
     func testMemoryPressureUnloadsAndTheNextUseReloadsFromTheModelStore() throws {
@@ -849,6 +922,8 @@ final class IntentEncoderInterpreterTests: XCTestCase {
         // message, topic or app span can come out of it.
         XCTAssertEqual(spike.tags, ["O", "B-contact", "I-contact", "B-time", "I-time"])
         XCTAssertEqual(spike.maxSequenceLength, 64)
+        XCTAssertEqual(spike.calibrationTemperature, 1.0,
+                       "the spike is uncalibrated — the identity, never an invented temperature")
         // Version + id are distinct from the artifact's own (the manifest
         // travels WITH the runtime because the zip has no meta.json).
         XCTAssertEqual(spike.id, "t033-c3-minilm-int8")
@@ -1055,5 +1130,80 @@ final class IntentEncoderDecoderTests: XCTestCase {
         XCTAssertEqual(best?.index, 1)
         XCTAssertEqual(best?.probability ?? 0, 0.665, accuracy: 0.001)
         XCTAssertNil(IntentEncoderDecoder.argmaxSoftmax([]))
+    }
+
+    // MARK: Calibration temperature (contract `calibration_temperature`)
+
+    func testTemperatureOfOneIsBehaviourPreserving() {
+        let logits: [Float] = [1.0, 3.0, 2.0]
+        let defaulted = IntentEncoderDecoder.argmaxSoftmax(logits)
+        let explicit = IntentEncoderDecoder.argmaxSoftmax(logits, temperature: 1.0)
+
+        XCTAssertEqual(defaulted?.index, explicit?.index)
+        XCTAssertEqual(defaulted?.probability ?? 0, explicit?.probability ?? 0,
+                       accuracy: 1e-12)
+        XCTAssertEqual(defaulted?.probability ?? 0, 0.665, accuracy: 0.001,
+                       "the identity leaves the uncalibrated spike unchanged")
+    }
+
+    func testTemperatureIsAppliedBeforeTheSoftmax() {
+        let logits: [Float] = [1.0, 3.0, 2.0]
+        let sharp = IntentEncoderDecoder.argmaxSoftmax(logits, temperature: 0.5)
+        let plain = IntentEncoderDecoder.argmaxSoftmax(logits)
+        let flat = IntentEncoderDecoder.argmaxSoftmax(logits, temperature: 2.0)
+
+        XCTAssertEqual(sharp?.index, 1,
+                       "a positive temperature never moves the argmax")
+        XCTAssertEqual(flat?.index, 1)
+        XCTAssertGreaterThan(sharp?.probability ?? 0, plain?.probability ?? 0)
+        XCTAssertLessThan(flat?.probability ?? 0, plain?.probability ?? 0)
+        // T = 0.5 is softmax(2 × logits) — the exact value is checkable.
+        let expected = exp(6.0) / (exp(2.0) + exp(6.0) + exp(4.0))
+        XCTAssertEqual(sharp?.probability ?? 0, expected, accuracy: 1e-9)
+    }
+
+    func testNonPositiveOrNonFiniteTemperatureFallsBackToTheIdentity() {
+        let logits: [Float] = [1.0, 3.0, 2.0]
+        let plain = IntentEncoderDecoder.argmaxSoftmax(logits)
+        for bad in [0.0, -1.0, .infinity, .nan] as [Double] {
+            let result = IntentEncoderDecoder.argmaxSoftmax(logits, temperature: bad)
+            XCTAssertEqual(result?.index, plain?.index,
+                           "temperature \(bad) must not produce NaN confidence")
+            XCTAssertEqual(result?.probability ?? 0, plain?.probability ?? 0,
+                           accuracy: 1e-12, "temperature \(bad)")
+        }
+    }
+
+    func testDecodeUsesTheManifestCalibrationTemperature() {
+        // The contract applies calibration in the INTERPRETER: the same
+        // logits at T = 0.5 must report a different confidence than at
+        // T = 1.0 — so the 0.4/0.7 band policy compares calibrated numbers.
+        let text = "केही"
+        let tokenization = tokenization(words: ["केही"], wordIndices: [0])
+        let intentLogits: [Float] = [4.0, 0.0, 0.0]
+        let slotRows = rows(["O"])
+        func makeManifest(temperature: Double) -> IntentEncoderManifest {
+            IntentEncoderManifest(id: "decode-test", version: "1",
+                                  intents: ["set_reminder", "query", "none"],
+                                  tags: manifest.tags,
+                                  maxSequenceLength: 64,
+                                  calibrationTemperature: temperature)
+        }
+        func confidence(_ manifest: IntentEncoderManifest) -> Double? {
+            guard case .command(_, let confidence, _) = IntentEncoderDecoder.decode(
+                logits: IntentEncoderLogits(intentLogits: intentLogits,
+                                            slotLogits: slotRows),
+                manifest: manifest,
+                tokenization: tokenization,
+                sanitisedTranscript: text) else { return nil }
+            return confidence
+        }
+
+        let plain = confidence(makeManifest(temperature: 1.0)) ?? 0
+        let calibrated = confidence(makeManifest(temperature: 0.5)) ?? 0
+
+        XCTAssertEqual(plain, 0.965, accuracy: 0.01)
+        XCTAssertGreaterThan(calibrated, plain,
+                             "T < 1 sharpens the calibrated confidence")
     }
 }

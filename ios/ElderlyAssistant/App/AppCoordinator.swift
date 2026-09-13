@@ -2181,20 +2181,27 @@ final class AppCoordinator: ObservableObject {
         // stand-in (`llamaCommandInterpreter`) and every other layer are
         // untouched — the keyword safety net still runs upstream of this
         // whole chain.
-        let offeredEncoder: CommandInterpreter? =
-            IntentEncoderFeature.isEnabled ? intentEncoderInterpreter : nil
+        //
+        // `gatedEncoder` is what protects the lazy factory: the closure is
+        // evaluated only when the gate is on, so a non-gated build never
+        // even CONSTRUCTS the interpreter (see the lazy var's docs). The
+        // wiring decision and the selection event both live in
+        // `IntentEncoderWiring`, so the shipped call site is the tested one.
+        let offeredEncoder = IntentEncoderWiring.gatedEncoder {
+            intentEncoderInterpreter
+        }
         let preferredLocal = IntentEncoderWiring.preferredLocalBrain(
             encoder: offeredEncoder,
             fallback: localIntentInterpreter)
-        if preferredLocal === intentEncoderInterpreter {
+        if let selectionMetadata = IntentEncoderWiring.selectionEventMetadata(
+                preferred: preferredLocal, encoder: offeredEncoder) {
             observabilityBus.emit(ObservabilityEvent(
                 component: "intent_encoder_wiring",
                 eventType: "encoder_selected_as_local_brain",
                 durationMs: nil,
                 outcome: "info",
                 errorCode: nil,
-                metadata: ["model_id": IntentEncoderManifest.t033Spike.id,
-                           "model_version": IntentEncoderManifest.t033Spike.version]
+                metadata: selectionMetadata
             ))
         }
         router3.localBrain = LocalBrainChain(preferred: preferredLocal,

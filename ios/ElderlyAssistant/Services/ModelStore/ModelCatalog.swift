@@ -226,14 +226,37 @@ enum ModelCatalog {
     /// strictly and abstains on anything outside schema v2
     /// (`IntentEncoderSchema`).
     ///
-    /// No hosted URL exists for this spike; `downloadURL` points at the
-    /// stable on-Mac copy (`/Users/anjan/.local/share/elderly-ai/
-    /// t033-spike/`) so an internal tester on the same machine can install
-    /// it through `ModelStore.installCoreMLEncoder(fromZip:for:)`. A
-    /// device-side install needs the zip copied over first (AirDrop /
-    /// `devicectl`) — the standard downloader would need a real HTTP URL,
-    /// which is deliberately not invented here.
+    /// No hosted URL exists for this spike and the catalog must not embed
+    /// a machine-specific path (`intentEncoderSpikeZipURL(environment:)`
+    /// documents the override). The supported internal-testing route does
+    /// not need a URL at all: pass the zip directly to
+    /// `ModelStore.installCoreMLEncoder(fromZip:for:)`. A device-side
+    /// install needs the zip copied over first (AirDrop / `devicectl`) —
+    /// the standard downloader would need a real HTTP URL, which is
+    /// deliberately not invented here.
     static let intentEncoderSpike = ModelID("intent-encoder-t033-c3-minilm-int8")
+
+    /// The local zip the internal-testing encoder entry points at.
+    ///
+    /// A personal home-directory path must not be committed (nobody else
+    /// could resolve it), so the default is a reserved-TLD placeholder
+    /// (`.invalid` — RFC 2606, can never resolve) and a tester who wants
+    /// the download/picker path to find their own copy sets:
+    ///
+    ///     INTENT_ENCODER_SPIKE_ZIP=/path/to/t033-encoder-int8-mlmodelc.zip
+    ///
+    /// `environment` is injectable so tests can pin both branches without
+    /// touching the process environment.
+    static func intentEncoderSpikeZipURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+        if let path = environment["INTENT_ENCODER_SPIKE_ZIP"],
+           !path.trimmingCharacters(in: .whitespaces).isEmpty {
+            return URL(fileURLWithPath: path)
+        }
+        // Documentation-only placeholder: .invalid is reserved by RFC 2606
+        // and never resolves. The internal-testing install does not use it.
+        return URL(string: "https://invalid.invalid/t033-spike/t033-encoder-int8-mlmodelc.zip")!
+    }
 
     /// The wake-word engine model (Slice A of voice-personalisation P0):
     /// sherpa-onnx streaming Zipformer keyword spotter trained on
@@ -813,10 +836,12 @@ enum ModelCatalog {
             // The installed DIRECTORY name inside the ModelStore; the zip
             // contains exactly this directory at its top level.
             filename: "t033-encoder-int8.mlmodelc",
-            // Stable on-Mac copy of the spike zip (outside the repo — the
-            // 109 MB binary is deliberately not committed). Not reachable
-            // from a device; see the ID's doc comment.
-            downloadURL: URL(string: "file:///Users/anjan/.local/share/elderly-ai/t033-spike/t033-encoder-int8-mlmodelc.zip")!,
+            // Non-routable placeholder, or the tester's own copy when
+            // INTENT_ENCODER_SPIKE_ZIP is set; the 109 MB spike zip itself
+            // is deliberately not committed and is installed by passing it
+            // to `installCoreMLEncoder(fromZip:for:)`. See
+            // `intentEncoderSpikeZipURL(environment:)`.
+            downloadURL: intentEncoderSpikeZipURL(),
             sizeBytes: 109_075_268,
             sha256: "6056ba41ba37d8e0a4b72e40c14809792ff9a16c3fe42e4a03f4aa53c7701ffa",
             // int8 encoder body ~118 MB; ~2 GB device floor is generous
