@@ -35,3 +35,4 @@ qwen-student-schema-nodistill-s42-off,0.765,0.769,0.833,1.000,1.000,closed_inten
 qwen-student-schema-repaired-s42-gbnf,0.882,0.833,0.750,1.000,1.000,closed_intent_accuracy|contact_f1|time_f1,gbnf
 qwen-student-schema-repaired-s42-off,0.882,0.833,0.750,1.000,1.000,closed_intent_accuracy|contact_f1|time_f1,off
 qwen-kr-repaired-s42,0.882,0.833,0.750,1.000,1.000,closed_intent_accuracy|contact_f1|time_f1,gbnf
+qwen4b-s43-gbnf-slotcanon-smoke,1.000,0.800,0.833,1.000,1.000,contact_f1|time_f1,gbnf

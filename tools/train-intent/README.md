@@ -212,3 +212,96 @@ arm D answered `म्यासिन` for `maiya`, and either single slip nearl
 gate's margin. Same family as the query/`time` finding above — the fix is
 annotation, not model: normalize contact labels (or accept the inflected form
 in the scorer) before reading a contact_f1 miss as a model defect.
+
+**Slot-convention normalization IMPLEMENTED (2026-09-13, slot-fix retrain):**
+the two annotation findings above (the contact case suffix, non-reminder
+`time`) are now fixed in code instead of left as reading discipline, in
+`src/slot_canonical.py` — one canonical form per slot, applied to BOTH sides:
+the training labels (`build_dataset.py`, to every source row before
+bucketing / dedupe / draw_key) and the eval's extraction (`eval_golden.py`),
+so train and eval agree on what a slot value IS.
+
+- **CONTACT** — the dative/accusative particle `लाई` / `lai` (attached or a
+  separate token, both scripts) is stripped; the slot is the bare name, as
+  all six golden contacts are. Measured in the built set: **366 contact
+  labels carried it** (343 train + 23 valid), now **0**; 5062 rows were
+  normalized across the raw pool. Deliberately NOT stripped: **`-मा`/`-ma`**,
+  which the first pass counted as a case suffix but which is part of the word
+  (`आमा` "mother", `सिमा` "Sima" — stripping yields `आ`/`सि`, corrupting every
+  such label), and honorifics, which are the app's match-time choice
+  (`NepaliTextNormalizer.strippingHonorifics`). The eval canonicalizes the
+  **prediction** too, not just the gold: a decode that copies the utterance's
+  particle resolves on-device anyway (`ContactResolver.score` contains-match
+  0.8, above its 0.6 accept threshold), so charging it 2 of the gate's 6
+  contact tokens was harsher than the device. Run
+  `.venv/bin/python src/slot_canonical.py` for the self-test + residual audit.
+- **TIME** — `time` is a **set_reminder-only slot in the shipped app**: the
+  single reader of `command.time` in the whole iOS tree is
+  `CommandRouter.handleSetReminder` (dev checkout at `2b72a2f`), and a
+  reminder with no time speaks `router.reminderNoTime`. The corpus filled it
+  on **55 non-reminder rows** — 43 weather queries with `time=भोलि`, plus 5
+  `send_message` rows whose `आज` belongs to the *dictated message*
+  ("आज भेट्नुहोस्" = tell her we'll meet today) — and the 4B s43 diag
+  reproduced exactly that habit as `time None -> 'आज'` on `gc-message-001`.
+  Nulled at build time (53 train + 2 valid rows in the built set; 1477 across
+  the pool). The eval nulls the **gold** by intent but scores a **predicted**
+  time raw — canonicalizing a prediction by its own predicted intent would
+  forgive the exact false positive the gate exists to catch.
+- **NOT changed:** the 77 rows whose time label **drops a daypart the
+  utterance states** (`बिहान ८ बजे` -> `८ बजे`, the other half of the s43
+  time miss). Fixing the `आज` false positive alone takes `time_f1`
+  0.833 -> 0.909 (tp 6 / fp 0), and restoring dayparts is a label rewrite,
+  not a normalization — the golden convention here is "their wording", so
+  the 387 rows that keep it are already the majority.
+- **COST:** `draw_key` is content-addressed, so editing a label moves that
+  row's key and can carry it across a take boundary — **363 of 4307 rows
+  (8.4%) swapped** in/out of the rebuilt set. The row COUNT is unchanged
+  (4307 train / 226 valid) and the swap is the anchored draw behaving as
+  documented (an edited label IS a different row); it is the one source of
+  variation in the retrain that is not the normalization itself, and it is
+  why the k=3 table is the read rather than a single seed. A side benefit:
+  duplicate utterances whose copies disagreed on the particle now
+  canonicalize to one label, so the anchored winner-pick among duplicates no
+  longer teaches an arbitrary convention.
+
+**Slot-fix retrain — the command, ready to launch (GPU-gated, never co-run):**
+
+    cd tools/train-intent
+    .venv/bin/python src/eval_golden_k.py --base qwen4b --k 3 \
+        --tag-prefix qwen4b-slotcanon
+
+Trains seeds 42/43/44 from `Qwen/Qwen3-4B-Instruct-2507` on the rebuilt
+`data/train.jsonl` (md5 `6381ae6162b419ce908870051c417f10`; valid
+`ca44271249a3b4a4d2a7610220fbf389`), exports each to
+`models/intent-ne-qwen4b-slotcanon-s<seed>-q4_k_m.gguf`, and grades under the
+app grammar (`--grammar gbnf`, the driver's default). Baseline to beat, same
+base, same decode mode: **`qwen4b-s43-gbnf` 1.000 / 0.800 / 0.833 / 1.000 /
+1.000** — contact and time both below 0.90, and each is **one token** from
+passing (contact tp 4 / fn 2 of 6; time tp 5 / fn 1 / fp 1 of 6). Add
+`--label-order schema` for the app-grammar property order the newest arms
+used (`qwen-kr-repaired`, arm D); the default `canonical` keeps the delta
+against s43 one-variable. The driver wait-loops for a free GPU before every
+train leg, so launch it once the intent-encoder run releases the card — or
+pass `--no-wait` to have it abort rather than queue. Resume is the same
+command (`eval/krun_state_qwen4b-slotcanon.json`); `--fresh` only if the
+point is a genuinely new trajectory.
+
+**Smoke-verified before the retrain (CPU llama.cpp, no GPU touched):** running
+that same `--grammar gbnf` eval on the EXISTING `qwen4b-s43` checkpoint with the
+normalization in place reproduces the pre-change table **bit-identically** —
+`qwen4b-s43-gbnf-slotcanon-smoke` 1.000 / 0.800 / 0.833 / 1.000 / 1.000, same
+two failed gates, same five per-row diffs, 0 `[gguf/grammar-BUG]` no-JSON rows
+(log committed; the run is the driver's own eval leg, one step only,
+`LLAMA_N_THREADS=8`):
+
+    .venv/bin/python src/eval_golden.py --backend gguf \
+        --model-path models/intent-ne-qwen4b-s43-q4_k_m.gguf \
+        --label qwen4b-s43-gbnf-slotcanon-smoke --grammar gbnf --diag
+
+The extraction change is therefore neutral where a decode does not copy the
+particle, and it bites exactly where it should: a semantically-correct decode
+that appends `लाई` on the three inflected golden rows scores **0.500 raw vs
+1.000 canonical** (`slot_f1` over the 6 gold tokens). The rebuilt set is
+byte-reproducible — a second `build_dataset.py` run reproduces md5
+`6381ae6162b419ce908870051c417f10` exactly, so the retrain's only data
+variable is the normalization plus the 363-row anchored re-draw above.

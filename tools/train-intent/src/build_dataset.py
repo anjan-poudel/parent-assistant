@@ -73,6 +73,7 @@ import unicodedata
 from pathlib import Path
 
 from config import load_config
+from slot_canonical import canonicalize_rows
 
 # Canonical app wire shape (2026-09-12 reconciliation): `intent`/`response`
 # (IntentPrompt.swift's structured-response contract), not the legacy
@@ -199,6 +200,19 @@ def main() -> None:
             continue
         with open(src, encoding="utf-8") as f:
             raw.extend(json.loads(line) for line in f if line.strip())
+
+    # Slot canonicalization (src/slot_canonical.py, 2026-09-13) — see that
+    # module for the measurements. Applied to EVERY source row BEFORE
+    # bucketing, dedupe and draw_key, so all three see the row that will be
+    # trained on and no draw is keyed on a spelling the golden corpus does
+    # not use. A side benefit: duplicate utterances whose copies disagreed on
+    # the particle ("सुनितालाई" vs "सुनिता") now canonicalize to one label, so
+    # the anchored winner-pick among duplicates no longer teaches an
+    # arbitrary convention choice.
+    raw, canon = canonicalize_rows(raw)
+    print(f"[build] slot canonicalization: contact stripped on "
+          f"{canon['contact']} rows, non-reminder time nulled on "
+          f"{canon['time']} rows")
 
     golden = load_golden_keys(root / "eval" / "golden_corpus.jsonl")
     frac = {b: float(cfg[f"mixture.{b}"]) for b in

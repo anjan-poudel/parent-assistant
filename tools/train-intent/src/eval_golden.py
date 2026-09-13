@@ -65,6 +65,7 @@ from pathlib import Path
 from command_grammar import build_grammar, fingerprint, load_schema
 from config import load_config
 from intent_prompt import render_prompt
+from slot_canonical import canonical_contact, canonical_time
 
 CLOSED_INTENTS = {"ack_med", "call", "emergency", "set_reminder",
                   "health_query", "music", "send_message", "guide",
@@ -329,9 +330,27 @@ def main() -> None:
 
     closed = [i for i in per_intent_total if i in CLOSED_INTENTS]
     closed_acc = sum(per_intent_correct[i] for i in closed) / max(sum(per_intent_total[i] for i in closed), 1)
-    contact_f1 = slot_f1([r["slots"].get("contact") for r in corpus],
-                         [p.get("contact") for p in preds])
-    time_f1 = slot_f1([r["slots"].get("time") for r in corpus],
+    # Slot canonicalization (src/slot_canonical.py, 2026-09-13): the gate
+    # scores the golden slot CONVENTION, not whichever surface form a decode
+    # happened to pick. CONTACT is canonicalized on BOTH sides — build_dataset
+    # applies the same function to the training labels, so train and eval now
+    # agree. A prediction that copies the utterance's dative particle
+    # ("सुनितालाई" for gold "सुनिता") still resolves on-device
+    # (ContactResolver contains-matches at 0.8, above its 0.6 accept
+    # threshold), while under token-level F1 it would cost 2 of the gate's 6
+    # contact tokens for a single slip. TIME is canonicalized on the GOLD side
+    # only: a predicted time is scored RAW, because nulling it by its own
+    # predicted intent would forgive exactly the spurious-time false positive
+    # the gate exists to catch.
+    gold_contacts = [canonical_contact(r["slots"].get("contact"))
+                     for r in corpus]
+    pred_contacts = [canonical_contact(p.get("contact")) for p in preds]
+    stripped_contacts = sum(1 for p in preds
+                            if canonical_contact(p.get("contact"))
+                            != p.get("contact"))
+    contact_f1 = slot_f1(gold_contacts, pred_contacts)
+    time_f1 = slot_f1([canonical_time(r["slots"].get("time"), r["intent"])
+                       for r in corpus],
                       [p.get("time") for p in preds])
     emergency_recall = emergency_hit / max(emergency_gold, 1)
     se_precision = se_tp / max(se_tp + se_fp, 1)
@@ -343,6 +362,10 @@ def main() -> None:
         print(f"decode                 : {args.grammar}"
               + (f" (commandJSONSchema {fingerprint()})"
                  if args.grammar == "gbnf" else " (unconstrained)"))
+    if stripped_contacts:
+        print(f"contact canonicalized  : {stripped_contacts} prediction(s) "
+              "carried the dative particle — stripped before scoring "
+              "(src/slot_canonical.py)")
     print(f"closed-intent accuracy : {closed_acc:.3f}  (gate {cfg['gates.closed_intent_accuracy']})")
     print(f"contact slot F1        : {contact_f1:.3f}  (gate {cfg['gates.slot_f1']})")
     print(f"time slot F1           : {time_f1:.3f}  (gate {cfg['gates.slot_f1']})")
@@ -383,10 +406,13 @@ def main() -> None:
         # response=None and the gate never reads it, so including it would
         # surface noise the score does not contain.
         print("\nper-row diffs (intent / contact / time; * = mismatch):")
-        for row, pred in zip(corpus, preds):
+        print("(contact is compared in CANONICAL form — slot_canonical.py — "
+              "so a particle-stripped prediction shows as equal)")
+        for i, (row, pred) in enumerate(zip(corpus, preds)):
             g_i, p_i = row["intent"], pred.get("intent", "none")
-            g_c, p_c = row["slots"].get("contact"), pred.get("contact")
-            g_t, p_t = row["slots"].get("time"), pred.get("time")
+            g_c, p_c = gold_contacts[i], pred_contacts[i]
+            g_t = canonical_time(row["slots"].get("time"), row["intent"])
+            p_t = pred.get("time")
             if (g_i, g_c, g_t) == (p_i, p_c, p_t):
                 continue
             marks = (" *" if g_i != p_i else "",
