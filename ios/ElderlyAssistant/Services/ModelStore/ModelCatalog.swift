@@ -260,13 +260,29 @@ enum ModelCatalog {
     /// touching the process environment.
     static func intentEncoderSpikeZipURL(
         environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
-        if let path = environment["INTENT_ENCODER_SPIKE_ZIP"],
-           !path.trimmingCharacters(in: .whitespaces).isEmpty {
-            return URL(fileURLWithPath: path)
+        if let configured = configuredIntentEncoderSpikeZipURL(environment: environment) {
+            return configured
         }
         // Documentation-only placeholder: .invalid is reserved by RFC 2606
         // and never resolves. The internal-testing install does not use it.
         return URL(string: "https://invalid.invalid/t033-spike/t033-encoder-int8-mlmodelc.zip")!
+    }
+
+    /// The tester's own copy of the spike zip, or nil when the environment
+    /// does not configure one.
+    ///
+    /// [ENCODER-RUNTIME-READY] The install trigger
+    /// (`IntentEncoderSpikeInstaller`) has to tell "not configured" apart
+    /// from "configured": `intentEncoderSpikeZipURL` is deliberately total
+    /// (the Settings/download path needs a URL to show), but installing its
+    /// `.invalid` placeholder would be a silent no-op, and the trigger's
+    /// contract is that a readiness request either installs or reports why
+    /// not. Same key, same blank-string rule, one predicate.
+    static func configuredIntentEncoderSpikeZipURL(
+        environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
+        guard let path = environment["INTENT_ENCODER_SPIKE_ZIP"],
+              !path.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return URL(fileURLWithPath: path)
     }
 
     /// The wake-word engine model (Slice A of voice-personalisation P0):

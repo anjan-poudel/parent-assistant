@@ -3,10 +3,12 @@ import Foundation
 /// [T-037-a] Compile-time feature gate for the intent-encoder local brain.
 ///
 /// The encoder is an INTERNAL-TESTING path in this phase, not a shipped
-/// brain: its artifact is the T-033 bake-off spike (legacy dataset, no
-/// schema-v2 slot coverage, unmeasured calibration) and the Swift-side
-/// tokenizer does not exist yet. It must therefore be impossible for the
-/// encoder to become the local brain in a release build by accident.
+/// brain: its artifact is the T-036 v0 export — a baseline whose E4 harness
+/// gates failed (closed-intent accuracy ~0.53, emergency recall ~0.9375,
+/// publication withheld), now with the Swift XLM-R tokenizer
+/// ([ENCODER-RUNTIME-READY]) and the artifact's companion meta.json wired
+/// behind this gate. It must therefore be impossible for the encoder to
+/// become the local brain in a release build by accident.
 ///
 /// The gate is a Swift compilation condition, not a runtime toggle, so a
 /// build WITHOUT `INTENT_ENCODER` cannot even construct the interpreter's
@@ -86,5 +88,33 @@ enum IntentEncoderWiring {
         guard let encoder, preferred === encoder else { return nil }
         return ["model_id": encoder.manifestIdentity.id,
                 "model_version": encoder.manifestIdentity.version]
+    }
+
+    /// [ENCODER-RUNTIME-READY] The local-brain preference for the
+    /// INTERNAL-TESTING path, as a deferred pair.
+    ///
+    /// `preferredLocalBrain` above answers "can the encoder serve RIGHT
+    /// NOW?" — correct for the boot decision, but it pins the answer for
+    /// the life of the process: `LocalBrainChain` holds the object it was
+    /// given. That is exactly wrong for the install trigger, which lands
+    /// the artifact asynchronously AFTER boot: the tester would have to
+    /// relaunch before the encoder could ever be selected.
+    ///
+    /// This wraps the decision in a `LocalBrainChain` so availability is
+    /// re-read on every turn (the chain's own rule), while the fallback
+    /// object is EXACTLY the one the boot decision would have installed
+    /// (the fine-tuned model when it can serve, else the stand-in). Once
+    /// the install completes, the very next turn goes to the encoder; until
+    /// then nothing about the chain's behaviour changes.
+    ///
+    /// The selection EVENT keeps its meaning because the caller emits it
+    /// from `selectionEventMetadata(preferred:encoder:)` fed by
+    /// `preferredLocalBrain` — the encoder-available-now decision — not by
+    /// this wrapper.
+    static func deferredEncoderPreference(encoder: IntentEncoderInterpreter?,
+                                          fallback: CommandInterpreter)
+    -> CommandInterpreter {
+        guard let encoder else { return fallback }
+        return LocalBrainChain(preferred: encoder, standIn: fallback)
     }
 }

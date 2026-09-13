@@ -1132,23 +1132,31 @@ final class AppCoordinator: ObservableObject {
                                                timeoutSeconds: 10),
         pluginRegistry: pluginRegistry
     )
-    /// [T-037-a] The on-device CoreML intent encoder (T-033 spike
-    /// artifact, internal testing only). Deliberately NOT constructed on
-    /// normal builds: every reference to it is guarded by
+    /// [T-037-a] The on-device CoreML intent encoder (internal testing
+    /// only; artifact pinned to the T-036 v0 export). Deliberately NOT
+    /// constructed on normal builds: every reference to it is guarded by
     /// `IntentEncoderFeature.isEnabled`, so the `lazy` factory never runs
     /// without the `INTENT_ENCODER` compilation condition. Its
     /// `isAvailable` is false unless the artifact is installed in
-    /// `ModelStore` AND a tokenizer is ready — `UnavailableIntentEncoderTokenizer`
-    /// is the production default until the Swift XLM-R tokenizer exists,
-    /// so the shipped behaviour is unchanged either way.
-    private lazy var intentEncoderInterpreter = IntentEncoderInterpreter(
-        modelStore: modelStore,
-        observabilityBus: observabilityBus,
-        modelId: ModelCatalog.intentEncoderSpike,
-        manifest: .t033Spike,
-        tokenizer: UnavailableIntentEncoderTokenizer(),
-        config: .default
-    )
+    /// `ModelStore` AND both bundled resources load — the Swift XLM-R
+    /// tokenizer ([ENCODER-RUNTIME-READY]) with the artifact's companion
+    /// meta.json. When either resource is unavailable,
+    /// `IntentEncoderRuntime.load` returns the explicit UNAVAILABLE pair,
+    /// so the shipped behaviour is unchanged.
+    private lazy var intentEncoderInterpreter: IntentEncoderInterpreter = {
+        let resources = IntentEncoderRuntime.load()
+        return IntentEncoderInterpreter(
+            modelStore: modelStore,
+            observabilityBus: observabilityBus,
+            modelId: ModelCatalog.intentEncoderSpike,
+            manifest: resources.manifest,
+            tokenizer: resources.tokenizer,
+            config: .default,
+            artifactInstaller: IntentEncoderSpikeInstaller(
+                modelStore: modelStore,
+                observabilityBus: observabilityBus)
+        )
+    }()
     /// Level-2 memory-warning observer for the encoder (nil unless the
     /// internal-testing gate is on).
     private var intentEncoderMemoryObserver: NSObjectProtocol?
@@ -2239,12 +2247,18 @@ final class AppCoordinator: ObservableObject {
         //
         // [T-037-a] Internal-testing encoder slot: when the INTENT_ENCODER
         // compilation condition is present AND the ModelStore artifact is
-        // installed AND a tokenizer is ready, the encoder takes the
-        // `preferred` slot; otherwise `preferredLocalBrain` returns
+        // installed AND the bundled resources load, the encoder takes the
+        // `preferred` slot; otherwise the chain serves
         // `localIntentInterpreter` UNCHANGED (the shipped default). The
         // stand-in (`llamaCommandInterpreter`) and every other layer are
         // untouched — the keyword safety net still runs upstream of this
         // whole chain.
+        //
+        // [ENCODER-RUNTIME-READY] The slot is wired through
+        // `deferredEncoderPreference`, so availability is re-read every
+        // turn: a tester whose artifact installs after launch (the
+        // readiness request below) gets the encoder on the next turn
+        // instead of needing a relaunch.
         //
         // `gatedEncoder` is what protects the lazy factory: the closure is
         // evaluated only when the gate is on, so a non-gated build never
@@ -2254,11 +2268,22 @@ final class AppCoordinator: ObservableObject {
         let offeredEncoder = IntentEncoderWiring.gatedEncoder {
             intentEncoderInterpreter
         }
-        let preferredLocal = IntentEncoderWiring.preferredLocalBrain(
+        // [ENCODER-RUNTIME-READY] Readiness is requested at the moment the
+        // encoder is OFFERED the local-brain slot: with
+        // INTENT_ENCODER_SPIKE_ZIP set (the tester's own copy of the pinned
+        // zip) this starts a background install through ModelStore's strict
+        // sha256 path; unset, it is an explicit no-op decision. No UI, no
+        // network, and nothing here runs on a non-gated build (the closure
+        // above is the only way this object exists at all).
+        if let offeredEncoder {
+            offeredEncoder.requestReadiness()
+        }
+        // "Can it serve now?" — decides the selection event, unchanged.
+        let encoderAvailableNow = IntentEncoderWiring.preferredLocalBrain(
             encoder: offeredEncoder,
             fallback: localIntentInterpreter)
         if let selectionMetadata = IntentEncoderWiring.selectionEventMetadata(
-                preferred: preferredLocal, encoder: offeredEncoder) {
+                preferred: encoderAvailableNow, encoder: offeredEncoder) {
             observabilityBus.emit(ObservabilityEvent(
                 component: "intent_encoder_wiring",
                 eventType: "encoder_selected_as_local_brain",
@@ -2268,6 +2293,13 @@ final class AppCoordinator: ObservableObject {
                 metadata: selectionMetadata
             ))
         }
+        // The slot itself is the DEFERRED pair, so an install that lands
+        // after boot is picked up on the next turn without a relaunch;
+        // while the encoder is unavailable the chain serves exactly the
+        // fallback the event above describes.
+        let preferredLocal = IntentEncoderWiring.deferredEncoderPreference(
+            encoder: offeredEncoder,
+            fallback: encoderAvailableNow)
         router3.localBrain = LocalBrainChain(preferred: preferredLocal,
                                              standIn: llamaCommandInterpreter)
         router3.cloudBrain = geminiInterpreter

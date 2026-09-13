@@ -115,10 +115,16 @@ enum IntentEncoderModelError: Error, Equatable {
 ///
 /// ## Honest limits of this phase
 ///
-///  - No Swift tokenizer for the XLM-R 250k vocabulary exists yet, so the
-///    production instance is constructed with
-///    `UnavailableIntentEncoderTokenizer` and `isAvailable` is false:
-///    the app behaves exactly as it did before this class existed.
+///  - The Swift XLM-R tokenizer exists ([ENCODER-RUNTIME-READY]:
+///    `XlmrUnigramTokenizer`, gated on a golden-fixture suite), but the
+///    GRAPH is still the T-036 v0 baseline artifact and the whole path is
+///    still internal testing: it runs only in `INTENT_ENCODER` builds, and
+///    `isAvailable` stays false until the artifact is installed in
+///    `ModelStore` AND the bundled vocabulary + companion meta.json load.
+///    The default initialiser still takes
+///    `UnavailableIntentEncoderTokenizer`, so a caller that does not wire
+///    the real resources gets the explicit "unavailable" behaviour, never
+///    an approximate tokenization.
 ///  - The encoder produces no spoken reply (`reply` is empty). `.query` /
 ///    `.none` therefore route through `CommandRouter.deliverModelReply`,
 ///    whose existing `ReplySanityGate` speaks the honest "didn't catch
@@ -170,6 +176,9 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
     private let config: Config
     private let tokenizer: IntentEncoderTokenizing
     private let modelRunnerFactory: (URL) throws -> IntentEncoderModelRunning
+    /// [ENCODER-RUNTIME-READY] The internal-testing install trigger, or nil
+    /// on every other configuration (tests, and any future non-spike use).
+    private let artifactInstaller: IntentEncoderArtifactInstalling?
 
     private let inferenceQueue = DispatchQueue(label: "intent.encoder",
                                                qos: .userInitiated)
@@ -193,6 +202,7 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
          manifest: IntentEncoderManifest = .t033Spike,
          tokenizer: IntentEncoderTokenizing = UnavailableIntentEncoderTokenizer(),
          config: Config = .default,
+         artifactInstaller: IntentEncoderArtifactInstalling? = nil,
          modelRunnerFactory: @escaping (URL) throws -> IntentEncoderModelRunning
              = IntentEncoderInterpreter.defaultModelRunnerFactory) {
         self.modelStore = modelStore
@@ -201,6 +211,7 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
         self.manifest = manifest
         self.tokenizer = tokenizer
         self.config = config
+        self.artifactInstaller = artifactInstaller
         self.modelRunnerFactory = modelRunnerFactory
     }
 
@@ -374,6 +385,31 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
     }
 
     // MARK: - Model lifecycle
+
+    /// [ENCODER-RUNTIME-READY] Asks for readiness at the one moment the app
+    /// offers this interpreter the local-brain slot (the gated wiring site
+    /// in `AppCoordinator`).
+    ///
+    /// With `INTENT_ENCODER_SPIKE_ZIP` set to a tester's own copy of the
+    /// pinned zip, this starts a background install of
+    /// `ModelCatalog.intentEncoderSpike` through
+    /// `ModelStore.installCoreMLEncoder(fromZip:for:)` (strict sha256
+    /// unchanged — see `IntentEncoderSpikeInstaller`). Without it, the call
+    /// is an explicit no-op decision (`notConfigured`), not a silent one.
+    ///
+    /// The hard `IntentEncoderFeature.isEnabled` guard is intentional
+    /// defense in depth: the compiler condition is what keeps this type out
+    /// of a normal build's wiring, and this check keeps a stray future
+    /// caller from installing an internal-testing artifact into a release
+    /// build's ModelStore.
+    @discardableResult
+    func requestReadiness(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> IntentEncoderInstallDecision {
+        guard IntentEncoderFeature.isEnabled else { return .notConfigured }
+        guard let artifactInstaller else { return .notConfigured }
+        return artifactInstaller.installIfConfigured(environment: environment)
+    }
 
     /// (Re)creates and loads the runner from the ModelStore path. Called on
     /// the inference queue, so loading a CoreML model never blocks the main
