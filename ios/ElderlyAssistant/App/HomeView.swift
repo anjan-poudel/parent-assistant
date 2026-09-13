@@ -194,7 +194,7 @@ struct HomeView: View {
                     .environmentObject(coordinator)
                     .environmentObject(session)
                     .environmentObject(coordinator.modelDownloadService)
-                    .environment(\.locale, coordinator.appLanguage.locale)
+                    .environment(\.locale, coordinator.activeLocale)
             }
             .sheet(isPresented: $showHistory) {
                 // The coordinator is passed (not looked up in the
@@ -358,7 +358,7 @@ struct HomeView: View {
     /// permission guidance, audio-unavailable notice, or the generic
     /// re-prompt — instead of always claiming a misheard utterance.
     private var errorStatusText: String {
-        let locale = coordinator.appLanguage.locale
+        let locale = coordinator.activeLocale
         switch coordinator.voiceErrorKind {
         case .permission:
             return L10n.str("state.error.permission", locale: locale)

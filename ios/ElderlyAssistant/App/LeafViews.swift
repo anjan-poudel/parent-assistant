@@ -365,7 +365,7 @@ struct MedicalView: View {
             Spacer()
             DatePicker("", selection: selection, displayedComponents: components)
                 .labelsHidden()
-                .environment(\.locale, coordinator.appLanguage.locale)
+                .environment(\.locale, coordinator.activeLocale)
         }
         .padding(14)
         .frame(minHeight: 56)
@@ -2725,7 +2725,12 @@ struct CalendarView: View {
                         Text(item.festival.nameNepali)
                             .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                             .foregroundStyle(DesignTokens.textPrimary)
-                        Text(BikramSambat.nepaliString(item.bsDate))
+                        // Years outside the verified panchang table are
+                        // resolved by tithi astronomy (±1 day) and say so
+                        // rather than presenting an estimate as fact.
+                        Text(item.isApproximate
+                             ? "\(BikramSambat.nepaliString(item.bsDate)) · \(L10n.str("calendar.approximateDate", locale: coordinator.activeLocale))"
+                             : BikramSambat.nepaliString(item.bsDate))
                             .font(.system(size: DesignTokens.minCaptionPointSize))
                             .foregroundStyle(DesignTokens.textSecondary)
                     }

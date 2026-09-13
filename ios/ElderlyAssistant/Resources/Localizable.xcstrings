@@ -1598,6 +1598,23 @@
         }
       }
     },
+    "calendar.approximateDate" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "estimated"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अनुमानित"
+          }
+        }
+      }
+    },
     "calendar.bsUnavailable" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5810,6 +5827,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "नेपाली"
+          }
+        }
+      }
+    },
+    "locale.region.india" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "India"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "भारत"
+          }
+        }
+      }
+    },
+    "locale.region.nepal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nepal"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "नेपाल"
+          }
+        }
+      }
+    },
+    "locale.region.unitedStates" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "United States"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "संयुक्त राज्य अमेरिका"
           }
         }
       }
@@ -10540,19 +10608,36 @@
         }
       }
     },
-    "settings.language.region" : {
+    "settings.language.region.footer" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Region: Nepal (ne-NP)"
+            "value" : "Region sets how dates, times and numbers are shown. Nepali (Nepal) is the default for Nepali."
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "क्षेत्र: नेपाल (ne-NP)"
+            "value" : "क्षेत्रले मिति, समय र सङ्ख्या कसरी देखिने भनेर निर्धारण गर्छ। नेपालीको लागि नेपाल (ne-NP) पूर्वनिर्धारित हो।"
+          }
+        }
+      }
+    },
+    "settings.language.region.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Region"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "क्षेत्र"
           }
         }
       }

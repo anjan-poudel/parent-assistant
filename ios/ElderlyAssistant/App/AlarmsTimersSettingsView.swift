@@ -185,7 +185,7 @@ struct AlarmsTimersSettingsView: View {
                 Spacer()
                 DatePicker("", selection: $time, displayedComponents: .hourAndMinute)
                     .labelsHidden()
-                    .environment(\.locale, coordinator.appLanguage.locale)
+                    .environment(\.locale, coordinator.activeLocale)
             }
             .padding(14)
             // DESIGN-REVIEW: was a fixed 56pt — a minimum keeps the row
@@ -271,7 +271,7 @@ struct AlarmsTimersSettingsView: View {
     /// only depends on the locale. `LocaleFormatters` builds it once per
     /// locale and hands back the same instance (see `ViewCaches.swift`).
     private func timeText(_ date: Date) -> String {
-        LocaleFormatters.shortTime(locale: coordinator.appLanguage.locale).string(from: date)
+        LocaleFormatters.shortTime(locale: coordinator.activeLocale).string(from: date)
     }
 
     /// Compact clock countdown — "H:MM:SS" above an hour, "M:SS" below
@@ -282,7 +282,7 @@ struct AlarmsTimersSettingsView: View {
         let hours = total / 3600
         let minutes = (total % 3600) / 60
         let seconds = total % 60
-        let isNepali = coordinator.appLanguage.locale.language.languageCode?.identifier == "ne"
+        let isNepali = coordinator.activeLocale.language.languageCode?.identifier == "ne"
         let text = hours > 0
             ? String(format: "%d:%02d:%02d", hours, minutes, seconds)
             : String(format: "%d:%02d", minutes, seconds)
