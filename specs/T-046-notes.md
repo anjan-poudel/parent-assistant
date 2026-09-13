@@ -57,9 +57,10 @@ Qwen3 renderers are byte-mirrors of `formattedPrompt`.
 
 Applied rule (in `framing_determination.json` → `policy`, applied identically to every id):
 reject a framing whose prompt overflows the 1,024-token runtime window (none did; max measured
-prompt 838 tokens), then rank by **rows correct AND usable on device** (intent matches gold AND the
-JSON parsed AND generation was not cut by the runtime budget), then emergency recall, then parse
-rate, then smaller prompt. A tie keeps the incumbent. Scope: the app's own intent fine-tunes are
+prompt 838 tokens), then rank by the correct-and-usable yield on device
+(`closed_intent_accuracy × rows_usable_on_device` — intent matches gold AND the JSON parsed AND
+generation was not cut by the runtime budget), then emergency recall, then parse rate, then smaller
+prompt. A tie keeps the incumbent. Scope: the app's own intent fine-tunes are
 decided by the measurement; general-purpose brains are NOT (the corpus exercises only this app's
 contract, which they were never trained on) — their measured rows are recorded in
 `general_purpose_observations` and their publisher template stands.
@@ -88,10 +89,6 @@ signalled); the runs coexisted with it and completed with `EXIT=0`.
 `usable` = rows correct-and-usable on device. Source: `tools/train-intent/eval/framing_summary.json`.
 
 | id | offered | pre-fix | llama3 (closed/em/parse/usable) | qwen3 | raw | rule's required | shipped |
-
-Every row is measured on the artifact the catalog ships for that id
-(`measured_quant` in `framing_determination.json` records the file, its digest, and
-`measured_artifact_is_the_shipped_one`).
 |---|---|---|---|---|---|---|---|
 | `intentQwen4BS43` (default, shipped Q3_K_M) | yes | llama3 | 0.882 / 1.000 / 0.900 / 18 | 0.941 / 1.000 / 0.950 / 19 | **1.000 / 1.000 / 1.000 / 20** | raw | **raw** (changed) |
 | `intentQwenS43` | yes | llama3 | 0.529 / 0.667 / 0.650 / 13 | **0.647 / 1.000 / 0.650 / 13** | 0.471 / 0.333 / 0.500 / 10 | qwen3 | **qwen3** (changed) |
@@ -102,6 +99,11 @@ Every row is measured on the artifact the catalog ships for that id
 | `llama3_2_1B` (legacy) | no | llama3 | 0.353 / 0.000 / 0.650 / 13 | 0.353 / 0.000 / 0.700 / 14 | 0.588 / 0.000 / 1.000 / 20 | raw | llama3 (unchanged, general-purpose) |
 | `llama3_2_3B` (legacy) | no | llama3 | 0.647 / 0.667 / 0.950 / 19 | **0.824 / 1.000 / 0.950 / 19** | 0.765 / 0.667 / 1.000 / 20 | qwen3 | llama3 (unchanged, general-purpose) |
 | `intentGemma1B` (hidden) | no | llama3 | 0.706 / 0.667 / 0.900 / 18 | 0.706 / 0.333 / 0.850 / 17 | 0.765 / 0.667 / 0.850 / 17 | raw | llama3 (fallback — template not expressible) |
+
+Every row is measured on the artifact the catalog ships for that id — `measured_quant` in
+`framing_determination.json` records the file, its digest and `measured_artifact_is_the_shipped_one`,
+and the metadata's `measured_artifact_checks.all_measured_files_are_the_shipped_artifacts` is `true`
+for all nine.
 
 Provenance per id (entry comments): `ModelCatalog.swift:503-522` `llama3_2_1B`; `524-546`
 `intentNepali1B`; `548-570` `intentQwen4BS43`; `572-594` `intentQwenS43`; `596-618` `intentGemma1B`;
@@ -219,7 +221,8 @@ was checked in the interim, not as a substitute.
 ## 8. Disk
 
 Free space on `/System/Volumes/Data` moved 1.7 GiB (start) → 2.6 → 5.1 → 11 → 25 → 27 → 34 → 29 →
-**6.4 GiB** by the end (other sessions' builds grew meanwhile). No ENOSPC; the gate ran. This
+**7.3 GiB** at the last check (other sessions' builds grew meanwhile). No ENOSPC; the gate at
+`c83bd0a` ran, and the review-round gate is the hold recorded in section 6. This
 worktree's `ios/build` is 4.5 GB; nothing was deleted outside the worktree.
 
 ## 9. Not done / open
