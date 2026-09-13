@@ -1,6 +1,227 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "settings.notifyCaregivers.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notify caregivers"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "परिवारलाई खबर गर्ने"
+          }
+        }
+      }
+    },
+    "settings.notifyCaregivers.medication" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When a medicine reminder rings"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "औषधि खाने बेला भएमा"
+          }
+        }
+      }
+    },
+    "settings.notifyCaregivers.routine" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When a daily routine reminder rings"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "दैनिक कामको सम्झना आएमा"
+          }
+        }
+      }
+    },
+    "settings.notifyCaregivers.calendar" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When a calendar event reminder rings"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "पात्रोको कार्यक्रमको सम्झना आएमा"
+          }
+        }
+      }
+    },
+    "settings.notifyCaregivers.channelHint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alerts reach your family on the app you already call them with — WhatsApp, Messenger, or SMS."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "खबर परिवारलाई तपाईंले फोन गर्ने एपमै जान्छ — व्हाट्सएप, मेसेन्जर वा एसएमएस।"
+          }
+        }
+      }
+    },
+    "settings.notifyCaregivers.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your family is told only that a reminder rang — never your medicine names or what the event is about."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "परिवारलाई सम्झना आयो भन्ने मात्र थाहा हुन्छ — औषधिको नाम वा कार्यक्रमको विवरण कहिल्यै जाँदैन।"
+          }
+        }
+      }
+    },
+    "family.alertEventReminder" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A reminder for your family member has just rung."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "तपाईंको परिवारका सदस्यको एउटा सम्झना भर्खरै बज्यो।"
+          }
+        }
+      }
+    },
+    "router.calendarEventNoTime" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When should I put it in the calendar? Say the day and time, like \"tomorrow at 8 in the morning\"."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "पात्रोमा कहिले राखूँ? दिन र समय भन्नुहोस्, जस्तै «भोलि बिहान ८ बजे»।"
+          }
+        }
+      }
+    },
+    "router.calendarEventNoTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What should I write in the calendar? Tell me the name of the event."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "पात्रोमा के लेखूँ? कार्यक्रमको नाम भन्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.calendarEventConfirm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Should I add \"%1$@\", at %2$@, to your calendar?"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "«%1$@» पात्रोमा %2$@ राखूँ?"
+          }
+        }
+      }
+    },
+    "router.calendarEventCancelled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Okay, I won't add it to your calendar."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "हुन्छ, पात्रोमा राख्दिनँ।"
+          }
+        }
+      }
+    },
+    "router.calendarEventCreated" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "\"%1$@\", at %2$@, is in your calendar."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "«%1$@» पात्रोमा %2$@ राखियो।"
+          }
+        }
+      }
+    },
+    "router.calendarEventCalendarUnavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I can't open the calendar right now. Please turn on calendar access in Settings."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "म अहिले पात्रो खोल्न सक्दिनँ। कृपया सेटिङमा पात्रोको अनुमति खोल्नुहोस्।"
+          }
+        }
+      }
+    },
     "·" : {
 
     },

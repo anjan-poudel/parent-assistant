@@ -76,11 +76,42 @@ final class MockFamilyNotifier: FamilyNotifierProtocol {
     var notifyCallCount = 0
     var lastAlertType: FamilyAlertType?
     var shouldFailForContacts: Set<String> = []
+    /// Every context-carrying call, in order (caregiver
+    /// event-notifications task, 2026-09-13) — the event alerts are
+    /// asserted through the CONTEXT (which event, which kind), never
+    /// through a wire payload the stub provider discards.
+    private(set) var contexts: [FamilyAlertContext] = []
+    /// Count of calls that carried NO context — the legacy alerts
+    /// (missed dose, double dose) must keep riding the context-free
+    /// form, and this is how a test proves the split.
+    private(set) var contextFreeCallCount = 0
+    /// Fired on EVERY notify, from whatever executor the production
+    /// `Task` landed on — the schedulers notify asynchronously, so the
+    /// only deterministic way to assert on it is to wait for the signal
+    /// instead of hoping the task already ran.
+    var onNotify: (() -> Void)?
 
     func notifyAll(alertType: FamilyAlertType, at timestamp: Date) async -> [NotificationResult] {
         notifyCallCount += 1
+        contextFreeCallCount += 1
         lastAlertType = alertType
+        onNotify?()
         return [NotificationResult(contactIdHash: "test_hash", success: true, errorCode: nil)]
+    }
+
+    func notifyAll(alertType: FamilyAlertType, at timestamp: Date,
+                   context: FamilyAlertContext?) async -> [NotificationResult] {
+        notifyCallCount += 1
+        lastAlertType = alertType
+        if let context {
+            contexts.append(context)
+        } else {
+            contextFreeCallCount += 1
+        }
+        onNotify?()
+        return [NotificationResult(contactIdHash: "test_hash", success: true,
+                                   errorCode: nil,
+                                   channel: context == nil ? nil : NotifyChannel.sms.rawValue)]
     }
 }
 
@@ -93,6 +124,11 @@ final class MedicationSchedulerTests: XCTestCase {
     var mockAlarm: MockAlarmScheduler!
     var mockObservability: MockObservabilityBus!
     var mockFamilyNotifier: MockFamilyNotifier!
+    /// Each test gets its OWN isolated settings (a throwaway defaults
+    /// suite) so a toggle flipped in one test can never leak into the
+    /// next — the settings persist by design, which makes a shared
+    /// instance an order-dependence bug waiting to happen.
+    var caregiverNotifySettings: CaregiverNotifySettings!
 
     override func setUp() {
         super.setUp()
@@ -100,11 +136,13 @@ final class MedicationSchedulerTests: XCTestCase {
         mockAlarm = MockAlarmScheduler()
         mockObservability = MockObservabilityBus()
         mockFamilyNotifier = MockFamilyNotifier()
+        caregiverNotifySettings = CaregiverNotifySettings.isolated()
         scheduler = MedicationScheduler(
             storage: mockStorage,
             alarmScheduler: mockAlarm,
             observabilityBus: mockObservability,
-            familyNotifier: mockFamilyNotifier
+            familyNotifier: mockFamilyNotifier,
+            caregiverNotifySettings: caregiverNotifySettings
         )
     }
 
@@ -212,7 +250,8 @@ final class MedicationSchedulerTests: XCTestCase {
             storage: mockStorage,
             alarmScheduler: mockAlarm,
             observabilityBus: mockObservability,
-            familyNotifier: mockFamilyNotifier
+            familyNotifier: mockFamilyNotifier,
+            caregiverNotifySettings: caregiverNotifySettings
         )
 
         newScheduler.scheduleAll()
@@ -237,6 +276,79 @@ final class MedicationSchedulerTests: XCTestCase {
         XCTAssertNotNil(prompt)
         XCTAssertTrue(prompt!.contains("Amlodipine"))
         XCTAssertTrue(prompt!.contains("small white tablet"))
+    }
+
+    // MARK: - Caregiver event alerts (2026-09-13)
+
+    /// First delivery of a reminder, toggle ON → exactly one event alert,
+    /// carrying the medication kind, the medication NAME as the title and
+    /// the REMINDER id (not the entry id) as the hash.
+    func testFirstFireNotifiesCaregiversWithMedicationKind() async {
+        let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+        scheduler.loadSchedule(entries: [entry])
+        caregiverNotifySettings.medicationReminders = true
+        guard let reminderId = scheduler.pendingReminders.first?.id else {
+            return XCTFail("expected a pending reminder")
+        }
+        let notified = expectation(description: "caregiver alert")
+        mockFamilyNotifier.onNotify = { notified.fulfill() }
+
+        scheduler.triggerReminder(for: reminderId)
+        await fulfillment(of: [notified], timeout: 2)
+
+        XCTAssertEqual(mockFamilyNotifier.lastAlertType, .eventReminder,
+                       "the event alert rides the one eventReminder wire type")
+        XCTAssertEqual(mockFamilyNotifier.contexts.count, 1)
+        let context = mockFamilyNotifier.contexts.first
+        XCTAssertEqual(context?.kind, .medicationReminder)
+        XCTAssertEqual(context?.eventTitle, "Amlodipine",
+                       "the alert title is the medication name the elder knows")
+        XCTAssertEqual(context?.eventIdHash, IdHashing.shortHash(of: reminderId),
+                       "the hash is the REMINDER id — a twice-daily entry has two distinct doses")
+    }
+
+    /// A RE-fire (the alarm nagging an unacknowledged dose) is the same
+    /// event, not a new one — the caregiver gets one alert per event.
+    func testRefireDoesNotNotifyCaregiversAgain() async {
+        let entry = makeMedicationEntry(name: "Metformin", timeHour: 8, timeMinute: 0)
+        scheduler.loadSchedule(entries: [entry])
+        caregiverNotifySettings.medicationReminders = true
+        guard let reminderId = scheduler.pendingReminders.first?.id else {
+            return XCTFail("expected a pending reminder")
+        }
+        let firstFire = expectation(description: "first fire alert")
+        mockFamilyNotifier.onNotify = { firstFire.fulfill() }
+        scheduler.triggerReminder(for: reminderId)
+        await fulfillment(of: [firstFire], timeout: 2)
+        XCTAssertEqual(mockFamilyNotifier.contexts.count, 1)
+
+        let noSecondAlert = expectation(description: "no second event alert")
+        noSecondAlert.isInverted = true
+        mockFamilyNotifier.onNotify = { noSecondAlert.fulfill() }
+        scheduler.triggerReminder(for: reminderId)
+        await fulfillment(of: [noSecondAlert], timeout: 0.3)
+
+        XCTAssertEqual(mockFamilyNotifier.contexts.count, 1,
+                       "a re-fire must not send a second alert for the SAME event")
+    }
+
+    /// Toggle OFF (the default) → the reminder fires exactly as before
+    /// and no caregiver is told anything.
+    func testFirstFireDoesNotNotifyWhenToggleIsOff() async {
+        let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+        scheduler.loadSchedule(entries: [entry])
+        XCTAssertFalse(caregiverNotifySettings.medicationReminders, "defaults are OFF")
+        guard let reminderId = scheduler.pendingReminders.first?.id else {
+            return XCTFail("expected a pending reminder")
+        }
+        let noAlert = expectation(description: "no caregiver alert")
+        noAlert.isInverted = true
+        mockFamilyNotifier.onNotify = { noAlert.fulfill() }
+
+        scheduler.triggerReminder(for: reminderId)
+        await fulfillment(of: [noAlert], timeout: 0.3)
+
+        XCTAssertTrue(mockFamilyNotifier.contexts.isEmpty)
     }
 
     // MARK: - Helpers

@@ -16,7 +16,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case appearance, language, calling, places, family, meds, manuals, calendar, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, voicePersonalization, webSearch, youtube, feeds, quickApps, privacy, intentLog, toolLog
+        case appearance, language, calling, places, family, meds, manuals, calendar, caregiverNotifications, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, voicePersonalization, webSearch, youtube, feeds, quickApps, privacy, intentLog, toolLog
 
         var id: String {
             switch self {
@@ -28,6 +28,7 @@ struct SettingsView: View {
             case .meds: return "meds"
             case .manuals: return "manuals"
             case .calendar: return "calendar"
+            case .caregiverNotifications: return "caregiverNotifications"
             case .alarms: return "alarms"
             case .geminiAI: return "geminiAI"
             case .voiceEngine: return "voiceEngine"
@@ -128,6 +129,14 @@ struct SettingsView: View {
                         // the meds leaf — this row is their hub entry.
                         sectionRow(.calendar, icon: "calendar.badge.clock",
                                    titleKey: "settings.calendar.title")
+                        // Family event alerts (caregiver
+                        // event-notifications task, 2026-09-13): the
+                        // per-event-type "tell my family" switches —
+                        // opt-in, default OFF, and deliberately placed
+                        // right below the calendar row they most often
+                        // go with.
+                        sectionRow(.caregiverNotifications, icon: "bell.badge.fill",
+                                   titleKey: "settings.notifyCaregivers.title")
                         // Voice-set alarms + in-app countdown timers
                         // (alarms-timers task, 2026-09-07). See the leaf's
                         // honesty caption — iOS alarms ring through the
@@ -174,6 +183,12 @@ struct SettingsView: View {
             // the mirror/two-way/import cards that used to crowd the
             // Medication schedule leaf.
             case .calendar: CalendarSettingsView()
+            // Family event alerts (caregiver event-notifications task,
+            // 2026-09-13) — the settings instance is the coordinator's
+            // OWN, so the toggles write the exact object the fire sites
+            // read.
+            case .caregiverNotifications:
+                CaregiverNotifySettingsView(settings: coordinator.caregiverNotifySettings)
             case .alarms: AlarmsTimersSettingsView()
             case .geminiAI: GeminiAPISettingsView()
             case .voiceEngine: VoiceEngineSettingsView()

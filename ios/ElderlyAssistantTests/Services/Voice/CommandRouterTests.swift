@@ -432,6 +432,189 @@ final class CommandRouterTests: XCTestCase {
         // must NOT also speak the model's ack as if WhatsApp opened.
         XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "command_message_whatsapp_opened" })
     }
+
+    // MARK: - create_calendar_event (2026-09-13)
+
+    /// The old stub is gone: a well-formed command must reach the
+    /// coordinator with a RESOLVED start instant and speak the
+    /// coordinator's own confirmation prompt verbatim (the prompt carries
+    /// the title; the router never composes it).
+    func testCalendarEventCommandRequestsConfirmationWithAResolvedStart() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .createCalendarEvent, entryId: nil, contact: nil,
+            time: "बिहान ८ बजे", medication: nil, message: nil, callType: nil,
+            requestedApp: nil, topic: "डाक्टर भेट्ने", pluginAction: nil,
+            pluginEntities: nil, confidence: 0.9, reply: "पात्रोमा राख्छु")
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+        let before = Date()
+
+        _ = router.route(transcript: "बिहान ८ बजे डाक्टर भेट्ने पात्रोमा राख")
+
+        XCTAssertEqual(coordinator.calendarEventRequests.count, 1)
+        XCTAssertEqual(coordinator.calendarEventRequests.first?.title, "डाक्टर भेट्ने")
+        // The coordinator receives a real, RESOLVED start instant (the
+        // writer's only storable shape) — and an 08:00 that is already
+        // past rolls to tomorrow rather than creating a started event.
+        guard let start = coordinator.calendarEventRequests.first?.startDate else {
+            return XCTFail("expected a resolved start date")
+        }
+        let parts = Calendar.current.dateComponents([.hour, .minute], from: start)
+        XCTAssertEqual(parts.hour, 8)
+        XCTAssertEqual(parts.minute, 0)
+        XCTAssertGreaterThan(start, before)
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "command_calendar_event_confirmation_requested"
+        })
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "command_v2_stub" },
+                       "create_calendar_event is no longer a stub")
+    }
+
+    /// No topic (the model heard a time but nothing to put in the
+    /// calendar) → the honest "what should I add?" line, never a
+    /// titleless event.
+    func testCalendarEventWithoutATitleAsksForOne() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .createCalendarEvent, entryId: nil, contact: nil,
+            time: "बिहान ८ बजे", medication: nil, message: nil, callType: nil,
+            requestedApp: nil, topic: "   ", pluginAction: nil, pluginEntities: nil,
+            confidence: 0.9, reply: "पात्रोमा राख्छु")
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "बिहान ८ बजे पात्रोमा राख")
+
+        XCTAssertTrue(coordinator.calendarEventRequests.isEmpty)
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_calendar_event_no_title" })
+    }
+
+    /// No time → the honest "when should I put it in?" line. The event is
+    /// never created at an invented instant.
+    func testCalendarEventWithoutATimeAsksForOne() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .createCalendarEvent, entryId: nil, contact: nil, time: nil,
+            medication: nil, message: nil, callType: nil, requestedApp: nil,
+            topic: "डाक्टर भेट्ने", pluginAction: nil, pluginEntities: nil,
+            confidence: 0.9, reply: "पात्रोमा राख्छु")
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "डाक्टर भेट्ने पात्रोमा राख")
+
+        XCTAssertTrue(coordinator.calendarEventRequests.isEmpty)
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_calendar_event_no_time" })
+    }
+
+    /// An unparseable time expression is the same honest refusal as no
+    /// time at all — "पर्सि" is a day, not an instant.
+    func testUnparseableTimeAsksForATimeInsteadOfGuessingMidnight() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .createCalendarEvent, entryId: nil, contact: nil, time: "पर्सि",
+            medication: nil, message: nil, callType: nil, requestedApp: nil,
+            topic: "डाक्टर भेट्ने", pluginAction: nil, pluginEntities: nil,
+            confidence: 0.9, reply: "पात्रोमा राख्छु")
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "पर्सि डाक्टर भेट्ने पात्रोमा राख")
+
+        XCTAssertTrue(coordinator.calendarEventRequests.isEmpty)
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_calendar_event_no_time" })
+    }
+
+    /// A coordinator that cannot write (denied calendar access) answers
+    /// nil → the honest unavailable line, never a spoken "done".
+    func testUnavailableCalendarSpeaksTheUnavailableLine() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.calendarEventPrompt = nil
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .createCalendarEvent, entryId: nil, contact: nil,
+            time: "बिहान ८ बजे", medication: nil, message: nil, callType: nil,
+            requestedApp: nil, topic: "डाक्टर भेट्ने", pluginAction: nil,
+            pluginEntities: nil, confidence: 0.9, reply: "पात्रोमा राख्छु")
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "बिहान ८ बजे डाक्टर भेट्ने पात्रोमा राख")
+
+        XCTAssertEqual(coordinator.calendarEventRequests.count, 1,
+                       "the coordinator decides availability, not the router")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "command_calendar_event_unavailable"
+        })
+    }
+
+    /// The yes/no follow-up to an event confirmation must NOT speak the
+    /// generic medication-flavored text — the coordinator speaks the
+    /// written event (or stays silent on a no) itself, and the outcome is
+    /// its own case so no caller mistakes it for a dose ack.
+    func testCalendarEventConfirmationYesDoesNotSpeakGenericMedicationText() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isAwaitingConfirmation = true
+        coordinator.isAwaitingCalendarEventConfirmation = true
+        let speaker = MockSpeaker()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: MockObservabilityBus(),
+                                   speaker: speaker)
+
+        let result = router.route(transcript: "हजुर")
+
+        XCTAssertEqual(result, .calendarEventConfirmed)
+        XCTAssertEqual(coordinator.confirmationResponses, [.yes])
+        XCTAssertTrue(speaker.utterances.isEmpty,
+                      "the coordinator speaks its own calendar-event outcome")
+    }
+
+    /// A no is a no: the router reports no confirmation outcome and does
+    /// not claim anything was written.
+    func testCalendarEventConfirmationNoWritesNothing() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isAwaitingConfirmation = true
+        coordinator.isAwaitingCalendarEventConfirmation = true
+        let speaker = MockSpeaker()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: MockObservabilityBus(),
+                                   speaker: speaker)
+
+        let result = router.route(transcript: "होइन")
+
+        XCTAssertNotEqual(result, .calendarEventConfirmed)
+        XCTAssertEqual(coordinator.confirmationResponses, [.no])
+    }
+
+    /// suggest_video stays the honest not-yet stub — the video phase owns
+    /// its executor, and nothing here may pretend a video was queued.
+    func testSuggestVideoStillStubs() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .suggestVideo, entryId: nil, contact: "छोरा", time: nil,
+            medication: nil, message: nil, callType: "video", requestedApp: nil,
+            topic: nil, pluginAction: nil, pluginEntities: nil,
+            confidence: 0.9, reply: "भिडियो कल गर्न सकिन्छ")
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "छोरासँग भिडियो कल गर्न मिल्छ?")
+
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_v2_stub" })
+        XCTAssertFalse(bus.emittedEvents.contains {
+            $0.eventType == "command_calendar_event_confirmation_requested"
+        })
+    }
 }
 
 /// Deterministic `CommandInterpreter` double: fires its completion
@@ -614,6 +797,21 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
         navigationDisambiguationRequests.append(targets)
         return navigationDisambiguationPrompt
     }
+
+    /// [CALENDAR-EVENTS] (2026-09-13) Real `create_calendar_event` —
+    /// protocol requirements (extension default nil/false keeps every
+    /// pre-existing router test on its historical path). The stored
+    /// vars script both sides: a prompt makes the router ask, nil models
+    /// the "cannot write right now" coordinator, and
+    /// `isAwaitingCalendarEventConfirmation` stands in for a pended
+    /// event during the yes/no follow-up.
+    var calendarEventPrompt: String? = "«%1$@» पात्रोमा राखूँ?"
+    private(set) var calendarEventRequests: [(title: String, startDate: Date)] = []
+    func requestCalendarEventConfirmation(title: String, startDate: Date) -> String? {
+        calendarEventRequests.append((title, startDate))
+        return calendarEventPrompt
+    }
+    var isAwaitingCalendarEventConfirmation = false
 
     /// [ALARMS-TIMERS] (2026-09-07) Alarm/timer creation — protocol
     /// requirements with an extension default of .failed; these stored

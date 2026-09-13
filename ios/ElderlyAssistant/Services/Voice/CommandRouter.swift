@@ -211,6 +211,19 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// speech is skipped.
     var isAwaitingNavigationDisambiguation: Bool { get }
 
+    /// [CALENDAR-EVENTS] (2026-09-13) True while a
+    /// `create_calendar_event` confirmation is outstanding. Widens the
+    /// router's confirmation path exactly like
+    /// `isAwaitingCallConfirmation`: the yes/no on the next transcript
+    /// goes to `handleConfirmationResponse` (which pends/writes the
+    /// event), and the medication-flavored generic "yes/no" speech is
+    /// skipped — the coordinator speaks the event itself ("…added to
+    /// your calendar"), and a plain "yes" is not a dose acknowledgement.
+    /// Requirement-with-extension-default pattern like the navigation
+    /// surface above (the router holds the coordinator as a protocol
+    /// reference).
+    var isAwaitingCalendarEventConfirmation: Bool { get }
+
     /// [ALARMS-TIMERS] (2026-09-07) Requests an ALARM at `time` (already
     /// the next future occurrence; only its hour/minute-of-day matters —
     /// the OS alarm is a DAILY-repeating local notification, see
@@ -276,6 +289,31 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// so an extension-only member would bind statically and
     /// `AppCoordinator`'s backend-aware key could never be reached.
     var alarmPermissionDeniedKey: String { get }
+    /// [CALENDAR-EVENTS] (2026-09-13) `create_calendar_event` intent —
+    /// the real executor behind the router's confirmation prompt. The
+    /// router has already parsed the time expression and resolved the
+    /// start instant (`NepaliTimeParser` + `CalendarEventTimeResolver`);
+    /// the coordinator pends the event, switches the session to
+    /// awaiting-confirmation and RETURNS the localized yes/no prompt to
+    /// speak (it owns the locale, the title and `SpokenTime`, so the
+    /// spoken start time is always formatted the project-wide way). On
+    /// yes it writes the event to the DEFAULT calendar and voices the
+    /// honest created/failed outcome; on no it cancels silently.
+    ///
+    /// Returns nil when the calendar cannot be written at all right now
+    /// (access denied/restricted, no calendar store) — the router then
+    /// speaks `router.calendarEventCalendarUnavailable` rather than
+    /// pretending the event was created or asking the elder to confirm
+    /// something that can only fail.
+    ///
+    /// Same requirement-with-extension-default pattern as the alarm
+    /// members above: the router holds the coordinator as a protocol
+    /// reference, so an extension-only member would bind statically and
+    /// `AppCoordinator`'s implementation could never be reached. The
+    /// default nil keeps every existing conformer on the honest
+    /// unavailable line.
+    func requestCalendarEventConfirmation(title: String, startDate: Date) -> String?
+
     /// [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1: fires the
     /// proactive morning briefing ("read me my briefing"). The briefing
     /// speaks itself through the shell's speak queue (once per calendar
@@ -311,6 +349,10 @@ extension VoiceCommandCoordinating {
     // mock under test) makes the directions stage do anything.
     var navigationCandidates: [DirectionsCandidate] { [] }
     var isAwaitingNavigationDisambiguation: Bool { false }
+    // [CALENDAR-EVENTS] (2026-09-13) Inert default — a conformer that
+    // does not opt in never has a calendar event pending, so the router's
+    // confirmation path behaves exactly as it did before this member.
+    var isAwaitingCalendarEventConfirmation: Bool { false }
     func requestNavigation(to target: DirectionsRoute.PlaceTarget) {}
     func requestNavigationDisambiguation(targets: [DirectionsCandidate]) -> String? { nil }
     // [ALARMS-TIMERS] (2026-09-07) Alarm/timer defaults — see the
@@ -341,6 +383,13 @@ extension VoiceCommandCoordinating {
     // notification-permission denial line. `AppCoordinator` overrides it
     // with the backend-aware key.
     var alarmPermissionDeniedKey: String { "alarms.permissionDenied" }
+    // [CALENDAR-EVENTS] (2026-09-13) Inert default — a conformer that
+    // does not opt in (every mock/double) cannot write a calendar event,
+    // so the router speaks the honest "calendar unavailable" line
+    // instead of a confirmation prompt. Only a coordinator that
+    // explicitly implements the member (AppCoordinator, and the
+    // scripted mock under test) creates anything.
+    func requestCalendarEventConfirmation(title: String, startDate: Date) -> String? { nil }
     // [MORNING-BRIEFING] (2026-09-07) Inert default — a conformer that
     // does not opt in (every mock/double across app and test target)
     // never fires a briefing, so the deterministic ladder stage falls
@@ -377,6 +426,12 @@ final class CommandRouter {
         case callConfirmed
         case contactSearchRequested
         case navigationRequested
+        /// [CALENDAR-EVENTS] (2026-09-13) A `create_calendar_event`
+        /// confirmation was answered YES — the coordinator has taken the
+        /// pended event and is writing it. Reports the calendar outcome
+        /// (not a medication acknowledgement), which is why it is its own
+        /// case rather than riding `.acknowledgedMedication`.
+        case calendarEventConfirmed
         case unrecognised(transcript: String)
     }
 
@@ -616,19 +671,29 @@ final class CommandRouter {
             // reports `.navigationRequested`, never a medication ack.
             let isCallConfirmation = coordinator?.isAwaitingCallConfirmation == true
             let isNavigationDisambiguation = coordinator?.isAwaitingNavigationDisambiguation == true
+            // [CALENDAR-EVENTS] (2026-09-13) Calendar-event confirmations
+            // speak their own outcome too (the coordinator speaks the
+            // written event or stays silent on a no) — the generic
+            // catalog yes/no is medication-flavored and would claim a
+            // dose was recorded.
+            let isCalendarEventConfirmation =
+                coordinator?.isAwaitingCalendarEventConfirmation == true
+            let speaksItsOwnYesNo = isCallConfirmation || isNavigationDisambiguation
+                || isCalendarEventConfirmation
             if Self.isYesResponse(raw) {
                 coordinator?.handleConfirmationResponse(.yes)
                 emit(eventType: "confirmation_yes", outcome: "success")
-                if !isCallConfirmation && !isNavigationDisambiguation {
+                if !speaksItsOwnYesNo {
                     speak(key: "router.confirmationYes")
                 }
                 if isCallConfirmation { return .callConfirmed }
+                if isCalendarEventConfirmation { return .calendarEventConfirmed }
                 return isNavigationDisambiguation ? .navigationRequested : .acknowledgedMedication
             }
             if Self.isNoResponse(raw) {
                 coordinator?.handleConfirmationResponse(.no)
                 emit(eventType: "confirmation_no", outcome: "success")
-                if !isCallConfirmation && !isNavigationDisambiguation {
+                if !speaksItsOwnYesNo {
                     speak(key: "router.confirmationNo")
                 }
                 return .unrecognised(transcript: raw)
@@ -2174,10 +2239,13 @@ final class CommandRouter {
             handleSendMessage(command)
         case .guide:
             handleGuide(command)
-        case .createCalendarEvent, .suggestVideo:
-            // Honest not-yet stubs (spec §7.3): the executors for these
-            // land with the calendar/video phases — never pretend an
-            // event was created or a video queued.
+        case .createCalendarEvent:
+            // [CALENDAR-EVENTS] (2026-09-13) Real executor — splits off
+            // the stub this action shared with `suggest_video`.
+            handleCreateCalendarEvent(command)
+        case .suggestVideo:
+            // Honest not-yet stub (spec §7.3): the video executor lands
+            // with the video phase — never pretend a video was queued.
             emit(eventType: "command_v2_stub", outcome: "info")
             speakWithVisibleOutcome(key: "router.featureNotYet")
         case .query:
@@ -2244,6 +2312,60 @@ final class CommandRouter {
         emit(eventType: "command_set_reminder", outcome: "success")
         let spokenTime = formattedTime(time, locale: locale)
         speak(text: L10n.fmt("router.reminderSet", locale: locale, spokenTime))
+    }
+
+    /// [CALENDAR-EVENTS] (2026-09-13) `create_calendar_event` — replaces
+    /// the stub this action shared with `suggest_video`.
+    ///
+    /// Deliberately NOT a write here: like every other `.confirm`-tier
+    /// action, the router only validates, resolves and asks. The
+    /// coordinator pends the event, speaks the question, and performs
+    /// the write on yes — so a misheard title or time costs one "होइन"
+    /// instead of a wrong entry in the family's shared calendar.
+    ///
+    /// Three honest dead ends, each with its own line — never one
+    /// generic failure, because they are fixed three different ways
+    /// (say the subject / say the time / grant calendar access):
+    ///  - no subject: the model extracted no `topic`. Confirming a
+    ///    nameless event would write a blank block into the calendar;
+    ///  - no usable time: no time expression, or one the parser could
+    ///    not resolve. A bare future-less time is NOT a dead end —
+    ///    `CalendarEventTimeResolver` rolls it to tomorrow;
+    ///  - no writer: the coordinator refused (access denied/restricted).
+    ///    Checked BEFORE the prompt, so the elder is never asked to
+    ///    confirm an action that can only fail.
+    ///
+    /// The `clock()` seam (not `Date()`) feeds "now", so the
+    /// bare-time-rolls-to-tomorrow decision is deterministic under test.
+    private func handleCreateCalendarEvent(_ command: InterpretedCommand) {
+        guard let topic = command.topic?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !topic.isEmpty else {
+            emit(eventType: "command_calendar_event_no_title", outcome: "info")
+            speak(key: "router.calendarEventNoTitle")
+            return
+        }
+
+        guard let timeString = command.time,
+              let parsed = NepaliTimeParser.parse(timeString),
+              let startDate = CalendarEventTimeResolver.resolveEventDate(
+                  from: parsed,
+                  now: clock(),
+                  calendar: Calendar.current
+              ) else {
+            emit(eventType: "command_calendar_event_no_time", outcome: "info")
+            speak(key: "router.calendarEventNoTime")
+            return
+        }
+
+        guard let prompt = coordinator?.requestCalendarEventConfirmation(
+            title: topic, startDate: startDate
+        ) else {
+            emit(eventType: "command_calendar_event_unavailable", outcome: "info")
+            speak(key: "router.calendarEventCalendarUnavailable")
+            return
+        }
+        emit(eventType: "command_calendar_event_confirmation_requested", outcome: "success")
+        speak(text: prompt)
     }
 
     /// Safety path with NO auth gate (spec §5.1, constitution: emergency

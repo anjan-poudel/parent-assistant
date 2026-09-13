@@ -5,6 +5,7 @@ import android.util.Log
 import com.elderlyassistant.services.medication.AlarmManagerScheduler
 import com.elderlyassistant.services.medication.MedicationScheduler
 import com.elderlyassistant.services.family.FCMFamilyNotifier
+import com.elderlyassistant.services.family.NotifySettings
 
 /**
  * Application class that initializes all services.
@@ -15,6 +16,15 @@ class ElderlyAssistantApp : Application() {
 
     lateinit var medicationScheduler: MedicationScheduler
         private set
+
+    /**
+     * Per-event-type caregiver notification preferences (caregiver
+     * event-notifications task, 2026-09-13) — the Android mirror of the
+     * iOS `AppCoordinator.caregiverNotifySettings`. Created here so the
+     * composition root owns the one instance; Android has no event fire
+     * wiring yet, so nothing reads it at runtime.
+     */
+    val notifySettings: NotifySettings by lazy { NotifySettings(this) }
 
     override fun onCreate() {
         super.onCreate()

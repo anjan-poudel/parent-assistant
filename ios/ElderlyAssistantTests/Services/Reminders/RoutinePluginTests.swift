@@ -28,8 +28,14 @@ final class RoutinePluginTests: XCTestCase {
             return
         }
         fakeNow = pinned
+        // The plugin only mutates the scheduler; the caregiver-alert
+        // collaborators are inert here (defaults OFF, recording mock) —
+        // this suite cares about the plugin's entity handling.
         scheduler = RoutineScheduler(store: store, alarmScheduler: alarm,
-                                     observabilityBus: bus, now: { [weak self] in
+                                     observabilityBus: bus,
+                                     familyNotifier: MockFamilyNotifier(),
+                                     caregiverNotifySettings: CaregiverNotifySettings.isolated(),
+                                     now: { [weak self] in
                                          self?.fakeNow ?? Date()
                                      })
         plugin = RoutinePlugin(scheduler: scheduler)

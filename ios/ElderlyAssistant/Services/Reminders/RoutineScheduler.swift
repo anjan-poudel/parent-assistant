@@ -18,6 +18,15 @@ final class RoutineScheduler {
     private let store: RoutineStore
     private let alarmScheduler: RoutineAlarmScheduling
     private let observabilityBus: ObservabilityBus
+    /// Caregiver alert seam (caregiver event-notifications task,
+    /// 2026-09-13). Unlike the medication path — where the scheduler
+    /// already notified for missed doses — routines had no family
+    /// notification at all; this is the wiring for the
+    /// designed-but-never-called `markDelivered` hook.
+    private let familyNotifier: FamilyNotifierProtocol
+    /// Per-event-type preferences, read at FIRE time (see
+    /// `CaregiverNotifySettings`).
+    private let caregiverNotifySettings: CaregiverNotifySettings
     /// Injectable clock — tests pin "now" so window/weekday behavior is
     /// deterministic. Production passes `Date.init`.
     private let now: () -> Date
@@ -37,11 +46,15 @@ final class RoutineScheduler {
         store: RoutineStore,
         alarmScheduler: RoutineAlarmScheduling,
         observabilityBus: ObservabilityBus,
+        familyNotifier: FamilyNotifierProtocol,
+        caregiverNotifySettings: CaregiverNotifySettings,
         now: @escaping () -> Date = Date.init
     ) {
         self.store = store
         self.alarmScheduler = alarmScheduler
         self.observabilityBus = observabilityBus
+        self.familyNotifier = familyNotifier
+        self.caregiverNotifySettings = caregiverNotifySettings
         self.now = now
     }
 
@@ -191,10 +204,18 @@ final class RoutineScheduler {
             .sorted { $0.scheduledAt < $1.scheduledAt }
     }
 
-    /// Marks an occurrence delivered (notification observed firing).
-    /// No UNUserNotificationCenterDelegate is wired yet — same gap as the
-    /// medication path, which also delivers via the OS notification alone;
-    /// the hook exists for when that delegate lands.
+    /// Marks an occurrence delivered (notification observed firing) and
+    /// fires the caregiver alert for it.
+    ///
+    /// Called from `CaregiverEventFireHandler.willPresent` — the
+    /// notification delegate finally exists (caregiver
+    /// event-notifications task, 2026-09-13), which is the "when that
+    /// delegate lands" moment this hook was written for.
+    ///
+    /// The `state == .pending` guard is what makes the alert
+    /// once-per-event: a foreground + background delivery pair for the
+    /// same occurrence (or a re-presented notification) notifies exactly
+    /// once, because the second call is already `.delivered`.
     func markDelivered(occurrenceId: UUID) {
         restoreState()
         guard var occurrence = occurrences[occurrenceId],
@@ -203,6 +224,39 @@ final class RoutineScheduler {
         occurrences[occurrenceId] = occurrence
         persistOccurrences()
         emit("reminder_delivered", metadata: ["entry_id_hash": idHash(occurrence.entryId)])
+        notifyCaregivers(of: occurrence)
+    }
+
+    /// Caregiver alert for a delivered routine occurrence (caregiver
+    /// event-notifications task, 2026-09-13).
+    ///
+    /// The alert's title is the entry's DISPLAY title — the exact string
+    /// the notification body and the mirrored calendar event carry
+    /// (`entry.displayTitle(locale:)`), so the caregiver sees the same
+    /// words the elder did. It stays in memory; the bus records only the
+    /// hashed occurrence id and the kind.
+    private func notifyCaregivers(of occurrence: RoutineOccurrence) {
+        guard caregiverNotifySettings.isEnabled(for: .routineReminder) else {
+            emit("caregiver_event_skipped",
+                 metadata: ["kind": EventNotifyKind.routineReminder.rawValue])
+            return
+        }
+        let context = FamilyAlertContext(
+            kind: .routineReminder,
+            eventIdHash: idHash(occurrence.id),
+            eventTitle: entry(for: occurrence.entryId)?.displayTitle(locale: locale) ?? "",
+            fireAt: occurrence.scheduledAt
+        )
+        emit("caregiver_event_fired",
+             metadata: ["kind": EventNotifyKind.routineReminder.rawValue,
+                        "event_id_hash": context.eventIdHash])
+        Task { [familyNotifier] in
+            _ = await familyNotifier.notifyAll(
+                alertType: .eventReminder,
+                at: Date(),
+                context: context
+            )
+        }
     }
 
     // MARK: - Private: window regeneration
