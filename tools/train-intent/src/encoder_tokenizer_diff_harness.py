@@ -44,6 +44,27 @@ from xlmr_unigram_ref import XlmrRefTokenizer  # noqa: E402
 MAX_LEN = 64
 CORPUS_FILES = ("teacher.jsonl", "noised.jsonl", "edge_cases.jsonl")
 
+# [review round F1] The empty-normalisation class, supplied as word lists:
+# a word whose normalised text is the empty string contributes NO ids and NO
+# word index (HF's Metaspace returns early on empty input). The corpora,
+# split with `str.split()`, never produced such a word — which is how the
+# reference's spurious `▁` piece slipped through this harness before. The control
+# scalars are the reachable ones (U+007F/U+008F/U+009F survive
+# `InputSanitiser` quarantine; U+001C does not, and is kept as the original
+# repro), plus the empty word itself.
+ADVERSARIAL_CASES = [
+    ["\u001c"],
+    ["\u007f"],
+    ["\u008f"],
+    ["\u009f"],
+    [""],
+    ["\u0914\u0937\u0927\u093f", "\u007f", "\u0916\u093e\u090f\u0901"],
+    ["\u0914\u0937\u0927\u093f", "\u008f", "\u0916\u093e\u090f\u0901"],
+    ["\u0914\u0937\u0927\u093f", "\u009f", "\u0916\u093e\u090f\u0901"],
+    ["\u008f", "\u008f"],
+    ["a", "", "b"],
+]
+
 
 def rows(path, limit=None):
     with open(path, encoding="utf-8") as handle:
@@ -93,16 +114,43 @@ def main(argv=None) -> int:
             exp_ids, exp_wids = encoding["input_ids"], encoding.word_ids()
             totals["rows"] += 1
             per_file["rows"] += 1
-            for kind, got, exp, key in (("ids", got_ids, exp_ids, "ids"),
-                                        ("wids", got_wids, exp_wids, "wids")):
+            # The metric name is spelled out: `key + "_mismatch"` mapped a
+            # word-id divergence onto "wids_mismatch", which is not a total
+            # (KeyError) — zero divergences meant it had never been hit.
+            for kind, got, exp, metric in (("ids", got_ids, exp_ids, "ids_mismatch"),
+                                           ("wids", got_wids, exp_wids, "wid_mismatch")):
                 if got == exp:
                     continue
-                totals[key + "_mismatch"] += 1
-                per_file[key] += 1
+                totals[metric] += 1
+                per_file[kind] += 1
                 if len(examples) < 24:
                     examples.append((kind, name, index, text, exp_ids, got_ids,
                                      exp_wids, got_wids))
         print(f"{name}: {per_file}  ({time.time() - started:.1f}s)")
+    # [review round F1] Empty-normalisation cases, supplied directly: the
+    # corpora above never yield a word whose normalised text is empty, which
+    # is exactly how the spurious piece slipped through before. Same
+    # comparison and the same bookkeeping as the corpus rows.
+    adversarial = {"rows": 0, "ids": 0, "wids": 0}
+    for index, words in enumerate(ADVERSARIAL_CASES):
+        got_ids, got_wids = ref.encode_words(words, max_length=MAX_LEN)
+        encoding = tokenizer(words, is_split_into_words=True,
+                             add_special_tokens=True, truncation=True,
+                             max_length=MAX_LEN)
+        exp_ids, exp_wids = encoding["input_ids"], encoding.word_ids()
+        totals["rows"] += 1
+        adversarial["rows"] += 1
+        for kind, got, exp, metric in (("ids", got_ids, exp_ids, "ids_mismatch"),
+                                       ("wids", got_wids, exp_wids, "wid_mismatch")):
+            if got == exp:
+                continue
+            totals[metric] += 1
+            adversarial[kind] += 1
+            if len(examples) < 24:
+                examples.append((kind, "adversarial-empty-word", index,
+                                 " ".join(words), exp_ids, got_ids,
+                                 exp_wids, got_wids))
+    print("adversarial empty-normalisation cases:", adversarial)
     print("TOTALS:", totals)
     for kind, name, index, text, exp_ids, got_ids, exp_wids, got_wids in examples:
         print("----", kind, name, index)
