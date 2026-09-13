@@ -1,0 +1,331 @@
+# Machine-readable annotation rules for the Nepali intent encoder — schema
+# annotation-rules/v1. Produced by T-034, consumed by T-035 (encoder design /
+# span→InterpretedCommand mapping) and T-036 (dataset builder + training).
+#
+# Scope: the taxonomy is schema v2 ONLY — the 12 values of VALID_ACTIONS, which
+# are also the 12 model-emittable cases of InterpretedCommand.Action. The
+# proposal doc's taxonomy is out of scope; the reconciliation table (with the
+# rejected labels and why) lives in the narrative spec:
+#   docs/superpowers/specs/2026-09-13-encoder-training-data-strategy.md §3.2
+# No label outside `taxonomy.labels` may appear in any training file, span tag,
+# prompt or config produced from these rules.
+#
+# Every rule below cites the committed file it is load-bearing against, so a
+# mismatch is a reviewable defect, not a matter of interpretation.
+
+schema: annotation-rules/v1
+task: T-034
+branch: worktree-t034-training-data
+consumed_by: [T-035, T-036]
+narrative_spec: docs/superpowers/specs/2026-09-13-encoder-training-data-strategy.md
+
+taxonomy:
+  source_of_truth:
+    seeds: tools/train-intent/seeds/intents.yaml          # intent targets + templates (schema v2)
+    valid_actions: tools/train-intent/src/build_dataset.py:69-71   # VALID_ACTIONS
+    swift_enum: ios/ElderlyAssistant/Services/Voice/LlamaCommandInterpreter.swift:66-88
+    schema: docs/superpowers/specs/2026-09-05-intent-engine-finetuned-llm-design.md:298-303
+  # The only legal training labels. A loader MUST assert set(labels) ==
+  # build_dataset.VALID_ACTIONS and that every value is a case rawValue of
+  # InterpretedCommand.Action.
+  labels:
+    - ack_med
+    - call
+    - emergency
+    - set_reminder
+    - health_query
+    - music
+    - send_message
+    - guide
+    - create_calendar_event
+    - suggest_video
+    - query
+    - none
+  # Runtime-only: InterpretedCommand.Action has a 13th case that is NEVER a
+  # model-emitted class. Core never learns plugin action names; they travel in
+  # pluginAction (LlamaCommandInterpreter.swift:82-87; plan risk 17). It is
+  # absent from VALID_ACTIONS and must stay absent from every training row.
+  excluded_runtime_actions:
+    - plugin
+  # Spec §9.1 targets; `seeds` column = target currently in seeds/intents.yaml.
+  targets:
+    call:                 {spec_9_1: 1500, seeds: 1500}
+    set_reminder:         {spec_9_1: 1200, seeds: 1200}
+    send_message:         {spec_9_1: 1000, seeds: 1000}
+    emergency:            {spec_9_1: 1000, seeds: 1000}   # first-class, non-zero; never reduced
+    health_query:         {spec_9_1: 700,  seeds: 700}
+    music:                {spec_9_1: 600,  seeds: 600}
+    guide:                {spec_9_1: 600,  seeds: 600}
+    query:                {spec_9_1: 1000, seeds: 1000}
+    none:                 {spec_9_1: 500,  seeds: 500}    # chit-chat/particles only; abstain+refusal families below
+    ack_med:              {spec_9_1: 800,  seeds: null}   # GAP: not implemented in seeds/intents.yaml (build_dataset.py:44-48)
+    create_calendar_event: {spec_9_1: null, seeds: null, proposed: 600}  # shipped action (CommandRouter.swift:2135-2142 honest stub); absent from spec §9.1
+    suggest_video:         {spec_9_1: null, seeds: null, proposed: 500}  # shipped action, same stub; cacheable (IntentCommandCache.swift:53)
+  # Labels with zero seed templates today. T-036 must add them to
+  # seeds/intents.yaml (or record an explicit waiver) before the first build.
+  seed_gaps:
+    - ack_med              # measured: teacher.jsonl produced 0 ack_med rows (build_dataset.py:44-48; docs/OPEN-ITEMS.md:127-133)
+    - create_calendar_event
+    - suggest_video
+  edge_classes_as_labels:
+    # Edge families are training rows, not new action values.
+    abstain_low_confidence: none
+    gibberish_to_none: none
+    corrections_overrides: call
+    ack_refusals: none
+
+spans:
+  # Slot-candidate extraction (BIO), never resolved values. The row's `slots`
+  # strings are the spoken surfaces of these spans; resolution happens in code
+  # (ContactResolver / MethodResolver / NepaliTimeParser / MedicationResolver)
+  # inside confirm-before-execute (T-035).
+  labels:
+    - contact      # name or relationship as heard ("माइया", "छोरा", "didi")
+    - time         # time expression as heard ("भोलि बिहान नौ बजे", "साढे ८")
+    - medication   # medication name as heard ("औषधि", "प्रेसरको औषधि")
+    - message      # dictated body span ("आज भेट्नुहोस्") — free text, may contain any words
+    - topic        # guide subject ("माइक्रोवेभ", "टिभी रिमोट")
+    - app          # explicitly named app/method ("वाट्सएप", "फेसटाइम", "फोन", "भिडियो कल")
+  no_span_fields:
+    # Fields the schema can carry that are NOT span-supervised, with their source.
+    entryId:    "filled by a later layer (scheduler/list resolution); never a span"
+    steps:      "template-rendered or LLM fallback (T-035 field map); never a span"
+    reply:      "template-rendered or LLM fallback (T-035 field map); never a span"
+    confidence: "calibrated scalar head; not a span"
+    callType:   "derived from the app/method span by T-035's mapping (भिडियो/भिडियो कल -> video); not a separate span label in v1"
+  offsets:
+    unit: unicode_scalar      # Python len(str) / Unicode code points, NOT grapheme clusters
+    base: 0
+    end: exclusive
+    invariant: "utterance[start:end] == text"
+    swift_note: >
+      Runtime/Wire conversions must use unicodeScalars offsets
+      (`String.Index(utf16Offset:)` and Character counting are wrong for
+      Devanagari clusters — a known regression class for this project).
+  bio:
+    scheme: BIO               # no BILUO/BIOES; no measured benefit, T-033 used BIO
+    tags: [O, B-contact, I-contact, B-time, I-time, B-medication, I-medication,
+           B-message, I-message, B-topic, I-topic, B-app, I-app]
+    tag_count: 13
+  tokenizer:
+    # T-033 GO, §8: the XLM-R sentencepiece shipped with the selected base.
+    name: XLM-R sentencepiece
+    vocab_size: 250037
+    source_repo: cartesinus/multilingual_minilm-amazon-massive-intent
+    revision: 08dc481605729de194f9139713d4eb20f4b80706
+    evidence: tools/train-intent/docs/T-033-encoder-bakeoff.md §8
+  alignment:
+    rule: word_first_offset_mapped   # first-subword tagging of word tags, via offset mapping
+    steps:
+      - "words = maximal non-whitespace runs of the exact utterance string, code-point intervals [a_i, b_i), ascending"
+      - "word tag: the first word intersecting a span gets B-<label>; every later word intersecting it gets I-<label>; all other words O"
+      - "tokenize the exact utterance with the T-033 tokenizer: add_special_tokens=true, return_offsets_mapping=true"
+      - "each subword token with offset [p, q), q > p, is assigned to the word it intersects; special and zero-width tokens get label_id -100 and are excluded from the slot loss"
+      - "tag projection: first subword of a B-word -> B-<label>; its remaining subwords -> I-<label>; every subword of an I-word -> I-<label>; subwords of an O-word -> O"
+      - "intent supervision = the pooled [CLS] representation; slot supervision = per-token tags where label_id != -100"
+    decoding: >
+      Runs of B-/I- of one label decode to the char interval
+      [start(first token), end(last token)) taken from the offset mapping;
+      surface = utterance[start:end]. Never concatenate decoded token strings —
+      the sentencepiece '▁' marker would leak into the span.
+    token_boundaries:
+      - "spans are whole-token runs; an affix merged into the token stays inside the span (डाक्टरलाई)"
+      - "a case particle Whisper emitted as its own token is excluded (माइया लाई -> span माइया)"
+      - "a span that is not recoverable as a contiguous run of tokens is a data error -> refuse the row (never mask it, never learn O over it)"
+    whole_word_merges: >
+      Whisper merges words into one token ("माइया लाई" -> "माइयालाई"). The span
+      then covers the merged token; the encoder never splits it. Resolution
+      accepts affixed surfaces via containment (ContactResolver.swift:127-134),
+      so the emitted span stays surface-exact.
+    masking_policy: >
+      Unlike T-033's spike (which masked the slot loss on the ~35% of rows whose
+      slot strings were not verbatim-alignable), T-034 requires every row to be
+      alignable by construction: the authoring rule is that spans are substrings
+      of the row's own utterance. Non-alignable rows are refused at build time
+      and counted; slot loss is never silently masked except for special tokens.
+  under_noise:
+    rule: re_annotate_on_noised_text
+    prohibition: "never inherit the clean text's spans or slot strings; stt_noise.py:138-145 copies slot fields from the parent row — that copy must not be used as supervision"
+    steps:
+      - "run the annotation pass on the noised transcript itself (word-first, offsets into the noised text)"
+      - "a clean entity whose surface survives (incl. merged/split/script-drifted forms) is re-spanned at its noised offsets"
+      - "if the noised text no longer supports the action's trigger (call: method/contact word; set_reminder: time or medication; send_message: message verb or dictated body; ack_med: med word or ack verb), drop or teacher-relabel the row and count it (`relabel_or_drop`)"
+      - "if a non-critical span's material is gone, omit that span from the row; keep the action if a trigger survives"
+    never_dropped: [emergency]   # recall-first: an emergency row is never dropped for surface loss
+    cases:
+      merged_word:    "the span is authored over the merged token (माइयालाई carries माइया + लाई)"
+      dropped_particle: "a separate particle token absent -> it was never in the span; a merged affix absent -> the span is shorter"
+      script_drift:   "span surface follows the noised script (romanised output of Devanagari input keeps the same label)"
+  row_format:
+    required: [id, utterance, action, register, source, confidence, spans, slots]
+    utterance: "the exact string the encoder consumes (for stt_noise rows: the noisy transcript)"
+    spans_item: {label: "<spans.labels>", text: "<utterance[start:end]>", start: "<int>", end: "<int>"}
+    slots: "schema-v2 slot strings; each non-null value equals one of the row's span texts or is null — never a resolved value"
+    target: "{action, spans, confidence} — the only supervised fields"
+    confidence: "float in [0,1]; edge-class bands in edge_classes below"
+  forbidden_in_target:
+    - "resolved time values not present verbatim in the utterance (e.g. \"tomorrow 09:00\", \"09:00\")"
+    - "contact ids / UUIDs / phone numbers / URLs"
+    - "any action value outside taxonomy.labels (incl. the runtime-only plugin case)"
+  validation:
+    # T-036 must enforce these in build_dataset.py's row guard for the BIO
+    # row format; each failure increments a named counter in the build report.
+    - "utterance[start:end] == span.text for every span; 0 <= start < end <= len(utterance)"
+    - "spans of different labels never overlap; same-label adjacent spans are merged at authoring"
+    - "every non-null slot string equals one of the row's span texts"
+    - "no forbidden_in_target value appears in the target"
+    - "action in taxonomy.labels; every tag in spans.bio.tags"
+    - "ack_med rows containing a refusal marker (छैन, होइन, नाइँ, खाइनँ, पछि) are refused — refusal must never fire ack"
+    - "normalized utterance not in eval/golden_corpus.jsonl (leak guard preserved, tools/train-intent/src/build_dataset.py:120-124, 159-160)"
+
+edge_classes:
+  abstain_low_confidence:
+    action: none            # or the guessed action; NEVER a 13th action value
+    confidence: "< 0.4"
+    target: 800
+    seed_source:  "seeds/intents.yaml:87-97 (abstain_low_confidence)"
+    required_fix: "gen_teacher.edge_ok accepts conf < 0.5 (gen_teacher.py:255-256); tighten to < 0.4 so teacher rows match the pinned band"
+  gibberish_to_none:
+    action: none
+    confidence: "< 0.2"
+    target: 400
+    seed_source:  "seeds/intents.yaml:98-101 (gibberish_to_none)"
+    required_fix: "gen_teacher.edge_ok accepts conf < 0.3 (gen_teacher.py:257-258); tighten to < 0.2"
+  corrections_overrides:
+    action: call            # schema-v2 meaning: the amended method, not a rejection
+    confidence: "0.8–0.95"
+    target: 400
+    seed_source: "seeds/intents.yaml:103-113"
+    rule: "the amended method must appear verbatim and is spanned as `app`; T-035 maps the span onto requestedApp (फोन -> phone, वाट्सएप -> whatsapp, फेसटाइम -> facetime). Example row: \"होइन, फोन नै गर\" -> action call, span app \"फोन\" [6,9)"
+  ack_med_family:
+    target: 800             # spec §9.1: ack variants AND refusals
+    split: {ack_positives: 500, refusals: 300}
+    positives: {action: ack_med, sources: ["new ack_med intent in seeds/intents.yaml (templates: औषधि खाएँ / खाइसकें / लिएँ ...) expanded by gen_teacher.py", "data/edge_cases.jsonl (server-only, 57 rows, always kept) until seeds carry the family"]}
+    refusals: {action: none, source: "refusal templates in the ack_med seed family ('औषधि खाएको छैन', 'खाइनँ', 'पछि खान्छु')", rule: "refusal text contains ack substrings — it must be labelled none, never ack_med; golden corpus gc-ack-002 pins exactly this"}
+    guard: "see spans.validation: ack_med rows with refusal markers are refused"
+
+mixture:
+  config_keys: tools/train-intent/config.yaml:30-36
+  targets: {stt_noised: 0.60, clean_devanagari: 0.25, romanized_codeswitched: 0.15}
+  register_to_bucket:      # mirrors build_dataset.py:77-82
+    devanagari: clean_devanagari
+    elder_fragmented: clean_devanagari
+    romanized: romanized_codeswitched
+    code_switched: romanized_codeswitched
+    stt_noise: stt_noised
+  registers: [devanagari, romanized, code_switched, elder_fragmented]   # gen_teacher.py:287-288
+  anchor: stt_noised       # the scarce runtime-critical bucket anchors the total (build_dataset.py:216-231)
+  edge_exemption: >
+    edge-class rows (`source: edge_cases:*` and `teacher:<edge_class>:*`) are
+    always kept — never sampled away; at least 90% stay in train and valid keeps
+    at least one row per family where supply allows. The current code exempts
+    only `edge_cases:*` (build_dataset.py:222-231); T-036 must extend the
+    priority match to the teacher edge-class source prefixes.
+  supply_caps:
+    policy: >
+      Bucket takes are capped by supply (never padded with duplicates). When a
+      clean bucket runs short, it is reported as SUPPLY-CAPPED with the achieved
+      delta; topping up is preferred over re-normalising the ratio. The
+      stt_noised share is never reduced to fit a clean-bucket target.
+    hard_floor_stt_noised: 0.55   # below this, T-036 must regenerate noised data before training (non-zero hold)
+    per_action_floor: "0.25 × taxonomy.targets[action] rows after sampling; an action at 0 rows must be topped up or explicitly waived in a recorded decision"
+    corpus_floor: 8000            # T-036 does not start training below this (round-2 corpus was 2,827 and was under-trained — docs/OPEN-ITEMS.md)
+  measurement:
+    # Reported by the build and recorded in the T-036 run manifest (counters and
+    # hashes only, no utterance content — NFR-016).
+    - "achieved share per bucket vs target (build_dataset.py:245-265 report; extend to per-register inside stt_noised)"
+    - "supply and cap per bucket, with SUPPLY-CAPPED flagged"
+    - "per-action row counts vs taxonomy.targets"
+    - "edge-class counts per family (abstain / gibberish / corrections / ack positives / refusals)"
+    - "span-bearing row count per span label and per register"
+    - "leak refusals, schema refusals, label-conflict drops, dup_clean drops (existing counters, preserved)"
+    - "distinct noised utterances vs raw noised rows (Whisper converges: 29,304 rows -> 2,458 distinct, docs/OPEN-ITEMS.md:136-141)"
+
+governance:
+  golden_corpus:
+    path: tools/train-intent/eval/golden_corpus.jsonl
+    held_out: true
+    guard: "normalized-utterance membership refusal in build_dataset.py:120-124, 159-160; refusal count reported; passing the corpus as a training input must fail (T-036 DoD)"
+  real_user_data:
+    admission: explicit_consent_export_bundle
+    bundle_source: "IntentLogStore.exportURL() (ios/ElderlyAssistant/Services/Intents/IntentLogStore.swift:108-123), produced by the family's deliberate export act (IntentLogReviewView.swift:23-27 ShareLink)"
+    requirements:
+      - "no pipeline stage reads on-device log content except the exported bundle (NFR-015)"
+      - "the run manifest records the bundle's opaque export reference (never its content)"
+      - "spec §11's 'encrypted bundle' is the admission requirement; the shipped exportURL() writes plaintext JSONL to tmp — T-036 must refuse bundles without a consent/export record and flag the encryption gap rather than silently ingesting"
+      - "bundles are synthetic-seed + consented-correction data only; no PII in logs, manifests or eval fixtures (NFR-016)"
+  leak_refusal: "refuse + count; never auto-delete silently, never log the utterance itself"
+
+teacher:
+  script: tools/train-intent/src/gen_teacher.py
+  model: config.gemini.model            # tools/train-intent/config.yaml:7 (currently gemini-2.5-flash-lite)
+  role: training_time_only
+  local_teacher: forbidden              # no local Qwen teacher; inference-time stays on-device-only (FR-007)
+  prompt_chat_format: seeds/prompt_template.txt
+  note: "README.md:8 says 'Gemini 2.5 Flash'; the config value (flash-lite) is the source of truth"
+
+stt_noise:
+  script: tools/train-intent/src/stt_noise.py
+  pipeline: "piper TTS -> the app's actual bundled Whisper -> noisy transcript (T-009)"
+  tts_voice: config.stt_noise.tts_voice   # config.yaml:23 (hi_IN pratham — nearest to ne)
+  whisper: [config.stt_noise.whisper_cpp, config.stt_noise.whisper_model, config.stt_noise.hf_model]  # config.yaml:18-22; whisper-medium-ne-q5_1.bin in the app
+  row_marks: {source: "stt_noise:<parent_register>", id: "<parent_id>:noise<n>", keeps: clean_utterance}
+  supervision: "labels stay the parent's action; spans and slot strings are recomputed on the noisy transcript per spans.under_noise — the inherited fields are auxiliary only"
+
+examples:
+  # Worked examples, offsets computed on the exact strings (code points).
+  # Noised strings are illustrative re-annotations of the measured noise classes
+  # (docs/OPEN-ITEMS.md:136-141); T-036 re-derives from data/noised.jsonl.
+  span_labels_covered: [contact, time, medication, message, topic, app]
+  rows:
+    - {id: wc-call-clean, register: devanagari, source: teacher:devanagari, action: call, confidence: 0.92,
+       utterance: "माइया लाई फोन गर",
+       spans: [{label: contact, text: "माइया", start: 0, end: 5}, {label: app, text: "फोन", start: 10, end: 13}]}
+    - {id: wc-call-rom, register: romanized, source: teacher:romanized, action: call, confidence: 0.92,
+       utterance: "maiya lai phone gara",
+       spans: [{label: contact, text: "maiya", start: 0, end: 5}, {label: app, text: "phone", start: 10, end: 15}]}
+    - {id: wc-call-noised, register: devanagari, source: "stt_noise:devanagari", action: call, confidence: 0.92,
+       utterance: "माइयालाई फोन गर",
+       spans: [{label: contact, text: "माइयालाई", start: 0, end: 8}, {label: app, text: "फोन", start: 9, end: 12}],
+       note: "whole-word merge — span widens with the merged affix"}
+    - {id: wc-reminder-clean, register: devanagari, source: teacher:devanagari, action: set_reminder, confidence: 0.9,
+       utterance: "भोलि बिहान नौ बजे डाक्टरलाई फोन गर्न सम्झाइदिनु",
+       spans: [{label: time, text: "भोलि बिहान नौ बजे", start: 0, end: 17}, {label: contact, text: "डाक्टरलाई", start: 18, end: 27}],
+       note: "the T-034 Gherkin pin; the embedded method mention 'फोन' is not spanned (v1 rule: non-method actions do not supervise app spans)"}
+    - {id: wc-reminder-rom, register: romanized, source: teacher:romanized, action: set_reminder, confidence: 0.9,
+       utterance: "bholi bihana nau baje doctor lai phone garna samjhaidinu",
+       spans: [{label: time, text: "bholi bihana nau baje", start: 0, end: 21}, {label: contact, text: "doctor", start: 22, end: 28}]}
+    - {id: wc-reminder-noised, register: devanagari, source: "stt_noise:devanagari", action: set_reminder, confidence: 0.9,
+       utterance: "भोलि बिहान ९ बजे डाक्टरलई फोन गर्न सम्झाइदिनु",
+       spans: [{label: time, text: "भोलि बिहान ९ बजे", start: 0, end: 16}, {label: contact, text: "डाक्टरलई", start: 17, end: 25}],
+       note: "digit substitution + name misspelling — spans re-annotated on the noised text"}
+    - {id: wc-emergency-clean, register: devanagari, source: teacher:devanagari, action: emergency, confidence: 0.95,
+       utterance: "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ", spans: []}
+    - {id: wc-emergency-rom, register: romanized, source: teacher:romanized, action: emergency, confidence: 0.95,
+       utterance: "madat garnus, malai mirgaula dukheko chha", spans: []}
+    - {id: wc-emergency-noised, register: devanagari, source: "stt_noise:devanagari", action: emergency, confidence: 0.95,
+       utterance: "मदत गर्नुस मलाई मिर्गौला दुख्यो", spans: [],
+       note: "surface loss is allowed for emergency — the row is never dropped (recall-first)"}
+    - {id: wc-medication, register: devanagari, source: teacher:devanagari, action: set_reminder, confidence: 0.9,
+       utterance: "बिहान ८ बजे औषधि खान सम्झाउनु",
+       spans: [{label: time, text: "बिहान ८ बजे", start: 0, end: 11}, {label: medication, text: "औषधि", start: 12, end: 16}]}
+    - {id: wc-message, register: devanagari, source: teacher:devanagari, action: send_message, confidence: 0.9,
+       utterance: "सुनितालाई आज भेट्नुहोस् भनेर मेसेज पठाउ",
+       spans: [{label: contact, text: "सुनितालाई", start: 0, end: 9}, {label: message, text: "आज भेट्नुहोस्", start: 10, end: 23}]}
+    - {id: wc-topic, register: devanagari, source: teacher:devanagari, action: guide, confidence: 0.9,
+       utterance: "माइक्रोवेभमा चिया कसरी तताउने",
+       spans: [{label: topic, text: "माइक्रोवेभमा", start: 0, end: 12}]}
+    - {id: wc-correction, register: devanagari, source: "teacher:corrections_overrides:devanagari", action: call, confidence: 0.9,
+       utterance: "होइन, फोन नै गर",
+       spans: [{label: app, text: "फोन", start: 6, end: 9}],
+       note: "correction keeps its schema-v2 meaning: action call, amended method span -> requestedApp phone (T-035 mapping)"}
+
+consumers:
+  T-035: "spans are the slot contract; map span -> InterpretedCommand fields per action (app -> requestedApp/callType), resolution stays in code"
+  T-036: "load these rules; extend build_dataset.py guards to the BIO row format; enforce edge bands, mixture caps, floors and the leak guard; record the measurement block"
+  eval_note: >
+    eval_golden.py's slot F1 compares whitespace-token sets against the golden
+    corpus's resolver-ready slot values (e.g. contact "माइया" for "माइयालाई").
+    Surface-exact spans therefore need span->slot normalization before
+    comparison; T-035/T-038 own that reconciliation (T-033 pre-registered low
+    contact F1 as a design input, docs/T-033-encoder-bakeoff.md K6 note).
