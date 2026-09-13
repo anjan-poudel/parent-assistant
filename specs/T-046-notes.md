@@ -3,8 +3,11 @@
 Worktree: `/Users/anjan/workspace/projects/elderly-ai-assistant/.claude/worktrees/t046-chat-framing`
 Branch: `worktree-t046-chat-framing` (base `840bcd7`; NOT merged, NOT pushed, NOT rebased)
 Commits: `5104a0b` (per-id framing + raw scheme), `c83bd0a` (table to the measured
-determination), `ca5d85d` + `ff9692a` (measurement evidence), `8b0e9a0` (routed follow-up T-051).
-Every artifact is inside this worktree; no file outside it was touched.
+determination), `ca5d85d` + `ff9692a` (measurement evidence), `8b0e9a0` (routed follow-up T-051),
+`42d7e0d` (these notes), `34af077` (merge helper). Every committed artifact is inside this worktree;
+the only writes outside it were scratch: `/tmp/t046-*.py|sh` on this Mac and the model host's own
+working directory `/mnt/nvme2/workspace/t046-chat-framing/` (models, per-run logs, row dumps) — no
+other worktree and no other repository file was touched.
 
 ## 1. What was wrong, measured
 
@@ -49,6 +52,10 @@ rate, then smaller prompt. A tie keeps the incumbent. Scope: the app's own inten
 decided by the measurement; general-purpose brains are NOT (the corpus exercises only this app's
 contract, which they were never trained on) — their measured rows are recorded in
 `general_purpose_observations` and their publisher template stands.
+
+Reproducing the verdicts: fetch the host's `out/summary-*.json` + `out/rows.jsonl` and run
+`python3 tools/train-intent/src/framing_determination_merge.py <dir>` — re-running it over the
+fetched evidence reproduces the three committed files with only the `generated_utc` stamp moving.
 
 Run: model host `192.168.1.117`, harness `tools/train-intent/src/framing_check.py`, HF cache
 `/storage/huggingface`, models under `/mnt/nvme2/workspace/t046-chat-framing/models`. Another
@@ -114,7 +121,8 @@ Row-level evidence for the changed ids:
   general-purpose stock entries carry no framing comment because their framing did not change;
   curated list untouched.
 - `tools/train-intent/src/framing_check.py` (new; renderers, per-row runner, summariser,
-  `PRE_FIX_FRAMING`, `required_framing`).
+  `PRE_FIX_FRAMING`, `required_framing`) and `tools/train-intent/src/framing_determination_merge.py`
+  (new; the committed merge that produces the three files below).
 - `tools/train-intent/eval/framing_summary.json`, `framing_rows.jsonl` (540 rows),
   `framing_determination.json` (policy, per-id ranking keys, shipped framing + reason, `source_lines`
   evidence spans, `general_purpose_observations`).
