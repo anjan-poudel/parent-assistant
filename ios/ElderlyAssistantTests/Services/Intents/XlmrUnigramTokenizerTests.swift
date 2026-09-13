@@ -19,21 +19,25 @@ import XCTest
 /// fix is in the tokenizer, never in the fixtures.
 ///
 /// Fixture provenance (recorded so a regenerated file is a deliberate act):
-///  - 387 rows / 4,368 tokens;
+///  - 394 rows / 4,391 tokens (file sha256 prefix `2f8ca8567a11`);
 ///  - stratified sample of `teacher.jsonl` + `noised.jsonl` (25 per register)
 ///    and ALL of `edge_cases.jsonl`, plus up to 10 digit-bearing rows;
-///  - 68 adversarial cases: empty, whitespace-only, single word, 62/63/64/65/
+///  - 75 adversarial cases: empty, whitespace-only, single word, 62/63/64/65/
 ///    80-word inputs, punctuation runs, literal `<s>`/`</s>`/`<mask>`/`<pad>`/
 ///    `<unk>` text, ZWJ emoji sequences, Devanagari conjuncts + combining
 ///    marks, control characters (NUL, U+001C), BOM, fullwidth forms, meta
-///    space literals, zero-width/word-joiner/soft-hyphen, 300-char words.
+///    space literals, zero-width/word-joiner/soft-hyphen, 300-char words,
+///    plus the empty-normalisation class (lone and embedded U+001C/U+007F/
+///    U+008F/U+009F words: HF's Metaspace emits nothing for an empty input,
+///    so those rows pin ids without the spurious `▁` and a word index that
+///    skips the emptied word).
 final class XlmrUnigramTokenizerTests: XCTestCase {
 
     /// Pinned fixture identity. A change here means the fixtures were
     /// regenerated and the numbers in this file's provenance comment (and
     /// `specs/T-037-a-notes.md`) must move with them.
-    private static let expectedFixtureRows = 387
-    private static let expectedFixtureTokens = 4368
+    private static let expectedFixtureRows = 394
+    private static let expectedFixtureTokens = 4391
 
     private var tokenizer: XlmrUnigramTokenizer!
 
@@ -263,6 +267,51 @@ final class XlmrUnigramTokenizerTests: XCTestCase {
         let encoded = try XCTUnwrap(tokenizer.tokenize(
             sanitisedTranscript: "औषधि   खाएँ", maxSequenceLength: 64))
         XCTAssertEqual(encoded.words, ["औषधि", "खाएँ"])
+    }
+
+    /// Review round F1. A word whose normalized text is the EMPTY string (the
+    /// character map deletes every scalar in it) contributes NO ids and NO
+    /// word index — tokenizers' `Metaspace` returns early on an empty input,
+    /// so `words=[""]` encodes as `<s> </s>`. The pre-fix tokenizer inserted
+    /// a spurious `▁` piece (id 6) with a word index for the emptied word.
+    func testAWordWhoseNormalisationIsEmptyContributesNoTokens() throws {
+        let lone = try XCTUnwrap(tokenizer.tokenize(sanitisedTranscript: "\u{8F}",
+                                                    maxSequenceLength: 64))
+        XCTAssertEqual(lone.words, ["\u{8F}"])
+        XCTAssertEqual(lone.tokenIds, [0, 2],
+                       "the emptied word must not encode a piece")
+        XCTAssertEqual(lone.wordIndices, [nil, nil])
+
+        let embedded = try XCTUnwrap(tokenizer.tokenize(
+            sanitisedTranscript: "औषधि \u{8F} खाएँ", maxSequenceLength: 64))
+        XCTAssertEqual(embedded.words, ["औषधि", "\u{8F}", "खाएँ"])
+        XCTAssertFalse(embedded.wordIndices.contains(1),
+                       "word 1 is empty after normalization — it owns no token")
+        let controlFree = try XCTUnwrap(tokenizer.tokenize(
+            sanitisedTranscript: "औषधि खाएँ", maxSequenceLength: 64))
+        XCTAssertEqual(embedded.tokenIds, controlFree.tokenIds,
+                       "the emptied word changes no other token")
+    }
+
+    /// Reachability of that class at runtime: `InputSanitiser` quarantine maps
+    /// every scalar below U+0020 to a space but leaves U+007F/U+008F/U+009F
+    /// alone, so a sanitized transcript can genuinely carry a word made only
+    /// of them. The tokenizer must skip it (and the pre-fix id 6 must not
+    /// reappear).
+    func testQuarantineKeepsTheReachableControlWordAndTheTokenizerSkipsIt() throws {
+        let raw = "औषधि \u{8F} खाएँ"
+        let quarantined = InputSanitiser.sanitise(raw, level: .quarantine)
+        XCTAssertEqual(quarantined, raw,
+                       "U+008F is >= U+0020 — quarantine does not rewrite it")
+        let encoded = try XCTUnwrap(tokenizer.tokenize(sanitisedTranscript: quarantined,
+                                                       maxSequenceLength: 64))
+        XCTAssertEqual(encoded.words, ["औषधि", "\u{8F}", "खाएँ"])
+        XCTAssertFalse(encoded.wordIndices.contains(1))
+        XCTAssertFalse(encoded.tokenIds.contains(6),
+                       "6 is the `▁` piece — no spurious metaspace token")
+        // Below U+0020 the sanitizer rewrites the scalar to a space, so those
+        // scalars can never arrive inside a word.
+        XCTAssertEqual(InputSanitiser.sanitise("a\u{1C}b", level: .quarantine), "a b")
     }
 
     func testAddedTokenTextIsEncodedAsItsIDNotAsPieces() throws {

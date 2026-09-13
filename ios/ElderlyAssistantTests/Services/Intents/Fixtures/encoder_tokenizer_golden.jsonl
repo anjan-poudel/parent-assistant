@@ -385,3 +385,10 @@
 {"id": "adv-066", "source": "adversarial:soft-hyphen", "transcript": "औष­धि", "words": ["औष­धि"], "ids": [0, 105370, 9750, 231, 20801, 2], "wordIndices": [null, 0, 0, 0, 0, null]}
 {"id": "adv-067", "source": "adversarial:replacement-char", "transcript": "औषधि�", "words": ["औषधि�"], "ids": [0, 139876, 6, 2], "wordIndices": [null, 0, 0, null]}
 {"id": "adv-068", "source": "adversarial:hindi-danda", "transcript": "औषधि खाएँ।", "words": ["औषधि", "खाएँ।"], "ids": [0, 139876, 16644, 71184, 125, 2], "wordIndices": [null, 0, 1, 1, 1, null]}
+{"id": "adv-069", "source": "adversarial:empty-normalised-lone-usc", "transcript": "\u001c", "words": ["\u001c"], "ids": [0, 2], "wordIndices": [null, null]}
+{"id": "adv-070", "source": "adversarial:empty-normalised-lone-del", "transcript": "", "words": [""], "ids": [0, 2], "wordIndices": [null, null]}
+{"id": "adv-071", "source": "adversarial:empty-normalised-lone-c1-8f", "transcript": "", "words": [""], "ids": [0, 2], "wordIndices": [null, null]}
+{"id": "adv-072", "source": "adversarial:empty-normalised-lone-c1-9f", "transcript": "", "words": [""], "ids": [0, 2], "wordIndices": [null, null]}
+{"id": "adv-073", "source": "adversarial:empty-normalised-embedded-del", "transcript": "औषधि  खाएँ", "words": ["औषधि", "", "खाएँ"], "ids": [0, 139876, 16644, 71184, 2], "wordIndices": [null, 0, 2, 2, null]}
+{"id": "adv-074", "source": "adversarial:empty-normalised-embedded-c1-8f", "transcript": "औषधि  खाएँ", "words": ["औषधि", "", "खाएँ"], "ids": [0, 139876, 16644, 71184, 2], "wordIndices": [null, 0, 2, 2, null]}
+{"id": "adv-075", "source": "adversarial:empty-normalised-embedded-c1-9f", "transcript": "औषधि  खाएँ", "words": ["औषधि", "", "खाएँ"], "ids": [0, 139876, 16644, 71184, 2], "wordIndices": [null, 0, 2, 2, null]}

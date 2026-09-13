@@ -145,12 +145,18 @@ class XlmrRefTokenizer:
         return self.replace_re.sub(self.replace_with, text)
 
     def metaspace_pieces(self, text):
+        # tokenizers' Metaspace returns EARLY on an empty input and emits no
+        # parts at all, so a word the normalizer emptied contributes no ids
+        # and no word index (HF: `words=[""]` -> `[<s>, </s>]`). The guard has
+        # to be here, before the prefix insertion: checking after it is dead
+        # code, because the insertion turns "" into "▁" and the spurious
+        # piece then encodes as a real token.
+        if not text:
+            return []
         s = text.replace(" ", self.metaspace)
         if self.add_prefix_space and not s.startswith(self.metaspace):
             s = self.metaspace + s
         m = self.metaspace
-        if not s:
-            return []
         return [p for p in re.split("(?=%s)" % re.escape(m), s) if p != ""]
 
     def unigram(self, piece):

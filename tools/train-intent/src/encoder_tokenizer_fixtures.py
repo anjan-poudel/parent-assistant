@@ -178,6 +178,23 @@ def adversarial_rows():
         ("soft-hyphen", "\u0914\u0937\u00ad\u0927\u093f"),
         ("replacement-char", "\u0914\u0937\u0927\u093f\ufffd"),
         ("hindi-danda", "\u0914\u0937\u0927\u093f \u0916\u093e\u090f\u0901\u0964"),
+        # The empty-normalisation class (review round F1): a word the
+        # Precompiled charmap deletes ENTIRELY normalises to "" and HF's
+        # Metaspace then emits NO pieces at all — no ids and no word index.
+        # U+007F / U+008F / U+009F are the scalars of this class that survive
+        # `InputSanitiser.sanitise(_, level: .quarantine)` (it turns <0x20
+        # into a space and leaves these three alone), so the embedded rows
+        # are the reachable form; U+001C is the reviewer's original repro.
+        ("empty-normalised-lone-usc", "\u001c"),
+        ("empty-normalised-lone-del", "\u007f"),
+        ("empty-normalised-lone-c1-8f", "\u008f"),
+        ("empty-normalised-lone-c1-9f", "\u009f"),
+        ("empty-normalised-embedded-del",
+         "\u0914\u0937\u0927\u093f \u007f \u0916\u093e\u090f\u0901"),
+        ("empty-normalised-embedded-c1-8f",
+         "\u0914\u0937\u0927\u093f \u008f \u0916\u093e\u090f\u0901"),
+        ("empty-normalised-embedded-c1-9f",
+         "\u0914\u0937\u0927\u093f \u009f \u0916\u093e\u090f\u0901"),
     ]
     return [{"id": "adv-%03d" % (i + 1), "source": "adversarial:%s" % name,
              "transcript": text}

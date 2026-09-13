@@ -286,7 +286,16 @@ final class XlmrUnigramTokenizer: IntentEncoderTokenizing {
     /// Spaces become `▁`, a leading `▁` is prepended when the text does not
     /// already start with one, and the text splits before every `▁`
     /// (`MergedWithNext`: the marker stays with the piece it introduces).
+    ///
+    /// An EMPTY input is a hard early return with no pieces at all — the
+    /// rule tokenizers' `Metaspace` implements (`pre_tokenize_str("")` is
+    /// `[]`, and a word that normalised to the empty string, e.g. one made
+    /// only of scalars the character map deletes, contributes no ids and no
+    /// word index). The guard must run BEFORE the prefix insertion: after it
+    /// the condition is unreachable, because inserting `▁` turns `""` into
+    /// `"▁"` and that spurious piece encodes as a real token.
     private func metaspacePieces(_ text: String) -> [String] {
+        guard !text.isEmpty else { return [] }
         var scalars = Array(text.unicodeScalars)
         for index in scalars.indices where scalars[index] == " " {
             scalars[index] = "▁"
