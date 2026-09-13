@@ -83,11 +83,31 @@ enum class FamilyAlertType {
     HEALTH_MONITORING_INTERRUPTED,
     CONFIGURATION_UPDATE_APPLIED,
     POSSIBLE_DOUBLE_DOSE,
-    INACTIVITY_ALERT
+    INACTIVITY_ALERT,
+
+    /**
+     * An EVENT fired (caregiver event-notifications task, 2026-09-13):
+     * a medication/routine/calendar reminder the elder opted into
+     * sharing. One wire type for all three kinds — the kind rides in the
+     * in-memory [com.elderlyassistant.services.family.FamilyAlertContext],
+     * never in the envelope, so the payload keeps its `alert_type`-only
+     * shape with no PII and no event taxonomy on the wire.
+     *
+     * iOS mirror: `FamilyAlertType.eventReminder`.
+     */
+    EVENT_REMINDER
 }
 
 data class NotificationResult(
     val contactIdHash: String,
     val success: Boolean,
-    val errorCode: String?
+    val errorCode: String?,
+    /**
+     * Which `NotifyChannel` this result's push rode (caregiver
+     * event-notifications task, 2026-09-13) — null for the legacy
+     * alerts, whose delivery surface was never modelled. Carried on the
+     * result so a caller can see the channel actually attempted, not the
+     * one intended.
+     */
+    val channel: String? = null
 )

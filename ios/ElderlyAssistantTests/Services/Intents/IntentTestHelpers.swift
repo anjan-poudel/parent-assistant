@@ -42,16 +42,18 @@ func makeCommand(action: InterpretedCommand.Action,
                  confidence: Double = 0.9,
                  callType: String? = nil,
                  requestedApp: String? = nil,
-                 reply: String = "ठीक छ") -> InterpretedCommand {
+                 reply: String = "ठीक छ",
+                 time: String? = nil,
+                 topic: String? = nil) -> InterpretedCommand {
     InterpretedCommand(action: action,
                        entryId: nil,
                        contact: contact,
-                       time: nil,
+                       time: time,
                        medication: nil,
                        message: nil,
                        callType: callType,
                        requestedApp: requestedApp,
-                       topic: nil,
+                       topic: topic,
                        steps: nil,
                        confidence: confidence,
                        reply: reply)
@@ -167,5 +169,45 @@ final class StubCoordinator: VoiceCommandCoordinating {
         let taken = rephrasePended
         rephrasePended = nil
         return taken
+    }
+
+    /// [CALENDAR-EVENTS] (2026-09-13) Recorder for the real
+    /// `create_calendar_event` executor. The router validates and
+    /// RESOLVES the start instant, then hands (title, startDate) over —
+    /// so these two fields are what the tests assert on, and the
+    /// returned prompt is what the router must speak verbatim.
+    /// `nil` models the "cannot write right now" coordinator (denied
+    /// access), which must reach the router's honest unavailable line.
+    var calendarEventPrompt: String? = "पात्रोमा राखूँ?"
+    private(set) var calendarEventRequests: [(title: String, startDate: Date)] = []
+    func requestCalendarEventConfirmation(title: String, startDate: Date) -> String? {
+        calendarEventRequests.append((title, startDate))
+        return calendarEventPrompt
+    }
+
+    /// [CALENDAR-EVENTS] (2026-09-13) Router-side gate for the yes/no
+    /// exemption — true only when a test is deliberately standing in for
+    /// a coordinator with an event pended.
+    var isAwaitingCalendarEventConfirmation = false
+}
+
+// MARK: - Caregiver notify settings (test seam)
+
+extension CaregiverNotifySettings {
+    /// Settings backed by a THROWAWAY `UserDefaults` suite — isolated
+    /// from the process-wide standard defaults and from every other test
+    /// (a shared suite would leak a flipped toggle across tests, which is
+    /// exactly the kind of order-dependence the settings' persistence
+    /// makes possible).
+    static func isolated(medication: Bool = false,
+                         routine: Bool = false,
+                         calendar: Bool = false) -> CaregiverNotifySettings {
+        let suiteName = "caregiverNotify.tests.\(UUID().uuidString)"
+        let suite = UserDefaults(suiteName: suiteName) ?? .standard
+        let settings = CaregiverNotifySettings(defaults: suite)
+        settings.medicationReminders = medication
+        settings.routineReminders = routine
+        settings.calendarEvents = calendar
+        return settings
     }
 }

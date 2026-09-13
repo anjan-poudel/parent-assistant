@@ -36,6 +36,12 @@ final class RoutineSchedulerTests: XCTestCase {
     var store: RoutineStore!
     var alarm: MockRoutineAlarmScheduler!
     var bus: MockObservabilityBus!
+    /// Shared with the medication tests' mock (same test module) — the
+    /// caregiver-alert seam is one protocol for every firing system.
+    var notifier: MockFamilyNotifier!
+    /// Isolated per test: the settings persist, so a shared instance
+    /// would leak a flipped toggle into the next test.
+    var caregiverNotifySettings: CaregiverNotifySettings!
     var scheduler: RoutineScheduler!
     var fakeNow: Date!
 
@@ -57,8 +63,13 @@ final class RoutineSchedulerTests: XCTestCase {
         alarm = MockRoutineAlarmScheduler()
         bus = MockObservabilityBus()
         fakeNow = pinnedNow()
+        notifier = MockFamilyNotifier()
+        caregiverNotifySettings = CaregiverNotifySettings.isolated()
         scheduler = RoutineScheduler(store: store, alarmScheduler: alarm,
-                                     observabilityBus: bus, now: { [weak self] in
+                                     observabilityBus: bus,
+                                     familyNotifier: notifier,
+                                     caregiverNotifySettings: caregiverNotifySettings,
+                                     now: { [weak self] in
                                          self?.fakeNow ?? Date()
                                      })
     }
@@ -185,6 +196,8 @@ final class RoutineSchedulerTests: XCTestCase {
         let relaunched = RoutineScheduler(store: RoutineStore(storage: storage),
                                           alarmScheduler: alarm,
                                           observabilityBus: bus,
+                                          familyNotifier: notifier,
+                                          caregiverNotifySettings: caregiverNotifySettings,
                                           now: { [weak self] in self?.fakeNow ?? Date() })
         relaunched.scheduleAll()
 
@@ -397,5 +410,78 @@ final class RoutineSchedulerTests: XCTestCase {
         // notification already fired — there is nothing to deliver again).
         scheduler.scheduleAll()
         XCTAssertEqual(alarm.scheduleCalls[occurrence.id] ?? 0, callsBefore)
+    }
+
+    // MARK: - Caregiver event alerts (2026-09-13)
+
+    /// A delivered routine occurrence tells the family — with the SAME
+    /// display title the notification body and the calendar mirror use,
+    /// so the caregiver reads the words the elder heard.
+    func testMarkDeliveredNotifiesCaregiversWithRoutineKind() async {
+        let entry = makeEntry(hour: 11)
+        store.add(entry)
+        scheduler.scheduleAll()
+        caregiverNotifySettings.routineReminders = true
+        guard let occurrence = scheduler.todaysOccurrences().first else {
+            return XCTFail("expected a pending occurrence today")
+        }
+        let notified = expectation(description: "caregiver alert")
+        notifier.onNotify = { notified.fulfill() }
+
+        scheduler.markDelivered(occurrenceId: occurrence.id)
+        await fulfillment(of: [notified], timeout: 2)
+
+        XCTAssertEqual(notifier.lastAlertType, .eventReminder)
+        XCTAssertEqual(notifier.contexts.count, 1)
+        let context = notifier.contexts.first
+        XCTAssertEqual(context?.kind, .routineReminder)
+        XCTAssertEqual(context?.eventTitle, entry.displayTitle(locale: scheduler.locale))
+        XCTAssertEqual(context?.eventIdHash, IdHashing.shortHash(of: occurrence.id))
+        XCTAssertEqual(context?.fireAt, occurrence.scheduledAt)
+    }
+
+    /// Foreground and background delivery of the SAME notification both
+    /// land here — the second call finds the occurrence already
+    /// `.delivered` and must not alert again.
+    func testMarkDeliveredAlertsOnceForTheSameOccurrence() async {
+        store.add(makeEntry(hour: 11))
+        scheduler.scheduleAll()
+        caregiverNotifySettings.routineReminders = true
+        guard let occurrence = scheduler.todaysOccurrences().first else {
+            return XCTFail("expected a pending occurrence today")
+        }
+        let first = expectation(description: "first alert")
+        notifier.onNotify = { first.fulfill() }
+        scheduler.markDelivered(occurrenceId: occurrence.id)
+        await fulfillment(of: [first], timeout: 2)
+
+        let noSecond = expectation(description: "no second alert")
+        noSecond.isInverted = true
+        notifier.onNotify = { noSecond.fulfill() }
+        scheduler.markDelivered(occurrenceId: occurrence.id)
+        await fulfillment(of: [noSecond], timeout: 0.3)
+
+        XCTAssertEqual(notifier.contexts.count, 1)
+    }
+
+    /// Toggle OFF (the default): routines behave exactly as before the
+    /// caregiver-alert wiring — delivered, and nobody told.
+    func testMarkDeliveredDoesNotNotifyWhenToggleIsOff() async {
+        store.add(makeEntry(hour: 11))
+        scheduler.scheduleAll()
+        XCTAssertFalse(caregiverNotifySettings.routineReminders, "defaults are OFF")
+        guard let occurrence = scheduler.todaysOccurrences().first else {
+            return XCTFail("expected a pending occurrence today")
+        }
+        let noAlert = expectation(description: "no caregiver alert")
+        noAlert.isInverted = true
+        notifier.onNotify = { noAlert.fulfill() }
+
+        scheduler.markDelivered(occurrenceId: occurrence.id)
+        await fulfillment(of: [noAlert], timeout: 0.3)
+
+        XCTAssertEqual(scheduler.todaysOccurrences().first?.state, .delivered,
+                       "the delivery itself is unaffected by the notify toggle")
+        XCTAssertTrue(notifier.contexts.isEmpty)
     }
 }

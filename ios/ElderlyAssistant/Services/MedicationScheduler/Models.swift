@@ -95,10 +95,23 @@ enum FamilyAlertType: String, Codable {
     case configurationUpdateApplied
     case possibleDoubleDose     // dementia FR-D03
     case inactivityAlert        // dementia FR-D12
+    /// An EVENT fired (caregiver event-notifications task, 2026-09-13):
+    /// a medication/routine/calendar reminder the elder opted into
+    /// sharing. One wire type for all three kinds — the kind rides in
+    /// the in-memory `FamilyAlertContext`, never in the envelope, so
+    /// the E2E payload stays `{v:1, alert_type, timestamp}` with no
+    /// PII and no event taxonomy on the wire.
+    case eventReminder
 }
 
 struct NotificationResult {
     let contactIdHash: String
     let success: Bool
     let errorCode: String?
+    /// Which `NotifyChannel` this result's push rode (caregiver
+    /// event-notifications task, 2026-09-13) — `nil` for the legacy
+    /// alerts, whose delivery surface was never modelled. Carried on
+    /// the result so a caller (and the observability event) can see
+    /// the channel actually attempted, not the one intended.
+    var channel: String? = nil
 }

@@ -10,6 +10,11 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
     private let observabilityBus: ObservabilityBus
     private let doubleDoseDetector: DoubleDoseDetector
     private let familyNotifier: FamilyNotifierProtocol
+    /// Per-event-type caregiver notification preferences (caregiver
+    /// event-notifications task, 2026-09-13). Read at FIRE time — the
+    /// reminder itself carries no "notify" flag, so flipping the toggle
+    /// changes every subsequent fire and nothing that already fired.
+    private let caregiverNotifySettings: CaregiverNotifySettings
 
     private var entries: [UUID: MedicationEntry] = [:]
     /// Escalation engines are keyed by REMINDER id, not medication entry id.
@@ -47,12 +52,14 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         storage: EncryptedLocalStorage,
         alarmScheduler: PlatformAlarmScheduler,
         observabilityBus: ObservabilityBus,
-        familyNotifier: FamilyNotifierProtocol
+        familyNotifier: FamilyNotifierProtocol,
+        caregiverNotifySettings: CaregiverNotifySettings
     ) {
         self.storage = storage
         self.alarmScheduler = alarmScheduler
         self.observabilityBus = observabilityBus
         self.familyNotifier = familyNotifier
+        self.caregiverNotifySettings = caregiverNotifySettings
         self.doubleDoseDetector = DoubleDoseDetector()
     }
 
@@ -177,6 +184,15 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
             _ = engine.start()
         }
 
+        // FIRST-fire gate, read BEFORE `lastFiredAt` below overwrites it
+        // (caregiver event-notifications task, 2026-09-13). A re-fire is
+        // the SAME event firing again — the alarm nagging an
+        // unacknowledged dose — so the caregiver wants the event, not one
+        // push per refire. `lastFiredAt` is the only "has this fired
+        // before" bit the reminder carries, and it is already persisted
+        // for the escalation engine's own reasons: no new per-event flag.
+        let isFirstFire = reminder.lastFiredAt == nil
+
         let escalationResult = engine.reminderDelivered(at: Date())
         reminder.state = engine.toReminderState()
         reminder.lastFiredAt = Date()
@@ -190,12 +206,51 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
             "refire_count": "\(engine.currentRefireCount)"
         ])
 
+        if isFirstFire {
+            notifyCaregiversOfFirstFire(entry: entry, reminder: reminder)
+        }
+
         // Schedule ack-window expiry check
         if case .waitForAcknowledgement(let deadline) = escalationResult.action {
             alarmScheduler.scheduleAckDeadlineCheck(
                 reminderId: reminderId,
                 entryId: entry.id,
                 deadline: deadline
+            )
+        }
+    }
+
+    /// Caregiver alert for the first delivery of a medication reminder
+    /// (caregiver event-notifications task, 2026-09-13).
+    ///
+    /// The event id is the REMINDER id, not the medication entry id: a
+    /// twice-daily entry produces two concurrent reminders, and "the
+    /// morning dose" vs "the evening dose" has to be two distinct events
+    /// for the caregiver reading the alert stream. The medication NAME is
+    /// the alert's title (the elder's own words for it — the same string
+    /// the confirmation challenge and the notification body use) and it
+    /// stays in memory; the bus records only the hashed id and the kind.
+    private func notifyCaregiversOfFirstFire(entry: MedicationEntry,
+                                             reminder: ScheduledReminder) {
+        guard caregiverNotifySettings.isEnabled(for: .medicationReminder) else {
+            emit("caregiver_event_skipped",
+                 metadata: ["kind": EventNotifyKind.medicationReminder.rawValue])
+            return
+        }
+        let context = FamilyAlertContext(
+            kind: .medicationReminder,
+            eventIdHash: idHash(reminder.id),
+            eventTitle: entry.medicationName,
+            fireAt: reminder.scheduledAt
+        )
+        emit("caregiver_event_fired",
+             metadata: ["kind": EventNotifyKind.medicationReminder.rawValue,
+                        "event_id_hash": context.eventIdHash])
+        Task { [familyNotifier] in
+            _ = await familyNotifier.notifyAll(
+                alertType: .eventReminder,
+                at: Date(),
+                context: context
             )
         }
     }
