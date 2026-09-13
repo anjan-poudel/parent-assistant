@@ -333,7 +333,7 @@ Corpus: the T-036 `teacher.jsonl` + `noised.jsonl` + `edge_cases.jsonl`.
 Fixture set: **387 rows / 4,368 tokens** (`sha256
 cee1bbaad598b7aab54bbd5690c78fa2675a9f2454817a74b454a4c668611246`): a
 stratified sample per register, all of `edge_cases.jsonl`, digit-bearing
-rows, and 70 adversarial rows (empty, whitespace-only, 62/63/64/65/80 words,
+rows, and 68 adversarial rows (empty, whitespace-only, 62/63/64/65/80 words,
 punctuation runs, literal `<s>`/`</s>`/`<mask>`, ZWJ/flags/keycap, Devanagari
 conjuncts + ZWNJ + nukta, control chars incl. NUL, BOM, fullwidth, meta-space
 literals, ZWSP/word-joiner/soft-hyphen, 300-char words …). Every row is

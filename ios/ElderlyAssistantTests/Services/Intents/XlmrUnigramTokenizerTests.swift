@@ -22,7 +22,7 @@ import XCTest
 ///  - 387 rows / 4,368 tokens;
 ///  - stratified sample of `teacher.jsonl` + `noised.jsonl` (25 per register)
 ///    and ALL of `edge_cases.jsonl`, plus up to 10 digit-bearing rows;
-///  - 70 adversarial cases: empty, whitespace-only, single word, 62/63/64/65/
+///  - 68 adversarial cases: empty, whitespace-only, single word, 62/63/64/65/
 ///    80-word inputs, punctuation runs, literal `<s>`/`</s>`/`<mask>`/`<pad>`/
 ///    `<unk>` text, ZWJ emoji sequences, Devanagari conjuncts + combining
 ///    marks, control characters (NUL, U+001C), BOM, fullwidth forms, meta
