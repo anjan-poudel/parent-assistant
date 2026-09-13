@@ -171,6 +171,11 @@ summary `{'result': 'Passed', 'totalTestCount': 2750, 'passedTests': 2741,
 this task's four suites (Interpreter 26, Decoder 13, Wiring 10, Artifact 8),
 all passing.
 
+Baseline note: that run tested exactly these sources, but the fixes were
+still uncommitted when it started, so `ios/build/.last-tested-sha` recorded
+the review commit. The branch tip was re-gated afterwards; the recorded
+baseline now names the revision that contains this file.
+
 1. **[MAJOR] Timeout no longer covers the graph load.** `interpret()` is two
    phases: PHASE 1 resolves/loads the runner outside the timed section (load
    failures keep `model_load_failed_*`; the artifact-load-race retry is
@@ -181,8 +186,21 @@ all passing.
    still returns a real command) and
    `testSlowPredictionStillTimesOutAfterASlowLoad`. Residual, stated
    honestly: a load that neither succeeds nor throws is no longer
-   timer-bounded — it only ever appeared bounded before, spuriously — and the
-   class docs no longer claim the interpreter is bounded by `timeoutSeconds`.
+   timer-bounded — it only ever appeared bounded before, spuriously. No outer
+   deadline covers it either (checked in source): `CommandRouter` awaits the
+   interpreter's completion with no deadline of its own
+   (`CommandRouter.swift:1070`); `VoicePipeline.holdIdleForTurnReply`'s 45 s
+   `turnPendingSafetySeconds` only releases the pipeline's idle hold — the
+   router's turn-reply token never resolves; and the AppCoordinator's 60 s
+   voice watchdog fires only in `.listening`, not while the session is
+   `.understanding`. A hung load therefore leaves the turn unresolved (UI
+   back to idle at 45 s) until the process restarts. Acceptable while the
+   encoder is off by default; a load budget (its own config key, per the
+   review's alternative) or a T-036 export that guarantees a bounded load is
+   the follow-up required before enabling it. The class docs no longer claim
+   the interpreter is bounded by `timeoutSeconds`.
+   (Aside, pre-existing: `IntentRouter.swift:263` calls the safety bound
+   35 s while the constant is 45 s — stale comment, not touched here.)
 2. **[MINOR] Gate-off lazy access + the flagged test gap.** The coordinator
    now calls `IntentEncoderWiring.gatedEncoder { intentEncoderInterpreter }`:
    the closure is the only reference to the lazy var on that path and runs
