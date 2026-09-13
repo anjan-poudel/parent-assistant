@@ -60,3 +60,77 @@ gates:
   emergency_recall: 1.00       # hard gate, no compromise
   side_effect_precision: 0.97  # call + send_message
   max_gap_vs_gemini: 0.03
+  abstention_precision: 0.90   # spec §10: "none" precision (false-urgent hurts)
+
+encoder:
+  # T-036: joint intent + BIO slot encoder (the C3 MiniLM candidate that won
+  # T-033's bakeoff). The label set, BIO tag set, span→slot map, edge bands,
+  # mixture targets and floors live in tools/train-intent/annotation_rules.yaml
+  # (T-034) and are read from there — never duplicated in this file.
+  #
+  # `null` below means "owned by T-035, not invented here": every stage that
+  # needs one calls encoder_rules.require_t035() and fails loudly.
+  base_model: cartesinus/multilingual_minilm-amazon-massive-intent
+  # 8-char prefix of annotation_rules.yaml spans.tokenizer.revision (the full
+  # hash is read from the rules file; this is a human-readable echo + the value
+  # the run manifest compares the resolved HF revision against).
+  base_revision_prefix: 08dc4816
+  # Optional local backbone directory (a snapshot download). When set it wins
+  # over base_model so training/eval never refetch from the Hub mid-stage.
+  backbone_path: null
+  max_len: 64
+  batch_size: 16
+  lr: 5.0e-5
+  weight_decay: 0.01
+  epochs: 6
+  grad_clip: 1.0
+  save_steps: 200
+  seed: 42
+  intent_loss_weight: 1.0
+  slot_loss_weight: 1.0
+  gpu:
+    # A compute process above this resident size means the card is busy; a CUDA
+    # stage refuses to start (tools/train-intent GPU discipline: never overlap).
+    max_resident_mib: 500
+    allow_overlap: false
+  distillation:
+    # Stage 2 is conditional in the T-035 contract
+    # (loss.distillation.enabled=conditional): it runs only when a real teacher
+    # distribution exists. `null` below means "use the contract value" — tau 2.0
+    # and lambda_kd 0.5 come from encoder_contract.yaml, never from this file.
+    # With enabled=false the run records WHY it skipped (distill_skip_reason).
+    enabled: false
+    teacher: null              # null -> contract teacher_preference_order
+    temperature: null          # null -> contract loss.distillation.temperature (2.0)
+    lambda_kd: null            # null -> contract loss.distillation.lambda_kd (0.5)
+    student_params_target: null  # null -> contract model.student_size_target_params
+  loss:
+    emergency_weight: null     # null -> contract intent_class_weight.emergency (2.0);
+                               # overrides must stay inside the contract's stated range
+  calibration:
+    # The gate numbers come from the T-035 contract
+    # (calibration.gate: buckets 10, tolerance 0.10, min_samples_per_bucket 30,
+    # below_floor pool_upward_and_report). These entries are fallbacks only for a
+    # contract revision that drops them.
+    buckets: 10
+    max_gap: 0.10
+  artifact:
+    # The T-035 contract names no artifact version: the release step must set one
+    # before run_encoder_pipeline.py will publish (it refuses with the reason).
+    version: null
+  # Path to the T-035 contract (relative to tools/train-intent/). null -> default.
+  contract_path: null
+  # Consumed contract revision (recorded, not read at run time — the file above
+  # is the source of truth and its sha256 goes into cfg_hash / the run manifest):
+  #   branch worktree-t035-encoder-design, commit b54d527 ("address challenger
+  #   review"), blob bb71f47, sha256 prefix 60e0211c53ce. The earlier revision
+  #   consumed first was 8bc8be9/sha256 prefix 9926c7c93f87; the review commit
+  #   only added notes + the interpreter `runtime.config` block, it did not
+  #   touch the logit order, tags, loss or calibration gate.
+  pipeline:
+    # Stage watchdog / retry policy for run_encoder_pipeline.py. 0 = no
+    # watchdog: a training leg must never be killed by surprise on a shared
+    # box. `stage_retries` only ever re-runs a TIMED-OUT stage — refusals and
+    # gate failures are deterministic and stay an operator decision.
+    stage_timeout_seconds: 0
+    stage_retries: 0
