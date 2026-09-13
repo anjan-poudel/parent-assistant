@@ -50,13 +50,23 @@ struct AppActivityEntry: Codable, Equatable, Identifiable {
         /// a missed or declined incoming call, or an attempted outgoing
         /// call nobody picked up (iOS reports these indistinguishably).
         /// iOS masks the identity AND the number of calls that involve
-        /// other apps, so this row stores an EMPTY `contactName` and
-        /// EMPTY `phone` — there is no name to store, no number to look
-        /// up, and no address-book match possible. The UI renders the
-        /// localized "Unanswered call" label (`history.unanswered`)
-        /// instead of a stored locale string, and the row's action opens
-        /// the Phone app (Recents is one tab away) — the only surface
-        /// where the caller's identity genuinely lives.
+        /// other apps, so this row normally stores an EMPTY
+        /// `contactName` and EMPTY `phone` — there is no name to store,
+        /// no number to look up, and no address-book match possible. The
+        /// UI renders the localized "Unanswered call" label
+        /// (`history.unanswered`) instead of a stored locale string, and
+        /// the row's action opens the Phone app (Recents is one tab
+        /// away) — the only surface where the caller's identity
+        /// genuinely lives.
+        ///
+        /// ONE attributed exception (call-tracking task, 2026-09-13): the
+        /// app's own opens are matched to the unanswered event by time
+        /// (`OpenedCallAttributor`), so a row for a call the APP placed
+        /// that was never picked up carries the contact the app itself
+        /// dialed. The mask argument does not apply there — the app
+        /// already knew who it called, and the observer's ended-
+        /// unconnected event is the outcome of that dial. Nothing else
+        /// is ever filled in: an unattributed event stays anonymous.
         case unanswered
     }
 
@@ -88,10 +98,11 @@ struct AppActivityEntry: Codable, Equatable, Identifiable {
 
 /// The assistant's own call/message history (call-history task,
 /// 2026-09-06) — the Recent activity leaf's store. Also holds the one
-/// anonymous exception described on `AppActivityEntry` — the
-/// unanswered-call row (missed-calls task, 2026-09-07), appended by the
-/// coordinator when live-call detection observes a call ending without
-/// ever connecting.
+/// exception described on `AppActivityEntry` — the unanswered-call row
+/// (missed-calls task, 2026-09-07), appended by the coordinator when
+/// live-call detection observes a call ending without ever connecting;
+/// anonymous unless the app itself placed the call that went unanswered
+/// (call-tracking task, 2026-09-13).
 ///
 /// Append-only in spirit (rows are never edited or deleted by the app),
 /// newest-first on read, capped at `maxEntries` by dropping the OLDEST
@@ -141,6 +152,40 @@ final class AppActivityLog {
     func entries() -> [AppActivityEntry] {
         loadFromDiskIfNeeded()
         return all.reversed()
+    }
+
+    /// How long a missed call stays "the last missed call" on the Home
+    /// activity tile (call-tracking task, 2026-09-13): a sliding day.
+    /// Long enough that a call missed last evening is still there in the
+    /// morning, short enough that yesterday's news never reads as
+    /// current — the same staleness rule the Home briefing panel holds
+    /// (it hides after its day, `TodayBriefingWidget`).
+    static let missedCallWindow: TimeInterval = 24 * 60 * 60
+
+    /// The newest missed call within `window` of `now`, or nil — the Home
+    /// tile's lookup (call-tracking task, 2026-09-13). Reads the SAME
+    /// entries the Recent-activity leaf renders (`entries()`, newest
+    /// first); a missed call is a row on `Channel.unanswered`, whether
+    /// anonymous or attributed to a call the app placed.
+    ///
+    /// Pure past-relative like `HistoryTimeFormat`: `now` is injected and
+    /// the clock is never read here, so the tests pin it. Future-stamped
+    /// rows are not excluded (the app records with `Date()`; a backwards
+    /// clock step must not blank the tile) — the newest row still wins.
+    func lastMissedCall(now: Date = Date(),
+                        within window: TimeInterval = AppActivityLog.missedCallWindow) -> AppActivityEntry? {
+        Self.lastMissedCall(in: entries(), now: now, within: window)
+    }
+
+    /// The pure form of the lookup above — any ordering in, newest missed
+    /// call within the window out.
+    static func lastMissedCall(in entries: [AppActivityEntry],
+                               now: Date,
+                               within window: TimeInterval = AppActivityLog.missedCallWindow) -> AppActivityEntry? {
+        let cutoff = now.addingTimeInterval(-window)
+        return entries
+            .filter { $0.channel == .unanswered && $0.timestamp >= cutoff }
+            .max { $0.timestamp < $1.timestamp }
     }
 
     /// Keeps only the newest `maxEntries`, dropping the oldest (the same

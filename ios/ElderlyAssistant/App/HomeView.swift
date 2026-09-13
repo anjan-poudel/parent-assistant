@@ -113,6 +113,22 @@ struct HomeView: View {
                             feedbackRegion
                                 .equatable()
 
+                            // Last missed call (call-tracking task,
+                            // 2026-09-13): the activity tile sits with the
+                            // rest of Home's activity flow, under the
+                            // feedback region and above the conversation
+                            // chip. It hides itself when there is nothing
+                            // to show (`homePresentation.lastMissedCall`
+                            // is nil) — no dead card, the redesign's
+                            // no-mockups rule. Tap pushes the Phone
+                            // screen's call log.
+                            if let missedCall = homePresentation.lastMissedCall {
+                                HomeMissedCallTile(presentation: missedCall) {
+                                    navPath.append(LeafDestination.call)
+                                }
+                                .equatable()
+                            }
+
                             if showsPinnedHistoryChip,
                                !homePresentation.setup.isVisible {
                                 historyChip
@@ -236,7 +252,29 @@ struct HomeView: View {
                 // Warning styling is reserved for a capability that is
                 // genuinely unavailable — never for "setup is not done"
                 // (design review: ready vs optional setup).
-                needsAttention: boot.hasFailures))
+                needsAttention: boot.hasFailures),
+            lastMissedCall: missedCallPresentation)
+    }
+
+    /// The last missed call, resolved into the tile's two lines — or nil
+    /// when the log has no missed call inside the tile window
+    /// (call-tracking task, 2026-09-13).
+    ///
+    /// The lookup is `AppActivityLog`'s OWN missed-call rule, run over the
+    /// same published window the Recent activity leaf renders
+    /// (`coordinator.recentActivity`), so the tile and the Phone screen's
+    /// call log can never disagree about which call was last missed.
+    /// Resolution happens here — where the coordinator is already
+    /// observed — for the active locale and this render's `now`; the tile
+    /// itself stays a value-typed view that reads nothing.
+    private var missedCallPresentation: MissedCallPresentation? {
+        let now = Date()
+        guard let entry = AppActivityLog.lastMissedCall(in: coordinator.recentActivity,
+                                                        now: now) else { return nil }
+        return MissedCallPresentation.resolve(entry,
+                                              now: now,
+                                              calendar: .current,
+                                              locale: coordinator.activeLocale)
     }
 
     /// The talk stage's [P0-2] readiness value plus its two derived labels.

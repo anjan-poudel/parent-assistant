@@ -107,6 +107,114 @@ final class AppActivityLogTests: XCTestCase {
         XCTAssertEqual(row?.phone, "")
     }
 
+    // MARK: - Missed-call lookup (call-tracking task, 2026-09-13)
+
+    /// A missed call is a row on `Channel.unanswered`; the lookup returns
+    /// the NEWEST one inside the window, regardless of the order the rows
+    /// sit in (the store publishes newest-first, but the pure function
+    /// takes any ordering).
+    func testLastMissedCallPicksNewestUnansweredInsideWindow() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let entries = [
+            AppActivityEntry(timestamp: now.addingTimeInterval(-30),
+                             kind: .call, channel: .unanswered,
+                             contactName: "", phone: ""),
+            AppActivityEntry(timestamp: now.addingTimeInterval(-600),
+                             kind: .call, channel: .unanswered,
+                             contactName: "बुबा", phone: "9812345678"),
+            AppActivityEntry(timestamp: now.addingTimeInterval(-900),
+                             kind: .call, channel: .unanswered,
+                             contactName: "", phone: "")
+        ]
+
+        let missed = AppActivityLog.lastMissedCall(in: entries, now: now)
+        XCTAssertEqual(missed?.contactName, "")
+        XCTAssertEqual(missed?.timestamp, now.addingTimeInterval(-30))
+    }
+
+    /// Rows that are NOT missed calls never answer the lookup, however new
+    /// they are — the tile is about missed calls, not about activity.
+    func testLastMissedCallIgnoresCallsAndMessages() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let answered = [
+            AppActivityEntry(timestamp: now.addingTimeInterval(-30),
+                             kind: .call, channel: .phone,
+                             contactName: "बुबा", phone: "9812345678"),
+            AppActivityEntry(timestamp: now.addingTimeInterval(-20),
+                             kind: .message, channel: .whatsapp,
+                             contactName: "सीता", phone: "9800000000")
+        ]
+        XCTAssertNil(AppActivityLog.lastMissedCall(in: answered, now: now))
+
+        // …and a missed call is still found next to newer call rows.
+        let mixed = answered + [AppActivityEntry(timestamp: now.addingTimeInterval(-300),
+                                                 kind: .call, channel: .unanswered,
+                                                 contactName: "", phone: "")]
+        XCTAssertEqual(AppActivityLog.lastMissedCall(in: mixed, now: now)?.timestamp,
+                       now.addingTimeInterval(-300))
+    }
+
+    /// The window is a sliding day: a missed call from just inside it
+    /// still answers; one from just outside it (or a stale one with
+    /// nothing newer) reads as no missed call at all, so Home shows no
+    /// tile instead of an old one.
+    func testLastMissedCallWindowBoundary() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let inside = AppActivityEntry(timestamp: now.addingTimeInterval(-AppActivityLog.missedCallWindow + 1),
+                                      kind: .call, channel: .unanswered,
+                                      contactName: "", phone: "")
+        let outside = AppActivityEntry(timestamp: now.addingTimeInterval(-AppActivityLog.missedCallWindow - 1),
+                                       kind: .call, channel: .unanswered,
+                                       contactName: "", phone: "")
+
+        XCTAssertEqual(AppActivityLog.lastMissedCall(in: [inside], now: now)?.id, inside.id)
+        XCTAssertNil(AppActivityLog.lastMissedCall(in: [outside], now: now))
+        XCTAssertNil(AppActivityLog.lastMissedCall(in: [], now: now))
+    }
+
+    /// The store-backed convenience reads the same persisted rows the
+    /// Recent-activity leaf renders: a missed call appended before a
+    /// relaunch is still the last missed call after it.
+    func testLastMissedCallReadsPersistedRowsAcrossRelaunch() {
+        let storage = StubEncryptedStorage()
+        let log = AppActivityLog(storage: storage)
+        let missedAt = Date(timeIntervalSince1970: 5_000)
+        log.append(AppActivityEntry(timestamp: missedAt, kind: .call,
+                                    channel: .unanswered,
+                                    contactName: "", phone: ""))
+        log.append(entry(9_000))          // a newer, non-missed row
+        log.append(AppActivityEntry(timestamp: missedAt.addingTimeInterval(-60),
+                                    kind: .call, channel: .unanswered,
+                                    contactName: "बुबा", phone: "9812345678"))
+
+        let relaunch = AppActivityLog(storage: storage)
+        let missed = relaunch.lastMissedCall(now: missedAt)
+        XCTAssertEqual(missed?.timestamp, missedAt)
+        // Past the sliding-day window the same store answers "nothing".
+        XCTAssertNil(relaunch.lastMissedCall(now: missedAt.addingTimeInterval(AppActivityLog.missedCallWindow + 1)))
+    }
+
+    /// An ATTRIBUTED missed row (call-tracking task, 2026-09-13) — the app
+    /// placed the call and it was never picked up — round-trips with its
+    /// contact, while an unattributed one still round-trips empty. The
+    /// distinction lives in the stored name, not in a second channel.
+    func testMissedRowRoundTripsBothAttributedAndAnonymous() {
+        let storage = StubEncryptedStorage()
+        let log = AppActivityLog(storage: storage)
+        log.append(AppActivityEntry(kind: .call, channel: .unanswered,
+                                    contactName: "बुबा", phone: "9812345678"))
+        log.append(AppActivityEntry(kind: .call, channel: .unanswered,
+                                    contactName: "", phone: ""))
+
+        let relaunch = AppActivityLog(storage: storage)
+        let rows = relaunch.entries()
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows.last?.contactName, "बुबा")
+        XCTAssertEqual(rows.last?.phone, "9812345678")
+        XCTAssertEqual(rows.first?.contactName, "")
+        XCTAssertEqual(rows.first?.phone, "")
+    }
+
     // MARK: - Corrupt / missing data tolerance
 
     /// Missing key on first launch → empty history, and the first append
