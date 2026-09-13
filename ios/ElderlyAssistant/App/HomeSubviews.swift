@@ -621,7 +621,7 @@ private struct SetupStrip: View {
     let action: () -> Void
 
     /// The app language, injected at the root (`\.locale` from
-    /// `appCoordinator.appLanguage.locale`) — never `Locale.current`,
+    /// `appCoordinator.activeLocale`) — never `Locale.current`,
     /// which would ignore an in-app language change.
     @Environment(\.locale) private var locale
 

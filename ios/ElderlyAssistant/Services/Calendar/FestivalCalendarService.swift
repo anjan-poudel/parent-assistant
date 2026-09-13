@@ -20,6 +20,10 @@ final class FestivalCalendarService {
         let adDate: Date
         let bsDate: BikramSambat.BSDate
         let daysAway: Int
+        /// True when this year is outside the verified panchang table and
+        /// the date came from tithi astronomy (±1 day). Surfaced so a
+        /// notification/UI can be honest about it.
+        let isApproximate: Bool
     }
 
     static let scheduleHorizonDays = 400   // ~1 year ahead
@@ -27,6 +31,11 @@ final class FestivalCalendarService {
 
     private let notificationCenter: UNUserNotificationCenter
     private let observabilityBus: ObservabilityBus
+
+    /// Locale for notification copy. Set from the app's active locale
+    /// (`AppCoordinator.syncServiceLocales()`); language and region are
+    /// independent settings, so this is a Locale, not an AppLanguage.
+    var locale: Locale = Locale(identifier: "ne-NP")
 
     /// Advance-reminder days for important festivals (default 2,
     /// user-configurable in Settings; a UI preference, not a secret).
@@ -66,7 +75,7 @@ final class FestivalCalendarService {
             bsDate: bs,
             weekdayNepali: BikramSambat.weekdayNamesNepali[weekdayIndex - 1],
             tithi: TithiCalculator.tithi(on: date, calendar: calendar),
-            festivals: NepaliFestivalCatalog.festivals(bsMonth: bs.month, bsDay: bs.day)
+            festivals: NepaliFestivalCatalog.festivals(onBSDate: bs, calendar: calendar)
         )
     }
 
@@ -74,19 +83,27 @@ final class FestivalCalendarService {
 
     /// The next `limit` festivals after `date` (BS-year boundary handled
     /// by simple forward iteration over the table's coverage).
+    ///
+    /// Each festival's date is resolved through its own `FestivalDateRule`
+    /// — fixed BS day for solar observances, verified-panchang table (or
+    /// tithi astronomy) for tithi-anchored ones. A tithi-anchored festival
+    /// can legitimately land in the NEXT BS month or even the next BS
+    /// year's month block (Holi's purnima follows Falgun's solar end), so
+    /// iteration covers one extra year beyond the horizon.
     func upcoming(after date: Date = Date(), limit: Int = 5,
                   calendar: Calendar = .current) -> [UpcomingFestival] {
         guard let todayBS = BikramSambat.bsDate(from: date, calendar: calendar) else { return [] }
+        let start = calendar.startOfDay(for: date)
         var results: [UpcomingFestival] = []
         for year in todayBS.year...(todayBS.year + 1) {
             for festival in NepaliFestivalCatalog.all {
-                let bs = BikramSambat.BSDate(year: year, month: festival.bsMonth, day: festival.bsDay)
-                guard let ad = BikramSambat.adDate(from: bs, calendar: calendar),
-                      ad >= calendar.startOfDay(for: date) else { continue }
-                let daysAway = calendar.dateComponents([.day],
-                    from: calendar.startOfDay(for: date), to: ad).day ?? 0
+                guard let resolved = festival.resolvedDate(inBSYear: year, calendar: calendar),
+                      let ad = BikramSambat.adDate(from: resolved.bsDate, calendar: calendar),
+                      ad >= start else { continue }
+                let daysAway = calendar.dateComponents([.day], from: start, to: ad).day ?? 0
                 results.append(UpcomingFestival(festival: festival, adDate: ad,
-                                                bsDate: bs, daysAway: daysAway))
+                                                bsDate: resolved.bsDate, daysAway: daysAway,
+                                                isApproximate: resolved.isApproximate))
             }
         }
         return Array(results.sorted { $0.adDate < $1.adDate }.prefix(limit))
@@ -164,7 +181,7 @@ final class FestivalCalendarService {
     }
 
     private func advanceBody(for item: UpcomingFestival) -> String {
-        let base = L10n.str("festival.advanceBody", locale: Locale(identifier: "ne"))
+        let base = L10n.str("festival.advanceBody", locale: locale)
         return String(format: base, advanceReminderDays)
     }
 

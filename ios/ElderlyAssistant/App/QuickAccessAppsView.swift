@@ -69,7 +69,7 @@ struct QuickAccessAppsView: View {
 
     private var searchResults: some View {
         let results = AppLauncher.search(query: searchText,
-                                         in: coordinator.appLanguage.locale)
+                                         in: coordinator.activeLocale)
         return VStack(alignment: .leading, spacing: 10) {
             ForEach(results) { app in
                 catalogRow(app)
@@ -199,7 +199,7 @@ struct QuickAccessAppsView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(L10n.fmt("quickApps.addFor",
-                                          locale: coordinator.appLanguage.locale,
+                                          locale: coordinator.activeLocale,
                                           appDisplayName(app))))
     }
 
@@ -213,7 +213,7 @@ struct QuickAccessAppsView: View {
             // correct ("व्हाट्सएप हटाउनुहोस्") and makes the control
             // self-describing for VoiceOver ("Remove WhatsApp, button").
             Text(L10n.fmt("quickApps.remove",
-                          locale: coordinator.appLanguage.locale,
+                          locale: coordinator.activeLocale,
                           appDisplayName(app)))
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
                 .foregroundStyle(DesignTokens.accent)
@@ -226,7 +226,7 @@ struct QuickAccessAppsView: View {
     // MARK: - Helpers
 
     private func appDisplayName(_ app: AppLauncher.App) -> String {
-        L10n.str(app.nameKey, locale: coordinator.appLanguage.locale)
+        L10n.str(app.nameKey, locale: coordinator.activeLocale)
     }
 
     /// One scheme probe per catalog app — runs once per appearance (the

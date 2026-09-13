@@ -452,13 +452,28 @@ struct LanguageSettingsView: View {
 
     var body: some View {
         LeafScreen(titleKey: "settings.language.title") {
-            VStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 16) {
                 VStack(spacing: 12) {
                     ForEach(AppLanguage.allCases) { language in
                         languageRow(language)
                     }
                 }
-                Text("settings.language.region")
+                // Region is a SEPARATE setting (2026-09-13): language picks
+                // the words, locale picks the dates/numbers/Nepali regional
+                // conventions. Was a static caption claiming "Nepal
+                // (ne-NP)" with no way to change it — wrong for a Nepali
+                // household in India, whose device region used to decide
+                // formatting by accident.
+                Text("settings.language.region.title")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .padding(.top, 4)
+                VStack(spacing: 12) {
+                    ForEach(AppLocale.supported(for: coordinator.appLanguage)) { locale in
+                        localeRow(locale)
+                    }
+                }
+                Text("settings.language.region.footer")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundStyle(DesignTokens.textSecondary)
             }
@@ -474,6 +489,41 @@ struct LanguageSettingsView: View {
                 Text(LocalizedStringKey(language.displayNameKey))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundStyle(DesignTokens.textPrimary)
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 26))
+                        .foregroundStyle(DesignTokens.accent)
+                }
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius)
+                    .stroke(isSelected ? DesignTokens.accent : Color.clear, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func localeRow(_ locale: AppLocale) -> some View {
+        let isSelected = locale == coordinator.appLocale
+        return Button {
+            coordinator.appLocale = locale
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(LocalizedStringKey(locale.regionDisplayNameKey))
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                        .foregroundStyle(DesignTokens.textPrimary)
+                    // The identifier itself ("ne-NP") — region codes are
+                    // not translated; helpful for caregivers.
+                    Text(locale.rawValue)
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                }
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
@@ -3054,7 +3104,7 @@ struct MedicationScheduleSettingsView: View {
                 Spacer()
                 DatePicker("", selection: $time, displayedComponents: .hourAndMinute)
                     .labelsHidden()
-                    .environment(\.locale, coordinator.appLanguage.locale)
+                    .environment(\.locale, coordinator.activeLocale)
             }
             .padding(14)
             .frame(minHeight: 56)
@@ -3171,7 +3221,7 @@ struct AIModelsSettingsView: View {
                         ForEach(ModelCatalog.availableSTTEntries, id: \.id) { entry in
                             Text(Self.sttOptionLabel(entry: entry,
                                                      downloaded: isInstalled(entry.id),
-                                                     locale: coordinator.appLanguage.locale))
+                                                     locale: coordinator.activeLocale))
                                 .tag(Optional(entry.id))
                         }
                     }
@@ -3187,9 +3237,9 @@ struct AIModelsSettingsView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "waveform.badge.magnifyingglass")
                             .foregroundStyle(DesignTokens.textSecondary)
-                        Text(L10n.fmt("model.sttInUse", locale: coordinator.appLanguage.locale,
+                        Text(L10n.fmt("model.sttInUse", locale: coordinator.activeLocale,
                                      L10n.str(coordinator.activeSTTNameKey,
-                                              locale: coordinator.appLanguage.locale)))
+                                              locale: coordinator.activeLocale)))
                             .font(.system(size: DesignTokens.minCaptionPointSize))
                             .foregroundStyle(DesignTokens.textSecondary)
                     }
@@ -3216,7 +3266,7 @@ struct AIModelsSettingsView: View {
                         ForEach(ModelCatalog.availableBrainEntries, id: \.id) { entry in
                             Text(Self.sttOptionLabel(entry: entry,
                                                      downloaded: isInstalled(entry.id),
-                                                     locale: coordinator.appLanguage.locale))
+                                                     locale: coordinator.activeLocale))
                                 .tag(Optional(entry.id))
                         }
                     }

@@ -109,6 +109,14 @@ final class CalendarSyncService: NSObject {
     /// the routine store.
     var entriesProvider: (() -> [RoutineEntry])?
 
+    /// Locale for the mirror-event titles written into the family's
+    /// shared calendar ("Morning walk (व्यायाम)"). Was hardcoded to a
+    /// bare `Locale(identifier: "ne")` at the composition sites
+    /// (2026-09-13) — wrong for an English-language household, and a
+    /// region-less "ne" besides. Injected from the app's active locale
+    /// by `AppCoordinator.syncServiceLocales()`.
+    var locale: Locale = Locale(identifier: "ne-NP")
+
     /// Delivered planned native mutations for the coordinator to apply
     /// through `RoutineScheduler` (whose mutators re-sync the mirror in
     /// turn — the planners then see equal shapes and stop).
@@ -431,7 +439,8 @@ final class CalendarSyncService: NSObject {
         entries: [RoutineEntry],
         records: [CalendarEventRecord],
         now: Date,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        locale: Locale = Locale(identifier: "ne-NP")
     ) -> [CalendarMirrorOperation] {
         var recordByAppKey: [String: CalendarEventRecord] = [:]
         for record in records where !record.isCanceled {
@@ -445,8 +454,8 @@ final class CalendarSyncService: NSObject {
         var desiredKeys = Set<String>()
         for entry in entries where entry.isEnabled {
             let label = L10n.str(entry.category.displayNameKey,
-                                 locale: Locale(identifier: "ne"))
-            let title = "\(entry.displayTitle(locale: Locale(identifier: "ne"))) (\(label))"
+                                 locale: locale)
+            let title = "\(entry.displayTitle(locale: locale)) (\(label))"
             let entryRecurrence = recurrence(for: entry)
             let weekdays: [Int]? = {
                 switch entryRecurrence {
@@ -590,7 +599,8 @@ final class CalendarSyncService: NSObject {
         let records = fetchMirrorWindowRecords()
         let operations = Self.planMirrorOperations(entries: entries,
                                                    records: records,
-                                                   now: now())
+                                                   now: now(),
+                                                   locale: locale)
         applyMirrorOperations(operations,
                               desiredKeys: desiredKeys(for: entries),
                               sahayakIdentifier: sahayakIdentifier)
@@ -603,8 +613,8 @@ final class CalendarSyncService: NSObject {
             // Category comes from the entry itself (the reminders-v2
             // model owns categories natively — no separate tag store).
             let label = L10n.str(entry.category.displayNameKey,
-                                 locale: Locale(identifier: "ne"))
-            let title = "\(entry.displayTitle(locale: Locale(identifier: "ne"))) (\(label))"
+                                 locale: locale)
+            let title = "\(entry.displayTitle(locale: locale)) (\(label))"
             for time in entry.scheduleTimes {
                 guard let hour = time.hour, let minute = time.minute,
                       let startDate = Self.nextStart(after: now(), hour: hour,

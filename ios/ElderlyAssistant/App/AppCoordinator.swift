@@ -55,6 +55,14 @@ final class AppCoordinator: ObservableObject {
     @Published var appLanguage: AppLanguage {
         didSet {
             appLanguage.persist()
+            // Language and locale are independent settings (2026-09-13):
+            // a language switch re-defaults the region (ne → ne-NP,
+            // en → en-US) but the household can then override it. A
+            // deliberate override is only cleared when it would leak into
+            // the new language (e.g. en-IN surviving a switch to Nepali).
+            if appLocale.language != appLanguage {
+                appLocale = AppLocale.defaultLocale(for: appLanguage)
+            }
             syncServiceLocales()
             // Model preferences only churn on a REAL change: re-tapping the
             // already-selected language must not override a deliberate
@@ -65,9 +73,21 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// The household's formatting locale — language + region, persisted
+    /// separately from `appLanguage` (spec §4.4.1 "Language & region").
+    /// Defaults to the language's region (`ne` → `ne-NP`); settable on its
+    /// own so a Nepali-speaking family in India runs Nepali UI with `ne-IN`
+    /// date/number conventions.
+    @Published var appLocale: AppLocale = .nepaliNepal {
+        didSet {
+            appLocale.persist()
+            syncServiceLocales()
+        }
+    }
+
     /// The locale every piece of non-View code (router speech, formatters)
     /// resolves against.
-    var activeLocale: Locale { appLanguage.locale }
+    var activeLocale: Locale { appLocale.locale }
 
     /// Pushes the active language into the services that build user-facing
     /// strings at call time — platform notifications, spoken confirmation
@@ -81,6 +101,10 @@ final class AppCoordinator: ObservableObject {
         routineAlarmScheduler.locale = activeLocale
         routineScheduler.locale = activeLocale
         externalCalendar.locale = activeLocale
+        // [CALENDAR-TEJ-LOCALE] (2026-09-13) Mirror-event titles written
+        // into the family's shared calendar follow the active locale too
+        // (was a hardcoded bare "ne" at the composition sites).
+        calendarSync.locale = activeLocale
         alarmTimersService.locale = activeLocale
         alarmTimersService.setSystemSchedulerLocale(activeLocale)
         // Voice-OS shell v1: the briefing composes in the app language,
@@ -89,6 +113,10 @@ final class AppCoordinator: ObservableObject {
         // [NEWS-READER] (2026-09-08) The news digest composes in the app
         // language too — same injection pattern.
         newsReader?.locale = activeLocale
+        // [CALENDAR-TEJ-LOCALE] (2026-09-13) Festival notifications are
+        // composed by the service at schedule time — it must follow the
+        // active locale, not a hardcoded bare "ne".
+        festivalCalendar.locale = activeLocale
     }
 
     /// Language-aware model selection (2026-09-13): the app language picks
@@ -1578,8 +1606,15 @@ final class AppCoordinator: ObservableObject {
         self.timerAlarmEngine = timerAlarmEngine
 
         // Language — restore the persisted choice, defaulting to the Nepali
-        // pilot language (spec §3.2).
-        self.appLanguage = AppLanguage.persisted()
+        // pilot language (spec §3.2). The locale (language + region) is a
+        // SEPARATE persisted setting (2026-09-13): restore it against the
+        // restored language so a value that no longer matches (a stored
+        // `en-IN` after the household switched to Nepali) falls back to the
+        // language's region default instead of leaking across.
+        let restoredLanguage = AppLanguage.persisted()
+        let restoredAppLocale = AppLocale.persisted(for: restoredLanguage)
+        self.appLanguage = restoredLanguage
+        self.appLocale = restoredAppLocale
 
         // Theme — restore the persisted background theme (skinnable home,
         // 2026-09-07). Unknown/missing raw values fall back to `.cream`
@@ -1600,10 +1635,12 @@ final class AppCoordinator: ObservableObject {
         // date line composes lazily on the first refresh.
         let calendarDisplayStore = CalendarDisplaySettingsStore()
         self.calendarDisplayStore = calendarDisplayStore
-        // AppLanguage.persisted() (not self.appLanguage) — init is
-        // not complete at this point, so the property read is illegal;
-        // the persisted value IS what the property will hold.
-        let calendarDisplay = calendarDisplayStore.load(locale: AppLanguage.persisted().locale)
+        // The locals restored above (not self.appLanguage / self.appLocale)
+        // — init is not complete at this point, so the property reads are
+        // illegal; the persisted values ARE what the properties will hold.
+        // The active LOCALE seeds the display default (2026-09-13: it is
+        // now a setting of its own, not derived from the device region).
+        let calendarDisplay = calendarDisplayStore.load(locale: restoredAppLocale.locale)
         self.calendarDisplayDefault = calendarDisplay.defaultCalendar
         self.showBSOverlay = calendarDisplay.showBSOverlay
         self.showTithiOverlay = calendarDisplay.showTithiOverlay
