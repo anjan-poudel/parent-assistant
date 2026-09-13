@@ -79,11 +79,11 @@ before/after URL identity, strict checksum abort, delete, stale-sweep safety.
 
 ## The spike artifact
 
-Kept outside the repo and outside `/tmp`, uncommitted (109 MB binary):
-
-```
-/Users/anjan/.local/share/elderly-ai/t033-spike/t033-encoder-int8-mlmodelc.zip
-```
+Kept outside the repo and outside `/tmp`, uncommitted (109 MB binary), at
+`~/.local/share/elderly-ai/t033-spike/t033-encoder-int8-mlmodelc.zip` (the
+tester's home directory; the path is deliberately no longer committed — see
+the fix round below). The supported internal-testing route passes the zip
+directly to `ModelStore.installCoreMLEncoder(fromZip:for:)`.
 
 Verified again during this task: 109,075,268 bytes, SHA-256 prefix
 `6056ba41ba37`, a single top-level `t033-encoder-int8.mlmodelc`
@@ -94,7 +94,11 @@ is functionally required for install verification.
 The spike is labelled honestly: it is the legacy LLM-format 10-intent dataset
 (no schema-v2 actions such as `create_calendar_event`, contact/time tags only),
 NOT the T-035 schema-v2 BIO training set. Tests pin exactly this —
-`testSpikeManifestIsHonestAboutItsLabels`.
+`testSpikeManifestIsHonestAboutItsLabels`. The logit-index order the decoder
+depends on is committed checkably at
+`tools/train-intent/docs/t033-evidence/C3-label-order.json` (intents, tags,
+`max_len`), so the manifest can be verified in-repo against the training run
+without the external `meta.json`.
 
 ## Decisions
 
@@ -107,16 +111,40 @@ NOT the T-035 schema-v2 BIO training set. Tests pin exactly this —
   `testFinalURLIsTheSameValueBeforeAndAfterInstall`.
 - **T-035 contract folded in**: `retryOnArtifactLoadRace` (one load-only
   retry), `maxRetries` 0 for timeouts/abstentions, offsets in unicode scalars
-  over the sanitised transcript. Note the contract's inputs are int64 while
-  the spike artifact accepts int32 — the runner matches the artifact.
+  over the sanitised transcript, `calibration_temperature` (divide-then-
+  softmax, default 1.0, applied in the interpreter).
+  **Known contract/artifact mismatch for T-036 to reconcile**: the contract
+  specifies int64 `input_ids`/`attention_mask`; the only compiled artifact's
+  `metadata.json` declares Int32 `[1, 1...64]`, so the runner uses Int32. A
+  schema-v2 export must either keep Int32 (and amend the contract) or the
+  runner must follow the artifact it is loading.
 - **`InputSanitiser` quarantine level** before inference, and spans are always
   slices of the sanitised text (never the raw transcript).
 - **No `MedicationResolver`** exists under `ios/` (T-035 §15.1); the schema
   exposes a `medication` slot type, and nothing in this task invents a
-  resolver. T-035 integration items I-1 (app span projection) and I-2
-  (abstention fall-through to the long-tail peer) are deliberately NOT
-  implemented; a wiring test pins the current I-2 behaviour so a later change
-  is visible.
+  resolver.
+
+## Explicit contract non-conformances (must land before any schema-v2 manifest is wired)
+
+These are NOT "deferred nice-to-haves": with a schema-v2 manifest in place
+each one would silently mis-map a real span/action, so they are blockers for
+enabling the encoder beyond the spike.
+
+1. **`.app` is not projected (T-035 §7.1).** The current mapping copies the
+   `app` span verbatim into `InterpretedCommand.requestedApp` and leaves
+   `callType` nil. The contract requires a closed-vocabulary projection
+   (`whatsapp`/`facetime`/…) plus a derived `callType` (`voice`/`video`).
+   Unreachable with the spike (its tag head has no `app` tag), latent with
+   any schema-v2 manifest.
+2. **`contact` is not clitic-trimmed (T-035 §7.2).** The contract trims
+   Nepali clitics (`छोरालाई` → `छोरा`) before resolution; the runtime passes
+   the verbatim surface. Correct today only because contact resolution is
+   downstream and the spike's contact spans are unmeasured.
+3. **Integration item I-2 is open (T-035 §16 R-3).** `LocalBrainChain`
+   passes a preferred brain's ABSTENTION through untouched, so an abstained
+   open-domain utterance never reaches the long-tail LLM. Pinned by
+   `testAbstentionDoesNotConsultTheStandInYet`; the fix belongs in the
+   integration task, not this runtime.
 
 ## Honest gaps
 
@@ -129,3 +157,67 @@ NOT the T-035 schema-v2 BIO training set. Tests pin exactly this —
   A device run with the real artifact + tokenizer is the next milestone.
 - **Gate is off in this build** (`#if INTENT_ENCODER` absent), so the shipped
   default and the runtime path are unchanged; the gate-off case is tested.
+
+## Fix round (post-review, commit `d042f3d`)
+
+Review record: `specs/T-037-a-review.md` (challenger GO, 0.87; 1 MAJOR + 6
+MINOR). All seven items were fixed; none was consciously skipped. Gate after
+the round, run from the worktree: `./build.sh test:unit` →
+"Executed 2750 tests, with 9 tests skipped and 0 failures" /
+`** TEST SUCCEEDED **`; xcresult
+`/tmp/t037a-dd/Logs/Test/Test-ElderlyAssistant-2026.09.13_10-50-00-+1000.xcresult`;
+summary `{'result': 'Passed', 'totalTestCount': 2750, 'passedTests': 2741,
+'failedTests': 0, 'skippedTests': 9, 'expectedFailures': 0}`. 57 of those are
+this task's four suites (Interpreter 26, Decoder 13, Wiring 10, Artifact 8),
+all passing.
+
+1. **[MAJOR] Timeout no longer covers the graph load.** `interpret()` is two
+   phases: PHASE 1 resolves/loads the runner outside the timed section (load
+   failures keep `model_load_failed_*`; the artifact-load-race retry is
+   unchanged), PHASE 2 arms the inference timer around the forward pass only,
+   so `inference_timeout` stays reserved for F-1's
+   `forward_pass_exceeds_local_leg_budget`. Regressions:
+   `testSlowGraphLoadIsNotChargedToTheInferenceBudget` (a load 8x the budget
+   still returns a real command) and
+   `testSlowPredictionStillTimesOutAfterASlowLoad`. Residual, stated
+   honestly: a load that neither succeeds nor throws is no longer
+   timer-bounded — it only ever appeared bounded before, spuriously — and the
+   class docs no longer claim the interpreter is bounded by `timeoutSeconds`.
+2. **[MINOR] Gate-off lazy access + the flagged test gap.** The coordinator
+   now calls `IntentEncoderWiring.gatedEncoder { intentEncoderInterpreter }`:
+   the closure is the only reference to the lazy var on that path and runs
+   only with `INTENT_ENCODER`, so a non-gated build never constructs the
+   interpreter. The selection event moved to
+   `IntentEncoderWiring.selectionEventMetadata(preferred:encoder:)` (metadata
+   read from the instance's own manifest identity). Tests drive those two
+   real functions — the hand-copied ternary is gone —
+   `testTheGateIsOffInThisBuildSoTheShippedDefaultIsUnchanged` counts closure
+   invocations and
+   `testSelectionEventMetadataOnlyWhenTheOfferedEncoderTakesTheSlot` covers
+   gate-off / unavailable / selected.
+3. **[MINOR] Personal absolute path removed.**
+   `ModelCatalog.intentEncoderSpikeZipURL(environment:)` returns a
+   reserved-TLD `https://invalid.invalid/…` placeholder by default and honours
+   `INTENT_ENCODER_SPIKE_ZIP` (injectable environment for tests); no
+   home-directory literal remains in source or in these notes. The zip on
+   disk was not touched.
+4. **[MINOR] Provenance pointer fixed.** The label order is committed at
+   `tools/train-intent/docs/t033-evidence/C3-label-order.json` (intents, BIO
+   tags, `max_len`); `IntentEncoderSchema.t033Spike` cites that file instead
+   of the C3 CoreML report, which has no `intents`/`tags` keys.
+5. **[MINOR] Calibration temperature implemented.**
+   `IntentEncoderManifest.calibrationTemperature` (default 1.0) divides the
+   intent logits before the softmax; non-finite/non-positive values fall back
+   to 1.0. Tests: identity is behaviour-preserving, T = 0.5 sharpens with the
+   exact expected probability, invalid values fall back, and `decode` uses
+   the manifest's value. The int64-contract vs Int32-artifact mismatch is
+   recorded above for T-036.
+6. **[MINOR] I-1 deferrals recorded as non-conformances**, not "deferred":
+   see "Explicit contract non-conformances" above — `.app` projection
+   (T-035 §7.1), contact clitic trimming (§7.2) and I-2 (§16 R-3) each carry
+   their clause and a blocker status.
+7. **[MINOR] Parent-directory creation scoped.** `ModelStore` creates the
+   install destination's parent only for `kind == .intentEncoder`; the
+   Whisper-companion path keeps its pre-existing failure in the anomalous
+   "encoder before its Whisper model" ordering, with the reasoning next to
+   the code.
