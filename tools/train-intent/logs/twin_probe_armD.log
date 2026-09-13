@@ -1,0 +1,38 @@
+[command_grammar] WARNING: /mnt/nvme2/workspace/projects/parent-assistant/ios/ElderlyAssistant/Services/Voice/LlamaCommandInterpreter.swift carries no commandJSONSchema literal (pre-2026-09-07 checkout?) — grading the checked-in schema 9432361c7bc3aa86 unverified against Swift. Set INTENT_SCHEMA_STRICT=1 to make this fatal. (commandJSONSchema literal not found in the Swift source — the app grammar moved or was renamed; update this extractor in the SAME change as seeds/command_schema.json)
+
+gc-health-001  gold=health_query  'मेरो रक्तचाप कस्तो हुनुपर्छ'
+   0.92 corpus=health_query  pred=query          MISS  'मेरो रक्तचाप कति हुनुपर्छ'
+   0.90 corpus=health_query  pred=query          MISS  'मेरो रक्तचाप मेरो कस्त हुनुपर्छ'
+   0.89 corpus=health_query  pred=health_query   ok  'मेरो रक्तचाप कति हुनु पर्छ?'
+
+gc-health-002  gold=health_query  'मिर्गौला दुख्दा के खानु हुन्न'
+   0.79 corpus=health_query  pred=guide          MISS  'मिर्गौला दुख्दा के खानु हुन्न भनेर भन्नुस् न'
+   0.70 corpus=health_query  pred=emergency      MISS  'यो मिर्गौलाको दुखाइमा.. केही खान हुन्छ कि हुन्'
+   0.65 corpus=health_query  pred=guide          MISS  'यो मिर्गौलाको ढुङ्गा... के हुन्छ?'
+
+gc-reminder-001  gold=set_reminder  'बिहान ८ बजे औषधि खान सम्झाउनु'
+   0.90 corpus=set_reminder  pred=set_reminder   ok  'बिहान ८ बजे औषधि खान सम्झाइदिनुस्'
+   0.83 corpus=set_reminder  pred=set_reminder   ok  'बिहानको आठ बजे औषधिखान सम्झाउनुपर्यो'
+   0.77 corpus=set_reminder  pred=set_reminder   ok  'राती ९ बजे... औषधि खान सम्झाउनु न'
+
+gc-reminder-002  gold=set_reminder  'साढे ७ बजे हिँड्न सम्झाउनुहोस्'
+   0.65 corpus=set_reminder  pred=set_reminder   ok  '७ बजे, पछि सम्झाउनु है'
+   0.62 corpus=set_reminder  pred=set_reminder   ok  'दबाइ दो बजे सम्झाउनु होला'
+   0.62 corpus=set_reminder  pred=set_reminder   ok  'साढे आठ बजे, पानी खानु है, सम्झाउनु'
+
+gc-ack-002  gold=none  'औषधि खाएको छैन'
+   0.88 corpus=none          pred=ack_med        MISS  'औषधि खाएको छैन अझै'
+   0.74 corpus=none          pred=none           ok  'औषधि खाएको छैन अहिलेसम्म'
+   0.65 corpus=none          pred=ack_med        MISS  'औषधि खानै बाँकी छ'
+
+gc-none-001  gold=none  'ऊ त्यो के भनें कुन्नि'
+   0.64 corpus=none          pred=query          MISS  'उत्यो के भने भन्नाइ सकेनन्'
+   0.63 corpus=none          pred=none           ok  'उत्यो के भने मेले'
+   0.62 corpus=none          pred=guide          MISS  'उत्यो के भन्डु ययहान्'
+
+gc-query-001  gold=query  'भोलि मौसम कस्तो हुन्छ'
+   0.81 corpus=query         pred=query          ok  'भोलि मौसम कस्तो होला?'
+   0.79 corpus=query         pred=query          ok  'भोलि मौसमको weather कस्तो हुन्छ?'
+   0.79 corpus=query         pred=query          ok  'भोलि नि मौसम कस्तो छ ?'
+
+[armD] 12/21 corpus twins answered with their own (golden-consistent) intent
