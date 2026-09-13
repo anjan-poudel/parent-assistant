@@ -17,6 +17,7 @@ Delivers the on-device LLaMA inference engine (llama.cpp, iOS + Android), the in
 | [T-046](T-046-chat-framing-per-offered-brain-id.md) | Chat framing per offered brain id | M | — | HIGH (EXPEDITE: production defect) |
 | [T-047](T-047-catalogue-comment-reconciliation.md) | Catalogue comment reconciliation (brain default + STT hidden-list claims) | S | T-046 | MEDIUM |
 | [T-048](T-048-deferred-brain-decisions.md) | Deferred brain decisions (LAN picker entry + interpreter default) | S | T-045 | MEDIUM |
+| [T-051](T-051-gemma-template-and-general-purpose-framing.md) | Gemma 3 chat template kind + general-purpose framing audit | M | T-046 | MEDIUM |
 
 ## Group effort estimate
 
