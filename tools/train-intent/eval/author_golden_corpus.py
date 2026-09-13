@@ -88,6 +88,10 @@ def row(row_id: str, script: str, intent: str, utterance: str, slots: dict,
     for (a, b) in zip(out, out[1:]):
         if b["start"] < a["end"]:
             raise SystemExit(f"{row_id}: overlapping spans {a} and {b}")
+        if b["start"] == a["end"] and b["label"] == a["label"]:
+            raise SystemExit(
+                f"{row_id}: adjacent same-label spans must be merged at authoring "
+                f"({a} and {b})")
     for key in SURFACE_SLOT_KEYS:
         value = slots.get(key)
         if value and value not in utterance:

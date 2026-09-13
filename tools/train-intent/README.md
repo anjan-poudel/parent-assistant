@@ -59,8 +59,8 @@ clean text guarantees a distribution mismatch. So:
 | **Emergency recall** | **= 100% on corpus, ≥ 0.98 on the adversarial near-miss set** |
 | Call/message precision | ≥ 97% |
 | Abstention precision | ≥ 0.90 (P(gold=none \| pred=none)) |
-| Calibration | per populated confidence bucket, \|accuracy − mean confidence\| ≤ 0.10 |
-| Δ vs Gemini interpreter | within −3 pts on closed intents |
+| Calibration | per populated confidence bucket with n ≥ `calibration_min_n`, \|accuracy − mean confidence\| ≤ 0.10; buckets below min-n are excluded from the gate but must hold ≤ `calibration_max_underfloor_fraction` of rows (`calibration_coverage`) |
+| Δ vs Gemini interpreter | within −3 pts on closed intents, against a baseline bound to the same corpus revision |
 
 `eval_golden.py` exits non-zero when any gate fails, so a bad checkpoint
 can't be shipped by accident. Every gate has a committed failing fixture
@@ -69,7 +69,7 @@ under `eval/fixtures/` proving it can fail a run on its own:
 ```bash
 # fixture backend replays a prediction file keyed by row id (no model needed);
 # each run appends a results.csv row whose last column names the failed gate.
-cp eval/fixtures/results_baseline_100.csv /tmp/r.csv
+cp eval/fixtures/results_baseline_28_096.csv /tmp/r.csv
 python src/eval_golden.py --backend fixture \
     --preds eval/fixtures/preds_emergency_miss.jsonl \
     --corpus eval/fixtures/corpus_closed28.jsonl \
@@ -77,10 +77,15 @@ python src/eval_golden.py --backend fixture \
     --results-csv /tmp/r.csv --label fx-emergency-miss
 ```
 
-The Δ-vs-Gemini gate reads the newest `results.csv` row whose label starts
-with `gemini` (override with `--gemini-label`); with no baseline recorded the
-gate fails closed (`gemini_gap_unevaluated`). Run the Gemini backend at a
-corpus revision **before** comparing candidates at that revision.
+Every result row is stamped with the corpus revision it was scored against:
+the label carries the first 8 hex chars of the corpus file's sha256
+(`label@<corpus_tag>`, plus a `corpus_tag` field in `--manifest-out`). The
+Δ-vs-Gemini gate reads the newest row whose label starts with `gemini`
+(override with `--gemini-label`) **and is bound to this run's corpus tag**.
+Unbound rows — legacy or pre-revision Gemini runs — are reported as
+UNEVALUATED and the gate fails closed (`gemini_gap_unevaluated`), as does a
+corpus with no matching baseline at all. Run the Gemini backend at a corpus
+revision before comparing candidates at that revision.
 
 ## Tests
 
@@ -119,6 +124,16 @@ python src/measure_device.py --replay eval/device/measurements_ios.jsonl \
     --prompts eval/device/prompts.jsonl --device-model "iPhone SE (3rd gen)" \
     --os "iOS 26.0" --build "<sha> (<build>)"     # appends eval/device/measurements.csv
 ```
+
+Exit codes: **0** = latency gates passed, **1** = gate failed, **2** =
+input/validation error (no/bad data, unknown ids). Without `--prompts` the
+script refuses to emit a verdict at all (exit 2) — a one-row file must never
+read as a §10 pass — and a `--prompts` run needs every prompt in **both**
+passes plus at least `--min-prompts` (default 100) prompts in the set.
+`--allow-partial` is the explicit override for exploratory runs: it stamps
+`partial=true` in the evidence row and prints "not a §10 ship verdict". The
+CSV persists `prompt_count`, the `partial` flag, and per-pass
+`cold_*`/`warm_*` columns alongside the aggregate numbers.
 
 Until a real measurements file is scored, every device number in the report
 stays **UNMEASURED** (device builds are T-037's).

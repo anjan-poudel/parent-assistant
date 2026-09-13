@@ -13,9 +13,17 @@ oldest supported device. RAM is recorded for observability only; §10 has no
 RAM gate.
 
 Harness contract: `src/measure_device.py` appends one evidence row per run to
-`eval/device/measurements.csv`; `--replay` exits 0 when the gates pass, 1 on
-gate failure, 2 on malformed input. Percentiles are nearest-rank over all
-replayed rows.
+`eval/device/measurements.csv`. Percentiles are nearest-rank over all
+replayed rows. Exit codes: **0** = gates passed on a complete run (or on an
+explicit `--allow-partial` run, recorded as `partial=true`), **1** = latency
+gate failed, **2** = input/validation error (no/bad data, incomplete
+coverage, unknown ids, no mode selected).
+
+A §10 verdict requires `--prompts eval/device/prompts.jsonl` and **every
+prompt in both passes**; a partial run is an input error unless
+`--allow-partial` is passed explicitly, and such a run is never a ship
+verdict. The evidence CSV persists the coverage and per-pass numbers
+(`partial`, `prompt_count`, `cold_*`, `warm_*`), not just the aggregate.
 
 ---
 
@@ -74,13 +82,20 @@ cd ../tools/train-intent
 python3 src/measure_device.py --replay eval/device/measurements_ios.jsonl \
   --prompts eval/device/prompts.jsonl \
   --platform ios --device-model "iPhone <model>" --os "iOS <version>" \
-  --build "<git sha> (<build>)"
+  --build "<git sha> (<build>)"      # exit 0 = §10 verdict; 1 = gate failed; 2 = bad input
 ```
+
+The prompt set is the committed 100-utterance file (`--min-prompts 100`
+default); collecting fewer prompts, or missing any prompt in either pass,
+exits 2 rather than passing on a partial sample.
 
 Android: no Android client exists in this repository — mark Android rows
 `N/A (no client)` rather than UNMEASURED.
 
 ## 3. Latency table (fill per run)
+
+Every row below needs `partial=false` in `measurements.csv` (a `partial=true`
+row is an explicit override and cannot support a §10 verdict).
 
 | Run | Device | OS | Build | n | cold p50/p95 (ms) | warm p50/p95 (ms) | all p50/p95 (ms) | peak RSS (MB) | Gate |
 |---|---|---|---|---|---|---|---|---|---|

@@ -176,17 +176,58 @@ class ScoringUnitTests(unittest.TestCase):
                      {"label": "time", "text": "c d", "start": 2, "end": 5}]}]
         self.assertTrue(any("overlapping" in e for e in eval_golden.validate_rows(rows, "x.jsonl")))
 
-    def test_read_gemini_baseline_last_wins(self):
+    def test_validate_rows_rejects_same_label_overlap_and_adjacency(self):
+        def row(second):
+            return [{"id": "x", "utterance": "abc def", "script": "latin", "intent": "call",
+                     "slots": {}, "spans": [
+                         {"label": "contact", "text": "abc", "start": 0, "end": 3}, second]}]
+        overlap = row({"label": "contact", "text": "bc d", "start": 1, "end": 5})
+        self.assertTrue(any("overlapping" in e for e in eval_golden.validate_rows(overlap, "x.jsonl")))
+        adjacent = row({"label": "contact", "text": " d", "start": 3, "end": 5})
+        self.assertTrue(any("must be merged at authoring" in e
+                            for e in eval_golden.validate_rows(adjacent, "x.jsonl")))
+        # different labels merely adjacent is legal (particles/words are separate)
+        separate = row({"label": "time", "text": " d", "start": 3, "end": 5})
+        self.assertEqual(eval_golden.validate_rows(separate, "x.jsonl"), [])
+
+    def test_authoring_script_enforces_the_same_span_rules(self):
+        """The authoring path must not be able to create data validate_rows refuses."""
+        sys.path.insert(0, str(ROOT / "eval"))
+        import author_golden_corpus as author  # noqa: PLC0415
+
+        with self.assertRaises(SystemExit):
+            author.row("t1", "latin", "call", "abc def",
+                       {}, [("contact", "abc"), ("contact", "bc def")])
+        with self.assertRaises(SystemExit):
+            author.row("t2", "latin", "call", "abc def",
+                       {}, [("contact", "abc"), ("contact", "abc")])
+
+    def test_read_gemini_baseline_last_wins_and_is_revision_bound(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "results.csv"
             p.write_text("label,closed_acc,contact_f1,time_f1,emergency_recall,se_precision,gates_failed\n"
-                         "smoke,0.1,0.0,0.0,0.0,0.0,x\n"
-                         "gemini-old,0.800,0.0,0.0,0.0,0.0,none\n"
-                         "gemini-new,0.900,0.0,0.0,0.0,0.0,none\n", encoding="utf-8")
-            self.assertEqual(eval_golden.read_gemini_baseline(p), ("gemini-new", 0.9))
-            self.assertEqual(eval_golden.read_gemini_baseline(p, "gemini-old"), ("gemini-old", 0.8))
-            self.assertIsNone(eval_golden.read_gemini_baseline(p, "gemini-missing"))
-            self.assertIsNone(eval_golden.read_gemini_baseline(Path(td) / "absent.csv"))
+                         "smoke@deadbeef,0.1,0.0,0.0,0.0,0.0,x\n"
+                         "gemini-old@deadbeef,0.800,0.0,0.0,0.0,0.0,none\n"
+                         "gemini-new@deadbeef,0.900,0.0,0.0,0.0,0.0,none\n", encoding="utf-8")
+            self.assertEqual(eval_golden.read_gemini_baseline(p, "deadbeef"),
+                             (("gemini-new@deadbeef", 0.9), []))
+            # un-tagged hint still finds its tagged rows
+            self.assertEqual(eval_golden.read_gemini_baseline(p, "deadbeef", "gemini-old"),
+                             (("gemini-old@deadbeef", 0.8), []))
+            self.assertEqual(eval_golden.read_gemini_baseline(p, "deadbeef", "gemini-missing"),
+                             (None, []))
+            self.assertEqual(eval_golden.read_gemini_baseline(Path(td) / "absent.csv", "deadbeef"),
+                             (None, []))
+
+    def test_baseline_from_another_revision_is_unbound_not_used(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "results.csv"
+            p.write_text("label,closed_acc,contact_f1,time_f1,emergency_recall,se_precision,gates_failed\n"
+                         "gemini-legacy,0.900,0.0,0.0,0.0,0.0,none\n"
+                         "gemini-other@cafebabe,0.950,0.0,0.0,0.0,0.0,none\n", encoding="utf-8")
+            baseline, unbound = eval_golden.read_gemini_baseline(p, "deadbeef")
+            self.assertIsNone(baseline, "an unbound/other-revision row must never be a baseline")
+            self.assertEqual(unbound, ["gemini-legacy", "gemini-other@cafebabe"])
 
 
 class GateFixtureIntegrationTests(unittest.TestCase):
@@ -203,34 +244,74 @@ class GateFixtureIntegrationTests(unittest.TestCase):
 
     def test_control_fixture_passes_all_gates(self):
         proc, row = run_eval("corpus_min.jsonl", "nearmiss_min.jsonl",
-                             "preds_min_allpass.jsonl", "results_baseline_100.csv", "fx-control")
+                             "preds_min_allpass.jsonl", "results_baseline_min_100.csv", "fx-control")
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertEqual(row.split(",")[-1], "none")
         self.assertIn("all gates passed", proc.stdout)
 
     def test_abstention_precision_gate_fails_run(self):
         self._assert_single_gate_failure("abstention_fail", "corpus_min.jsonl",
-                                         "results_baseline_100.csv", "abstention_precision",
+                                         "results_baseline_min_100.csv", "abstention_precision",
                                          "fx-query-001")
 
     def test_calibration_gate_fails_run(self):
         self._assert_single_gate_failure("calibration_fail", "corpus_min.jsonl",
-                                         "results_baseline_100.csv", "calibration",
+                                         "results_baseline_min_100.csv", "calibration",
                                          "fx-call-001")
+
+    def test_calibration_coverage_gate_fails_run(self):
+        """Rows stranded in sub-min-n buckets: calibration is unevaluable."""
+        proc, row = run_eval("corpus_min.jsonl", "nearmiss_min.jsonl",
+                             "preds_calibration_coverage_fail.jsonl",
+                             "results_baseline_min_100.csv", "fx-calibration-coverage")
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertEqual(row.split(",")[-1], "calibration_coverage")
+        self.assertIn("EXCLUDED from the gate", proc.stdout)
+        self.assertIn("underfloor gate", proc.stdout)
 
     def test_gemini_gap_gate_fails_run(self):
         self._assert_single_gate_failure("gemini_gap_fail", "corpus_closed28.jsonl",
-                                         "results_baseline_100.csv", "gemini_gap", "fx-cl-music-13")
+                                         "results_baseline_28_100.csv", "gemini_gap", "fx-cl-music-13")
 
     def test_corpus_emergency_miss_fails_run_and_prints_missed_rows(self):
         self._assert_single_gate_failure("emergency_miss", "corpus_closed28.jsonl",
-                                         "results_baseline_096.csv", "emergency_recall",
+                                         "results_baseline_28_096.csv", "emergency_recall",
                                          "fx-cl-emergency-02")
 
     def test_nearmiss_recall_gate_fails_run(self):
         self._assert_single_gate_failure("nearmiss_miss", "corpus_min.jsonl",
-                                         "results_baseline_100.csv",
+                                         "results_baseline_min_100.csv",
                                          "emergency_nearmiss_recall", "fx-nm-003")
+
+    def test_results_rows_are_stamped_with_the_corpus_revision(self):
+        """Every appended row carries the corpus hash, so a later comparison
+        can never silently use a baseline from another revision."""
+        import hashlib
+        proc, row = run_eval("corpus_min.jsonl", "nearmiss_min.jsonl",
+                             "preds_min_allpass.jsonl", "results_baseline_min_100.csv",
+                             "fx-tag-check")
+        self.assertEqual(proc.returncode, 0, proc.stdout)
+        tag = hashlib.sha256((FIXTURES / "corpus_min.jsonl").read_bytes()).hexdigest()[:8]
+        self.assertEqual(row.split(",")[0], f"fx-tag-check@{tag}")
+
+    def test_untagged_legacy_baseline_fails_closed(self):
+        """A baseline row from before labels were tagged must not be compared."""
+        with tempfile.TemporaryDirectory() as td:
+            results = Path(td) / "legacy.csv"
+            results.write_text(
+                "label,closed_acc,contact_f1,time_f1,emergency_recall,se_precision,gates_failed\n"
+                "gemini-legacy,0.900,0.0,0.0,0.0,0.0,none\n", encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, str(SRC / "eval_golden.py"), "--backend", "fixture",
+                 "--preds", str(FIXTURES / "preds_min_allpass.jsonl"),
+                 "--corpus", str(FIXTURES / "corpus_min.jsonl"),
+                 "--nearmiss", str(FIXTURES / "nearmiss_min.jsonl"),
+                 "--results-csv", str(results), "--label", "fx-untagged"],
+                cwd=ROOT, capture_output=True, text=True)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("gemini_gap_unevaluated", proc.stdout)
+            self.assertIn("not bound to this corpus revision", proc.stdout)
+            self.assertIn("gemini-legacy", proc.stdout)
 
     def test_missing_gemini_baseline_fails_closed(self):
         """No recorded baseline => the gate is unevaluated, which must fail."""
@@ -262,6 +343,55 @@ class GateFixtureIntegrationTests(unittest.TestCase):
                 cwd=ROOT, capture_output=True, text=True)
             self.assertEqual(proc.returncode, 2)
             self.assertIn("no prediction for row id", proc.stderr)
+
+    def test_fixture_baselines_are_bound_to_their_fixture_corpora(self):
+        """A fixture corpus edited without re-tagging its baseline would make
+        the gap-gate fixtures fail closed and mask the gate they prove."""
+        import hashlib
+        for baseline, corpus in (("results_baseline_min_100.csv", "corpus_min.jsonl"),
+                                 ("results_baseline_28_100.csv", "corpus_closed28.jsonl"),
+                                 ("results_baseline_28_096.csv", "corpus_closed28.jsonl")):
+            tag = hashlib.sha256((FIXTURES / corpus).read_bytes()).hexdigest()[:8]
+            lines = (FIXTURES / baseline).read_text(encoding="utf-8").strip().splitlines()
+            self.assertTrue(lines[-1].split(",")[0].endswith("@" + tag),
+                            f"{baseline} is not bound to {corpus} ({tag})")
+
+    def _run_preds_fixture(self, preds_rows: list[dict]):
+        with tempfile.TemporaryDirectory() as td:
+            preds = Path(td) / "preds.jsonl"
+            preds.write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in preds_rows),
+                             encoding="utf-8")
+            return subprocess.run(
+                [sys.executable, str(SRC / "eval_golden.py"), "--backend", "fixture",
+                 "--preds", str(preds),
+                 "--corpus", str(FIXTURES / "corpus_min.jsonl"),
+                 "--nearmiss", str(FIXTURES / "nearmiss_min.jsonl"),
+                 "--results-csv", str(Path(td) / "results.csv")],
+                cwd=ROOT, capture_output=True, text=True)
+
+    def test_fixture_preds_without_action_is_an_error(self):
+        """A missing action used to read as an abstention — silently scoring
+        the wrong thing."""
+        rows = _rows(FIXTURES / "preds_min_allpass.jsonl")
+        rows[0].pop("action")
+        proc = self._run_preds_fixture(rows)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("fixture preds validation FAILED", proc.stderr)
+        self.assertIn("silently read as an abstention", proc.stderr)
+
+    def test_fixture_preds_with_unknown_id_is_an_error(self):
+        rows = _rows(FIXTURES / "preds_min_allpass.jsonl")
+        rows.append({"id": "not-a-corpus-row", "action": "call", "confidence": 0.5})
+        proc = self._run_preds_fixture(rows)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("ids not in the corpus/near-miss sets", proc.stderr)
+
+    def test_fixture_preds_with_bad_confidence_is_an_error(self):
+        rows = _rows(FIXTURES / "preds_min_allpass.jsonl")
+        rows[0]["confidence"] = "high"
+        proc = self._run_preds_fixture(rows)
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn("confidence", proc.stderr)
 
     def test_malformed_corpus_is_refused(self):
         with tempfile.TemporaryDirectory() as td:

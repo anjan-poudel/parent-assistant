@@ -64,4 +64,6 @@ gates:
   # the §10 gates with no enforcement).
   abstention_precision: 0.90   # P(gold == none | pred == none) — abstain only when truly unresolvable
   calibration_tolerance: 0.10  # per populated confidence bucket: |accuracy - mean confidence|
+  calibration_min_n: 5         # a bucket needs this many rows before it carries gate weight
+  calibration_max_underfloor_fraction: 0.20  # rows stranded below min-n across buckets
   emergency_recall_nearmiss: 0.98  # adversarial near-miss set (eval/emergency_nearmiss.jsonl)

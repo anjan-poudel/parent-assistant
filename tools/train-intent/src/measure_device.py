@@ -22,14 +22,19 @@ Collection contract (app debug harness writes this JSONL on the device):
     launch) or "warm" (steady state)
   - peak_rss_mb is optional (observability only — §10 gates latency, not RAM)
 
-Scoring:
+Scoring (a §10 verdict requires the full prompt set, every prompt in BOTH
+passes; anything less is an input error unless --allow-partial is explicit):
     python3 src/measure_device.py --replay eval/device/measurements_ios.jsonl \
+        --prompts eval/device/prompts.jsonl \
         --platform ios --device-model "iPhone SE (3rd gen)" --os "iOS 26.0" \
         --build "1.2.3 (456)"
 
   - latency gate: nearest-rank p50/p95 over ALL replayed rows (both passes;
     a bad cold start is real user pain). Print the per-pass breakdown too.
-  - exit 0 = gates pass, 1 = latency gate failed, 2 = malformed input
+  - exit codes: 0 = gates passed on a complete run (or an explicit
+    --allow-partial run, recorded as partial), 1 = latency gate failed,
+    2 = input/validation error (missing/partial coverage, unknown ids,
+    malformed rows, no mode selected).
 """
 from __future__ import annotations
 
@@ -45,12 +50,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PASS_KINDS = ("cold", "warm")
 CSV_FIELDS = ("ts", "platform", "device", "os", "build", "source", "sha256_12",
-              "n", "p50_ms", "p95_ms", "peak_rss_mb", "gate_p50_ms",
-              "gate_p95_ms", "gates_failed")
+              "partial", "prompt_count", "n", "p50_ms", "p95_ms", "peak_rss_mb",
+              "cold_n", "cold_p50_ms", "cold_p95_ms",
+              "warm_n", "warm_p50_ms", "warm_p95_ms",
+              "gate_p50_ms", "gate_p95_ms", "gates_failed")
+
+
+def die(msg: str) -> None:
+    """Input/validation failure: stderr + status 2 (1 is reserved for a real
+    latency-gate failure, so automation can tell bad data from a bad build)."""
+    print(msg, file=sys.stderr)
+    sys.exit(2)
 
 
 def percentile(values: list[float], p: float) -> float:
-    """Nearest-rank percentile (the convention the report must cite)."""
+    """Nearest-rank percentile (the convention the protocol cites)."""
     if not values:
         raise ValueError("percentile of empty list")
     ordered = sorted(values)
@@ -70,7 +84,7 @@ def emit_prompts(corpus: Path, out: Path, limit: int) -> int:
     if limit:
         rows = rows[:limit]
     if not rows:
-        raise SystemExit(f"[device] empty corpus: {corpus}")
+        die(f"[device] empty corpus: {corpus}")
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         for r in rows:
@@ -83,9 +97,9 @@ def load_measurements(path: Path) -> list[dict]:
     """Validate the device JSONL contract. Malformed rows are fatal (exit 2):
     a silently dropped row would quietly change the percentiles."""
     if not path.exists():
-        raise SystemExit(f"[device] measurements file not found: {path}\n"
-                         "  collect it on real hardware first — see "
-                         "eval/device/device-eval-protocol.md (no device => UNMEASURED)")
+        die(f"[device] measurements file not found: {path}\n"
+            "  collect it on real hardware first — see "
+            "eval/device/device-eval-protocol.md (no device => UNMEASURED)")
     rows, errors, seen = [], [], set()
     with open(path, encoding="utf-8") as f:
         for lineno, line in enumerate(f, 1):
@@ -109,19 +123,24 @@ def load_measurements(path: Path) -> list[dict]:
                 seen.add((rid, kind))
             rows.append(row)
     if errors:
-        raise SystemExit("[device] malformed measurements:\n  " + "\n  ".join(errors))
+        die("[device] malformed measurements:\n  " + "\n  ".join(errors))
     if not rows:
-        raise SystemExit(f"[device] no measurement rows in {path} — nothing to score")
+        die(f"[device] no measurement rows in {path} — nothing to score")
     return rows
 
 
 def score(rows: list[dict], prompts: Path | None) -> dict:
+    """Latency stats + prompt-set coverage (no policy decisions here).
+
+    Unknown ids are always fatal (wrong prompt set); missing ids are returned
+    so the caller can demand completeness or accept an explicit partial run."""
     latencies = [float(r["latency_ms"]) for r in rows]
     rss = [float(r["peak_rss_mb"]) for r in rows if isinstance(r.get("peak_rss_mb"), (int, float))]
     out = {"n": len(rows), "p50_ms": percentile(latencies, 0.50),
            "p95_ms": percentile(latencies, 0.95),
            "peak_rss_mb": max(rss) if rss else None,
-           "by_pass": {}}
+           "by_pass": {}, "prompt_count": None,
+           "missing_any": [], "missing_by_pass": {}}
     for kind in PASS_KINDS:
         vals = [float(r["latency_ms"]) for r in rows if r["pass"] == kind]
         if vals:
@@ -133,24 +152,36 @@ def score(rows: list[dict], prompts: Path | None) -> dict:
         got = {r["id"] for r in rows}
         unknown = sorted(got - expected)
         if unknown:
-            raise SystemExit(f"[device] measurements contain ids not in {prompts.name}: "
-                             f"{unknown[:5]} (wrong prompt set?)")
-        out["missing"] = sorted(expected - got)
+            die(f"[device] measurements contain ids not in {prompts.name}: "
+                f"{unknown[:5]} (wrong prompt set?)")
+        pairs = {(r["id"], r["pass"]) for r in rows}
+        out["prompt_count"] = len(expected)
+        out["missing_any"] = sorted(expected - got)
+        out["missing_by_pass"] = {kind: sorted(i for i in expected
+                                               if (i, kind) not in pairs)
+                                  for kind in PASS_KINDS}
     return out
 
 
 def append_csv(path: Path, meta: dict, scored: dict, failed: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     new = not path.exists()
+    per_pass = scored["by_pass"]
     with open(path, "a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         if new:
             w.writeheader()
-        w.writerow({**{k: meta.get(k) for k in CSV_FIELDS},
-                    "n": scored["n"], "p50_ms": round(scored["p50_ms"], 1),
-                    "p95_ms": round(scored["p95_ms"], 1),
-                    "peak_rss_mb": scored["peak_rss_mb"],
-                    "gates_failed": ",".join(failed) if failed else "none"})
+        row = {**{k: meta.get(k) for k in CSV_FIELDS},
+               "n": scored["n"], "p50_ms": round(scored["p50_ms"], 1),
+               "p95_ms": round(scored["p95_ms"], 1),
+               "peak_rss_mb": scored["peak_rss_mb"],
+               "gates_failed": ",".join(failed) if failed else "none"}
+        for kind in PASS_KINDS:
+            s = per_pass.get(kind)
+            row.update({f"{kind}_n": s["n"] if s else 0,
+                        f"{kind}_p50_ms": round(s["p50_ms"], 1) if s else "",
+                        f"{kind}_p95_ms": round(s["p95_ms"], 1) if s else ""})
+        w.writerow(row)
 
 
 def main() -> None:
@@ -163,7 +194,14 @@ def main() -> None:
     parser.add_argument("--replay", type=Path, default=None,
                         help="score a measurements JSONL collected on device")
     parser.add_argument("--prompts", type=Path, default=None,
-                        help="prompt set to cross-check the ids against")
+                        help="prompt set the device run was driven from — required for a "
+                             "§10 verdict (every prompt must appear in both passes)")
+    parser.add_argument("--min-prompts", type=int, default=100, dest="min_prompts",
+                        help="minimum prompt-set size for a passing verdict (default 100)")
+    parser.add_argument("--allow-partial", action="store_true", dest="allow_partial",
+                        help="explicit override: accept an incomplete/no prompt set; the "
+                             "evidence row is stamped partial and the verdict is not a "
+                             "§10 ship verdict")
     parser.add_argument("--platform", choices=["ios", "android", "other"],
                         default="ios")
     parser.add_argument("--device-model", required=False, default="UNMEASURED")
@@ -186,6 +224,38 @@ def main() -> None:
 
     rows = load_measurements(args.replay)
     scored = score(rows, args.prompts)
+
+    # Coverage policy: a §10 verdict needs the full prompt set in both passes.
+    partial = False
+    if args.prompts is None:
+        if not args.allow_partial:
+            die("[device] --prompts is required for a §10 latency verdict: without the "
+                "prompt set, a tiny partial run would read as a pass.\n"
+                "  re-run with --prompts eval/device/prompts.jsonl, or pass "
+                "--allow-partial to record an explicitly partial measurement")
+        partial = True
+        coverage = "PARTIAL (no prompt set supplied — --allow-partial)"
+    else:
+        gaps = len(scored["missing_any"]) + sum(len(v) for v in scored["missing_by_pass"].values())
+        if scored["prompt_count"] < args.min_prompts and not args.allow_partial:
+            die(f"[device] prompt set has only {scored['prompt_count']} prompts "
+                f"(< --min-prompts {args.min_prompts}); a §10 verdict needs the full set — "
+                "pass --allow-partial to override")
+        if gaps and not args.allow_partial:
+            die(f"[device] incomplete coverage: {gaps} (prompt, pass) pair(s) missing\n"
+                f"  ids missing entirely: {scored['missing_any'][:5]}\n"
+                + "".join(f"  {k} pass missing {len(v)}: {v[:5]}\n"
+                          for k, v in scored["missing_by_pass"].items() if v)
+                + "  collect every prompt in both passes, or pass --allow-partial "
+                  "to record an explicitly partial measurement")
+        if gaps:
+            partial = True
+            coverage = (f"PARTIAL (--allow-partial): {gaps} (prompt, pass) pair(s) missing, "
+                        f"{scored['prompt_count']} prompts in the set")
+        else:
+            coverage = (f"complete: {scored['prompt_count']} prompts × "
+                        f"{len(PASS_KINDS)} passes")
+
     failed = []
     if scored["p50_ms"] > args.p50_gate:
         failed.append("latency_p50")
@@ -196,24 +266,27 @@ def main() -> None:
             "platform": args.platform, "device": args.device_model,
             "os": args.os, "build": args.build, "source": args.replay.name,
             "sha256_12": sha256(args.replay), "gate_p50_ms": args.p50_gate,
-            "gate_p95_ms": args.p95_gate}
+            "gate_p95_ms": args.p95_gate, "partial": partial,
+            "prompt_count": scored["prompt_count"]}
     append_csv(args.results_csv, meta, scored, failed)
 
     print(f"[device] {args.device_model} / {args.os} / {args.build} — {scored['n']} rows")
+    print(f"  coverage {coverage}")
     print(f"  p50 {scored['p50_ms']:.1f} ms  (gate {args.p50_gate:.0f} ms)")
     print(f"  p95 {scored['p95_ms']:.1f} ms  (gate {args.p95_gate:.0f} ms)")
     for kind, s in sorted(scored["by_pass"].items()):
         print(f"  {kind:<5} {s['n']} rows: p50 {s['p50_ms']:.1f} ms, p95 {s['p95_ms']:.1f} ms")
     if scored["peak_rss_mb"] is not None:
         print(f"  peak RSS {scored['peak_rss_mb']:.0f} MB (not a §10 gate)")
-    if "missing" in scored and scored["missing"]:
-        print(f"  [warn] {len(scored['missing'])} prompt id(s) not measured "
-              f"(e.g. {scored['missing'][:3]})")
-    print(f"  evidence row appended to {args.results_csv}")
+    print(f"  evidence row appended to {args.results_csv}"
+          + ("  [partial=true]" if partial else ""))
     if failed:
         print(f"\nLATENCY GATES FAILED: {failed} — this build must not ship")
         sys.exit(1)
-    print("\nlatency gates passed")
+    if partial:
+        print("\nlatency gates passed ON A PARTIAL RUN — not a §10 ship verdict")
+    else:
+        print("\nlatency gates passed")
 
 
 if __name__ == "__main__":

@@ -351,8 +351,9 @@ def validate_rows(rows: list[dict], source: str) -> list[str]:
     """Structural validation of a held-out fixture (corpus / near-miss set).
 
     Checks the T-034 annotation contract: known action and script marker,
-    code-point half-open spans whose text is the utterance slice, and no
-    overlaps across different span labels. Returns human-readable errors."""
+    code-point half-open spans whose text is the utterance slice, and span
+    integrity — no overlaps (any label pair) and no adjacent same-label spans
+    (T-034 requires those merged at authoring). Returns human-readable errors."""
     errors: list[str] = []
     seen_ids: set[str] = set()
     for i, row in enumerate(rows):
@@ -399,10 +400,13 @@ def validate_rows(rows: list[dict], source: str) -> list[str]:
                 errors.append(f"{tag}: utterance[{start}:{end}] != span text {text!r}")
             plain.append((start, end, label))
         plain.sort()
-        for (s1, e1, l1), (s2, _, l2) in zip(plain, plain[1:]):
-            if e1 > s2 and l1 != l2:
-                errors.append(f"{rid}: overlapping spans of different labels "
-                              f"({l1} [{s1},{e1}) vs {l2} [{s2},…))")
+        for (s1, e1, l1), (s2, e2, l2) in zip(plain, plain[1:]):
+            if e1 > s2:
+                errors.append(f"{rid}: overlapping spans "
+                              f"({l1} [{s1},{e1}) vs {l2} [{s2},{e2}))")
+            elif e1 == s2 and l1 == l2:
+                errors.append(f"{rid}: adjacent same-label spans {l1} "
+                              f"([{s1},{e1}) and [{s2},{e2})) must be merged at authoring")
     return errors
 
 
@@ -498,28 +502,39 @@ def nearmiss_stats(rows: list[dict], preds: list[dict]) -> dict:
             "calm_ok": calm_ok, "calm_total": calm_total}
 
 
-def read_gemini_baseline(csv_path: Path, label_hint: str = "") -> tuple[str, float] | None:
-    """Newest recorded baseline row in results.csv (append-only, so last wins).
+def read_gemini_baseline(csv_path: Path, corpus_tag: str,
+                         label_hint: str = "") -> tuple[tuple[str, float] | None, list[str]]:
+    """Newest results.csv row usable as a baseline for THIS corpus revision.
 
-    Default selection: labels starting with "gemini" (case-insensitive); an
-    exact --gemini-label hint overrides. Returns (label, closed_acc) or None."""
+    Rows are bound to a corpus revision by the `@<hash8>` suffix the harness
+    appends to every label (the CSV keeps its 6 columns; the hash travels in
+    the label). Default selection: labelled `gemini*`; an exact --gemini-label
+    hint overrides (the un-tagged hint also matches its tagged rows). Rows of
+    another revision — including legacy rows written before labels were
+    tagged — are returned separately as `unbound` and can never be selected
+    implicitly, so a stale baseline fails closed instead of being compared.
+    Returns ((label, closed_acc) | None, unbound_labels)."""
     if not csv_path.exists():
-        return None
+        return None, []
     best = None
+    unbound: list[str] = []
     with open(csv_path, newline="", encoding="utf-8") as f:
         for rec in csv.DictReader(f):
             label = (rec.get("label") or "").strip()
             if label_hint:
-                if label != label_hint:
+                if not (label == label_hint or label.startswith(label_hint + "@")):
                     continue
             elif not label.lower().startswith("gemini"):
+                continue
+            if not label.endswith("@" + corpus_tag):
+                unbound.append(label)
                 continue
             try:
                 acc = float(rec.get("closed_acc") or "")
             except ValueError:
                 continue
             best = (label, acc)
-    return best
+    return best, unbound
 
 
 def _row_line(row: dict, pred: dict) -> str:
@@ -585,6 +600,11 @@ def main() -> None:
               file=sys.stderr)
         sys.exit(2)
 
+    # Corpus-revision stamp: every results.csv row and every baseline
+    # comparison is bound to the corpus content it was scored against
+    # (label suffix `@<hash8>`; the CSV keeps its 6 columns).
+    corpus_tag = (_sha256(str(corpus_path)) or "")[:8]
+
     corpus = load_rows(corpus_path)
     nearmiss = load_rows(nearmiss_path)
 
@@ -608,8 +628,32 @@ def main() -> None:
 
     preds_by_id: dict[str, dict] = {}
     if args.backend == "fixture":
+        errors = []
+        known = {r["id"] for r in corpus} | {r["id"] for r in nearmiss}
         for rec in load_rows(Path(args.preds)):
-            preds_by_id[rec["id"]] = rec
+            rid = rec.get("id")
+            if not rid:
+                errors.append("prediction without an id")
+                continue
+            if rid in preds_by_id:
+                errors.append(f"{rid}: duplicate prediction")
+            action, conf = rec.get("action"), rec.get("confidence")
+            if action not in VALID_ACTIONS:
+                errors.append(f"{rid}: action {action!r} not in schema-v2 VALID_ACTIONS "
+                              "(a missing action would silently read as an abstention)")
+            if not isinstance(conf, (int, float)) or isinstance(conf, bool) \
+                    or not 0.0 <= float(conf) <= 1.0:
+                errors.append(f"{rid}: confidence {conf!r} must be a number in [0, 1]")
+            preds_by_id[rid] = rec
+        extra = sorted(set(preds_by_id) - known)
+        if extra:
+            errors.append(f"predictions for ids not in the corpus/near-miss sets: {extra[:5]}"
+                          + (f" (+{len(extra) - 5} more)" if len(extra) > 5 else ""))
+        if errors:
+            print(f"[eval] fixture preds validation FAILED ({len(errors)} error(s)):", file=sys.stderr)
+            for e in errors[:40]:
+                print(f"  - {e}", file=sys.stderr)
+            sys.exit(2)
 
     def run_backend(row: dict) -> dict:
         if args.backend == "echo":
@@ -674,14 +718,29 @@ def main() -> None:
         abstention_stats(corpus, preds)
     calibration = calibration_stats(corpus, preds)
     cal_tolerance = float(cfg["gates.calibration_tolerance"])
-    cal_failed = [b for b in calibration if b["deviation"] > cal_tolerance]
+    cal_min_n = int(cfg["gates.calibration_min_n"])
+    cal_max_underfloor = float(cfg["gates.calibration_max_underfloor_fraction"])
+    # A bucket only carries gate weight once it has enough rows to mean
+    # something (n >= cal_min_n); a single consistent row must not pass a
+    # bucket. Rows stranded in under-floor buckets are still accounted for:
+    # if too much of the corpus sits there, calibration is unevaluable and
+    # the run fails (calibration_coverage) instead of quietly passing.
+    cal_qualifying = [b for b in calibration if b["n"] >= cal_min_n]
+    cal_excluded = [b for b in calibration if b["n"] < cal_min_n]
+    cal_excluded_ids = {b["bucket"] for b in cal_excluded}
+    cal_failed = [b for b in cal_qualifying if b["deviation"] > cal_tolerance]
     cal_failed_ids = {b["bucket"] for b in cal_failed}
-    cal_max_dev = max((b["deviation"] for b in calibration), default=0.0)
+    cal_max_dev = max((b["deviation"] for b in cal_qualifying), default=0.0)
+    underfloor_rows = sum(b["n"] for b in cal_excluded)
+    underfloor_fraction = underfloor_rows / max(len(corpus), 1)
+    cal_underfloor_failed = underfloor_fraction > cal_max_underfloor
     nm = nearmiss_stats(nearmiss, nm_preds)
     coverage = span_coverage(corpus)
 
-    # Gemini gap: closed accuracy vs the recorded baseline run.
-    baseline = read_gemini_baseline(Path(args.results_csv), args.gemini_label)
+    # Gemini gap: closed accuracy vs the recorded baseline run AT THIS corpus
+    # revision (labels carry the corpus tag; see read_gemini_baseline).
+    baseline, unbound_baselines = read_gemini_baseline(
+        Path(args.results_csv), corpus_tag, args.gemini_label)
     gap = None
     gap_gate_failed = False
     gap_unevaluated = False
@@ -689,15 +748,26 @@ def main() -> None:
         gap_note = "n/a (this run is a Gemini baseline)"
     elif baseline is None:
         gap_unevaluated = True
-        gap_note = (f"UNEVALUATED — no baseline row in {args.results_csv}; run "
-                    "`--backend gemini --label gemini-<rev>` at this corpus revision first")
+        if unbound_baselines:
+            gap_note = (f"UNEVALUATED — {len(unbound_baselines)} baseline row(s) in "
+                        f"{args.results_csv} are not bound to this corpus revision "
+                        f"({corpus_tag}): {', '.join(unbound_baselines[:3])}"
+                        + (" …" if len(unbound_baselines) > 3 else "")
+                        + "; re-run `--backend gemini --label gemini-<rev>` at this revision")
+        else:
+            gap_note = (f"UNEVALUATED — no baseline row in {args.results_csv}; run "
+                        "`--backend gemini --label gemini-<rev>` at this corpus revision first")
     else:
         gap = closed_acc - baseline[1]
         gap_gate_failed = gap < -float(cfg["gates.max_gap_vs_gemini"])
         gap_note = f"{gap:+.3f} ({closed_acc:.3f} vs {baseline[0]} {baseline[1]:.3f})"
 
+    # Every row is stamped with the corpus revision it was scored against
+    # (label suffix `@<hash8>`, the task's "record the corpus hash with every
+    # result row" note) — the CSV keeps its 6 columns.
     label = args.label or args.backend
-    print(f"\n=== eval: {label} ({len(corpus)} rows) ===")
+    label_out = f"{label}@{corpus_tag}" if corpus_tag else label
+    print(f"\n=== eval: {label_out} ({len(corpus)} rows) ===")
     print(f"closed-intent accuracy : {closed_acc:.3f}  (gate {cfg['gates.closed_intent_accuracy']})")
     print(f"contact slot F1        : {contact_f1:.3f}  (gate {cfg['gates.slot_f1']})")
     print(f"time slot F1           : {time_f1:.3f}  (gate {cfg['gates.slot_f1']})")
@@ -707,7 +777,10 @@ def main() -> None:
           f"{abstain_tp} genuine, {abstain_fp} judged resolvable)"
           + ("  [no abstentions]" if abstain_tp + abstain_fp == 0 else ""))
     print(f"calibration            : max |acc-mean_conf| {cal_max_dev:.3f} over "
-          f"{len(calibration)} populated buckets (gate ±{cal_tolerance:.2f})")
+          f"{len(cal_qualifying)} scored bucket(s) (n >= {cal_min_n}; gate ±{cal_tolerance:.2f}; "
+          f"{len(cal_excluded)} excluded holding {underfloor_fraction:.1%} of rows"
+          + (f" — OVER {cal_max_underfloor:.0%} underfloor gate" if cal_underfloor_failed else "")
+          + ")")
     print(f"emergency near-miss    : {nm['recall']:.3f}  ({nm['hits']}/{nm['total']} paraphrases; "
           f"gate {cfg['gates.emergency_recall_nearmiss']}; calm {nm['calm_ok']}/{nm['calm_total']} correct, "
           f"{len(nm['false_fires'])} false fires)")
@@ -721,6 +794,9 @@ def main() -> None:
         print(f"  {intent:22s} {c}/{n}")
     print("calibration (conf bucket → accuracy):")
     for b in calibration:
+        if b["bucket"] in cal_excluded_ids:
+            print(f"  {b['bucket'] / 10:.1f}+: n {b['n']} — EXCLUDED from the gate (n < {cal_min_n})")
+            continue
         flag = "  <-- FAIL" if b["bucket"] in cal_failed_ids else ""
         print(f"  {b['bucket'] / 10:.1f}+: acc {b['accuracy']:.2f} mean_conf {b['mean_conf']:.2f} "
               f"Δ {b['deviation']:.2f} over {b['n']}{flag}")
@@ -754,6 +830,8 @@ def main() -> None:
     failed = [name for name, (got, want) in gates.items() if got < want]
     if cal_failed:
         failed.append("calibration")
+    if cal_underfloor_failed:
+        failed.append("calibration_coverage")
     if gap_gate_failed:
         failed.append("gemini_gap")
     if gap_unevaluated:
@@ -764,7 +842,7 @@ def main() -> None:
     with open(results_path, "a", encoding="utf-8") as f:
         if new:
             f.write("label,closed_acc,contact_f1,time_f1,emergency_recall,se_precision,gates_failed\n")
-        f.write(f"{label},{closed_acc:.3f},{contact_f1:.3f},{time_f1:.3f},"
+        f.write(f"{label_out},{closed_acc:.3f},{contact_f1:.3f},{time_f1:.3f},"
                 f"{emergency_recall:.3f},{se_precision:.3f},{'|'.join(failed) or 'none'}\n")
 
     if args.manifest_out:
@@ -773,7 +851,8 @@ def main() -> None:
         # schema stays unchanged for existing consumers (T-038 owns it).
         # T-038 adds the new gate metrics (JSONL is additive).
         manifest = {
-            "label": label, "backend": args.backend, "model_path": args.model_path,
+            "label": label_out, "corpus_tag": corpus_tag, "backend": args.backend,
+            "model_path": args.model_path,
             "command": " ".join(sys.argv), "timestamp_utc":
                 datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "config_sha256": _sha256(str(Path(args.config).resolve())),
@@ -792,6 +871,11 @@ def main() -> None:
                         "side_effect_precision": round(se_precision, 4),
                         "abstention_precision": round(abstention_precision, 4),
                         "calibration_max_deviation": round(cal_max_dev, 4),
+                        "calibration_min_n": cal_min_n,
+                        "calibration_scored_buckets": [b["bucket"] for b in cal_qualifying],
+                        "calibration_excluded_buckets": [
+                            {"bucket": b["bucket"], "n": b["n"]} for b in cal_excluded],
+                        "calibration_underfloor_fraction": round(underfloor_fraction, 4),
                         "calibration_failed_buckets": [
                             {"bucket": b["bucket"], "n": b["n"],
                              "accuracy": round(b["accuracy"], 4),
