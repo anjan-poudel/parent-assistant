@@ -1,11 +1,12 @@
 # Task Breakdown — Elderly AI Assistant
 
 ## Summary
-- Task groups: 9 (Jira Epics)
-- Total tasks: 39 parent tasks (50 task IDs: T-001–T-050)
+- Task groups: 10 (Jira Epics)
+- Total tasks: 49 parent tasks (60 task IDs: T-001–T-060)
 - Subtasks: 26 subtasks (platform splits)
-- Estimated effort: 39–64 days (full parallel — the TG-08 ML track is the longest chain; TG-09 and T-046–T-050 are iOS-side work inside the existing app stream) / 133–221 days (sequential)
+- Estimated effort: 39–64 days (full parallel — the TG-08 ML track is the longest chain; TG-09, TG-10 and T-046–T-050 are iOS-/ML-side work inside the existing streams) / 161–266 days (sequential, TG-10's ~28–45 days included)
 - Critical path: T-033 → T-034 → T-035 → T-036 → T-037 → T-038 (TG-08; conditional on the T-033 GO/NO-GO and gated at entry by T-009 and T-021)
+- TG-10 (Continuous Learning Loop, T-052–T-060) runs **off** the critical path: its design and privacy half (T-052/T-053, then T-054/T-055) is independent of the encoder chain, and T-058 consumes the T-038 harness as it exists rather than re-opening it. The group adds no task to T-033 → T-034 → T-035 → T-036 → T-037 → T-038 and does not extend that chain.
 - Rework stream: T-049, T-050 (+3–6 days) — the B1/B2 remediation tasks raised by the `security-test` SECURITY-NO_GO (`specs/security-test.md`). Both are iOS-side and HIGH risk, neither extends the critical path, and both are prerequisites in substance (not in the dependency graph) for `final-sign-off`, whose gate the failed security test blocks.
 
 ## Contents
@@ -76,6 +77,8 @@ Sequential effort: ~12 days iOS.
 27. **MEDIUM — Two deferred decisions are undocumented (T-048):** the LAN-only `qwen4BNepali` (ModelCatalog.swift:632) is offered in the shipped picker (795; consumers SettingsView.swift:3216, 3225) with no decision on hosting vs hiding, against the "anything offered must be fetchable" rule (AppCoordinator.swift:1255-1263), the App Store/Play compliance constraints (constitution.md:61-64) and FR-007 (requirements.md:40-42); and the interpreter construction default `llama3_2_1B` (LlamaCommandInterpreter.swift:386) diverges from the app default `intentQwenS43` (AppCoordinator.swift:1170), pinned by a test (BrainModelSelectionTests.swift:145-161 at `2061566`). T-048 decides both and either names an implementation follow-up task or records an explicit Open Decision (constitution.md:93) — an undocumented divergence is not an outcome.
 28. **HIGH — Release builds print the recognised transcript (T-049):** `WhisperSpeechRecognizer.swift:815` and `WhisperKitSpeechRecognizer.swift:488` print the utterance verbatim, and `WhisperKitSpeechRecognizer.swift:493` prints the raw error object. Neither file contains a `#if DEBUG` region — only `#if canImport(SwiftWhisper)` (3, 186, 544, 932) and `#if canImport(WhisperKit)` (4, 71, 104, 161, 293, 319, 417, 646) — and `SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG` is set only in the Debug configuration (project.pbxproj:2702, closed by `name = Debug;` at 2706; Release at 2708 does not set it), so both prints ship. They bypass `LogSanitiser` and `ConsoleObservabilityBus` (AppCoordinator.swift:7049, print at 7066) entirely: on the on-device stack every medication name, symptom, family name and emergency phrase reaches the device console, retrievable via sysdiagnose, against NFR-016 and the constitution's Privacy bullet. The correctly guarded Gemini pattern already exists to copy (`GeminiSpeechRecognizer.swift:122-125`, `:129-135`; `GeminiCommandInterpreter.swift:62-70`). The adjacent metadata prints (`WhisperSpeechRecognizer.swift:809-812`, `WhisperKitSpeechRecognizer.swift:487`) are PII-free and must survive. Reported as B1 of the `security-test` SECURITY-NO_GO.
 29. **HIGH — The Gemini API key and raw upstream bodies reach the console (T-050):** the key sits in the request URL query (`GeminiClient.swift:230`, `:395`), transport failures rethrow the untouched `URLError` that carries that URL (`:258-263`, `:413-418`), six sites stringify it with `String(describing: error)` into `error_code` (`GeminiSpeechRecognizer.swift:139`, `GeminiCommandInterpreter.swift:107`, `VoicePipeline.swift:855`, `GeminiClient+Vision.swift:117`, `ApplianceHelperSession.swift:190`, `NepaliCalendarPlugin.swift:90`), and `LogSanitiser` copies `errorCode` unscrubbed (`:59`) because `error_code` is allow-listed (`:30`) and the scrub pass (`:64-76`, patterns `:37-47`) runs only over allow-listed metadata and matches only phone/e-mail/blood-pressure shapes. `error_code` is therefore the one content-bearing field no allow-list decision and no scrub pattern ever touches. The `security-test` repro shows `String(describing: URLError)` containing `...key=SECRET_API_KEY_VALUE, NSErrorFailingURLStringKey=https://…`, so a mere offline/DNS/TLS/timeout failure leaks the key. `GeminiClientError.httpError(status:body:)` (`:53`, thrown `:428-429`) retains the raw upstream body and is stringified at the same sites. Gate is green while both defects ship — tests do not cover the error path's content. Reported as B2 of the `security-test` SECURITY-NO_GO.
+30. **HIGH — The continuous-learning loop's egress boundary is the project's first device-data channel (T-053, T-054, T-056, T-059):** the shipped flywheel log is content-bearing by design — `IntentLogStore` holds slot values (contact names included) and states it "leaves only via the family's explicit export" (`IntentLogStore.swift:8-14`) — and the loop's hashed egress (hashes/signals leave; raw audio and raw text do not) is a second channel over the same record. The natural implementation mistake is to serialise `IntentLogStore.Record` and post it, which would send slot values off-device against NFR-015 (`requirements.md:262-263`) and Architecture Constraint 1 (`constitution.md:43`). A hash of a low-entropy utterance is a pseudonym, not anonymity, so an unsalted hash would overstate the guarantee. Controls: T-053 rules on the consent basis, salt and retention; T-054 writes the payload field by field; T-056 builds the serialiser from derived fields and amends the store's docstring so the shipped source describes both channels; T-059 audits the serialised bytes end to end and classifies any deviation as BLOCKING.
+31. **HIGH — The promotion gate can publish a regression, or be bypassed (T-058, T-060):** the eight T-038 gates are absolute floors (`config.yaml:56-69`) and the harness exits non-zero on any failure (`eval_golden.py:821-838`, `:895-898`), but a candidate can clear every floor and still lose to the brain the user actually has. The incumbent comparison rides on the corpus-revision binding (`@<hash8>`), whose missing-baseline case is UNEVALUATED and must fail closed (`:742-763`, `:814-815`). A promotion gate wired as a second, parallel decision path — or one that reads "no baseline" as "pass" — would publish unmeasured brains, and the weekly cadence multiplies the opportunity. Controls: T-058 adds the comparison to the existing single refusal list in `run_encoder_pipeline.py:303-330`, `:556-559`; T-060 drives the blocking cases, including an all-gates-pass candidate that loses to the incumbent and a stale-baseline candidate, and asserts the artifact was never written.
 
 ## Security blockers
 
@@ -91,6 +94,8 @@ No new security BLOCKERs are introduced by T-045. The task reads the catalogue/d
 
 No new security BLOCKERs are introduced by T-046–T-048. T-046 keeps `InputSanitiser.sanitise(.quarantine)` as the sole transcript entry into the prompt (NFR-013) and does not touch the keyword safety net or the router stage order (FR-009); T-047 changes comments only; T-048 keeps the on-device-only constraint (FR-007) and the auto-download default on a real hosted artifact.
 
+No new security BLOCKERs are introduced by TG-10. The loop is opt-in (recorded decision D-1), leaves raw audio and raw text on the device (D-2, NFR-015), carries no PII or secret on any path it adds (NFR-016), and cannot gate, suppress or replace the keyword safety net, the emergency path or medication acknowledgement (FR-009; design §7.1). TG-10 depends on T-050's sanitiser hardening rather than re-opening it: its telemetry rides the existing `LogSanitiser` boundary (T-059 audits it), and a loop event that carries content on a declared key is a finding against the boundary, not a reason to bypass it. Two of the group's tasks are privacy-verification tasks by construction (T-053's review, T-059's audit), and a BLOCKING finding in either blocks the loop's enablement rather than being logged and waived.
+
 **T-049 and T-050 are remediation tasks, not new BLOCKERs** — they close findings B1 and B2 of `specs/security-test.md`, where the `security-test` task returned **SECURITY-NO_GO**. T-049 removes transcript content from Release output without removing the PII-free counts and timings that make on-device STT diagnosable. T-050 restores the sanitiser's guarantee at the `LogSanitiser` boundary rather than by emitter-by-emitter discipline, so the next emitter inherits the safe behaviour. Neither touches the keyword safety net, the router stage order or the emergency path (FR-009); T-050's binding of `errorCode` must not weaken the existing allow-list behaviour for the sanitiser's other keys, and T-049 must not re-create the leak in its own tests (NFR-016).
 
 **The security test's remaining findings stay open.** B3 (sensitive-action authentication unwired; BLOCKER-1/2 still open), B4/B6 (no emergency-call module; APNs/FCM alert stubs return success silently), B5 (remote-config chain absent; cleartext LAN model URLs against NFR-011) and B7 (constitution Privacy bullet vs. the default cloud voice stack) are **not** covered by T-049 or T-050. They are recorded here so that landing the rework stream is not mistaken for a passing security posture: `final-sign-off` remains blocked until those findings are either remediated under their own tasks or explicitly descoped by a human decision recorded as an Open Decision (constitution.md:93).
@@ -103,14 +108,15 @@ No new security BLOCKERs are introduced by T-046–T-048. T-046 keeps `InputSani
 |-------|-------|-------|----------|----------|
 | [TG-01](tasks/TG-01-foundation-infrastructure/index.md) | Foundation & Infrastructure | 4 | 2 (T-002) | MEDIUM/HIGH |
 | [TG-02](tasks/TG-02-voice-interface/index.md) | Voice Interface | 6 | 8 (T-005, T-007, T-009, T-012) | MEDIUM/HIGH |
-| [TG-03](tasks/TG-03-on-device-ai/index.md) | On-Device AI | 7 | 2 (T-018) | HIGH |
+| [TG-03](tasks/TG-03-on-device-ai/index.md) | On-Device AI | 8 | 2 (T-018) | HIGH |
 | [TG-04](tasks/TG-04-authentication-security/index.md) | Authentication & Security | 3 | 2 (T-014) | HIGH |
 | [TG-05](tasks/TG-05-voice-session/index.md) | Voice Session | 1 | 2 (T-022) | HIGH |
 | [TG-06](tasks/TG-06-safety-critical-services/index.md) | Safety-Critical Services | 3 | 6 (T-024, T-026, T-028) | HIGH (SAFETY CRITICAL) |
 | [TG-07](tasks/TG-07-remote-configuration/index.md) | Remote Configuration | 3 | 2 (T-032) | HIGH/MEDIUM |
 | [TG-08](tasks/TG-08-nepali-intent-encoder/index.md) | Nepali Intent Encoder | 6 | 2 (T-037) | HIGH (GO/NO-GO gate) |
 | [TG-09](tasks/TG-09-plugin-recognition-contract/index.md) | Plugin Recognition & Contract | 6 | 0 | HIGH (governance + doc-contract) |
-| **Total** | | **39** | **26** | |
+| [TG-10](tasks/TG-10-continuous-learning-loop/index.md) | Continuous Learning Loop | 9 | 0 | HIGH (privacy boundary + promotion gate) |
+| **Total** | | **49** | **26** | |
 
 ---
 
@@ -156,3 +162,13 @@ No new security BLOCKERs are introduced by T-046–T-048. T-046 keeps `InputSani
 | T-048 | FR-007, FR-008 |
 | T-049 | NFR-013, NFR-016 |
 | T-050 | NFR-010, NFR-011, NFR-016 |
+| T-051 | FR-007, FR-008 |
+| T-052 | NFR-015, NFR-016 |
+| T-053 | NFR-015, NFR-016, NFR-032 |
+| T-054 | NFR-011, NFR-015, NFR-016, NFR-032 |
+| T-055 | NFR-002, NFR-013, NFR-016 |
+| T-056 | NFR-011, NFR-015, NFR-016, NFR-023, NFR-024 |
+| T-057 | FR-008, NFR-015, NFR-016 |
+| T-058 | FR-009, NFR-016, NFR-029 |
+| T-059 | NFR-015, NFR-016, NFR-032 |
+| T-060 | FR-009, NFR-016, NFR-029 |
