@@ -1,0 +1,10 @@
+[chain] 2026-09-13T06:04:19+10:00 waiting for arm A to exit
+[chain] 2026-09-13T07:07:21+10:00 arm A exited cleanly; exporting
+-rw-rw-r-- 1 anjan anjan 1107408576 Sep 13 07:07 models/intent-ne-qwen-student-q4_k_m.gguf
+[chain] 2026-09-13T07:07:46+10:00 launching arm B (schema label order)
+[chain] arm B pid 4047698
+[chain] 2026-09-13T07:07:46+10:00 evaluating arm A: gbnf
+[chain] gbnf rc=1
+[chain] 2026-09-13T07:11:28+10:00 evaluating arm A: off
+[chain] off rc=1
+[chain] 2026-09-13T07:13:35+10:00 DONE (arm A evaluated; arm B training in background)

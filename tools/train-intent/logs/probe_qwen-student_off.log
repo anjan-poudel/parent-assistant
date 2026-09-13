@@ -1,0 +1,16 @@
+gc-reminder-001      gold=set_reminder   pred='set_reminder' gold_slots={"time": "बिहान ८ बजे", "medication": "औषधि"}
+  raw : '{"intent": "set_reminder", "response": "ठीक छ, सम्झाउँछु।", "confidence": 0.95, "actionType": null, "actionUrl": null}'
+  slots-> contact=None time=None
+
+gc-reminder-002      gold=set_reminder   pred='set_reminder' gold_slots={"time": "साढे ७ बजे", "medication": null}
+  raw : '{"intent": "set_reminder", "response": "सम्झाउँछु।", "confidence": 0.9, "actionType": null, "actionUrl": null}'
+  slots-> contact=None time=None
+
+gc-call-003          gold=call           pred='call' gold_slots={"contact": "छोरा", "callType": null, "requestedApp": "whatsapp"}
+  raw : '{"intent": "call", "response": "ठीक छ, छोरालाई वाट्सएपमा कल गर्छु।", "confidence": 0.95, "actionType": "MAKE_CALL", "actionUrl": "https://wa.me/91987654321"}'
+  slots-> contact=None time=None
+
+gc-emergency-003     gold=emergency      pred='none' gold_slots={}
+  raw : '{"intent": "none", "response": "म तपाईंलाई मद्दत गर्ने छु।", "confidence": 1.0, "actionType": null, "actionUrl": null}'
+  slots-> contact=None time=None
+

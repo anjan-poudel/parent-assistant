@@ -1,0 +1,20 @@
+[distill] 1900 new utterances selected (seed=42, teacher=checkpoints/qwen4b-s43-merged)
+Loading weights:   0%|          | 0/398 [00:00<?, ?it/s]Loading weights:   0%|          | 1/398 [00:00<02:37,  2.52it/s]Loading weights:   8%|▊         | 33/398 [00:00<00:04, 82.42it/s]Loading weights:  13%|█▎        | 50/398 [00:00<00:04, 86.43it/s]Loading weights:  17%|█▋        | 69/398 [00:00<00:03, 108.33it/s]Loading weights:  21%|██        | 84/398 [00:00<00:03, 103.85it/s]Loading weights:  26%|██▌       | 104/398 [00:01<00:02, 122.87it/s]Loading weights:  30%|██▉       | 119/398 [00:01<00:02, 123.31it/s]Loading weights:  34%|███▍      | 135/398 [00:01<00:02, 124.40it/s]Loading weights:  37%|███▋      | 149/398 [00:01<00:02, 115.46it/s]Loading weights:  42%|████▏     | 168/398 [00:01<00:01, 125.36it/s]Loading weights:  46%|████▌     | 182/398 [00:01<00:01, 117.24it/s]Loading weights:  49%|████▉     | 195/398 [00:01<00:01, 114.74it/s]Loading weights:  53%|█████▎    | 212/398 [00:01<00:01, 121.72it/s]Loading weights:  57%|█████▋    | 225/398 [00:02<00:01, 114.28it/s]Loading weights:  60%|██████    | 239/398 [00:02<00:01, 120.51it/s]Loading weights:  63%|██████▎   | 252/398 [00:02<00:01, 117.74it/s]Loading weights:  67%|██████▋   | 267/398 [00:02<00:01, 123.87it/s]Loading weights:  70%|███████   | 280/398 [00:02<00:01, 109.07it/s]Loading weights:  75%|███████▌  | 300/398 [00:02<00:00, 118.18it/s]Loading weights:  79%|███████▊  | 313/398 [00:02<00:00, 106.95it/s]Loading weights:  83%|████████▎ | 330/398 [00:03<00:00, 115.98it/s]Loading weights:  86%|████████▋ | 344/398 [00:03<00:00, 114.28it/s]Loading weights:  89%|████████▉ | 356/398 [00:03<00:00, 103.65it/s]Loading weights:  92%|█████████▏| 367/398 [00:03<00:00, 99.64it/s] Loading weights:  97%|█████████▋| 385/398 [00:03<00:00, 116.57it/s]Loading weights: 100%|██████████| 398/398 [00:03<00:00, 110.84it/s]
+[distill] labelled 12/1900
+[distill] labelled 492/1900
+[distill] labelled 972/1900
+[distill] labelled 1452/1900
+[distill] wrote 1706 new rows to distill.jsonl (0 already present); dropped {'no_json': 43, 'disagree': 151, 'invalid': 0}
+[distill] by intent: {'ack_med': 85, 'call': 390, 'emergency': 148, 'guide': 123, 'health_query': 46, 'music': 175, 'none': 77, 'query': 47, 'send_message': 246, 'set_reminder': 369}
+[distill] by register: {'code_switched': 262, 'devanagari': 1165, 'elder_fragmented': 19, 'romanized': 260}
+[distill] teacher disagreed with the taxonomy on 151 rows — first 10:
+    call             -> send_message     gopal sanga kura garna man chha
+    call             -> send_message     radha sanga kura garna man chha
+    call             -> send_message     gopal sanga kura garna man chha hai
+    call             -> send_message     sanju sanga kura garna man chha hai
+    call             -> send_message     anita sanga kura garna man chha na
+    call             -> send_message     पार्वती लाई मेसेन्जर मा सम्पर्क गर
+    call             -> send_message     kamala sanga kura garna man chha hai
+    call             -> send_message     सञ्जु लाई मेसेन्जर मा सम्पर्क गर
+    call             -> send_message     sanju sanga kura garna man chha
+    call             -> send_message     gopal sanga kura garna man chha na

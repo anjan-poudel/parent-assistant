@@ -46,12 +46,27 @@ Guards (spec §9 / §10):
 # BUT 0 ack_med rows (seed taxonomy never defined the intent — round-1
 # ack gates failed because ack was never taught; data/edge_cases.jsonl
 # supplies them, always kept, exempt from clean-bucket sampling).
+#
+# Round 3 findings (bake-off iteration-3, 2026-09-09) → ANCHORED DRAW
+# (bake-off iteration-4, 2026-09-09): the rng(seed) whole-pool shuffle +
+# slice draw made every selection step a function of pool LENGTH — the
+# RNG stream position at each draw depends on all earlier draws' sizes,
+# so any pool growth (a new gen/noise run appends rows) silently re-drew
+# ~1000 of 2827 rows between builds, old rows swapped for other old rows
+# by lottery. Iteration deltas were therefore not interpretable.
+#
+# All draws now use CONTENT-ADDRESSED keys (draw_key): a pure function of
+# (mixture.seed, namespace, row bytes). Identical inputs rebuild a
+# byte-identical dataset, and append-only pool growth can only move a
+# selection boundary by the share of genuinely new rows — an existing row
+# never changes key, so it is never re-drawn out in favor of another old
+# row. No RNG stream is consumed anywhere, so no draw can shift another.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
-import random
 import re
 import string
 import unicodedata
@@ -59,14 +74,17 @@ from pathlib import Path
 
 from config import load_config
 
+# Canonical app wire shape (2026-09-12 reconciliation): `intent`/`response`
+# (IntentPrompt.swift's structured-response contract), not the legacy
+# action/reply names the pre-reconciliation rows carried.
 SCHEMA_FIELDS = {
-    "action": str, "entryId": (str, type(None)), "contact": (str, type(None)),
+    "intent": str, "entryId": (str, type(None)), "contact": (str, type(None)),
     "time": (str, type(None)), "medication": (str, type(None)),
     "message": (str, type(None)), "callType": (str, type(None)),
     "requestedApp": (str, type(None)), "topic": (str, type(None)),
-    "steps": (list, type(None)), "confidence": (int, float), "reply": str,
+    "steps": (list, type(None)), "confidence": (int, float), "response": str,
 }
-VALID_ACTIONS = {"ack_med", "call", "emergency", "set_reminder", "health_query",
+VALID_INTENTS = {"ack_med", "call", "emergency", "set_reminder", "health_query",
                  "music", "send_message", "guide", "create_calendar_event",
                  "suggest_video", "query", "none"}
 
@@ -82,6 +100,10 @@ BUCKET_OF_REGISTER = {
 }
 NOISED_SOURCES = ("stt_noise",)
 EDGE_SOURCES = ("edge_cases",)
+# Phase-2 data distillation (2026-09-13): rows labelled by the gate-passing
+# 4B teacher (qwen4b-s43) via gen_distill.py. Priority supply like
+# edge_cases, but an ADD-ON one — see the selection block in main().
+DISTILL_SOURCES = ("distill",)
 BUCKET_NAMES = ("stt_noised", "clean_devanagari", "romanized_codeswitched")
 
 
@@ -105,8 +127,40 @@ def lossless_key(text: str) -> str:
     return " ".join(stripped.split())
 
 
+# Schema-key reconciliation (2026-09-12): the label keys were renamed
+# action→intent / reply→response with row CONTENT unchanged. draw_key
+# hashes the full row JSON, so without canonicalization the rename flips
+# every row's key and the anchored draw re-selects the mixture wholesale
+# (measured on the first post-rename rebuild: 2061 of 2686 rows swapped —
+# exactly the old-for-old churn the anchored draw exists to prevent, and
+# it would have made the iteration's bake-off delta uninterpretable).
+# Hashing the LEGACY-keyed form of the row keeps every pre/post-rename row
+# on the same key; a genuine label/slot edit still changes it.
+LEGACY_LABEL_KEYS = {"intent": "action", "response": "reply"}
+
+
+def draw_key(row: dict, seed, namespace: str) -> bytes:
+    """Content-addressed selection key (iteration-4 anchored draw).
+
+    Pure function of (mixture.seed, namespace, row bytes) — NOT of file
+    order, pool length or RNG stream position. Consequences:
+      * identical inputs → identical keys → byte-identical rebuilds;
+      * append-only pool growth never reshuffles existing rows: a row
+        keeps its key forever and can only leave a take by being pushed
+        past the boundary by genuinely new rows whose keys sort in;
+      * no shared RNG stream, so no draw's size can shift another draw.
+    Keys are 64-bit blake2b digests of the full row JSON in its
+    legacy-canonical key form (see LEGACY_LABEL_KEYS), so two rows that
+    differ in ANY content field (label value, slots, source, register)
+    draw independently while a pure schema-key rename does not re-draw."""
+    canonical = {LEGACY_LABEL_KEYS.get(k, k): v for k, v in row.items()}
+    content = json.dumps(canonical, sort_keys=True, ensure_ascii=False)
+    return hashlib.blake2b(f"{seed}|{namespace}|{content}".encode("utf-8"),
+                           digest_size=8).digest()
+
+
 def valid_row(row: dict) -> bool:
-    if row.get("action") not in VALID_ACTIONS:
+    if row.get("intent") not in VALID_INTENTS:
         return False
     if not row.get("utterance"):
         return False
@@ -136,7 +190,8 @@ def main() -> None:
     else:
         sources = [root / "data" / "teacher.jsonl",
                    root / "data" / "noised.jsonl",
-                   root / "data" / "edge_cases.jsonl"]
+                   root / "data" / "edge_cases.jsonl",
+                   root / "data" / "distill.jsonl"]
     raw: list[dict] = []
     for src in sources:
         if not src.exists():
@@ -170,28 +225,33 @@ def main() -> None:
             continue
         buckets[bucket].append(row)
 
-    rng = random.Random(int(cfg["mixture.seed"]))
+    # Draw anchor: mixture.seed from config.yaml. draw_key() is a pure
+    # function of this seed — no RNG object is used anywhere below.
+    seed = cfg["mixture.seed"]
 
-    # Per-bucket label-conflict guard + dedupe (lossless key, first wins
-    # after a deterministic shuffle). CONFLICT GUARD FIRST: when several
-    # copies of the SAME utterance disagree on the action, every copy is
-    # dropped — teaching one arbitrary label for a text that occurs with
-    # two is noise (measured: 703 noised keys carry contradictory labels;
-    # the two whisper variants of different parents collapse onto one
-    # transcript). Only then dedupe within the surviving rows.
+    # Per-bucket label-conflict guard + dedupe (lossless key, anchored
+    # winner). CONFLICT GUARD FIRST: when several copies of the SAME
+    # utterance disagree on the intent, every copy is dropped — teaching
+    # one arbitrary label for a text that occurs with two is noise
+    # (measured: 703 noised keys carry contradictory labels; the two
+    # whisper variants of different parents collapse onto one
+    # transcript). Only then dedupe within the surviving rows: which copy
+    # of a duplicate survives is the one with the smallest draw_key —
+    # content-addressed, so pool growth can never flip an old duplicate
+    # pair (round-3 shuffle made the winner a function of pool length).
     kept: dict[str, list[dict]] = {}
     for bucket in BUCKET_NAMES:
         rows = list(buckets[bucket])
-        by_action: dict[str, set] = {}
+        by_intent: dict[str, set] = {}
         for row in rows:
-            by_action.setdefault(lossless_key(row["utterance"]), set()).add(row["action"])
-        conflict_keys = {k for k, acts in by_action.items() if len(acts) > 1}
+            by_intent.setdefault(lossless_key(row["utterance"]), set()).add(row["intent"])
+        conflict_keys = {k for k, acts in by_intent.items() if len(acts) > 1}
         rows = [r for r in rows if lossless_key(r["utterance"]) not in conflict_keys]
-        rng.shuffle(rows)
-        by_key: dict[str, dict] = {}
-        for row in rows:
-            by_key.setdefault(lossless_key(row["utterance"]), row)
-        kept[bucket] = list(by_key.values())
+        keyed = sorted((draw_key(r, seed, f"dedupe-{bucket}"), r) for r in rows)
+        best: dict[str, dict] = {}
+        for _, r in keyed:  # ascending key → smallest key wins per lossless key
+            best.setdefault(lossless_key(r["utterance"]), r)
+        kept[bucket] = [best[k] for k in sorted(best)]
         if conflict_keys:
             print(f"[build] {bucket}: dropped {len(conflict_keys)} "
                   "conflicting-label keys")
@@ -212,27 +272,63 @@ def main() -> None:
     # the clean buckets are sampled toward their §9.2 share, capped by
     # supply. edge_cases rows are always kept (priority) — they carry the
     # round-2 intent fixes (ack_med/refusal/bare-emergency) and must not
-    # be sampled away.
+    # be sampled away. The take is the `take` rows with the smallest
+    # draw_key (anchored — see module docstring): pool growth admits only
+    # the boundary share of genuinely new rows, never old-for-old churn.
     n_noised = len(kept["stt_noised"])
     total = math.ceil(n_noised / frac["stt_noised"])
     targets = {"clean_devanagari": round(total * frac["clean_devanagari"]),
                "romanized_codeswitched": round(total * frac["romanized_codeswitched"])}
     selected: dict[str, list[dict]] = {"stt_noised": kept["stt_noised"]}
     supply_capped: list[str] = []
+
+    # Distill rows are priority supply that GROWS the mix instead of
+    # filling the clean buckets' §9.2 share. The share is already covered
+    # exactly by existing teacher/edge supply, so — anchored draw or not —
+    # new clean rows cannot enlarge the dataset by displacement alone; they
+    # would only swap out existing rows. `mixture.distill_target` caps the
+    # add-on; the take is ONE global anchored draw over both clean buckets,
+    # so the distill pool's own register mix decides the split, not the
+    # bucket sizes. §9.2's 60/25/15 governs the non-distill portion; the
+    # achieved overall mix is reported below.
+    distill_cap = int(cfg.get("mixture.distill_target", 0) or 0)
+    distill_by_bucket: dict[str, list[dict]] = {}
+    for bucket in targets:
+        distill_by_bucket[bucket] = [
+            r for r in kept[bucket]
+            if (r.get("source") or "").startswith(DISTILL_SOURCES)]
+    distill_bucket_of = {id(r): b for b, rows in distill_by_bucket.items()
+                         for r in rows}
+    distill_all = sorted((r for rows in distill_by_bucket.values() for r in rows),
+                         key=lambda r: draw_key(r, seed, "mix-distill"))
+    distill_take = distill_all[:distill_cap]
+
     for bucket, target in targets.items():
         rows = list(kept[bucket])
         priority = [r for r in rows if (r.get("source") or "").startswith(EDGE_SOURCES)]
-        pool = [r for r in rows if r not in priority]
-        rng.shuffle(pool)
+        distill_ids = {id(r) for r in distill_by_bucket[bucket]}
+        pool = sorted((r for r in rows if r not in priority
+                       and id(r) not in distill_ids),
+                      key=lambda r: draw_key(r, seed, f"mix-{bucket}"))
         take = max(0, target - len(priority))
         if len(pool) < take:
             supply_capped.append(bucket)
             take = len(pool)
         selected[bucket] = priority + pool[:take]
 
-    train_pool = selected["stt_noised"] + selected["clean_devanagari"] \
-        + selected["romanized_codeswitched"]
-    rng.shuffle(train_pool)
+    distill_added = {b: 0 for b in BUCKET_NAMES}
+    for row in distill_take:
+        bucket = distill_bucket_of[id(row)]
+        selected[bucket].append(row)
+        distill_added[bucket] += 1
+
+    # Train/valid split: first n_valid rows of the keyed total order
+    # (5% over the whole mixture, as before) — anchored like every other
+    # draw, so a rebuild only moves the split boundary where membership
+    # itself changed.
+    train_pool = sorted(selected["stt_noised"] + selected["clean_devanagari"]
+                        + selected["romanized_codeswitched"],
+                        key=lambda r: draw_key(r, seed, "split"))
     n_valid = max(1, int(len(train_pool) * float(cfg["mixture.valid_fraction"])))
     valid, train = train_pool[:n_valid], train_pool[n_valid:]
 
@@ -242,24 +338,35 @@ def main() -> None:
             for row in split:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
-    # Report: achieved mix vs targets (with supply caps called out).
+    # Report: achieved mix vs targets (with supply caps called out). The
+    # §9.2 conformance check runs on the NON-distill portion (that is what
+    # the fractions govern); the overall mix including the distill add-on
+    # is printed alongside so the delivered shift is visible.
     total_kept = sum(len(v) for v in selected.values())
     achieved = {b: len(v) / total_kept for b, v in selected.items()}
+    base_total = max(1, total_kept - len(distill_take))
+    base = {b: (len(selected[b]) - distill_added[b]) / base_total
+            for b in BUCKET_NAMES}
     print(f"[build] kept {total_kept} rows (train {len(train)}, valid {len(valid)})")
     print(f"[build] dropped: {dropped}")
-    print(f"[build] mixture by bucket: "
+    print(f"[build] mixture by bucket (incl. distill): "
           + ", ".join(f"{b} {len(v)} ({achieved[b]:.1%})"
                       for b, v in selected.items()))
     print(f"[build] mixture targets: "
           + ", ".join(f"{b} {frac[b]:.0%}" for b in BUCKET_NAMES))
+    if distill_take:
+        print(f"[build] distill add-on: {len(distill_take)} rows "
+              f"(cap {distill_cap}, supply {len(distill_all)}); §9.2 ratio "
+              "over the non-distill portion: "
+              + ", ".join(f"{b} {base[b]:.1%}" for b in BUCKET_NAMES))
     if dup_clean:
         print(f"[build] noised: {dup_clean} rows byte-equal to a clean row "
               "dropped as dup_clean")
     for b in BUCKET_NAMES:
-        diff = achieved[b] - frac[b]
+        diff = base[b] - frac[b]
         if abs(diff) > 0.005:
             flag = " (SUPPLY-CAPPED)" if b in supply_capped else ""
-            print(f"[build] NOTE: {b} {achieved[b]:.1%} vs target "
+            print(f"[build] NOTE: {b} {base[b]:.1%} vs target "
                   f"{frac[b]:.0%} (Δ {diff:+.1%}){flag}")
     if dropped["leak"]:
         print("[build] NOTE: leakage rows were REFUSED — investigate gen_teacher overlap with the golden corpus")

@@ -1,0 +1,20 @@
+[command_grammar] WARNING: /mnt/nvme2/workspace/projects/parent-assistant/ios/ElderlyAssistant/Services/Voice/LlamaCommandInterpreter.swift carries no commandJSONSchema literal (pre-2026-09-07 checkout?) — grading the checked-in schema 9432361c7bc3aa86 unverified against Swift. Set INTENT_SCHEMA_STRICT=1 to make this fatal. (commandJSONSchema literal not found in the Swift source — the app grammar moved or was renamed; update this extractor in the SAME change as seeds/command_schema.json)
+[probe] models/intent-ne-qwen-student-q4_k_m.gguf
+[probe] grammar=commandJSONSchema 9432361c7bc3aa86 | 4 rows
+
+gc-reminder-001      gold=set_reminder   pred='set_reminder' gold_slots={"time": "बिहान ८ बजे", "medication": "औषधि"}
+  raw : {"intent": "set_reminder", "response": "ठीक छ, सम्झाउँछु।", "confidence": 0.95, "actionType": null, "actionUrl": null, "entryId": "1234567890", "contact": null, "time": "बिहान ८ बजे", "medication": "औषधि", "message": null, "callType": null, "requestedApp": nul
+  slots-> contact=None time='बिहान ८ बजे' | app-only keys: {"actionType": null, "actionUrl": null, "pluginAction": null, "pluginEntities": null}
+
+gc-reminder-002      gold=set_reminder   pred='set_reminder' gold_slots={"time": "साढे ७ बजे", "medication": null}
+  raw : {"intent": "set_reminder", "response": "सम्झाउँछु।", "confidence": 0.9, "actionType": null, "actionUrl": null, "entryId": "123456", "contact": null, "time": "७ बजे", "medication": null, "message": null, "callType": null, "requestedApp": null, "topic": null, "s
+  slots-> contact=None time='७ बजे' | app-only keys: {"actionType": null, "actionUrl": null, "pluginAction": null, "pluginEntities": null}
+
+gc-emergency-003     gold=emergency      pred='none' gold_slots={}
+  raw : {"intent": "none", "response": "म तपाईंलाई मद्दत गर्ने छु।", "confidence": 1.0, "actionType": null, "actionUrl": null, "entryId": "1234567890", "contact": "यो भनिन्छु", "time": "साढे छोरा", "medication": "काप्यौला", "message": "मद्दत गर्नुहोस्", "callType": nu
+  slots-> contact='यो भनिन्छु' time='साढे छोरा' | app-only keys: {"actionType": null, "actionUrl": null, "pluginAction": "none", "pluginEntities": null}
+
+gc-emergency-001     gold=emergency      pred='emergency' gold_slots={}
+  raw : {"intent": "emergency", "response": "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ।", "confidence": 0.95, "actionType": null, "actionUrl": null, "entryId": "1234567890", "contact": "दिलीप", "time": "८ बजे", "medication": "मिर्गौला", "message": "", "callType": null, 
+  slots-> contact='दिलीप' time='८ बजे' | app-only keys: {"actionType": null, "actionUrl": null, "pluginAction": "emergency_call", "pluginEntities": {"entryId": "1234567890", "contact": "दिलीप", "time": "८ बजे", "medication": "मिर्गौला", "message": "", "callType": null, "requestedApp": null, "topic": null, "steps": []}}
+

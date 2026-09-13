@@ -1,0 +1,20 @@
+[chain4] 2026-09-13T09:57:15+10:00 waiting for arm D to exit
+[chain4] 2026-09-13T11:21:20+10:00 arm D exited cleanly; exporting
+-rw-rw-r-- 1 anjan anjan 1107408608 Sep 13 11:21 models/intent-ne-qwen-student-schema-repaired-q4_k_m.gguf
+[chain4] 2026-09-13T11:21:46+10:00 evaluating arm D: gbnf
+[chain4] arm D gbnf rc=1
+[chain4] 2026-09-13T11:25:09+10:00 evaluating arm D: off
+[chain4] arm D off rc=1
+
+[chain4] 2026-09-13T11:29:53+10:00 arm comparison, gbnf (k=1, seed 42)
+  arm                                gate table (closed/contact/time/emergency/side-effect)
+  v14 canonical+pre                  0.882 0.571 0.833 1.0 1.000                FAIL
+  A canonical+distill                0.824 0.444 0.526 1.0 1.000                FAIL
+  B schema+distill                   0.882 1.000 0.750 1.0 1.000                FAIL
+  C schema+pre                       0.765 0.769 0.833 1.0 1.000                FAIL
+  D schema+repaired                  0.882 0.833 0.750 1.0 1.000                FAIL
+[chain4] no arm has a clean k=1 gate table; k=3 NOT launched (~4.5 GPU-hours).
+[chain4] candidate commands, run deliberately once a config is chosen:
+[chain4]   .venv/bin/python src/eval_golden_k.py --base qwen --tag-prefix qwen-kr-repaired --k 3 --label-order schema   # repaired distill data (on disk)
+[chain4]   .venv/bin/python src/eval_golden_k.py --base qwen --tag-prefix qwen-kr-nodistill --k 3 --label-order schema  # after distill_target: 0 + build_dataset
+[chain4] 2026-09-13T11:29:53+10:00 DONE (no k=3)

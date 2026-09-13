@@ -1,0 +1,46 @@
+{
+ "runs": {
+  "42": {
+   "idx": 0,
+   "mode": "soft",
+   "metrics": {
+    "closed_acc": 0.706,
+    "contact_f1": 0.286,
+    "time_f1": 1.0,
+    "emergency_recall": 1.0,
+    "se_precision": 1.0
+   },
+   "gates_failed": "['closed_intent_accuracy', 'contact_f1'] \u2014 this checkpoint must not ship",
+   "passed": false,
+   "done": true
+  },
+  "43": {
+   "idx": 1,
+   "mode": "soft",
+   "metrics": {
+    "closed_acc": 1.0,
+    "contact_f1": 1.0,
+    "time_f1": 1.0,
+    "emergency_recall": 1.0,
+    "se_precision": 1.0
+   },
+   "gates_failed": "",
+   "passed": true,
+   "done": true
+  },
+  "44": {
+   "idx": 2,
+   "mode": "soft",
+   "metrics": {
+    "closed_acc": 0.941,
+    "contact_f1": 1.0,
+    "time_f1": 1.0,
+    "emergency_recall": 0.667,
+    "se_precision": 1.0
+   },
+   "gates_failed": "['closed_intent_accuracy', 'emergency_recall'] \u2014 this checkpoint must not ship",
+   "passed": false,
+   "done": true
+  }
+ }
+}

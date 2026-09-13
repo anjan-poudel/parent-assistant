@@ -1,0 +1,8 @@
+[krun] 11:31:47 set=qwen-kr-repaired base=qwen k=3 seeds 42..44; grammar gbnf; label_order schema; determinism mode hard (per config training.deterministic)
+[krun] 11:31:47 $ /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/bin/python src/train_qlora.py --base qwen --out qwen-kr-repaired-s42 --seed-offset 0 --label-order schema
+[krun] 12:50:56 set=qwen-kr-repaired base=qwen k=3 seeds 42..44; grammar gbnf; label_order schema; determinism mode hard (per config training.deterministic)
+[krun] 12:50:56 $ /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/bin/python src/train_qlora.py --base qwen --out qwen-kr-repaired-s42 --seed-offset 0 --label-order schema
+[krun] 14:12:37 $ /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/bin/python src/export_gguf.py --model /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/checkpoints/qwen-kr-repaired-s42-final --tag qwen-kr-repaired-s42 --base qwen
+[krun] 14:13:03 $ /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/bin/python src/eval_golden.py --backend gguf --model-path /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/models/intent-ne-qwen-kr-repaired-s42-q4_k_m.gguf --label qwen-kr-repaired-s42 --grammar gbnf
+[krun] 14:15:15 run 0 (seed 42): gates failed [['closed_intent_accuracy', 'contact_f1', 'time_f1'] — this checkpoint must not ship] — recorded, continuing
+[krun] 14:15:15 $ /mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/.venv/bin/python src/train_qlora.py --base qwen --out qwen-kr-repaired-s43 --seed-offset 1 --label-order schema

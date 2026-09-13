@@ -67,7 +67,8 @@ def main() -> None:
     cfg = apply_common(cfg, args)
 
     data_dir = abs_path(cfg, "data_dir")
-    model = WhisperForConditionalGeneration.from_pretrained(args.model)
+    model = WhisperForConditionalGeneration.from_pretrained(
+        args.model, torch_dtype=torch.float32)
     if args.processor == "medium":
         from transformers import WhisperProcessor
         processor = WhisperProcessor.from_pretrained(

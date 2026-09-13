@@ -30,13 +30,27 @@ appended, so the models never learned a terminator. Eval therefore:
     preamble were being cut before their closing brace);
   - applies a per-family repeat penalty (qwen 1.05: temperature-0 greedy
     repetition attractors — qwen gc-emergency-003 emitted the correct
-    {"action":"emergency"...} but repeated its reply phrase forever and
+    emergency JSON but repeated its response phrase forever and
     never closed the brace at penalty 1.0; gemma stays 1.0 — higher
     penalties perturb fine-grained slots at the margin);
   - n_ctx 4096 (longest prompt is ~1224 tokens; 956 cap needs headroom);
   - parses the FIRST complete JSON object anywhere in the output
     (skipping template-echo preamble / stacked objects / trailing prose),
     instead of slicing first-brace-to-last-brace.
+  - reads the app's canonical `intent` key (schema reconciliation
+    2026-09-12: the train side emits intent/response, not the legacy
+    action/reply) and renders the prompt through intent_prompt.render_prompt
+    so all three template placeholders are filled exactly as training does.
+
+Grammar discipline ([EVAL-FIDELITY], 2026-09-13): the gguf backend now
+decodes through the SAME grammar the app does — the JSON Schema at
+`LlamaGrammar.commandJSONSchema`, converted by llama.cpp's
+json-schema→GBNF converter (see command_grammar.py), so malformed JSON
+is impossible here exactly as it is on-device. `--grammar off` restores
+the old unconstrained sampling for A/B comparison; it is NOT a valid
+gate on its own (README "Gate-fidelity caveat"). Each run logs the
+schema fingerprint it graded against and records the mode in
+eval/results.csv.
 """
 from __future__ import annotations
 
@@ -48,7 +62,9 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+from command_grammar import build_grammar, fingerprint, load_schema
 from config import load_config
+from intent_prompt import render_prompt
 
 CLOSED_INTENTS = {"ack_med", "call", "emergency", "set_reminder",
                   "health_query", "music", "send_message", "guide",
@@ -57,14 +73,49 @@ SIDE_EFFECT_INTENTS = {"call", "send_message"}
 
 GGUF_MAX_TOKENS = 956        # was 700; rows with a preamble echo need the room
 GGUF_TEMPERATURE = 0.0       # deterministic; keep
+GRAMMAR_MODES = ("gbnf", "off")  # gbnf = app grammar (default); off = legacy
+
+RESULTS_HEADER = ("label,closed_acc,contact_f1,time_f1,emergency_recall,"
+                  "se_precision,gates_failed,grammar")
+RESULTS_FIELDS = len(RESULTS_HEADER.split(","))
+
+
+def _ensure_results_schema(path: Path) -> bool:
+    """Return True when the caller must write the header (file is new).
+
+    eval/results.csv predates the grammar column: its header still lists
+    seven fields while every row written since 2026-09-13 has eight, which
+    makes the file unparseable as a single table. Migrate in place — rewrite
+    the header and backfill the short rows with `off`, which is what they
+    were: every pre-2026-09-13 gguf run sampled unconstrained (the backend
+    had no grammar yet). Idempotent; a conforming file is left untouched.
+    """
+    if not path.exists():
+        return True
+    lines = path.read_text(encoding="utf-8").splitlines()
+    if lines and lines[0] == RESULTS_HEADER and all(
+            not ln.strip() or len(ln.split(",")) == RESULTS_FIELDS
+            for ln in lines[1:]):
+        return False
+    fixed = [RESULTS_HEADER]
+    for ln in lines[1:]:
+        if not ln.strip():
+            continue
+        fields = ln.split(",")
+        if len(fields) == RESULTS_FIELDS - 1:
+            fields.append("off")
+        fixed.append(",".join(fields))
+    path.write_text("\n".join(fixed) + "\n", encoding="utf-8")
+    print(f"[eval] migrated {path.name}: header + grammar=off backfill")
+    return False
 
 
 def _repeat_penalty(model_path: str) -> float:
     """Per-family repeat penalty.
 
     At penalty 1.0 the temperature-0 qwen leg falls into a repetition
-    attractor on gc-emergency-003 (the correct {"action":"emergency"…}
-    JSON never reaches its closing brace because the reply phrase loops
+    attractor on gc-emergency-003 (the correct {"intent":"emergency"…}
+    JSON never reaches its closing brace because the response phrase loops
     forever); 1.05 breaks the loop and the JSON completes. Gemma shows no
     such loop, and probing showed penalties perturb fine-grained slots at
     the margin (gemma contact माइया → माइयालाई at 1.15; qwen's
@@ -94,7 +145,7 @@ def _stop_strings(model_path: str) -> list[str]:
 
 
 def predict_echo(utterance: str, cfg: dict) -> dict:
-    return {"action": "none", "confidence": 0.0}
+    return {"intent": "none", "confidence": 0.0}
 
 
 def _first_complete_json(text: str) -> dict | None:
@@ -104,26 +155,40 @@ def _first_complete_json(text: str) -> dict | None:
     The output is expected to START with the model's JSON object, but some
     rows begin by echoing/continuing the prompt template first; every brace
     candidate is tried until one parses as a complete object with an
-    "action" field. Returns None when no complete object exists (the model
-    refused / echoed forever / degenerated without emitting JSON)."""
+    "intent" field. Returns None when no complete object exists (the model
+    refused / echoed forever / degenerated without emitting JSON).
+
+    STRICT on the canonical key (schema reconciliation 2026-09-12): the app
+    parser also accepts the legacy `action`/`reply` wire shape, but the
+    gate must prove the fine-tune EMITS the app's canonical `intent`, not
+    that the harness can paper over its absence — a legacy-shaped
+    completion counts as no-JSON here."""
     decoder = json.JSONDecoder()
     for m in re.finditer(r"\{", text):
         try:
             obj, _ = decoder.raw_decode(text, m.start())
         except json.JSONDecodeError:
             continue
-        if isinstance(obj, dict) and isinstance(obj.get("action"), str):
+        if isinstance(obj, dict) and isinstance(obj.get("intent"), str):
             return obj
     return None
 
 
-def predict_gguf(utterance: str, cfg: dict, model_path: str) -> dict:
+def predict_gguf(utterance: str, cfg: dict, model_path: str,
+                 grammar=None) -> dict:
     """Local GGUF via llama-cpp-python. The prompt MUST mirror
     IntentPrompt.build exactly — training and inference use the identical
     prompt (seeds/prompt_template.txt is extracted from the Swift source
     of truth; train_qlora.py tokenizes that raw text with NO chat-template
     wrapper, so the eval prompt must stay raw too — never pass the prompt
-    through a chat template here)."""
+    through a chat template here).
+
+    `grammar` (a LlamaGrammar built from the app's commandJSONSchema —
+    see command_grammar.py) constrains the sampler exactly as
+    `LLMCore.generateWithConstraints` does on-device: every completion is
+    a structurally valid command object, so the gate scores the model and
+    not the sampler's JSON discipline. None = legacy unconstrained
+    sampling (only for A/B; not a valid gate)."""
     from llama_cpp import Llama  # pip install llama-cpp-python
 
     if not hasattr(predict_gguf, "_llm"):
@@ -141,19 +206,30 @@ def predict_gguf(utterance: str, cfg: dict, model_path: str) -> dict:
         # utterance + 192 max_tokens reached 1214 tokens (ValueError).
         # 4096 leaves room for the 1224-token longest prompt + cap 956.
         predict_gguf._template = template
-    prompt = predict_gguf._template.replace("{transcript}", utterance)
+    prompt = render_prompt(predict_gguf._template, utterance)
+    # Grammar-constrained decode (app fidelity). With a grammar the
+    # sampler can only ever emit the command object, so the "\n\n"
+    # continuation stops and the loop-breaking repeat penalty stay as
+    # documented no-ops here — the same knobs the unconstrained runs used,
+    # so a delta is attributable to the grammar and not to sampling.
     out = predict_gguf._llm(prompt, max_tokens=GGUF_MAX_TOKENS,
                             temperature=GGUF_TEMPERATURE,
                             repeat_penalty=_repeat_penalty(model_path),
-                            stop=_stop_strings(model_path))
+                            stop=_stop_strings(model_path),
+                            grammar=grammar)
     text = out["choices"][0]["text"]
     obj = _first_complete_json(text)
     if obj is None:
         # No complete JSON object — model refused/echoed/degenerated. Count
-        # as an abstention (action none) but surface the raw output.
-        print(f"[gguf] NO-JSON output for {utterance[:60]!r}: {text[:300]!r}",
+        # as an abstention (intent none) but surface the raw output. Under
+        # the grammar this is unreachable (the sampler cannot emit
+        # non-matching text), so flag it as a HARNESS failure rather than
+        # a model outcome: a no-JSON row in a gbnf run means the grammar
+        # was not actually applied.
+        tag = "[gguf/grammar-BUG]" if grammar is not None else "[gguf]"
+        print(f"{tag} NO-JSON output for {utterance[:60]!r}: {text[:300]!r}",
               file=sys.stderr)
-        return {"action": "none", "confidence": 0.0}
+        return {"intent": "none", "confidence": 0.0}
     return obj
 
 
@@ -166,7 +242,7 @@ def predict_gemini(utterance: str, cfg: dict) -> dict:
     template = (Path(__file__).parent.parent / "seeds" / "prompt_template.txt").read_text(encoding="utf-8")
     resp = predict_gemini._client.models.generate_content(
         model=str(cfg["gemini.model"]),
-        contents=template.replace("{transcript}", utterance),
+        contents=render_prompt(template, utterance),
         config=types.GenerateContentConfig(response_mime_type="application/json"),
     )
     return json.loads(resp.text)
@@ -191,8 +267,28 @@ def main() -> None:
     parser.add_argument("--backend", required=True, choices=["echo", "gguf", "gemini"])
     parser.add_argument("--model-path", default="")
     parser.add_argument("--label", default="", help="row label for results.csv")
+    parser.add_argument("--grammar", default="gbnf", choices=list(GRAMMAR_MODES),
+                        help="gbnf (default) = decode through the app's "
+                             "commandJSONSchema grammar, exactly as the "
+                             "on-device runtime does; off = legacy "
+                             "unconstrained sampling (A/B only)")
+    parser.add_argument("--diag", action="store_true",
+                        help="print every row whose SCORED fields (intent, "
+                             "contact, time) differ from gold — the "
+                             "microscope behind a failed slot gate; the "
+                             "response field is never scored and never "
+                             "printed here")
     args, cfg = load_config(parser)
     root = Path(__file__).parent.parent
+
+    grammar = None
+    if args.backend == "gguf" and args.grammar == "gbnf":
+        grammar = build_grammar(load_schema())
+        print(f"[gguf] grammar=commandJSONSchema "
+              f"fingerprint={fingerprint()} ({len(grammar._grammar)} chars GBNF)")
+    elif args.backend == "gguf":
+        print("[gguf] grammar=OFF — unconstrained sampling (legacy; not a "
+              "valid gate on its own — README Gate-fidelity caveat)")
 
     corpus = [json.loads(line) for line in
               open(root / "eval" / "golden_corpus.jsonl", encoding="utf-8") if line.strip()]
@@ -202,7 +298,8 @@ def main() -> None:
         if args.backend == "echo":
             pred = predict_echo(row["utterance"], cfg)
         elif args.backend == "gguf":
-            pred = predict_gguf(row["utterance"], cfg, args.model_path)
+            pred = predict_gguf(row["utterance"], cfg, args.model_path,
+                                grammar=grammar)
         else:
             pred = predict_gemini(row["utterance"], cfg)
         preds.append(pred)
@@ -215,7 +312,7 @@ def main() -> None:
     calibration: dict[int, list[int]] = defaultdict(list)
 
     for row, pred in zip(corpus, preds):
-        gold_intent, pred_intent = row["intent"], pred.get("action", "none")
+        gold_intent, pred_intent = row["intent"], pred.get("intent", "none")
         per_intent_total[gold_intent] += 1
         if pred_intent == gold_intent:
             per_intent_correct[gold_intent] += 1
@@ -240,7 +337,12 @@ def main() -> None:
     se_precision = se_tp / max(se_tp + se_fp, 1)
 
     label = args.label or args.backend
+    grammar_col = args.grammar if args.backend == "gguf" else "n/a"
     print(f"\n=== eval: {label} ({len(corpus)} rows) ===")
+    if args.backend == "gguf":
+        print(f"decode                 : {args.grammar}"
+              + (f" (commandJSONSchema {fingerprint()})"
+                 if args.grammar == "gbnf" else " (unconstrained)"))
     print(f"closed-intent accuracy : {closed_acc:.3f}  (gate {cfg['gates.closed_intent_accuracy']})")
     print(f"contact slot F1        : {contact_f1:.3f}  (gate {cfg['gates.slot_f1']})")
     print(f"time slot F1           : {time_f1:.3f}  (gate {cfg['gates.slot_f1']})")
@@ -264,12 +366,36 @@ def main() -> None:
     }
     failed = [name for name, (got, want) in gates.items() if got < want]
     results_path = root / "eval" / "results.csv"
-    new = not results_path.exists()
+    new = _ensure_results_schema(results_path)
     with open(results_path, "a", encoding="utf-8") as f:
         if new:
-            f.write("label,closed_acc,contact_f1,time_f1,emergency_recall,se_precision,gates_failed\n")
+            f.write(RESULTS_HEADER + "\n")
+        # Trailing `grammar` column (added 2026-09-13): rows written before
+        # that date carry 7 fields and were all effectively "off" — the
+        # gguf backend sampled unconstrained then.
         f.write(f"{label},{closed_acc:.3f},{contact_f1:.3f},{time_f1:.3f},"
-                f"{emergency_recall:.3f},{se_precision:.3f},{'|'.join(failed) or 'none'}\n")
+                f"{emergency_recall:.3f},{se_precision:.3f},{'|'.join(failed) or 'none'}"
+                f",{grammar_col}\n")
+
+    if args.diag:
+        # Per-row diff of the three SCORED fields under this decode mode.
+        # `response` is deliberately absent: golden_corpus rows carry
+        # response=None and the gate never reads it, so including it would
+        # surface noise the score does not contain.
+        print("\nper-row diffs (intent / contact / time; * = mismatch):")
+        for row, pred in zip(corpus, preds):
+            g_i, p_i = row["intent"], pred.get("intent", "none")
+            g_c, p_c = row["slots"].get("contact"), pred.get("contact")
+            g_t, p_t = row["slots"].get("time"), pred.get("time")
+            if (g_i, g_c, g_t) == (p_i, p_c, p_t):
+                continue
+            marks = (" *" if g_i != p_i else "",
+                     " *" if g_c != p_c else "",
+                     " *" if g_t != p_t else "")
+            print(f"  {row['id']:20s} intent {g_i} -> {p_i}{marks[0]} | "
+                  f"contact {g_c!r} -> {p_c!r}{marks[1]} | "
+                  f"time {g_t!r} -> {p_t!r}{marks[2]}")
+            print(f"      utt: {row['utterance']}")
 
     if failed:
         print(f"\nGATES FAILED: {failed} — this checkpoint must not ship")

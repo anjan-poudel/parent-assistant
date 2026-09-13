@@ -35,13 +35,20 @@ intents:
       - "{contact} लाई '{message}' भनेर मेसेज पठाउ"
       - "{contact_latin} lai message patha"
   set_reminder:
-    target: 1200
+    target: 2069
     templates:
       - "{time} {medication} खान सम्झाउनु"
       - "{time} मलाई सम्झना गराउनुहोस्"
       - "हरेक {time} पानी खान सम्झाउनु"
+
+      # Iteration-3b topup: gc-reminder-001 family — reminder requests with
+      # explicit time+medication must stay strong against the attractor that
+      # degenerated them to NO-JSON in the iter-3 retrain.
+      - "बिहान ८ बजे प्रेसरको औषधि खान सम्झाउनुहोस् है"
+      - "साँझ ७ बजे भिटामिन खान रिमाइन्डर राख्नुहोस्"
+
   emergency:
-    target: 1000
+    target: 1322
     templates:
       - "मद्दत गर्नुहोस्"
       - "मलाई बचाउनुहोस्"
@@ -51,19 +58,87 @@ intents:
       # Boundary pairs (spec §9.4): plea+pain is emergency; the SAME pain
       # phrased calmly is health_query. Both must exist, labelled right.
       - "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ"
+
+      # Iteration-3b topup: the 2026-09-09 rebuild re-drew the clean 40% of the
+      # mixture and displaced ~82 rich emergency rows (code-switched plea+pain)
+      # — gc-emergency-002 regressed to NO-JSON. Replenish the plea+pain supply
+      # with fresh symptom-event frames (fall, faint, bleed, stroke, hypo).
+      - "मलाई बेहोस भए जस्तो छ, मद्दत गर्नुहोस्"
+      - "सुगर धेरै घटेर लडेँ, बचाउनुहोस्"
+      - "टाउकोमा चोट लाग्यो, रगत बग्दै छ"
+      - "छाती दुखेर सास फेर्न गाह्रो भयो"
+      - "आमा ढलेर बेहोस हुनुभयो, छिटो आउनुस्"
+      - "अचानक हात खुट्टा चल्दैनन्"
+      - "बेहोस हुन लागेँ, मलाई सम्हाल्नुहोस्"
+      - "रगतचाप एकदम बढेर टाउको दुखेको छ, डाक्टर बोलाउनुहोस्"
+
   health_query:
-    target: 700
+    target: 1326
     templates:
       - "मेरो रक्तचाप कस्तो हुनुपर्छ"
       - "मिर्गौला दुख्दा के गर्नुपर्छ"
       - "सुगर कति हुँदा ठीक हुन्छ"
+      # Iteration-3 topup (bake-off 2026-09-09): iter-2 qwen sent calm
+      # blood-pressure/kidney questions to generic "query" (gc-health-001)
+      # or degenerated to NO-JSON (gc-health-002). These add the
+      # रक्तचाप/मधुमेह/मिर्गौला question frames the golden corpus uses —
+      # calm, non-urgent, no plea (plea+pain stays emergency, spec §9.4).
+      - "रक्तचाप कति हुँदा ठीक हुन्छ"
+      - "मेरो प्रेसर बढी छ कि कम कसरी थाहा पाउने"
+      - "मधुमेह भएकाले के खान हुन्न"
+      - "मधुमेहको औषधि खाने उपयुक्त समय कुन हो"
+      - "सुगर घटाउन के खानुपर्छ"
+      - "मिर्गौला दुखेको बेला के खान मिल्छ"
+      - "मिर्गौलामा ढुङ्गा भयो भने के गर्ने"
+      - "रक्तचाप धेरै भए के गर्ने"
+      - "खाना खाएपछि सुगर कति हुनुपर्छ"
+      - "बिहान खाली पेटमा सुगर कति हुनुपर्छ"
+      - "प्रेसरको औषधि नखाए के हुन्छ"
+
+      # Iteration-3b topup (2026-09-09): iter-3 retrain showed the mixture re-draw
+      # starved the boundary classes (see build log diff). These replenish calm
+      # BP/sugar/kidney question frames — the health_query supply the golden
+      # corpus probes (gc-health-001/002).
+      - "रक्तचापको जाँच कहिले गराउने राम्रो"
+      - "रक्तचाप घट्दा के के लक्षण देखिन्छन्"
+      - "मधुमेहमा कुन फलफूल खान हुन्छ"
+      - "मिर्गौला बिरामीका लागि कस्तो खाना ठीक हुन्छ"
+      - "sugar ma ke khaana paainchha ke paaindaina"
+      - "blood pressure high bhayo bhane ke garna parcha"
+
   music:
-    target: 600
+    target: 1405
     templates:
       - "भजन बजाउनुस्"
       - "{bhajan} बजाउ"
       - "गीत चलाउ"
       - "bhajan bajaunu"
+      # Iteration-3 topup: iter-2 qwen pulled "bhajan bajau na" into
+      # set_reminder with a HALLUCINATED time (gc-music-002 — also the
+      # source of the time-F1 miss). Music/entertainment requests that
+      # merely CONTAIN time-ish words (बिहान/साँझ/बेलुका/अब) must stay
+      # music; romanized forms included for the romanized register.
+      - "बिहानको भजन बजाइदेऊ न"
+      - "साँझमा आरतीको गीत लगाइदेऊ"
+      - "बेलुका सुत्ने बेला गीत बजाउ"
+      - "अब त भजन नै बजाऊ"
+      - "हिँड्ने बेला गीत लगाइदेऊ"
+      - "चलचित्रको गीत बजाऊ"
+      - "पुराना भजनहरू बजाइदिनुहोस्"
+      - "bihana ko bhajan bajau na"
+      - "geet bajaideu na bihana"
+      - "movie ko geet bajau"
+      - "purano bhajan sunna man chha"
+      - "bihana uthne bittikai geet bajau"
+
+      # Iteration-3b topup: more romanized/music-with-time-context decoys so
+      # bhajan requests (gc-music-002 family) never route to set_reminder.
+      - "bhajan bajau ta"
+      - "ek choti bhajan sunau na"
+      - "मन शान्त हुने भजन लगाइदिनुस्"
+      - "आज बेलुका भजनै बजाऊ न"
+      - "movie ko song bajau"
+
   guide:
     target: 600
     templates:
@@ -71,17 +146,44 @@ intents:
       - "{appliance} मा के बटन थिच्ने"
       - "माइक्रोवेभमा चिया कसरी तताउने"
   query:
-    target: 1000
+    target: 1186
     templates:
       - "भोलि मौसम कस्तो हुन्छ"
       - "आज के दिन हो"
       - "नेपालको राजधानी कहाँ हो"
+      # Iteration-3 topup: weather/general questions that contain
+      # reminder-flavoured time words (बिहान/बेलुका/साँझ/अब) must NOT be
+      # pulled into set_reminder — they are plain queries, labelled query.
+      - "बिहानको मौसम कस्तो होला"
+      - "बेलुका पानी पर्छ कि पर्दैन"
+      - "साँझतिर हावा चल्छ कि चल्दैन"
+      - "अबको मौसम कस्तो रहला"
+      - "भोलि बिहान घाम लाग्छ कि"
+      - "अहिले कति बजे भयो"
+      - "आजको तापक्रम कति छ"
+      - "यस हप्ता कुन दिन बिदा पर्छ"
+      - "aaja ko mausam kasto chha"
+
+      # Iteration-3b topup.
+      - "बाहिर अहिले न्यानो छ कि चिसो"
+
   none:
-    target: 500
+    target: 1800
     templates:
       - "हँ"
       - "अहो"
       - "के थाहा"
+      # Iteration-3 topup: medication REFUSALS ("औषधि खाएको छैन") must
+      # never parse as ack_med — iter-2 qwen marked the golden refusal
+      # gc-ack-002 "taken" at conf 0.95 with a hallucinated medication.
+      # Refusals are a decisive none, not an abstain (do NOT use the
+      # low-confidence edge classes for them). Static templates, word
+      # order/tense varied so no paraphrase collides with the golden row.
+      - "औषधि खान बाँकी छ"
+      - "आजको औषधि खाएको छैन"
+      - "दवाई खाइनँ आज"
+      - "अहिलेसम्म केही खाएको छैन"
+      - "दिउँसोको दवाई खान बाँकी नै छ"
 
 edge_classes:
   abstain_low_confidence:

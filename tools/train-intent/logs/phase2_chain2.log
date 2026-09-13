@@ -1,0 +1,13 @@
+[chain2] 2026-09-13T07:28:40+10:00 waiting for arm B to exit
+[chain2] 2026-09-13T08:39:42+10:00 arm B exited cleanly; exporting
+-rw-rw-r-- 1 anjan anjan 1107408608 Sep 13 08:40 models/intent-ne-qwen-student-schema-q4_k_m.gguf
+[chain2] 2026-09-13T08:40:07+10:00 rebuilding dataset for arm C (distill_target 0)
+[chain2] arm C dataset rows=2686
+[chain2] arm C data is byte-identical to the pre-distill backup
+[chain2] 2026-09-13T08:40:09+10:00 launching arm C (schema order, pre-distill data)
+[chain2] arm C pid 4082058
+[chain2] 2026-09-13T08:40:09+10:00 evaluating arm B: gbnf
+[chain2] gbnf rc=1
+[chain2] 2026-09-13T08:43:44+10:00 evaluating arm B: off
+[chain2] off rc=1
+[chain2] 2026-09-13T08:46:09+10:00 DONE (arm B evaluated; arm C training in background)

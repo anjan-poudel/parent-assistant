@@ -6,7 +6,7 @@ Gemini 2.5 Flash as the teacher. Two job families:
   - core intents: paraphrase each filled seed template, label it
   - EDGE CLASSES (spec §9.1/§9.3 — abstention is a feature):
       abstain_low_confidence : ambiguous/fragmentary → conf < 0.5
-      gibberish_to_none      : STT-noise strings → action none, conf < 0.3
+      gibberish_to_none      : STT-noise strings → intent none, conf < 0.3
       corrections_overrides  : no-with-amendment → call + requestedApp
 
 Resumable at CALL level: completed (job, register) pairs are recorded in
@@ -32,14 +32,21 @@ import yaml
 
 from config import load_config, abs_path
 
-SCHEMA_FIELDS = ["action", "entryId", "contact", "time", "medication", "message",
-                 "callType", "requestedApp", "topic", "steps", "confidence", "reply"]
+# Canonical app wire shape (2026-09-12 reconciliation): the teacher must
+# emit `intent`/`response` (IntentPrompt.swift's contract). Existing rows
+# were migrated in place by the same change.
+SCHEMA_FIELDS = ["intent", "entryId", "contact", "time", "medication", "message",
+                 "callType", "requestedApp", "topic", "steps", "confidence", "response"]
 
 STATE_PATH = Path(__file__).parent.parent / "data" / ".gen_teacher_state.json"
 
 
-def row_id(utterance: str, action: str, register: str) -> str:
-    h = hashlib.sha256(f"{register}|{action}|{utterance}".encode()).hexdigest()
+def row_id(utterance: str, intent: str, register: str) -> str:
+    # The hashed string is register|intent|utterance — the VALUES are
+    # unchanged from the pre-reconciliation (action-keyed) id scheme, so
+    # every existing row keeps its id and noised.jsonl's "{id}:noise{n}"
+    # skip set stays valid.
+    h = hashlib.sha256(f"{register}|{intent}|{utterance}".encode()).hexdigest()
     return h[:16]
 
 
@@ -73,22 +80,22 @@ def rows_per_job(cfg: dict, registers: list[str]) -> int:
 
 
 def count_existing(out_path: Path) -> tuple[dict[str, int], dict[str, int]]:
-    """Rows already written, per action (core) and per edge class
+    """Rows already written, per intent (core) and per edge class
     (matched on the source prefix written by this script)."""
-    per_action: dict[str, int] = {}
+    per_intent: dict[str, int] = {}
     per_edge: dict[str, int] = {}
     if out_path.exists():
         for line in open(out_path, encoding="utf-8"):
             if not line.strip():
                 continue
             row = json.loads(line)
-            per_action[row["action"]] = per_action.get(row["action"], 0) + 1
+            per_intent[row["intent"]] = per_intent.get(row["intent"], 0) + 1
             source = row.get("source") or ""
             for prefix in ("abstain_low_confidence", "gibberish_to_none",
                            "corrections_overrides"):
                 if f":{prefix}:" in source:
                     per_edge[prefix] = per_edge.get(prefix, 0) + 1
-    return per_action, per_edge
+    return per_intent, per_edge
 
 
 def fill_templates(seeds: dict, cfg: dict, registers: list[str],
@@ -166,11 +173,11 @@ Seed intent: {intent}
 Seed utterance: {utterance}
 
 Output ONLY a JSON array, one object per paraphrase:
-[{{"utterance": "...", "action": "{intent}", "entryId": null,
+[{{"utterance": "...", "intent": "{intent}", "entryId": null,
    "contact": string|null, "time": string|null, "medication": string|null,
    "message": string|null, "callType": string|null, "requestedApp": string|null,
    "topic": string|null, "steps": string[]|null,
-   "confidence": number, "reply": "short spoken reply in the user's language"}}]
+   "confidence": number, "response": "short spoken reply in the user's language"}}]
 
 Rules: copy entity spans VERBATIM from each paraphrase into the slot fields;
 never invent entities not present; requestedApp only if the paraphrase names
@@ -188,15 +195,15 @@ intents — in the "{register}" register.
 Seed utterance: {utterance}
 
 Output ONLY a JSON array, one object per variant:
-[{{"utterance": "...", "action": "none", "entryId": null,
+[{{"utterance": "...", "intent": "none", "entryId": null,
    "contact": null, "time": null, "medication": null, "message": null,
    "callType": null, "requestedApp": null, "topic": null, "steps": null,
    "confidence": number between 0.1 and 0.4,
-   "reply": "a short gentle re-prompt in the user's language, e.g. asking
+   "response": "a short gentle re-prompt in the user's language, e.g. asking
 them to say it again"}}]
 
-Rules: action is ALWAYS "none"; confidence is ALWAYS below 0.4 (these
-utterances must not cross the 0.7 dispatch threshold); reply asks for
+Rules: intent is ALWAYS "none"; confidence is ALWAYS below 0.4 (these
+utterances must not cross the 0.7 dispatch threshold); response asks for
 clarification, never guesses.""",
 
     "gibberish_to_none": """You are generating GIBBERISH training data for an
@@ -208,13 +215,13 @@ words, mixed-script noise, single particles — in the "{register}"
 register's script.
 
 Output ONLY a JSON array:
-[{{"utterance": "...", "action": "none", "entryId": null,
+[{{"utterance": "...", "intent": "none", "entryId": null,
    "contact": null, "time": null, "medication": null, "message": null,
    "callType": null, "requestedApp": null, "topic": null, "steps": null,
    "confidence": number between 0.0 and 0.2,
-   "reply": "short polite 'I didn't understand' in the user's language"}}]
+   "response": "short polite 'I didn't understand' in the user's language"}}]
 
-Rules: action is ALWAYS "none"; confidence ALWAYS below 0.2; the strings
+Rules: intent is ALWAYS "none"; confidence ALWAYS below 0.2; the strings
 must NOT contain a recognizable command.""",
 
     "corrections_overrides": """You are generating CORRECTION training data for an
@@ -228,15 +235,15 @@ forms ("फेसटाइममा गर" alone).
 Seed correction: {utterance}
 
 Output ONLY a JSON array:
-[{{"utterance": "...", "action": "call", "entryId": null,
+[{{"utterance": "...", "intent": "call", "entryId": null,
    "contact": null, "time": null, "medication": null, "message": null,
    "callType": "video"|null, "requestedApp": "whatsapp"|"facetime"|"phone"|null,
    "topic": null, "steps": null,
    "confidence": number between 0.8 and 0.95,
-   "reply": "short acknowledgment of the corrected method in the user's
+   "response": "short acknowledgment of the corrected method in the user's
 language"}}]
 
-Rules: action is ALWAYS "call"; requestedApp mirrors the method the
+Rules: intent is ALWAYS "call"; requestedApp mirrors the method the
 variant names ("वाट्सएप"→"whatsapp", "फेसटाइम"→"facetime",
 "फोन/कल"→"phone", "भिडियो"→"facetime" with callType "video"); the
 amended method must appear verbatim in the utterance.""",
@@ -253,11 +260,11 @@ def edge_ok(row: dict, job: dict) -> bool:
         return True
     conf = float(row.get("confidence", 1))
     if ec == "abstain_low_confidence":
-        return row.get("action") == "none" and conf < 0.5
+        return row.get("intent") == "none" and conf < 0.5
     if ec == "gibberish_to_none":
-        return row.get("action") == "none" and conf < 0.3
+        return row.get("intent") == "none" and conf < 0.3
     if ec == "corrections_overrides":
-        return row.get("action") == "call" and bool(row.get("requestedApp"))
+        return row.get("intent") == "call" and bool(row.get("requestedApp"))
     return True
 
 
@@ -299,10 +306,10 @@ def main() -> None:
     with open(Path(__file__).parent.parent / "seeds" / "intents.yaml", encoding="utf-8") as f:
         seeds = yaml.safe_load(f)
 
-    per_action, per_edge = count_existing(out_path)
+    per_intent, per_edge = count_existing(out_path)
     only = {s.strip() for s in args.only_intents.split(",") if s.strip()} or None
     core_jobs = [] if args.edge_only else fill_templates(
-        seeds, cfg, args.registers, per_action, only)
+        seeds, cfg, args.registers, per_intent, only)
     edge_jobs = fill_edge_templates(seeds, cfg, args.registers, per_edge)
     jobs = core_jobs + edge_jobs
     if args.limit:
@@ -345,7 +352,7 @@ def main() -> None:
                     if not edge_ok(row, job):
                         rejected += 1
                         continue
-                    rid = row_id(row.get("utterance", ""), row.get("action", ""), register)
+                    rid = row_id(row.get("utterance", ""), row.get("intent", ""), register)
                     if rid in done:
                         continue
                     row["id"] = rid

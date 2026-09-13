@@ -1,0 +1,10 @@
+[transformers] `torch_dtype` is deprecated! Use `dtype` instead!
+[train] 14748 train / 776 valid rows, base=gemma
+Loading weights:   0%|          | 0/340 [00:00<?, ?it/s]Loading weights:   1%|          | 3/340 [00:00<00:11, 28.74it/s]Loading weights:  51%|█████     | 173/340 [00:00<00:00, 991.49it/s]Loading weights: 100%|██████████| 340/340 [00:00<00:00, 1140.30it/s]
+Traceback (most recent call last):
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/src/train_qlora.py", line 143, in <module>
+    main()
+  File "/mnt/nvme2/workspace/projects/parent-assistant/tools/train-intent/src/train_qlora.py", line 102, in main
+    targs = TrainingArguments(
+            ^^^^^^^^^^^^^^^^^^
+TypeError: TrainingArguments.__init__() got an unexpected keyword argument 'warmup_ratio'
