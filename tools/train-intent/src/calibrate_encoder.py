@@ -175,11 +175,16 @@ def collect_logits(model, tok, rows: list[dict], intents: list[str], max_len: in
 
 
 def _load_rows(path: Path, intents: list[str]) -> list[dict]:
+    """Rows from either schema: stage-E1 rows carry `action`, the golden corpus
+    carries the same label under `intent` (eval_golden.py reads that one).
+    Reading only `action` made the golden corpus look empty ("unreadable/empty")
+    on the server smoke run."""
     rows = []
     for r in read_jsonl(path):
-        if r.get("action") in intents and isinstance(r.get("utterance"), str):
+        action = r.get("action") or r.get("intent")
+        if action in intents and isinstance(r.get("utterance"), str):
             rows.append({"id": r.get("id"), "utterance": r["utterance"],
-                         "action": r["action"]})
+                         "action": action})
     return rows
 
 
@@ -337,7 +342,21 @@ def main(argv=None) -> int:
                             "corpus_floor": gate_cfg.get("corpus_floor"),
                             "measurable_today": bool(gate_cfg.get("measurable_today",
                                                                   False))}
-        report["gate"].update({"passed": not viol, "violations": viol,
+        # Tri-state, never a silent pass: True (measured and inside tolerance),
+        # False (measured and out), None (NOT MEASURABLE — the corpus is below
+        # the contract's floor / measurable_today=false, so the buckets cannot
+        # support a claim. A pooled bucket smaller than min_bucket_n would
+        # otherwise produce an empty violation list and read as a pass.)
+        floor = int(gate_cfg.get("corpus_floor") or 0)
+        measurable = bool(gate_cfg.get("measurable_today", False)) and len(grows) >= floor
+        report["gate"].update({"passed": (not viol) if measurable else None,
+                               "measurable": measurable,
+                               "violations": viol,
+                               "not_measurable_reason": None if measurable else
+                               (f"golden corpus has {len(grows)} rows; the contract "
+                                f"requires measurable_today=true and >= {floor} rows "
+                                "(calibration.gate) before the buckets can support a "
+                                "pass"),
                                "min_bucket_n": min_bucket_n, "buckets": buckets,
                                "pooled_merges": [b for b in pooled_b
                                                  if "pooled_from" in b]})
@@ -362,6 +381,11 @@ def main(argv=None) -> int:
     if report["gate"]["passed"] is False:
         print(f"[gate] FAILED: {len(report['gate']['violations'])} bucket(s) exceed "
               f"±{max_gap:.0%} accuracy-vs-confidence — do NOT publish this artifact")
+        return EXIT_STAGE
+    if report["gate"]["passed"] is None:
+        print("[gate] NOT MEASURABLE: "
+              + str(report["gate"]["not_measurable_reason"])
+              + " — reporting no claim rather than a pass this artifact has not earned")
         return EXIT_STAGE
     return EXIT_OK
 

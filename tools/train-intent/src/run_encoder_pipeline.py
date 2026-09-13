@@ -159,6 +159,9 @@ def publish_reasons(smoke: bool, harness_exit: int | None, calibration_passed,
         reasons.append("harness gates failed (see eval log / eval_manifest.jsonl)")
     if calibration_passed is False:
         reasons.append("calibration gate failed (accuracy-vs-confidence)")
+    if calibration_passed is None and not skip_calibration:
+        reasons.append("calibration gate not measurable (corpus below the contract "
+                       "floor) — no calibrated claim can be made")
     if not unchanged:
         reasons.append("model.pt changed between eval and publish — provenance broken")
     if no_publish:
@@ -224,9 +227,20 @@ def main(argv=None) -> int:
         return EXIT_GUARD
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    work = Path(args.work_dir) if args.work_dir else abs_path(cfg, "encoder.work_dir") \
+    work = Path(args.work_dir).expanduser() if args.work_dir else abs_path(cfg, "encoder.work_dir") \
         if cfg.get("encoder.work_dir") else ROOT / "artifacts" / f"encoder-run-{stamp}"
     work = work if work.is_absolute() else ROOT / work
+    # Every path handed to a stage process is made absolute HERE: stage commands
+    # run with cwd=ROOT (the tool root), which is not the caller's cwd — a
+    # relative path forwarded verbatim would be silently resolved against the
+    # wrong directory. Resolve against the caller's cwd, once, and log it.
+    if args.sources:
+        args.sources = [str(Path(s).expanduser().resolve()) for s in args.sources]
+    if args.build_report:
+        args.build_report = str(Path(args.build_report).expanduser().resolve())
+    if args.publish_dir:
+        args.publish_dir = str(Path(args.publish_dir).expanduser().resolve())
+    work = work.resolve()
     log_dir = work / "logs"
     build_dir = work / "build"
     train_dir = work / "train"
@@ -304,10 +318,18 @@ def main(argv=None) -> int:
                     "--report", str(calib_report)]
         st = run_stage("calibrate", cmd, log_dir, args.dry_run, **stage_opts)
         stages.append(st)
+        # The report carries the tri-state verdict (True / False / None =
+        # not measurable); the exit code alone cannot tell "failed" from
+        # "the corpus cannot support a claim".
+        if calib_report.exists():
+            gates["calibration_gate_passed"] = read_json(calib_report).get(
+                "gate", {}).get("passed")
+        elif st.get("exit") not in (0, None):
+            gates["calibration_gate_passed"] = False   # refused before any report
         if st.get("exit") not in (0, None):
-            gates["calibration_gate_passed"] = False
-            print("[pipeline] calibration gate FAILED — continuing to the harness for "
-                  "the full picture; publication is withheld")
+            print("[pipeline] calibration did not pass or was not measurable — "
+                  "continuing to the harness for the full picture; publication is "
+                  "withheld")
     elif not args.dry_run and calib_report.exists():
         gates["calibration_gate_passed"] = bool(
             read_json(calib_report).get("gate", {}).get("passed"))

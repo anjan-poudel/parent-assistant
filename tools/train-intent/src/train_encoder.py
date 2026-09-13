@@ -168,8 +168,11 @@ def collate(batch: list[dict], pad_id: int, label_of: dict | None = None):
         L = len(b["input_ids"])
         ids[i, :L] = torch.tensor(b["input_ids"], dtype=torch.long)
         mask[i, :L] = 1
-        tags[i, :L] = torch.tensor([IGNORE_INDEX if t is None else t for t in b["tags"]],
-                                   dtype=torch.long)
+        # `tags` is None for intent-only callers (calibration collects intent
+        # logits, it has no gold tags); the slot tensor stays all-ignore_index.
+        if b.get("tags") is not None:
+            tags[i, :L] = torch.tensor(
+                [IGNORE_INDEX if t is None else t for t in b["tags"]], dtype=torch.long)
     out = {"input_ids": ids, "attention_mask": mask, "tags": tags}
     if label_of is not None:
         out["intent_labels"] = torch.tensor([label_of[b["intent"]] for b in batch],
@@ -404,6 +407,29 @@ def resume_mismatch(state: dict, cfg_hash: str, data_hash: str) -> str | None:
     return None
 
 
+def tokenizer_pin_problem(tok_len: int, emb_rows: int, pinned: int) -> str | None:
+    """Reason the tokenizer/model disagrees with the T-034 pin, or None.
+
+    The pin (`spans.tokenizer.vocab_size`) is the EMBEDDING row count — for the
+    C3 XLM-R checkpoint, config.json:vocab_size = 250037 — while the
+    sentencepiece tokenizer itself reports 250002 (the same checkpoint: the
+    extra 35 rows are reserved and unused). Comparing those two numbers to each
+    other refuses a CORRECT model, which the server smoke run did, so the check
+    is two-sided and explicit:
+      - the embedding rows must equal the pin (catches the wrong checkpoint);
+      - the tokenizer must not exceed the embeddings (catches out-of-range ids).
+    Torch-free: both numbers are passed in, so the refusal is testable.
+    """
+    if emb_rows != pinned:
+        return (f"model embedding rows {emb_rows} != pinned tokenizer vocab "
+                f"{pinned} (annotation_rules.yaml spans.tokenizer.vocab_size) — "
+                "wrong backbone revision pins the alignment contract")
+    if tok_len > emb_rows:
+        return (f"tokenizer has {tok_len} ids but the embeddings have only "
+                f"{emb_rows} rows — token ids would be out of range")
+    return None
+
+
 def save_state(path: Path, model, opt, sched, step: int, epoch: int,
                cfg_hash: str, data_hash: str, seed: int) -> None:
     import torch
@@ -591,12 +617,14 @@ def main(argv=None) -> int:
     max_steps = int(args.max_steps)
 
     tok = AutoTokenizer.from_pretrained(base_repo)
-    if len(tok) != rules.tokenizer_vocab:
-        print(f"[guard] REFUSED: tokenizer vocab {len(tok)} != pinned "
-              f"{rules.tokenizer_vocab} (annotation_rules.yaml) — wrong tokenizer "
-              "pins the alignment contract")
+    from transformers import AutoConfig
+    emb_rows = int(getattr(AutoConfig.from_pretrained(base_repo), "vocab_size", 0))
+    problem = tokenizer_pin_problem(len(tok), emb_rows, rules.tokenizer_vocab)
+    if problem:
+        print(f"[guard] REFUSED: {problem}")
         return EXIT_GUARD
-    print(f"[tok] vocab={len(tok)} repo={base_repo}")
+    print(f"[tok] tokenizer_vocab={len(tok)} embedding_rows={emb_rows} "
+          f"pin={rules.tokenizer_vocab} repo={base_repo}")
 
     feats = build_features(tok, train_rows, rules, max_len, counters)
     vfeats = build_features(tok, valid_rows, rules, max_len, counters)
@@ -632,7 +660,10 @@ def main(argv=None) -> int:
     opt = torch.optim.AdamW(model.parameters(), lr=lr,
                             weight_decay=float(cfg.get("encoder.weight_decay", 0.01)))
     steps_per_epoch = max(1, math.ceil(len(feats) / batch_size))
-    total_steps = (max_steps or steps_per_epoch * epochs)
+    # The FULL length of the configured run — the yardstick for "is this run
+    # partial?", independent of the --max-steps cap applied to total_steps.
+    full_steps = steps_per_epoch * epochs
+    total_steps = (max_steps or full_steps)
     sched = get_linear_schedule_with_warmup(opt, int(0.1 * total_steps), total_steps)
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -678,6 +709,12 @@ def main(argv=None) -> int:
         feats, generator=torch.Generator().manual_seed(seed + start_epoch))
     loader = DataLoader(feats, batch_size=batch_size, sampler=sampler,
                         collate_fn=lambda b: collate(b, pad_id, label_of))
+    # A resume that already reached the --max-steps cap must not run a further
+    # step just because the loop starts: collapse the epoch range instead.
+    if max_steps and start_step >= max_steps:
+        print(f"[resume] step {start_step} is already at --max-steps {max_steps}: "
+              "no training needed — re-checkpointing the resumed state")
+        epochs = start_epoch
     # Losses exactly as the contract states: class-weighted intent CE +
     # lambda_slot * masked slot CE (+ optional tau^2 * KL for stage 2).
     ce_intent = torch.nn.CrossEntropyLoss(
@@ -686,7 +723,13 @@ def main(argv=None) -> int:
     model.train()
     step, t0 = start_step, time.time()
     done = False
+    # `resume_epoch` is the epoch a continuation must restart from (the epoch
+    # the loop is currently inside). The final checkpoint must save THIS, not
+    # `epochs` — saving the terminal epoch made a resume start past the end of
+    # the run and silently do nothing (observed on the server smoke run).
+    resume_epoch = start_epoch
     for epoch in range(start_epoch, epochs):
+        resume_epoch = epoch
         if epoch != start_epoch:
             sampler.generator = torch.Generator().manual_seed(seed + epoch)
         skip = max(0, step - epoch * steps_per_epoch)
@@ -732,8 +775,16 @@ def main(argv=None) -> int:
                 break
         if done:
             break
-    if not done:
-        save_state(state_path, model, opt, sched, step, epochs, cfg_hash, data_hash, seed)
+    # Resumability: a run stopped early by --max-steps is a PARTIAL run and must
+    # leave state.pt behind (the server smoke run proved the opposite was true —
+    # a capped run left no state, so nothing could continue). A run that finished
+    # all epochs has nothing to resume and deliberately leaves no state file: a
+    # stale state.pt would only invite an accidental continuation.
+    partial = bool(done) and step < full_steps
+    if partial:
+        save_state(state_path, model, opt, sched, step, epoch, cfg_hash, data_hash, seed)
+        print(f"[state] partial run (max-steps {max_steps}) — resume with the same "
+              f"command; state -> {state_path}")
 
     valid_metrics = evaluate(model, tok, valid_rows, vfeats, rules, device, batch_size)
     print(f"[valid] {json.dumps(valid_metrics, sort_keys=True)}")
@@ -743,9 +794,11 @@ def main(argv=None) -> int:
     calib_path = out_dir / "calibration.json"
     if calib_path.exists():
         calib = read_json(calib_path)
-    _checkpoint(model, tok, opt, sched, out_dir, state_path, step, epochs, cfg_hash,
-                data_hash, seed, rules, cfg, base_repo, max_len, data_hashes,
-                smoke=args.smoke, contract=contract, calib=calib, final=True)
+    # `final=True` skips the state write, so only a COMPLETE run passes it; a
+    # --max-steps-capped run keeps its state.pt (written just above) resumable.
+    _checkpoint(model, tok, opt, sched, out_dir, state_path, step, resume_epoch,
+                cfg_hash, data_hash, seed, rules, cfg, base_repo, max_len, data_hashes,
+                smoke=args.smoke, contract=contract, calib=calib, final=not partial)
 
     manifest = {
         "schema": "encoder-run-manifest/v1",

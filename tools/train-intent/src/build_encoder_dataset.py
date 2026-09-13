@@ -389,8 +389,9 @@ def source_stats(paths: list[Path]) -> list[dict]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--sources", default="", help="comma-separated source jsonl "
-                        f"(default: {', '.join(DEFAULT_SOURCES)})")
+    parser.add_argument("--sources", nargs="+", default=None,
+                        help="source jsonl files, comma-separated or space-separated "
+                             f"(default: {', '.join(DEFAULT_SOURCES)})")
     parser.add_argument("--out-dir", default="data/encoder")
     parser.add_argument("--report", default="")
     parser.add_argument("--rules", default="")
@@ -418,7 +419,11 @@ def main() -> int:
         print(f"[guard] REFUSED: {e}", file=sys.stderr)
         return EXIT_GUARD
 
-    sources = [Path(s.strip()) for s in args.sources.split(",") if s.strip()] or \
+    # Both spellings are accepted ("a.jsonl,b.jsonl" and "a.jsonl b.jsonl"):
+    # run_encoder_pipeline.py forwards --sources as separate argv entries, and a
+    # single-value option would silently keep only the first one.
+    given = [p for chunk in (args.sources or []) for p in str(chunk).split(",") if p.strip()]
+    sources = [Path(p.strip()).expanduser() for p in given] or \
         [ROOT / s for s in DEFAULT_SOURCES]
     for src in sources:
         try:
@@ -426,6 +431,20 @@ def main() -> int:
         except GuardError as e:
             print(f"[guard] REFUSED: {e}", file=sys.stderr)
             return EXIT_GUARD
+    # A source that does not exist is either a path mistake (the caller's cwd is
+    # not this process's cwd) or a stage that was never run. Warning per file is
+    # fine for an optional member of a set, but ALL of them missing means the
+    # build would quietly produce an empty corpus — refuse instead, and print
+    # the resolved path so the cwd mismatch is visible.
+    missing = [s for s in sources if not s.exists()]
+    if missing and len(missing) == len(sources):
+        print("[guard] REFUSED: none of the --sources exist: "
+              + ", ".join(str(s.resolve()) for s in missing)
+              + " — run the upstream stage first, or fix the path (paths are "
+                "resolved against the current directory)", file=sys.stderr)
+        return EXIT_GUARD
+    for s in missing:
+        print(f"[build-encoder] warning: {s.resolve()} missing — skipped")
 
     # config.yaml is the runtime knob source (same convention as build_dataset);
     # the T-034 rules are the contract — a disagreement is a hard error, never a
@@ -452,8 +471,7 @@ def main() -> int:
 
     raw: list[dict] = []
     for src in sources:
-        if not src.exists():
-            print(f"[build-encoder] warning: {src} missing — skipped")
+        if not src.exists():   # already warned (with its resolved path) in main()
             continue
         rows = [json.loads(line) for line in src.read_text(encoding="utf-8").splitlines()
                 if line.strip()]

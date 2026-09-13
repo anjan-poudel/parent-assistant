@@ -103,6 +103,19 @@ startup. Changing either file invalidates a resume (`cfg_hash` covers both).
 | 4 | corpus-floor refusal for a real run (waivable only with an explicit flag) |
 | 5 | publish withheld by `run_encoder_pipeline.py` |
 
+The calibration verdict is **tri-state**: `true` (measured, inside tolerance),
+`false` (measured, outside), or `null` — *not measurable*, because the golden
+corpus is below the contract's `corpus_floor` / `measurable_today=false`. `null`
+withholds publication exactly like `false`: with a 20-row corpus every bucket
+under-fills and pools, and an empty violation list must never be read as a pass.
+
+Paths passed to a stage (`--sources`, `--build-report`, `--publish-dir`) are
+made absolute at the pipeline's entry point, because stages run with cwd set to
+`tools/train-intent/` rather than the caller's directory. `--sources` accepts
+both comma- and space-separated lists; a source that does not exist is named
+with its resolved path, and if *none* of them exist the build refuses instead of
+producing an empty corpus.
+
 The golden corpus is **never** a training input: `build_encoder_dataset.py`,
 `train_encoder.py` and `calibrate_encoder.py` all refuse it by normalized
 (matra-stripped) membership, and that refusal has a test that runs the CLI and
