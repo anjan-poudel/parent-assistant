@@ -463,5 +463,92 @@ on master. The six rows were replaced with verified non-golden text and the JSON
 regenerated — test data only; no guard or assertion changed. The suite is green again:
 **183 tests, all pass, 4 skipped** (torch-only) on the Mac.
 
-**Still true:** no run launched from this round; publication would still be withheld at E3
-(calibration not measurable) and E4 (harness gates) as measured in the coordinator's run.
+**Superseded:** the line that stood here ("no run launched from this round") is no longer
+true — the validation relaunch and the CoreML export both ran; see §10.
+
+## 10. Validation relaunch + CoreML export (coordinator-run, 2026-09-13)
+
+**Validation relaunch.** Run `t036-validate-8836350-20260913-121622`, launched at `8836350`
+(`encoder.artifact.version: 0.1.0-internal`) through `queue_encoder.sh` with
+`T036_WAIVE_FLOOR=corpus_floor,stt_noised_floor,per_action_floor`, `T036_WAIVE_LEAK=1` and a
+recorded reason, against the pre-cleaned derived sources
+(`runs/clean-9af1d59-20260913-120652/sources_clean`, `provenance.json` records the drop
+predicate). The queue gate re-checked the card itself and found it free (0%, 38 MiB).
+
+- Stage timings: build 2.15 s, train 41.83 s, calibrate 5.4 s, eval 6.96 s; pipeline **exit 5**
+  (publish gate withheld). Nothing published.
+- The **leak counter is 0** on the cleaned sources: the guard is satisfied on the merits, and
+  the leak waiver is recorded as belt-and-braces (`requested: true, waived: true, counter: 0`)
+  with the parent-derived scope/note, in both the build report and the run manifest.
+- Floors: 12 violations, all three classes waived with the reason verbatim; corpus 2,561 rows
+  (2,433 train / 128 valid), `stt_noised` 0.416, 2,450 distinct noised transcripts.
+- Gates: closed_intent 0.5287, contact_f1 0.0667, time_f1 0.0, emergency_recall 0.9375,
+  side_effect 0.6364, abstention 0.4138, calibration deviation 0.2644 — 9 failures; withheld for
+  harness gates plus calibration not measurable below the corpus floor.
+- Artifact sha256 prefix **26ee1ec9b5ce** — distinct from the `6d2989e95785` checkpoint that was
+  exported to CoreML, so the device zip is the earlier run's artifact, as instructed.
+
+**CoreML export.** `bakeoff_export_coreml.py` run on the Mac against the `6d2989e95785`
+artifact, with `T033_BACKBONE_OVERRIDE` pointed at the cached safetensors backbone and
+`--reps 5 --latency-passes 2` (reduced from the defaults to bound the CPU-only latency loop;
+the report records the real n).
+
+- Zip: `t033-encoder-int8-mlmodelc.zip`, sha256
+  `e0ff09231843c5a6e667db9f6a33d5994df9a2f37c9601f82e1a125073d7aaa5`, 109,086,647 bytes, one
+  top-level `t033-encoder-int8.mlmodelc` — the ModelStore shape.
+- Landed at `models/web/encoder-dev/` on the server (docroot side) and reported as the
+  `INTENT_ENCODER_SPIKE_ZIP` value from the Mac staging copy; `v0-coreml-report.json` sits
+  beside it and in the producing run dir.
+- Verification through the **int8** model, 189 golden rows: intent agreement 0.9894, slot-tag
+  agreement 0.9971. Inputs `Int32 1...64` flexible, matching the runner's wire contract.
+- Latency p50 25.93 ms / p95 31.32 ms, n=945, CPU_ONLY x86_64 proxy; device-class number
+  still UNMEASURED (no device). Not comparable with the T-033 report's 178.56 ms — the export
+  script's own comment documents 20.5 ms vs 178.6 ms for the same artifact under machine
+  contention, so that figure was contention-inflated.
+- Framed throughout as an internal-testing baseline: closed intent ~0.53, emergency recall
+  0.9375, publish withheld. Mechanics and baseline behaviour, not quality.
+
+**Install blocker (flagged for a decision).** The spike entry pins the *T-033* zip's hash, and
+`ModelStore.installCoreMLEncoder` verifies it unconditionally for `.intentEncoder`
+(`ModelStore.swift:242-247`), so the new zip fails `checksumMismatch` under the app's `.strict`
+default until the pin moves. A worktree task was dispatched to re-pin the sha256/sizeBytes and
+update the two test assertions; not merged here.
+
+**Platform question, resolved by measurement.** A device install could have failed if a
+host-compiled `.mlmodelc` were macOS-locked, so an iOS-targeted compile
+(`coremlcompiler compile --platform iOS`) was compared file by file against the shipped one:
+`model.mil`, `metadata.json`, `analytics/coremldata.bin` and `weights/weight.bin` are
+**byte-identical**, and the top-level `coremldata.bin` differs only in the *ordering* of two
+metadata entries (`conversion_date` / `source`). No platform marker, no arch-specific binary —
+the archive is MIL plus weights and is compiled for the device at load time. The remaining
+unknown is only the load itself (no device was available to try it).
+
+## 11. Why the corpus-regeneration job could not be launched as specified (measured)
+
+The requested "noised whisper passes targeting >=4,800 distinct surviving noised rows" cannot
+produce new rows with the pipeline as it stands, so the card was left idle rather than burned:
+
+- `stt_noise.py` is deterministic end to end. `synthesize()` receives no variant index and
+  passes no prosody or speaker variation; the hf transcriber calls `generate()` greedily. So
+  `variants_per_utterance: 2` writes two identical transcripts per utterance.
+- Measured on the server corpora: `noised.jsonl` is 29,304 rows but only **2,458 distinct**
+  texts, 2,048 of them duplicated. `config.yaml`'s own mixture comment already calls the
+  bucket "already fully used: 2458 distinct transcripts". Re-running can only re-attempt the
+  ~6.7k identical round-trips that are dropped every time.
+- The >=4,800 figure is 0.60 x `corpus_floor` 8,000. Reaching it needs more distinct source
+  utterances and/or diversity in the TTS/decode path (multiple voices, `--length_scale` /
+  `--noise_scale` per variant, sampling decode with a per-variant seed) — a code change, after
+  which the GPU pass is short.
+- The two zero-row actions are not a noise problem: `create_calendar_event` and
+  `suggest_video` are taxonomy `proposed` intents (600/500) with no seed templates in
+  `seeds/intents.yaml` and 0 teacher rows, so no STT pass can ever produce them.
+- The clean side is short too: 2,561 rows against the 8,000 floor, with set_reminder 48/300,
+  ack_med 11/200, guide 13/150, query 41/250.
+- Repo note: the corpus tooling lives in the separate `parent-assistant` repo, whose
+  `stt_noise.py` is newer (8,959 B, Sep 12) than this repo's copy (6,585 B, Sep 6), so a
+  diversity patch belongs there, not in this worktree.
+
+Card state at the time of writing: idle (0% util, 38 MiB, no compute processes), this repo's
+queue empty. The waiting GPU job is the `parent-assistant` repo's own: its HEAD records the
+`qwen-kr-repaired` k=3 eval stopped at step 155/405 with the GPU released to the encoder run
+and the resume command documented.
