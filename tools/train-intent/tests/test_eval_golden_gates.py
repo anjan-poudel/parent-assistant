@@ -16,6 +16,7 @@ committed ledgers are never modified and the tests are hermetic.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -408,6 +409,16 @@ class GateFixtureIntegrationTests(unittest.TestCase):
                 cwd=ROOT, capture_output=True, text=True)
             self.assertEqual(proc.returncode, 2)
             self.assertIn("fixture validation FAILED", proc.stderr)
+
+    def test_fixture_sweep_script_references_only_existing_files(self):
+        """run_fixture_sweep.sh is the operator-facing proof that every gate can
+        fail; a renamed fixture file must not leave it silently half-broken."""
+        script = (FIXTURES / "run_fixture_sweep.sh").read_text(encoding="utf-8")
+        referenced = set(re.findall(r"\b(?:corpus|preds|nearmiss|results_baseline)[A-Za-z0-9_]*\.(?:jsonl|csv)",
+                                    script))
+        self.assertTrue(referenced, "sweep script references no fixture files?")
+        missing = sorted(name for name in referenced if not (FIXTURES / name).exists())
+        self.assertEqual(missing, [], f"fixture sweep references missing files: {missing}")
 
 
 class LeakageGuardTests(unittest.TestCase):
