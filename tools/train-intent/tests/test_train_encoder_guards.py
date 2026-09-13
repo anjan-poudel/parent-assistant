@@ -229,9 +229,18 @@ class TestResumeAndDistillationGuards(unittest.TestCase):
         # contract runtime.meta_json.required_keys
         for key in contract.meta_required_keys:
             self.assertIn(key, meta, f"meta.json must carry {key}")
-        self.assertIsNone(meta["calibration_temperature"])
+        # calibration_temperature is present, numeric and honest: identity 1.0
+        # marked uncalibrated — the interpreter divides by it, so null/unset must
+        # not be indistinguishable from calibrated.
+        self.assertEqual(meta["calibration_temperature"], 1.0)
+        self.assertEqual(meta["calibration"]["status"], "uncalibrated")
         self.assertIsNone(meta["artifact_digest"])
         self.assertEqual(meta["provenance"]["contract_sha256"], contract.sha256)
+        # Export-dtype reconciliation + interpreter runtime.config are recorded.
+        conf = meta["conformance"]
+        self.assertEqual(conf["input_dtype"]["ios_coreml_wire"]["input_dtype"], "int32")
+        self.assertEqual(conf["input_dtype"]["contract_graph_input_dtype"], "int64")
+        self.assertEqual(conf["runtime_config"]["maxSequenceLength"], 64)
 
 
 class TestHistograms(unittest.TestCase):

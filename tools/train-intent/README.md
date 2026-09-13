@@ -92,6 +92,21 @@ calibration gate buckets live in `encoder_contract.yaml` (T-035) and are
 asserted element-wise against `annotation_rules.yaml` (T-034) at every stage
 startup. Changing either file invalidates a resume (`cfg_hash` covers both).
 
+**Export conformance (recorded, not implied).** The contract states `int64`
+graph inputs; the already-compiled T-033 CoreML artifact and the shipped iOS
+runner (`IntentEncoderInterpreter.swift`, T-037-a) use **int32 on the wire**, and
+coremltools inserts the int32 -> int64 cast at the graph input — so the iOS side
+needs no change. That reconciliation is written into `meta.json` and
+`run_manifest.json` under `conformance` (together with the interpreter-side
+`runtime.config`, which training records but never drives), and
+`bakeoff_export_coreml.py` declares the wire dtype as `WIRE_INPUT_DTYPE` with the
+same note — an int64 CoreML export would need a matching runner change, so it is
+flagged rather than left to whichever script exports first. `max_len` must equal
+the contract's `runtime.config.maxSequenceLength` (64); the trainer and the
+calibrator refuse a mismatch. `meta.json:calibration_temperature` is always
+numeric and honest: `1.0` with `calibration.status='uncalibrated'` until stage E3
+fits one, never null, because the interpreter divides by it.
+
 **Guards — refusals, not warnings** (exit codes from `src/pipeline_guards.py`):
 
 | Code | Meaning |

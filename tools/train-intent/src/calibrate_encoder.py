@@ -240,6 +240,11 @@ def main(argv=None) -> int:
         return EXIT_GUARD
     gate_cfg = contract.calibration_gate or {}
     max_len = int(args.max_len or meta.get("max_len", cfg.get("encoder.max_len", 64)))
+    try:
+        contract.check_max_len(max_len)   # runtime.config.maxSequenceLength (T-035)
+    except ContractError as e:
+        print(f"[guard] REFUSED: {e}")
+        return EXIT_GUARD
     buckets = int(args.buckets or gate_cfg.get("buckets")
                   or cfg.get("encoder.calibration.buckets", 10))
     # tolerance/min_samples come from the T-035 contract's calibration.gate
@@ -287,7 +292,8 @@ def main(argv=None) -> int:
         # ("graph emits raw logits; divide then softmax in interpreter code").
         meta["calibration_temperature"] = fit["temperature"]
         meta["calibration"] = {"status": "fitted", "temperature": fit["temperature"],
-                               "fit_rows": len(rows), "mechanism": contract.calibration.get(
+                               "fit_rows": len(rows), "method": fitted["method"],
+                               "mechanism": contract.calibration.get(
                                    "mechanism", "temperature_scaling"),
                                "applied_in": contract.calibration.get("applied_in",
                                                                      "interpreter_code"),

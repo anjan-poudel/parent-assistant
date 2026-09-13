@@ -342,10 +342,21 @@ def make_meta(rules, cfg, base_repo: str, max_len: int, steps: int,
     """Artifact meta. `intents`/`tags` ARE the logit order (T-035 contract).
 
     The contract's `runtime.meta_json.required_keys` are all present here:
-    intents, tags, max_len, calibration_temperature, artifact_digest. The last
-    two are stamped by `_stamp_artifact_meta` after the weights are written
-    (a file cannot contain the hash of the bytes that contain the hash).
+    intents, tags, max_len, calibration_temperature, artifact_digest. The digest
+    is stamped by `stamp_artifact_meta` after the weights are written (a file
+    cannot contain the hash of the bytes that contain the hash).
+
+    `calibration_temperature` is ALWAYS a number: before stage E3 fits one it is
+    the honest identity 1.0 with `calibration.status='uncalibrated'`, never null —
+    the interpreter divides by it, and "unset" must not be indistinguishable from
+    "calibrated to 1.0". Stage E3 rewrites both keys with the fitted value.
     """
+    cal = calib or {"status": "uncalibrated", "temperature": 1.0,
+                    "mechanism": "identity (temperature scaling not yet fitted)",
+                    "applied_in": "interpreter_code",
+                    "graph_contains_temperature": False,
+                    "note": "no fit has been performed; this is T=1.0, not a "
+                            "calibrated value"}
     meta = {
         "intents": list(rules.labels),      # == contract.heads.intent.labels (asserted)
         "tags": list(rules.bio_tags),       # == contract.heads.slot.tags (asserted)
@@ -356,8 +367,8 @@ def make_meta(rules, cfg, base_repo: str, max_len: int, steps: int,
         "data": data_hashes,
         "rules_sha256": sha256_file(rules.path),
         "smoke": smoke,
-        "calibration": calib or {"status": "uncalibrated"},
-        "calibration_temperature": (calib or {}).get("temperature"),
+        "calibration": cal,
+        "calibration_temperature": float(cal.get("temperature") or 1.0),
         "artifact_digest": None,
         "provenance": {"task": "T-036", "schema": "encoder-artifact/v1"},
     }
@@ -368,6 +379,15 @@ def make_meta(rules, cfg, base_repo: str, max_len: int, steps: int,
             "contract_sha256": contract.sha256,
             "contract_source_task": contract.source_task,
         })
+        # Export-dtype reconciliation (int64 contract vs int32 CoreML wire) and
+        # the interpreter-side runtime.config: recorded here, not re-decided.
+        meta["conformance"] = {
+            "input_dtype": contract.dtype_conformance(),
+            "runtime_config": dict(contract.runtime_config),
+            "note": "runtime.config is applied by the iOS interpreter (T-037); the "
+                    "trainer neither drives nor overrides it, it is recorded so a "
+                    "T-035 revision is detectable",
+        }
     return meta
 
 
@@ -587,6 +607,16 @@ def main(argv=None) -> int:
     else:
         print(f"[distill] stage 2 skipped: {spec['reason']}")
 
+    max_len = int(args.max_len or cfg.get("encoder.max_len", 64))
+    try:
+        # runtime.config.maxSequenceLength is the contract's value and equals
+        # meta.json:max_len (T-035); an off-contract truncation is refused here,
+        # before torch is imported, like every other guard.
+        contract.check_max_len(max_len)
+    except ContractError as e:
+        print(f"[guard] REFUSED: {e}")
+        return EXIT_GUARD
+
     # ---- heavy imports (all guards above ran without them, on purpose) ----
     try:
         import torch
@@ -601,7 +631,6 @@ def main(argv=None) -> int:
               "refused inputs fail the same way on a machine without torch.")
         return EXIT_STAGE
 
-    max_len = int(args.max_len or cfg.get("encoder.max_len", 64))
     batch_size = int(args.batch_size or cfg.get("encoder.batch_size", 16))
     epochs = int(args.epochs or cfg.get("encoder.epochs", 6))
     lr = float(args.lr or cfg.get("encoder.lr", 5e-5))

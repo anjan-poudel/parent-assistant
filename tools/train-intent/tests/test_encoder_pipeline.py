@@ -20,10 +20,31 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 import fixtures  # noqa: E402
 from run_encoder_pipeline import (  # noqa: E402
-    EXIT_GATE, harness_metrics, publish_reasons, retry_ok, run_stage,
+    EXIT_GATE, conformance_block, harness_metrics, publish_reasons, retry_ok, run_stage,
 )
 
 PIPELINE = ROOT / "src" / "run_encoder_pipeline.py"
+
+
+class TestConformanceBlock(unittest.TestCase):
+    """The run manifest must carry the T-035 conformance record (dtype
+    reconciliation + interpreter runtime.config), not leave it implicit."""
+
+    @classmethod
+    def setUpClass(cls):
+        from encoder_contract import load_contract
+        cls.block = conformance_block(load_contract())
+
+    def test_dtype_reconciliation_is_recorded(self):
+        dtype = self.block["input_dtype"]
+        self.assertEqual(dtype["contract_graph_input_dtype"], "int64")
+        self.assertEqual(dtype["ios_coreml_wire"]["input_dtype"], "int32")
+        self.assertIn("runner", dtype["ios_coreml_wire"]["flag"])
+
+    def test_runtime_config_is_recorded_but_not_driven(self):
+        self.assertEqual(self.block["runtime_config"]["confidenceThreshold"], 0.4)
+        self.assertEqual(self.block["runtime_config"]["timeoutSeconds"], 2.0)
+        self.assertIn("T-037", self.block["note"])
 
 
 class TestRetryPolicy(unittest.TestCase):

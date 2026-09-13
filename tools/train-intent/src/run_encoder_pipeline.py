@@ -144,6 +144,24 @@ def harness_metrics(manifest_out: Path) -> dict | None:
     return json.loads(last) if last else None
 
 
+def conformance_block(contract) -> dict:
+    """Machine-readable conformance record for the run manifest.
+
+    Two things the T-035 contract fixes that live outside the training maths and
+    would otherwise be decided implicitly at export time: the export input dtype
+    (contract says int64; the shipped CoreML artifact + T-037-a iOS runner use
+    int32 — `EncoderContract.dtype_conformance()` states the reconciliation) and
+    the interpreter-side `runtime.config` (recorded, not driven by this pipeline).
+    """
+    return {
+        "input_dtype": contract.dtype_conformance(),
+        "runtime_config": dict(contract.runtime_config),
+        "note": "runtime.config is applied by the iOS interpreter (T-037); this "
+                "pipeline neither drives nor overrides it — recorded so a T-035 "
+                "revision is detectable",
+    }
+
+
 def publish_reasons(smoke: bool, harness_exit: int | None, calibration_passed,
                     unchanged: bool, no_publish: bool, skip_calibration: bool,
                     version) -> tuple[list[str], str | None]:
@@ -395,6 +413,7 @@ def main(argv=None) -> int:
                              "detectable, and all logit ordering comes from it"},
         "stages": stages,
         "gates": gates,
+        "conformance": conformance_block(contract),
         "publish": {"published": False, "dir": None, "label": label,
                     "withheld_reasons": reasons,
                     "version": version, "version_error": version_err},

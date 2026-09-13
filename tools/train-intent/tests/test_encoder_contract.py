@@ -107,6 +107,48 @@ class TestContractLoad(unittest.TestCase):
             load_contract(rules=Fake())
 
 
+class TestRuntimeConformance(unittest.TestCase):
+    """T-035 `runtime.config` + the export-dtype reconciliation T-036 records.
+
+    The contract states int64 graph inputs, but the compiled T-033 CoreML
+    artifact and the T-037-a iOS runner use Int32. The decision (iOS wire stays
+    int32, no runner change) must be *stated*, not implied by whichever script
+    happens to export first.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.contract = load_contract()
+
+    def test_runtime_config_is_the_contracts_and_complete(self):
+        rc = self.contract.runtime_config
+        self.assertEqual(rc["confidenceThreshold"], 0.4)
+        self.assertEqual(rc["maxSequenceLength"], 64)
+        self.assertEqual(rc["timeoutSeconds"], 2.0)
+        self.assertEqual(rc["maxRetries"], 0)
+        self.assertIs(rc["retryOnArtifactLoadRace"], True)
+        self.assertEqual(self.contract.graph_input_dtype, "int64")
+
+    def test_max_len_must_equal_the_contract(self):
+        self.contract.check_max_len(64)
+        for bad in (32, 128):
+            with self.assertRaises(ContractError) as cm:
+                self.contract.check_max_len(bad)
+            self.assertIn("maxSequenceLength", str(cm.exception))
+
+    def test_dtype_conformance_states_both_sides_and_the_flag(self):
+        c = self.contract.dtype_conformance()
+        self.assertEqual(c["contract_graph_input_dtype"], "int64")
+        self.assertEqual(c["training_graph"]["input_ids"], "int64")
+        self.assertEqual(c["ios_coreml_wire"]["input_dtype"], "int32")
+        self.assertEqual(c["onnx_android_wire"]["input_dtype"], "int64")
+        self.assertIn("int32", c["decision"])
+        self.assertIn("runner", c["ios_coreml_wire"]["flag"])
+        evidence = " ".join(c["ios_coreml_wire"]["evidence"])
+        self.assertIn("metadata.json", evidence)
+        self.assertIn("IntentEncoderInterpreter.swift", evidence)
+
+
 class TestStudentSize(unittest.TestCase):
     def setUp(self):
         self.contract = load_contract()

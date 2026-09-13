@@ -34,6 +34,17 @@ import torch
 
 from bakeoff_encoder import load_model
 
+# Export-dtype conformance (T-035 contract vs T-033/T-037 wire), stated here so
+# it is never changed silently: `encoder_contract.yaml runtime.graph.inputs`
+# declares int64 (the torch/ONNX convention), while this CoreML export declares
+# int32 because the compiled T-033 artifact's metadata.json declares Int32
+# [1, 1...64] and the shipped iOS runner (IntentEncoderInterpreter.swift,
+# T-037-a) sends Int32; coremltools inserts the int32 -> int64 cast at the graph
+# input. Exporting int64 inputs here WOULD require a matching iOS runner change.
+# The decision and its evidence are recorded machine-readably in the T-036
+# artifact meta.json and run_manifest.json under "conformance".
+WIRE_INPUT_DTYPE = np.int32
+
 
 def dir_size_mb(path: Path) -> float:
     if path.is_file():
@@ -109,8 +120,10 @@ def main() -> None:
     try:
         mlmodel = ct.convert(
             traced,
-            inputs=[ct.TensorType(name="input_ids", shape=(1, seq_dim), dtype=np.int32),
-                    ct.TensorType(name="attention_mask", shape=(1, seq_dim), dtype=np.int32)],
+            inputs=[ct.TensorType(name="input_ids", shape=(1, seq_dim),
+                                  dtype=WIRE_INPUT_DTYPE),
+                    ct.TensorType(name="attention_mask", shape=(1, seq_dim),
+                                  dtype=WIRE_INPUT_DTYPE)],
             outputs=[ct.TensorType(name="intent_logits"),
                      ct.TensorType(name="slot_logits")],
             convert_to="mlprogram",

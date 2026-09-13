@@ -61,6 +61,8 @@ class EncoderContract:
     bands: dict = field(default_factory=dict)
     gates: dict = field(default_factory=dict)
     max_len_hint: int | None = None
+    graph_input_dtype: str = "int64"
+    runtime_config: dict = field(default_factory=dict)
 
     def intent_index(self) -> dict[str, int]:
         return {lab: i for i, lab in enumerate(self.intent_labels)}
@@ -82,6 +84,57 @@ class EncoderContract:
                 f"student has {n_params:,} params, outside the T-035 target range "
                 f"[{lo:,}, {hi:,}] — resize the model or revise the contract "
                 "(do not silently train an off-contract student).")
+
+    def check_max_len(self, max_len: int) -> None:
+        """`runtime.config.maxSequenceLength` is the contract's, not the config's.
+
+        It is stated as `= meta_json.max_len` and fixes the exported graph shape
+        (input_ids `[1, "<=64"]`). Training at a different truncation would make
+        meta.json disagree with the graph the iOS runner feeds.
+        """
+        want = self.runtime_config.get("maxSequenceLength", self.max_len_hint)
+        if want is not None and int(max_len) != int(want):
+            raise ContractError(
+                f"encoder.max_len={max_len} != contract runtime.config."
+                f"maxSequenceLength={want} — the exported graph shape and "
+                "meta.json:max_len are fixed by the T-035 contract; revise the "
+                "contract rather than training an off-contract sequence length.")
+
+    def dtype_conformance(self) -> dict:
+        """The int64-vs-int32 export-dtype reconciliation, stated not implied.
+
+        The contract states int64 graph inputs (the PyTorch/ONNX convention: an
+        Embedding takes long). The already-compiled T-033 CoreML artifact declares
+        Int32 and the T-037-a iOS runner sends Int32, so the wire dtype on iOS is
+        int32 and coremltools inserts the int32 -> int64 cast at the graph input.
+        Decision: the iOS wire stays int32 — no runner change — while the torch
+        graph and the ONNX export keep the contract's int64. This block is written
+        into meta.json and run_manifest.json so the choice is recorded rather than
+        silently diverging; a CoreML export declaring int64 inputs *would* need a
+        matching iOS runner change, and that is flagged rather than assumed.
+        """
+        return {
+            "contract_graph_input_dtype": self.graph_input_dtype,
+            "training_graph": {
+                "input_ids": "int64",
+                "mechanism": "PyTorch Embedding requires long; the trainer and the "
+                             "traced graph use .long() input ids",
+            },
+            "ios_coreml_wire": {
+                "input_dtype": "int32",
+                "evidence": [
+                    "T-033 compiled artifact metadata.json declares Int32 [1, 1...64]",
+                    "T-037-a IntentEncoderInterpreter.swift sends Int32",
+                ],
+                "boundary": "coremltools inserts the int32 -> int64 cast at the graph input",
+                "flag": "a CoreML export declaring int64 inputs would require a matching "
+                        "iOS runner change — do not diverge silently",
+            },
+            "onnx_android_wire": {"input_dtype": self.graph_input_dtype},
+            "decision": "iOS wire dtype stays int32 (matches the shipped artifact and "
+                        "runner, no iOS change); int64 remains the contract dtype for "
+                        "the torch graph and the ONNX export",
+        }
 
 
 def _parse_range(text: str) -> tuple[float, float] | None:
@@ -148,6 +201,25 @@ def load_contract(path: str | Path | None = None, rules=None) -> EncoderContract
         m = re.search(r"(\d+)", shape[1])
         hint = int(m.group(1)) if m else None
 
+    input_dtype = str(graph.get("inputs", {}).get("input_ids", {}).get("dtype") or "")
+    if input_dtype not in ("int32", "int64"):
+        raise ContractError(
+            f"{p.name}: runtime.graph.inputs.input_ids.dtype is {input_dtype!r} — "
+            "expected int32/int64 so the export-dtype reconciliation can be recorded "
+            "against the shipped CoreML artifact and iOS runner")
+    runtime_config = dict(c.get("runtime", {}).get("config", {}))
+    for key in ("confidenceThreshold", "maxSequenceLength", "timeoutSeconds",
+                "maxRetries", "retryOnArtifactLoadRace"):
+        if key not in runtime_config:
+            raise ContractError(
+                f"{p.name}: runtime.config.{key} is missing — the interpreter "
+                "contract is incomplete and T-036 will not guess it")
+    if hint is not None and int(runtime_config["maxSequenceLength"]) != hint:
+        raise ContractError(
+            f"{p.name}: runtime.config.maxSequenceLength="
+            f"{runtime_config['maxSequenceLength']} disagrees with the declared "
+            f"input_ids shape {shape!r} (parsed {hint})")
+
     return EncoderContract(
         path=p,
         sha256=sha256_file(p),
@@ -174,6 +246,8 @@ def load_contract(path: str | Path | None = None, rules=None) -> EncoderContract
         bands=dict(c.get("bands", {})),
         gates=dict(c.get("gates", {})),
         max_len_hint=hint,
+        graph_input_dtype=input_dtype,
+        runtime_config=runtime_config,
     )
 
 
