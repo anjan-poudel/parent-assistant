@@ -434,3 +434,34 @@ guard's condition in `train_encoder.py` was left untouched.
 
 - Notes to self about the run: the waiver's reason string is stored verbatim in the run's
   `build_report.json:floors.waive_reason`; no utterance text is in any log or manifest.
+
+## 9. Leak-counter waiver + fixture realignment (commits 8a4bb11, 91307a7, on top of 9af1d59)
+
+**Why.** The 12:04:39 run died at E2 on `train_encoder.py`'s unconditional refusal when the
+build report's `counters.leak > 0` (leak = 105: rows E1 had already excluded as exact
+golden matches). That made the real corpora untrainable with or without the floor waiver.
+
+**What was built (`8a4bb11`).** `--waive-leak` mirrors the floor waiver end to end:
+`build_encoder_dataset.py` records a `leak_waiver` block (requires `--waive-reason`) and
+prints the exclusion; `train_encoder.py` honors the recorded waiver and keeps the row-level
+belt-and-braces guard non-waivable, with its refusal message unchanged;
+`run_encoder_pipeline.py` refuses (EXIT_GUARD/3) before any stage when the reason is missing
+or the build stage will not run, forwards the flag only to E1, and records `leak_waiver` in
+`run_manifest.json` alongside the floor record; `queue_encoder.sh` forwards
+`T036_WAIVE_LEAK=1`. The help text, build-report `scope`/`note` and manifest note all state
+the limit measured by the coordinator: the counter is **exact normalized-utterance matches
+only** (teacher 67 hits / 25 keys, noised 32 / 2, edge_cases 6 / 5) and cannot see the 118
+noised rows whose `clean_utterance` parent is a golden utterance (22 keys) — so "waived"
+means "exact matches were excluded", never "contamination handled". The earlier rationale
+that "E1 already excluded the rows, so the counter documents exclusion, not contamination"
+holds for the exact 105 rows and NOT for the parent-derived ones; a waiver alone is not a
+de-overlap.
+
+**Fixture realignment (`91307a7`).** The T-038 golden-corpus expansion (`01a494f`, 189 rows)
+put six fixture utterances inside the held-out skeleton, which is why five tests had been red
+on master. The six rows were replaced with verified non-golden text and the JSONL
+regenerated — test data only; no guard or assertion changed. The suite is green again:
+**183 tests, all pass, 4 skipped** (torch-only) on the Mac.
+
+**Still true:** no run launched from this round; publication would still be withheld at E3
+(calibration not measurable) and E4 (harness gates) as measured in the coordinator's run.
