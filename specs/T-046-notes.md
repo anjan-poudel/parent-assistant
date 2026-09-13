@@ -4,7 +4,9 @@ Worktree: `/Users/anjan/workspace/projects/elderly-ai-assistant/.claude/worktree
 Branch: `worktree-t046-chat-framing` (base `840bcd7`; NOT merged, NOT pushed, NOT rebased)
 Commits: `5104a0b` (per-id framing + raw scheme), `c83bd0a` (table to the measured
 determination), `ca5d85d` + `ff9692a` (measurement evidence), `8b0e9a0` (routed follow-up T-051),
-`42d7e0d` (these notes), `34af077` (merge helper). Every committed artifact is inside this worktree;
+`42d7e0d` (these notes), `34af077` (merge helper), `7e23bbf` (challenger review record),
+`f1c72de` + `58ece7b` (review-round corrections: host modules committed, shipped-Q3 re-measurement,
+restored pins), `084341e` + `17709d9` (gate hold + notes repairs). Every committed artifact is inside this worktree;
 the only writes outside it were scratch: `/tmp/t046-*.py|sh` on this Mac and the model host's own
 working directory `/mnt/nvme2/workspace/t046-chat-framing/` (models, per-run logs, row dumps) — no
 other worktree and no other repository file was touched.
