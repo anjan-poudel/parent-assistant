@@ -378,3 +378,59 @@ Re-validation: the same CPU smoke pipeline was re-run on the server after these 
 - The full training run was **not launched** — no GPU leg, no published artifact, no
   `models/` output. `full_training_run_launched: false` is recorded in each smoke run manifest.
 - No merge, no push, no `.ai-sdd/` state touched, no `complete-task` from this session.
+
+## 8. Waiver plumbing + first full-run launch (worktree `t036-waiver`, 2026-09-13)
+
+### What was built (commits 9af1d59, 2c4214e)
+
+Commits on `worktree-t036-waiver` (base `e28165c`):
+
+- `9af1d59` — `--waive-floor` / `--waive-reason` in `run_encoder_pipeline.py`: refused with
+  EXIT_GUARD (3) before any stage when a waiver has no reason, or when the build stage will not
+  run (`--skip-build` / no `--sources`); forwarded **only** to the E1 build command
+  (`build_stage_cmd`); recorded in `run_manifest.json:waiver` with the build report's own keys
+  (`violations` / `waived` / `unwaived` / `waive_reason`) plus `violations_waived` and
+  `zero_row_actions`. An unwaived floor hold now surfaces as EXIT_FLOOR (4), not a generic
+  EXIT_STAGE. `queue_encoder.sh` forwards `T036_WAIVE_FLOOR` / `T036_WAIVE_REASON` (both unset =
+  the floor-enforcing default). No new publish-withholding reason: publication still requires the
+  calibration + harness gates on the artifact's own merits.
+- `2c4214e` — `encoder.artifact.version: "0.1.0-internal"` in `config.yaml` (release-step
+  decision; feeds `cfg_hash`), the matching deferral-test update, and a stale header line in
+  `queue_encoder.sh`.
+
+Tests (Mac, no torch): full `tools/train-intent` suite **172 tests, 167 pass, 5 fail, 4 skipped**.
+The 5 failures are **pre-existing**: the same suite on pristine `master` (archived to `/tmp`) gives
+the identical 5 failures out of 161. They are all one root cause — the golden corpus grew to 189
+rows in T-038 (`01a494f`) and now collides with the fixture rows and the leak-count expectations
+(`TestFixtureBuild.test_no_leak_into_training_rows`, `TestFixtureIntegrity`, two `TestCliRefusals`
+message assertions). 11 of the 17 new tests exercise the waiver parse/refusal/forwarding/audit path.
+
+### First full-run launch — build passed with the waiver, train leg refused
+
+Launched at 2026-09-13 12:04:39 server time, work dir
+`~/workspace/projects/rnd/t036-encoder/runs/t036-full-0.1.0-internal-20260913-120439`, sources
+`parent-assistant/tools/train-intent/data/{teacher,noised,edge_cases}.jsonl` (digests
+`3b81e3f4aa6b` / `cff510f31b8f` / `6d75b0460b57`), waiver names
+`corpus_floor,stt_noised_floor,per_action_floor`, reason = the instructed sentence verbatim,
+followed by the reproduced 2,561-row figures and the two zero-row actions
+(`create_calendar_event`, `suggest_video`).
+
+- E1 build: **exit 0 in 2.2 s**, `kept 2561 rows (train 2433, valid 128)`, printed
+  `floors waived: corpus_floor, stt_noised_floor, per_action_floor (...) — smoke/wiring use only`
+  and **no HOLD**. The waiver plumbing works end to end on the real corpora.
+- E2 train: **exit 3 in 0.1 s — `[guard] REFUSED: build report records leaked rows — refusing
+  this corpus`**. No GPU work, no CUDA leg, nothing published.
+- The refusal is `train_encoder.py`'s check on `build_report.counters.leak > 0`; this build's
+  counter is **leak = 105** — 105 source rows dropped by E1's leak guard because their normalized
+  utterance is in the (now 189-row) golden corpus. Those rows never entered `train.jsonl`; the
+  counter records exclusions, and the trainer refuses the corpus anyway.
+- Consequence: **any** run of this pipeline over these corpora dies at E2, waiver or not — the
+  earlier floor HOLD simply hid this second gate. The 5 pre-existing fixture failures are the same
+  collision at fixture scale.
+
+Open decision (not mine to take, nothing changed): either the leak counter becomes a recorded
+exclusion with an explicit waiver of its own, or the sources/golden corpus are de-overlapped; the
+guard's condition in `train_encoder.py` was left untouched.
+
+- Notes to self about the run: the waiver's reason string is stored verbatim in the run's
+  `build_report.json:floors.waive_reason`; no utterance text is in any log or manifest.
