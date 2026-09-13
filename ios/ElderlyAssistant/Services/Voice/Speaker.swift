@@ -507,7 +507,7 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
             try engine.warm(voiceDirectory: dir)
             completion(.ready)
         } catch {
-            print("[speaker] warm failed for \(voiceID.rawValue): \(error)")
+            print("[speaker] warm failed for \(voiceID.rawValue): \(ErrorCodeMapper.code(for: error))")
             completion(.failed(reason: "engine_init_failed"))
         }
     }

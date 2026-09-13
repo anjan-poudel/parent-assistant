@@ -178,7 +178,7 @@ final class UNAlarmBackend: AlarmSchedulingBackend {
     func scheduleAlarm(_ alarm: Alarm) {
         notifications.add(UNAlarmRequestFactory.dailyRepeatRequest(for: alarm, locale: locale)) { error in
             if let error {
-                print("[UNAlarmBackend] Failed to arm alarm \(alarm.id): \(error)")
+                print("[UNAlarmBackend] Failed to arm alarm \(alarm.id): \(ErrorCodeMapper.code(for: error))")
             }
         }
     }
@@ -194,7 +194,7 @@ final class UNAlarmBackend: AlarmSchedulingBackend {
             UNAlarmRequestFactory.snoozeRequest(for: alarm, timeInterval: timeInterval, locale: locale)
         ) { error in
             if let error {
-                print("[UNAlarmBackend] Failed to arm snooze for alarm \(alarm.id): \(error)")
+                print("[UNAlarmBackend] Failed to arm snooze for alarm \(alarm.id): \(ErrorCodeMapper.code(for: error))")
             }
         }
     }

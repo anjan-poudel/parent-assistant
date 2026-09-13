@@ -67,7 +67,7 @@ final class UNExternalReminderScheduler: ExternalAlarmScheduling {
         )
         center.add(request) { error in
             if let error = error {
-                print("[UNExternalReminderScheduler] Failed to schedule: \(error)")
+                print("[UNExternalReminderScheduler] Failed to schedule: \(ErrorCodeMapper.code(for: error))")
             }
         }
     }

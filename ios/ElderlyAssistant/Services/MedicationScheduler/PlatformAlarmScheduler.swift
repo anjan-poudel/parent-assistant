@@ -50,7 +50,7 @@ final class UNNotificationScheduler: PlatformAlarmScheduler {
     private func requestAuthorization() {
         center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             if !granted, let error = error {
-                print("[UNNotificationScheduler] Authorization denied: \(error)")
+                print("[UNNotificationScheduler] Authorization denied: \(ErrorCodeMapper.code(for: error))")
             }
         }
     }
@@ -102,7 +102,7 @@ final class UNNotificationScheduler: PlatformAlarmScheduler {
 
         center.add(request) { error in
             if let error = error {
-                print("[UNNotificationScheduler] Failed to schedule: \(error)")
+                print("[UNNotificationScheduler] Failed to schedule: \(ErrorCodeMapper.code(for: error))")
             }
         }
     }
