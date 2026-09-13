@@ -1068,6 +1068,27 @@ final class AppCoordinator: ObservableObject {
                                                timeoutSeconds: 10),
         pluginRegistry: pluginRegistry
     )
+    /// [T-037-a] The on-device CoreML intent encoder (T-033 spike
+    /// artifact, internal testing only). Deliberately NOT constructed on
+    /// normal builds: every reference to it is guarded by
+    /// `IntentEncoderFeature.isEnabled`, so the `lazy` factory never runs
+    /// without the `INTENT_ENCODER` compilation condition. Its
+    /// `isAvailable` is false unless the artifact is installed in
+    /// `ModelStore` AND a tokenizer is ready — `UnavailableIntentEncoderTokenizer`
+    /// is the production default until the Swift XLM-R tokenizer exists,
+    /// so the shipped behaviour is unchanged either way.
+    private lazy var intentEncoderInterpreter = IntentEncoderInterpreter(
+        modelStore: modelStore,
+        observabilityBus: observabilityBus,
+        modelId: ModelCatalog.intentEncoderSpike,
+        manifest: .t033Spike,
+        tokenizer: UnavailableIntentEncoderTokenizer(),
+        config: .default
+    )
+    /// Level-2 memory-warning observer for the encoder (nil unless the
+    /// internal-testing gate is on).
+    private var intentEncoderMemoryObserver: NSObjectProtocol?
+
     /// The fine-tuned intent model (spec 2026-09-05 §8) — the local brain
     /// `IntentRouter` prefers once its GGUF is cached (the preferred half
     /// of `LocalBrainChain`). Until the bake-off artifact ships,
@@ -1941,6 +1962,9 @@ final class AppCoordinator: ObservableObject {
         // here — post-first-frame, like every other observer — not in
         // `init()`.
         observeCalendarDayChange()
+        // [T-037-a] Encoder memory-pressure lifecycle (no-op unless the
+        // internal-testing INTENT_ENCODER gate is compiled in).
+        observeIntentEncoderMemoryPressure()
 
         // Restore and re-arm any outstanding medication reminders
         medicationScheduler.scheduleAll()
@@ -2148,7 +2172,32 @@ final class AppCoordinator: ObservableObject {
         // `LocalBrainChain` consults the stand-in only while the
         // preferred model is unavailable, so nothing changes once the
         // fine-tuned GGUF ships.
-        router3.localBrain = LocalBrainChain(preferred: localIntentInterpreter,
+        //
+        // [T-037-a] Internal-testing encoder slot: when the INTENT_ENCODER
+        // compilation condition is present AND the ModelStore artifact is
+        // installed AND a tokenizer is ready, the encoder takes the
+        // `preferred` slot; otherwise `preferredLocalBrain` returns
+        // `localIntentInterpreter` UNCHANGED (the shipped default). The
+        // stand-in (`llamaCommandInterpreter`) and every other layer are
+        // untouched — the keyword safety net still runs upstream of this
+        // whole chain.
+        let offeredEncoder: CommandInterpreter? =
+            IntentEncoderFeature.isEnabled ? intentEncoderInterpreter : nil
+        let preferredLocal = IntentEncoderWiring.preferredLocalBrain(
+            encoder: offeredEncoder,
+            fallback: localIntentInterpreter)
+        if preferredLocal === intentEncoderInterpreter {
+            observabilityBus.emit(ObservabilityEvent(
+                component: "intent_encoder_wiring",
+                eventType: "encoder_selected_as_local_brain",
+                durationMs: nil,
+                outcome: "info",
+                errorCode: nil,
+                metadata: ["model_id": IntentEncoderManifest.t033Spike.id,
+                           "model_version": IntentEncoderManifest.t033Spike.version]
+            ))
+        }
+        router3.localBrain = LocalBrainChain(preferred: preferredLocal,
                                              standIn: llamaCommandInterpreter)
         router3.cloudBrain = geminiInterpreter
         router3.cloudEnabled = (voiceEngineStack == .gemini)
@@ -3167,6 +3216,10 @@ self.noteTalkContractChanged()
                 applyVoiceProcessingPresetChange()
             }
         case .capturingCommand:
+            // [T-037-a] The next use after a memory-pressure unload: clear
+            // the encoder's hold so the first interpret() reloads. No-op
+            // in builds without the internal-testing gate.
+            rearmIntentEncoderIfEnabled()
             // A fresh capture supersedes any post-reset notice: the
             // status line must speak for the LIVE cycle, not the last
             // reset (TALK-CRASH-FIX, 2026-09-07).
@@ -5981,6 +6034,35 @@ self.noteTalkContractChanged()
         ) { [weak self] _ in
             self?.refreshActiveNotificationCount()
         }
+    }
+
+    /// [T-037-a] Level-2 memory warning → release the intent encoder's
+    /// CoreML weights. Installed only on an `INTENT_ENCODER` build, so a
+    /// normal build adds no observer and touches no encoder object.
+    ///
+    /// Release is one half of the contract; the other half is the re-arm
+    /// in `handlePipelineState(.capturingCommand)`: the NEXT voice turn
+    /// clears the hold and the first `interpret()` reloads the weights
+    /// from ModelStore on its own queue — never on the main thread, and
+    /// never a crash from a stale handle.
+    private func observeIntentEncoderMemoryPressure() {
+        guard IntentEncoderFeature.isEnabled, intentEncoderMemoryObserver == nil else {
+            return
+        }
+        intentEncoderMemoryObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.intentEncoderInterpreter.handleMemoryPressure()
+        }
+    }
+
+    /// Re-arms the encoder after a memory-pressure unload at the start of
+    /// a voice turn (no-op unless the internal-testing gate is on, so the
+    /// lazy encoder object is never even constructed otherwise).
+    private func rearmIntentEncoderIfEnabled() {
+        guard IntentEncoderFeature.isEnabled else { return }
+        intentEncoderInterpreter.rearmAfterMemoryPressure()
     }
 
     /// Adds or validates a medication schedule entry from the Settings

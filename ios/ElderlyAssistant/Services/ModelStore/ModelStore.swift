@@ -81,6 +81,12 @@ final class ModelStore {
         if let entry = ModelCatalog.entry(for: id), entry.kind == .kws {
             return kwsModelDirectory(for: id) != nil
         }
+        // [T-037-a] CoreML-only encoder: a DIRECTORY artifact with no ggml
+        // sibling, so the single-file `path(for:)` check below is not the
+        // right shape (it would also report a half-written staging file).
+        if let entry = ModelCatalog.entry(for: id), entry.kind == .intentEncoder {
+            return isCoreMLCached(id)
+        }
         return path(for: id) != nil
     }
 
@@ -203,8 +209,14 @@ final class ModelStore {
     /// encoder.mlmodelc`), so we match that derivation exactly — a
     /// q5_1-preserving name here is silently ignored by the runtime.
     func coreMLBundleFinalURL(for id: ModelID) -> URL? {
-        guard let entry = ModelCatalog.entry(for: id),
-              entry.coreMLEncoderBundledName != nil
+        guard let entry = ModelCatalog.entry(for: id) else { return nil }
+        // [T-037-a] A CoreML-only encoder (kind .intentEncoder) has no ggml
+        // sibling to derive a Whisper-style `<stem>-encoder.mlmodelc` name
+        // from — the entry's own filename IS the installed directory name.
+        if entry.kind == .intentEncoder {
+            return finalURL(for: entry)
+        }
+        guard entry.coreMLEncoderBundledName != nil
                 || entry.coreMLEncoderDownloadURL != nil else {
             return nil
         }
@@ -213,9 +225,26 @@ final class ModelStore {
 
     /// Unpacks a downloaded encoder zip (M2 delivery) into the
     /// whisper.cpp-derived `<stem>-encoder.mlmodelc` location next to the
-    /// model. Returns the installed directory URL, nil on failure.
+    /// model — or, for a CoreML-only entry (`kind == .intentEncoder`), into
+    /// the entry's own final directory.
+    ///
+    /// [T-037-a] Checksum policy: a CoreML-only entry's catalog sha256 is
+    /// the ZIP's own hash, so it is verified here BEFORE anything is
+    /// unpacked — a mismatch throws `ModelStoreError.checksumMismatch` and
+    /// leaves nothing behind. (The Whisper companion encoders cannot be
+    /// checked this way: their entries hash the ggml `.bin`, not the
+    /// encoder zip, so that path keeps its pre-existing behaviour.)
+    ///
+    /// Returns the installed directory URL, nil on failure.
     func installCoreMLEncoder(fromZip zipURL: URL, for id: ModelID) throws -> URL? {
-        guard let dest = coreMLBundleFinalURL(for: id) else { return nil }
+        guard let entry = ModelCatalog.entry(for: id),
+              let dest = coreMLBundleFinalURL(for: id) else { return nil }
+        if entry.kind == .intentEncoder,
+           !(try verifyChecksum(at: zipURL, expected: entry.sha256)) {
+            emit("coreml_encoder_checksum_mismatch", outcome: "failure",
+                 modelId: id, errorCode: "checksum")
+            throw ModelStoreError.checksumMismatch
+        }
         let unzipDir = zipURL.deletingLastPathComponent()
             .appendingPathComponent("encoder-unzip-\(UUID().uuidString)")
         defer { try? fileManager.removeItem(at: unzipDir) }
@@ -232,6 +261,9 @@ final class ModelStore {
                                      "encoder zip did not contain an .mlmodelc directory"])
         }
         try? fileManager.removeItem(at: dest)
+        // A CoreML-only entry has no ggml file to have created the parent
+        // directory already; ensure it exists before the move.
+        try ensureDirectory(dest.deletingLastPathComponent())
         try fileManager.moveItem(at: extracted, to: dest)
         emit("coreml_encoder_installed", outcome: "success", modelId: id,
              errorCode: nil)
@@ -615,10 +647,19 @@ final class ModelStore {
 
     // MARK: - Internals
 
+    /// NOTE (T-037-a): the last component is appended with an explicit
+    /// `isDirectory` because `URL.appendingPathComponent(_:)` infers it
+    /// from the filesystem WHEN THE PATH EXISTS — the same call returns
+    /// `…/x.mlmodelc` before an install and `…/x.mlmodelc/` after one.
+    /// Two callers comparing URLs (or recording a load path) would then
+    /// disagree with no code change in between. Directory kinds state it
+    /// up front so the URL is the same value on every call; the whisper /
+    /// llama `.bin` kinds stay file URLs.
     private func finalURL(for entry: ModelCatalogEntry) -> URL {
         rootDirectory
             .appendingPathComponent(entry.kind.rawValue, isDirectory: true)
-            .appendingPathComponent(entry.filename)
+            .appendingPathComponent(entry.filename,
+                                    isDirectory: entry.kind.isDirectoryArtifact)
     }
 
     private func ensureDirectory(_ url: URL) throws {

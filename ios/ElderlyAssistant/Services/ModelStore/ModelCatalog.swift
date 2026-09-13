@@ -18,6 +18,27 @@ enum ModelKind: String, Codable {
     case kws           // sherpa-onnx KWS model (DIRECTORY artifact: encoder/
                        // decoder/joiner .onnx + tokens.txt + keywords.txt)
     case vad           // Silero, small
+    case intentEncoder // CoreML-only intent encoder (DIRECTORY artifact: a
+                       // compiled `.mlmodelc` unpacked from a zip). NOT a
+                       // Whisper ANE companion — it has no ggml sibling, so
+                       // its install destination is the entry's own final
+                       // URL rather than a path derived from a `.bin` stem
+                       // (see `ModelStore.coreMLBundleFinalURL(for:)`).
+                       // The catalog sha256 for this kind is the ZIP's own
+                       // hash, verified at install time.
+    /// True when the entry's `filename` names a DIRECTORY artifact. Only
+    /// `.intentEncoder` reports true today: `.tts` / `.kws` keep their own
+    /// `ttsVoiceDirectory` / `kwsModelDirectory` helpers, and changing
+    /// their `finalURL` shape would be churn with no reader (T-037-a).
+    /// Used by `ModelStore.finalURL(for:)` to make the URL the SAME value
+    /// before and after an install — `appendingPathComponent(_:)` infers
+    /// the trailing slash from the filesystem otherwise.
+    var isDirectoryArtifact: Bool {
+        switch self {
+        case .intentEncoder: return true
+        default: return false
+        }
+    }
 }
 
 /// Static description of a model the app knows how to download. Not the
@@ -194,6 +215,26 @@ enum ModelCatalog {
     /// live on the sherpa `tts-models` release; research basis:
     /// docs/research-sections/response-voice.md §3.
     static let piperNepaliChitwan = ModelID("piper-ne-chitwan-medium-int8")
+    /// [T-037-a] The T-033 bake-off encoder spike — CoreML int8
+    /// `t033-encoder-int8.mlmodelc`, delivered through the existing
+    /// ModelStore encoder path. INTERNAL TESTING ONLY, and honestly
+    /// labelled as such: the checkpoint was fine-tuned on a LEGACY
+    /// LLM-format dataset snapshot (not T-034 schema-v2 BIO data), so its
+    /// slot coverage is contact/time only and its calibration is
+    /// unmeasured. It is NOT in `availableBrainEntries` / any picker — a
+    /// household can never select it. The runtime validates every output
+    /// strictly and abstains on anything outside schema v2
+    /// (`IntentEncoderSchema`).
+    ///
+    /// No hosted URL exists for this spike; `downloadURL` points at the
+    /// stable on-Mac copy (`/Users/anjan/.local/share/elderly-ai/
+    /// t033-spike/`) so an internal tester on the same machine can install
+    /// it through `ModelStore.installCoreMLEncoder(fromZip:for:)`. A
+    /// device-side install needs the zip copied over first (AirDrop /
+    /// `devicectl`) — the standard downloader would need a real HTTP URL,
+    /// which is deliberately not invented here.
+    static let intentEncoderSpike = ModelID("intent-encoder-t033-c3-minilm-int8")
+
     /// The wake-word engine model (Slice A of voice-personalisation P0):
     /// sherpa-onnx streaming Zipformer keyword spotter trained on
     /// GigaSpeech (English, 3.3M params) — replaces the Porcupine engine
@@ -754,12 +795,47 @@ enum ModelCatalog {
             minDeviceRAMBytes: 500_000_000,
             dependsOn: nil,
             bundledResourceName: "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01"
+        ),
+        // [T-037-a] Intent encoder spike (INTERNAL TESTING ONLY — see the
+        // `intentEncoderSpike` ID docs). `sha256`/`sizeBytes` are the
+        // RELEASE ZIP's own values, verified by
+        // `ModelStore.installCoreMLEncoder(fromZip:for:)` before unpacking
+        // (strict checksum policy) — a corrupted or substituted artifact
+        // surfaces as an install failure, never as a silent install.
+        // Measured 2026-09-13 from the T-033 bake-off export
+        // (`tools/train-intent/docs/t033-evidence/C3-coreml-report.json`,
+        // packaging_int8: 109.1 MB zip, one top-level
+        // `t033-encoder-int8.mlmodelc` directory).
+        ModelCatalogEntry(
+            id: intentEncoderSpike,
+            kind: .intentEncoder,
+            displayName: "Intent encoder — T-033 spike (internal testing only)",
+            // The installed DIRECTORY name inside the ModelStore; the zip
+            // contains exactly this directory at its top level.
+            filename: "t033-encoder-int8.mlmodelc",
+            // Stable on-Mac copy of the spike zip (outside the repo — the
+            // 109 MB binary is deliberately not committed). Not reachable
+            // from a device; see the ID's doc comment.
+            downloadURL: URL(string: "file:///Users/anjan/.local/share/elderly-ai/t033-spike/t033-encoder-int8-mlmodelc.zip")!,
+            sizeBytes: 109_075_268,
+            sha256: "6056ba41ba37d8e0a4b72e40c14809792ff9a16c3fe42e4a03f4aa53c7701ffa",
+            // int8 encoder body ~118 MB; ~2 GB device floor is generous
+            // headroom for the 100–120M-param student.
+            minDeviceRAMBytes: 2_000_000_000,
+            dependsOn: nil
         )
     ]
 
     static func entry(for id: ModelID) -> ModelCatalogEntry? {
         all.first { $0.id == id }
     }
+
+    /// [T-037-a] Encoder entries offered to the INTERNAL-TESTING path only
+    /// (`IntentEncoderFeature`). Deliberately NOT part of
+    /// `availableBrainEntries`: the Settings brain picker must never offer
+    /// a spike artifact to a household.
+    static let internalTestingEncoderEntries: [ModelCatalogEntry] =
+        [intentEncoderSpike].compactMap { entry(for: $0) }
 
     static func entries(kind: ModelKind) -> [ModelCatalogEntry] {
         all.filter { $0.kind == kind }
