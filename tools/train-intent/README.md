@@ -200,3 +200,15 @@ Result: `seeds/command_schema.json` is byte-identical to the `commandJSONSchema`
 literal (fingerprint `9432361c7bc3aa86`, 16 required keys in schema order with
 `response` second and `pluginAction`/`pluginEntities` last, 2730 chars of GBNF
 from llama.cpp's own converter).
+
+**Contact-slot convention is not uniform (2026-09-13):** the corpus's contact
+labels are bare names 78.1% of the time and keep the utterance's case suffix
+21.9% of the time (324/1481 rows), while all six golden contact rows strip it
+(`माइयालाई फोन गर` -> `माइया`, `didi lai facetime ma call gara na` -> `didi`)
+and score the label, not the surface form. `slot_f1` is token-level, so
+copying the utterance's `-लाई` is a one-token false positive on a slot whose
+entire golden budget is six tokens: arm C answered `छोरालाई` for `छोरा` and
+arm D answered `म्यासिन` for `maiya`, and either single slip nearly halves the
+gate's margin. Same family as the query/`time` finding above — the fix is
+annotation, not model: normalize contact labels (or accept the inflected form
+in the scorer) before reading a contact_f1 miss as a model defect.
