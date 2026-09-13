@@ -884,6 +884,23 @@
         }
       }
     },
+    "appliance.manual.defaultBadge" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Default"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "पूर्वनिर्धारित"
+          }
+        }
+      }
+    },
     "appliance.manual.deleteA11y" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7799,6 +7816,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "उपकरण वा त्यसका बटनहरूको सफा फोटो खिच्नुहोस्, म तपाईंलाई सिकाउँछु।"
+          }
+        }
+      }
+    },
+    "plugin.applianceHelper.defaultManualPrompt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I have your %@ manual — here it is."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "तपाईंको %@ को पुस्तिका मसँग छ — यो हेर्नुहोस्।"
           }
         }
       }

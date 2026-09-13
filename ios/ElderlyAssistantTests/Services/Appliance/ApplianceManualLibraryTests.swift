@@ -201,6 +201,56 @@ final class ApplianceManualLibraryTests: XCTestCase {
         XCTAssertEqual(model.manuals.first?.title, "microwave")
     }
 
+    // MARK: - Default manual (2026-09-13, appliance-default-manual)
+
+    func testTheCategoryDefaultIsSurfacedOnItsRow() {
+        let defaultID = cache.store(guidance(brand: "LG", model: "M1"), photoHash: "1",
+                                    imageJPEG: makeJPEG())
+        cache.setDefault(entryID: defaultID)
+        let plainID = cache.store(guidance(brand: "Samsung", model: "B", category: "tv"),
+                                  photoHash: "2", imageJPEG: makeJPEG())
+
+        let model = makeModel()
+        model.reload()
+
+        XCTAssertTrue(model.manuals.first { $0.id == defaultID }?.isDefault ?? false,
+                      "the row the assistant will serve must be marked — the star badge reads from this")
+        XCTAssertFalse(model.manuals.first { $0.id == plainID }?.isDefault ?? true)
+    }
+
+    func testASecondManualForTheSameCategoryStaysUnmarked() {
+        // Two saved manuals for one appliance: only the promoted one is
+        // the default, and the library must not mark both.
+        let firstID = cache.store(guidance(brand: "LG", model: "M1"), photoHash: "1",
+                                  imageJPEG: makeJPEG())
+        cache.setDefault(entryID: firstID)
+        advanceClock()
+        _ = cache.store(guidance(brand: "LG", model: "M1"), photoHash: "2",
+                        question: "घडी कसरी मिलाउने", imageJPEG: makeJPEG())
+
+        let model = makeModel()
+        model.reload()
+
+        XCTAssertEqual(model.manuals.count, 2)
+        XCTAssertEqual(model.manuals.filter(\.isDefault).map(\.id), [firstID],
+                       "exactly one row carries the star per appliance category")
+    }
+
+    func testReloadDropsTheMarkWhenTheDefaultIsDeleted() {
+        let defaultID = cache.store(guidance(brand: "LG", model: "M1"), photoHash: "1",
+                                    imageJPEG: makeJPEG())
+        cache.setDefault(entryID: defaultID)
+
+        let model = makeModel()
+        model.reload()
+        XCTAssertTrue(model.manuals.first?.isDefault ?? false)
+
+        model.delete(manualID: defaultID)
+        model.reload()
+        XCTAssertTrue(model.manuals.allSatisfy { !$0.isDefault },
+                      "with no manuals left there is no default to show")
+    }
+
     // MARK: - Delete
 
     func testDeleteRemovesTheManualTheEntryAndItsFile() {
@@ -271,10 +321,11 @@ final class ApplianceManualLibraryTests: XCTestCase {
                         category: String = "microwave",
                         question: String? = nil,
                         createdAt: Date = Date(timeIntervalSince1970: 1_800_000_000),
-                        thumbnail: UIImage? = nil) -> ApplianceManualLibraryModel.Manual {
+                        thumbnail: UIImage? = nil,
+                        isDefault: Bool = false) -> ApplianceManualLibraryModel.Manual {
         ApplianceManualLibraryModel.Manual(id: id, title: title, brand: brand,
                                            model: model, category: category,
                                            question: question, createdAt: createdAt,
-                                           thumbnail: thumbnail)
+                                           thumbnail: thumbnail, isDefault: isDefault)
     }
 }

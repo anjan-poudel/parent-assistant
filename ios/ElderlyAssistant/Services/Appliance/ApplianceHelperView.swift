@@ -74,6 +74,15 @@ struct ApplianceHelperView: View {
             // pop the camera over its step cards.
             guard !didAutoOpenCamera, session.state == .capturing else { return }
             didAutoOpenCamera = true
+            // A voice turn that found this appliance's saved default manual
+            // (2026-09-13, appliance-default-manual) opens THAT first —
+            // camera-less, network-free, and the reason the elder asked.
+            // Only when no manual was pending, or the pending one can no
+            // longer be rendered (deleted in the meantime, photo file
+            // gone), does the camera affordance open as it always has.
+            if session.pendingManualEntryID != nil, session.presentPendingManualIfNeeded() {
+                return
+            }
             showCamera = true
         }
         .sheet(isPresented: $showCamera) {

@@ -233,6 +233,7 @@
 		844662D5B41E668537E6763A /* ManualTalkReadinessState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F1C476499D44D4ACDAB941C /* ManualTalkReadinessState.swift */; };
 		84922D9A629A8229D4596019 /* OnboardingWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D0DDC948A0F8B16BA72B03 /* OnboardingWizardView.swift */; };
 		850EFBBBA4BFEDD70C73B849 /* WakeWordUserRecordingProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71087481932AB5E88C9FF39D /* WakeWordUserRecordingProbeTests.swift */; };
+		8521BD1B2F154AC66C203389 /* ApplianceCategoryKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ED67C46BB055E5D738393EB /* ApplianceCategoryKeyTests.swift */; };
 		852A95F82E0646D5167A8635 /* InterpreterSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 923ED5C7C1B9B517363272BA /* InterpreterSelector.swift */; };
 		8567D2CD1407641E8EEC1E14 /* VADHangoverTrimTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62E0366B5FF6055695A53C3D /* VADHangoverTrimTests.swift */; };
 		8569DF670C003C38729E1F62 /* ApplianceGuidance.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B1DE15DC91ED50AED5D835 /* ApplianceGuidance.swift */; };
@@ -412,6 +413,7 @@
 		E4BD632FC9F539C51FF03751 /* WakeWordEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6007724BD36A4CDB4D71F3A7 /* WakeWordEngine.swift */; };
 		E4EC3CD2D5EC4A124169B1BF /* UnifiedContactSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 668857180EFC8414708A2AEB /* UnifiedContactSearch.swift */; };
 		E51EBD25AA4686284CBAB74F /* ContactResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71727A2EC12CD44F954618C5 /* ContactResolver.swift */; };
+		E5979ADDAEBFF6CD9A788405 /* ApplianceCategoryKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6B012A5902CD805C9E12D02 /* ApplianceCategoryKey.swift */; };
 		E6CD7A649BC80B23C416B27F /* SpeakQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21EE07B96FEE151F1990EB2B /* SpeakQueue.swift */; };
 		E700F45EAE38E220DAC6B893 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 31B2F1E52012C40396E02666 /* LaunchScreen.storyboard */; };
 		E708D6B8397B5BAA99E522D9 /* whisper-medium-ne-q5_1.bin in Resources */ = {isa = PBXBuildFile; fileRef = 9AA00B88AADB64F15A1BC85C /* whisper-medium-ne-q5_1.bin */; };
@@ -692,6 +694,7 @@
 		5D9604F3CC966A9E549FA807 /* DialectBiasComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialectBiasComposer.swift; sourceTree = "<group>"; };
 		5DB994909EEA3C869ABDBE57 /* SpeakerBiometricServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerBiometricServiceTests.swift; sourceTree = "<group>"; };
 		5E3EEA3E69C5ECA0B8EE1DBA /* WhisperSpeechRecognizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperSpeechRecognizerTests.swift; sourceTree = "<group>"; };
+		5ED67C46BB055E5D738393EB /* ApplianceCategoryKeyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceCategoryKeyTests.swift; sourceTree = "<group>"; };
 		5F607A95F7DC52438612645E /* CappedGeminiRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CappedGeminiRouterTests.swift; sourceTree = "<group>"; };
 		5F639E77BAB21BD06023FB43 /* LocalToolTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalToolTransport.swift; sourceTree = "<group>"; };
 		5F77AAE8D39CC0556C033AF7 /* ChatHistoryStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatHistoryStoreTests.swift; sourceTree = "<group>"; };
@@ -955,6 +958,7 @@
 		F492F4D6BC34B9F3AAA977C4 /* Speaker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Speaker.swift; sourceTree = "<group>"; };
 		F4DE29E0787DF7E8A4537C50 /* L10n.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = L10n.swift; sourceTree = "<group>"; };
 		F525688EDA15A66F48E45461 /* OnDeviceSTTSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnDeviceSTTSelection.swift; sourceTree = "<group>"; };
+		F6B012A5902CD805C9E12D02 /* ApplianceCategoryKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceCategoryKey.swift; sourceTree = "<group>"; };
 		F6C6DC7636D26D44A73A7D71 /* VoiceEnrollmentRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceEnrollmentRecorder.swift; sourceTree = "<group>"; };
 		F6D0122346CB9657139E6909 /* PiperVoiceSpeakerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PiperVoiceSpeakerTests.swift; sourceTree = "<group>"; };
 		F70180CB638E353C23C30392 /* HomePresentationState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomePresentationState.swift; sourceTree = "<group>"; };
@@ -1394,6 +1398,7 @@
 			isa = PBXGroup;
 			children = (
 				A012D8FD1155E0F5774CE332 /* ApplianceCache.swift */,
+				F6B012A5902CD805C9E12D02 /* ApplianceCategoryKey.swift */,
 				2F0795548716779E4610EAAE /* ApplianceCropGeometry.swift */,
 				D0B1DE15DC91ED50AED5D835 /* ApplianceGuidance.swift */,
 				9DDF8EB1C6FE258BAABEBD59 /* ApplianceGuidancePolicy.swift */,
@@ -1761,6 +1766,7 @@
 			isa = PBXGroup;
 			children = (
 				4403D9B985AA75ECF78CAA18 /* ApplianceCacheTests.swift */,
+				5ED67C46BB055E5D738393EB /* ApplianceCategoryKeyTests.swift */,
 				7294DB0D9166528EB32040F2 /* ApplianceCropGeometryTests.swift */,
 				F269E7A40BD190077BD33723 /* ApplianceGuidancePolicyTests.swift */,
 				DE1DFF8F9710FE47A345319B /* ApplianceHelperSessionTests.swift */,
@@ -2159,6 +2165,7 @@
 				ED3D43C17AD13CA9E0ED1CE0 /* AppTheme.swift in Sources */,
 				DD170A3B29DA4E54AA59D9BF /* AppearanceSettingsView.swift in Sources */,
 				14E74986D0D6FA4D6A911B71 /* ApplianceCache.swift in Sources */,
+				E5979ADDAEBFF6CD9A788405 /* ApplianceCategoryKey.swift in Sources */,
 				DF77B9BAE300A7AAD325C8A5 /* ApplianceCropGeometry.swift in Sources */,
 				8569DF670C003C38729E1F62 /* ApplianceGuidance.swift in Sources */,
 				BD63873A5A4B6E382E378FFD /* ApplianceGuidancePolicy.swift in Sources */,
@@ -2394,6 +2401,7 @@
 				F486D39BD7AE380042C5D247 /* AppLauncherTests.swift in Sources */,
 				A677CF6F38E5CDC5BFD0AAB0 /* AppThemeTests.swift in Sources */,
 				BD86389BBEA8C1EC3456CFC9 /* ApplianceCacheTests.swift in Sources */,
+				8521BD1B2F154AC66C203389 /* ApplianceCategoryKeyTests.swift in Sources */,
 				39BEE582EE0027E8C4092058 /* ApplianceCropGeometryTests.swift in Sources */,
 				F9A1B873CE4E1B83AAC4AE62 /* ApplianceGuidancePolicyTests.swift in Sources */,
 				8085E85953FF05DB2D6F4725 /* ApplianceHelperPluginTests.swift in Sources */,

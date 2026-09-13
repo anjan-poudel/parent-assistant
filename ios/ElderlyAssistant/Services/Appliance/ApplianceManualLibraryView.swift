@@ -264,11 +264,18 @@ struct ApplianceManualLibraryView: View {
                 HStack(spacing: 14) {
                     thumbnail(manual)
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(manual.title)
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                            .foregroundColor(DesignTokens.textPrimary)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
+                        HStack(spacing: 8) {
+                            Text(manual.title)
+                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                                .foregroundColor(DesignTokens.textPrimary)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+                            // The star marks the manual the assistant will
+                            // serve for this appliance's category.
+                            if manual.isDefault {
+                                defaultBadge
+                            }
+                        }
                         if let question = manual.question, !question.isEmpty {
                             Text(question)
                                 .font(.system(size: DesignTokens.minCaptionPointSize))
@@ -304,6 +311,23 @@ struct ApplianceManualLibraryView: View {
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
         .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+    }
+
+    /// The star that marks a category's default manual (2026-09-13,
+    /// appliance-default-manual): the same accent-circle + white-glyph
+    /// language as the user-manual row's book badge, sized down to ride
+    /// beside the title rather than lead the row (it is a marker, not a
+    /// control — no tap target of its own). Labeled rather than just
+    /// drawn: a bare star means nothing to an elder who never learned the
+    /// convention, while VoiceOver reads this one as "Default".
+    private var defaultBadge: some View {
+        Image(systemName: "star.fill")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundColor(.white)
+            .frame(width: 24, height: 24)
+            .background(DesignTokens.accent)
+            .clipShape(Circle())
+            .accessibilityLabel(Text("appliance.manual.defaultBadge"))
     }
 
     /// The manual's stored photo, or a warm placeholder when the file is

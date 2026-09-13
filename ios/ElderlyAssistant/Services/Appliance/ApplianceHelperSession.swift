@@ -23,7 +23,11 @@ import UIKit
 ///      manual-substitute).
 ///   5. Cache the winner under the photo-hash+question key, together
 ///      with a downscaled photo copy — that entry is the saved "manual"
-///      the manuals library lists and re-renders with zero network.
+///      the manuals library lists and re-renders with zero network. The
+///      FIRST such manual for an appliance category also becomes that
+///      category's default (2026-09-13, appliance-default-manual), the
+///      manual later voice requests are served from cache instead of
+///      re-opening the camera.
 ///   6. Present + speak the summary.
 @MainActor
 final class ApplianceHelperSession: ObservableObject {
@@ -64,6 +68,17 @@ final class ApplianceHelperSession: ObservableObject {
     let question: String?
     let locale: Locale
 
+    /// A saved manual the voice turn already found for this appliance's
+    /// category (2026-09-13, appliance-default-manual): the plugin
+    /// resolves the request's category to a default entry and hands the
+    /// id here, so the view can open the manual INSTEAD of the camera.
+    ///
+    /// Nonisolated (like `init`): `presentationView(for:)` builds and
+    /// reads the session off the main actor, synchronously, and the view
+    /// reads the flag in `.onAppear` — no isolation hop may sit between
+    /// "the plugin found a manual" and "the sheet decides what to show".
+    nonisolated let pendingManualEntryID: UUID?
+
     /// Internal so the manuals library (same feature surface) can read
     /// the entry list for its rows.
     let cache: ApplianceCache
@@ -79,14 +94,20 @@ final class ApplianceHelperSession: ObservableObject {
     /// Nonisolated so `presentationView(for:)` (called synchronously, off
     /// the main actor, by `CommandRouter`) can build the session; all
     /// state mutations after init are main-confined by the class.
+    ///
+    /// `pendingManualEntryID` defaults to nil: a camera-first session —
+    /// every call site that predates the default-manual feature — behaves
+    /// exactly as before.
     nonisolated init(question: String?, locale: Locale, geminiClient: GeminiClient,
-                     cache: ApplianceCache, observabilityBus: ObservabilityBus, speaker: Speaker?) {
+                     cache: ApplianceCache, observabilityBus: ObservabilityBus,
+                     speaker: Speaker?, pendingManualEntryID: UUID? = nil) {
         self.question = question
         self.locale = locale
         self.geminiClient = geminiClient
         self.cache = cache
         self.observabilityBus = observabilityBus
         self.speaker = speaker
+        self.pendingManualEntryID = pendingManualEntryID
     }
 
     private var languageHint: String {
@@ -130,6 +151,22 @@ final class ApplianceHelperSession: ObservableObject {
         isViewingManual = true
         present(hit.entry.guidance, image: image)
         return true
+    }
+
+    /// Opens the default manual the voice turn found for this appliance's
+    /// category, when there is one (2026-09-13, appliance-default-manual).
+    ///
+    /// Returns false when no manual was pending OR when the pending one can
+    /// no longer open (deleted between the plugin's lookup and the sheet's
+    /// appearance, photo file gone) — `presentManual`'s honest failure,
+    /// passed straight through. The caller (`ApplianceHelperView.onAppear`)
+    /// then falls back to the camera exactly as it did before this feature,
+    /// so a vanished manual costs the elder a camera open, never a blank
+    /// sheet.
+    @discardableResult
+    func presentPendingManualIfNeeded() -> Bool {
+        guard let entryID = pendingManualEntryID else { return false }
+        return presentManual(entryID: entryID)
     }
 
     /// Opens a BUNDLED default manual (2026-09-07, bundled-manuals task):
@@ -210,8 +247,8 @@ final class ApplianceHelperSession: ObservableObject {
                  metadata: ["via": "identity_question", "stale": cached.stale ? "true" : "false"])
             // Keep the fresh photo-hash answer too — a retake of THIS
             // exact frame should hit its own question's answer.
-            cache.store(fresh, photoHash: prepared.photoHash, question: question,
-                        imageJPEG: Self.thumbnail(of: prepared.image))
+            storeAndPromoteIfNone(fresh, photoHash: prepared.photoHash, question: question,
+                                  imageJPEG: Self.thumbnail(of: prepared.image))
             present(cached.entry.guidance, image: prepared.image)
             return
         }
@@ -232,9 +269,42 @@ final class ApplianceHelperSession: ObservableObject {
         // 5. Cache under the photo-hash+question key with the downscaled
         // photo (the saved manual) and present (even a still-low-
         // confidence winner — §4.1: hedge, never refuse).
-        cache.store(winner, photoHash: prepared.photoHash, question: question,
-                    imageJPEG: Self.thumbnail(of: prepared.image))
+        storeAndPromoteIfNone(winner, photoHash: prepared.photoHash, question: question,
+                              imageJPEG: Self.thumbnail(of: prepared.image))
         present(winner, image: prepared.image)
+    }
+
+    /// Stores a pipeline answer and makes it its category's default manual
+    /// when that category has none yet (2026-09-13, appliance-default-
+    /// manual) — "the first manual the elder saves for an appliance is the
+    /// one voice requests serve".
+    ///
+    /// Called at BOTH store sites — the identity+question hit (4a) and the
+    /// final store (5) — because either can be the first answer this
+    /// household ever gets for that appliance, and the rule must not
+    /// depend on which tier produced the answer.
+    ///
+    /// The two gates:
+    ///  - the category must be ELIGIBLE (not blank, not "other"): those are
+    ///    the unidentified bucket shared by every appliance Gemini could
+    ///    not name, and a default stored there would later be served for a
+    ///    different appliance — a fabricated answer.
+    ///  - the category must have NO default yet: a later manual for the
+    ///    same appliance (a more specific question, a better-grounded
+    ///    retake) must never steal the default from the manual the elder
+    ///    already relies on. Changing the default is a future, deliberate
+    ///    user action — never a side effect of asking again.
+    @discardableResult
+    private func storeAndPromoteIfNone(_ guidance: ApplianceGuidance, photoHash: String,
+                                       question: String?, imageJPEG: Data?) -> UUID {
+        let entryID = cache.store(guidance, photoHash: photoHash, question: question,
+                                  imageJPEG: imageJPEG)
+        let category = guidance.identity.category
+        if ApplianceCategoryKey.isDefaultEligible(category),
+           cache.defaultEntry(forCategory: category) == nil {
+            cache.setDefault(entryID: entryID)
+        }
+        return entryID
     }
 
     /// The downscaled photo copy kept for cache-only re-render. Prepared
