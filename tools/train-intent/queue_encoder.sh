@@ -20,7 +20,8 @@
 #
 # Run this ON THE TRAINING BOX, from tools/train-intent/, with the venv that
 # has torch+transformers. The publish gate additionally requires
-# encoder.artifact.version to be set in config.yaml (null today by design).
+# encoder.artifact.version to be set in config.yaml (set to "0.1.0-internal"
+# for the internal-testing release; the null placeholder blocks publication).
 set -u
 cd "${0:a:h}" || exit 1
 

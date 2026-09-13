@@ -209,7 +209,13 @@ class TestResumeAndDistillationGuards(unittest.TestCase):
         for key in ("teacher", "temperature", "lambda_kd", "student_params_target"):
             self.assertIsNone(cfg["distillation"][key],
                               f"{key} must defer to the contract (null)")
-        self.assertIsNone(cfg["artifact"]["version"])
+        # The contract names no artifact version, so this is the one value the
+        # release step must supply (publish refuses on the null placeholder).
+        # Unset is the pre-release state; a set value must be a real version.
+        version = cfg["artifact"]["version"]
+        if version is not None:
+            self.assertEqual(require_t035(version, "encoder.artifact.version"),
+                             version)
         self.assertEqual(cfg["base_revision_prefix"],
                          load_rules().tokenizer_revision_prefix)
 
