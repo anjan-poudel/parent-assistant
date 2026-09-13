@@ -232,6 +232,102 @@ final class UnansweredCallTrackerTests: XCTestCase {
     }
 }
 
+/// The app-initiated-call attribution gate (call-tracking task,
+/// 2026-09-13). Same reason to be pure and testable as
+/// `UnansweredCallTracker`: the coordinator's init boots the voice stack,
+/// so the decision — may this anonymous unanswered event carry the
+/// contact the app just dialed? — is driven here directly.
+final class OpenedCallAttributorTests: XCTestCase {
+
+    private let dialedAt = Date(timeIntervalSince1970: 10_000)
+
+    private func attributorWithPendingCall() -> OpenedCallAttributor {
+        let attributor = OpenedCallAttributor()
+        attributor.recordOpenedCall(name: "बुबा", phone: "9812345678", at: dialedAt)
+        return attributor
+    }
+
+    /// The one case the app can prove: it opened a call to a contact, and
+    /// a call ended without ever connecting inside the window — the row
+    /// gets the contact the app itself dialed.
+    func testAttributesAnUnansweredEndInsideTheWindow() {
+        let attributor = attributorWithPendingCall()
+
+        let opened = attributor.attributedMissedCall(endedAt: dialedAt.addingTimeInterval(45))
+        XCTAssertEqual(opened?.name, "बुबा")
+        XCTAssertEqual(opened?.phone, "9812345678")
+    }
+
+    /// The window is narrow on purpose: an unanswered event later than
+    /// `window` after the dial is not that dial's outcome, so it stays
+    /// anonymous rather than naming the wrong caller. The horizon itself
+    /// is inclusive — an event landing exactly at it is still the call
+    /// just placed.
+    func testAttributesAtTheHorizonAndRefusesBeyondIt() {
+        let atHorizon = attributorWithPendingCall()
+        XCTAssertNotNil(atHorizon.attributedMissedCall(
+            endedAt: dialedAt.addingTimeInterval(OpenedCallAttributor.window)))
+
+        let beyond = attributorWithPendingCall()
+        XCTAssertNil(beyond.attributedMissedCall(
+            endedAt: dialedAt.addingTimeInterval(OpenedCallAttributor.window + 1)))
+    }
+
+    /// Nothing opened → nothing to attribute, whatever the timing.
+    func testRefusesWithNothingPending() {
+        let attributor = OpenedCallAttributor()
+
+        XCTAssertNil(attributor.attributedMissedCall(endedAt: dialedAt))
+    }
+
+    /// An end that precedes the open (clock skew, or an event delivered
+    /// out of order) is never attributed.
+    func testRefusesAnEndBeforeTheOpen() {
+        let attributor = attributorWithPendingCall()
+
+        XCTAssertNil(attributor.attributedMissedCall(endedAt: dialedAt.addingTimeInterval(-1)))
+    }
+
+    /// A connected call clears the candidate: something was answered, so a
+    /// later unanswered event cannot honestly be pinned on the dial.
+    func testConnectedCallClearsTheCandidate() {
+        let attributor = attributorWithPendingCall()
+        attributor.noteCallConnected()
+
+        XCTAssertNil(attributor.attributedMissedCall(endedAt: dialedAt.addingTimeInterval(30)))
+    }
+
+    /// An unanswered end consumes the candidate — the same event can never
+    /// be attributed twice, and a later unrelated end is not credited to
+    /// the same dial.
+    func testAttributionIsConsumedOnce() {
+        let attributor = attributorWithPendingCall()
+
+        XCTAssertNotNil(attributor.attributedMissedCall(endedAt: dialedAt.addingTimeInterval(30)))
+        XCTAssertNil(attributor.attributedMissedCall(endedAt: dialedAt.addingTimeInterval(40)))
+    }
+
+    /// One candidate at a time: a newer open replaces an older one, so the
+    /// row names the call the user most recently placed.
+    func testNewestOpenWins() {
+        let attributor = attributorWithPendingCall()
+        let secondDialAt = dialedAt.addingTimeInterval(60)
+        attributor.recordOpenedCall(name: "सीता", phone: "9800000000", at: secondDialAt)
+
+        let opened = attributor.attributedMissedCall(endedAt: secondDialAt.addingTimeInterval(20))
+        XCTAssertEqual(opened?.name, "सीता")
+    }
+
+    /// An open with no number can never be matched, so it records no
+    /// candidate — the next end stays anonymous.
+    func testOpenWithoutANumberNeverBecomesACandidate() {
+        let attributor = OpenedCallAttributor()
+        attributor.recordOpenedCall(name: "बुबा", phone: "", at: dialedAt)
+
+        XCTAssertNil(attributor.attributedMissedCall(endedAt: dialedAt.addingTimeInterval(10)))
+    }
+}
+
 /// Fake `CallStateProviding` — a mutable flag plus the registered
 /// listeners, driven manually by the test.
 private final class FakeCallStateProvider: CallStateProviding {

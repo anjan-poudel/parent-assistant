@@ -491,15 +491,28 @@ final class AppCoordinator: ObservableObject {
     /// Encrypted, bounded (100-entry) log of what THIS app itself
     /// called/messaged — the Recent activity leaf's source of truth.
     /// Never the system call log, never other apps' messages (iOS
-    /// platform wall). The ONE exception is the anonymous unanswered-call
-    /// row (missed-calls task, 2026-09-07): a presence-only fact the
-    /// live-call observer saw — a call ended without ever connecting —
-    /// recorded with no name and no number, never the identity the
-    /// system call log would carry (iOS does not expose it). Lazy like
-    /// `chatHistoryStore`: `storage` is assigned at the top of `init`,
-    /// long before any call/message path can record. Main-queue confined
-    /// by contract.
+    /// platform wall). The ONE exception is the unanswered-call row
+    /// (missed-calls task, 2026-09-07): a presence-only fact the live-call
+    /// observer saw — a call ended without ever connecting — recorded
+    /// with no name and no number, never the identity the system call log
+    /// would carry (iOS does not expose it). Since the call-tracking task
+    /// (2026-09-13) that row is ATTRIBUTED when it can honestly be: if
+    /// the app itself opened a call moments earlier and no call ever
+    /// connected in between, the row carries the contact the app dialed
+    /// (`openedCallAttributor` below). Everything else stays anonymous.
+    /// Lazy like `chatHistoryStore`: `storage` is assigned at the top of
+    /// `init`, long before any call/message path can record. Main-queue
+    /// confined by contract.
     private(set) lazy var activityLog = AppActivityLog(storage: storage)
+
+    /// Matches the app's OWN call opens to the anonymous unanswered events
+    /// the live-call observer reports (call-tracking task, 2026-09-13),
+    /// so a call the app placed that was never picked up is recorded as a
+    /// missed call WITH its contact instead of an anonymous row. The
+    /// decision itself — window, connect-clears, consume-once — is the
+    /// pure `OpenedCallAttributor`; this property is only the wiring.
+    /// Main-queue confined, like every other piece of activity recording.
+    private let openedCallAttributor = OpenedCallAttributor()
 
     /// Published window over `activityLog`, newest first — the leaf's
     /// read side. Mirrors the `conversationHistory` window pattern:
@@ -5383,25 +5396,61 @@ self.noteTalkContractChanged()
                                             phone: phone,
                                             messengerHandle: messengerHandle,
                                             body: storedBody))
+        // Arm the missed-call attribution (call-tracking task, 2026-09-13):
+        // a call the app genuinely OPENED is the one event iOS's anonymous
+        // unanswered report may honestly be matched to. Only the real call
+        // channels qualify — a Messenger thread open is recorded as a call
+        // attempt but is not a call, WhatsApp opens a chat, and an
+        // `.unanswered` row is the observer's own event (never a dial of
+        // ours), so none of them can become a candidate.
+        if kind == .call, Self.attributableCallChannels.contains(channel) {
+            openedCallAttributor.recordOpenedCall(name: contactName,
+                                                  phone: phone,
+                                                  at: timestamp)
+        }
         refreshRecentActivity()
     }
 
-    /// Records one ANONYMOUS unanswered call — the coordinator side of
-    /// the live-call detector's `onUnanswered` (missed-calls task,
-    /// 2026-09-07). Fired when CXCallObserver reported a call that ended
-    /// without ever connecting: a missed or declined incoming call, or
-    /// an attempted outgoing call nobody picked up. iOS masks calls that
-    /// involve other apps so completely that these are
-    /// indistinguishable — this row claims only the shared fact, "a call
-    /// ended unanswered". `contactName` and `phone` are EMPTY ON
-    /// PURPOSE: the caller's identity AND number are masked by iOS —
-    /// there is no name to store, no number to look up or dial, and no
-    /// address-book match is possible — and the UI renders the localized
-    /// "Unanswered call" label (`history.unanswered`) instead of a
-    /// stored locale string. The row's action opens the Phone app
-    /// (`PhoneAppOpener`), where the caller's identity genuinely lives
-    /// (its Recents tab, one tap from the dialer).
+    /// The channels whose open IS a placed call (call-tracking task,
+    /// 2026-09-13) — the only ones `OpenedCallAttributor` may match an
+    /// unanswered event to. Messenger is deliberately absent: its "call"
+    /// request resolves to an opened THREAD (no documented scheme starts a
+    /// Messenger call), so no call exists to go unanswered.
+    private static let attributableCallChannels: Set<AppActivityEntry.Channel> = [
+        .phone, .faceTimeVideo, .faceTimeAudio
+    ]
+
+    /// Records one unanswered call — the coordinator side of the
+    /// live-call detector's `onUnanswered` (missed-calls task, 2026-09-07;
+    /// attribution, call-tracking task, 2026-09-13). Fired when
+    /// CXCallObserver reported a call that ended without ever connecting:
+    /// a missed or declined incoming call, or an attempted outgoing call
+    /// nobody picked up. iOS masks calls that involve other apps so
+    /// completely that these are indistinguishable, so the row claims only
+    /// the shared fact, "a call ended unanswered".
+    ///
+    /// TWO shapes, and the difference is what the app can prove:
+    ///  - ATTRIBUTED — the app itself opened a call to a contact moments
+    ///    before the event and no call ever connected in between
+    ///    (`OpenedCallAttributor`): the row carries that contact, because
+    ///    the app already knew who it dialed and the ended-unconnected
+    ///    event is that dial's outcome.
+    ///  - ANONYMOUS — everything else. `contactName` and `phone` are EMPTY
+    ///    ON PURPOSE: the caller's identity AND number are masked by iOS —
+    ///    there is no name to store, no number to look up or dial, and no
+    ///    address-book match is possible — and the UI renders the
+    ///    localized "Unanswered call" label (`history.unanswered`) instead
+    ///    of a stored locale string.
+    /// Either way the row's action opens the Phone app (`PhoneAppOpener`),
+    /// where the call genuinely lives (its Recents tab, one tap from the
+    /// dialer).
     private func recordUnansweredCall(at timestamp: Date) {
+        if let opened = openedCallAttributor.attributedMissedCall(endedAt: timestamp) {
+            recordActivity(kind: .call, channel: .unanswered,
+                           contactName: opened.name, phone: opened.phone,
+                           timestamp: timestamp)
+            return
+        }
         recordActivity(kind: .call, channel: .unanswered,
                        contactName: "", phone: "", timestamp: timestamp)
     }
@@ -5422,7 +5471,16 @@ self.noteTalkContractChanged()
         let detector = LiveCallDetector(
             provider: CXCallStateProvider(),
             onChange: { [weak self] active in
-                DispatchQueue.main.async { self?.liveCallActive = active }
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.liveCallActive = active
+                    // A connected call clears the attribution candidate
+                    // (call-tracking task, 2026-09-13): something was
+                    // ANSWERED, so if an unanswered event lands later it
+                    // is not the app's dial — better to record it
+                    // anonymously than to name the wrong contact.
+                    if active { self.openedCallAttributor.noteCallConnected() }
+                }
             },
             onUnanswered: { [weak self] timestamp in
                 // Record the anonymous unanswered row (missed-calls task,

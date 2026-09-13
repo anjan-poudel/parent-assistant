@@ -117,6 +117,88 @@ final class UnansweredCallTracker {
     }
 }
 
+/// Attribution gate for the app's own call opens (call-tracking task,
+/// 2026-09-13) — the one honest bridge between the two halves of the
+/// call log.
+///
+/// The app records every call IT opened with the contact it dialed
+/// (call-history task, 2026-09-06). The MISSED half arrives anonymously:
+/// iOS's unanswered event carries no name, no number, nothing an address
+/// book could match. Time is the only fact that links the two — when the
+/// app opened a call to a known contact moments before an unanswered
+/// event arrives, and no call ever connected in between, the call the
+/// observer saw end without ever connecting IS the call the app just
+/// opened (an outgoing call nobody picked up). That narrow case is the
+/// only one this gate attributes; everything it cannot know stays
+/// anonymous, exactly as the platform dictates.
+///
+/// Deliberately narrow:
+///  - only the app's OWN opens are candidates (a `tel:`/FaceTime open
+///    with a stored number — the coordinator records them from
+///    `recordActivity`; a Messenger thread open is not a call and never
+///    becomes a candidate);
+///  - only within `window` seconds of the open — the ring-and-end horizon
+///    of a call just placed, not a licence to claim any later event;
+///  - any observed CONNECTED call clears the candidate: something was
+///    answered, so a later unanswered event must never be attributed to
+///    the dial;
+///  - one candidate at a time (a newer open replaces an older one), and
+///    the first unanswered event consumes it — an attributed miss is
+///    reported once, exactly like the anonymous event it came from.
+///
+/// Foundation-only and stateful for the same reason as
+/// `UnansweredCallTracker`: the coordinator's init boots the voice stack,
+/// so the decision is tested here directly and the coordinator owns only
+/// the wiring.
+final class OpenedCallAttributor {
+
+    /// One call the app opened, awaiting its outcome.
+    struct OpenedCall: Equatable {
+        let name: String
+        let phone: String
+        let openedAt: Date
+    }
+
+    /// How long an opened call stays a candidate. An outgoing call that
+    /// is never picked up rings for ~30 seconds and ends; two minutes
+    /// covers that plus the delay before iOS's ended-unconnected update
+    /// reaches the observer, while staying far too short to smear an
+    /// unrelated missed call from later in the hour onto this dial.
+    static let window: TimeInterval = 120
+
+    private var pending: OpenedCall?
+
+    /// The app genuinely opened a call to `phone` at `timestamp`. An open
+    /// without a number can never be attributed (there is nothing to
+    /// match), so it records nothing.
+    func recordOpenedCall(name: String, phone: String, at timestamp: Date) {
+        guard !phone.isEmpty else { return }
+        pending = OpenedCall(name: name, phone: phone, openedAt: timestamp)
+    }
+
+    /// A connected call was observed. Whatever it was, the app's dial is
+    /// no longer the honest explanation for any later unanswered event —
+    /// the candidate is dropped rather than guessed with.
+    func noteCallConnected() {
+        pending = nil
+    }
+
+    /// The identity of the call the just-reported unanswered end belongs
+    /// to, or nil when the event cannot honestly be attributed (nothing
+    /// pending, a candidate older than `window`, or a candidate recorded
+    /// after the end — clock skew). The candidate is consumed either way:
+    /// an unanswered end reports once, and a stale candidate can never
+    /// answer a later event.
+    func attributedMissedCall(endedAt: Date,
+                              window: TimeInterval = OpenedCallAttributor.window) -> OpenedCall? {
+        guard let pending else { return nil }
+        self.pending = nil
+        let age = endedAt.timeIntervalSince(pending.openedAt)
+        guard age >= 0, age <= window else { return nil }
+        return pending
+    }
+}
+
 /// Edge-triggered live-call detector (call-history task, 2026-09-06;
 /// missed-calls task, 2026-09-07).
 ///

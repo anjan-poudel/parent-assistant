@@ -536,6 +536,73 @@ extension FeedbackRegion: Equatable {
     }
 }
 
+/// The Home missed-call activity tile (call-tracking task, 2026-09-13):
+/// one card in Home's activity flow showing the last missed call —
+/// "छुटेको कल: बुबा · १० मिनेट अघि" — and pushing the Phone screen, where
+/// the full call log lives.
+///
+/// Where the row comes from: `AppActivityLog`'s missed-call lookup over
+/// the assistant's own activity log (a call the app placed and nobody
+/// picked up, or an unanswered call the live-call observer reported with
+/// no identity — see the tile's two-line presentation). A missed call
+/// the app cannot attribute is shown honestly, without a name.
+///
+/// Why the tile is a NAVIGATION row, not a dial action: the app never
+/// dials from a glance (every call goes through the Talk confirmation or
+/// a tapped contact), and an anonymous missed call has no number to dial
+/// at all. The chevron is the app's standard "this opens a screen"
+/// disclosure (UpdatesRowButton draws the same one).
+///
+/// EQUATABLE by presentation only — the tap closure is re-created every
+/// render and always pushes the same destination, the rule every extracted
+/// Home view follows (see HomePresentationState).
+struct HomeMissedCallTile: View {
+    let presentation: MissedCallPresentation
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: 12) {
+                IconBadge(systemImage: "phone.arrow.down.left",
+                          tint: .call,
+                          diameter: 40)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(presentation.title)
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundStyle(DesignTokens.textPrimary)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(2)
+                    Text(presentation.time)
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                    .foregroundStyle(DesignTokens.textSecondary)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        }
+        .buttonStyle(.plain)
+        // One gesture reads the whole tile: "Missed call: बुबा · १० मिनेट
+        // अघि" — then the hint says what the tap does, the same split
+        // every row in the app uses.
+        .accessibilityLabel(Text(presentation.line))
+        .accessibilityHint(Text(LocalizedStringKey("history.openPhone")))
+    }
+}
+
+extension HomeMissedCallTile: Equatable {
+    /// The resolved lines decide the render; the closure never does (it
+    /// always pushes the same destination).
+    static func == (lhs: HomeMissedCallTile, rhs: HomeMissedCallTile) -> Bool {
+        lhs.presentation == rhs.presentation
+    }
+}
+
 /// The slim setup strip (redesign spec §3.1): Home's only resume
 /// affordance for the onboarding wizard, and transient per-user — it must
 /// never push the hero off the viewport, so the region below the hero owns
