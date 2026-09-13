@@ -577,11 +577,14 @@ enum ModelCatalog {
             // template + reconciled intent/response schema. Gates: closed
             // 0.941 (one row short), emergency 1.000, side-effect 1.000 —
             // best available on-device brain.
-            // CHAT FRAMING (T-046, measured): `.raw` — trained on the bare
-            // prompt template with NO chat-template wrap (gate numbers above
-            // are grammar-off; see the T-046 framing record for this
-            // checkpoint's app-faithful numbers). The pre-T-046 `default:`
-            // branch sent it the LLaMA 3.2 scheme.
+            // CHAT FRAMING (T-046, measured): `.qwen3` — the one fine-tune
+            // the app-faithful check does NOT send the bare prompt: under the
+            // on-device grammar it decoded better wrapped in the official
+            // Qwen3 template (emergency 1.000 / closed 0.647 / 13 usable
+            // rows) than bare (0.333 / 0.471 / 10) or under the pre-T-046
+            // LLaMA 3.2 scheme (0.667 / 0.529 / 13). Gate numbers above are
+            // grammar-off; see the T-046 framing record for the per-framing
+            // rows. The pre-T-046 `default:` branch sent it LLaMA 3.2.
             filename: "intent-ne-qwen-s43-q4_k_m.gguf",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v14/intent-ne-qwen-s43-q4_k_m.gguf")!,
             sizeBytes: 1_107_408_576,
@@ -671,6 +674,13 @@ enum ModelCatalog {
             // embedding restore), GGUF Q4_K_M. Served from the home
             // server for TESTING (LAN-only URL); public hosting needs a
             // >2GiB route — parts sit on release v13.
+            // CHAT FRAMING (T-046, measured): `.raw` — under the on-device
+            // grammar the bare prompt halved the wrong rows (6 of 20, vs 12
+            // of 20 for the pre-T-046 LLaMA 3.2 scheme): closed 0.412 ->
+            // 0.706, parse 0.400 -> 0.700, usable 8 -> 13. The one
+            // emergency row it drops (gc-emergency-001) is a runtime
+            // truncation, not a misclassification — see the T-046 record's
+            // safety table.
             filename: "intent-ne-qwen3-4b-nepali-q4_k_m.gguf",
             downloadURL: URL(string: "http://192.168.1.117:8765/intent-ne-qwen3-4b-nepali-q4_k_m.gguf")!,
             sizeBytes: 2_529_263_424,

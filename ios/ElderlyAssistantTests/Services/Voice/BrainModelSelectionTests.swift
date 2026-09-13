@@ -113,15 +113,18 @@ final class BrainModelSelectionTests: XCTestCase {
     /// committed at `tools/train-intent/eval/framing_summary.json` /
     /// `framing_rows.jsonl`.
     ///
-    /// The three `.raw` ids are Qwen3-derived fine-tunes: `train_qlora.py`
-    /// tokenizes the bare prompt template with no chat-template wrap and the
-    /// eval harness documents the matching inference contract, so a wrapped
-    /// prompt is a training/inference mismatch regardless of the wrapper.
-    /// Before T-046 every one of them was sent the LLaMA 3.2 scheme by the
-    /// `default:` branch, including the shipped default brain.
+    /// Before T-046 every one of these ids was sent the LLaMA 3.2 scheme by
+    /// the `default:` branch — except the two stock Qwen3 ids, which were the
+    /// only ones the old two-case switch knew. The `.raw` ids are the
+    /// Qwen3-derived fine-tunes that decode as trained on the bare prompt
+    /// (`train_qlora.py` tokenizes the template with no chat-template wrap);
+    /// `intentQwenS43` is the one fine-tune whose measurement put the Qwen3
+    /// wrap ahead of the bare shape once the app's own decode grammar was in
+    /// the loop, so its row is `.qwen3` — per id, from the check, not by
+    /// family.
     private static let determinedFramings: [(ModelID, LlamaCommandInterpreter.ChatFormat.Kind)] = [
         (ModelCatalog.intentQwen4BS43, .raw),        // default brain, offered
-        (ModelCatalog.intentQwenS43, .raw),          // offered
+        (ModelCatalog.intentQwenS43, .qwen3),        // offered, measured wrap
         (ModelCatalog.qwen4BNepali, .raw),           // offered
         (ModelCatalog.qwen3_4BInstruct, .qwen3),     // offered (stock Qwen3)
         (ModelCatalog.qwen3_1_7BInstruct, .qwen3),   // offered (stock Qwen3)

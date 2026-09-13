@@ -510,8 +510,18 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// on-device runtime samples through), recording per-row outcomes,
     /// prompt token counts against the 1,024-token context, and emergency
     /// rows per framing. Result tables:
-    /// `tools/train-intent/eval/framing_summary.json` and
-    /// `framing_rows.jsonl`.
+    /// `tools/train-intent/eval/framing_summary.json`,
+    /// `framing_rows.jsonl` and the applied verdicts in
+    /// `framing_determination.json`.
+    ///
+    /// Two kinds of id appear here and the check treats them differently:
+    /// the intent fine-tunes (trained on this app's own prompt contract) are
+    /// decided by the measurement, while the general-purpose brains — never
+    /// trained on that contract — are only checked for an outright decode
+    /// failure; the golden corpus cannot certify a template change for a
+    /// model it never trained, so their publisher's template stands and the
+    /// numbers are recorded instead (see the determination table's
+    /// `policy` field).
     ///
     /// A hidden id that a stale stored preference can still resolve is
     /// listed here too — `resolvedBrainModelID` returns any id that still
@@ -519,7 +529,7 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     static let measuredFramings: [ModelID: ChatFormat.Kind] = [
         // — offered picker brains (ModelCatalog.availableBrainEntries) —
         ModelCatalog.intentQwen4BS43: .raw,
-        ModelCatalog.intentQwenS43:   .raw,
+        ModelCatalog.intentQwenS43:   .qwen3,
         ModelCatalog.qwen4BNepali:    .raw,
         ModelCatalog.qwen3_4BInstruct: .qwen3,
         ModelCatalog.qwen3_1_7BInstruct: .qwen3,
