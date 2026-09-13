@@ -1,0 +1,27 @@
+{
+ "runs": {
+  "42": {
+   "idx": 0,
+   "set": "qwen-kr-repaired",
+   "grammar": "gbnf",
+   "label_order": "schema",
+   "mode": "soft",
+   "metrics": {
+    "closed_acc": 0.882,
+    "contact_f1": 0.833,
+    "time_f1": 0.75,
+    "emergency_recall": 1.0,
+    "se_precision": 1.0
+   },
+   "gates_failed": "['closed_intent_accuracy', 'contact_f1', 'time_f1'] \u2014 this checkpoint must not ship",
+   "passed": false,
+   "done": true
+  },
+  "43": {
+   "idx": 1,
+   "set": "qwen-kr-repaired",
+   "grammar": "gbnf",
+   "label_order": "schema"
+  }
+ }
+}

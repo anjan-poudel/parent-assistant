@@ -20,7 +20,17 @@ from eval_golden import GGUF_MAX_TOKENS, GGUF_TEMPERATURE, _repeat_penalty, _sto
 from intent_prompt import render_prompt  # noqa: E402
 from llama_cpp import Llama  # noqa: E402
 
-ROOT = Path(__file__).resolve().parent
+def _suite_root() -> Path:
+    """The suite root: the nearest ancestor holding seeds/prompt_template.txt
+    (this script lives in src/, but must also work from a scratch copy)."""
+    here = Path(__file__).resolve().parent
+    for cand in (here, *here.parents):
+        if (cand / "seeds" / "prompt_template.txt").exists():
+            return cand
+    raise SystemExit("suite root not found from %s" % here)
+
+
+ROOT = _suite_root()
 model_path, tag = sys.argv[1], sys.argv[2]
 golden = {r["id"]: r for r in
           (json.loads(l) for l in open(ROOT / "eval" / "golden_corpus.jsonl", encoding="utf-8") if l.strip())}
