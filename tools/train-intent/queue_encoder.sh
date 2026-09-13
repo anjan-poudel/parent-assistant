@@ -50,8 +50,19 @@ while pgrep -f "train_finetune.py" >/dev/null \
    || pgrep -f "train_qlora.py" >/dev/null \
    || pgrep -f "eval_checkpoint.py" >/dev/null; do sleep 120; done
 
+# Optional supply-floor waiver, forwarded verbatim to the build stage only.
+# Both unset = no waiver (the default, floor-enforcing path). The pipeline
+# refuses a waiver with no reason, so a half-set pair fails loudly instead of
+# silently dropping the decision.
+WAIVE=()
+if [ -n "${T036_WAIVE_FLOOR:-}" ]; then WAIVE+=(--waive-floor "$T036_WAIVE_FLOOR"); fi
+if [ -n "${T036_WAIVE_REASON:-}" ]; then WAIVE+=(--waive-reason "$T036_WAIVE_REASON"); fi
+
 gpu_free
 echo "[encoder] $(date +%Y%m%d-%H%M%S) GPU free — starting full T-036 run -> $WORK_DIR"
+if [ ${#WAIVE[@]} -gt 0 ]; then
+  echo "[encoder] floor waiver requested: ${T036_WAIVE_FLOOR:-none} — the waiver is recorded in the run manifest and is internal-testing-only"
+fi
 # The pipeline itself re-checks the card before the train leg (encoder.gpu.*)
 # and runs every stage in one supervised chain, so an interruption leaves a
 # resumable state.pt plus a partially-written run_manifest.json.
@@ -60,6 +71,7 @@ echo "[encoder] $(date +%Y%m%d-%H%M%S) GPU free — starting full T-036 run -> $
   --work-dir "$WORK_DIR" \
   --device cuda \
   --publish-dir "${T036_PUBLISH_DIR:-}" \
+  "${WAIVE[@]}" \
   > "$LOG_DIR/pipeline_$(date +%Y%m%d_%H%M%S).log" 2>&1
 RC=$?
 echo "[encoder] pipeline exit=$RC (0=published/clean, 5=publish gate withheld, "\
