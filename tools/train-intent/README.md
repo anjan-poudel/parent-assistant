@@ -59,6 +59,95 @@ clean text guarantees a distribution mismatch. So:
 `eval_golden.py` exits non-zero when any gate fails, so a bad checkpoint
 can't be shipped by accident.
 
+## Encoder pipeline (T-036 — joint intent + BIO slots, `--backend encoder`)
+
+The C3 candidate that won the T-033 bakeoff (`cartesinus/multilingual_minilm-
+amazon-massive-intent`) fine-tuned with **one intent head + one BIO slot head**
+on the same data. It is a *second* backend of the same intent engine, not a
+replacement for the LLM path; `eval_golden.py --backend encoder` scores it
+through the identical harness and gates.
+
+```bash
+# wiring check — CPU, no GPU, ~1 min, publishes nothing
+python src/run_encoder_pipeline.py \
+  --sources tests/data/encoder_rows_sample.jsonl \
+  --work-dir /tmp/t036-smoke --device cpu --max-steps 2 --smoke
+
+# the real thing (on the training box, GPU-free gate first) — see queue_encoder.sh
+zsh queue_encoder.sh data/teacher.jsonl data/noised.jsonl data/clean.jsonl
+```
+
+| Stage | Command | Output | Resume |
+|---|---|---|---|
+| E1 build BIO corpus | `src/build_encoder_dataset.py` | `build/{train,valid,test}.jsonl` + `build_report.json` | deterministic rebuild |
+| E2 train | `src/train_encoder.py` | `train/artifact/{model.pt,meta.json}` + `state.pt` | resumes from `state.pt`; config/dataset drift refused |
+| E3 calibrate | `src/calibrate_encoder.py` | `artifact/calibration.json`, `meta.json:calibration_temperature` | refit (seconds) |
+| E4 eval | `src/eval_golden.py --backend encoder` (T-038-owned) | `eval_manifest.jsonl` | per-row |
+| E5 publish gate | `src/run_encoder_pipeline.py` | `run_manifest.json` | refuses with a reason |
+
+**Everything is contract-driven.** The canonical logit order (12 intents), the
+13 BIO tags, the loss shape (class-weighted intent CE + masked slot CE,
+`ignore_index -100`), distillation defaults (`tau 2.0`, `lambda_kd 0.5`) and the
+calibration gate buckets live in `encoder_contract.yaml` (T-035) and are
+asserted element-wise against `annotation_rules.yaml` (T-034) at every stage
+startup. Changing either file invalidates a resume (`cfg_hash` covers both).
+
+**Export conformance (recorded, not implied).** The contract states `int64`
+graph inputs; the already-compiled T-033 CoreML artifact and the shipped iOS
+runner (`IntentEncoderInterpreter.swift`, T-037-a) use **int32 on the wire**, and
+coremltools inserts the int32 -> int64 cast at the graph input — so the iOS side
+needs no change. That reconciliation is written into `meta.json` and
+`run_manifest.json` under `conformance` (together with the interpreter-side
+`runtime.config`, which training records but never drives), and
+`bakeoff_export_coreml.py` declares the wire dtype as `WIRE_INPUT_DTYPE` with the
+same note — an int64 CoreML export would need a matching runner change, so it is
+flagged rather than left to whichever script exports first. `max_len` must equal
+the contract's `runtime.config.maxSequenceLength` (64); the trainer and the
+calibrator refuse a mismatch. `meta.json:calibration_temperature` is always
+numeric and honest: `1.0` with `calibration.status='uncalibrated'` until stage E3
+fits one, never null, because the interpreter divides by it.
+
+**Guards — refusals, not warnings** (exit codes from `src/pipeline_guards.py`):
+
+| Code | Meaning |
+|---|---|
+| 0 | OK |
+| 1 | a stage failed (train/calibration gate) |
+| 2 | usage error |
+| 3 | refused input — golden corpus as a training input, missing build provenance, smoke corpus without `--smoke`, leaky row, drifted resume, missing contract |
+| 4 | corpus-floor refusal for a real run (waivable only with an explicit flag) |
+| 5 | publish withheld by `run_encoder_pipeline.py` |
+
+The calibration verdict is **tri-state**: `true` (measured, inside tolerance),
+`false` (measured, outside), or `null` — *not measurable*, because the golden
+corpus is below the contract's `corpus_floor` / `measurable_today=false`. `null`
+withholds publication exactly like `false`: with a 20-row corpus every bucket
+under-fills and pools, and an empty violation list must never be read as a pass.
+
+Paths passed to a stage (`--sources`, `--build-report`, `--publish-dir`) are
+made absolute at the pipeline's entry point, because stages run with cwd set to
+`tools/train-intent/` rather than the caller's directory. `--sources` accepts
+both comma- and space-separated lists; a source that does not exist is named
+with its resolved path, and if *none* of them exist the build refuses instead of
+producing an empty corpus.
+
+The golden corpus is **never** a training input: `build_encoder_dataset.py`,
+`train_encoder.py` and `calibrate_encoder.py` all refuse it by normalized
+(matra-stripped) membership, and that refusal has a test that runs the CLI and
+asserts the observed message.
+
+**Distillation (stage 2) is conditional** (`loss.distillation.enabled=conditional`
+in the contract). The KD loss (`tau^2 * KL`) is implemented and unit-tested, the
+sampler keeps per-row teacher `confidence`, but the run **skips it by default and
+records the reason** (`distill_skip_reason()`): the preferred teacher
+(`incumbent_local_llm`) is `tooling_not_in_repo`, and the only available one is a
+stated construction from a scalar confidence, not a measured distribution. Opt in
+with `encoder.distillation.enabled: true`.
+
+**Publish is withheld until `encoder.artifact.version` is set** in `config.yaml`
+(no version = no release); `run_manifest.json` then carries the refusal reason
+rather than an unversioned artifact.
+
 ## Training (stage 4, external)
 
 Recommended: unsloth or axolotl QLoRA on the 4090 box (same machine as

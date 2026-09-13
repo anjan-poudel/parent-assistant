@@ -89,13 +89,19 @@ def spans_from_tags(words: list[str], tag_ids: list[int], label: str) -> str | N
 
 
 class JointEncoder(nn.Module):
-    def __init__(self, backbone_name_or_path: str, num_intents: int):
+    def __init__(self, backbone_name_or_path: str, num_intents: int,
+                 tags: list[str] | None = None):
+        # `tags` defaults to the T-033 spike's 5-tag set so every existing
+        # checkpoint keeps loading bit-identically; T-036 passes the T-034
+        # 13-tag set (O + B/I x 6 span labels). The first five entries are
+        # identical, so the harness's contact/time decoding is unchanged.
         super().__init__()
         from transformers import AutoModel
         self.backbone = AutoModel.from_pretrained(backbone_name_or_path)
         hidden = int(self.backbone.config.hidden_size)
+        self.tags = list(tags or TAGS)
         self.intent_head = nn.Linear(hidden, num_intents)
-        self.slot_head = nn.Linear(hidden, len(TAGS))
+        self.slot_head = nn.Linear(hidden, len(self.tags))
 
     def forward(self, input_ids, attention_mask):
         out = self.backbone(input_ids=input_ids, attention_mask=attention_mask)
@@ -130,7 +136,17 @@ def load_model(model_dir: str | Path, map_location="cpu"):
     # (CVE-2025-32434 guard) — the override dir carries safetensors instead).
     local = os.environ.get("T033_BACKBONE_OVERRIDE") or meta.get("backbone_local") or ""
     backbone = local if local and Path(local).exists() else meta["backbone"]
-    model = JointEncoder(backbone, num_intents=len(meta["intents"]))
+    # T-036 checkpoints carry the T-034 13-tag set in meta["tags"]; T-033
+    # checkpoints have no such key and fall back to the spike's 5 tags.
+    tags = list(meta.get("tags") or TAGS)
+    model = JointEncoder(backbone, num_intents=len(meta["intents"]), tags=tags)
+    expected_slot = len(tags)
+    got_slot = ckpt["state_dict"]["slot_head.weight"].shape[0]
+    if got_slot != expected_slot:
+        raise ValueError(
+            f"slot head has {got_slot} rows but meta['tags'] lists {expected_slot} "
+            f"tags ({tags}) — the checkpoint and its meta disagree; refusing to "
+            "load rather than silently scoring misaligned tags.")
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
     tok = AutoTokenizer.from_pretrained(str(d))
