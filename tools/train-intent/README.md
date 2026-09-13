@@ -42,9 +42,13 @@ clean text guarantees a distribution mismatch. So:
 - **Edge classes** (spec §9.1): gibberish → `none`; emergency near-misses
   → `emergency` (recall-first); ambiguous → low-confidence abstain.
   **An overconfident small model is worse than no model.**
-- **The golden corpus (`eval/golden_corpus.jsonl`) is HELD OUT — never
+- **The golden corpus (`eval/golden_corpus.jsonl`) and the adversarial
+  near-miss set (`eval/emergency_nearmiss.jsonl`) are HELD OUT — never
   trained on.** `build_dataset.py` refuses any row whose normalized
-  utterance appears in the corpus.
+  utterance appears in either file. The corpus covers every schema-v2 action
+  (15–25 rows each) with T-034 span annotations + script markers; it is
+  authored (never hand-typed) via `eval/author_golden_corpus.py` — run it
+  with `--check` to prove the committed JSONL matches the authoring data.
 
 ## Ship gates (spec §10 — eval enforces these)
 
@@ -52,12 +56,37 @@ clean text guarantees a distribution mismatch. So:
 |---|---|
 | Closed-intent accuracy | ≥ 95% |
 | Slot F1 (contact, time) | ≥ 0.90 |
-| **Emergency recall** | **= 100% on corpus** |
+| **Emergency recall** | **= 100% on corpus, ≥ 0.98 on the adversarial near-miss set** |
 | Call/message precision | ≥ 97% |
+| Abstention precision | ≥ 0.90 (P(gold=none \| pred=none)) |
+| Calibration | per populated confidence bucket, \|accuracy − mean confidence\| ≤ 0.10 |
 | Δ vs Gemini interpreter | within −3 pts on closed intents |
 
 `eval_golden.py` exits non-zero when any gate fails, so a bad checkpoint
-can't be shipped by accident.
+can't be shipped by accident. Every gate has a committed failing fixture
+under `eval/fixtures/` proving it can fail a run on its own:
+
+```bash
+# fixture backend replays a prediction file keyed by row id (no model needed);
+# each run appends a results.csv row whose last column names the failed gate.
+cp eval/fixtures/results_baseline_100.csv /tmp/r.csv
+python src/eval_golden.py --backend fixture \
+    --preds eval/fixtures/preds_emergency_miss.jsonl \
+    --corpus eval/fixtures/corpus_closed28.jsonl \
+    --nearmiss eval/fixtures/nearmiss_min.jsonl \
+    --results-csv /tmp/r.csv --label fx-emergency-miss
+```
+
+The Δ-vs-Gemini gate reads the newest `results.csv` row whose label starts
+with `gemini` (override with `--gemini-label`); with no baseline recorded the
+gate fails closed (`gemini_gap_unevaluated`). Run the Gemini backend at a
+corpus revision **before** comparing candidates at that revision.
+
+## Tests
+
+```bash
+python3 -m unittest discover -s tests -v   # gates, fixtures, leakage guard, device harness
+```
 
 ## Training (stage 4, external)
 
@@ -76,3 +105,20 @@ sends.
 python src/build_dataset.py --smoke    # validates + splits data/sample.jsonl only
 python src/eval_golden.py --backend echo   # dry-runs the harness (echo backend = utterance in, none out)
 ```
+
+## On-device latency (spec §10: p50 ≤ 1.0s, p95 ≤ 2.0s)
+
+`src/measure_device.py` measures nothing by itself — no phone is attached to
+this box, and it will not invent numbers:
+
+```bash
+python src/measure_device.py --emit-prompts eval/device/prompts.jsonl  # 100 held-out prompts
+# ... run the protocol in eval/device/device-eval-protocol.md on the oldest
+#     supported iPhone, pull measurements_ios.jsonl back ...
+python src/measure_device.py --replay eval/device/measurements_ios.jsonl \
+    --prompts eval/device/prompts.jsonl --device-model "iPhone SE (3rd gen)" \
+    --os "iOS 26.0" --build "<sha> (<build>)"     # appends eval/device/measurements.csv
+```
+
+Until a real measurements file is scored, every device number in the report
+stays **UNMEASURED** (device builds are T-037's).

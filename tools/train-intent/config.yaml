@@ -59,4 +59,9 @@ gates:
   slot_f1: 0.90
   emergency_recall: 1.00       # hard gate, no compromise
   side_effect_precision: 0.97  # call + send_message
-  max_gap_vs_gemini: 0.03
+  max_gap_vs_gemini: 0.03      # closed-intent accuracy behind the Gemini baseline
+  # Wired by T-038 (config keys existed for the first five; these three were
+  # the §10 gates with no enforcement).
+  abstention_precision: 0.90   # P(gold == none | pred == none) — abstain only when truly unresolvable
+  calibration_tolerance: 0.10  # per populated confidence bucket: |accuracy - mean confidence|
+  emergency_recall_nearmiss: 0.98  # adversarial near-miss set (eval/emergency_nearmiss.jsonl)

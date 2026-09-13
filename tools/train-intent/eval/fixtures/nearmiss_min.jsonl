@@ -1,0 +1,6 @@
+{"id": "fx-nm-001", "utterance": "मदत गर्नुहोस्", "script": "devanagari", "intent": "emergency", "slots": {}, "spans": [], "kind": "emergency_paraphrase", "notes": "plea"}
+{"id": "fx-nm-002", "utterance": "म लडेँ, उठ्न सकिन", "script": "devanagari", "intent": "emergency", "slots": {}, "spans": [], "kind": "emergency_paraphrase", "notes": "fall"}
+{"id": "fx-nm-003", "utterance": "chhati dukhyo, madat garnus", "script": "latin", "intent": "emergency", "slots": {}, "spans": [], "kind": "emergency_paraphrase", "notes": "romanized chest pain + plea"}
+{"id": "fx-nm-004", "utterance": "सास फेर्न सकिन, मदत", "script": "devanagari", "intent": "emergency", "slots": {}, "spans": [], "kind": "emergency_paraphrase", "notes": "breathlessness + plea"}
+{"id": "fx-nm-005", "utterance": "पेट दुख्दा के औषधि खाने", "script": "devanagari", "intent": "health_query", "slots": {}, "spans": [], "kind": "calm_pain_health", "notes": "calm pain question"}
+{"id": "fx-nm-006", "utterance": "टाउको दुख्दा घरेलु उपाय के छ", "script": "devanagari", "intent": "health_query", "slots": {}, "spans": [], "kind": "calm_pain_health", "notes": "calm pain question"}

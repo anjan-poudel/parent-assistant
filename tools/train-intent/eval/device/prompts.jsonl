@@ -1,0 +1,100 @@
+{"id": "gc-call-001", "utterance": "माइयालाई फोन गर"}
+{"id": "gc-call-002", "utterance": "maiya lai phone gara"}
+{"id": "gc-call-003", "utterance": "छोरालाई वाट्सएपमा कल गर"}
+{"id": "gc-call-004", "utterance": "सुनितालाई भिडियो कल गर्नुहोस्"}
+{"id": "gc-call-005", "utterance": "didi lai facetime ma call gara na"}
+{"id": "gc-call-006", "utterance": "रामलाई फोन लगाउनुहोस्"}
+{"id": "gc-call-007", "utterance": "गीतालाई कल गर"}
+{"id": "gc-call-008", "utterance": "ram lai call gara"}
+{"id": "gc-call-009", "utterance": "हरिलाई भिडियो कल गर"}
+{"id": "gc-call-010", "utterance": "आमालाई व्हाट्सएपमा फोन गर"}
+{"id": "gc-call-011", "utterance": "बुबालाई फेसटाइममा कल गर्नुहोस्"}
+{"id": "gc-call-012", "utterance": "saraswati lai video call gara"}
+{"id": "gc-call-013", "utterance": "होइन, वाट्सएपमा नै गर"}
+{"id": "gc-call-014", "utterance": "कृष्णलाई फोन गर न"}
+{"id": "gc-call-015", "utterance": "didi lai phone gara"}
+{"id": "gc-call-016", "utterance": "मलाई छोरी सँग कुरा गर्नु छ"}
+{"id": "gc-emergency-001", "utterance": "मद्दत गर्नुहोस्"}
+{"id": "gc-emergency-002", "utterance": "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ"}
+{"id": "gc-emergency-003", "utterance": "म लडेँ, उठ्न सकिन"}
+{"id": "gc-emergency-004", "utterance": "मलाई बचाउनुहोस्"}
+{"id": "gc-emergency-005", "utterance": "छाती धेरै दुख्यो, मद्दत गर्नुहोस्"}
+{"id": "gc-emergency-006", "utterance": "सास फेर्न सकिन"}
+{"id": "gc-emergency-007", "utterance": "म लडेँ, मद्दत चाहियो"}
+{"id": "gc-emergency-008", "utterance": "मलाई डर लागिरहेको छ"}
+{"id": "gc-emergency-009", "utterance": "टाउको धेरै दुख्यो, बचाउनुहोस्"}
+{"id": "gc-emergency-010", "utterance": "madat garnus, malai saas ferna sakina"}
+{"id": "gc-emergency-011", "utterance": "आमा बेहोस भइन्, मद्दत गर्नुहोस्"}
+{"id": "gc-emergency-012", "utterance": "रगत बगिरहेको छ, हतार गर्नुहोस्"}
+{"id": "gc-emergency-013", "utterance": "उठ्न सक्दिन, मद्दत गर्नुहोस्"}
+{"id": "gc-emergency-014", "utterance": "मलाई सन्चो छैन, मद्दत गर्नुहोस्"}
+{"id": "gc-emergency-015", "utterance": "मिर्गौला दुख्यो, मद्दत गर्नुहोस्"}
+{"id": "gc-emergency-016", "utterance": "पेट दुख्यो र उठ्न सकिन, मद्दत चाहियो"}
+{"id": "gc-health-001", "utterance": "मेरो रक्तचाप कस्तो हुनुपर्छ"}
+{"id": "gc-health-002", "utterance": "मिर्गौला दुख्दा के खानु हुन्न"}
+{"id": "gc-health-003", "utterance": "सुगर कति हुँदा ठीक हुन्छ"}
+{"id": "gc-health-004", "utterance": "रक्तचाप बढी भए के गर्नुपर्छ"}
+{"id": "gc-health-005", "utterance": "औषधि खान बिर्सें भने के गर्ने"}
+{"id": "gc-health-006", "utterance": "टाउको दुख्दा कुन औषधि खाने"}
+{"id": "gc-health-007", "utterance": "घुँडा दुख्दा के गर्नु राम्रो हुन्छ"}
+{"id": "gc-health-008", "utterance": "दिनमा कति पानी पिउनुपर्छ"}
+{"id": "gc-health-009", "utterance": "नुन कति खानु हुन्छ"}
+{"id": "gc-health-010", "utterance": "दुखाइको औषधि खाली पेट खान हुन्छ"}
+{"id": "gc-health-011", "utterance": "ब्लड सुगरको जाँच कति दिनमा गर्नुपर्छ"}
+{"id": "gc-health-012", "utterance": "निद्रा लाग्दैन, के गर्नुपर्छ"}
+{"id": "gc-health-013", "utterance": "रगतको चाप सामान्य कति हुनुपर्छ"}
+{"id": "gc-health-014", "utterance": "खोकी लागिरहेको छ, घरेलु उपाय के छ"}
+{"id": "gc-health-015", "utterance": "मेरो तौल घट्दै छ, किन होला"}
+{"id": "gc-health-016", "utterance": "आँखा धमिलो देखिन्छ, के कारण होला"}
+{"id": "gc-ack-001", "utterance": "औषधि खाएँ"}
+{"id": "gc-ack-002", "utterance": "औषधि खाएको छैन"}
+{"id": "gc-ack-003", "utterance": "औषधि खाइसकें"}
+{"id": "gc-ack-004", "utterance": "दवाई खाएँ"}
+{"id": "gc-ack-005", "utterance": "औषधि लिएँ"}
+{"id": "gc-ack-006", "utterance": "प्रेसरको औषधि खाएँ"}
+{"id": "gc-ack-007", "utterance": "सुगरको औषधि खाइसकें"}
+{"id": "gc-ack-008", "utterance": "भिटामिन खाएँ"}
+{"id": "gc-ack-009", "utterance": "aushadhi khaen"}
+{"id": "gc-ack-010", "utterance": "dabai khaisake"}
+{"id": "gc-ack-011", "utterance": "medicine khaisake"}
+{"id": "gc-ack-012", "utterance": "आजको औषधि खाएँ"}
+{"id": "gc-ack-013", "utterance": "बिहानको औषधि खाइसकें"}
+{"id": "gc-ack-014", "utterance": "मैले औषधि खाएँ"}
+{"id": "gc-ack-015", "utterance": "औषधि खाएँ, ठीक छ"}
+{"id": "gc-ack-016", "utterance": "औषधि खाएको छु"}
+{"id": "gc-reminder-001", "utterance": "बिहान ८ बजे औषधि खान सम्झाउनु"}
+{"id": "gc-reminder-002", "utterance": "साढे ७ बजे हिँड्न सम्झाउनुहोस्"}
+{"id": "gc-reminder-003", "utterance": "दिउँसो २ बजे औषधि खान सम्झाउनु"}
+{"id": "gc-reminder-004", "utterance": "बेलुका ७ बजे दवाई खान सम्झाउनु"}
+{"id": "gc-reminder-005", "utterance": "राति ९ बजे सुगरको औषधि खान सम्झाउनु"}
+{"id": "gc-reminder-006", "utterance": "साढे ८ बजे पानी खान सम्झाउनु"}
+{"id": "gc-reminder-007", "utterance": "भोलि बिहान ७ बजे हिँड्न सम्झाउनु"}
+{"id": "gc-reminder-008", "utterance": "हरेक दिन बिहान ६ बजे उठ्न सम्झाउनु"}
+{"id": "gc-reminder-009", "utterance": "साँझ ५ बजे प्रेसरको औषधि खान सम्झाउनु"}
+{"id": "gc-reminder-010", "utterance": "bihana 7 baje aushadhi khana samjhaunu"}
+{"id": "gc-reminder-011", "utterance": "saadhe 6 baje hidna samjhaunu"}
+{"id": "gc-reminder-012", "utterance": "मलाई बिहान ८ बजे सम्झना गराउनुहोस्"}
+{"id": "gc-reminder-013", "utterance": "हरेक दिन बेलुका ८ बजे औषधि खान सम्झाउनु"}
+{"id": "gc-reminder-014", "utterance": "बिहान १० बजे भिटामिन खान सम्झाउनु"}
+{"id": "gc-reminder-015", "utterance": "दिउँसो १ बजे खाना खान सम्झाउनु"}
+{"id": "gc-reminder-016", "utterance": "राति साढे ९ बजे औषधि खान सम्झाउनु"}
+{"id": "gc-message-001", "utterance": "सुनितालाई आज भेट्नुहोस् भनेर मेसेज पठाउ"}
+{"id": "gc-message-002", "utterance": "माइयालाई मेसेज गर"}
+{"id": "gc-message-003", "utterance": "छोरालाई भोलि आउनु भनेर मेसेज पठाउ"}
+{"id": "gc-message-004", "utterance": "रामलाई फोन गर्न भन्ने मेसेज पठाउ"}
+{"id": "gc-message-005", "utterance": "रामलाई भोलि भेटौँला भनेर मेसेज पठाउ"}
+{"id": "gc-message-006", "utterance": "maiya lai message patha"}
+{"id": "gc-message-007", "utterance": "sunita lai ma thik chhu bhanera message patha"}
+{"id": "gc-message-008", "utterance": "दिदीलाई आज आउनुहोस् भनेर मेसेज गर"}
+{"id": "gc-message-009", "utterance": "आमालाई मलाई फोन गर्नु भनेर मेसेज पठाउ"}
+{"id": "gc-message-010", "utterance": "भाइलाई घर आउँदै छु भनेर मेसेज पठाउ"}
+{"id": "gc-message-011", "utterance": "हरिलाई शुभकामना भनेर मेसेज पठाउ"}
+{"id": "gc-message-012", "utterance": "गीतालाई भोलि बिहान आउनु भनेर मेसेज पठाउ"}
+{"id": "gc-message-013", "utterance": "krishna lai aaja aaunu bhanera message patha"}
+{"id": "gc-message-014", "utterance": "सरस्वतीलाई औषधि खान बिर्सनु हुन्न भनेर मेसेज पठाउ"}
+{"id": "gc-message-015", "utterance": "नातिलाई परीक्षा राम्रो होस् भनेर मेसेज पठाउ"}
+{"id": "gc-message-016", "utterance": "didi lai 'ma pugẽ' bhanera message patha"}
+{"id": "gc-music-001", "utterance": "भजन बजाउनुस्"}
+{"id": "gc-music-002", "utterance": "bhajan bajau na"}
+{"id": "gc-music-003", "utterance": "गीत चलाउ"}
+{"id": "gc-music-004", "utterance": "पुरानो नेपाली गीत बजाउ"}
