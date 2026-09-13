@@ -40,7 +40,8 @@ final class ApplianceHelperSessionTests: XCTestCase {
     }
 
     private func makeSession(transport: SequencedGeminiTransport,
-                             question: String? = "चिया कसरी बनाउने") -> ApplianceHelperSession {
+                             question: String? = "चिया कसरी बनाउने",
+                             pendingManualEntryID: UUID? = nil) -> ApplianceHelperSession {
         let store = GeminiConfigStore(storage: GeminiInMemoryStorage())
         store.save("fake-key")
         let client = GeminiClient(configStore: store, observabilityBus: bus,
@@ -48,7 +49,8 @@ final class ApplianceHelperSessionTests: XCTestCase {
         return ApplianceHelperSession(question: question, locale: locale,
                                       geminiClient: client,
                                       cache: makeCache(),
-                                      observabilityBus: bus, speaker: nil)
+                                      observabilityBus: bus, speaker: nil,
+                                      pendingManualEntryID: pendingManualEntryID)
     }
 
     private func makeImage(w: CGFloat = 400, h: CGFloat = 300) -> UIImage {
@@ -62,12 +64,13 @@ final class ApplianceHelperSessionTests: XCTestCase {
         bus.emittedEvents.filter { $0.eventType == "appliance_cache_hit" }.count
     }
 
-    private func payload(confidence: Double, brand: String? = nil, model: String? = nil) -> String {
+    private func payload(confidence: Double, brand: String? = nil, model: String? = nil,
+                         category: String = "microwave") -> String {
         let brandJSON = brand.map { "\"\($0)\"" } ?? "null"
         let modelJSON = model.map { "\"\($0)\"" } ?? "null"
         return """
         {"identity": {"brand": \(brandJSON), "model": \(modelJSON),
-                      "category": "microwave", "displayName": "test microwave"},
+                      "category": "\(category)", "displayName": "test microwave"},
          "steps": ["step one", "step two"],
          "groundedControls": [],
          "spokenSummary": "summary",
@@ -323,6 +326,127 @@ final class ApplianceHelperSessionTests: XCTestCase {
         XCTAssertEqual(cacheHitCount(), 0)
     }
 
+    // MARK: - Category default promotion (2026-09-13, appliance-default-manual)
+
+    func testFirstManualForACategoryBecomesItsDefault() async {
+        let transport = SequencedGeminiTransport(results: [
+            .success(FakeGeminiTransport.jsonResponse(text: payload(confidence: 0.9)))
+        ])
+        let session = makeSession(transport: transport)
+        session.handleCapturedPhoto(makeImage())
+        await waitForPipeline(session)
+
+        let entry = makeCache().allEntries().first
+        XCTAssertEqual(entry?.isDefault, true,
+                       "the first manual saved for an appliance is the one voice requests serve")
+        XCTAssertEqual(makeCache().defaultEntry(forCategory: "microwave")?.id, entry?.id)
+    }
+
+    func testSecondManualForTheSameCategoryDoesNotStealTheDefault() async {
+        // The first answer for this appliance — the elder's manual…
+        let first = makeSession(transport: SequencedGeminiTransport(results: [
+            .success(FakeGeminiTransport.jsonResponse(text: payload(confidence: 0.9)))
+        ]))
+        first.handleCapturedPhoto(makeImage())
+        await waitForPipeline(first)
+        let defaultID = makeCache().defaultEntry(forCategory: "microwave")?.id
+        XCTAssertNotNil(defaultID)
+
+        // …then a SECOND, different request for the same appliance (a new
+        // photo, another question). It must not take over: the elder
+        // already relies on the first manual, and changing it is a
+        // deliberate future action, never a side effect of asking again.
+        let second = makeSession(transport: SequencedGeminiTransport(results: [
+            .success(FakeGeminiTransport.jsonResponse(text: payload(confidence: 0.9)))
+        ]), question: "घडी कसरी मिलाउने")
+        second.handleCapturedPhoto(makeImage(w: 320, h: 240))
+        await waitForPipeline(second)
+
+        XCTAssertEqual(makeCache().count, 2, "two different requests are two entries")
+        XCTAssertEqual(makeCache().defaultEntry(forCategory: "microwave")?.id, defaultID)
+        XCTAssertEqual(makeCache().allEntries().filter(\.isDefault).count, 1,
+                       "exactly one default per category")
+    }
+
+    func testUnidentifiedCategoryIsNeverPromotedToDefault() async {
+        let transport = SequencedGeminiTransport(results: [
+            .success(FakeGeminiTransport.jsonResponse(
+                text: payload(confidence: 0.9, category: "other")))
+        ])
+        let session = makeSession(transport: transport)
+        session.handleCapturedPhoto(makeImage())
+        await waitForPipeline(session)
+
+        XCTAssertEqual(makeCache().count, 1, "the answer is still cached and listed")
+        XCTAssertNil(makeCache().defaultEntry(forCategory: "other"),
+                     "\"other\" is every unidentified appliance's bucket — a default there would serve the wrong manual")
+        XCTAssertFalse(makeCache().allEntries().first?.isDefault ?? true)
+    }
+
+    func testBlankCategoryIsNeverPromotedToDefault() async {
+        let transport = SequencedGeminiTransport(results: [
+            .success(FakeGeminiTransport.jsonResponse(
+                text: payload(confidence: 0.9, category: "")))
+        ])
+        let session = makeSession(transport: transport)
+        session.handleCapturedPhoto(makeImage())
+        await waitForPipeline(session)
+
+        XCTAssertEqual(makeCache().count, 1)
+        XCTAssertNil(makeCache().defaultEntry(forCategory: ""))
+        XCTAssertFalse(makeCache().allEntries().first?.isDefault ?? true,
+                       "a payload that identified no appliance promotes nothing")
+    }
+
+    func testIdentityHitStoreAlsoPromotesTheCategoryDefault() async {
+        // A confident cached answer exists (seeded WITHOUT the default
+        // flag, as a cache from before the feature would be) and the fresh
+        // identify is weak: the pipeline serves the cached guide and also
+        // stores the fresh photo-hash answer at site 4a. That store is a
+        // saved manual like any other, so it must be promoted too — the
+        // rule may not depend on which tier produced the answer.
+        makeCache().store(cachedPanasonicGuidance(), photoHash: "older-photo",
+                          question: "चिया कसरी बनाउने")
+        XCTAssertNil(makeCache().defaultEntry(forCategory: "microwave"))
+
+        let transport = SequencedGeminiTransport(results: [
+            .success(FakeGeminiTransport.jsonResponse(
+                text: payload(confidence: 0.3, brand: "Panasonic", model: "NN-SN686S"))),
+        ])
+        let session = makeSession(transport: transport)
+        session.handleCapturedPhoto(makeImage())
+        await waitForPipeline(session)
+
+        let storedFresh = makeCache().allEntries().first { $0.photoHash != "older-photo" }
+        XCTAssertNotNil(storedFresh, "site 4a stored the fresh photo-hash answer")
+        XCTAssertTrue(storedFresh?.isDefault ?? false)
+        XCTAssertEqual(makeCache().defaultEntry(forCategory: "microwave")?.id, storedFresh?.id)
+    }
+
+    func testAManualStoredForAnotherCategoryDoesNotAffectThisOne() async {
+        // A TV manual saved earlier must not stop the microwave from
+        // getting its own default — one default PER appliance.
+        let tvGuidance = ApplianceGuidance(
+            identity: ApplianceIdentity(brand: "Samsung", model: "T1",
+                                        category: "टिभी", displayName: "Samsung TV"),
+            steps: ["tv step"], groundedControls: [], spokenSummary: "tv",
+            confidence: 0.9)
+        let tvID = makeCache().store(tvGuidance, photoHash: "tv-photo")
+        makeCache().setDefault(entryID: tvID)
+
+        let transport = SequencedGeminiTransport(results: [
+            .success(FakeGeminiTransport.jsonResponse(text: payload(confidence: 0.9)))
+        ])
+        let session = makeSession(transport: transport)
+        session.handleCapturedPhoto(makeImage())
+        await waitForPipeline(session)
+
+        XCTAssertNotEqual(makeCache().defaultEntry(forCategory: "microwave")?.id, tvID)
+        XCTAssertNotNil(makeCache().defaultEntry(forCategory: "microwave"))
+        XCTAssertEqual(makeCache().defaultEntry(forCategory: "tv")?.id, tvID,
+                       "the TV default is untouched")
+    }
+
     // MARK: - Stored thumbnails (2026-09-06)
 
     func testPipelineStoresTheDownscaledPhotoWithTheEntry() async {
@@ -383,6 +507,74 @@ final class ApplianceHelperSessionTests: XCTestCase {
         let entryID = makeCache().allEntries().first!.id
         let session = makeSession(transport: SequencedGeminiTransport(results: []))
         XCTAssertFalse(session.presentManual(entryID: entryID))
+    }
+
+    // MARK: - Pending default manual (2026-09-13, appliance-default-manual)
+
+    func testPresentPendingManualOpensTheStoredManualWithoutNetwork() async {
+        let jpeg = makeImage().jpegData(compressionQuality: 0.8)!
+        makeCache().store(cachedPanasonicGuidance(), photoHash: "older-photo",
+                          imageJPEG: jpeg)
+        let entryID = makeCache().allEntries().first!.id
+        makeCache().setDefault(entryID: entryID)
+
+        // The plugin resolved the request to this entry; the session must
+        // open it with zero network (the transport has nothing to give).
+        let session = makeSession(transport: SequencedGeminiTransport(results: []),
+                                  pendingManualEntryID: entryID)
+        XCTAssertEqual(session.pendingManualEntryID, entryID)
+        XCTAssertTrue(session.presentPendingManualIfNeeded())
+        XCTAssertTrue(session.isViewingManual,
+                      "a manual opened this way is read-only guidance, not a capture session")
+
+        guard case let .guidance(presentation, image) = session.state else {
+            XCTFail("expected guidance, got \(session.state)")
+            return
+        }
+        XCTAssertEqual(presentation.guidance.identity.brand, "Panasonic")
+        XCTAssertEqual(presentation.guidance.steps, ["cached step"])
+        XCTAssertEqual(image.size, UIImage(data: jpeg)?.size)
+    }
+
+    func testNoPendingManualLeavesTheSessionInCapturing() async {
+        let session = makeSession(transport: SequencedGeminiTransport(results: []))
+        XCTAssertNil(session.pendingManualEntryID,
+                     "a camera-first session (every call site before this feature) has no pending manual")
+        XCTAssertFalse(session.presentPendingManualIfNeeded())
+        guard case .capturing = session.state else {
+            XCTFail("expected capturing, got \(session.state)")
+            return
+        }
+    }
+
+    func testPendingManualThatVanishedFallsBackHonestly() async {
+        // Deleted between the plugin's lookup and the sheet's appearance:
+        // the session reports false and stays in .capturing, so the view
+        // opens the camera — never a blank sheet, never a fabricated guide.
+        let session = makeSession(transport: SequencedGeminiTransport(results: []),
+                                  pendingManualEntryID: UUID())
+        XCTAssertFalse(session.presentPendingManualIfNeeded())
+        guard case .capturing = session.state else {
+            XCTFail("expected capturing, got \(session.state)")
+            return
+        }
+    }
+
+    func testPendingManualWithoutAStoredPhotoIsRefused() async {
+        // Same rule as the library's rows: an image-less entry cannot
+        // re-render the step-card UI, so it is not openable — even when
+        // the plugin resolved it as the category default.
+        makeCache().store(cachedPanasonicGuidance(), photoHash: "older-photo")
+        let entryID = makeCache().allEntries().first!.id
+        makeCache().setDefault(entryID: entryID)
+
+        let session = makeSession(transport: SequencedGeminiTransport(results: []),
+                                  pendingManualEntryID: entryID)
+        XCTAssertFalse(session.presentPendingManualIfNeeded())
+        guard case .capturing = session.state else {
+            XCTFail("expected capturing, got \(session.state)")
+            return
+        }
     }
 
     // MARK: - Capture failure

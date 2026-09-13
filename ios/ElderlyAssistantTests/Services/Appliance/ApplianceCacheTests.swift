@@ -35,11 +35,12 @@ final class ApplianceCacheTests: XCTestCase {
     }
 
     private func guidance(brand: String? = nil, model: String? = nil,
+                          category: String = "microwave",
                           confidence: Double = 0.9,
                           source: KnowledgeSource = .onDeviceModelKnowledge) -> ApplianceGuidance {
         ApplianceGuidance(
             identity: ApplianceIdentity(brand: brand, model: model,
-                                        category: "microwave", displayName: "d"),
+                                        category: category, displayName: "d"),
             steps: ["s"], groundedControls: [], spokenSummary: "sum",
             confidence: confidence, knowledgeSource: source)
     }
@@ -303,8 +304,199 @@ final class ApplianceCacheTests: XCTestCase {
         XCTAssertEqual(entries.count, 1)
         XCTAssertNil(entries[0].question)
         XCTAssertNil(entries[0].imageFileName)
+        XCTAssertFalse(entries[0].isDefault)
         XCTAssertEqual(entries[0].photoHash, "h")
         XCTAssertEqual(entries[0].guidance.identity.brand, "LG")
+    }
+
+    func testLegacyEntriesWithoutIsDefaultDecodeAsNotDefault() throws {
+        // Entries stored before 2026-09-13 carry no `isDefault` field. A
+        // cache that predates the concept must read as "nothing was ever
+        // promoted" — not fail to load, and not fabricate a default.
+        let entry: [String: Any] = [
+            "id": UUID().uuidString,
+            "guidance": [
+                "identity": ["brand": "LG", "model": "M1", "category": "microwave",
+                             "displayName": "LG microwave"],
+                "steps": [], "groundedControls": [], "spokenSummary": "",
+                "confidence": 0.9, "knowledgeSource": "onDeviceModelKnowledge"
+            ],
+            "photoHash": "h",
+            "brandModelKey": "lg|m1",
+            "lastAccessedAt": 100.0,
+            "createdAt": 100.0,
+            "imageFileName": NSNull()
+        ]
+        let data = try JSONSerialization.data(withJSONObject: [entry])
+        let entries = try JSONDecoder().decode([ApplianceCache.Entry].self, from: data)
+        XCTAssertEqual(entries.count, 1)
+        XCTAssertFalse(entries[0].isDefault)
+    }
+
+    // MARK: - Category defaults (2026-09-13, appliance-default-manual)
+
+    func testStoreReturnsTheNewEntryID() {
+        let cache = makeCache()
+        let id = cache.store(guidance(), photoHash: "h")
+        XCTAssertEqual(cache.lookup(entryID: id)?.entry.photoHash, "h",
+                       "the returned id addresses the entry that was just written")
+
+        // A pair-keyed replace writes a NEW entry (a new answer), so the
+        // caller is handed the id it may promote — never a stale one.
+        let replaced = cache.store(guidance(confidence: 0.99), photoHash: "h")
+        XCTAssertNotEqual(replaced, id)
+        XCTAssertEqual(cache.lookup(entryID: replaced)?.entry.guidance.confidence ?? -1,
+                       0.99, accuracy: 0.0001)
+        XCTAssertNil(cache.lookup(entryID: id), "the replaced entry is gone")
+    }
+
+    func testSetDefaultMarksTheEntryAndSurvivesReinstances() {
+        let cache = makeCache()
+        let id = cache.store(guidance(), photoHash: "h")
+        XCTAssertTrue(cache.setDefault(entryID: id))
+        XCTAssertEqual(makeCache().defaultEntry(forCategory: "microwave")?.id, id,
+                       "the flag is persisted, not held in memory")
+    }
+
+    func testSetDefaultOfAnUnknownEntryIsAFalseNoOp() {
+        let cache = makeCache()
+        _ = cache.store(guidance(), photoHash: "h")
+        XCTAssertFalse(cache.setDefault(entryID: UUID()))
+        XCTAssertNil(cache.defaultEntry(forCategory: "microwave"))
+    }
+
+    func testSetDefaultIsExclusiveWithinACategory() {
+        let cache = makeCache()
+        let first = cache.store(guidance(), photoHash: "h1")
+        currentDate = currentDate.addingTimeInterval(60)
+        let second = cache.store(guidance(), photoHash: "h2")
+
+        XCTAssertTrue(cache.setDefault(entryID: first))
+        XCTAssertTrue(cache.setDefault(entryID: second))
+
+        XCTAssertEqual(cache.defaultEntry(forCategory: "microwave")?.id, second,
+                       "the newest promotion wins")
+        XCTAssertEqual(cache.allEntries().filter(\.isDefault).count, 1,
+                       "at most one default per category, enforced by the store")
+    }
+
+    func testSetDefaultLeavesOtherCategoriesAlone() {
+        let cache = makeCache()
+        let microwave = cache.store(guidance(category: "microwave"), photoHash: "m")
+        let tv = cache.store(guidance(category: "टिभी"), photoHash: "t")
+
+        XCTAssertTrue(cache.setDefault(entryID: microwave))
+        XCTAssertTrue(cache.setDefault(entryID: tv))
+
+        XCTAssertEqual(cache.defaultEntry(forCategory: "microwave")?.id, microwave)
+        XCTAssertEqual(cache.defaultEntry(forCategory: "tv")?.id, tv,
+                       "the Nepali-stored category answers to the English keyword — one key space")
+        XCTAssertEqual(cache.allEntries().filter(\.isDefault).count, 2,
+                       "one default PER category, never one globally")
+    }
+
+    func testDefaultEntryForKeylessOrUnknownCategoryIsNil() {
+        let cache = makeCache()
+        _ = cache.store(guidance(), photoHash: "h")
+        XCTAssertNil(cache.defaultEntry(forCategory: nil))
+        XCTAssertNil(cache.defaultEntry(forCategory: "   "))
+        XCTAssertNil(cache.defaultEntry(forCategory: "fridge"),
+                     "a category with no manuals has no default")
+    }
+
+    func testCategoryDefaultIsFoundRegardlessOfTheQuestionItAnswered() {
+        let cache = makeCache()
+        let id = cache.store(guidance(), photoHash: "h", question: "घडी कसरी मिलाउने")
+        cache.setDefault(entryID: id)
+        XCTAssertEqual(cache.defaultEntry(forCategory: "microwave")?.id, id,
+                       "the default is keyed by APPLIANCE — which question it answered is the plugin's concern")
+    }
+
+    func testDefaultEntryLookupIsReadOnly() {
+        let cache = makeCache()
+        let id = cache.store(guidance(), photoHash: "h")
+        cache.setDefault(entryID: id)
+        let before = cache.allEntries().first!
+
+        currentDate = currentDate.addingTimeInterval(600)
+        XCTAssertEqual(cache.defaultEntry(forCategory: "microwave")?.lastAccessedAt,
+                       before.lastAccessedAt,
+                       "asking whether a category has a default must not count as USING the manual")
+
+        // Nothing was persisted either: a fresh cache over the same
+        // storage sees the untouched stamp (lazy LRU touch would have
+        // written `currentDate`).
+        XCTAssertEqual(makeCache().allEntries().first?.lastAccessedAt,
+                       before.lastAccessedAt)
+    }
+
+    // MARK: - Delete re-promotion (2026-09-13)
+
+    func testDeletingTheDefaultPromotesTheMostRecentlySavedSameCategoryManual() {
+        let cache = makeCache()
+        let oldest = cache.store(guidance(), photoHash: "1")
+        currentDate = currentDate.addingTimeInterval(60)
+        let middle = cache.store(guidance(), photoHash: "2")
+        currentDate = currentDate.addingTimeInterval(60)
+        let newest = cache.store(guidance(), photoHash: "3")
+        cache.setDefault(entryID: oldest)
+
+        XCTAssertTrue(cache.delete(entryID: oldest))
+
+        XCTAssertEqual(cache.defaultEntry(forCategory: "microwave")?.id, newest,
+                       "the most recently SAVED survivor takes over — same ordering the library shows")
+        XCTAssertNotEqual(cache.defaultEntry(forCategory: "microwave")?.id, middle)
+    }
+
+    func testDeletingANonDefaultLeavesTheDefaultInPlace() {
+        let cache = makeCache()
+        let promoted = cache.store(guidance(), photoHash: "1")
+        currentDate = currentDate.addingTimeInterval(60)
+        let other = cache.store(guidance(), photoHash: "2", question: "घडी कसरी मिलाउने")
+        cache.setDefault(entryID: promoted)
+
+        XCTAssertTrue(cache.delete(entryID: other))
+        XCTAssertEqual(cache.defaultEntry(forCategory: "microwave")?.id, promoted,
+                       "deleting a non-default manual never reshuffles the default")
+    }
+
+    func testDeletingTheLastManualOfACategoryLeavesNoDefault() {
+        let cache = makeCache()
+        let only = cache.store(guidance(), photoHash: "1")
+        cache.setDefault(entryID: only)
+
+        XCTAssertTrue(cache.delete(entryID: only))
+        XCTAssertNil(cache.defaultEntry(forCategory: "microwave"),
+                     "no survivor, no default — the next manual saved for it is promoted by the session")
+    }
+
+    func testDeletingTheDefaultNeverPromotesADifferentCategory() {
+        let cache = makeCache()
+        let microwave = cache.store(guidance(category: "microwave"), photoHash: "1")
+        _ = cache.store(guidance(category: "fridge"), photoHash: "2")
+        cache.setDefault(entryID: microwave)
+
+        XCTAssertTrue(cache.delete(entryID: microwave))
+        XCTAssertNil(cache.defaultEntry(forCategory: "microwave"))
+        XCTAssertNil(cache.defaultEntry(forCategory: "fridge"),
+                     "a default the elder never created must not appear out of a deletion")
+    }
+
+    func testDeletingTheDefaultDoesNotResurrectAnOlderDefaultFromTheSameCategory() {
+        // Two same-category manuals both became defaults at some point
+        // (first promoted, then a second promoted — the store clears the
+        // first). Deleting the current default promotes the survivor, and
+        // exactly one entry stays flagged.
+        let cache = makeCache()
+        let first = cache.store(guidance(), photoHash: "1")
+        currentDate = currentDate.addingTimeInterval(60)
+        let second = cache.store(guidance(), photoHash: "2")
+        cache.setDefault(entryID: first)
+        cache.setDefault(entryID: second)
+
+        XCTAssertTrue(cache.delete(entryID: second))
+        XCTAssertEqual(cache.defaultEntry(forCategory: "microwave")?.id, first)
+        XCTAssertEqual(cache.allEntries().filter(\.isDefault).count, 1)
     }
 
     func testCorruptStorageReadsAsEmptyCache() {

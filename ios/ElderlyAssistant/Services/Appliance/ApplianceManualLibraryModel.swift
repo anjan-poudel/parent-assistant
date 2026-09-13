@@ -32,6 +32,11 @@ final class ApplianceManualLibraryModel: ObservableObject {
         /// The stored downscaled photo; nil only when the file is
         /// unreadable (defensive — rows still open, image-less).
         let thumbnail: UIImage?
+        /// This manual is its appliance CATEGORY's default (2026-09-13,
+        /// appliance-default-manual) — the one a voice request about that
+        /// appliance is served from cache. Shown as a star badge so the
+        /// elder can see which manual the assistant will reach for.
+        let isDefault: Bool
     }
 
     @Published private(set) var manuals: [Manual] = []
@@ -135,6 +140,7 @@ final class ApplianceManualLibraryModel: ObservableObject {
                       category: identity.category,
                       question: entry.question,
                       createdAt: entry.createdAt,
-                      thumbnail: thumbnail)
+                      thumbnail: thumbnail,
+                      isDefault: entry.isDefault)
     }
 }

@@ -19,6 +19,17 @@ import UIKit
 /// different questions would fabricate an answer the elder didn't ask
 /// for; a photo re-asked with a new question is a NEW request.
 ///
+/// 2026-09-13 (appliance-default-manual): entries carry one more flag,
+/// `isDefault` — the manual served for a voice request about that
+/// APPLIANCE (identity, not question: "माइक्रोवेभ कसरी चलाउने" → the saved
+/// microwave manual, no camera). It is per category (`ApplianceCategoryKey`
+/// folds the elder's word and Gemini's category onto one key) and at most
+/// one entry per category carries it. The default is **auto-managed**:
+/// the first manual saved for a category is promoted by
+/// `ApplianceHelperSession`, and deleting the default promotes the
+/// most-recent same-category manual. There is deliberately no
+/// user-facing "make this the default" this iteration.
+///
 /// Each entry also persists a DOWNSCALED copy of the photo (~256px long
 /// edge JPEG) so a saved manual re-renders its step-card result UI with
 /// zero network. The JPEG lives as its own Data-Protection-Complete file
@@ -50,10 +61,21 @@ final class ApplianceCache {
         /// cannot render the step-card result UI from cache, so they are
         /// not listed in the manuals library.
         let imageFileName: String?
+        /// This entry is its CATEGORY's default manual (2026-09-13,
+        /// appliance-default-manual): the guide a voice request about that
+        /// appliance is served from cache instead of re-opening the camera
+        /// ("माइक्रोवेभ कसरी चलाउने" → the saved microwave manual).
+        ///
+        /// At most ONE entry per `ApplianceCategoryKey` carries it — the
+        /// exclusivity is `setDefault(entryID:)`'s job, never the
+        /// caller's. Mutable like `lastAccessedAt` because it is a state
+        /// transition on an existing entry (promotion/demotion), not a
+        /// property of the stored answer.
+        var isDefault: Bool
 
         init(id: UUID = UUID(), guidance: ApplianceGuidance, photoHash: String,
              brandModelKey: String?, question: String?, lastAccessedAt: Date,
-             createdAt: Date, imageFileName: String?) {
+             createdAt: Date, imageFileName: String?, isDefault: Bool = false) {
             self.id = id
             self.guidance = guidance
             self.photoHash = photoHash
@@ -62,12 +84,16 @@ final class ApplianceCache {
             self.lastAccessedAt = lastAccessedAt
             self.createdAt = createdAt
             self.imageFileName = imageFileName
+            self.isDefault = isDefault
         }
 
         /// Tolerant decode: v1 entries (before 2026-09-06) lack
-        /// `id`/`question`/`imageFileName`. They still dedupe by key with
-        /// a synthesized id and a nil question; they just have no image
-        /// and match general requests only.
+        /// `id`/`question`/`imageFileName`, and every entry stored before
+        /// 2026-09-13 lacks `isDefault`. They still dedupe by key with a
+        /// synthesized id and a nil question; they just have no image and
+        /// match general requests only — and no default flag, which is the
+        /// honest reading of a cache that predates the concept (nothing
+        /// was promoted, so nothing is).
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             id = (try? c.decodeIfPresent(UUID.self, forKey: .id)) ?? UUID()
@@ -78,6 +104,7 @@ final class ApplianceCache {
             lastAccessedAt = try c.decode(Date.self, forKey: .lastAccessedAt)
             createdAt = try c.decode(Date.self, forKey: .createdAt)
             imageFileName = try? c.decodeIfPresent(String.self, forKey: .imageFileName)
+            isDefault = (try? c.decodeIfPresent(Bool.self, forKey: .isDefault)) ?? false
         }
     }
 
@@ -213,8 +240,19 @@ final class ApplianceCache {
     /// `imageJPEG` is the downscaled copy kept for cache-only re-render
     /// of the result UI; when it fails to write, the entry still caches
     /// (minus the thumbnail) — storage must never break the feature.
+    ///
+    /// Returns the stored entry's id (2026-09-13): promotion to a
+    /// category default needs a handle on the entry that was just
+    /// written, and a caller must never re-derive it by matching keys it
+    /// might normalize differently. A pair-keyed REPLACE writes a new id
+    /// and deliberately does NOT inherit the replaced entry's
+    /// `isDefault` — the flag belongs to the manual, and the only
+    /// production callers (`ApplianceHelperSession`) re-evaluate the
+    /// category's default right after storing, so a replaced default is
+    /// promoted again in the same breath.
+    @discardableResult
     func store(_ guidance: ApplianceGuidance, photoHash: String,
-               question: String? = nil, imageJPEG: Data? = nil) {
+               question: String? = nil, imageJPEG: Data? = nil) -> UUID {
         var entries = loadEntries()
         let normalizedQuestion = Self.normalizeQuestion(question)
         var imageFilesToRemove: [String] = []
@@ -267,20 +305,85 @@ final class ApplianceCache {
             thumbnailStore.delete(fileName: fileName)
         }
         persist(entries)
+        return id
+    }
+
+    // MARK: - Category defaults (2026-09-13, appliance-default-manual)
+
+    /// The entry marked default for `category`, or nil when the category
+    /// has none (or keys on nothing at all).
+    ///
+    /// Read-only BY DESIGN — no LRU touch, no persist. This is called on
+    /// the voice request path (does the elder have a microwave manual
+    /// before we open the camera?) and from the promotion check after
+    /// every store; a lookup that quietly bumped `lastAccessedAt` would
+    /// let merely ASKING about an appliance protect an entry from LRU
+    /// eviction and would rewrite storage on every question.
+    func defaultEntry(forCategory category: String?) -> Entry? {
+        guard let key = ApplianceCategoryKey.normalize(category) else { return nil }
+        return loadEntries().first {
+            $0.isDefault && ApplianceCategoryKey.normalize($0.guidance.identity.category) == key
+        }
+    }
+
+    /// Makes `entryID` its category's default, clearing any other default
+    /// in that same category. Returns false when no such entry exists (the
+    /// library treats that as already-gone, like `delete`).
+    ///
+    /// Exclusivity lives HERE, not at the call sites: "at most one default
+    /// per category" is an invariant of the store, and a caller that had
+    /// to clear the old default itself could forget. Entries in OTHER
+    /// categories are untouched — a household has one default per
+    /// appliance, not one globally.
+    @discardableResult
+    func setDefault(entryID: UUID) -> Bool {
+        var entries = loadEntries()
+        guard let index = entries.firstIndex(where: { $0.id == entryID }) else { return false }
+        let key = ApplianceCategoryKey.normalize(entries[index].guidance.identity.category)
+        for i in entries.indices {
+            if i == index {
+                entries[i].isDefault = true
+            } else if let key,
+                      ApplianceCategoryKey.normalize(entries[i].guidance.identity.category) == key {
+                entries[i].isDefault = false
+            }
+        }
+        persist(entries)
+        return true
     }
 
     // MARK: - Per-entry operations (manuals library)
 
     /// Removes one entry (and its image file). Returns false when no such
     /// entry exists — the library treats that as already-gone.
+    ///
+    /// Deleting a category's DEFAULT promotes a successor (2026-09-13):
+    /// the most recently SAVED same-category entry, matching the
+    /// library's "newest first" sense of which manual is the current one.
+    /// Without this, deleting the default would silently drop the elder
+    /// back to the camera for that appliance even though another manual
+    /// for it is sitting right there in the library. A category with no
+    /// surviving entry simply has no default — that is the honest state,
+    /// and the next manual saved for it is promoted by the session.
     @discardableResult
     func delete(entryID: UUID) -> Bool {
         var entries = loadEntries()
         guard let index = entries.firstIndex(where: { $0.id == entryID }) else { return false }
+        let wasDefault = entries[index].isDefault
+        let categoryKey = ApplianceCategoryKey.normalize(entries[index].guidance.identity.category)
         if let fileName = entries[index].imageFileName {
             thumbnailStore.delete(fileName: fileName)
         }
         entries.remove(at: index)
+        if wasDefault, let categoryKey {
+            let survivors = entries.filter {
+                ApplianceCategoryKey.normalize($0.guidance.identity.category) == categoryKey
+            }
+            if let successor = survivors.max(by: { $0.createdAt < $1.createdAt }),
+               let successorIndex = entries.firstIndex(where: { $0.id == successor.id }) {
+                entries[successorIndex].isDefault = true
+            }
+        }
         persist(entries)
         return true
     }
