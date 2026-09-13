@@ -193,6 +193,17 @@ anything outside: (a) xcodegen needed the standard worktree symlinks for large r
 worktree only; (b) another worktree's `xcodebuild` was using the same simulator (crash "signal kill
 before establishing connection") — the gate was re-run after that run drained.
 
+**Gate for the review-round commits (`f1c72de`, `58ece7b`): NOT RUN — held.** Those commits touch
+`ios/` (two comment-only changes and additional assertions inside the existing byte test; no new
+test functions, so the expected totals are unchanged: 2695 executed / 2689 passed / 0 failed /
+6 skipped). The orchestrating session asked this session to hold any iOS gate while the
+coordinator's main-checkout gate was running on the shared simulator (a concurrent `xcodebuild`
+had already killed two of its tests), and to wait for its go-ahead. This session's own gate run was
+stopped mid-flight for that reason (`EXIT=143`); the coordinator's run finished afterwards
+(2798 total / 2792 passed / 0 failed / 6 skipped, `Test-ElderlyAssistant-2026.09.13_11-26-38-+1000.xcresult`
+in the main checkout). The gate for `f1c72de`/`58ece7b` is therefore outstanding at the time this
+note was written and must be run before the branch is merged.
+
 ## 7. Paired review
 
 Could not be obtained by this session (no agent-spawn tool here, and the ai-sdd CLI exposes no
