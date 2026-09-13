@@ -1,6 +1,6 @@
 {
   "task": "T-046 chat framing per offered brain id",
-  "generated_utc": "2026-09-13T01:06:47Z",
+  "generated_utc": "2026-09-13T01:08:02Z",
   "what": "Every catalog id the app can resolve, scored under each candidate chat framing against tools/train-intent/eval/golden_corpus.jsonl through the app's own grammar-constrained GGUF decode path (tools/train-intent/src/framing_check.py).",
   "grammar_modes": [
     "gbnf"
