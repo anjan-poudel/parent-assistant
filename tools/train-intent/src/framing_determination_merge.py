@@ -140,6 +140,33 @@ CATALOG = Path("ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift")
 SWIFT = Path("ios/ElderlyAssistant/Services/Voice/LlamaCommandInterpreter.swift")
 
 
+def _catalog_artifacts(path: Path) -> dict[str, str]:
+    """ModelID raw value -> the `filename` its catalog entry ships."""
+    text = path.read_text(encoding="utf-8")
+    const_to_raw = dict(re.findall(
+        r'static let (\w+)\s*=\s*ModelID\("([^"]+)"\)', text))
+    raw_by_const: dict[str, str] = {}
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        if lines[i].strip() == "ModelCatalogEntry(":
+            ident = fname = None
+            j = i + 1
+            while j < len(lines) and lines[j].strip() != "),":
+                m = re.match(r"\s*id:\s*([A-Za-z_0-9]+),", lines[j])
+                if m:
+                    ident = m.group(1)
+                f = re.match(r'\s*filename:\s*"([^"]+)"', lines[j])
+                if f:
+                    fname = f.group(1)
+                j += 1
+            if ident and fname and ident in const_to_raw:
+                raw_by_const[const_to_raw[ident]] = fname
+            i = j
+        i += 1
+    return raw_by_const
+
+
 def _entry_ranges(path: Path) -> dict[str, str]:
     """id constant -> "path:start-end" for its ModelCatalogEntry block."""
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -271,12 +298,67 @@ source_lines = {
     "harness": "tools/train-intent/src/framing_check.py",
 }
 
+_catalog_files = _catalog_artifacts(CATALOG)
+_PREVIOUS_QUANT = {
+    # The first measurement pass ran before the reviewer caught that the
+    # harness mapped this id to the Q4 export while the catalog ships the
+    # v15 Q3_K_M. Kept here so the record shows both measurements and
+    # which artifact the device actually runs.
+    "intent-ne-qwen4b-s43-q4km": {
+        "note": ("first pass measured intent-ne-qwen4b-s43-q4_k_m.gguf "
+                 "(sha 5a29688902f1...); superseded by the shipped-artifact "
+                 "re-measurement below"),
+        "metrics": {
+            "llama3": {"closed_intent_accuracy": 0.941,
+                       "emergency_recall": 0.667,
+                       "json_parse_rate": 1.0,
+                       "rows_usable_on_device": 20},
+            "qwen3": {"closed_intent_accuracy": 0.941,
+                      "emergency_recall": 1.0,
+                      "json_parse_rate": 0.95,
+                      "rows_usable_on_device": 19},
+            "raw": {"closed_intent_accuracy": 1.0,
+                    "emergency_recall": 1.0,
+                    "json_parse_rate": 1.0,
+                    "rows_usable_on_device": 20},
+        },
+    },
+}
+measured_quant = {}
+for mid, entry in sorted(ids.items()):
+    mf = entry.get("model_file") or ""
+    lower = mf.lower()
+    quant = ("Q3_K_M" if "q3_k_m" in lower else
+             "Q4_K_M" if "q4_k_m" in lower else
+             "Q5_K_M" if "q5_k_m" in lower else "unknown")
+    shipped_file = _catalog_files.get(mid)
+    measured_quant[mid] = {
+        "measured_model_file": mf,
+        "measured_model_sha256": entry.get("model_sha256"),
+        "quant": quant,
+        "catalog_shipped_file": shipped_file,
+        "measured_artifact_is_the_shipped_one": (
+            None if shipped_file is None else shipped_file == mf),
+        "previous_quant_measurement": _PREVIOUS_QUANT.get(mid),
+    }
+
 det_doc = {
     "task": "T-046 chat framing per offered brain id",
     "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "policy": POLICY,
     "gates": meta.get("gates", {}),
     "source_lines": source_lines,
+    "measured_quant": measured_quant,
+    "measured_artifact_checks": {
+        "all_measured_files_are_the_shipped_artifacts": all(
+            v["measured_artifact_is_the_shipped_one"]
+            for v in measured_quant.values()
+            if v["measured_artifact_is_the_shipped_one"] is not None),
+        "method": ("catalog filename parsed from each ModelCatalogEntry in "
+                   "ios/ElderlyAssistant/Services/ModelStore/ModelCatalog.swift "
+                   "and compared with the model_file the summary records for "
+                   "the run"),
+    },
     "determination": det,
     "general_purpose_observations": observations,
 }

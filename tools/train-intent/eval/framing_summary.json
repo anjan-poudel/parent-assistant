@@ -1,6 +1,6 @@
 {
   "task": "T-046 chat framing per offered brain id",
-  "generated_utc": "2026-09-13T01:08:02Z",
+  "generated_utc": "2026-09-13T01:47:20Z",
   "what": "Every catalog id the app can resolve, scored under each candidate chat framing against tools/train-intent/eval/golden_corpus.jsonl through the app's own grammar-constrained GGUF decode path (tools/train-intent/src/framing_check.py).",
   "grammar_modes": [
     "gbnf"
@@ -768,25 +768,26 @@
     "intent-ne-qwen4b-s43-q4km": {
       "offered": true,
       "provenance": "Qwen3-4B QLoRA intent fine-tune, slim-template seed 43 — the first gate-passing brain (ModelCatalog intentQwen4BS43 entry comment)",
-      "model_file": "intent-ne-qwen4b-s43-q4_k_m.gguf",
-      "model_sha256": "5a29688902f14d8eb4497198a6169e364bf71e19fc676115d10a37ddd0862afd",
+      "pre_fix_framing": "llama3",
+      "model_file": "intent-ne-qwen4b-s43-q3_k_m.gguf",
+      "model_sha256": "c48e94d0931732d3e6ae14f45f955d20ee5474a83f8e127e8b972ed920999d10",
       "framings": {
         "llama3": {
-          "closed_intent_accuracy": 0.9412,
-          "contact_f1": 0.6667,
-          "time_f1": 0.8333,
-          "emergency_recall": 0.6667,
-          "emergency_correct": 2,
+          "closed_intent_accuracy": 0.8824,
+          "contact_f1": 0.4444,
+          "time_f1": 0.9091,
+          "emergency_recall": 1.0,
+          "emergency_correct": 3,
           "emergency_gold": 3,
           "side_effect_precision": 1.0,
-          "json_parse_rate": 1.0,
-          "canonical_key_rate": 1.0,
+          "json_parse_rate": 0.9,
+          "canonical_key_rate": 0.9,
           "prompt_tokens_min": 805,
           "prompt_tokens_max": 838,
           "headroom_tokens_min": 186,
           "rows_prompt_over_runtime_context": 0,
-          "rows_runtime_truncated": 0,
-          "rows_usable_on_device": 20,
+          "rows_runtime_truncated": 2,
+          "rows_usable_on_device": 18,
           "per_intent": {
             "ack_med": [
               1,
@@ -797,15 +798,15 @@
               5
             ],
             "emergency": [
-              2,
+              3,
               3
             ],
             "guide": [
-              1,
+              0,
               1
             ],
             "health_query": [
-              2,
+              1,
               2
             ],
             "music": [
@@ -833,7 +834,7 @@
         "qwen3": {
           "closed_intent_accuracy": 0.9412,
           "contact_f1": 0.8,
-          "time_f1": 0.8333,
+          "time_f1": 0.9091,
           "emergency_recall": 1.0,
           "emergency_correct": 3,
           "emergency_gold": 3,
@@ -891,8 +892,8 @@
         },
         "raw": {
           "closed_intent_accuracy": 1.0,
-          "contact_f1": 0.8,
-          "time_f1": 0.8333,
+          "contact_f1": 0.8333,
+          "time_f1": 0.9091,
           "emergency_recall": 1.0,
           "emergency_correct": 3,
           "emergency_gold": 3,

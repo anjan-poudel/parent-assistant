@@ -555,11 +555,17 @@ enum ModelCatalog {
             // Q3_K_M for sub-2GiB GitHub distribution (v15). Q3 gates:
             // closed 1.000, emergency 1.000, se 1.000, time 0.909,
             // contact 0.833 (Q4 = 1.000 — Q4 is the ship target).
-            // CHAT FRAMING (T-046, measured): `.raw` — trained on the bare
-            // prompt template with NO chat-template wrap (gate numbers above
-            // are grammar-off; see the T-046 framing record for this
-            // checkpoint's app-faithful numbers). This is the shipped
-            // default brain, so it is the id the pre-T-046 `default:` branch
+            // CHAT FRAMING (T-046, measured on THIS shipped Q3_K_M artifact —
+            // the record's `measured_quant` maps the id to this filename and
+            // digest): `.raw` — the fine-tune was trained on the bare prompt
+            // template with NO chat-template wrap. Under the app's decode
+            // grammar, raw decodes 20/20 golden rows correct and usable
+            // (closed 1.000 / emergency 1.000) vs 18/20 for the pre-T-046
+            // LLaMA 3.2 branch (closed 0.882, two runtime truncations and one
+            // spurious emergency) and 19/20 for the Qwen3 wrap. Gate numbers
+            // above are grammar-off; the T-046 framing record carries the
+            // app-faithful per-framing rows. This is the shipped default
+            // brain, so it is the id the pre-T-046 `default:` branch
             // mis-framed most consequentially.
             filename: "intent-ne-qwen4b-s43-q3_k_m.gguf",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v15/intent-ne-qwen4b-s43-q3_k_m.gguf")!,

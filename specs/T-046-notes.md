@@ -18,15 +18,26 @@ checkpoints were never trained on. The fine-tunes were trained on the bare promp
 (`tools/train-intent/src/train_qlora.py` `to_text`; the matching inference contract is stated in
 `tools/train-intent/src/eval_golden.py`).
 
-Reproduced on the golden corpus under the pre-fix framing, on the default brain
-(`intent-ne-qwen4b-s43-q4km`, GGUF sha256 `5a296889…`):
+**Quant correction (review round).** The first pass measured the Q4 export of the default brain;
+the catalog ships the **v15 Q3_K_M** (`ModelCatalog.swift:564-565`, sha256 `c48e94d0…`,
+2,075,616,032 bytes) and the device runs that file. The id was re-measured on the shipped artifact
+and every id is now verified programmatically against its catalog filename
+(`framing_determination.json` → `measured_quant` / `measured_artifact_checks`:
+`all_measured_files_are_the_shipped_artifacts: true`; the harness's `MODEL_FILES` now names the
+shipped file). On the **shipped Q3**, the pre-fix framing fails as a decode-quality loss:
 
-| row | utterance (gold intent) | pre-fix `llama3` output | after `raw` |
-|---|---|---|---|
-| `gc-emergency-003` | "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ" (`emergency`) | `{"intent": "guide", "response": "ठीक छ, म तपाईंलाई उठ्न सिकाउँछु।", …}` | `{"intent": "emergency", "response": "मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ।", …}` |
+| framing (shipped Q3) | closed intent | emergency recall | JSON parse | correct-and-usable |
+|---|---|---|---|---|
+| `llama3` (pre-fix) | 0.882 | 1.000 | 0.900 | 18 / 20 (2 runtime truncations, 1 spurious emergency) |
+| `qwen3` | 0.941 | 1.000 | 0.950 | 19 / 20 |
+| `raw` (shipped) | **1.000** | **1.000** | **1.000** | **20 / 20** |
 
-An emergency plea was answered as a how-to. Aggregate for that id: pre-fix `llama3`
-closed 0.941 / emergency 0.667 / 20 usable → `raw` 1.000 / 1.000 / 20 usable.
+The Q4 export's failure mode was sharper and is recorded here for completeness, **not** as the
+shipped artifact's behaviour: on Q4 the pre-fix framing decoded `gc-emergency-003`
+("मद्दत गर्नुहोस्, मलाई मिर्गौला दुखेको छ") as `{"intent": "guide", "response": "ठीक छ, म तपाईंलाई उठ्न सिकाउँछु।"}`
+— an emergency plea answered as a how-to, with emergency recall 0.667. On the shipped Q3 that row
+decodes as `emergency` under every framing; the misrouting does not reproduce there, and the
+verdict for the id rests on the shipped-quant table above.
 
 Note on safety: the LLM-independent keyword net, the router stage order and
 `InputSanitiser.sanitise(.quarantine)` as the sole transcript entry (`LlamaCommandInterpreter.swift:444`,
@@ -56,6 +67,15 @@ contract, which they were never trained on) — their measured rows are recorded
 Reproducing the verdicts: fetch the host's `out/summary-*.json` + `out/rows.jsonl` and run
 `python3 tools/train-intent/src/framing_determination_merge.py <dir>` — re-running it over the
 fetched evidence reproduces the three committed files with only the `generated_utc` stamp moving.
+The harness's own two app-faithful modules are committed with it: `tools/train-intent/src/intent_prompt.py`
+(renders the three template placeholders — the training/inference prompt-identity rule) and
+`tools/train-intent/src/command_grammar.py` (extracts `commandJSONSchema` from the Swift source,
+loads the checked-in `tools/train-intent/seeds/command_schema.json`, and builds the GBNF the app
+links; `INTENT_SCHEMA_STRICT=1` makes a Swift/JSON drift fatal). Regenerating the schema from this
+repo's Swift source reproduces the recorded grammar fingerprint `9432361c7bc3aa86` exactly. The
+Swift source the host harness read is the **base** revision `840bcd7` (`swift_source_sha256`
+`11f958ab…`); `chatSystemPrompt` is byte-identical at the base and fixed revisions (verified), so
+the measured prompt bytes are the ones the app sends.
 
 Run: model host `192.168.1.117`, harness `tools/train-intent/src/framing_check.py`, HF cache
 `/storage/huggingface`, models under `/mnt/nvme2/workspace/t046-chat-framing/models`. Another
@@ -68,8 +88,12 @@ signalled); the runs coexisted with it and completed with `EXIT=0`.
 `usable` = rows correct-and-usable on device. Source: `tools/train-intent/eval/framing_summary.json`.
 
 | id | offered | pre-fix | llama3 (closed/em/parse/usable) | qwen3 | raw | rule's required | shipped |
+
+Every row is measured on the artifact the catalog ships for that id
+(`measured_quant` in `framing_determination.json` records the file, its digest, and
+`measured_artifact_is_the_shipped_one`).
 |---|---|---|---|---|---|---|---|
-| `intentQwen4BS43` (default) | yes | llama3 | 0.941 / 0.667 / 1.000 / 20 | 0.941 / 1.000 / 0.950 / 19 | **1.000 / 1.000 / 1.000 / 20** | raw | **raw** (changed) |
+| `intentQwen4BS43` (default, shipped Q3_K_M) | yes | llama3 | 0.882 / 1.000 / 0.900 / 18 | 0.941 / 1.000 / 0.950 / 19 | **1.000 / 1.000 / 1.000 / 20** | raw | **raw** (changed) |
 | `intentQwenS43` | yes | llama3 | 0.529 / 0.667 / 0.650 / 13 | **0.647 / 1.000 / 0.650 / 13** | 0.471 / 0.333 / 0.500 / 10 | qwen3 | **qwen3** (changed) |
 | `qwen4BNepali` | yes | llama3 | 0.412 / 1.000 / 0.400 / 8 | 0.412 / 0.667 / 0.400 / 8 | **0.706 / 0.667 / 0.700 / 13** | raw | **raw** (changed) |
 | `intentNepali1B` (hidden, stale pref) | no | llama3 | 0.647 / 0.667 / 0.900 / 18 | 0.765 / 0.667 / 0.950 / 19 | **0.882 / 1.000 / 1.000 / 20** | raw | **raw** (changed) |
@@ -88,9 +112,10 @@ Row-level evidence for the changed ids:
 - `intentQwenS43` pre-fix: `gc-emergency-003` ran to `gen=209` and was cut by the runtime budget
   (`runtime_truncated=true`, pred `none`); under `qwen3` it is `emergency` in 138 tokens. That
   truncation is what made the pre-fix emergency recall 0.667.
-- `qwen4BNepali` pre-fix: 12 of 20 rows wrong, of which 8 are runtime truncations; under `raw`
-  6 of 20 wrong, 7 truncations. Its one emergency miss (`gc-emergency-001`, `raw`, `gen=377`) is a
-  truncation, not a misclassification — recorded as such rather than papered over.
+- `qwen4BNepali` pre-fix: 12 of 20 rows wrong, 11 of those wrong rows truncated (12 rows
+  truncated in total); under `raw` 6 of 20 wrong, 4 of those truncated (7 rows truncated in total).
+  Its one emergency miss (`gc-emergency-001`, `raw`, `gen=377`) is a truncation, not a
+  misclassification — recorded as such rather than papered over.
 - `intentNepali1B`'s Qwen3 leg was missing in the first pass; it was measured afterwards
   (`ff9692a`) precisely because the id shares the shipped default's lineage and could have flipped
   the verdict. It did not: raw still ranks first on correct-and-usable rows.
@@ -121,8 +146,11 @@ Row-level evidence for the changed ids:
   general-purpose stock entries carry no framing comment because their framing did not change;
   curated list untouched.
 - `tools/train-intent/src/framing_check.py` (new; renderers, per-row runner, summariser,
-  `PRE_FIX_FRAMING`, `required_framing`) and `tools/train-intent/src/framing_determination_merge.py`
-  (new; the committed merge that produces the three files below).
+  `PRE_FIX_FRAMING`, `required_framing`), `tools/train-intent/src/framing_determination_merge.py`
+  (new; the committed merge that produces the three files below), `tools/train-intent/src/intent_prompt.py`
+  + `tools/train-intent/src/command_grammar.py` (the two app-faithful modules the check imports; they
+  were host-only at review time) and `tools/train-intent/seeds/command_schema.json` (the schema
+  extracted from this repo's Swift source; its fingerprint matches the recorded grammar).
 - `tools/train-intent/eval/framing_summary.json`, `framing_rows.jsonl` (540 rows),
   `framing_determination.json` (policy, per-id ranking keys, shipped framing + reason, `source_lines`
   evidence spans, `general_purpose_observations`).
@@ -165,18 +193,17 @@ anything outside: (a) xcodegen needed the standard worktree symlinks for large r
 worktree only; (b) another worktree's `xcodebuild` was using the same simulator (crash "signal kill
 before establishing connection") — the gate was re-run after that run drained.
 
-## 7. Paired review — NOT OBTAINED
+## 7. Paired review
 
-No agent-spawn tool exists in this session, and the ai-sdd CLI exposes no review verb
-(`ai-sdd --help`: run/status/approve/reject/complete-task/validate-config/init/hil). **An independent
-`sdd-reviewer` verdict was therefore not obtained** — no approval is assumed here. What was done
-instead: an adversarial self-pass over the diff, which verified that the harness's `raw` renderer
-ignores the system turn exactly like the app's `.raw` case (so the measured numbers describe the
-shipped bytes), that the LLaMA/Qwen3 renderers mirror `formattedPrompt` byte-for-byte, that the
-harness's own `required_framing` helper differs from the local one only in helper code (the
-measurement code that produced the rows is byte-identical to what is committed), that no
-`XCTSkip`/`XCTExpectFailure` was introduced, and that the safety paths are untouched. That is a
-self-check, not a challenger.
+Could not be obtained by this session (no agent-spawn tool here, and the ai-sdd CLI exposes no
+review verb). It was then obtained by the orchestrating session: an independent `sdd-reviewer`
+challenger reviewed `840bcd7..acc4619` and returned **GO, confidence 0.88**, "no rework of the code
+change required", conditional on two MAJOR record gaps and seven MINORs — all addressed in the
+review round commits (`f1c72de` and the evidence refresh that follows). The verdict, its per-claim
+reasoning, the reviewer's own reproduction of every dispute, and the orchestrator's independent
+reproduction are committed at `specs/T-046-review.md` (7e23bbf). Before that verdict arrived this
+section recorded "not obtained"; the self-pass described here is retained only as the record of what
+was checked in the interim, not as a substitute.
 
 ## 8. Disk
 
@@ -196,5 +223,6 @@ worktree's `ios/build` is 4.5 GB; nothing was deleted outside the worktree.
   n_ctx 4096 and a per-row runtime budget, while the app uses temp 0 / topK 40 / topP 0.95 /
   repeatPenalty 1.2 / `maxTokenCount: 1024`. Within-harness comparisons are the accepted evidence
   basis; the harness numbers are not device numbers, and the digit-looping truncations may be
-  overstated relative to the device.
+  overstated relative to the device (llama.cpp reports `generated = headroom + 1` on 17 of the 540
+  rows; the harness's `generated >= headroom` rule flags those as truncated, which is conservative).
 - **T-047** (catalogue comment reconciliation) consumes this task's outcome and remains open.
