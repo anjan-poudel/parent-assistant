@@ -1,0 +1,26 @@
+{
+  "artifact": "t033-encoder-int8.mlmodelc",
+  "model": "T-033 bake-off C3 (multilingual MiniLM intent+slot encoder, int8)",
+  "extracted_from": "the C3 training run's meta.json (external to this repo)",
+  "intents": [
+    "ack_med",
+    "call",
+    "emergency",
+    "guide",
+    "health_query",
+    "music",
+    "none",
+    "query",
+    "send_message",
+    "set_reminder"
+  ],
+  "tags": [
+    "O",
+    "B-contact",
+    "I-contact",
+    "B-time",
+    "I-time"
+  ],
+  "max_len": 64,
+  "note": "Logit-index order of the compiled encoder's intent and slot heads, committed so the Swift runtime (IntentEncoderManifest.t033Spike) can be checked against the training run without the external meta.json. Logit-order misalignment silently maps a correct index to the wrong label/action, so this file is the in-repo reference for that order. The label set is the LEGACY LLM-format snapshot (10 intents, contact/time tags only), NOT the T-034 schema-v2 BIO label set."
+}
