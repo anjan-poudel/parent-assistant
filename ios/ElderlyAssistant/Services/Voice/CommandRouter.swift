@@ -1553,6 +1553,15 @@ final class CommandRouter {
     ///      device's place beats silence.
     ///   3. No named place → device location directly.
     ///
+    /// [TOMORROW-WEATHER] (2026-09-13) The DAY the question asks about is
+    /// resolved once, up front (`NepaliTimeParser.relativeDayOffset`) and
+    /// threaded into whichever fetch runs: 1 (भोलि/tomorrow) or 2
+    /// (पर्सि/the day after) reads that day's `daily` forecast and the
+    /// reply names the day; 0 (आज/today or no day word) keeps the live
+    /// `current` reading exactly as before. Pre-fix the day was dropped
+    /// here and the tool had no way to express it, so a tomorrow question
+    /// was answered with today's weather.
+    ///
     /// Every remaining failure (no transport, no fetcher factory,
     /// location denied/unavailable/timed out, forecast transport failure,
     /// malformed forecast payload) delivers the EXISTING static
@@ -1564,6 +1573,8 @@ final class CommandRouter {
     /// unmediated ground truth.
     private func fireLocalWeatherLookup(transcript raw: String) {
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        // The asked day — the ONE resolution point (see the doc above).
+        let dayOffset = NepaliTimeParser.relativeDayOffset(in: raw) ?? 0
         // Announce first — the user hears the lookup start before the
         // (possibly multi-second) geocode/location + fetch round-trip.
         speak(key: "weather.checking")
@@ -1597,10 +1608,12 @@ final class CommandRouter {
                 do {
                     let place = try await WeatherTool.fetchGeocode(name: askedPlace,
                                                                    transport: transport)
-                    let conditions = try await WeatherTool.fetchCurrent(
-                        latitude: place.latitude, longitude: place.longitude, transport: transport)
+                    let sentence = try await self.liveWeatherSentence(
+                        latitude: place.latitude, longitude: place.longitude,
+                        dayOffset: dayOffset, placeName: place.name, locale: locale,
+                        transport: transport)
                     await MainActor.run {
-                        self.deliverLiveWeather(conditions, placeName: place.name, locale: locale,
+                        self.deliverLiveWeather(sentence: sentence, locale: locale,
                                                 query: query, outcome: "ok",
                                                 startedAt: attemptStartedAt)
                     }
@@ -1637,11 +1650,12 @@ final class CommandRouter {
                 return
             }
             do {
-                let conditions = try await WeatherTool.fetchCurrent(latitude: fix.latitude,
-                                                                    longitude: fix.longitude,
-                                                                    transport: transport)
+                let sentence = try await self.liveWeatherSentence(
+                    latitude: fix.latitude, longitude: fix.longitude,
+                    dayOffset: dayOffset, placeName: fix.placeName, locale: locale,
+                    transport: transport)
                 await MainActor.run {
-                    self.deliverLiveWeather(conditions, placeName: fix.placeName, locale: locale,
+                    self.deliverLiveWeather(sentence: sentence, locale: locale,
                                             query: query,
                                             outcome: namedPlace == nil ? "ok" : "fallback",
                                             startedAt: attemptStartedAt)
@@ -1655,24 +1669,52 @@ final class CommandRouter {
         }
     }
 
-    /// [WEATHER-ROUTING] (2026-09-07) Live-conditions delivery — the
+    /// [TOMORROW-WEATHER] (2026-09-13) Fetches the reading for the asked
+    /// DAY at one point and renders the tool's bare sentence for it — the
+    /// fetch every weather delivery shares (geocoded place and device
+    /// location alike), so the day rule lives in exactly one place:
+    ///
+    ///   · `dayOffset` 0 (आज / no day word) → live CURRENT conditions,
+    ///     the historical reading and reply shape, unchanged;
+    ///   · `dayOffset` ≥ 1 (भोलि/पर्सि) → that day's `daily` forecast,
+    ///     whose reply names the day it was read for.
+    ///
+    /// Throws on any failure of the underlying fetch — the caller takes
+    /// the honest no-data line (never a fabricated reading).
+    private func liveWeatherSentence(latitude: Double,
+                                     longitude: Double,
+                                     dayOffset: Int,
+                                     placeName: String?,
+                                     locale: Locale,
+                                     transport: LocalToolTransport) async throws -> String {
+        if dayOffset > 0 {
+            let forecast = try await WeatherTool.fetchDailyForecast(
+                latitude: latitude, longitude: longitude,
+                dayOffset: dayOffset, transport: transport)
+            return WeatherTool.reply(for: forecast, placeName: placeName, locale: locale)
+        }
+        let conditions = try await WeatherTool.fetchCurrent(
+            latitude: latitude, longitude: longitude, transport: transport)
+        return WeatherTool.reply(for: conditions, placeName: placeName, locale: locale)
+    }
+
+    /// [WEATHER-ROUTING] (2026-09-07) Live-weather delivery — the
     /// single point where a real open-meteo reading reaches the user:
-    /// the localized conditions sentence (`WeatherTool.reply`) is WRAPPED
-    /// in the `weather.replySource` hedge ("According to the weather
-    /// service, …") so a live reading is presented as forecast data,
-    /// never as unmediated ground truth. The bare sentence stays the
-    /// tool's own contract (WeatherToolTests pin it directly); the router
-    /// applies the hedge here, once, for every delivery path (geocoded
-    /// named place and device location alike).
-    private func deliverLiveWeather(_ conditions: WeatherTool.CurrentConditions,
-                                    placeName: String?,
+    /// the localized sentence (`WeatherTool.reply`, built by
+    /// `liveWeatherSentence`) is WRAPPED in the `weather.replySource`
+    /// hedge ("According to the weather service, …") so a live reading is
+    /// presented as forecast data, never as unmediated ground truth. The
+    /// bare sentence stays the tool's own contract (WeatherToolTests pin
+    /// it directly); the router applies the hedge here, once, for every
+    /// delivery path (geocoded named place and device location, today's
+    /// reading and a future day's forecast alike).
+    private func deliverLiveWeather(sentence: String,
                                     locale: Locale,
                                     query: String,
                                     outcome: String,
                                     startedAt: Date) {
         emitLocalTool(eventType: "weather", outcome: "ok")
-        let conditionsText = WeatherTool.reply(for: conditions, placeName: placeName, locale: locale)
-        let text = L10n.fmt("weather.replySource", locale: locale, conditionsText)
+        let text = L10n.fmt("weather.replySource", locale: locale, sentence)
         coordinator?.noteGenericReply(text)
         speak(text: text, locale: locale)
         // [TOOL-DEBUG-LOG] (2026-09-07) The bus event stays "ok" on BOTH

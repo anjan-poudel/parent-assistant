@@ -1117,6 +1117,15 @@ final class CommandRouterLocalToolsTests: XCTestCase {
             + Data(#" "wind_speed_10m": 12.5, "relative_humidity_2m": 62}}"#.utf8)
     }
 
+    /// [TOMORROW-WEATHER] (2026-09-13) The `daily` block a future-day
+    /// question gets: index 1 = tomorrow (14.0…22.1 °C, WMO 61 = rain),
+    /// index 2 = the day after tomorrow (16.0…25.0 °C, WMO 3).
+    private var dailyWeatherJSON: Data {
+        Data(#"{"daily": {"time": ["2026-09-13", "2026-09-14", "2026-09-15"],"#.utf8)
+            + Data(#" "weather_code": [0, 61, 3], "temperature_2m_max": [24.3, 22.1, 25.0],"#.utf8)
+            + Data(#" "temperature_2m_min": [15.2, 14.0, 16.0]}}"#.utf8)
+    }
+
     // MARK: - Weather: named place → geocoded live reading
 
     /// The Arncliffe fix end to end: "is it raining in Arncliffe?" on the
@@ -1186,6 +1195,12 @@ final class CommandRouterLocalToolsTests: XCTestCase {
     /// Nepali named place through the same pipeline: the locative
     /// "काठमाडौंमा" is geocoded (Devanagari name on the wire, decoded by
     /// the seam) and the device location stays untouched.
+    ///
+    /// [TOMORROW-WEATHER] (2026-09-13) This utterance is a भोलि
+    /// (tomorrow) question, so the forecast round-trip now asks
+    /// open-meteo's `daily` block for TOMORROW at the geocoded point and
+    /// the reply names भोलि — pre-fix it fetched the current reading and
+    /// spoke "अहिले …" (today's weather) for tomorrow's question.
     func testOnDeviceNepaliWeatherQuestionWithNamedPlaceGeocodesThatPlace() {
         let coordinator = MockVoiceCommandCoordinator()
         coordinator.isOnDeviceStack = true
@@ -1193,6 +1208,7 @@ final class CommandRouterLocalToolsTests: XCTestCase {
             LocationFix(latitude: 27.7172, longitude: 85.3240, placeName: nil)))
         let transport = StubLocalToolTransport(
             data: weatherJSON,
+            dailyData: dailyWeatherJSON,
             geocodingData: Data(#"{"results": [{"name": "Kathmandu", "latitude": 27.7172,"#.utf8)
                 + Data(#" "longitude": 85.324}]}"#.utf8))
         let (router, bus, _) = makeRouter(coordinator,
@@ -1207,16 +1223,127 @@ final class CommandRouterLocalToolsTests: XCTestCase {
                                     resolvingAgainstBaseURL: false)
         XCTAssertEqual(geocode?.host, "geocoding-api.open-meteo.com")
         XCTAssertEqual(geocode?.queryItems?.first { $0.name == "name" }?.value, "काठमाडौं")
+        // The forecast round-trip answers for TOMORROW at the geocoded
+        // point — the daily block, day index 1 (forecast_days = 2).
+        let forecast = URLComponents(url: transport.capturedRequests[1].url!,
+                                     resolvingAgainstBaseURL: false)
+        XCTAssertEqual(forecast?.queryItems?.first { $0.name == "latitude" }?.value, "27.7172")
+        XCTAssertEqual(forecast?.queryItems?.first { $0.name == "forecast_days" }?.value, "2")
+        XCTAssertNil(forecast?.queryItems?.first { $0.name == "current" })
         XCTAssertEqual(fetcher.requestCount, 0)
-        // The reply names the GEOCODED (English) place under Nepali.
-        let conditions = WeatherTool.CurrentConditions(temperatureC: 24.3, wmoCode: 0,
-                                                       windKmh: 12.5, humidityPercent: 62)
-        let raw = WeatherTool.reply(for: conditions, placeName: "Kathmandu", locale: ne)
+        // The reply names the GEOCODED (English) place under Nepali — and
+        // the day it was asked about.
+        let daily = WeatherTool.DailyForecast(temperatureMaxC: 22.1, temperatureMinC: 14.0,
+                                               wmoCode: 61, dayOffset: 1)
+        let raw = WeatherTool.reply(for: daily, placeName: "Kathmandu", locale: ne)
         let expected = L10n.fmt("weather.replySource", locale: ne, raw)
         XCTAssertEqual(coordinator.genericReplies, [expected])
+        XCTAssertTrue(expected.contains("भोलि"), "the answer must name tomorrow: \(expected)")
+        XCTAssertFalse(expected.contains("अहिले"), "never answer tomorrow as now: \(expected)")
         XCTAssertTrue(bus.emittedEvents.contains {
             $0.eventType == "weather" && $0.outcome == "ok"
         })
+    }
+
+    // MARK: - Weather: the asked DAY drives the query
+
+    /// The device repro: "भोलि मौसम कस्तो हुन्छ" (tomorrow's weather, no
+    /// named place, no clock time) must read TOMORROW's forecast for the
+    /// device location — pre-fix the day was dropped entirely and the
+    /// current (today) reading was spoken as the answer.
+    func testOnDeviceTomorrowWeatherQuestionFetchesTomorrowsForecastNotTodays() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isOnDeviceStack = true
+        let fetcher = StubLocationFetcher(result: .success(
+            LocationFix(latitude: 27.7172, longitude: 85.3240, placeName: "काठमाडौं")))
+        let transport = StubLocalToolTransport(data: weatherJSON, dailyData: dailyWeatherJSON)
+        let (router, bus, _) = makeRouter(coordinator,
+                                          locationFetcherFactory: { fetcher },
+                                          weatherTransport: transport)
+
+        _ = router.route(transcript: "भोलि मौसम कस्तो हुन्छ")
+        waitForToolDelivery()
+
+        XCTAssertEqual(fetcher.requestCount, 1, "no place named — the device fix answers")
+        XCTAssertEqual(transport.capturedRequests.count, 1)
+        let components = URLComponents(url: transport.capturedRequests[0].url!,
+                                       resolvingAgainstBaseURL: false)
+        XCTAssertEqual(components?.host, "api.open-meteo.com")
+        XCTAssertEqual(components?.queryItems?.first { $0.name == "daily" }?.value,
+                       "weather_code,temperature_2m_max,temperature_2m_min")
+        XCTAssertEqual(components?.queryItems?.first { $0.name == "forecast_days" }?.value, "2",
+                       "day index 1 = tomorrow")
+        XCTAssertNil(components?.queryItems?.first { $0.name == "current" },
+                     "a tomorrow question must not fetch today's current reading")
+
+        let daily = WeatherTool.DailyForecast(temperatureMaxC: 22.1, temperatureMinC: 14.0,
+                                               wmoCode: 61, dayOffset: 1)
+        let raw = WeatherTool.reply(for: daily, placeName: "काठमाडौं", locale: ne)
+        let expected = L10n.fmt("weather.replySource", locale: ne, raw)
+        XCTAssertEqual(coordinator.assistantSpoken,
+                       [L10n.str("weather.checking", locale: ne), expected])
+        XCTAssertEqual(coordinator.genericReplies, [expected])
+        XCTAssertTrue(expected.contains("भोलि"), "the spoken answer must say tomorrow: \(expected)")
+        XCTAssertFalse(expected.contains("अहिले"),
+                       "tomorrow's answer must never be today's 'now' reading: \(expected)")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "local_tools" && $0.eventType == "weather" && $0.outcome == "ok"
+        })
+    }
+
+    /// Sanity: an आज (today) question keeps the pre-existing live
+    /// current-conditions path — the day fix must not have moved today's
+    /// question onto the daily block.
+    func testOnDeviceTodayWeatherQuestionKeepsTheCurrentReading() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isOnDeviceStack = true
+        let fetcher = StubLocationFetcher(result: .success(
+            LocationFix(latitude: 27.7172, longitude: 85.3240, placeName: "काठमाडौं")))
+        let transport = StubLocalToolTransport(data: weatherJSON, dailyData: dailyWeatherJSON)
+        let (router, _, _) = makeRouter(coordinator,
+                                        locationFetcherFactory: { fetcher },
+                                        weatherTransport: transport)
+
+        _ = router.route(transcript: "आजको मौसम कस्तो छ?")
+        waitForToolDelivery()
+
+        XCTAssertEqual(transport.capturedRequests.count, 1)
+        let components = URLComponents(url: transport.capturedRequests[0].url!,
+                                       resolvingAgainstBaseURL: false)
+        XCTAssertNotNil(components?.queryItems?.first { $0.name == "current" })
+        XCTAssertNil(components?.queryItems?.first { $0.name == "daily" })
+        let conditions = WeatherTool.CurrentConditions(temperatureC: 24.3, wmoCode: 0,
+                                                       windKmh: 12.5, humidityPercent: 62)
+        let raw = WeatherTool.reply(for: conditions, placeName: "काठमाडौं", locale: ne)
+        XCTAssertEqual(coordinator.genericReplies,
+                       [L10n.fmt("weather.replySource", locale: ne, raw)])
+    }
+
+    /// पर्सि (the day after tomorrow) asks day index 2 — the same path
+    /// with a three-day window.
+    func testOnDeviceDayAfterTomorrowWeatherQuestionAsksDayIndexTwo() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isOnDeviceStack = true
+        let fetcher = StubLocationFetcher(result: .success(
+            LocationFix(latitude: 27.7172, longitude: 85.3240, placeName: nil)))
+        let transport = StubLocalToolTransport(data: weatherJSON, dailyData: dailyWeatherJSON)
+        let (router, _, _) = makeRouter(coordinator,
+                                        locationFetcherFactory: { fetcher },
+                                        weatherTransport: transport)
+
+        _ = router.route(transcript: "पर्सिको मौसम कस्तो छ?")
+        waitForToolDelivery()
+
+        let components = URLComponents(url: transport.capturedRequests[0].url!,
+                                       resolvingAgainstBaseURL: false)
+        XCTAssertEqual(components?.queryItems?.first { $0.name == "forecast_days" }?.value, "3",
+                       "day index 2 = the day after tomorrow")
+        let daily = WeatherTool.DailyForecast(temperatureMaxC: 25.0, temperatureMinC: 16.0,
+                                               wmoCode: 3, dayOffset: 2)
+        let raw = WeatherTool.reply(for: daily, placeName: nil, locale: ne)
+        let expected = L10n.fmt("weather.replySource", locale: ne, raw)
+        XCTAssertEqual(coordinator.genericReplies, [expected])
+        XCTAssertTrue(expected.contains("पर्सि"), "the answer must name the far day: \(expected)")
     }
 
     // MARK: - Weather: no place name → device location
@@ -1939,14 +2066,17 @@ private final class StubLocalToolTransport: LocalToolTransport {
     private let data: Data
     private let statusCode: Int
     private let error: Error?
+    private let dailyData: Data
     private let geocodingData: Data
     private let geocodingStatusCode: Int
 
     init(data: Data = Data(), statusCode: Int = 200, error: Error? = nil,
+         dailyData: Data = Data(),
          geocodingData: Data = Data(), geocodingStatusCode: Int = 200) {
         self.data = data
         self.statusCode = statusCode
         self.error = error
+        self.dailyData = dailyData
         self.geocodingData = geocodingData
         self.geocodingStatusCode = geocodingStatusCode
     }
@@ -1954,10 +2084,17 @@ private final class StubLocalToolTransport: LocalToolTransport {
     func fetchData(for request: URLRequest) async throws -> (Data, URLResponse) {
         capturedRequests.append(request)
         if let error { throw error }
-        let isGeocoding = request.url?.host == "geocoding-api.open-meteo.com"
-        let payload = isGeocoding ? geocodingData : data
+        let url = request.url
+        let isGeocoding = url?.host == "geocoding-api.open-meteo.com"
+        // [TOMORROW-WEATHER] (2026-09-13) A future-day question fetches
+        // open-meteo's `daily` block (same host as the current reading),
+        // so the stub serves `dailyData` for those requests.
+        let isDaily = URLComponents(url: url ?? URL(string: "https://stub.local")!,
+                                    resolvingAgainstBaseURL: false)?
+            .queryItems?.contains { $0.name == "daily" } ?? false
+        let payload = isGeocoding ? geocodingData : (isDaily ? dailyData : data)
         let code = isGeocoding ? geocodingStatusCode : statusCode
-        let response = HTTPURLResponse(url: request.url ?? URL(string: "https://stub.local")!,
+        let response = HTTPURLResponse(url: url ?? URL(string: "https://stub.local")!,
                                        statusCode: code,
                                        httpVersion: nil,
                                        headerFields: nil)!

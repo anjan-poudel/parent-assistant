@@ -14944,6 +14944,40 @@
         }
       }
     },
+    "weather.reply.dayAfterTomorrow" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The day after tomorrow it will be %1$@ to %2$@°C and %3$@%4$@."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%4$@पर्सि %1$@ देखि %2$@°C र %3$@ हुनेछ।"
+          }
+        }
+      }
+    },
+    "weather.reply.tomorrow" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tomorrow it will be %1$@ to %2$@°C and %3$@%4$@."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%4$@भोलि %1$@ देखि %2$@°C र %3$@ हुनेछ।"
+          }
+        }
+      }
+    },
     "weather.replySource" : {
       "extractionState" : "manual",
       "localizations" : {

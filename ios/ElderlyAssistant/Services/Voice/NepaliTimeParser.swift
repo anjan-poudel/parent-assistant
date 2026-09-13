@@ -54,7 +54,7 @@ enum NepaliTimeParser {
         // Relative days (आज/भोलि/पर्सि, today/tomorrow) and weekday names
         // (आइतबार…शनिबार, sunday…saturday) attach a DATE to the time of
         // day parsed below — checked here, applied at the end.
-        let dayOffset = relativeDayOffset(in: text)
+        let dayOffset = relativeDayOffset(inNormalised: text)
         let weekday = weekdayIndex(in: text)
 
         let period = periods.first { text.contains($0.word) }
@@ -115,7 +115,35 @@ enum NepaliTimeParser {
 
     /// आज → 0, भोलि → 1, पर्सि → 2 (+ English). Nil when no relative-day
     /// word is present — callers then leave the date components unset.
-    private static func relativeDayOffset(in text: String) -> Int? {
+    ///
+    /// [TOMORROW-WEATHER] (2026-09-13) Internal, and the single day table
+    /// for the whole app: a question that carries a DAY but no clock time
+    /// ("भोलि मौसम कस्तो हुन्छ") is no business of `parse` — which
+    /// extracts time-of-day and returns nil for it — so before this seam
+    /// existed the day was dropped before the weather query and a भोलि
+    /// question was answered with today's reading. The weather path
+    /// resolves the asked day HERE (raw transcript in, offset out) and
+    /// threads it into the forecast request.
+    static func relativeDayOffset(in raw: String) -> Int? {
+        relativeDayOffset(inNormalised: normalise(raw))
+    }
+
+    /// The calendar DAY a relative-day phrase names, resolved against
+    /// `now` (start of that day) — आज = today, भोलि = tomorrow, पर्सि =
+    /// the day after tomorrow. Nil when the utterance names no relative
+    /// day. The date-level view of `relativeDayOffset`, on an injected
+    /// clock/calendar so it is deterministic under test.
+    static func resolveRelativeDay(in raw: String,
+                                   now: Date = Date(),
+                                   calendar: Calendar = .current) -> Date? {
+        guard let offset = relativeDayOffset(in: raw) else { return nil }
+        let start = calendar.startOfDay(for: now)
+        return calendar.date(byAdding: .day, value: offset, to: start)
+    }
+
+    /// `relativeDayOffset(in:)` on text that has already been through
+    /// `normalise` (the `parse` path) — avoids a second normalisation.
+    private static func relativeDayOffset(inNormalised text: String) -> Int? {
         if text.contains("पर्सि") || text.contains("day after tomorrow") { return 2 }
         if text.contains("भोलि") || text.contains("tomorrow") { return 1 }
         if text.contains("आज") || text.contains("today") { return 0 }

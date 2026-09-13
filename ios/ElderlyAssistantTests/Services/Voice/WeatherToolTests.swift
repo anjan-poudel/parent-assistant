@@ -283,4 +283,125 @@ final class WeatherToolTests: XCTestCase {
         XCTAssertNil(WeatherTool.parseGeocodingJSON(data: Data("not json".utf8)))
         XCTAssertNil(WeatherTool.parseGeocodingJSON(data: Data()))
     }
+
+    // MARK: - Day-aware query (tomorrow's weather, 2026-09-13)
+    //
+    // Field report: asking (in Nepali) for TOMORROW's weather answered
+    // with TODAY's. Root cause: the tool had no day concept at all — the
+    // request carried only open-meteo's `current` block and the reply
+    // said "अहिले"/"It's …", so a भोलि/पर्सि question was answered with
+    // the current (today) reading. These tests pin the day-aware query,
+    // the daily payload parsing and the day-naming reply.
+
+    /// open-meteo daily parameter list — one day's forecast: condition
+    /// code plus the day's temperature range.
+    private let dailyJSON = Data("""
+    {"daily": {"time": ["2026-09-13", "2026-09-14", "2026-09-15"],
+               "weather_code": [0, 61, 3],
+               "temperature_2m_max": [24.3, 22.1, 25.0],
+               "temperature_2m_min": [15.2, 14.0, 16.0]}}
+    """.utf8)
+
+    func testRequestURLForTodayKeepsTheCurrentConditionsShape() {
+        // dayOffset 0 (आज / no day word) is the pre-existing behaviour —
+        // the exact `current`-only request is pinned above and must not
+        // drift: today's question is answered with a live reading.
+        XCTAssertEqual(WeatherTool.requestURL(latitude: 27.7172, longitude: 85.3240, dayOffset: 0),
+                       WeatherTool.requestURL(latitude: 27.7172, longitude: 85.3240))
+    }
+
+    func testRequestURLForTomorrowAsksTheDailyBlockForThatDay() {
+        let url = WeatherTool.requestURL(latitude: 27.7172, longitude: 85.3240, dayOffset: 1)
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+
+        XCTAssertEqual(components?.host, "api.open-meteo.com")
+        XCTAssertEqual(components?.path, "/v1/forecast")
+        XCTAssertEqual(components?.queryItems, [
+            URLQueryItem(name: "latitude", value: "27.7172"),
+            URLQueryItem(name: "longitude", value: "85.324"),
+            URLQueryItem(name: "daily",
+                         value: "weather_code,temperature_2m_max,temperature_2m_min"),
+            URLQueryItem(name: "forecast_days", value: "2"),
+            URLQueryItem(name: "timezone", value: "auto")
+        ])
+        XCTAssertNil(components?.queryItems?.first { $0.name == "current" },
+                     "a future-day question must not fetch the current reading")
+    }
+
+    func testRequestURLForTheDayAfterTomorrowRequestsThreeDays() {
+        let url = WeatherTool.requestURL(latitude: 1.5, longitude: 2.5, dayOffset: 2)
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        XCTAssertEqual(items?.first { $0.name == "forecast_days" }?.value, "3")
+        XCTAssertEqual(items?.first { $0.name == "timezone" }?.value, "auto")
+    }
+
+    func testParseDailyForecastPicksTheRequestedDay() {
+        // Index 1 = tomorrow: 14.0…22.1 °C, WMO 61 = rain.
+        XCTAssertEqual(WeatherTool.parseDailyForecastJSON(data: dailyJSON, dayOffset: 1),
+                       WeatherTool.DailyForecast(temperatureMaxC: 22.1,
+                                                 temperatureMinC: 14.0,
+                                                 wmoCode: 61,
+                                                 dayOffset: 1))
+        // Index 2 = the day after tomorrow.
+        XCTAssertEqual(WeatherTool.parseDailyForecastJSON(data: dailyJSON, dayOffset: 2),
+                       WeatherTool.DailyForecast(temperatureMaxC: 25.0,
+                                                 temperatureMinC: 16.0,
+                                                 wmoCode: 3,
+                                                 dayOffset: 2))
+    }
+
+    func testParseDailyForecastReturnsNilForOutOfRangeOrMalformed() {
+        // Index 3 is past the requested window — the payload cannot
+        // answer the asked day, so the router takes the honest line.
+        XCTAssertNil(WeatherTool.parseDailyForecastJSON(data: dailyJSON, dayOffset: 3))
+        // dayOffset 0 is the CURRENT path — never a daily index.
+        XCTAssertNil(WeatherTool.parseDailyForecastJSON(data: dailyJSON, dayOffset: 0))
+        // A `current`-only payload does not decode as a daily forecast.
+        XCTAssertNil(WeatherTool.parseDailyForecastJSON(
+            data: Data(#"{"current": {"temperature_2m": 24.3, "weather_code": 0}}"#.utf8),
+            dayOffset: 1))
+        // Missing/blank arrays, non-JSON, empty.
+        XCTAssertNil(WeatherTool.parseDailyForecastJSON(
+            data: Data(#"{"daily": {"weather_code": [0, 61]}}"#.utf8), dayOffset: 1))
+        XCTAssertNil(WeatherTool.parseDailyForecastJSON(data: Data("not json".utf8), dayOffset: 1))
+        XCTAssertNil(WeatherTool.parseDailyForecastJSON(data: Data(), dayOffset: 1))
+        // A swapped range is not a usable forecast (never speak it).
+        XCTAssertNil(WeatherTool.parseDailyForecastJSON(
+            data: Data(#"{"daily": {"weather_code": [61], "temperature_2m_max": [10.0], "temperature_2m_min": [20.0]}}"#.utf8),
+            dayOffset: 1))
+    }
+
+    func testTomorrowReplyNamesTheDayInEnglishAndNepali() {
+        let forecast = WeatherTool.DailyForecast(temperatureMaxC: 22.1, temperatureMinC: 14.0,
+                                                 wmoCode: 61, dayOffset: 1)
+        XCTAssertEqual(WeatherTool.reply(for: forecast, placeName: "Kathmandu", locale: en),
+                       "Tomorrow it will be 14 to 22°C and rain in Kathmandu.")
+        XCTAssertEqual(WeatherTool.reply(for: forecast, placeName: nil, locale: en),
+                       "Tomorrow it will be 14 to 22°C and rain.")
+        XCTAssertEqual(WeatherTool.reply(for: forecast, placeName: "काठमाडौं", locale: ne),
+                       "काठमाडौंमा भोलि १४ देखि २२°C र पानी परिरहेको हुनेछ।")
+        XCTAssertEqual(WeatherTool.reply(for: forecast, placeName: nil, locale: ne),
+                       "भोलि १४ देखि २२°C र पानी परिरहेको हुनेछ।")
+    }
+
+    func testDayAfterTomorrowReplyUsesTheFarDayWord() {
+        let forecast = WeatherTool.DailyForecast(temperatureMaxC: 25.0, temperatureMinC: 16.0,
+                                                 wmoCode: 3, dayOffset: 2)
+        XCTAssertEqual(WeatherTool.reply(for: forecast, placeName: nil, locale: en),
+                       "The day after tomorrow it will be 16 to 25°C and partly cloudy.")
+        XCTAssertEqual(WeatherTool.reply(for: forecast, placeName: nil, locale: ne),
+                       "पर्सि १६ देखि २५°C र आंशिक बादल हुनेछ।")
+    }
+
+    /// The honesty pin: a future-day reading is a forecast, so it must
+    /// NEVER claim "now" ("अहिले" / "It's …") — that was exactly the lie
+    /// the field report caught ("tomorrow's weather" answered as today's).
+    func testFutureDayReplyNeverClaimsNow() {
+        let forecast = WeatherTool.DailyForecast(temperatureMaxC: 24.0, temperatureMinC: 15.0,
+                                                 wmoCode: 0, dayOffset: 1)
+        let nepali = WeatherTool.reply(for: forecast, placeName: "काठमाडौं", locale: ne)
+        let english = WeatherTool.reply(for: forecast, placeName: "Kathmandu", locale: en)
+        XCTAssertFalse(nepali.contains("अहिले"), "गोल forecast must not be spoken as now: \(nepali)")
+        XCTAssertFalse(english.contains("It's"), "a forecast must not be spoken as now: \(english)")
+    }
 }

@@ -27,6 +27,18 @@ import Foundation
 ///    honest "live weather is not available right now" message that
 ///    pre-dates this tool, never a fabricated number.
 ///
+/// [TOMORROW-WEATHER] (2026-09-13) A question about a FUTURE day
+/// ("भोलिको मौसम कस्तो छ?", "will it rain tomorrow?") is a FORECAST
+/// question, so it reads open-meteo's `daily` block for that day —
+/// requested as `dayOffset` days ahead of the location's today
+/// (1 = भोलि/tomorrow, 2 = पर्सि/the day after tomorrow) — and the reply
+/// names the day ("Tomorrow it will be 14 to 22°C …" / "भोलि १४ देखि
+/// २२°C … हुनेछ।"). Pre-fix the tool had no day concept at all: every
+/// question fetched the `current` block and the reply said "अहिले"
+/// ("now"), so a tomorrow question was answered with TODAY's weather —
+/// the field report this path exists to fix. A day-0 (today) question
+/// keeps the current-conditions request byte-for-byte.
+///
 /// Privacy: the forecast request carries ONLY coordinates (+ open-meteo's
 /// fixed `current` parameter list); the geocoding request carries the
 /// place name the USER spoke (a named-place question sends that name
@@ -59,6 +71,20 @@ enum WeatherTool {
         case malformedResponse
     }
 
+    /// [TOMORROW-WEATHER] (2026-09-13) One FUTURE day's forecast: the
+    /// day's WMO condition code plus its temperature range, read from
+    /// open-meteo's `daily` block. `dayOffset` is the day this reading
+    /// was requested FOR (the router's resolved day index — 1 = tomorrow,
+    /// 2 = the day after), carried so the spoken reply can name the day
+    /// it belongs to.
+    struct DailyForecast: Equatable {
+        let temperatureMaxC: Double
+        let temperatureMinC: Double
+        /// WMO 4677 weather code (0–99) — see `conditionKey(wmoCode:)`.
+        let wmoCode: Int
+        let dayOffset: Int
+    }
+
     /// Timeout for the forecast round-trip. The router announces
     /// "weather.checking" before firing; on failure the static fallback
     /// follows, so the budget is "user-visible ceiling" — 8 s is long
@@ -69,22 +95,44 @@ enum WeatherTool {
     /// from the SAME snapshot, so temperature and condition always agree.
     static let currentParameter = "temperature_2m,weather_code,wind_speed_10m,relative_humidity_2m"
 
+    /// Comma-joined open-meteo `daily` parameter for a FUTURE day: that
+    /// day's condition code plus its temperature range. All three come
+    /// from the SAME day of the same forecast run.
+    static let dailyParameter = "weather_code,temperature_2m_max,temperature_2m_min"
+
     // MARK: - URL
 
     /// open-meteo forecast endpoint for one point. Pure URL construction —
     /// the unit tests assert the exact query-item set here (coordinates
-    /// plus ONLY the fixed `current` parameter list; no API key, no
-    /// per-user state).
-    static func requestURL(latitude: Double, longitude: Double) -> URL {
+    /// plus the fixed parameter list; no API key, no per-user state).
+    ///
+    /// `dayOffset` is how many days ahead the question asks about:
+    /// 0 (default) = today → the `current` block, the historical shape;
+    /// 1 = भोलि/tomorrow, 2 = पर्सि/the day after tomorrow → the `daily`
+    /// block, sized to reach that day (`forecast_days` = dayOffset + 1)
+    /// and timezone-aware (`timezone=auto` — the day boundaries are the
+    /// QUERIED point's, so "tomorrow" means tomorrow where the weather
+    /// is). A future-day request never carries `current`: today's reading
+    /// cannot answer tomorrow's question.
+    static func requestURL(latitude: Double, longitude: Double,
+                           dayOffset: Int = 0) -> URL {
         var components = URLComponents()
         components.scheme = "https"
         components.host = "api.open-meteo.com"
         components.path = "/v1/forecast"
-        components.queryItems = [
+        var items = [
             URLQueryItem(name: "latitude", value: String(latitude)),
-            URLQueryItem(name: "longitude", value: String(longitude)),
-            URLQueryItem(name: "current", value: currentParameter)
+            URLQueryItem(name: "longitude", value: String(longitude))
         ]
+        if dayOffset > 0 {
+            items.append(URLQueryItem(name: "daily", value: dailyParameter))
+            items.append(URLQueryItem(name: "forecast_days",
+                                      value: String(dayOffset + 1)))
+            items.append(URLQueryItem(name: "timezone", value: "auto"))
+        } else {
+            items.append(URLQueryItem(name: "current", value: currentParameter))
+        }
+        components.queryItems = items
         return components.url!
     }
 
@@ -306,6 +354,42 @@ enum WeatherTool {
                                  humidityPercent: payload.current.relative_humidity_2m)
     }
 
+    /// [TOMORROW-WEATHER] (2026-09-13) Wire format of the open-meteo
+    /// `daily` block: parallel arrays, one entry per forecast day
+    /// (index 0 = the queried point's today). All fields optional so a
+    /// short or missing array is a nil reading, never a crash.
+    private struct DailyPayload: Decodable {
+        struct Daily: Decodable {
+            let weather_code: [Int]?
+            let temperature_2m_max: [Double]?
+            let temperature_2m_min: [Double]?
+        }
+        let daily: Daily
+    }
+
+    /// Decodes the forecast for the REQUESTED day (`dayOffset` — must be
+    /// ≥ 1: day 0 is the current-conditions path, never a daily index).
+    /// Returns nil unless every array carries that day AND the range is
+    /// coherent (min ≤ max) — the router then takes the honest no-data
+    /// line rather than speaking a different day's numbers.
+    static func parseDailyForecastJSON(data: Data, dayOffset: Int) -> DailyForecast? {
+        guard dayOffset >= 1,
+              let payload = try? JSONDecoder().decode(DailyPayload.self, from: data),
+              let codes = payload.daily.weather_code,
+              let maxima = payload.daily.temperature_2m_max,
+              let minima = payload.daily.temperature_2m_min,
+              dayOffset < codes.count,
+              dayOffset < maxima.count,
+              dayOffset < minima.count else {
+            return nil
+        }
+        let maxC = maxima[dayOffset]
+        let minC = minima[dayOffset]
+        guard minC <= maxC else { return nil }
+        return DailyForecast(temperatureMaxC: maxC, temperatureMinC: minC,
+                             wmoCode: codes[dayOffset], dayOffset: dayOffset)
+    }
+
     // MARK: - Conditions
 
     /// WMO 4677 weather code → localization key. Banding follows
@@ -370,27 +454,61 @@ enum WeatherTool {
                       placeName: String?,
                       locale: Locale) -> String {
         let isNepali = locale.language.languageCode?.identifier == "ne"
-        let rounded = Int(conditions.temperatureC.rounded())
-
-        let temperatureText = isNepali
-            ? BikramSambat.devanagariDigits(rounded)
-            : String(rounded)
-
+        let temperatureText = temperatureText(conditions.temperatureC, isNepali: isNepali)
         let condition = conditionName(wmoCode: conditions.wmoCode, locale: locale)
-
-        let placeClause: String
-        // Trimmed: a whitespace-only placeName (geocoder gave nothing)
-        // must read as ABSENT, never "in     ."
-        if let trimmed = placeName?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !trimmed.isEmpty {
-            placeClause = isNepali ? "\(trimmed)मा " : " in \(trimmed)"
-        } else {
-            placeClause = ""
-        }
 
         // en: "It's 24°C and clear in Kathmandu." / ne: "काठमाडौंमा अहिले २४°C र खुला छ।"
         return L10n.fmt("weather.reply", locale: locale,
-                        temperatureText, condition, placeClause)
+                        temperatureText, condition, placeClause(placeName, isNepali: isNepali))
+    }
+
+    /// [TOMORROW-WEATHER] (2026-09-13) The spoken answer for a FUTURE day:
+    /// "Tomorrow it will be 14 to 22°C and rain in Kathmandu." /
+    /// "काठमाडौंमा भोलि १४ देखि २२°C र पानी परिरहेको हुनेछ।"
+    ///
+    /// The day the forecast was READ FOR (`forecast.dayOffset`) picks the
+    /// reply key, so the sentence names भोलि/पर्सि — a future-day reading
+    /// is a FORECAST and must never be spoken as "अहिले"/"It's …" (the
+    /// exact lie the field report caught: tomorrow's question answered
+    /// with today's reading). The temperature is the day's RANGE, the
+    /// house spoken form for a daily forecast.
+    static func reply(for forecast: DailyForecast,
+                      placeName: String?,
+                      locale: Locale) -> String {
+        let isNepali = locale.language.languageCode?.identifier == "ne"
+        let minText = temperatureText(forecast.temperatureMinC, isNepali: isNepali)
+        let maxText = temperatureText(forecast.temperatureMaxC, isNepali: isNepali)
+        let condition = conditionName(wmoCode: forecast.wmoCode, locale: locale)
+        // 2 is the deepest day the resolver produces (पर्सि); anything
+        // beyond reads as the far day rather than silently as tomorrow.
+        let key = forecast.dayOffset >= 2
+            ? "weather.reply.dayAfterTomorrow"
+            : "weather.reply.tomorrow"
+
+        // en: "Tomorrow it will be 14 to 22°C and rain in Kathmandu."
+        // ne: "काठमाडौंमा भोलि १४ देखि २२°C र पानी परिरहेको हुनेछ।"
+        return L10n.fmt(key, locale: locale,
+                        minText, maxText, condition,
+                        placeClause(placeName, isNepali: isNepali))
+    }
+
+    /// Spoken degrees: Devanagari numerals under Nepali, rounded to the
+    /// nearest degree (the house convention of `TopicPreAnswer`).
+    private static func temperatureText(_ celsius: Double, isNepali: Bool) -> String {
+        let rounded = Int(celsius.rounded())
+        return isNepali ? BikramSambat.devanagariDigits(rounded) : String(rounded)
+    }
+
+    /// The "in X" / "Xमा " glue, as an argument so a nil place (device
+    /// location without a reverse-geocoded name, geocode miss) still
+    /// yields a grammatical sentence. Trimmed: a whitespace-only place
+    /// must read as ABSENT, never "in     ."
+    private static func placeClause(_ placeName: String?, isNepali: Bool) -> String {
+        guard let trimmed = placeName?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else {
+            return ""
+        }
+        return isNepali ? "\(trimmed)मा " : " in \(trimmed)"
     }
 
     // MARK: - Fetch
@@ -412,6 +530,28 @@ enum WeatherTool {
             throw FetchError.malformedResponse
         }
         return conditions
+    }
+
+    /// [TOMORROW-WEATHER] (2026-09-13) The same fetch for a FUTURE day:
+    /// reads the `daily` block for day `dayOffset` (≥ 1) at one point.
+    /// Same error discipline as `fetchCurrent` — non-200 and undecodable
+    /// (or day-less) payloads throw, transport errors propagate, and the
+    /// router answers with the honest no-data line on any throw.
+    static func fetchDailyForecast(latitude: Double,
+                                   longitude: Double,
+                                   dayOffset: Int,
+                                   transport: LocalToolTransport = URLSession.shared) async throws -> DailyForecast {
+        var request = URLRequest(url: requestURL(latitude: latitude, longitude: longitude,
+                                                 dayOffset: dayOffset))
+        request.timeoutInterval = fetchTimeoutSeconds
+        let (data, response) = try await transport.fetchData(for: request)
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            throw FetchError.invalidResponse(statusCode: http.statusCode)
+        }
+        guard let forecast = parseDailyForecastJSON(data: data, dayOffset: dayOffset) else {
+            throw FetchError.malformedResponse
+        }
+        return forecast
     }
 
     /// [WEATHER-ROUTING] (2026-09-07) Resolves a spoken place name to a
