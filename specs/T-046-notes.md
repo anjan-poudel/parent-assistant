@@ -197,16 +197,25 @@ anything outside: (a) xcodegen needed the standard worktree symlinks for large r
 worktree only; (b) another worktree's `xcodebuild` was using the same simulator (crash "signal kill
 before establishing connection") — the gate was re-run after that run drained.
 
-**Gate for the review-round commits (`f1c72de`, `58ece7b`): NOT RUN — held.** Those commits touch
-`ios/` (two comment-only changes and additional assertions inside the existing byte test; no new
-test functions, so the expected totals are unchanged: 2695 executed / 2689 passed / 0 failed /
-6 skipped). The orchestrating session asked this session to hold any iOS gate while the
-coordinator's main-checkout gate was running on the shared simulator (a concurrent `xcodebuild`
-had already killed two of its tests), and to wait for its go-ahead. This session's own gate run was
-stopped mid-flight for that reason (`EXIT=143`); the coordinator's run finished afterwards
-(2798 total / 2792 passed / 0 failed / 6 skipped, `Test-ElderlyAssistant-2026.09.13_11-26-38-+1000.xcresult`
-in the main checkout). The gate for `f1c72de`/`58ece7b` is therefore outstanding at the time this
-note was written and must be run before the branch is merged.
+**Review-round commits (`f1c72de`, `58ece7b`) — gate re-run at HEAD, Passed.** Those commits touch
+`ios/` (two comment-only changes and additional assertions restored inside the existing byte test;
+no new test functions), so the totals are unchanged. The orchestrating session asked this session
+to hold any iOS gate while the coordinator's main-checkout gate ran on the shared simulator (a
+concurrent `xcodebuild` had already killed two of its tests); this session's own run at the time
+was stopped mid-flight for that reason (`EXIT=143`), and the hold was lifted once the coordinator's
+gate went green (2798 total / 2792 passed / 0 failed / 6 skipped, master `3c48213`,
+`Test-ElderlyAssistant-2026.09.13_11-26-38-+1000.xcresult` in the main checkout). Launched only
+after confirming no other `xcodebuild` was live:
+
+```
+result: Passed       (HEAD 334835c)
+totalTestCount: 2695   passedTests: 2689   failedTests: 0   skippedTests: 6
+expectedFailures: 0
+xcresult: ios/build/DerivedDataTests/Logs/Test/Test-ElderlyAssistant-2026.09.13_11-49-13-+1000.xcresult
+```
+
+There is no outstanding gate: the last three commits (`084341e`, `17709d9`, `334835c`) are
+Markdown-only and this run covers them too.
 
 ## 7. Paired review
 
@@ -223,9 +232,9 @@ was checked in the interim, not as a substitute.
 ## 8. Disk
 
 Free space on `/System/Volumes/Data` moved 1.7 GiB (start) → 2.6 → 5.1 → 11 → 25 → 27 → 34 → 29 →
-**7.3 GiB** at the last check (other sessions' builds grew meanwhile). No ENOSPC; the gate at
-`c83bd0a` ran, and the review-round gate is the hold recorded in section 6. This
-worktree's `ios/build` is 4.5 GB; nothing was deleted outside the worktree.
+**7.3 GiB** at the last check (other sessions' builds grew meanwhile). No ENOSPC; both gates ran —
+at `c83bd0a` and at HEAD `334835c`. This worktree's `ios/build` is 4.5 GB; nothing was deleted
+outside the worktree.
 
 ## 9. Not done / open
 
