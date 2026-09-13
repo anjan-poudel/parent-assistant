@@ -4,3 +4,4 @@ T033-C3-minilm-s42,0.882,0.333,1.000,1.000,1.000,closed_intent_accuracy|contact_
 T033-C2-mmbert-s42,1.000,0.333,0.833,1.000,1.000,contact_f1|time_f1
 T033-C2-mmbert-int8-onnx-s42,0.824,0.333,0.727,0.000,1.000,closed_intent_accuracy|contact_f1|time_f1|emergency_recall
 T033-C3-minilm-int8-onnx-s42,0.882,0.333,1.000,1.000,1.000,closed_intent_accuracy|contact_f1
+t038-smoke-echo-189@c5e4c049,0.000,0.000,0.000,0.000,0.000,closed_intent_accuracy|contact_f1|time_f1|emergency_recall|side_effect_precision|abstention_precision|emergency_nearmiss_recall|gemini_gap_unevaluated

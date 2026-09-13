@@ -1,0 +1,28 @@
+{"id": "fx-cl-music-01", "utterance": "भजन बजाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-02", "utterance": "गीत चलाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-03", "utterance": "पुरानो गीत बजाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-04", "utterance": "लोक गीत बजाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-05", "utterance": "मन्त्र बजाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-06", "utterance": "गायत्री मन्त्र लगाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-07", "utterance": "रेडियोमा भजन लगाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-08", "utterance": "अर्को गीत बजाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-09", "utterance": "फेरि बजाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-10", "utterance": "भजन लगाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-11", "utterance": "नेपाली गीत बजाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-12", "utterance": "पुरानो भजन लगाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-13", "utterance": "शान्त गीत बजाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-14", "utterance": "भक्ति गीत लगाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-15", "utterance": "सुमधुर गीत बजाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-16", "utterance": "होलीको गीत बजाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-17", "utterance": "तीजको गीत लगाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-18", "utterance": "लोक भजन बजाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-19", "utterance": "चलचित्रको गीत बजाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-20", "utterance": "आधुनिक गीत लगाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-21", "utterance": "पुरानो लोक गीत बजाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-22", "utterance": "ओम मणि पद्मे हूँ लगाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-23", "utterance": "गीत सुनाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-24", "utterance": "भजन सुनाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-music-25", "utterance": "मीठो गीत बजाउ", "script": "devanagari", "intent": "music", "slots": {}, "spans": [], "notes": "closed, slotless"}
+{"id": "fx-cl-call-01", "utterance": "माइयालाई फोन गर", "script": "devanagari", "intent": "call", "slots": {"contact": "माइया", "callType": null, "requestedApp": null}, "spans": [{"label": "contact", "text": "माइयालाई", "start": 0, "end": 8}, {"label": "app", "text": "फोन", "start": 9, "end": 12}], "notes": "side-effecting closed row — keeps side-effect precision measurable"}
+{"id": "fx-cl-emergency-01", "utterance": "मद्दत गर्नुहोस्", "script": "devanagari", "intent": "emergency", "slots": {}, "spans": [], "notes": "emergency denominator 1"}
+{"id": "fx-cl-emergency-02", "utterance": "म लडेँ, उठ्न सकिन", "script": "devanagari", "intent": "emergency", "slots": {}, "spans": [], "notes": "emergency denominator 2"}

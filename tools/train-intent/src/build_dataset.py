@@ -117,11 +117,22 @@ def valid_row(row: dict) -> bool:
     return 0.0 <= float(conf) <= 1.0
 
 
-def load_golden_keys(path: Path) -> set[str]:
-    if not path.exists():
-        return set()
-    return {normalize(json.loads(line)["utterance"])
-            for line in open(path, encoding="utf-8") if line.strip()}
+def load_golden_keys(*paths: Path) -> set[str]:
+    """Held-out utterances that must never enter training.
+
+    Both eval sets are gates in eval_golden.py (golden_corpus.jsonl for the
+    §10 metrics, emergency_nearmiss.jsonl for adversarial emergency recall),
+    so both are leak-guarded (T-038). A missing file warns — silently losing
+    guard coverage would weaken the gates without anyone noticing."""
+    keys: set[str] = set()
+    for path in paths:
+        if not path.exists():
+            print(f"[build] warning: leak-guard file {path.name} missing — not guarded")
+            continue
+        with open(path, encoding="utf-8") as f:
+            keys.update(normalize(json.loads(line)["utterance"])
+                        for line in f if line.strip())
+    return keys
 
 
 def main() -> None:
@@ -145,7 +156,8 @@ def main() -> None:
         with open(src, encoding="utf-8") as f:
             raw.extend(json.loads(line) for line in f if line.strip())
 
-    golden = load_golden_keys(root / "eval" / "golden_corpus.jsonl")
+    golden = load_golden_keys(root / "eval" / "golden_corpus.jsonl",
+                              root / "eval" / "emergency_nearmiss.jsonl")
     frac = {b: float(cfg[f"mixture.{b}"]) for b in
             ("stt_noised", "clean_devanagari", "romanized_codeswitched")}
 

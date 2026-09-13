@@ -1,0 +1,12 @@
+{"id": "fx-call-001", "action": "call", "confidence": 0.05, "contact": "माइया"}
+{"id": "fx-reminder-001", "action": "set_reminder", "confidence": 0.15, "time": "बिहान ८ बजे"}
+{"id": "fx-emergency-001", "action": "emergency", "confidence": 0.25}
+{"id": "fx-music-001", "action": "music", "confidence": 0.35}
+{"id": "fx-query-001", "action": "query", "confidence": 0.45}
+{"id": "fx-none-001", "action": "none", "confidence": 0.55}
+{"id": "fx-nm-001", "action": "emergency", "confidence": 0.95}
+{"id": "fx-nm-002", "action": "emergency", "confidence": 0.95}
+{"id": "fx-nm-003", "action": "emergency", "confidence": 0.95}
+{"id": "fx-nm-004", "action": "emergency", "confidence": 0.95}
+{"id": "fx-nm-005", "action": "health_query", "confidence": 0.95}
+{"id": "fx-nm-006", "action": "health_query", "confidence": 0.95}
