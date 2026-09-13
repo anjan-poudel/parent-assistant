@@ -1,0 +1,468 @@
+# T-035 — joint intent+slot encoder: machine-readable design contract.
+#
+# Consumed by T-036 (training + distillation) and T-038 (eval + device verification).
+# This file is the machine-readable form of
+# docs/superpowers/specs/2026-09-13-joint-intent-slot-encoder-design.md.
+# It defines NO new label set: every label comes from
+# tools/train-intent/annotation_rules.yaml (schema annotation-rules/v1).
+#
+# Offsets in this file that name source revisions/commits use 8-12 char prefixes
+# only (project secret-scanner convention: never a full 40-char hex run).
+
+schema: encoder-contract/v1
+task: T-035
+branch: worktree-t035-encoder-design
+design_doc: docs/superpowers/specs/2026-09-13-joint-intent-slot-encoder-design.md
+l2_amendment_doc: docs/superpowers/specs/2026-09-13-l2-4.2-amendment.md
+
+upstream:
+  # Read, not redefined. Asserted at training-data build time by T-036.
+  annotation_rules: tools/train-intent/annotation_rules.yaml   # schema annotation-rules/v1
+  bakeoff: tools/train-intent/docs/T-033-encoder-bakeoff.md    # GO decision, section 8
+  legacy_training_data_doc: docs/superpowers/specs/2026-09-13-encoder-training-data-strategy.md
+
+# ---------------------------------------------------------------------------
+# Model
+# ---------------------------------------------------------------------------
+model:
+  base: cartesinus/multilingual_minilm-amazon-massive-intent
+  family: XLM-R MiniLM (12 layers, hidden 384)
+  tokenizer:
+    type: xlm_roberta_sentencepiece
+    vocab_size: 250037
+    revision_prefix: "08dc4816"        # prefix only, by convention
+    # Tokenization mechanism is pinned to match the T-033 spike so train and
+    # runtime cannot drift: is_split_into_words=True, truncation, max_length.
+    word_first: true
+    first_subword_tagging: true
+    return_offsets_mapping: false      # word_ids() is the mechanism
+  student_size_target_params: [100000000, 120000000]   # 100-120M, from T-033 section 8
+  param_accounting:
+    encoder_body: 117506432            # C3 encoder_body_params, size_composition.json
+    intent_head: "Linear(384, 12)"     # 4620 params
+    slot_head: "Linear(384, 13)"       # 5005 params
+    heads_total: 9625                  # ~0.01M
+    # Unlike T-033's size_composition.json, the heads ARE inference-time and DO ship.
+    # T-033's 170940 (bert.pooler.dense.* + classifier.*) is NOT this head count —
+    # those were excluded as training heads and do not exist here.
+    heads_ship: true
+    t033_excluded_reference: 170940
+
+heads:
+  shared_pass: true
+  # Both enumerated lists below ARE the logit order (meta.json:intents / meta.json:tags).
+  # This is a contract, NOT the Swift enum's declaration order: InterpretedCommand.Action
+  # declares `query` before `send_message`, and `plugin` (runtime-only) has no class at
+  # all. A reorder requires retraining, not a metadata edit. T-036 asserts element-wise
+  # equality against annotation_rules at build time.
+  logit_order: is_contract
+  intent:
+    pooling: "[CLS] == last_hidden_state[:, 0]"   # XLM-R position 0
+    shape: [384, 12]
+    label_source: annotation_rules.taxonomy.labels
+    # Enumerated so the logit order is a contract, not an inference. This list IS
+    # meta.json:intents, in this order. Identical to T-034's taxonomy.labels.
+    labels:
+      - ack_med
+      - call
+      - emergency
+      - set_reminder
+      - health_query
+      - music
+      - send_message
+      - guide
+      - create_calendar_event
+      - suggest_video
+      - query
+      - none
+  slot:
+    shape: [384, 13]
+    per_token: true
+    label_source: annotation_rules.spans.bio.tags
+    bio_scheme: BIO                                # never BILUO
+    # Enumerated for the same reason. This list IS meta.json:tags, in this order.
+    # Identical to T-034's spans.bio.tags.
+    tags:
+      - O
+      - B-contact
+      - I-contact
+      - B-time
+      - I-time
+      - B-medication
+      - I-medication
+      - B-message
+      - I-message
+      - B-topic
+      - I-topic
+      - B-app
+      - I-app
+
+# ---------------------------------------------------------------------------
+# Loss
+# ---------------------------------------------------------------------------
+loss:
+  supervised:
+    intent: cross_entropy
+    intent_class_weight:
+      emergency: 2.0            # initial; T-036 may tune within [1.0, 4.0]
+      others: 1.0
+      rationale: emergency recall is a hard gate; weighting trades calibration for recall
+    slot:
+      type: cross_entropy
+      ignore_index: -100
+      reduction: masked_mean_over_non_ignored_tokens
+      lambda_slot: 1.0
+    total: "L_intent + lambda_slot * L_slot"
+    # T-033 masked ~35% of slot rows; that masking is RETIRED (T-034 makes
+    # alignability an authoring invariant; non-alignable rows are refused at build).
+  distillation:
+    enabled: conditional            # stage 2 only when a teacher distribution exists
+    temperature: 2.0
+    lambda_kd: 0.5                  # initial; T-036 owns the sweep
+    formula: "tau^2 * KL(softmax(teacher/tau) || softmax(student/tau))"
+    teacher_preference_order:
+      - id: incumbent_local_llm
+        model: ModelCatalog.intentNepali1B
+        availability: tooling_not_in_repo    # no script reads per-class logprobs today
+        owner: T-036
+      - id: gemini_teacher_rows
+        generator: tools/train-intent/src/gen_teacher.py
+        availability: available
+        target_construction: >-
+          p_teacher[gold] = confidence; remaining (1 - confidence) spread uniformly
+          over the other 11 classes. A STATED CONSTRUCTION, not a measured
+          distribution (gen_teacher rows carry a scalar confidence).
+    slot_distillation: none          # teachers emit no token-aligned BIO; slot is hard-label only
+    teacher_at_runtime: forbidden    # FR-007: inference stays on-device
+
+# ---------------------------------------------------------------------------
+# Span contract  (the load-bearing invariant)
+# ---------------------------------------------------------------------------
+slots:
+  contract: "verbatim transcript spans OR closed-vocabulary projection of one"
+  forbidden_in_output: [contact_id, phone_number, url, resolved_time]
+  offsets:
+    unit: unicode_scalar
+    base: 0
+    end: exclusive
+    invariant: "transcript[start:end] == text"
+    offset_space: sanitised_transcript   # InputSanitiser.sanitise(_:level:.quarantine) output
+  decode:
+    unit: word
+    order: ascending
+    rule: "B-/I- run of one label -> union of those words' char intervals"
+    surface_source: transcript_slice    # NOT re-joined words (divergence from spike decoder)
+  field_map:
+    # (a) encoder-emitted class/span, (b) template/code, (c) later layer
+    action:
+      class: a
+      source: intent_head_argmax
+    contact:
+      class: a
+      span_label: contact
+      post: clitic_trim                # see contact_normalisation
+    time:
+      class: a
+      span_label: time
+      resolver: NepaliTimeParser.parse
+    medication:
+      class: a
+      span_label: medication
+      resolver: none_shipped           # see design doc section 15.1
+    message:
+      class: a
+      span_label: message
+    topic:
+      class: a
+      span_label: topic
+    callType:
+      class: b
+      derived_from_span: app
+      values: ["voice", "video", null]
+    requestedApp:
+      class: b
+      derived_from_span: app
+      vocabulary: closed
+      values: ["whatsapp", "facetime", "messenger", "viber", null]
+    entryId:
+      class: c
+    steps:
+      class: b_or_c                    # runbook template, or LLM long-tail
+      encoder_can_emit: false
+    reply:
+      class: b_or_c                    # template, or LLM for Reply-class actions
+      encoder_can_emit: false
+    pluginAction:
+      class: c
+      encoder_can_emit: false
+    pluginEntities:
+      class: c
+      encoder_can_emit: false
+    confidence:
+      class: a
+      source: intent_head_softmax_post_temperature
+
+# app span -> (requestedApp, callType). Reuses shipped vocab:
+#   ios/ElderlyAssistant/Services/Intents/CallLinks.swift:248-251,257
+#   ios/ElderlyAssistant/Services/Intents/MethodResolver.swift:87-113
+app_span_projection:
+  named_apps:                          # -> requestedApp, callType nil
+    whatsapp: ["whatsapp", "वाट्सएप", "ह्वाट्सएप"]
+    facetime: ["facetime", "फेसटाइम"]
+    messenger: ["messenger", "मेसेन्जर", "म्यासेन्जर"]
+    viber: ["viber", "भाइबर"]
+  generic_methods:                     # -> requestedApp nil, callType set
+    voice: ["phone", "फोन", "call", "कल"]
+    video: ["video", "भिडियो"]
+  matching: containment                # shipped code uses contains(), handles "वाट्सएपमा"
+  unknown: { requestedApp: null, callType: null }
+  # KNOWN CONSEQUENCE (integration item I-1, owner T-037):
+  #   a generic phone word yields callType="voice" + requestedApp=nil, which
+  #   MethodResolver.explicitMethod currently returns nil for
+  #   (MethodResolver.swift:92-94, the guard). The "होइन, फोन नै गर" correction therefore
+  #   needs either the corrections_overrides family to emit requestedApp="phone",
+  #   or explicitMethod to read callType=="voice" as an explicit amendment.
+
+contact_normalisation:
+  applies_to_span_labels: [contact]     # ONLY contact
+  trailing_clitics: ["लाई", "ले", "मा", "बाट", "सम्म", "को", "का", "की"]
+  guard: remainder must be non-empty and still a substring of the transcript
+  span_set_unchanged: true             # spans stay surface-exact; slot value is trimmed by code
+  purpose: reconcile T-034's surface-exact spans with eval_golden's resolver-ready golden values
+
+# ---------------------------------------------------------------------------
+# Calibration  (spec section 10 ship gate)
+# ---------------------------------------------------------------------------
+calibration:
+  mechanism: temperature_scaling
+  fitted_on: valid_split                # T-034 valid_fraction 0.05; NEVER the golden corpus
+  shipped_as: meta.json:calibration_temperature
+  applied_in: interpreter_code          # graph emits raw logits; divide then softmax
+  graph_contains_temperature: false     # keeps the parameter reviewable
+  argmax_preserving: true               # monotone; cannot change the winning class
+  gate:
+    source: config.yaml:gates + intent-engine spec section 10
+    buckets: 10
+    bucket_edges: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+    min_samples_per_bucket: 30
+    tolerance: 0.10
+    below_floor: pool_upward_and_report
+    corpus_floor: 8000                  # annotation_rules.mixture.supply_caps.corpus_floor
+    measurable_today: false             # T-033's 20-row corpus cannot fill 10 buckets
+
+# ---------------------------------------------------------------------------
+# Bands  (shipped policy; this design adds NO threshold)
+# ---------------------------------------------------------------------------
+bands:
+  source: ios/ElderlyAssistant/Services/Intents/IntentRouter.swift:56-58 (Config.default)
+  accept: 0.7
+  rephrase: 0.4
+  applied_by: IntentRouter.bandChecked (IntentRouter.swift:316-330)
+  tiers: ios/ElderlyAssistant/Services/Intents/ConfirmationTier.swift:17-34
+  behaviour:
+    ">=0.7": dispatch
+    "0.4-0.7":
+      tier_confirm: dispatch_into_confirmation_flow
+      tier_free: drop_for_escalation_or_rephrase_question_when_local_final
+    "<0.4": abstain
+  encoder_abstains_at: 0.4              # matches LocalIntentInterpreter.Config.default.confidenceThreshold
+  abstention_sets_failure_reason: false # "honest abstention - no retry, no failure"
+  new_thresholds_introduced: 0
+
+# ---------------------------------------------------------------------------
+# Runtime
+# ---------------------------------------------------------------------------
+runtime:
+  ios:
+    format: coreml_mlprogram
+    quantization: int8_weights
+    distribution: zip_with_single_mlmodelc_at_top_level
+    install_path: new_code_required    # ModelStore.installCoreMLEncoder is Whisper-shaped
+    size_mb: 109.1
+  android:
+    format: onnx
+    quantization: int8
+    opset: 17
+    runtime: onnxruntime_mobile
+    install_path: new_code_required
+    size_mb: 118.1
+  graph:
+    inputs:
+      input_ids: {dtype: int64, shape: [1, "<=64"]}
+      attention_mask: {dtype: int64, shape: [1, "<=64"]}
+    outputs:
+      logits: {dtype: float32, shape: [1, 12], note: raw_unnormalized}
+      slot_logits: {dtype: float32, shape: [1, "<=64", 13], note: raw_unnormalized}
+  meta_json:
+    required_keys: [intents, tags, max_len, calibration_temperature, artifact_digest]
+    intents_order: is_logit_order
+    tags_order: is_logit_order
+  determinism:
+    sampler: none                       # argmax over one deterministic forward pass
+    ondevice_sampling_applies_to: llm_interpreters_only
+    tie_break: lowest_class_index
+    decode_order: ascending_words
+    expected_variance: low_order_confidence_only   # across CoreML/ONNX int8 kernels
+  conformance:
+    protocol: CommandInterpreter        # LlamaCommandInterpreter.swift:34-41
+    failure_reporting: InterpreterFailureReporting
+    completion_exactly_once: true
+    install_slot: LocalBrainChain.preferred
+    standin: LlamaCommandInterpreter
+    context_consumed: false             # avoids train/inference skew
+  config:
+    # Every value is a parameter, not a constant buried in the implementation.
+    # Mirrors the incumbent's Config struct (LocalIntentInterpreter.swift:39-50).
+    confidenceThreshold: 0.4            # = IntentRouter.Config.rephraseThreshold; NOT new
+    maxSequenceLength: 64               # = meta_json.max_len
+    timeoutSeconds: 2.0                 # = p95 local-leg budget (intent-engine spec section 10)
+    maxRetries: 0                       # deterministic pass: a timeout retry cannot help
+    retryOnArtifactLoadRace: true       # one retry when the graph was still loading
+    retry_policy_rationale: >-
+      LocalIntentInterpreter retries once, but its trigger is truncated_json
+      (LocalIntentInterpreter.swift:289-293) - a sampling failure a retry can
+      plausibly fix. The encoder does not sample: a timeout re-runs identical work
+      for identical expected duration, and span_invalid is a decoding verdict, not a
+      transient. A blanket retry would spend 2 x timeoutSeconds inside NFR-002's
+      4 s budget for no expected recovery. Load race is the one genuine transient.
+    on_timeout: set_lastInferenceFailureReason_inference_timeout_then_complete_nil
+    on_abstention: complete_nil_without_failure_reason
+
+# ---------------------------------------------------------------------------
+# Ladder  (preserved; FR-007 long tail explicit)
+# ---------------------------------------------------------------------------
+ladder:
+  order:
+    - keyword_safety_net                # CommandRouter, before any interpreter (:651-653)
+    - cache                             # IntentCommandCache, cacheable actions only
+    - local_encoder                     # this component
+    - cloud_brain
+    - re_prompt
+  long_tail_peer:
+    component: incumbent_local_llm
+    engaged_on: abstention_only
+    fr: FR-007
+    status: integration_item_I-2        # requires a LocalBrainChain fall-through (T-037)
+  safety_net_first: true
+  safety_net_covers: [emergency, med_ack_explicit, med_ack_denial]
+  # A low-confidence or abstaining encoder can never suppress emergency or explicit
+  # med-ack: those are matched before any interpreter runs.
+
+# ---------------------------------------------------------------------------
+# Failure modes  (each names detection, fallback, user-visible behaviour)
+# ---------------------------------------------------------------------------
+failure_modes_invariant: no_path_ends_in_a_wrong_action
+failure_modes:
+  - id: F-1
+    name: inference_timeout
+    detection: forward_pass_exceeds_local_leg_budget
+    fallback: set_lastInferenceFailureReason_and_complete_nil
+    user_visible: cloud_answers_else_re_prompt
+    sets_failure_reason: true
+  - id: F-2
+    name: artifact_unavailable
+    detection: isAvailable_false
+    fallback: LocalBrainChain_standin
+    user_visible: incumbent_local_brain_answers
+  - id: F-3
+    name: sanitised_empty
+    detection: sanitiser_returns_empty
+    fallback: complete_nil
+    user_visible: re_prompt
+  - id: F-4
+    name: span_invalid
+    detection: "fails transcript[start:end] == text, out of range, or label overlap"
+    fallback: drop_span_or_abstain_if_required
+    user_visible: re_prompt_or_cloud_answer
+  - id: F-5
+    name: span_severed_by_truncation
+    detection: 200_char_clamp_cut_a_span
+    fallback: as_F-4
+    user_visible: re_prompt
+  - id: F-6
+    name: abstention
+    detection: calibrated_confidence_below_0.4_or_action_outside_the_twelve
+    fallback: complete_nil_without_failure_reason
+    user_visible: open_question_escalation_else_re_prompt
+    sets_failure_reason: false
+  - id: F-7
+    name: low_confidence_band
+    detection: "0.4 <= confidence < 0.7"
+    fallback: bandChecked_owns_it
+    user_visible: "tier_confirm: spoken confirmation; tier_free: escalation or rephrase question"
+  - id: F-8
+    name: out_of_vocabulary
+    detection: abstention_preferred
+    fallback: tier_1_confirmation_and_side_effect_precision_gate
+    user_visible: confirmation_prompt_or_re_prompt
+  - id: F-9
+    name: graph_load_failure
+    detection: digest_mismatch_or_session_error
+    fallback: as_F-2
+    user_visible: incumbent_local_brain_answers
+
+# ---------------------------------------------------------------------------
+# SetFit / slotless scoping  (architectural, not a tuning choice)
+# ---------------------------------------------------------------------------
+slotless:
+  verdict: excluded_from_joint_model
+  reason: >-
+    A sentence-embedding + linear head pools one vector per utterance and therefore
+    emits one label per utterance. It has no per-token representation, so it cannot
+    produce token-level BIO spans, so it has no span candidates and no offsets.
+  t033_cross_ref: "C4 exclusion, T-033 bake-off section 7"
+  allowed_at_most_as:
+    name: IntentOnlyFastPath
+    emits: [action, confidence]
+    slots: all_nil
+    restricted_to_actions_with_no_required_span: true
+    scored_on: closed_intent_accuracy_only
+    may_report_slot_f1: false
+    may_consume_joint_slot_gates: false
+  proposed_for_tg08: false
+
+# ---------------------------------------------------------------------------
+# Gates  (from config.yaml:56-62 + intent-engine spec section 10)
+# ---------------------------------------------------------------------------
+gates:
+  closed_intent_accuracy: 0.95
+  slot_f1: 0.90
+  emergency_recall_corpus: 1.00          # hard gate, no compromise
+  emergency_recall_adversarial: 0.98     # hard gate
+  side_effect_precision: 0.97            # call + send_message
+  abstention_precision: 0.90
+  calibration_bucket_tolerance: 0.10
+  max_gap_vs_gemini: 0.03
+  latency_p50_s: 1.0                     # UNMEASURED (T-033 K5 desktop proxy)
+  latency_p95_s: 2.0
+  # QUALIFIED - this key is NOT a gate pass. These three have a T-033 PROXY figure only:
+  # the legacy 20-row corpus, T-033's own checkpoint and dataset, BEFORE T-034's data
+  # rebuild. Two of the three proxies are BELOW their gates (closed 0.882 < 0.95,
+  # contact-portion slot F1 0.333 < 0.90; emergency recall 1.000 meets its gate).
+  # Re-measurement against the T-036 corpus with the shipped artifact is required.
+  proxy_measured_on_legacy_corpus:
+    closed_intent_accuracy: 0.882
+    slot_f1: 0.333
+    emergency_recall_corpus: 1.000
+  gate_passed: false                     # no gate has been passed; T-036/T-038 own that
+  unmeasured_today: [emergency_recall_adversarial, side_effect_precision, abstention_precision, calibration_bucket_tolerance, max_gap_vs_gemini, latency_p50_s, latency_p95_s]
+
+consumers:
+  T-036:
+    - load this contract and annotation_rules together; assert the 12 intent labels
+      against build_dataset.VALID_ACTIONS and against InterpretedCommand.Action rawValues minus plugin
+    - widen the spike's 5-tag slot head to the 13 tags here
+    - implement w_emergency, lambda_slot, tau, lambda_kd with the stated defaults
+    - fit temperature scaling on the valid split and write calibration_temperature into meta.json
+    - close the ack_med / create_calendar_event / suggest_video seed gap
+    - if no teacher distribution is available, SKIP stage 2 and record it
+  T-037:
+    - integration item I-1: generic voice-method amendment (app_span_projection.unknown)
+    - integration item I-2: LocalBrainChain abstention fall-through to the long-tail LLM
+    - real CoreML/ONNX install path (ModelStore.installCoreMLEncoder is Whisper-shaped)
+    - plugin-utterance routing (the encoder has no .plugin class)
+  T-038:
+    - calibrate-bucket reporting per calibration.gate
+    - device latency p50/p95 on the oldest supported device
+    - determinism check: golden corpus twice, same artifact digest, identical argmax + spans
+    - delta vs GeminiCommandInterpreter
