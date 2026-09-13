@@ -181,6 +181,19 @@ class TestResumeAndDistillationGuards(unittest.TestCase):
         self.assertEqual(on["temperature"], 2.0)
         self.assertEqual(on["lambda_kd"], 0.5)
 
+    def test_tokenizer_pin_compares_like_with_like(self):
+        """The pin is the embedding row count; the sentencepiece tokenizer is
+        250002 for the same checkpoint. Comparing them to each other refused a
+        correct model on the server, so both sides are asserted here."""
+        from train_encoder import tokenizer_pin_problem
+        pinned = load_rules().tokenizer_vocab
+        self.assertEqual(pinned, 250037)
+        self.assertIsNone(tokenizer_pin_problem(250002, pinned, pinned))  # real case
+        self.assertIsNone(tokenizer_pin_problem(pinned, pinned, pinned))
+        self.assertIn("embedding rows", tokenizer_pin_problem(250002, 250000, pinned)
+                      or "")
+        self.assertIn("out of range", tokenizer_pin_problem(250100, pinned, pinned) or "")
+
     def test_require_t035_rejects_placeholders(self):
         self.assertEqual(require_t035(3, "x"), 3)
         for placeholder in (None, "TODO(T-035)", "  TODO(T-035)  "):

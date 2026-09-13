@@ -142,6 +142,27 @@ class TestGoldenCorpusRefusals(unittest.TestCase):
             self.assertEqual(report["kept"]["total"], 0)
 
 
+class TestSourcePaths(unittest.TestCase):
+    """A missing --sources path is a mistake, not an empty corpus."""
+
+    def test_all_sources_missing_is_refused_not_silently_empty(self):
+        with tempfile.TemporaryDirectory() as td:
+            missing = Path(td) / "never_ran" / "teacher.jsonl"
+            p, report = run_builder([missing], Path(td) / "out")
+            self.assertEqual(p.returncode, 3, p.stdout + p.stderr)
+            self.assertIn("none of the --sources exist", p.stdout + p.stderr)
+            self.assertIn(str(missing.resolve()), p.stdout + p.stderr)
+            self.assertIsNone(report, "a refused build must not write a report")
+
+    def test_one_missing_source_among_present_ones_warns_but_builds(self):
+        with tempfile.TemporaryDirectory() as td:
+            missing = Path(td) / "noised.jsonl"
+            p, report = run_builder([fixtures.FIXTURE_PATH, missing], Path(td) / "out")
+            self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+            self.assertIn("missing — skipped", p.stdout)
+            self.assertGreater(report["kept"]["total"], 0)
+
+
 class TestFloors(unittest.TestCase):
     def test_floor_violations_exit_nonzero_without_waiver(self):
         with tempfile.TemporaryDirectory() as td:

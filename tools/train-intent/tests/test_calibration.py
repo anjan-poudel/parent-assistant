@@ -15,11 +15,39 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from calibrate_encoder import (  # noqa: E402
-    bucket_stats, ece, fit_temperature, gate_violations, nll, softmax,
+    _load_rows, bucket_stats, ece, fit_temperature, gate_violations, nll, softmax,
 )
 from pipeline_guards import GOLDEN_CORPUS  # noqa: E402
 
 CALIBRATE = ROOT / "src" / "calibrate_encoder.py"
+
+
+class TestGoldenCorpusSchema(unittest.TestCase):
+    """The golden corpus spells its label `intent`; stage-E1 rows spell it
+    `action`. Reading only one of them made the corpus look empty on the
+    server smoke run, so both spellings are pinned here."""
+
+    def test_both_schemas_are_read(self):
+        import json
+        import tempfile
+        intents = ["call", "none"]
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "rows.jsonl"
+            p.write_text(
+                json.dumps({"id": "a", "utterance": "माइयालाई फोन गर", "intent": "call"})
+                + "\n"
+                + json.dumps({"id": "b", "utterance": "हरिलाई फोन गर", "action": "none"})
+                + "\n"
+                + json.dumps({"id": "c", "utterance": "x", "intent": "fly_drone"}) + "\n",
+                encoding="utf-8")
+            rows = _load_rows(p, intents)
+        self.assertEqual([r["action"] for r in rows], ["call", "none"])
+
+    def test_the_real_golden_corpus_loads(self):
+        from encoder_contract import load_contract
+        rows = _load_rows(GOLDEN_CORPUS, list(load_contract().intent_labels))
+        self.assertGreater(len(rows), 0,
+                           "the held-out corpus must be readable by the calibrator")
 
 
 class TestSoftmax(unittest.TestCase):

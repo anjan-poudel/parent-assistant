@@ -61,6 +61,17 @@ class TestPublishReasons(unittest.TestCase):
         _, err = publish_reasons(False, 0, True, True, False, False, None)
         self.assertIn("TODO(T-035)", err or "")
 
+    def test_a_not_measurable_calibration_withholds_publication(self):
+        """None means 'the corpus cannot support a claim' — that must never be
+        treated as a pass, or a 20-row corpus would publish an artifact."""
+        reasons, _ = publish_reasons(False, 0, None, True, False, False, "2026.09.1")
+        self.assertTrue(any("not measurable" in r for r in reasons), reasons)
+
+    def test_skipping_calibration_does_not_double_report(self):
+        reasons, _ = publish_reasons(False, 0, None, True, False, True, "2026.09.1")
+        self.assertEqual([r for r in reasons if "not measurable" in r], [])
+        self.assertTrue(any("calibration skipped" in r for r in reasons), reasons)
+
 
 class TestStageSupervision(unittest.TestCase):
     """Real subprocesses: watchdog kill, retry, streaming, log tee."""
@@ -137,6 +148,20 @@ class TestPipelineCli(unittest.TestCase):
             self.assertIn(frag, out)
         self.assertIn("dry run — no stages executed", out)
         self.assertNotIn("Traceback", out)
+
+    def test_relative_paths_are_resolved_against_the_caller_cwd(self):
+        """Stages run with cwd=ROOT, so a relative --sources handed through
+        verbatim would be looked up in the wrong directory (observed on the
+        server smoke run: the build found 0 of 1 sources and said nothing)."""
+        td = tempfile.TemporaryDirectory()
+        self.addCleanup(td.cleanup)
+        rel = Path(fixtures.FIXTURE_PATH).name
+        p = subprocess.run([sys.executable, str(PIPELINE),
+                            "--sources", rel, "--work-dir", td.name, "--dry-run"],
+                           capture_output=True, text=True, cwd=fixtures.FIXTURE_PATH.parent)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn(str(fixtures.FIXTURE_PATH), p.stdout)
+        self.assertNotIn(f"--sources {rel} ", p.stdout)
 
     def test_consent_export_is_refused(self):
         p = subprocess.run([sys.executable, str(PIPELINE), "--consent-export", "bundle",
