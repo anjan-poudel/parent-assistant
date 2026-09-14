@@ -49,6 +49,21 @@ struct ModelCatalogEntry: Codable, Identifiable {
     let displayName: String
     let filename: String
     let downloadURL: URL
+
+    /// Ordered part URLs when ONE model file is delivered as N release
+    /// assets (GitHub caps a single asset at 2 GiB, so a >2 GiB `.gguf`
+    /// ships as `.partaa` / `.partab` / …). `ModelDownloadService` fetches
+    /// every part and concatenates them in THIS order — part 0 first —
+    /// before the ordinary full-file checksum + install. Nil (the default,
+    /// and every entry that fits in one asset) means the single-file
+    /// `downloadURL` path. Parts are a DELIVERY mechanism, not a licence to
+    /// ship arbitrary sizes: the service still refuses any entry whose
+    /// declared total exceeds its hard size cap.
+    ///
+    /// `downloadURL` mirrors part 0 for readers that predate this field;
+    /// the download service always prefers the parts when they are set.
+    let downloadPartURLs: [URL]?
+
     let sizeBytes: Int64
     let sha256: String
     let minDeviceRAMBytes: UInt64
@@ -101,6 +116,7 @@ struct ModelCatalogEntry: Codable, Identifiable {
          displayName: String,
          filename: String,
          downloadURL: URL,
+         downloadPartURLs: [URL]? = nil,
          sizeBytes: Int64,
          sha256: String,
          minDeviceRAMBytes: UInt64,
@@ -118,6 +134,7 @@ struct ModelCatalogEntry: Codable, Identifiable {
         self.displayName = displayName
         self.filename = filename
         self.downloadURL = downloadURL
+        self.downloadPartURLs = downloadPartURLs
         self.sizeBytes = sizeBytes
         self.sha256 = sha256
         self.minDeviceRAMBytes = minDeviceRAMBytes
@@ -133,6 +150,16 @@ struct ModelCatalogEntry: Codable, Identifiable {
     }
 
     var id_: ModelID { id }
+
+    /// Clearly-marked placeholder for an entry whose artifact exists but
+    /// has not been uploaded yet — the coordinator supplies the real
+    /// digest once the release asset is live. It is deliberately NOT
+    /// 64-hex, so a "full pin" assertion (e.g.
+    /// `InterpreterAvailabilityTests`) can tell a real pin from an
+    /// unpublished entry instead of being satisfied by a zero stub.
+    /// The strict checksum path rejects it, so nothing installs from an
+    /// entry still carrying it.
+    static let pendingSHA256 = "REPLACE_WITH_SHA256"
 }
 
 /// The catalog of models the app knows about. Constants for now; a later
@@ -205,10 +232,20 @@ enum ModelCatalog {
     /// v14 slim-template retrain (seed 43) — NEW artifact id so devices
     /// cached on the v12 seed-42 file download it fresh.
     static let intentQwenS43       = ModelID("intent-ne-qwen-s43-q4km")
-    /// 4B slim-template retrain seed 43 — the FIRST gate-passing brain
-    /// (all five gates, 2026-09-13). LAN-hosted for testing; parts on
-    /// GitHub for later distribution (>2 GiB).
+    /// 4B slim-template retrain seed 43 — the first gate-passing brain
+    /// (all five gates, 2026-09-13) and the default brain until the
+    /// slot-canonical retrain below superseded it. LAN-hosted for testing;
+    /// parts on GitHub for later distribution (>2 GiB). Kept in `all`
+    /// (a device that cached it must still be able to delete it) but no
+    /// longer offered or auto-downloaded.
     static let intentQwen4BS43     = ModelID("intent-ne-qwen4b-s43-q4km")
+    /// The 4B SLOT-CANONICAL retrain (v16) — the gate-passing brain that
+    /// replaces `intentQwen4BS43` as the default: the slot gates the
+    /// seed-43 export failed (contact 0.800 / time 0.833) are the reason
+    /// for the retrain. Shipped Q4_K_M, >2 GiB, so it is delivered as two
+    /// ordered parts (GitHub's per-asset cap) reassembled by
+    /// `ModelDownloadService`.
+    static let intentQwen4BSlotCanon = ModelID("intent-ne-qwen4b-slotcanon-q4km")
     /// The GEMMA leg of the bake-off (2026-09-07): the QLoRA fine-tune
     /// over google/gemma-3-1b-it, merged to fp16 and exported Q4_K_M
     /// (`intent-ne-gemma-q4_k_m.gguf`, release v7). A real, hosted
@@ -615,8 +652,9 @@ enum ModelCatalog {
             // (`measuredFramings[llama3_2_1B] = .llama3`).
             // The auto-download default is NOT this brain (a comment here
             // claimed it was until T-046); `AppCoordinator.defaultBrainModelID`
-            // is `intentQwen4BS43`. T-047 reconciles the remaining catalogue
-            // prose.
+            // is `intentQwen4BSlotCanon` (was `intentQwen4BS43` until the
+            // v16 retrain superseded it). T-047 reconciles the remaining
+            // catalogue prose.
             displayName: "Brain — LLaMA 1B (legacy)",
             filename: "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
             downloadURL: URL(string: "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf")!,
@@ -654,9 +692,59 @@ enum ModelCatalog {
             languages: ["ne"]
         ),
         ModelCatalogEntry(
+            id: intentQwen4BSlotCanon,
+            kind: .llamaBase,
+            displayName: "Brain — Qwen 4B · Nepali (gate-passing)",
+            // The v16 slot-canonical retrain of the seed-43 4B (see the id
+            // docs): the slot gates (contact / time) the earlier export
+            // failed are what this artifact was retrained for. Q4_K_M is
+            // the quant the seed-43 record named as THE ship target (the
+            // v15 Q3_K_M export shipped only because it fit under GitHub's
+            // 2 GiB per-asset cap).
+            //
+            // DELIVERY: 2.50 GB in one file, so GitHub cannot host it as a
+            // single asset — the release v16 asset is two ordered parts
+            // (`.partaa` / `.partab`) that `ModelDownloadService`
+            // downloads CONCURRENTLY (max 3 in flight) and concatenates in
+            // order before the full-file sha256 + install. `sizeBytes` is
+            // the ASSEMBLED file's size, which is also what the service's
+            // `MAX_MULTIPART_TOTAL_BYTES` guardrail measures.
+            //
+            // sha256: the coordinator supplies the digest after the v16
+            // upload — `pendingSHA256` is the clearly-marked placeholder
+            // until then, and the strict checksum path refuses to install
+            // from it (no household can end up with an unverified 2.5 GB
+            // brain).
+            filename: "intent-ne-qwen4b-slotcanon-q4_k_m.gguf",
+            // `downloadURL` mirrors part 0 for readers that predate
+            // `downloadPartURLs`; the service always takes the parts.
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v16/intent-ne-qwen4b-slotcanon-q4_k_m.gguf.partaa")!,
+            downloadPartURLs: [
+                URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v16/intent-ne-qwen4b-slotcanon-q4_k_m.gguf.partaa")!,
+                URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v16/intent-ne-qwen4b-slotcanon-q4_k_m.gguf.partab")!
+            ],
+            sizeBytes: 2_497_278_752,
+            sha256: ModelCatalogEntry.pendingSHA256,
+            // Same 4 GB floor as its seed-43 predecessor: 4B Q4_K_M is a
+            // ~2.5 GB file and ~3.5-4 GB live, and the gate reads the
+            // CURRENT free budget (`os_proc_available_memory`), not total
+            // RAM — a 6 GB device must still be able to download it.
+            minDeviceRAMBytes: 4_000_000_000,
+            dependsOn: nil,
+            // Language tag: ne-only model.
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
             id: intentQwen4BS43,
             kind: .llamaBase,
-            displayName: "Brain — Qwen 4B · intent fine-tune (slim, seed 43)",
+            // HIDDEN from the picker (2026-09-14): superseded by the
+            // slot-canonical v16 retrain above — same 4B class, but the
+            // seed-43 export's slot gates (contact 0.800 / time 0.833)
+            // are what the retrain exists to fix. Kept in `all` so a
+            // device that cached it can still delete it — and it stays
+            // resolvable through a stale stored preference, which is why
+            // it keeps a `measuredFramings` row.
+            displayName: "Brain — Qwen 4B · intent fine-tune (slim, seed 43, superseded)",
             // Qwen3-4B QLoRA intent fine-tune, seed 43 of the SLIM-template
             // deterministic k=3 bake-off. GBNF-corrected (on-device-faithful)
             // gates: closed-intent 1.000, emergency 1.000, side-effect
@@ -675,9 +763,9 @@ enum ModelCatalog {
             // LLaMA 3.2 branch (closed 0.882, two runtime truncations and one
             // spurious emergency) and 19/20 for the Qwen3 wrap. Gate numbers
             // above are grammar-off; the T-046 framing record carries the
-            // app-faithful per-framing rows. This is the shipped default
-            // brain, so it is the id the pre-T-046 `default:` branch
-            // mis-framed most consequentially.
+            // app-faithful per-framing rows. It was the shipped default
+            // brain when T-046 measured it, so it is the id the pre-T-046
+            // `default:` branch mis-framed most consequentially.
             filename: "intent-ne-qwen4b-s43-q3_k_m.gguf",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v15/intent-ne-qwen4b-s43-q3_k_m.gguf")!,
             sizeBytes: 2_075_616_032,
@@ -1015,17 +1103,21 @@ enum ModelCatalog {
         whisperBaseEn
     ].compactMap { entry(for: $0) }
 
-    /// The brain models the Settings picker offers: the Nepali intent
-    /// fine-tune (the v12 bake-off winner) and the two stock Qwen 3
-    /// sizes, biggest first.
+    /// The brain models the Settings picker offers: the gate-passing
+    /// slot-canonical Qwen 4B (the default brain) and the two smaller
+    /// Nepali intent fine-tunes, then the two stock Qwen 3 sizes —
+    /// biggest first.
     ///
     /// Hidden (in `all`, not offered):
+    ///   - `intentQwen4BS43` — the seed-43 4B, superseded by the
+    ///     slot-canonical v16 retrain (same class; the retrain fixes the
+    ///     slot gates it failed).
     ///   - `intentGemma1B` — fails the emergency hard gate, the one gate
     ///     the household safety story cannot trade away.
     ///   - `llama3_2_1B` / `llama3_2_3B` — the pre-Qwen LLaMA brains
     ///     (legacy; Qwen 3 supersedes both sizes).
     static let availableBrainEntries: [ModelCatalogEntry] = [
-        intentQwen4BS43,
+        intentQwen4BSlotCanon,
         intentQwenS43,
         qwen4BNepali,
         qwen3_4BInstruct,
@@ -1071,7 +1163,9 @@ enum ModelCatalog {
     ///     is set — the first-run install already put it on disk, so the
     ///     switch downloads nothing);
     ///   - STT `en` → whisper-base.en (60 MB, not the 190 MB multilingual);
-    ///   - brain `ne` → the intent fine-tune (the curated list's own pick);
+    ///   - brain `ne` → the gate-passing slot-canonical 4B (the curated
+    ///     list's own pick — a superseded entry must never be what an
+    ///     app-language switch lands on);
     ///   - brain `en` → Qwen3 1.7B (1.3 GB, not the 2.5 GB Qwen3 4B);
     ///   - TTS `ne` / `en` → the locale voice of each language.
     ///
@@ -1085,7 +1179,7 @@ enum ModelCatalog {
             "en": whisperBaseEn
         ],
         .llamaBase: [
-            "ne": intentQwen4BS43,
+            "ne": intentQwen4BSlotCanon,
             "en": qwen3_1_7BInstruct
         ],
         .tts: [

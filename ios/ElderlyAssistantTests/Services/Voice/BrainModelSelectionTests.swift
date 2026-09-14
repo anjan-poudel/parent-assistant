@@ -8,21 +8,38 @@ final class BrainModelSelectionTests: XCTestCase {
     // MARK: - Catalog surface
 
     /// The picker list is CURATED (catalog declutter, 2026-09-12): the
-    /// gate-passing Qwen 4B slim-template seed-43 intent fine-tune (added
-    /// 2026-09-13, the default brain), the v14 slim-template seed-43
-    /// Nepali 1.7B intent fine-tune (its own id so cached v12 seed-42
-    /// devices re-download), the Nepali-specialized Qwen 4B (added
-    /// 2026-09-12 for LAN testing), plus the two stock Qwen 3 sizes —
-    /// biggest first. The pre-Qwen LLaMA brains and the superseded v12
+    /// gate-passing slot-canonical Qwen 4B (the v16 retrain, the default
+    /// brain since 2026-09-14), the v14 slim-template seed-43 Nepali 1.7B
+    /// intent fine-tune (its own id so cached v12 seed-42 devices
+    /// re-download), the Nepali-specialized Qwen 4B (added 2026-09-12 for
+    /// LAN testing), plus the two stock Qwen 3 sizes — biggest first. The
+    /// pre-Qwen LLaMA brains, the superseded seed-43 4B and the v12
     /// seed-42 fine-tune are legacy and the Gemma fine-tune fails the
     /// emergency hard gate — none may read as a choice.
     func testAvailableBrainEntriesIsTheCuratedList() {
         XCTAssertEqual(ModelCatalog.availableBrainEntries.map(\.id),
-                       [ModelCatalog.intentQwen4BS43,
+                       [ModelCatalog.intentQwen4BSlotCanon,
                         ModelCatalog.intentQwenS43,
                         ModelCatalog.qwen4BNepali,
                         ModelCatalog.qwen3_4BInstruct,
                         ModelCatalog.qwen3_1_7BInstruct])
+    }
+
+    /// The superseded seed-43 4B brain: still in the catalog (a cached
+    /// device must be able to delete it, and a stale stored preference
+    /// must still resolve) but no longer offered — the slot-canonical v16
+    /// retrain is the 4B the picker shows and the coordinator downloads.
+    func testSupersededSeed43BrainIsHiddenButStillDeletable() {
+        let offered = Set(ModelCatalog.availableBrainEntries.map(\.id))
+        XCTAssertFalse(offered.contains(ModelCatalog.intentQwen4BS43))
+        XCTAssertNotNil(ModelCatalog.entry(for: ModelCatalog.intentQwen4BS43))
+        XCTAssertEqual(ModelCatalog.entry(for: ModelCatalog.intentQwen4BS43)?.kind,
+                       .llamaBase)
+        XCTAssertEqual(ModelCatalog.entry(for: ModelCatalog.intentQwen4BS43)?.displayName,
+                       "Brain — Qwen 4B · intent fine-tune (slim, seed 43, superseded)")
+        XCTAssertNotNil(LlamaCommandInterpreter.measuredFraming(for: ModelCatalog.intentQwen4BS43),
+                        "a stale preference can still resolve the seed-43 brain — "
+                        + "it must keep its measured framing")
     }
 
     /// Hidden brains stay in the catalog so a device that cached one can
@@ -123,11 +140,16 @@ final class BrainModelSelectionTests: XCTestCase {
     /// the loop, so its row is `.qwen3` — per id, from the check, not by
     /// family.
     private static let determinedFramings: [(ModelID, LlamaCommandInterpreter.ChatFormat.Kind)] = [
-        (ModelCatalog.intentQwen4BS43, .raw),        // default brain, offered
+        // Offered since the v16 retrain became the default brain; its row
+        // is INHERITED from the seed-43 measurement below (same bare-prompt
+        // training contract) — re-run the framing check on the v16
+        // artifact when it publishes.
+        (ModelCatalog.intentQwen4BSlotCanon, .raw),
         (ModelCatalog.intentQwenS43, .qwen3),        // offered, measured wrap
         (ModelCatalog.qwen4BNepali, .raw),           // offered
         (ModelCatalog.qwen3_4BInstruct, .qwen3),     // offered (stock Qwen3)
         (ModelCatalog.qwen3_1_7BInstruct, .qwen3),   // offered (stock Qwen3)
+        (ModelCatalog.intentQwen4BS43, .raw),        // hidden, superseded 4B
         (ModelCatalog.intentNepali1B, .raw),         // hidden, stale pref
         (ModelCatalog.llama3_2_1B, .llama3),         // hidden legacy LLaMA
         (ModelCatalog.llama3_2_3B, .llama3)          // hidden legacy LLaMA

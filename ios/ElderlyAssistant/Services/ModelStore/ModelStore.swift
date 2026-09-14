@@ -682,7 +682,11 @@ final class ModelStore {
         }
     }
 
-    private func verifyChecksum(at url: URL, expected: String) throws -> Bool {
+    /// Streaming sha256 comparison against `expected`. Internal rather
+    /// than private so tests can verify a reassembled multipart file
+    /// against a digest they computed themselves — the same call `finalize`
+    /// makes before a model is promoted out of staging.
+    func verifyChecksum(at url: URL, expected: String) throws -> Bool {
         if checksumPolicy == .skip { return true }
 
         // Streaming SHA-256 so we don't load 2 GB models into RAM.

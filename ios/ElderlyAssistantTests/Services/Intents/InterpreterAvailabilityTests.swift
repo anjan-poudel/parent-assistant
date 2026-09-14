@@ -164,35 +164,59 @@ final class InterpreterAvailabilityTests: XCTestCase {
     // MARK: - (c) Auto-download wiring + readiness derivation
 
     func testDefaultBrainModelIsTheRealHostedLlamaArtifact() {
-        // The auto-download target since 2026-09-13 is the gate-passing
-        // Qwen 4B slim-template seed-43 intent fine-tune
-        // (`intentQwen4BS43`) — the first brain to clear all five ship
-        // gates. It must ship from the hosted (https) GitHub release, not
-        // the LAN test URL the catalogue briefly carried for bake-off
-        // testing; the https pin below is what forces that swap, so it
-        // stays red until the entry moves off 192.168.1.117. Nothing to
-        // publish; this is pure wiring.
-        XCTAssertEqual(AppCoordinator.defaultBrainModelID, ModelCatalog.intentQwen4BS43)
+        // The auto-download target since 2026-09-14 is the gate-passing
+        // slot-canonical Qwen 4B (v16, `intentQwen4BSlotCanon`) — the
+        // retrain of the seed-43 brain that first cleared all five ship
+        // gates, fixing the slot gates it failed. It must ship from the
+        // hosted (https) GitHub release, not a LAN test URL the catalogue
+        // carries for bake-off testing (qwen4BNepali still does).
+        XCTAssertEqual(AppCoordinator.defaultBrainModelID, ModelCatalog.intentQwen4BSlotCanon)
         let entry = ModelCatalog.entry(for: AppCoordinator.defaultBrainModelID)
         XCTAssertNotNil(entry)
         let url = entry?.downloadURL.absoluteString ?? ""
         XCTAssertFalse(url.contains(".invalid"),
                        "the assistant-brain artifact must be a real hosted URL, not a placeholder")
         // Hosted means https: the catalogue also carries LAN-only test
-        // entries (e.g. qwen4BNepali on the home server, and this 4B
-        // brain's first LAN-testing URL) that would pass the placeholder
-        // check but must never become the auto-downloaded default. The
-        // https pin stays.
+        // entries (e.g. qwen4BNepali on the home server) that would pass
+        // the placeholder check but must never become the auto-downloaded
+        // default. The https pin stays.
         XCTAssertTrue(url.hasPrefix("https://"),
                       "the default brain must come from a hosted (https) URL, not a LAN/local address")
         XCTAssertGreaterThan(entry?.sizeBytes ?? 0, 0)
         XCTAssertEqual(entry?.kind, .llamaBase)
-        // Real artifact, not a stub: a full-length, non-zero sha256 pin.
+        // Delivery: 2.5 GB exceeds GitHub's 2 GiB per-asset cap, so the
+        // default brain MUST declare ordered parts — a single-asset URL
+        // would be a 404 on the release.
+        let parts = entry?.downloadPartURLs ?? []
+        XCTAssertGreaterThanOrEqual(parts.count, 2,
+                                    "a >2 GiB artifact cannot ship as one GitHub asset")
+        for part in parts {
+            XCTAssertTrue(part.absoluteString.hasPrefix("https://"),
+                          "every part must come from the hosted release")
+        }
+        XCTAssertEqual(parts.first?.absoluteString, url,
+                       "downloadURL mirrors part 0 for readers that predate parts")
+        // Guardrail: the default brain must be inside the service's hard
+        // size cap (see ModelDownloadService.maxMultipartTotalBytes).
+        XCTAssertLessThanOrEqual(entry?.sizeBytes ?? .max,
+                                 ModelDownloadService.maxMultipartTotalBytes,
+                                 "the default brain must fit the size guardrail")
+        // Real artifact, not a stub: a full-length, non-zero sha256 pin —
+        // OR the explicitly-marked pre-upload placeholder, which is the
+        // honest state until the coordinator uploads the v16 asset and
+        // supplies its digest. Any OTHER value still fails: this test is
+        // what stops a fabricated pin from shipping.
         let sha = entry?.sha256 ?? ""
-        XCTAssertEqual(sha.count, 64,
-                       "the default brain's sha256 must be a full 64-hex pin")
-        XCTAssertNotEqual(sha, String(repeating: "0", count: 64),
-                          "the default brain's sha256 must be a real pin, not a zero stub")
+        if sha == ModelCatalogEntry.pendingSHA256 {
+            XCTAssertGreaterThan(entry?.sizeBytes ?? 0, 2_147_483_648,
+                                 "only a >2 GiB artifact needs the pending-digest "
+                                 + "route; a small model has no excuse for an unpinned sha")
+        } else {
+            XCTAssertEqual(sha.count, 64,
+                           "the default brain's sha256 must be a full 64-hex pin")
+            XCTAssertNotEqual(sha, String(repeating: "0", count: 64),
+                              "the default brain's sha256 must be a real pin, not a zero stub")
+        }
     }
 
     func testAutoDownloadPolicyDownloadsWhenChainNeedsTheModel() {

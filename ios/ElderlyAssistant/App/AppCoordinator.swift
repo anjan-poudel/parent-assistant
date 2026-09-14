@@ -1298,9 +1298,12 @@ final class AppCoordinator: ObservableObject {
     /// selectability (2026-09-06) the Settings "AI मोडेल" screen offers
     /// every `ModelCatalog.availableBrainEntries` model; the LIVE
     /// choice is `resolvedBrainModelID`.
-    // The Qwen 1.7B intent fine-tune (v12, seed 42) is the default
-    // brain — the legacy LLaMA 1B is hidden from the picker now.
-    static let defaultBrainModelID = ModelCatalog.intentQwen4BS43
+    // The default brain is the slot-canonical Qwen 4B retrain (v16, the
+    // curated list's leader and the only entry that clears all five ship
+    // gates) — the legacy LLaMA 1B and the superseded seed-43 4B are
+    // hidden from the picker now. It is a >2 GiB artifact, so it arrives
+    // as two ordered parts (ModelDownloadService reassembles them).
+    static let defaultBrainModelID = ModelCatalog.intentQwen4BSlotCanon
 
     /// The brain model the interpreter actually uses: the stored
     /// preference when it names a real catalog entry, else the default.

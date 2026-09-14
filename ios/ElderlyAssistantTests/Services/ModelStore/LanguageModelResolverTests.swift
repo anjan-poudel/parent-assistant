@@ -98,7 +98,7 @@ final class LanguageModelResolverTests: XCTestCase {
             languages: ["en"])
         XCTAssertEqual(LanguageModelResolver.resolvedPreference(
             current: englishOnly.id, language: "ne", catalog: [englishOnly]),
-                       ModelCatalog.intentQwen4BS43)
+                       ModelCatalog.intentQwen4BSlotCanon)
     }
 
     func testEnglishToNepaliSwitchesTheReplyVoiceToTheNepaliDefault() {
@@ -190,7 +190,7 @@ final class LanguageModelResolverTests: XCTestCase {
         XCTAssertEqual(ModelCatalog.defaultEntry(kind: .whisperBase, language: "en")?.id,
                        ModelCatalog.whisperBaseEn)
         XCTAssertEqual(ModelCatalog.defaultEntry(kind: .llamaBase, language: "ne")?.id,
-                       ModelCatalog.intentQwen4BS43)
+                       ModelCatalog.intentQwen4BSlotCanon)
         XCTAssertEqual(ModelCatalog.defaultEntry(kind: .llamaBase, language: "en")?.id,
                        ModelCatalog.qwen3_1_7BInstruct)
         XCTAssertEqual(ModelCatalog.defaultEntry(kind: .tts, language: "ne")?.id,

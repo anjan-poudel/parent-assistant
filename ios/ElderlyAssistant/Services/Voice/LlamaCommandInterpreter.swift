@@ -526,14 +526,29 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// A hidden id that a stale stored preference can still resolve is
     /// listed here too — `resolvedBrainModelID` returns any id that still
     /// has a catalog entry, so "not offered" is not "not reachable".
+    ///
+    /// INHERITED ROW (2026-09-14): `intentQwen4BSlotCanon` (the v16
+    /// slot-canonical retrain) has not been through `framing_check.py`
+    /// itself yet, so its row is the `.raw` determination of the seed-43
+    /// 4B it retrains — the same `train_qlora.py` bare-prompt training
+    /// contract, which is what `.raw` encodes. Re-run the check on the v16
+    /// artifact when it is published and replace the inherited row with
+    /// its own measurement; the offered-brain test
+    /// (`BrainModelSelectionTests`) requires SOME row, and the LLaMA 3.2
+    /// fallback would mis-frame it.
     static let measuredFramings: [ModelID: ChatFormat.Kind] = [
         // — offered picker brains (ModelCatalog.availableBrainEntries) —
-        ModelCatalog.intentQwen4BS43: .raw,
+        ModelCatalog.intentQwen4BSlotCanon: .raw,   // inherited (see above)
         ModelCatalog.intentQwenS43:   .qwen3,
         ModelCatalog.qwen4BNepali:    .raw,
         ModelCatalog.qwen3_4BInstruct: .qwen3,
         ModelCatalog.qwen3_1_7BInstruct: .qwen3,
         // — hidden but still resolvable through a stored preference —
+        // The seed-43 4B (superseded by the slot-canonical retrain above):
+        // its `.raw` row is the T-046 measurement of the shipped v15
+        // Q3_K_M artifact — same bare-prompt training contract, kept so a
+        // stale stored preference is not mis-framed.
+        ModelCatalog.intentQwen4BS43: .raw,
         ModelCatalog.intentNepali1B:  .raw,
         ModelCatalog.llama3_2_1B:     .llama3,
         ModelCatalog.llama3_2_3B:     .llama3

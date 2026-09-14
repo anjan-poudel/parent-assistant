@@ -50,6 +50,7 @@ final class ModelCatalogLanguageTests: XCTestCase {
             ModelCatalog.intentNepali1B,
             ModelCatalog.intentQwenS43,
             ModelCatalog.intentQwen4BS43,
+            ModelCatalog.intentQwen4BSlotCanon,
             ModelCatalog.intentGemma1B,
             ModelCatalog.qwen4BNepali
         ]
@@ -117,8 +118,9 @@ final class ModelCatalogLanguageTests: XCTestCase {
         XCTAssertEqual(stt?.id, ModelCatalog.whisperMediumFinetunedNepali)
         XCTAssertEqual(stt?.languages, ["ne"])
         let brain = ModelCatalog.defaultEntry(kind: .llamaBase, language: "ne")
-        XCTAssertEqual(brain?.id, ModelCatalog.intentQwen4BS43,
-                       "the map keeps the curated brain list's own ne leader")
+        XCTAssertEqual(brain?.id, ModelCatalog.intentQwen4BSlotCanon,
+                       "the map keeps the curated brain list's own ne leader "
+                       + "(the gate-passing v16 4B, not the superseded seed-43)")
     }
 
     func testDefaultEntryFallsBackToLanguageNeutralThenFirst() {
