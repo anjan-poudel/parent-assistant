@@ -56,6 +56,14 @@ final class VoiceTurnLatencyTracer {
     /// finalized the turn — hop to main in the handler.
     var onTurnFinalized: ((_ stages: [StageTiming], _ totalMs: Int) -> Void)?
 
+    /// [TURN-TIMING-BREAKDOWN] Fired when a turn begins — AFTER any
+    /// abandoned turn found at begin time was finalized and delivered
+    /// (see `beginTurn`), so a subscriber's per-turn state is always
+    /// opened for the turn that is actually starting. Same threading
+    /// contract as `onTurnFinalized`: called off the lock, on the
+    /// caller's queue.
+    var onTurnBegan: (() -> Void)?
+
     private let bus: ObservabilityBus
     private let lock = NSLock()
 
@@ -90,6 +98,10 @@ final class VoiceTurnLatencyTracer {
         pendingSpeaks = 0
         dispatchResolved = false
         lock.unlock()
+        // [TURN-TIMING-BREAKDOWN] The turn edge, delivered outside the
+        // lock and AFTER the abandoned-turn finalize above (so a
+        // subscriber reports the old turn before opening the new one).
+        onTurnBegan?()
     }
 
     /// Closes the currently open stage at `now` (its ms = time since its

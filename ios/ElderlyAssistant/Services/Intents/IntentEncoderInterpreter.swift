@@ -179,6 +179,12 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
     /// [ENCODER-RUNTIME-READY] The internal-testing install trigger, or nil
     /// on every other configuration (tests, and any future non-spike use).
     private let artifactInstaller: IntentEncoderArtifactInstalling?
+    /// [TURN-TIMING-BREAKDOWN] Turn-scoped stage stopwatch for the three
+    /// encoder stages (tokenizer / CoreML forward / decode). Nil — every
+    /// configuration except an `INTENT_ENCODER` build — makes each
+    /// measurement a nil check around the UNCHANGED call: no clock read,
+    /// no allocation, and no decision anywhere consults it.
+    private let timingRecorder: TurnTimingRecorder?
 
     private let inferenceQueue = DispatchQueue(label: "intent.encoder",
                                                qos: .userInitiated)
@@ -203,6 +209,7 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
          tokenizer: IntentEncoderTokenizing = UnavailableIntentEncoderTokenizer(),
          config: Config = .default,
          artifactInstaller: IntentEncoderArtifactInstalling? = nil,
+         timingRecorder: TurnTimingRecorder? = nil,
          modelRunnerFactory: @escaping (URL) throws -> IntentEncoderModelRunning
              = IntentEncoderInterpreter.defaultModelRunnerFactory) {
         self.modelStore = modelStore
@@ -212,6 +219,7 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
         self.tokenizer = tokenizer
         self.config = config
         self.artifactInstaller = artifactInstaller
+        self.timingRecorder = timingRecorder
         self.modelRunnerFactory = modelRunnerFactory
     }
 
@@ -295,9 +303,15 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
             DispatchQueue.main.async { completion(nil) }
             return
         }
-        guard let tokenization = tokenizer.tokenize(
-                sanitisedTranscript: clean,
-                maxSequenceLength: manifest.maxSequenceLength) else {
+        // [TURN-TIMING-BREAKDOWN] `encoder_tokenizer` — the tokenizer call
+        // is wrapped, never restructured: nil recorder (every non-gated
+        // build) runs the identical expression with no clock read.
+        let tokenization: IntentEncoderTokenization? =
+            timingRecorder.measure(.encoderTokenizer) {
+                tokenizer.tokenize(sanitisedTranscript: clean,
+                                   maxSequenceLength: manifest.maxSequenceLength)
+            }
+        guard let tokenization else {
             emit("encoder_unavailable", outcome: "info",
                  errorCode: IntentEncoderAbstention.tokenizerUnavailable.rawValue)
             lastInferenceFailureReason = IntentEncoderAbstention.tokenizerUnavailable.rawValue
@@ -359,13 +373,22 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
             }
 
             do {
-                let logits = try runner.predict(tokenIds: tokenization.tokenIds,
-                                                attentionMask: tokenization.attentionMask)
-                let outcome = IntentEncoderDecoder.decode(
-                    logits: logits,
-                    manifest: manifest,
-                    tokenization: tokenization,
-                    sanitisedTranscript: clean)
+                // [TURN-TIMING-BREAKDOWN] `encoder_inference` and
+                // `encoder_decode` — the two stages the forward pass
+                // actually consists of, measured where they run (the
+                // inference queue). Pure spans: neither reading is
+                // consulted by the decode rule or the timeout policy.
+                let logits = try self.timingRecorder.measure(.encoderInference) {
+                    try runner.predict(tokenIds: tokenization.tokenIds,
+                                       attentionMask: tokenization.attentionMask)
+                }
+                let outcome = self.timingRecorder.measure(.encoderDecode) {
+                    IntentEncoderDecoder.decode(
+                        logits: logits,
+                        manifest: manifest,
+                        tokenization: tokenization,
+                        sanitisedTranscript: clean)
+                }
                 attempt.finish {
                     self.settle(outcome, started: started,
                                 completion: completion)

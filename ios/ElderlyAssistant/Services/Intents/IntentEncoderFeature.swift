@@ -175,6 +175,7 @@ enum IntentEncoderWiring {
                                encoder: IntentEncoderInterpreter?,
                                encoderFallback: CommandInterpreter,
                                pickerBrain: CommandInterpreter,
+                               timingRecorder: TurnTimingRecorder? = nil,
                                onEscalated: @escaping (LocalBrainChain.EscalationReason) -> Void = { _ in })
     -> CommandInterpreter {
         let preferredLocal = deferredEncoderPreference(encoder: encoder,
@@ -183,9 +184,13 @@ enum IntentEncoderWiring {
             ? LocalBrainChain.Cascade(acceptThreshold: cascadeAcceptThreshold,
                                       onEscalated: onEscalated)
             : nil
+        // [TURN-TIMING-BREAKDOWN] The cascade's decision span rides the
+        // chain that owns the decision; nil (non-gated builds) leaves the
+        // chain's behavior and cost identical to before.
         return LocalBrainChain(preferred: preferredLocal,
                                standIn: pickerBrain,
-                               cascade: cascade)
+                               cascade: cascade,
+                               timingRecorder: timingRecorder)
     }
 
     /// Returns the encoder when the caller OFFERS it (feature gate passed)

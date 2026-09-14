@@ -634,6 +634,20 @@ final class AppCoordinator: ObservableObject {
     /// the bus) and injected into the pipeline/router/speaker composition
     /// in `start()` and the recognizers below.
     private let turnTracer: VoiceTurnLatencyTracer
+
+    /// [TURN-TIMING-BREAKDOWN] The per-turn stage stopwatch behind the
+    /// intent-model timing breakdown. Non-nil ONLY on a build that
+    /// compiles `INTENT_ENCODER` in (`IntentEncoderFeature.isEnabled` is
+    /// a compile-time constant, so a shipped build constructs neither the
+    /// recorder nor the reporter and every instrumented call site sees
+    /// nil — the zero-cost requirement). Injected into the encoder, the
+    /// picker brain, the cascade chain and the speaker; the coordinator
+    /// itself never reads a stage.
+    private let turnTimingRecorder: TurnTimingRecorder?
+    /// [TURN-TIMING-BREAKDOWN] The breakdown's single emission point —
+    /// attached to `turnTracer` in `composePostFirstFrame()`, where the
+    /// tracer's handlers are wired. Nil exactly when the recorder is.
+    private let turnLatencyReporter: TurnLatencyReporter?
     private let medicationScheduler: MedicationScheduler
     private let alarmScheduler: UNNotificationScheduler
     private let familyNotifier: APNsFamilyNotifier
@@ -1130,7 +1144,11 @@ final class AppCoordinator: ObservableObject {
         config: LlamaCommandInterpreter.Config(confidenceThreshold: 0.4,
                                                maxTokens: 128,
                                                timeoutSeconds: 10),
-        pluginRegistry: pluginRegistry
+        pluginRegistry: pluginRegistry,
+        // [TURN-TIMING-BREAKDOWN] Nil on every build but an
+        // `INTENT_ENCODER` one — the picker brain's prompt-build and
+        // inference spans cost a nil check there.
+        timingRecorder: turnTimingRecorder
     )
     /// [ENCODER-RUNTIME-TOGGLE] Settings → AI मोडेल (hidden) → the
     /// internal-testing switch that lets the encoder take the local-brain
@@ -1180,6 +1198,20 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// [TURN-TIMING-BREAKDOWN] The LAST finalized turn's stage breakdown,
+    /// behind the internal-testing card's "Last turn" readout: each stage
+    /// the turn actually spent time in, with its milliseconds.
+    ///
+    /// IN MEMORY ONLY — never persisted, never written to the encrypted
+    /// stores, never logged. The value holds stage names and numbers by
+    /// construction (`TurnTimingStage` is a fixed enum), so it cannot
+    /// carry transcript, entity or reply content; it is diagnostic state
+    /// for the tester holding the device, and it disappears with the
+    /// process. Nil until the first turn with instrumentation active
+    /// finalizes — and permanently nil on a non-gated build, where no
+    /// reporter exists to fill it.
+    @Published private(set) var lastTurnTimingBreakdown: TurnTimingBreakdown?
+
     /// Both internal-testing switches act through here. Non-gated builds
     /// never reach it (no UI exposes the switches), but the guard keeps
     /// the invariant local: only a build that compiles the encoder in may
@@ -1218,7 +1250,12 @@ final class AppCoordinator: ObservableObject {
             config: .default,
             artifactInstaller: IntentEncoderSpikeInstaller(
                 modelStore: modelStore,
-                observabilityBus: observabilityBus)
+                observabilityBus: observabilityBus),
+            // [TURN-TIMING-BREAKDOWN] The encoder's three stage spans
+            // (tokenizer / CoreML forward / decode). Non-nil exactly when
+            // this build compiles `INTENT_ENCODER` in — the encoder is
+            // only ever constructed on such a build anyway.
+            timingRecorder: turnTimingRecorder
         )
     }()
     /// Level-2 memory-warning observer for the encoder (nil unless the
@@ -1306,6 +1343,9 @@ final class AppCoordinator: ObservableObject {
             encoder: offeredEncoder,
             encoderFallback: encoderAvailableNow,
             pickerBrain: llamaCommandInterpreter,
+            // [TURN-TIMING-BREAKDOWN] The cascade's decision span rides
+            // the chain that owns the decision; nil on non-gated builds.
+            timingRecorder: turnTimingRecorder,
             onEscalated: { [weak self] reason in
                 self?.emitEncoderEscalatedToPickerBrain(reason)
             })
@@ -1595,6 +1635,17 @@ final class AppCoordinator: ObservableObject {
         // `start()` — a self-capturing closure cannot be assigned before
         // init finishes (definite-initialization).
         self.turnTracer = VoiceTurnLatencyTracer(observabilityBus: bus)
+        // [TURN-TIMING-BREAKDOWN] Built only when the internal-testing
+        // encoder is compiled in — `turnTimingRecorder` and
+        // `turnLatencyReporter` stay nil everywhere else, which is what
+        // makes the instrumentation genuinely zero-cost on a shipped
+        // build (see the property docs).
+        let timingRecorder: TurnTimingRecorder? =
+            IntentEncoderFeature.isEnabled ? TurnTimingRecorder() : nil
+        self.turnTimingRecorder = timingRecorder
+        self.turnLatencyReporter = timingRecorder.map {
+            TurnLatencyReporter(observabilityBus: bus, recorder: $0)
+        }
         self.alarmScheduler = UNNotificationScheduler()
         // [STARTUP-PERF] The keychain-backed stores below are CREATED
         // here (cheap objects) but their loads moved to the background
@@ -2293,6 +2344,18 @@ final class AppCoordinator: ObservableObject {
                 self?.applyTurnTimingCaption(stages)
             }
         }
+        // [TURN-TIMING-BREAKDOWN] Attach AFTER the caption hook above:
+        // `attach` CHAINS to the handler already installed, so the caption
+        // and the breakdown both fire on every finalized turn. One
+        // `turn_latency`/`turn_timing_breakdown` event per turn; the
+        // breakdown itself is published for the internal-testing card
+        // (in-memory only — see `lastTurnTimingBreakdown`).
+        turnLatencyReporter?.onReported = { [weak self] breakdown in
+            DispatchQueue.main.async {
+                self?.lastTurnTimingBreakdown = breakdown
+            }
+        }
+        turnLatencyReporter?.attach(to: turnTracer)
         // [LAT-M2] Ack fast lane: one shared file-backed pre-ack cache —
         // the speaker pre-synthesizes the ack variants into it at warm
         // time (see `maybeStartAckCacheWarm`), the player below reads
@@ -2303,6 +2366,9 @@ final class AppCoordinator: ObservableObject {
             observabilityBus: observabilityBus,
             modelStore: modelStore,
             turnTracer: turnTracer,
+            // [TURN-TIMING-BREAKDOWN] The speaker's `tts_start` ramp
+            // (handed-to-speaker → audio start). Nil on non-gated builds.
+            timingRecorder: turnTimingRecorder,
             ackCache: ackAudioCache
         )
         let ackFastLanePlayer = AckFastLanePlayer(cache: ackAudioCache,

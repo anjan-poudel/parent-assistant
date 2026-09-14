@@ -77,6 +77,12 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
     private let standIn: CommandInterpreter
     private let cascade: Cascade?
 
+    /// [TURN-TIMING-BREAKDOWN] Turn-scoped stage stopwatch for the
+    /// `cascade_decision` stage. Nil (the default, and every non-gated
+    /// build) makes the measurement a nil check: no clock read, no lock.
+    /// Instrumentation only — the decision itself never reads it.
+    private let timingRecorder: TurnTimingRecorder?
+
     /// Which brain answered the LAST turn (true = preferred), so the
     /// failure reason below describes the brain that actually served —
     /// under a cascade the preferred brain's timeout must not be reported
@@ -87,10 +93,12 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
 
     init(preferred: CommandInterpreter,
          standIn: CommandInterpreter,
-         cascade: Cascade? = nil) {
+         cascade: Cascade? = nil,
+         timingRecorder: TurnTimingRecorder? = nil) {
         self.preferred = preferred
         self.standIn = standIn
         self.cascade = cascade
+        self.timingRecorder = timingRecorder
     }
 
     var isAvailable: Bool {
@@ -128,7 +136,16 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
         // router would have used as-is.
         preferred.interpret(transcript: transcript, context: context) { [weak self, cascade] command in
             guard let self else { completion(command); return }
+            // [TURN-TIMING-BREAKDOWN] `cascade_decision` — the chain's own
+            // serve-or-escalate work, from the preferred brain's answer to
+            // the branch taken. Finished at EACH decision point (before
+            // the stand-in is dispatched) so the stage can never absorb
+            // the stand-in's own run; `finish()` is one-shot, so exactly
+            // one duration is recorded per turn. Instrumentation only —
+            // no branch below reads the span.
+            let decisionSpan = self.timingRecorder?.start(.cascadeDecision)
             if let command, command.confidence >= cascade.acceptThreshold {
+                decisionSpan?.finish()
                 self.lastServedPreferred = true
                 completion(command)
                 return
@@ -137,11 +154,13 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
                 // Nothing is configured to escalate TO: the preferred
                 // brain's own answer stands, so a cascade turn can never
                 // be WORSE than the standalone rule.
+                decisionSpan?.finish()
                 self.lastServedPreferred = true
                 completion(command)
                 return
             }
             self.lastServedPreferred = false
+            decisionSpan?.finish()
             cascade.onEscalated?(Self.escalationReason(for: command,
                                                        preferred: self.preferred))
             self.standIn.interpret(transcript: transcript, context: context,

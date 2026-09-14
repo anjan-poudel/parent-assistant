@@ -546,6 +546,110 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
                        "reset/start must precede the first processed frame")
     }
 
+    // MARK: - [TURN-TIMING-BREAKDOWN] the intent-model breakdown event
+    //
+    // The same real pipeline + tracer composition, with a
+    // `TurnLatencyReporter` ATTACHED the way `AppCoordinator` attaches
+    // it: exactly one `turn_latency`/`turn_timing_breakdown` event per
+    // turn, carrying the reused STT span plus that turn's recorded
+    // stages — and nothing from the turn before it. Everything here is
+    // instrumentation: the routing assertions of the tests above still
+    // hold, unaltered.
+
+    func testBreakdownEventIsEmittedOncePerTurnThroughTheSeam() {
+        let h = Harness()
+        let recorder = TurnTimingRecorder()
+        let reporter = TurnLatencyReporter(observabilityBus: h.bus,
+                                           recorder: recorder,
+                                           isInstrumentationEnabled: true)
+        let reported = expectation(description: "breakdown reported")
+        reporter.onReported = { _ in reported.fulfill() }
+
+        h.pipeline.debugEnterIdleForTesting()
+        h.pipeline.simulateWakeWordDetection()
+        h.recognizer.complete(with: .success(Self.openQuestionTranscript))
+        // Mid-turn local-brain work, recorded exactly as the instrumented
+        // call sites record it (the turn is open from wake to finalize).
+        recorder.record(.encoderInference, ms: 42)
+        recorder.record(.pickerInference, ms: 1_200)
+
+        h.interpreter.completeNext(with: InterpretedCommand(
+            action: .query,
+            entryId: nil, contact: nil, time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil, topic: nil,
+            steps: nil, pluginAction: nil, pluginEntities: nil,
+            confidence: 0.9, reply: "सबै ठीक छ।"
+        ))
+        wait(for: [reported], timeout: 2)
+
+        let events = h.bus.events.filter {
+            $0.eventType == TurnLatencyReporter.eventType
+        }
+        XCTAssertEqual(events.count, 1,
+                       "exactly ONE breakdown event per finalized turn")
+        XCTAssertEqual(events[0].component, TurnLatencyReporter.component)
+        XCTAssertEqual(events[0].outcome, "success")
+        XCTAssertNil(events[0].errorCode)
+        XCTAssertNotNil(events[0].durationMs)
+        XCTAssertEqual(h.bus.turnTimingEvents.count, 1,
+                       "the tracer's own voice_turn_timing event is untouched")
+
+        // Same wire shape as the tracer's stages, so one decoder reads
+        // either: the reused STT span first, then the recorded stages in
+        // canonical order.
+        let raw = events[0].metadata["stages"] ?? "[]"
+        let stages = (try? JSONDecoder()
+            .decode([VoiceTurnLatencyTracer.StageTiming].self,
+                    from: raw.data(using: .utf8)!)) ?? []
+        XCTAssertEqual(stages.map(\.stage),
+                       ["stt_total", "encoder_inference", "picker_inference"])
+        XCTAssertEqual(stages.map(\.ms).suffix(2), [42, 1_200])
+        XCTAssertTrue(stages.allSatisfy { $0.ms >= 0 },
+                      "every reported duration is non-negative")
+    }
+
+    func testBreakdownReportsPerTurnWithoutStageLeaksForward() {
+        let h = Harness()
+        let recorder = TurnTimingRecorder()
+        let reporter = TurnLatencyReporter(observabilityBus: h.bus,
+                                           recorder: recorder,
+                                           isInstrumentationEnabled: true)
+        let reported = expectation(description: "two breakdowns")
+        reported.expectedFulfillmentCount = 2
+        var breakdowns: [TurnTimingBreakdown] = []
+        reporter.onReported = { breakdown in
+            breakdowns.append(breakdown)
+            reported.fulfill()
+        }
+        reporter.attach(to: h.tracer)
+
+        // Turn 1 — the sync (emergency) path, with picker work recorded.
+        h.pipeline.debugEnterIdleForTesting()
+        h.pipeline.simulateWakeWordDetection()
+        h.recognizer.complete(with: .success("मद्दत गर्नुहोस्"))
+        recorder.record(.pickerPromptBuild, ms: 8)
+
+        // Turn 2 — nothing recorded: its breakdown is the STT span alone.
+        let firstDone = expectation(description: "first turn finalized")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { firstDone.fulfill() }
+        wait(for: [firstDone], timeout: 2)
+
+        h.pipeline.debugEnterIdleForTesting()
+        h.pipeline.simulateWakeWordDetection()
+        h.recognizer.complete(with: .success("मद्दत गर्नुहोस्"))
+        wait(for: [reported], timeout: 3)
+
+        XCTAssertEqual(breakdowns.count, 2, "one breakdown per turn")
+        XCTAssertEqual(h.bus.events.filter {
+            $0.eventType == TurnLatencyReporter.eventType
+        }.count, 2)
+        XCTAssertEqual(breakdowns[0].stages.first?.stage, "stt_total")
+        XCTAssertTrue(breakdowns[0].stages.contains { $0.stage == "picker_prompt_build" },
+                      "turn 1 reports the work recorded during it")
+        XCTAssertEqual(breakdowns[1].stages.map(\.stage), ["stt_total"],
+                       "turn 2 carries no stage from turn 1")
+    }
+
     /// Captures that end WITHOUT a VAD end (STT timeout / wedge) still
     /// report their VAD frame cost — the once-per-capture fallback in
     /// the STT completion tail.

@@ -87,6 +87,31 @@ struct SettingsView: View {
                         // recovery action offered — routed through the
                         // same seam the coordinator installed.
                         degradationDiagnosticsSection
+                        // [ENCODER-RUNTIME-TOGGLE] Visible door to the
+                        // internal AI screen on flagged builds: a single
+                        // tap opens the same hidden sheet the title
+                        // long-press opens, so the A/B card needs no
+                        // gesture hunt. Gated by the same compile-time
+                        // IntentEncoderFeature.isEnabled.
+                        if IntentEncoderFeature.isEnabled {
+                            Button {
+                                showHiddenAIModels = true
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "brain.head.profile")
+                                        .foregroundStyle(DesignTokens.textPrimary)
+                                    Text("settings.encoder.title")
+                                        .foregroundStyle(DesignTokens.textPrimary)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                                        .foregroundStyle(DesignTokens.textSecondary)
+                                }
+                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                                .frame(minHeight: DesignTokens.minTapTargetSize)
+                                .padding(.horizontal, 20)
+                            }
+                        }
                         // Skinnable app background (2026-09-07) — warm
                         // presets today; a photo-picker background is a
                         // noted future option.
@@ -3432,6 +3457,40 @@ struct AIModelsSettingsView: View {
                                        locale: coordinator.appLanguage.locale)))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundStyle(DesignTokens.textSecondary)
+            }
+            // [TURN-TIMING-BREAKDOWN] The last completed turn's stage
+            // breakdown: one row per stage the turn actually spent time
+            // in, name + milliseconds. The breakdown is the coordinator's
+            // in-memory last-turn value (never persisted, never logged) —
+            // empty until a turn with instrumentation active finalizes.
+            //
+            // The stage names are DIAGNOSTIC TOKENS (the same vocabulary
+            // the observability event carries) and stay unlocalized like
+            // the transcript caption's "asr/llm/tts" labels: the card is
+            // an internal-testing surface whose vocabulary must match the
+            // device logs it is read against.
+            Divider()
+            VStack(alignment: .leading, spacing: 6) {
+                Text("settings.encoder.lastTurn")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                if let timing = coordinator.lastTurnTimingBreakdown, !timing.isEmpty {
+                    ForEach(timing.readout) { row in
+                        HStack(spacing: 8) {
+                            Text(row.label)
+                            Spacer(minLength: 8)
+                            Text(row.value)
+                        }
+                        .font(.system(size: DesignTokens.minCaptionPointSize,
+                                      design: .monospaced))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                    }
+                } else {
+                    Text("settings.encoder.lastTurn.empty")
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .padding(16)

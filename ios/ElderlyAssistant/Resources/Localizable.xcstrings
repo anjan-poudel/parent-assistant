@@ -9962,6 +9962,40 @@
         }
       }
     },
+    "settings.encoder.lastTurn" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last turn"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "पछिल्लो पालो"
+          }
+        }
+      }
+    },
+    "settings.encoder.lastTurn.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No turn timed yet"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अहिलेसम्म कुनै पालोको समय मापन भएको छैन"
+          }
+        }
+      }
+    },
     "settings.calendar.title" : {
       "extractionState" : "manual",
       "localizations" : {
