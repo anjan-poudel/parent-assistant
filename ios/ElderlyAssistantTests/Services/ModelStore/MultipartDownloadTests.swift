@@ -164,8 +164,8 @@ final class MultipartDownloadTests: XCTestCase {
 
         let parts = try XCTUnwrap(entry.downloadPartURLs)
         XCTAssertEqual(parts.map(\.lastPathComponent), [
-            "intent-ne-qwen4b-slotcanon-q4_k_m.gguf.partaa",
-            "intent-ne-qwen4b-slotcanon-q4_k_m.gguf.partab"
+            "intent-ne-qwen4b-slotcanon-s42-q4_k_m.gguf.partaa",
+            "intent-ne-qwen4b-slotcanon-s42-q4_k_m.gguf.partab"
         ], "part order IS the reassembly order")
         for part in parts {
             XCTAssertTrue(part.absoluteString.hasPrefix(
