@@ -1102,6 +1102,7 @@ enum ModelCatalog {
     static let availableSTTEntries: [ModelCatalogEntry] = [
         whisperMediumV6,
         whisperKitMediumV6,
+        whisperKitNepaliMedium,
         whisperMediumV5,
         whisperKitMediumV5,
         whisperKitNepali,
