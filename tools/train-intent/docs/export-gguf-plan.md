@@ -110,6 +110,8 @@ export:
 - **`convert_hf_to_gguf.py` version pin**: llama.cpp moves fast; record the
   checkout SHA used for the winning export in `eval/results.csv`-adjacent
   notes (reproducibility).
-- **eval set growth**: the golden corpus is 20 rows; gates get meaningfully
-  stricter once it grows to the planned 15–25 per intent. Ship decision for
-  the first GGUF may note the small-n caveat explicitly.
+- **eval set growth**: DONE — the golden corpus is now 8,000 rows (revision
+  `7f71b8ae`, 12 recorded batches in `eval/golden_batches_manifest.jsonl`), the
+  hand-authored 15–25 rows/action boundary section plus the generated bulk, so
+  the small-n caveat this item was written for no longer applies; gates are
+  measured, not caveated.

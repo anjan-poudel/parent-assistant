@@ -1,21 +1,42 @@
 """Author the held-out eval fixtures (T-038).
 
 Writes:
-  eval/golden_corpus.jsonl        — the §9.1 held-out corpus (15-25 rows per
-                                    schema-v2 action), span-annotated
+  eval/golden_corpus.jsonl        — the held-out corpus: a hand-authored
+                                    boundary section (15-25 rows per schema-v2
+                                    action, spec §9.1) followed by the
+                                    deterministically generated batch section
+                                    that carries the corpus to the calibration
+                                    gate's `corpus_floor: 8000`
   eval/emergency_nearmiss.jsonl   — adversarial emergency near-miss set:
                                     emergency paraphrases that MUST classify
                                     as emergency + calm pain/health questions
                                     that MUST NOT
+  eval/golden_batches_manifest.jsonl — one record per generated batch: counts,
+                                    cumulative rows, corpus sha256 and the
+                                    revision tag that sha256 yields
 
 The committed JSONL files are the artifacts; this script is the reproducible
 authoring path. Span offsets are computed here (never hand-counted) and every
 row is validated before writing, so the annotations cannot silently drift from
 the utterances.
 
+The generated section is NOT hand-typed: eval/golden_corpus_batches.py enumerates
+register-varied templates over entity banks, refuses any candidate whose
+`build_dataset.normalize` key is already used by a hand row, a near-miss row or
+a seed template, and hands back row specs that this file runs through its own
+`row()` — so generated rows obey exactly the same offset/overlap/adjacency/slot
+rules as the pinned ones. The hand section is emitted first and unchanged: the
+first `HAND_ROWS` lines of golden_corpus.jsonl are byte-identical to the
+pre-growth revision, so the revision tag stays meaningful for them.
+
 Run from tools/train-intent/:
-    python3 eval/author_golden_corpus.py           # (re)write both files
-    python3 eval/author_golden_corpus.py --check   # verify committed files match
+    python3 eval/author_golden_corpus.py             # (re)write every file
+    python3 eval/author_golden_corpus.py --check     # verify committed files match
+    python3 eval/author_golden_corpus.py --batches 3 # emit only batches 1..3
+                                                     # (a valid, smaller, still
+                                                     # checkable corpus; the
+                                                     # blocks are a literal
+                                                     # prefix of the full one)
 
 Annotation conventions (T-034 annotation-rules/v1 — annotation_rules.yaml):
   - span labels: contact, time, medication, message, topic, app
@@ -725,12 +746,109 @@ add_nm("nm-calm-020", "devanagari", "health_query", "पानी कति प�
 
 
 # ---------------------------------------------------------------------------
+# Generated section — carries the corpus to the calibration floor (T-038)
+# ---------------------------------------------------------------------------
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import golden_corpus_batches as _batches  # noqa: E402  (path set just above)
+
+HAND_ROWS = len(CORPUS)   # the pinned §9.1 section: never rewritten, never dropped
+GENERATED_REPORT: dict = {}
+
+
+def extend_with_batches(upto: int | None = None) -> dict:
+    """Append the deterministic generated blocks to CORPUS (hand rows first).
+
+    Each spec is run through `row()`, so the generated rows obey the same
+    offset/overlap/adjacency/slot rules as the hand rows. `upto` emits only the
+    first N blocks; the corpus is re-derived from the hand rows every call, so
+    this is idempotent rather than cumulative.
+    """
+    del CORPUS[HAND_ROWS:]
+    specs, report = _batches.generated_specs(CORPUS, NEARMISS, upto=upto)
+    for spec in specs:
+        CORPUS.append(row(spec["id"], spec["script"], spec["intent"],
+                          spec["utterance"], spec["slots"], spec["spans"],
+                          spec["shape"]))
+    _assert_no_duplicates()
+    GENERATED_REPORT.clear()
+    GENERATED_REPORT.update(report)
+    return report
+
+
+def _norm_key(text: str) -> str:
+    sys.path.insert(0, str(ROOT / "src"))
+    from build_dataset import normalize  # noqa: PLC0415 (path set just above)
+
+    return normalize(text)
+
+
+def _assert_no_duplicates() -> None:
+    """No normalized utterance twice anywhere in the corpus, and none shared
+    with the near-miss set. The generator refuses these already; asserting makes
+    a regression in that filter a hard authoring failure instead of a quiet
+    duplicate in a held-out fixture."""
+    seen: dict[str, str] = {}
+    for rec in CORPUS:
+        key = _norm_key(rec["utterance"])
+        other = seen.get(key)
+        if other is not None:
+            raise SystemExit(
+                f"[author] duplicate utterance: {rec['id']} and {other} normalize "
+                f"to the same string ({key!r}) — a held-out row must be unique")
+        seen[key] = rec["id"]
+    for rec in NEARMISS:
+        other = seen.get(_norm_key(rec["utterance"]))
+        if other is not None:
+            raise SystemExit(f"[author] near-miss {rec['id']} duplicates corpus row {other}")
+
+
+# The corpus is complete from here on: hand rows + every generated batch.
+extend_with_batches()
+
+
+def _corpus_bytes(rows: list[dict]) -> bytes:
+    """The exact bytes `_write` puts on disk — the manifest hashes this."""
+    return "".join(json.dumps(rec, ensure_ascii=False) + "\n"
+                   for rec in rows).encode("utf-8")
+
+
+def _batch_manifest() -> list[dict]:
+    """One record per emitted batch: counts, cumulative rows, corpus sha256.
+
+    The revision tag is the first 8 hex of the sha256 of the corpus file at
+    that point — the same tag the harness results carry (@<hash8>), so a batch
+    manifest line names the exact corpus revision it produced."""
+    import hashlib
+
+    lines: list[dict] = []
+    blocks = GENERATED_REPORT.get("batches", [])
+    for entry in blocks:
+        if not entry["emitted"]:
+            continue
+        cumulative = HAND_ROWS + sum(b["rows"] for b in blocks
+                                     if b["emitted"] and b["batch"] <= entry["batch"])
+        sha = hashlib.sha256(_corpus_bytes(CORPUS[:cumulative])).hexdigest()
+        lines.append({
+            "batch": entry["batch"],
+            "rows": entry["rows"],
+            "actions": dict(sorted(entry["actions"].items())),
+            "cumulative_rows": cumulative,
+            "corpus_sha256": sha,
+            "revision": sha[:8],
+            "hand_rows": HAND_ROWS,
+            "training_source_proxy_keys": GENERATED_REPORT.get("proxy_keys"),
+            "test_fixture_keys": GENERATED_REPORT.get("fixture_keys"),
+            "authoring": "eval/author_golden_corpus.py (via eval/golden_corpus_batches.py)",
+        })
+    return lines
+
+
+# ---------------------------------------------------------------------------
 
 def _write(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        for rec in rows:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    path.write_bytes(_corpus_bytes(rows))
 
 
 def _summary(name: str, rows: list[dict]) -> str:
@@ -762,13 +880,23 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true",
                         help="verify the committed files match this authoring data")
+    parser.add_argument("--batches", type=int, default=None,
+                        help="emit only the first N generated batches "
+                             f"(1..{_batches.N_BATCHES}); default: all")
     args = parser.parse_args()
 
     corpus_path = ROOT / "eval" / "golden_corpus.jsonl"
     nearmiss_path = ROOT / "eval" / "emergency_nearmiss.jsonl"
+    manifest_path = ROOT / "eval" / "golden_batches_manifest.jsonl"
+    if args.batches is not None:
+        extend_with_batches(args.batches)
     _check_disjoint()
     print("[author] " + _summary("golden_corpus", CORPUS))
     print("[author] " + _summary("emergency_nearmiss", NEARMISS))
+    manifest = _batch_manifest()
+    for rec in manifest:
+        print(f"[author] batch {rec['batch']:02d}: +{rec['rows']} rows "
+              f"({rec['cumulative_rows']} total, revision {rec['revision']})")
 
     if args.check:
         ok = True
@@ -784,12 +912,22 @@ def main() -> None:
                 ok = False
             else:
                 print(f"[author] OK: {path} matches ({len(rows)} rows)")
+        committed_manifest = ([json.loads(line) for line in
+                               open(manifest_path, encoding="utf-8") if line.strip()]
+                              if manifest_path.exists() else [])
+        if committed_manifest != manifest:
+            print(f"[author] MISMATCH: {manifest_path} differs from the emitted batches")
+            ok = False
+        else:
+            print(f"[author] OK: {manifest_path} matches ({len(manifest)} batches)")
         sys.exit(0 if ok else 1)
 
     _write(corpus_path, CORPUS)
     _write(nearmiss_path, NEARMISS)
+    _write(manifest_path, manifest)
     print(f"[author] wrote {corpus_path} ({len(CORPUS)} rows)")
     print(f"[author] wrote {nearmiss_path} ({len(NEARMISS)} rows)")
+    print(f"[author] wrote {manifest_path} ({len(manifest)} batches)")
 
 
 if __name__ == "__main__":
