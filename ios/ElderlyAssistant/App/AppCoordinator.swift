@@ -1148,15 +1148,49 @@ final class AppCoordinator: ObservableObject {
         didSet {
             intentEncoderPreferences.setEnabled(intentEncoderEnabled)
             guard oldValue != intentEncoderEnabled else { return }
-            // Non-gated builds never reach this (no UI exposes the
-            // switch), but the guard keeps the invariant local: only a
-            // build that compiles the encoder in may touch the slot.
-            guard IntentEncoderFeature.isEnabled else { return }
-            if let intentRouter {
-                installLocalBrainSlot(on: intentRouter)
-            }
+            reinstallLocalBrainSlotIfGated()
         }
     }
+
+    /// [ENCODER-RUNTIME-CASCADE] Settings → AI मोडेल (hidden) → the
+    /// cascade switch, on the SAME internal card as the enable switch.
+    /// Persisted under `IntentEncoderPreferences.cascadeKey`
+    /// ("intentEncoder.cascade"), **default OFF**.
+    ///
+    /// OFF (the default) is `intentEncoderEnabled`'s own behaviour: the
+    /// encoder holds the local slot alone, so an abstention falls through
+    /// to the router's band/cloud policy as it always has. ON widens the
+    /// turn: the encoder answers first and the picker brain (the model
+    /// selected above it) answers the SAME turn — one turn, one answer, no
+    /// second prompt — whenever the encoder abstains or comes back below
+    /// the router's ACCEPT band. Nothing changes downstream: the keyword
+    /// safety net still runs upstream of this chain, and the cloud layer
+    /// still receives whatever the local slot does not answer.
+    ///
+    /// Ignored while the enable switch is OFF (`servingMode` collapses to
+    /// the picker brain), which is why the UI disables the row until the
+    /// encoder is on. Same hot-swap contract as the enable switch: the
+    /// didSet persists and re-installs the slot, so a flip acts on the
+    /// NEXT TURN, not the next launch.
+    @Published var intentEncoderCascadeEnabled: Bool {
+        didSet {
+            intentEncoderPreferences.setCascadeEnabled(intentEncoderCascadeEnabled)
+            guard oldValue != intentEncoderCascadeEnabled else { return }
+            reinstallLocalBrainSlotIfGated()
+        }
+    }
+
+    /// Both internal-testing switches act through here. Non-gated builds
+    /// never reach it (no UI exposes the switches), but the guard keeps
+    /// the invariant local: only a build that compiles the encoder in may
+    /// touch the slot.
+    private func reinstallLocalBrainSlotIfGated() {
+        guard IntentEncoderFeature.isEnabled else { return }
+        if let intentRouter {
+            installLocalBrainSlot(on: intentRouter)
+        }
+    }
+
     private let intentEncoderPreferences = IntentEncoderPreferences()
 
     /// [T-037-a] The on-device CoreML intent encoder (internal testing
@@ -1224,10 +1258,16 @@ final class AppCoordinator: ObservableObject {
     /// after the switch is flipped is picked up on the next turn without
     /// a relaunch; while the encoder is unavailable the chain serves
     /// exactly the fallback the selection event describes.
+    ///
+    /// [ENCODER-RUNTIME-CASCADE] The second switch only chooses the slot's
+    /// SHAPE (standalone vs. encoder-first with a same-turn escalation to
+    /// the picker brain); it never changes which brain is offered, never
+    /// constructs anything, and is ignored unless the enable switch is on.
     private func installLocalBrainSlot(on router: IntentRouter) {
+        let servingEnabled = IntentEncoderWiring.isServingEnabled(
+            isToggleOn: intentEncoderEnabled)
         let offeredEncoder = IntentEncoderWiring.gatedEncoder(
-            isEnabled: IntentEncoderWiring.isServingEnabled(
-                isToggleOn: intentEncoderEnabled)
+            isEnabled: servingEnabled
         ) {
             intentEncoderInterpreter
         }
@@ -1252,11 +1292,40 @@ final class AppCoordinator: ObservableObject {
                 metadata: selectionMetadata
             ))
         }
-        let preferredLocal = IntentEncoderWiring.deferredEncoderPreference(
+        // [ENCODER-RUNTIME-CASCADE] The slot's SHAPE follows the two
+        // switches: standalone (the encoder alone — the pre-cascade
+        // behaviour, and the default), or encoder-first with the picker
+        // brain escalating on the same turn. The decision is the pure
+        // `servingMode`; this call site only feeds it the switches, so the
+        // mode truth table the tests pin IS the shipped one.
+        let mode = IntentEncoderWiring.servingMode(
+            isEnabled: servingEnabled,
+            isCascadeOn: intentEncoderCascadeEnabled)
+        router.localBrain = IntentEncoderWiring.localBrainSlot(
+            mode: mode,
             encoder: offeredEncoder,
-            fallback: encoderAvailableNow)
-        router.localBrain = LocalBrainChain(preferred: preferredLocal,
-                                            standIn: llamaCommandInterpreter)
+            encoderFallback: encoderAvailableNow,
+            pickerBrain: llamaCommandInterpreter,
+            onEscalated: { [weak self] reason in
+                self?.emitEncoderEscalatedToPickerBrain(reason)
+            })
+    }
+
+    /// [ENCODER-RUNTIME-CASCADE] The A/B evidence for a cascade turn: the
+    /// encoder did not serve (abstained, failed, or answered below the
+    /// ACCEPT band) and the picker brain answered instead. Fixed
+    /// vocabulary only — the reason enum and a literal — never transcript
+    /// or reply content (C9 policy). Pair it with `encoder_inference_*`
+    /// to tell "the encoder answered" from "the encoder was overruled".
+    private func emitEncoderEscalatedToPickerBrain(_ reason: LocalBrainChain.EscalationReason) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "intent_encoder_wiring",
+            eventType: "encoder_escalated_to_picker_brain",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: ["reason": reason.rawValue]
+        ))
     }
 
     /// The fine-tuned intent model (spec 2026-09-05 §8) — the local brain
@@ -1866,6 +1935,11 @@ final class AppCoordinator: ObservableObject {
         // later, in `composePostFirstFrame()`, which reads this value; on
         // a build without `INTENT_ENCODER` nothing reads it at all.
         self.intentEncoderEnabled = intentEncoderPreferences.isEnabled
+        // [ENCODER-RUNTIME-CASCADE] …and its cascade sibling (same
+        // default OFF, same restore rule). Restored even while the enable
+        // switch is off: the value is irrelevant in that state, and the
+        // tester's choice must survive an off/on round trip.
+        self.intentEncoderCascadeEnabled = intentEncoderPreferences.isCascadeEnabled
 
         // Restore the persisted STT model choice. The didSet observer
         // pushes it to the recognizer and refreshes the label. Unknown

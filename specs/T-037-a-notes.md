@@ -458,6 +458,50 @@ be handed to someone who never meets the encoder at all.
   strict-checksum install of the tester's staged zip; the deferred pair
   picks it up on the first turn after it lands.
 
+### Cascade — the A/B's third leg ([ENCODER-RUNTIME-CASCADE])
+
+A second switch on the SAME card (default OFF, same hot-swap contract)
+chooses what happens when the encoder does not clear the bar. The
+standalone encoder ends the turn on an abstention, so the utterance falls
+to the router's own policy (band → cloud escalation → generic re-prompt);
+with the cascade on, the picked brain answers that same turn instead.
+
+- **Persistence.** `IntentEncoderPreferences.cascadeKey` —
+  `"intentEncoder.cascade"`, a `UserDefaults` bool, **default OFF**. The
+  two keys are independent: switching the encoder on never switches the
+  cascade on.
+- **Decision.** `IntentEncoderWiring.servingMode(isEnabled:isCascadeOn:)` →
+  `.pickerBrain` / `.standaloneEncoder` / `.encoderFirstEscalate`. The
+  enable half is the composed gate (`isServingEnabled`: compile condition
+  AND enable toggle), so the cascade can only choose BETWEEN encoder modes
+  — it can never opt a build, or a device, into the encoder path.
+- **Band.** `IntentEncoderWiring.cascadeAcceptThreshold` IS
+  `IntentRouter.Config.default.acceptThreshold` (0.7) — one number, the
+  router's own, so "the encoder served" means exactly what it means in
+  `bandChecked`. Confidence ≥ 0.7 → the encoder's answer is the turn's
+  answer. Abstain, failure, or < 0.7 → the picker brain gets the turn.
+- **One turn, one answer.** The escalation happens INSIDE the local-brain
+  chain (`LocalBrainChain.Cascade`) — the picker brain is already that
+  chain's stand-in, so this is the existing local slot, not a new layer:
+  one completion, no second prompt, no re-run of the confirmation flow.
+  The router, the band policy, the cloud layer and the keyword safety net
+  are untouched; `CommandRouter` still consults its keyword net first, so
+  emergency / med-ack utterances never reach either brain.
+- **Cascade can only add.** With no picker brain available (no model
+  cached, released under memory pressure) the encoder's own answer stands
+  — the cascade degrades to exactly the standalone rule rather than
+  dropping the command. A failed encoder that the picker brain answers no
+  longer reports `local_failed_fallback`, because the local slot DID
+  answer; if both fail, the failure reason forwarded to the router is the
+  brain that actually served (pinned by test).
+- **Ignored while the encoder is off.** The UI disables the row; the mode
+  collapses to `.pickerBrain` regardless of the stored value.
+- **Evidence.** Each escalated turn emits `encoder_escalated_to_picker_brain`
+  (component `intent_encoder_wiring`) with `reason` ∈ {`abstained`,
+  `failed`, `subBandConfidence`} — fixed vocabulary, no content (C9
+  policy). Pair it with the encoder's own `encoder_*` events to tell "the
+  encoder answered" from "the encoder was overruled".
+
 ## Device-test flow
 
 The paths below are the ones the tests drive; the staging command is the
@@ -526,9 +570,27 @@ brain on the same utterances):
    43). Run the utterance set; this is the picker brain serving.
 4. **Leg B — the encoder**: flip the toggle ON (same session, same install)
    and re-run the SAME utterances. The next turn goes to the encoder.
-5. **Compare**: executed command/reply per utterance plus the event trail
-   (`encoder_*` vs. the GGUF brain's own events). Flip the toggle OFF at the
-   end — that restores the shipped behaviour exactly.
+5. **Leg C — the cascade**: leave the encoder on and flip the SECOND switch
+   (cascade) on. Re-run the SAME utterances. Now the encoder answers first
+   and the 1.7B answers the same turn whenever the encoder abstains or
+   lands below the 0.7 accept band — see the next section for what to read
+   in the trail.
+6. **Compare**: executed command/reply per utterance plus the event trail
+   (`encoder_*` vs. the GGUF brain's own events). Flip both switches OFF at
+   the end — that restores the shipped behaviour exactly.
+
+The three legs and what each one answers with:
+
+| leg | switches | who answers | what a low-confidence/abstain turn does |
+|---|---|---|---|
+| A | encoder OFF | the picked brain (1.7B/4B) | the picked brain's own answer; no encoder involved |
+| B | encoder ON, cascade OFF | the encoder alone | falls through the router's band policy → cloud escalation if configured → generic re-prompt |
+| C | encoder ON, cascade ON | the encoder first, else the picked brain the SAME turn | the picked brain answers this turn; `encoder_escalated_to_picker_brain` with `reason` says why |
+
+In leg C the encoder's own `encoder_inference_*` / `encoder_abstained`
+events plus `encoder_escalated_to_picker_brain` tell the whole story per
+utterance: whether the encoder answered, abstained, failed, or came back
+below the band — and therefore which brain the user actually heard.
 
 RAM floors (check these before handing a device to someone):
 

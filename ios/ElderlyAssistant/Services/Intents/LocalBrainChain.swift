@@ -25,14 +25,72 @@ import Foundation
 /// despite the STT transcribing correctly. This chain restores the LLaMA
 /// path for exactly those configurations without disturbing the
 /// fine-tuned model's future role.
+///
+/// [ENCODER-RUNTIME-CASCADE] A second, OPT-IN rule exists for the
+/// internal-testing A/B (the encoder switch's cascade toggle): when the
+/// chain is built with a `Cascade`, the preferred brain answers FIRST and
+/// the stand-in answers the SAME turn whenever the preferred brain
+/// abstained or came back below the router's ACCEPT band. `cascade: nil`
+/// — the default, and every shipped call site — is the availability-only
+/// rule documented above, unchanged. The cascade can only ADD a layer: it
+/// selects between two brains the router would consult anyway, and it sits
+/// downstream of `CommandRouter`'s keyword safety net like every other
+/// interpreter decision.
 final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
+
+    /// [ENCODER-RUNTIME-CASCADE] Why a cascade turn left the preferred
+    /// brain. Fixed vocabulary for the observability trail — event
+    /// metadata only, never transcript or reply content (C9 policy).
+    enum EscalationReason: String {
+        /// No command, no failure report: the preferred brain's own
+        /// calibrated abstention.
+        case abstained
+        /// No command AND a failure report (timeout / truncated output
+        /// after the interpreter's own retry) — the distinction
+        /// `IntentRouter`'s LAT-EVIDENCE path reads.
+        case failed
+        /// A command came back below the ACCEPT band — the encoder served
+        /// nothing it would not have had to rephrase or drop.
+        case subBandConfidence
+    }
+
+    /// [ENCODER-RUNTIME-CASCADE] Opt-in encoder-first behaviour for the
+    /// internal-testing A/B. Nil (the default) keeps the exclusive rule.
+    struct Cascade {
+        /// The router's ACCEPT threshold: an answer at or above it IS the
+        /// turn's answer; below it — or an abstention — the stand-in gets
+        /// the turn. One band, the router's own, so "the encoder served"
+        /// means exactly what it means in `IntentRouter.bandChecked`.
+        let acceptThreshold: Double
+        /// Called once per escalated turn, BEFORE the stand-in runs, with
+        /// the reason the preferred brain did not serve. Metadata only.
+        let onEscalated: ((EscalationReason) -> Void)?
+
+        init(acceptThreshold: Double,
+             onEscalated: ((EscalationReason) -> Void)? = nil) {
+            self.acceptThreshold = acceptThreshold
+            self.onEscalated = onEscalated
+        }
+    }
 
     private let preferred: CommandInterpreter
     private let standIn: CommandInterpreter
+    private let cascade: Cascade?
 
-    init(preferred: CommandInterpreter, standIn: CommandInterpreter) {
+    /// Which brain answered the LAST turn (true = preferred), so the
+    /// failure reason below describes the brain that actually served —
+    /// under a cascade the preferred brain's timeout must not be reported
+    /// as the reason a stand-in answer arrived. nil until the chain has
+    /// answered a turn, where the availability-based rule below applies
+    /// exactly as it did before this property existed.
+    private var lastServedPreferred: Bool?
+
+    init(preferred: CommandInterpreter,
+         standIn: CommandInterpreter,
+         cascade: Cascade? = nil) {
         self.preferred = preferred
         self.standIn = standIn
+        self.cascade = cascade
     }
 
     var isAvailable: Bool {
@@ -41,30 +99,75 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
 
     /// [LAT-EVIDENCE] Forwards the inner interpreter's failure reason —
     /// whichever one served the last turn (the preferred model when
-    /// available, else the stand-in) — so the router sees through the
-    /// chain and escalates a FAILED local brain to the cloud.
+    /// available, else the stand-in; under a cascade, the brain that
+    /// actually answered) — so the router sees through the chain and
+    /// escalates a FAILED local brain to the cloud.
     var lastInferenceFailureReason: String? {
-        if preferred.isAvailable {
-            return (preferred as? InterpreterFailureReporting)?
-                .lastInferenceFailureReason
-        }
-        return (standIn as? InterpreterFailureReporting)?
-            .lastInferenceFailureReason
+        let serving = (lastServedPreferred ?? preferred.isAvailable) ? preferred : standIn
+        return (serving as? InterpreterFailureReporting)?.lastInferenceFailureReason
     }
 
     func interpret(transcript: String,
                    context: InterpreterContext,
                    completion: @escaping (InterpretedCommand?) -> Void) {
-        if preferred.isAvailable {
+        guard preferred.isAvailable else {
+            // Availability-only substitution — the rule in every mode.
+            serveFromStandIn(transcript: transcript, context: context,
+                             completion: completion)
+            return
+        }
+        guard let cascade else {
+            lastServedPreferred = true
             preferred.interpret(transcript: transcript, context: context,
                                 completion: completion)
             return
         }
+        // [ENCODER-RUNTIME-CASCADE] Encoder-first: the preferred brain
+        // gets the turn; the stand-in gets the SAME turn (one completion,
+        // no second prompt) only when the preferred answer is not one the
+        // router would have used as-is.
+        preferred.interpret(transcript: transcript, context: context) { [weak self, cascade] command in
+            guard let self else { completion(command); return }
+            if let command, command.confidence >= cascade.acceptThreshold {
+                self.lastServedPreferred = true
+                completion(command)
+                return
+            }
+            guard self.standIn.isAvailable else {
+                // Nothing is configured to escalate TO: the preferred
+                // brain's own answer stands, so a cascade turn can never
+                // be WORSE than the standalone rule.
+                self.lastServedPreferred = true
+                completion(command)
+                return
+            }
+            self.lastServedPreferred = false
+            cascade.onEscalated?(Self.escalationReason(for: command,
+                                                       preferred: self.preferred))
+            self.standIn.interpret(transcript: transcript, context: context,
+                                   completion: completion)
+        }
+    }
+
+    private func serveFromStandIn(transcript: String,
+                                  context: InterpreterContext,
+                                  completion: @escaping (InterpretedCommand?) -> Void) {
         guard standIn.isAvailable else {
             DispatchQueue.main.async { completion(nil) }
             return
         }
+        lastServedPreferred = false
         standIn.interpret(transcript: transcript, context: context,
                           completion: completion)
+    }
+
+    /// Abstention and failure both arrive as nil; only the failure carries
+    /// a reason (the same distinction `IntentRouter` draws).
+    private static func escalationReason(for command: InterpretedCommand?,
+                                         preferred: CommandInterpreter) -> EscalationReason {
+        guard command == nil else { return .subBandConfidence }
+        let failed = (preferred as? InterpreterFailureReporting)?
+            .lastInferenceFailureReason != nil
+        return failed ? .failed : .abstained
     }
 }

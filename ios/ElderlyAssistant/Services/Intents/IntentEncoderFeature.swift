@@ -23,6 +23,14 @@ import Foundation
 /// opts in, and a flagged device can A/B the encoder against the picker
 /// brain from the same install by flipping one switch.
 ///
+/// [ENCODER-RUNTIME-CASCADE] A second, independent switch
+/// (`intentEncoder.cascade`, same card, default OFF) widens the A/B to a
+/// third leg: ON, the encoder answers first and the picker brain answers
+/// the SAME turn whenever the encoder abstains or lands below the
+/// router's ACCEPT band; OFF, the encoder answers alone (the
+/// [ENCODER-RUNTIME-TOGGLE] behaviour). It is ignored while the enable
+/// switch is off — see `IntentEncoderWiring.servingMode`.
+///
 /// Internal-testing enablement (Debug/internal builds only):
 ///
 ///   xcodebuild ... SWIFT_ACTIVE_COMPILATION_CONDITIONS="\$(inherited) INTENT_ENCODER"
@@ -71,6 +79,9 @@ enum IntentEncoderFeature {
 /// UITest launch argument without touching any user-facing setting.
 final class IntentEncoderPreferences {
     static let enabledKey = "intentEncoder.enabled"
+    /// [ENCODER-RUNTIME-CASCADE] The cascade switch, same treatment and
+    /// same default.
+    static let cascadeKey = "intentEncoder.cascade"
 
     private let defaults: UserDefaults
 
@@ -86,6 +97,19 @@ final class IntentEncoderPreferences {
 
     func setEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Self.enabledKey)
+    }
+
+    /// [ENCODER-RUNTIME-CASCADE] True only when someone has explicitly
+    /// switched the cascade on. Absent key reads as false, so an
+    /// enable-only device gets the standalone encoder, and the cascade is
+    /// never in play on a build whose enable switch was never touched.
+    var isCascadeEnabled: Bool {
+        guard defaults.object(forKey: Self.cascadeKey) != nil else { return false }
+        return defaults.bool(forKey: Self.cascadeKey)
+    }
+
+    func setCascadeEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: Self.cascadeKey)
     }
 }
 
@@ -105,6 +129,63 @@ enum IntentEncoderWiring {
     static func isServingEnabled(isCompiledIn: Bool = IntentEncoderFeature.isEnabled,
                                  isToggleOn: Bool) -> Bool {
         isCompiledIn && isToggleOn
+    }
+
+    /// [ENCODER-RUNTIME-CASCADE] How the local-brain slot is served, from
+    /// the two persisted switches. `isEnabled` is the compose gate above
+    /// (compilation condition AND enable toggle), so the cascade can only
+    /// ever choose between the two encoder modes — never opt a build into
+    /// the encoder path, and never past the enable switch.
+    ///
+    ///  - `.pickerBrain` — the encoder is not in play: the picker brain
+    ///    holds the local slot exactly as on a non-gated build.
+    ///  - `.standaloneEncoder` — the encoder holds the slot ALONE, so an
+    ///    abstention falls through to the router's own policy (band →
+    ///    cloud escalation → re-prompt), unchanged.
+    ///  - `.encoderFirstEscalate` — the encoder answers first; on an
+    ///    abstention or a sub-band answer the picker brain answers the
+    ///    SAME turn (one turn, one answer, no second prompt).
+    enum ServingMode: Equatable {
+        case pickerBrain
+        case standaloneEncoder
+        case encoderFirstEscalate
+    }
+
+    static func servingMode(isEnabled: Bool,
+                            isCascadeOn: Bool) -> ServingMode {
+        guard isEnabled else { return .pickerBrain }
+        return isCascadeOn ? .encoderFirstEscalate : .standaloneEncoder
+    }
+
+    /// [ENCODER-RUNTIME-CASCADE] The cascade's serve-or-escalate line:
+    /// the router's OWN ACCEPT band, so "the encoder serves" means exactly
+    /// what it means in `IntentRouter.bandChecked` — one number, not two.
+    static let cascadeAcceptThreshold = IntentRouter.Config.default.acceptThreshold
+
+    /// [ENCODER-RUNTIME-CASCADE] Builds the local-brain slot for a serving
+    /// mode. `.pickerBrain` and `.standaloneEncoder` produce the SAME
+    /// chain shape as before this switch existed (the deferred encoder
+    /// pair in the `preferred` slot, the picker brain as the stand-in);
+    /// only `.encoderFirstEscalate` attaches a cascade, and the cascade
+    /// then escalates to that SAME picker brain — one turn, one answer.
+    ///
+    /// `onEscalated` is consulted only in the cascade mode; the default
+    /// no-op keeps the non-cascading call sites honest (nothing to report).
+    static func localBrainSlot(mode: ServingMode,
+                               encoder: IntentEncoderInterpreter?,
+                               encoderFallback: CommandInterpreter,
+                               pickerBrain: CommandInterpreter,
+                               onEscalated: @escaping (LocalBrainChain.EscalationReason) -> Void = { _ in })
+    -> CommandInterpreter {
+        let preferredLocal = deferredEncoderPreference(encoder: encoder,
+                                                       fallback: encoderFallback)
+        let cascade: LocalBrainChain.Cascade? = mode == .encoderFirstEscalate
+            ? LocalBrainChain.Cascade(acceptThreshold: cascadeAcceptThreshold,
+                                      onEscalated: onEscalated)
+            : nil
+        return LocalBrainChain(preferred: preferredLocal,
+                               standIn: pickerBrain,
+                               cascade: cascade)
     }
 
     /// Returns the encoder when the caller OFFERS it (feature gate passed)

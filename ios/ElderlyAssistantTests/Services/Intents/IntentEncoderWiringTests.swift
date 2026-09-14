@@ -291,6 +291,139 @@ final class IntentEncoderWiringTests: XCTestCase {
         XCTAssertFalse(IntentEncoderPreferences(defaults: suite).isEnabled)
     }
 
+    // MARK: [ENCODER-RUNTIME-CASCADE] the mode decision
+
+    /// The whole truth table: the enable gate decides WHETHER the encoder
+    /// is in play at all (and the cascade can never serve it past that
+    /// gate), the cascade decides only WHICH encoder mode.
+    func testServingModeTruthTable() {
+        XCTAssertEqual(IntentEncoderWiring.servingMode(isEnabled: false,
+                                                       isCascadeOn: false),
+                       .pickerBrain)
+        XCTAssertEqual(IntentEncoderWiring.servingMode(isEnabled: false,
+                                                       isCascadeOn: true),
+                       .pickerBrain,
+                       "a stale cascade value must not opt anything in — "
+                       + "cascade is meaningless while the encoder is off")
+        XCTAssertEqual(IntentEncoderWiring.servingMode(isEnabled: true,
+                                                       isCascadeOn: false),
+                       .standaloneEncoder,
+                       "the shipped default: the encoder answers alone")
+        XCTAssertEqual(IntentEncoderWiring.servingMode(isEnabled: true,
+                                                       isCascadeOn: true),
+                       .encoderFirstEscalate)
+    }
+
+    /// The mode composes with the compile gate exactly as the serving
+    /// decision does: `isServingEnabled` is the enable half, so a build
+    /// without `INTENT_ENCODER` is `.pickerBrain` whatever is stored.
+    func testServingModeIsPickerBrainWheneverTheEnableGateIsClosed() {
+        for cascade in [false, true] {
+            let mode = IntentEncoderWiring.servingMode(
+                isEnabled: IntentEncoderWiring.isServingEnabled(isCompiledIn: false,
+                                                                isToggleOn: true),
+                isCascadeOn: cascade)
+            XCTAssertEqual(mode, .pickerBrain)
+        }
+        let gatedOff = IntentEncoderWiring.servingMode(
+            isEnabled: IntentEncoderWiring.isServingEnabled(isCompiledIn: true,
+                                                            isToggleOn: false),
+            isCascadeOn: true)
+        XCTAssertEqual(gatedOff, .pickerBrain,
+                       "the cascade cannot switch the encoder on by itself")
+    }
+
+    /// One band, the router's own: the cascade escalates below the SAME
+    /// 0.7 the router uses to accept an answer as-is.
+    func testCascadeBandIsTheRoutersOwnAcceptThreshold() {
+        XCTAssertEqual(IntentEncoderWiring.cascadeAcceptThreshold, 0.7, accuracy: 0.0001)
+        XCTAssertEqual(IntentEncoderWiring.cascadeAcceptThreshold,
+                       IntentRouter.Config.default.acceptThreshold)
+    }
+
+    /// The cascade switch's own persistence: absent ⇒ OFF, independent of
+    /// the enable key, and a flip survives a relaunch.
+    func testCascadeToggleDefaultsOffAndRoundTrips() throws {
+        let name = "intent-encoder-cascade-\(UUID().uuidString)"
+        let suite = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { suite.removePersistentDomain(forName: name) }
+
+        let prefs = IntentEncoderPreferences(defaults: suite)
+        XCTAssertEqual(IntentEncoderPreferences.cascadeKey, "intentEncoder.cascade")
+        XCTAssertNotEqual(IntentEncoderPreferences.cascadeKey,
+                          IntentEncoderPreferences.enabledKey)
+        XCTAssertFalse(prefs.isCascadeEnabled,
+                       "an absent key reads as OFF — the standalone encoder is the default")
+
+        prefs.setEnabled(true)
+        XCTAssertFalse(prefs.isCascadeEnabled,
+                       "switching the encoder ON must not switch the cascade on")
+
+        prefs.setCascadeEnabled(true)
+        XCTAssertTrue(IntentEncoderPreferences(defaults: suite).isCascadeEnabled,
+                      "the tester's choice survives a relaunch")
+        XCTAssertTrue(prefs.isEnabled, "and it never disturbs the enable switch")
+
+        prefs.setCascadeEnabled(false)
+        XCTAssertFalse(IntentEncoderPreferences(defaults: suite).isCascadeEnabled)
+    }
+
+    /// The shipped slot builder: `.standaloneEncoder` keeps the encoder's
+    /// abstention untouched (the picker brain is never consulted), and
+    /// `.encoderFirstEscalate` escalates the SAME abstention to the picker
+    /// brain on the same turn — one completion, one answer.
+    func testSlotBuilderAttachesTheCascadeOnlyInEncoderFirstMode() throws {
+        let store = try makeStore()
+        try installArtifact(store: store)
+        let spy = IntentEncoderRunnerSpy()
+        let model = StubIntentEncoderModel()
+        // Flat logits → the real encoder abstains (no failure reported).
+        model.logits = IntentEncoderLogits(
+            intentLogits: [Float](repeating: 0, count: 10),
+            slotLogits: [[0, 0, 0, 0, 0]])
+        spy.make = { model }
+        let encoder = makeEncoder(store: store, spy: spy)
+        let fallback = StubCommandInterpreter(
+            result: makeCommand(action: .query, reply: "fallback"))
+        let picker = StubCommandInterpreter(
+            result: makeCommand(action: .query, reply: "picker"))
+
+        let standalone = IntentEncoderWiring.localBrainSlot(
+            mode: .standaloneEncoder,
+            encoder: encoder,
+            encoderFallback: fallback,
+            pickerBrain: picker)
+        XCTAssertNil(interpret(standalone, "तपाईंलाई कस्तो लाग्छ"),
+                     "standalone: the abstention falls through to the router, as before")
+        XCTAssertEqual(picker.callCount, 0,
+                       "no cascade → the picker brain is never consulted")
+
+        var reasons: [LocalBrainChain.EscalationReason] = []
+        let cascaded = IntentEncoderWiring.localBrainSlot(
+            mode: .encoderFirstEscalate,
+            encoder: encoder,
+            encoderFallback: fallback,
+            pickerBrain: picker,
+            onEscalated: { reasons.append($0) })
+        XCTAssertEqual(interpret(cascaded, "तपाईंलाई कस्तो लाग्छ")?.reply, "picker")
+        XCTAssertEqual(picker.callCount, 1,
+                       "one turn, one answer — the picker brain answers this same turn")
+        XCTAssertEqual(reasons, [.abstained],
+                       "and the trail says the encoder abstained, not that it failed")
+
+        // `.pickerBrain` (the enable gate closed) hands the slot to the
+        // encoderFallback and never touches the encoder at all.
+        let pickerOnly = IntentEncoderWiring.localBrainSlot(
+            mode: .pickerBrain,
+            encoder: nil,
+            encoderFallback: fallback,
+            pickerBrain: picker)
+        let pickerCallsBefore = picker.callCount
+        XCTAssertEqual(interpret(pickerOnly, "तपाईंलाई कस्तो लाग्छ")?.reply, "fallback")
+        XCTAssertEqual(picker.callCount, pickerCallsBefore,
+                       "the encoder is not in play: the shipped chain shape answers")
+    }
+
     // MARK: LocalBrainChain semantics
 
     func testChainUsesTheEncoderWhenAvailable() throws {

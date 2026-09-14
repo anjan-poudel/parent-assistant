@@ -3312,6 +3312,10 @@ struct AIModelsSettingsView: View {
     /// compiles `INTENT_ENCODER` in (see the caller) and sits on the
     /// hidden internal screen, so a household user never meets this switch
     /// or its vocabulary.
+    ///
+    /// [ENCODER-RUNTIME-CASCADE] The second switch on the card is the A/B's
+    /// third leg: OFF the encoder answers alone; ON the brain picked above
+    /// answers the same turn whenever the encoder abstains or is unsure.
     private var encoderCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("settings.encoder.title")
@@ -3328,6 +3332,26 @@ struct AIModelsSettingsView: View {
             .tint(DesignTokens.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Text("settings.encoder.note")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            // [ENCODER-RUNTIME-CASCADE] The A/B's third leg: encoder first,
+            // the picked brain answering the same turn when the encoder is
+            // unsure. Disabled (not hidden) while the encoder is off —
+            // the mode collapses to the picker brain there, so the row
+            // would do nothing, and the disabled state says so honestly.
+            Toggle(isOn: Binding(
+                get: { coordinator.intentEncoderCascadeEnabled },
+                set: { coordinator.intentEncoderCascadeEnabled = $0 }
+            )) {
+                Text("settings.encoder.cascadeLabel")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .disabled(!coordinator.intentEncoderEnabled)
+            Text("settings.encoder.cascadeNote")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
                 .foregroundStyle(DesignTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

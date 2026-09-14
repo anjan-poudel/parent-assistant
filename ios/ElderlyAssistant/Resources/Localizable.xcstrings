@@ -9520,6 +9520,40 @@
         }
       }
     },
+    "settings.encoder.cascadeLabel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fall back to the picked brain when the encoder is unsure"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "इन्कोडर अनिश्चित हुँदा माथि छानिएको दिमाग प्रयोग गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.encoder.cascadeNote" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On, the brain picked above answers the same turn whenever the encoder abstains or is unsure; off, the encoder answers alone. Ignored while the switch above is off."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "खुला हुँदा, इन्कोडरले जवाफ नदिएको वा अनिश्चित भएको बेला माथि छानिएको दिमागले उही पालोमा जवाफ दिन्छ; बन्द हुँदा इन्कोडर एक्लै जवाफ दिन्छ। माथिको स्विच बन्द हुँदा यो मान्य हुँदैन।"
+          }
+        }
+      }
+    },
     "settings.calendar.title" : {
       "extractionState" : "manual",
       "localizations" : {
