@@ -723,10 +723,10 @@ enum ModelCatalog {
             filename: "intent-ne-qwen4b-slotcanon-q4_k_m.gguf",
             // `downloadURL` mirrors part 0 for readers that predate
             // `downloadPartURLs`; the service always takes the parts.
-            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v16/intent-ne-qwen4b-slotcanon-q4_k_m.gguf.partaa")!,
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v16/intent-ne-qwen4b-slotcanon-s42-q4_k_m.gguf.partaa")!,
             downloadPartURLs: [
-                URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v16/intent-ne-qwen4b-slotcanon-q4_k_m.gguf.partaa")!,
-                URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v16/intent-ne-qwen4b-slotcanon-q4_k_m.gguf.partab")!
+                URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v16/intent-ne-qwen4b-slotcanon-s42-q4_k_m.gguf.partaa")!,
+                URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v16/intent-ne-qwen4b-slotcanon-s42-q4_k_m.gguf.partab")!
             ],
             // The parts sum to 2_497_278_784 (the size the server and the
             // uploaded whole file both report); the entry previously
