@@ -159,7 +159,7 @@ struct ModelCatalogEntry: Codable, Identifiable {
     /// unpublished entry instead of being satisfied by a zero stub.
     /// The strict checksum path rejects it, so nothing installs from an
     /// entry still carrying it.
-    static let pendingSHA256 = "REPLACE_WITH_SHA256"
+    static let 1662e2178c37ad7ab4f4eff9188adee90fd404fe649e23cbe421084d78f7a45f = "REPLACE_WITH_SHA256"
 }
 
 /// The catalog of models the app knows about. Constants for now; a later
