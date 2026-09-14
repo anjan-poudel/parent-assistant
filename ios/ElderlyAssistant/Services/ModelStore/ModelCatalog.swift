@@ -598,15 +598,15 @@ enum ModelCatalog {
             // best measured accuracy, on the ANE fast path. CoreML spec
             // v9 → iOS 18+.
             filename: "whisperkit-ne-medium-v6-q6",
-            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v11/whisperkit-ne-medium-v6-q6.zip")!,
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v17/whisperkit-ne-medium-v6-q8.zip")!,
             // Unpacked q6 mlmodelc trio + tokenizer (~613 MB zip).
             sizeBytes: 800_000_000,
             // SHA-256 of the release ZIP — verified by installWhisperKitModel.
-            sha256: "88ff2a77020b9a1e3e67b694be7bb91e97c9a4b91d12322cbea02e753e7bddf2",
+            sha256: "b894e0b4c39a200872b4266c7df2be00600a6bb19898aa784926277b379ebe52",
             minDeviceRAMBytes: 4_000_000_000,
             dependsOn: nil,
             whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v11/whisperkit-ne-medium-v6-q6.zip")!,
-            whisperKitZipBytes: 642_434_570,
+            whisperKitZipBytes: 766_945_619,
             requiresiOS18: true,
             // Language tag (2026-09-13): ne-only model.
             languages: ["ne"]
