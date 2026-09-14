@@ -1144,7 +1144,7 @@ final class AppCoordinator: ObservableObject {
     /// OFF is a silent fall-through, never an error surface: the picker
     /// brain (`localIntentInterpreter`, or the LLaMA stand-in when it
     /// cannot serve) answers exactly as it does on a non-gated build.
-    @Published var intentEncoderEnabled: Bool {
+    @Published var intentEncoderEnabled: Bool = false {
         didSet {
             intentEncoderPreferences.setEnabled(intentEncoderEnabled)
             guard oldValue != intentEncoderEnabled else { return }
@@ -1172,7 +1172,7 @@ final class AppCoordinator: ObservableObject {
     /// encoder is on. Same hot-swap contract as the enable switch: the
     /// didSet persists and re-installs the slot, so a flip acts on the
     /// NEXT TURN, not the next launch.
-    @Published var intentEncoderCascadeEnabled: Bool {
+    @Published var intentEncoderCascadeEnabled: Bool = false {
         didSet {
             intentEncoderPreferences.setCascadeEnabled(intentEncoderCascadeEnabled)
             guard oldValue != intentEncoderCascadeEnabled else { return }
