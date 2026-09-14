@@ -942,18 +942,19 @@ enum ModelCatalog {
             languages: []
         ),
         // [T-037-a] Intent encoder artifact (INTERNAL TESTING ONLY — see the
-        // `intentEncoderSpike` ID docs). T-036 v0 CoreML export of
-        // checkpoint `6d2989e95785` from run
-        // `clean-9af1d59-20260913-120652`: an internal-testing BASELINE for
-        // mechanics and baseline behaviour, NOT a quality claim — the E4
-        // harness gates failed on this artifact (closed-intent accuracy
-        // ~0.53, emergency recall ~0.9375) and publication was withheld.
+        // `intentEncoderSpike` ID docs). T-036 v3 CoreML export of
+        // checkpoint `0bd6bafbc30dd2d3` from run
+        // `t036-full-0.1.0-internal-noised6b-topup-20260914-071945` — v2
+        // corpus + teacher-topup rows for the three starved intents (zero
+        // floor waivers): closed-intent ~0.87, emergency 1.000, time-F1
+        // 0.90, near-miss 30/30. Still internal-testing only, NOT a quality
+        // claim — harness gates not all met and publication withheld.
         // `sha256`/`sizeBytes` are the ZIP's own values (strict checksum),
-        // superseding the earlier T-033 export's hash, verified by
-        // `ModelStore.installCoreMLEncoder(fromZip:for:)` before unpacking —
-        // a corrupted or substituted artifact surfaces as an install
-        // failure, never as a silent install. The zip is 109.1 MB with a
-        // single top-level `t033-encoder-int8.mlmodelc` directory.
+        // verified by `ModelStore.installCoreMLEncoder(fromZip:for:)`
+        // before unpacking — a corrupted or substituted artifact surfaces
+        // as an install failure, never as a silent install. The zip is
+        // 109.1 MB with a single top-level
+        // `t033-encoder-int8.mlmodelc` directory.
         ModelCatalogEntry(
             id: intentEncoderSpike,
             kind: .intentEncoder,
@@ -967,8 +968,8 @@ enum ModelCatalog {
             // to `installCoreMLEncoder(fromZip:for:)`. See
             // `intentEncoderSpikeZipURL(environment:)`.
             downloadURL: intentEncoderSpikeZipURL(),
-            sizeBytes: 109_086_647,
-            sha256: "e0ff09231843c5a6e667db9f6a33d5994df9a2f37c9601f82e1a125073d7aaa5",
+            sizeBytes: 109_079_441,
+            sha256: "d8f549ecb2e37b44bbcf21a243cbfc00f917d47f7f4e7187d547f51168afbcdc",
             // int8 encoder body ~118 MB; ~2 GB device floor is generous
             // headroom for the 100–120M-param student.
             minDeviceRAMBytes: 2_000_000_000,
