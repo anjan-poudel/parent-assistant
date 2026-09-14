@@ -972,7 +972,17 @@ final class AppCoordinator: ObservableObject {
     /// only resolved by the boot's voice phase, the warm, and downloads.
     lazy var modelStore: ModelStore = {
         do {
-            return try ModelStore(observabilityBus: observabilityBus)
+            // [T-036 SIDELOAD] The store resolves entries through the
+            // shipped catalog PLUS the internal-testing encoder sideload
+            // (`ModelCatalog.entryIncludingInternalSideload(for:)` — the
+            // shipped catalog stays authoritative and is consulted first;
+            // the resolver can only ever ADD the one sideload id). Without
+            // this, `installCoreMLEncoder`/`coreMLBundleFinalURL` would
+            // resolve the sideload id to nil and the gated encoder could
+            // never see the artifact it is supposed to serve.
+            return try ModelStore(
+                observabilityBus: observabilityBus,
+                entryProvider: ModelCatalog.entryIncludingInternalSideload(for:))
         } catch {
             fatalError("Cannot initialise ModelStore: \(error)")
         }
@@ -1180,22 +1190,38 @@ final class AppCoordinator: ObservableObject {
                                                timeoutSeconds: 10),
         pluginRegistry: pluginRegistry
     )
-    /// [T-037-a] The on-device CoreML intent encoder (T-033 spike
-    /// artifact, internal testing only). Deliberately NOT constructed on
-    /// normal builds: every reference to it is guarded by
+    /// [T-037-a] The on-device CoreML intent encoder — now serving the
+    /// TRAINED T-036 artifact (`IntentEncoderSideload`, internal testing
+    /// only; the T-033/T-036-v0 spike pin stays in the catalog as the
+    /// historical baseline). Deliberately NOT constructed on normal
+    /// builds: every reference to it is guarded by
     /// `IntentEncoderFeature.isEnabled`, so the `lazy` factory never runs
     /// without the `INTENT_ENCODER` compilation condition. Its
     /// `isAvailable` is false unless the artifact is installed in
     /// `ModelStore` AND a tokenizer is ready — `UnavailableIntentEncoderTokenizer`
     /// is the production default until the Swift XLM-R tokenizer exists,
     /// so the shipped behaviour is unchanged either way.
+    ///
+    /// The manifest is the artifact's OWN label order + fitted calibration
+    /// temperature: pinning the sideload artifact while keeping
+    /// `.t033Spike`'s 10 intents / 5 tags would silently mislabel every
+    /// utterance (see `IntentEncoderSideload.manifest`).
     private lazy var intentEncoderInterpreter = IntentEncoderInterpreter(
         modelStore: modelStore,
         observabilityBus: observabilityBus,
-        modelId: ModelCatalog.intentEncoderSpike,
-        manifest: .t033Spike,
+        modelId: IntentEncoderSideload.modelID,
+        manifest: IntentEncoderSideload.manifest,
         tokenizer: UnavailableIntentEncoderTokenizer(),
         config: .default
+    )
+    /// [T-036 SIDELOAD] LAN fetch + install of the trained encoder
+    /// artifact — INTERNAL TESTING, publish blocked on the 8,000-row
+    /// calibration corpus (T-035/T-038); see `IntentEncoderSideload`.
+    /// Constructed only behind `IntentEncoderFeature.isEnabled`, matching
+    /// the interpreter's lazy-factory invariant above.
+    private lazy var intentEncoderSideloadInstaller = IntentEncoderSideloadInstaller(
+        modelStore: modelStore,
+        observabilityBus: observabilityBus
     )
     /// Level-2 memory-warning observer for the encoder (nil unless the
     /// internal-testing gate is on).
@@ -2360,6 +2386,20 @@ final class AppCoordinator: ObservableObject {
         // `IntentEncoderWiring`, so the shipped call site is the tested one.
         let offeredEncoder = IntentEncoderWiring.gatedEncoder {
             intentEncoderInterpreter
+        }
+        // [T-036 SIDELOAD] INTERNAL TESTING — publish blocked on the
+        // 8,000-row calibration corpus (T-035/T-038). On a gated build,
+        // fetch the TRAINED artifact from the LAN web root into the
+        // ModelStore the encoder above reads, unless it is already
+        // installed. `installIfNeeded` returns synchronously (fetch +
+        // checksum + unzip run on its own queue) and re-checks the
+        // compile-time gate first, so a shipped build neither downloads
+        // nor even constructs the installer; the brain chain re-checks
+        // `isAvailable` every turn, so a successful install is picked up
+        // without a reload. `INTENT_ENCODER_SIDELOAD_URL=` (blank)
+        // disables the fetch entirely for a tester who staged the zip.
+        if IntentEncoderFeature.isEnabled {
+            _ = intentEncoderSideloadInstaller.installIfNeeded()
         }
         let preferredLocal = IntentEncoderWiring.preferredLocalBrain(
             encoder: offeredEncoder,
