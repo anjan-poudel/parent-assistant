@@ -51,7 +51,13 @@ struct DirectionsCandidate: Equatable {
 ///    is also present ("घर जानुहोस्"). That gate keeps music and orders
 ///    out: "गीत बजाऊ" (play a song) contains जाऊ but no घर, so it never
 ///    reaches navigation. Bare "जान" is excluded entirely (जानकारी
-///    hazard — plan).
+///    hazard — plan). The WAY/DIRECTIONS family ("बाटो लगाउँ", "बाटो
+///    देखाऊ", "बाटो बताऊ", the रास्ता synonyms — 2026-09-14) covers the
+///    request shape the transport verbs missed: asking FOR the way
+///    instead of asking to be taken somewhere ("सिड्नी घरको बाटो लगाउँ"
+///    fell through to the model before this). It fires standalone like
+///    TAKE/DROP and passes through the same bare-verb gate: nothing
+///    surviving extraction and no home word → not directions.
 ///  - Devanagari verb forms are enumerated explicitly, exactly like the
 ///    router's keyword tables: Swift substring matching works on EXTENDED
 ///    GRAPHEME CLUSTERS, so a virama or matra fuses into the preceding
@@ -71,7 +77,11 @@ struct DirectionsCandidate: Equatable {
 ///    alone — is not directions.)
 ///  - Scoring mirrors `ContactResolver`: exact normalized name 1.0 /
 ///    relationship-anchor 0.9 / containment 0.8 / token overlap ≥ half
-///    the query 0.6; accept 0.6, ambiguity margin 0.15. A top score with
+///    the query 0.6; accept 0.6, ambiguity margin 0.15. Under every
+///    literal tier sits the transliteration tier (0.7 — see `score`):
+///    a Devanagari query matched against a Latin candidate name
+///    ("सिड्नी" ↔ "Sydney house" — the 2026-09-14 failure), and the same
+///    variance inside one script ("सिड्नी" ↔ "सिडनी"). A top score with
 ///    a rival inside the margin → `.ambiguous` (the coordinator asks
 ///    yes/no, never guessing a PLACE — the same rule that protects
 ///    persons). No candidate clears the bar → `.unknownPlace` (the
@@ -237,6 +247,41 @@ enum DirectionsRoute {
         "जाऊँ", "जाऊ", "जाउ", "जानुहोस्", "जानुस्", "जाने"
     ]
 
+    /// WAY/DIRECTIONS-request forms — "बाटो लगाउँ" (give me the way),
+    /// "बाटो देखाऊ" (show me the way), "बाटो बताऊ" (tell me the way) and
+    /// the रास्ता/रस्ता synonyms (2026-09-14: the reported "सिड्नी घरको
+    /// बाटो लगाउँ" had no marker at all and fell through to the model).
+    ///
+    /// Every entry is the WHOLE collocation (way noun + request verb),
+    /// enumerated in full like the tables above (grapheme rule): "बाटो
+    /// लगाउ" is a grapheme-safe prefix of "बाटो लगाउनुहोस्" (उ is an
+    /// independent vowel, it does not fuse into the नु), but the longer
+    /// forms stay listed — same defensive style as the जाऊ/जाउ pairs.
+    /// Bare "लगाउ"/"देखाऊ"/"बताऊ" are deliberately NOT markers: they are
+    /// everyday verbs ("फोन लगाउ" = dial, "भात लगाउ" = serve rice), so
+    /// the way NOUN is what anchors this family — a destination is never
+    /// the way-word itself. Fused noun+verb spellings ("बाटोलगाउ") are
+    /// listed too (STT drops the space), mirroring the contact route's
+    /// fused entries.
+    private static let wayRequestPhrases = [
+        // बाटो + लगाउनु (give/apply — "give me the way")
+        "बाटो लगाउँ", "बाटो लगाउ", "बाटो लगाऊ", "बाटो लगाउनुहोस्", "बाटो लगाउनुस्",
+        "बाटो लगाइदिनुहोस्", "बाटो लगाइदिनुस्", "बाटो लगाइदिनु", "बाटो लगाइदेउ",
+        "बाटोलगाउ", "बाटोलगाउँ", "बाटोलगाइदिनुहोस्",
+        // बाटो + देखाउनु (show)
+        "बाटो देखाऊ", "बाटो देखाउ", "बाटो देखाउनुहोस्", "बाटो देखाउनुस्",
+        "बाटो देखाइदिनुहोस्", "बाटोदेखाउ",
+        // बाटो + बताउनु (tell)
+        "बाटो बताऊ", "बाटो बताउ", "बाटो बताउनुहोस्", "बाटो बताउनुस्", "बाटोबताउ",
+        // रास्ता synonym (आ spelling) — same three verbs
+        "रास्ता लगाउँ", "रास्ता लगाउ", "रास्ता लगाऊ", "रास्ता लगाउनुहोस्",
+        "रास्ता लगाइदिनुहोस्", "रास्ता देखाऊ", "रास्ता देखाउ", "रास्ता देखाउनुहोस्",
+        "रास्ता बताऊ", "रास्ता बताउ", "रास्ता बताउनुहोस्", "रास्तालगाउ",
+        // रस्ता (अ spelling — STT wavers between आ and अ)
+        "रस्ता लगाउ", "रस्ता देखाऊ", "रस्ता देखाउ", "रस्ता बताऊ",
+        "रस्ता लगाउनुहोस्", "रस्ता देखाउनुहोस्", "रस्तालगाउ"
+    ]
+
     /// Romanized-Nepali transport verbs — whole-token (Latin-script STT
     /// renders Nepali requests as "ghar laija", "ghar jaau"). Home words
     /// are deliberately NOT here: the GO family needs its Devanagari gate
@@ -248,6 +293,20 @@ enum DirectionsRoute {
         "laijaideu", "laijaideuu", "lija", "lijau", "lijaideu",
         "purya", "puryau", "puryaunu", "puryaidinu", "puryaideu",
         "jaau", "jaaun", "jaan", "janu", "janus", "jane"
+    ]
+
+    /// Romanized-Nepali way requests ("bato lagau", "rasta dekhau") —
+    /// same discipline as the Devanagari family: the way NOUN and a
+    /// request VERB must both appear as whole tokens, so bare "lagau"
+    /// ("phone lagau" = dial the phone) never fires on its own. Both the
+    /// bato/rasta noun spellings STT produces are listed.
+    private static let romanizedWayNouns = [
+        "bato", "bata", "baato", "rasta", "rastaa", "raasta"
+    ]
+    private static let romanizedWayVerbs = [
+        "lagau", "lagaa", "lagauu", "lagaun", "laganus", "lagaidinu",
+        "dekhau", "dekhaau", "dekhaun", "dekhauu",
+        "batau", "bataau", "bataun", "batauu"
     ]
 
     /// English navigation phrases (substring). Deliberately narrow: bare
@@ -262,8 +321,18 @@ enum DirectionsRoute {
 
     private static func isNavigationShaped(_ text: String) -> Bool {
         if takeDropVerbForms.contains(where: { text.contains($0) }) { return true }
+        // WAY/DIRECTIONS family — fires standalone like TAKE/DROP. There
+        // is no bare-verb hazard to gate here (the noun is part of every
+        // phrase), and the no-destination rule lives in `decide`, so
+        // "बाटो लगाउँ" alone still is not directions.
+        if wayRequestPhrases.contains(where: { text.contains($0) }) { return true }
         if englishNavPhrases.contains(where: { text.contains($0) }) { return true }
         if romanizedVerbTokens.contains(where: { token($0, in: text) }) { return true }
+        // Romanized way requests — noun AND verb, both as whole tokens.
+        if romanizedWayNouns.contains(where: { token($0, in: text) }),
+           romanizedWayVerbs.contains(where: { token($0, in: text) }) {
+            return true
+        }
         // GO family — only with a home word present.
         if containsHomeWord(text),
            goVerbForms.contains(where: { text.contains($0) }) {
@@ -280,6 +349,18 @@ enum DirectionsRoute {
     /// eat real names, e.g. "route" ⊂ "router").
     private static let verbDropTokens = takeDropVerbForms + goVerbForms + [
         "घर", "ghar", "ghara", "home", "house", "तिर", "सम्म"
+    ]
+
+    /// WAY-family drops: the way nouns themselves (a token that STARTS
+    /// with one of these is never a destination name — "बाटो", "बाटोको",
+    /// and the fused "बाटोलगाउँ" are all requests, not places) and the
+    /// request verbs left standing after the noun is cut ("सिड्नी घरको
+    /// बाटो लगाउँ" → "सिड्नी"). Whole-token, so real names survive.
+    private static let wayNounTokens = ["बाटो", "रास्ता", "रस्ता"]
+    private static let wayVerbDropTokens = [
+        "लगाउँ", "लगाउ", "लगाऊ", "लगाउनुहोस्", "लगाउनुस्",
+        "देखाऊ", "देखाउ", "देखाउनुहोस्", "देखाउनुस्", "देखाइदिनुहोस्",
+        "बताऊ", "बताउ", "बताउनुहोस्", "बताउनुस्"
     ]
 
     private static let englishVerbDropTokens = [
@@ -339,14 +420,20 @@ enum DirectionsRoute {
     private static func isDropToken(_ token: String, devanagari: Bool) -> Bool {
         if token.isEmpty { return true }
         if devanagari {
-            // Exact verb/home-word match, or any fused घर form (घरमा,
+            // Exact verb/home-word match, any fused घर form (घरमा,
             // घरै…) — a token that starts with the word for "home" is
-            // never a destination name.
-            return verbDropTokens.contains(token) || token.hasPrefix("घर")
+            // never a destination name — or a way noun / fused way
+            // request (बाटो, बाटोको, बाटोलगाउँ) for the same reason.
+            return verbDropTokens.contains(token)
+                || wayVerbDropTokens.contains(token)
+                || token.hasPrefix("घर")
+                || wayNounTokens.contains { token.hasPrefix($0) }
         }
         return englishVerbDropTokens.contains(token)
             || romanizedVerbTokens.contains(token)
             || verbDropTokens.contains(token)
+            || romanizedWayNouns.contains(token)
+            || romanizedWayVerbs.contains(token)
     }
 
     // MARK: - Candidate resolution
@@ -388,9 +475,19 @@ enum DirectionsRoute {
     private static let ambiguityMargin = 0.15
 
     /// Scores one candidate against the normalized query — the exact
-    /// `ContactResolver.score` ladder (normalized both sides):
+    /// `ContactResolver.score` ladder (normalized both sides), plus the
+    /// transliteration tier this route adds for cross-script names:
     ///  1.0 exact name, 0.9 shared relationship anchor, 0.8 containment,
-    ///  0.6 token overlap ≥ half the query, else 0.
+    ///  0.7 transliteration (see `transliterationMatch`), 0.6 token
+    ///  overlap ≥ half the query, else 0.
+    /// The transliteration tier sits UNDER every literal tier on purpose:
+    /// it is lossy (script folding plus an edit-distance fuzz), so a
+    /// candidate that literally carries the query must always outrank one
+    /// that merely sounds like it. 0.7 is above `acceptThreshold`, so a
+    /// clean cross-script name ("सिड्नी" ↔ "Sydney house") resolves
+    /// instead of falling into `.unknownPlace` — and since it is one
+    /// score like any other, it takes part in the same ambiguity margin
+    /// (a 0.7 name beside a 0.8 containment still asks).
     private static func score(_ normalizedQuery: String,
                               against candidate: DirectionsCandidate) -> Double {
         let name = NepaliTextNormalizer.normalize(candidate.name)
@@ -419,7 +516,164 @@ enum DirectionsRoute {
                 return 0.6
             }
         }
+
+        // Transliteration tier — last, so it can never outrank a literal
+        // hit on another candidate, and below containment's 0.8.
+        if transliterationMatch(normalizedQuery, name: name) { return 0.7 }
         return 0
+    }
+
+    // MARK: - Transliteration tier
+
+    /// Whether EVERY token of the query finds a token in the candidate
+    /// name that is the same word heard through another script or another
+    /// STT run — the cross-script bridge ("सिड्नी" ↔ "Sydney house", the
+    /// 2026-09-14 failure: a Latin-stored saved place the Devanagari
+    /// utterance could never reach through normalization) and the
+    /// spelling-variance bridge inside one script ("सिड्नी" ↔ "सिडनी").
+    /// Whole-query coverage on purpose: a partial hit is not a name, so
+    /// an unmatched token means no tier match at all.
+    ///
+    /// The repo's contact search deliberately refuses transliteration
+    /// (`UnifiedContactSearch` / `NepaliTextNormalizer`: lossy folding
+    /// would merge different people), and that rule stands for SEARCH.
+    /// Here the stakes are a yes/no question the coordinator already
+    /// asks, so the tier is fenced the repo's way: it ranks under every
+    /// literal tier, and short tokens may not fuzz at all (below).
+    private static func transliterationMatch(_ normalizedQuery: String,
+                                             name: String) -> Bool {
+        let queryTokens = latinForm(normalizedQuery).split(separator: " ").map(String.init)
+        let nameTokens = Set(latinForm(name).split(separator: " ").map(String.init))
+        guard !queryTokens.isEmpty, !nameTokens.isEmpty else { return false }
+        return queryTokens.allSatisfy { queryToken in
+            nameTokens.contains { withinEditTolerance(queryToken, $0) }
+        }
+    }
+
+    /// Two Latin tokens are "the same word" when they are equal, or —
+    /// only for tokens of five characters and up — within three edits
+    /// AND at least half their characters in order. "sidni" ↔ "sydney"
+    /// is exactly at that bound (3 edits, 0.50 similarity): the 'y'/'e'
+    /// the Devanagari spelling has no letters for. Short tokens must be
+    /// EQUAL: "rama" ↔ "raja" (राम/राज) is a single edit and they are
+    /// different people — one edit on a four-letter name is a different
+    /// name far more often than it is a spelling wobble, so the tier
+    /// refuses to guess there at all.
+    private static func withinEditTolerance(_ lhs: String, _ rhs: String) -> Bool {
+        if lhs == rhs { return true }
+        guard min(lhs.count, rhs.count) >= 5 else { return false }
+        let distance = editDistance(lhs, rhs)
+        guard distance <= 3 else { return false }
+        let similarity = 1 - Double(distance) / Double(max(lhs.count, rhs.count))
+        return similarity >= 0.5
+    }
+
+    /// Plain Levenshtein distance over characters. The tokens are names,
+    /// so the O(n·m) table is the honest, obviously-correct form (no
+    /// early-exit cleverness to get wrong).
+    private static func editDistance(_ lhs: String, _ rhs: String) -> Int {
+        let left = Array(lhs)
+        let right = Array(rhs)
+        var previous = Array(0...right.count)
+        var current = [Int](repeating: 0, count: right.count + 1)
+        for (i, lhsCharacter) in left.enumerated() {
+            current[0] = i + 1
+            for (j, rhsCharacter) in right.enumerated() {
+                let substitution = previous[j] + (lhsCharacter == rhsCharacter ? 0 : 1)
+                current[j + 1] = min(previous[j + 1] + 1,
+                                     current[j] + 1,
+                                     substitution)
+            }
+            swap(&previous, &current)
+        }
+        return previous[right.count]
+    }
+
+    /// Devanagari → Latin tables for the tier above, in the spelling
+    /// NEPALI SPEAKERS THEMSELVES TYPE (not ISO 15919): long and short
+    /// vowels collapse onto one letter (ई/ी → i, ऊ/ू → u, आ/ा → a)
+    /// because STT wavers between the two lengths in the same word and
+    /// the tier only has to survive an edit-distance comparison. Nukta
+    /// variants degrade to the base consonant's sound ("ज़" → j). Lossy
+    /// by construction — which is exactly why it ranks lowest.
+    private static let devanagariConsonants: [Unicode.Scalar: String] = [
+        "क": "k", "ख": "kh", "ग": "g", "घ": "gh", "ङ": "n",
+        "च": "ch", "छ": "chh", "ज": "j", "झ": "jh", "ञ": "n",
+        "ट": "t", "ठ": "th", "ड": "d", "ढ": "dh", "ण": "n",
+        "त": "t", "थ": "th", "द": "d", "ध": "dh", "न": "n",
+        "प": "p", "फ": "ph", "ब": "b", "भ": "bh", "म": "m",
+        "य": "y", "र": "r", "ल": "l", "व": "v",
+        "श": "sh", "ष": "sh", "स": "s", "ह": "h"
+    ]
+    private static let devanagariIndependentVowels: [Unicode.Scalar: String] = [
+        "अ": "a", "आ": "a", "इ": "i", "ई": "i", "उ": "u", "ऊ": "u",
+        "ऋ": "ri", "ए": "e", "ऐ": "ai", "ओ": "o", "औ": "au"
+    ]
+    private static let devanagariMatras: [Unicode.Scalar: String] = [
+        "ा": "a", "ि": "i", "ी": "i", "ु": "u", "ू": "u",
+        "ृ": "ri", "े": "e", "ै": "ai", "ो": "o", "ौ": "au"
+    ]
+    private static let devanagariVirama: Unicode.Scalar = "्"
+    private static let devanagariNukta: Unicode.Scalar = "़"
+    private static let devanagariAnusvara: Unicode.Scalar = "ं"
+    private static let devanagariChandrabindu: Unicode.Scalar = "ँ"
+    private static let devanagariVisarga: Unicode.Scalar = "ः"
+
+    /// The Latin spelling of `text`: Devanagari transliterated, ASCII
+    /// passed through, everything else a word break. Scalar-wise, not
+    /// character-wise, so the virama/matra fusions the file doc describes
+    /// are decoded rather than mangled. Used ONLY by the transliteration
+    /// tier — never for storage, matching or display.
+    private static func latinForm(_ text: String) -> String {
+        var out = ""
+        let scalars = Array(text.unicodeScalars)
+        var index = 0
+        while index < scalars.count {
+            let scalar = scalars[index]
+            if let consonant = devanagariConsonants[scalar] {
+                out += consonant
+                let next = index + 1
+                if next < scalars.count, scalars[next] == devanagariVirama {
+                    index = next + 1              // conjunct: no inherent vowel
+                    continue
+                }
+                if next < scalars.count, let matra = devanagariMatras[scalars[next]] {
+                    out += matra
+                    index = next + 1
+                    continue
+                }
+                out += "a"                        // inherent vowel
+                index = next
+                continue
+            }
+            if let vowel = devanagariIndependentVowels[scalar] {
+                out += vowel
+                index += 1
+                continue
+            }
+            if scalar == devanagariAnusvara || scalar == devanagariChandrabindu {
+                out += "n"                        // nasalisation, not a letter
+                index += 1
+                continue
+            }
+            if scalar == devanagariVisarga {
+                out += "h"
+                index += 1
+                continue
+            }
+            if scalar == devanagariVirama || scalar == devanagariNukta {
+                index += 1                        // stray marks carry no sound
+                continue
+            }
+            if scalar.value < 0x80,
+               scalar.properties.isAlphabetic || scalar.properties.numericType != nil {
+                out.unicodeScalars.append(scalar) // Latin/ASCII stays as written
+            } else {
+                out += " "
+            }
+            index += 1
+        }
+        return out.lowercased()
     }
 
     /// The first relationship anchor word found in `normalizedText` —

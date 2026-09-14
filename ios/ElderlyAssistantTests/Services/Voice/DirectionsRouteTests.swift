@@ -18,7 +18,14 @@ import XCTest
 ///  - Scoring mirrors `ContactResolver` (1.0 exact / 0.9 relationship
 ///    anchor / 0.8 containment / 0.6 token overlap; accept 0.6, ambiguity
 ///    margin 0.15) — top with a rival inside the margin → `.ambiguous`
-///    (top first), nothing clearing the bar → `.unknownPlace`.
+///    (top first), nothing clearing the bar → `.unknownPlace`. Under all
+///    of those sits the transliteration tier (0.7, WAY/WAY-request task
+///    2026-09-14): "सिड्नी" reaches a saved place stored as "Sydney
+///    house".
+///  - WAY/DIRECTIONS requests ("बाटो लगाउँ", "बाटो देखाऊ", "बाटो बताऊ",
+///    रास्ता/रस्ता) are their own family: they fire standalone, the bare
+///    form with no destination is not directions, and a home word makes
+///    them the bare-home case.
 final class DirectionsRouteTests: XCTestCase {
 
     private func place(id: UUID = UUID(), name: String) -> DirectionsCandidate {
@@ -207,5 +214,151 @@ final class DirectionsRouteTests: XCTestCase {
         XCTAssertEqual(DirectionsRoute.decide(transcript: "लैजाऊ",
                                               candidates: []),
                        .notDirections)
+    }
+
+    // MARK: - WAY/DIRECTIONS requests (2026-09-14)
+
+    /// The reported on-device failure, verbatim: the elder asked
+    /// "सिड्नी घरको बाटो लगाउँ" about a saved place stored in LATIN
+    /// ("Sydney house" — the name as it was typed when it was saved) and
+    /// the turn fell through to the model, which misclassified and
+    /// truncated it. The way family sends it to navigation and the
+    /// transliteration tier finds the candidate.
+    func testLatinNamedSavedPlaceResolvesFromDevanagariWayRequest() {
+        let sydney = UUID()
+        let decision = DirectionsRoute.decide(
+            transcript: "सिड्नी घरको बाटो लगाउँ",
+            candidates: [place(id: sydney, name: "Sydney house")])
+        XCTAssertEqual(decision, .navigate(.place(sydney)))
+    }
+
+    func testWayRequestFormsResolveNamedPlace() {
+        // Every way phrasing, the way a speaker actually varies them.
+        let hospital = UUID()
+        let destination = place(id: hospital, name: "अस्पताल")
+        for transcript in ["बाटो देखाउनुहोस् अस्पताल",
+                           "अस्पतालको बाटो बताऊ",
+                           "अस्पताल बाटो लगाइदिनुहोस्",
+                           "अस्पताल बाटो देखाऊ",
+                           "अस्पताल सम्मको रास्ता बताउनुहोस्",
+                           "अस्पताल बाटोलगाउँ",
+                           "bato dekhau अस्पताल"] {
+            XCTAssertEqual(DirectionsRoute.decide(transcript: transcript,
+                                                  candidates: [destination]),
+                           .navigate(.place(hospital)), transcript)
+        }
+    }
+
+    func testRomanizedWayRequestResolvesEnglishNamedPlace() {
+        let hospital = UUID()
+        XCTAssertEqual(DirectionsRoute.decide(transcript: "hospital rasta dekhau",
+                                              candidates: [place(id: hospital,
+                                                                 name: "Hospital")]),
+                       .navigate(.place(hospital)))
+    }
+
+    func testWayRequestWithHomeWordResolvesDefaultHome() {
+        // "give me the way home" — the way noun is the destination the
+        // walker means, and घर is what makes it the bare-home case.
+        XCTAssertEqual(DirectionsRoute.decide(transcript: "घरको बाटो लगाउँ",
+                                              candidates: []),
+                       .navigate(.defaultHome))
+    }
+
+    func testBareWayRequestWithNoDestinationIsNotDirections() {
+        // The way noun alone names no place and no home: a request for
+        // directions is not a drive to a default home (the same gate the
+        // bare TAKE/DROP verbs pass through).
+        for transcript in ["बाटो लगाउँ", "बाटो देखाउनुहोस्", "रास्ता बताऊ",
+                           "bato lagau"] {
+            XCTAssertEqual(DirectionsRoute.decide(transcript: transcript,
+                                                  candidates: []),
+                           .notDirections, transcript)
+        }
+    }
+
+    func testBareWayVerbsAreNotMarkersOnTheirOwn() {
+        // The ver forms only mark a request WITH the way noun: "भात
+        // लगाउ" (serve rice) and "फोटो देखाऊ" (show the photo) are
+        // everyday verb use, never a drive.
+        for transcript in ["लगाउ", "भात लगाउ", "फोटो देखाऊ", "फोटो देखाउनुहोस्"] {
+            XCTAssertEqual(DirectionsRoute.decide(transcript: transcript,
+                                                  candidates: []),
+                           .notDirections, transcript)
+        }
+    }
+
+    func testWayRequestVetoesStillWin() {
+        // The vetoes run before the shape check, way noun or not.
+        XCTAssertEqual(DirectionsRoute.decide(transcript: "फोन लगाउ",
+                                              candidates: []),
+                       .notDirections)
+        XCTAssertEqual(DirectionsRoute.decide(transcript: "दवाई बाटो लगाउ",
+                                              candidates: []),
+                       .notDirections)
+        XCTAssertEqual(DirectionsRoute.decide(transcript: "औषधि बाटो देखाऊ",
+                                              candidates: []),
+                       .notDirections)
+    }
+
+    // MARK: - Transliteration tier
+
+    func testTransliterationTierMatchesLatinCandidateNames() {
+        // Devanagari query ↔ Latin name is the bridge; "सुनिता" ↔
+        // "Sunita" is the same bridge with nothing to fuzz.
+        let aspatal = UUID()
+        XCTAssertEqual(DirectionsRoute.decide(transcript: "अस्पताल बाटो लगाउँ",
+                                              candidates: [place(id: aspatal,
+                                                                 name: "Aspatal")]),
+                       .navigate(.place(aspatal)))
+
+        let sunita = UUID()
+        XCTAssertEqual(DirectionsRoute.decide(transcript: "सुनिता घरको बाटो देखाऊ",
+                                              candidates: [place(id: sunita,
+                                                                 name: "Sunita")]),
+                       .navigate(.place(sunita)))
+    }
+
+    func testTransliterationTierMatchesDevanagariCandidateFromLatinQuery() {
+        let sydney = UUID()
+        XCTAssertEqual(DirectionsRoute.decide(transcript: "sidney bato dekhau",
+                                              candidates: [place(id: sydney,
+                                                                 name: "सिड्नी")]),
+                       .navigate(.place(sydney)))
+    }
+
+    func testLiteralMatchOutranksTransliterationTier() {
+        // Both candidates are reachable from "अस्पताल" — the literal one
+        // must win, and win alone (no ambiguity: 1.0 clears 0.7 by more
+        // than the margin).
+        let literal = UUID()
+        XCTAssertEqual(DirectionsRoute.decide(
+            transcript: "अस्पताल लैजाऊ",
+            candidates: [place(id: literal, name: "अस्पताल"),
+                         place(name: "Aspatal")]),
+                       .navigate(.place(literal)))
+    }
+
+    func testShortNamesAreNotFuzzedAcrossScripts() {
+        // "राम" and "राज" are one edit apart in Latin form and are
+        // different people: tokens under five characters must match
+        // exactly, so this stays unknown rather than driving to राज.
+        XCTAssertEqual(DirectionsRoute.decide(transcript: "राम लैजाऊ",
+                                              candidates: [place(name: "राज")]),
+                       .unknownPlace)
+        XCTAssertEqual(DirectionsRoute.decide(transcript: "सिड्नी लैजाऊ",
+                                              candidates: [place(name: "सीता")]),
+                       .unknownPlace)
+    }
+
+    func testTwoTransliterationMatchesAskTopCandidateFirst() {
+        // The transliteration score is one score like any other, so the
+        // ambiguity margin applies to it too — the coordinator asks.
+        let decision = DirectionsRoute.decide(transcript: "सिड्नी बाटो लगाउँ",
+                                              candidates: [place(name: "Sydney"),
+                                                           place(name: "Sidney")])
+        guard case .ambiguous = decision else {
+            return XCTFail("two transliteration matches must ask, got \(decision)")
+        }
     }
 }
