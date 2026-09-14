@@ -35,6 +35,14 @@ final class ModelDownloadService: NSObject, ObservableObject {
     private let store: ModelStore
     private let observabilityBus: ObservabilityBus
     private let sessionFactory: () -> URLSession
+    /// Free-space probe for the pre-flight disk guard (see `start(_:)`).
+    /// A seam for the same reason `sessionFactory` is one: the guard
+    /// measures the HOST volume, so a test that drives the real 2.5 GB
+    /// catalog entry through a stubbed transport must not start failing
+    /// because the machine running the suite happens to be nearly full.
+    /// `nil` means "not measurable" — the guard is skipped, exactly as it
+    /// already is when the volume query fails.
+    private let availableBytesProvider: () -> Int64?
     private var tasks: [ModelID: URLSessionDownloadTask] = [:]
     /// Multipart downloads in flight, keyed by model. A multipart model
     /// has NO entry in `tasks` — its parts are owned by the runner, which
@@ -63,7 +71,8 @@ final class ModelDownloadService: NSObject, ObservableObject {
 
     init(store: ModelStore,
          observabilityBus: ObservabilityBus,
-         sessionFactory: (() -> URLSession)? = nil) {
+         sessionFactory: (() -> URLSession)? = nil,
+         availableBytesProvider: (() -> Int64?)? = nil) {
         self.store = store
         self.observabilityBus = observabilityBus
         self.sessionFactory = sessionFactory ?? {
@@ -71,6 +80,11 @@ final class ModelDownloadService: NSObject, ObservableObject {
             config.waitsForConnectivity = true
             config.timeoutIntervalForResource = 6 * 60 * 60
             return URLSession(configuration: config)
+        }
+        self.availableBytesProvider = availableBytesProvider ?? {
+            try? URL(fileURLWithPath: NSHomeDirectory())
+                .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+                .volumeAvailableCapacityForImportantUsage
         }
         super.init()
     }
@@ -113,9 +127,7 @@ final class ModelDownloadService: NSObject, ObservableObject {
         // zip, not the placeholder `sizeBytes`.
         let requiredBytes = entry.whisperKitZipURL != nil
             ? entry.whisperKitZipBytes : entry.sizeBytes
-        if let free = try? URL(fileURLWithPath: NSHomeDirectory())
-            .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-            .volumeAvailableCapacityForImportantUsage,
+        if let free = availableBytesProvider(),
            free < requiredBytes + diskSafetyMarginBytes {
             update(id, .failed(reason: "not enough disk space"))
             emit("download_disk_full", outcome: "failure", modelId: id, errorCode: "disk_full")
@@ -265,15 +277,32 @@ final class ModelDownloadService: NSObject, ObservableObject {
         tasks[id] = nil
     }
 
-    /// A multipart attempt died (transport error, or a runtime size-cap
-    /// overrun). The runner has already cancelled the remaining parts and
-    /// deleted every temp file by the time this is called.
-    fileprivate func handleMultipartFailure(_ id: ModelID, reason: String,
-                                            event: String, errorCode: String) {
+    /// The transfer reported "finished" but what landed is NOT the
+    /// artifact: an HTTP error page (a 404 asset name answers with a 9-byte
+    /// `Not Found` body), or a body with no bytes at all. Neither may be
+    /// staged and checksummed — that path ends in `finalize` blaming the
+    /// checksum for a download that never happened, which is exactly the
+    /// 2026-09-14 on-device report (a 2.5 GB model "failing checksum" 423 ms
+    /// after it started). Fails with the status/byte count as the reason.
+    fileprivate func handleUnusableDownload(_ id: ModelID, reason: String,
+                                            event: String, errorCode: String,
+                                            metadata: [String: String] = [:]) {
         update(id, .failed(reason: reason))
-        emit(event, outcome: "failure", modelId: id, errorCode: errorCode)
-        multipart[id] = nil
+        emit(event, outcome: "failure", modelId: id, errorCode: errorCode,
+             metadata: metadata)
         tasks[id] = nil
+    }
+
+    /// A multipart attempt died (transport error, an unusable part, or a
+    /// runtime size-cap overrun). The runner has already cancelled the
+    /// remaining parts and deleted every temp file by the time this is
+    /// called.
+    fileprivate func handleMultipartFailure(_ id: ModelID, reason: String,
+                                            event: String, errorCode: String,
+                                            metadata: [String: String] = [:]) {
+        handleUnusableDownload(id, reason: reason, event: event,
+                               errorCode: errorCode, metadata: metadata)
+        multipart[id] = nil
     }
 
     // MARK: - Bundled (no-network) installs
@@ -306,6 +335,17 @@ final class ModelDownloadService: NSObject, ObservableObject {
     }
 
     fileprivate func handleFinishedDownload(_ id: ModelID, tempURL: URL) {
+        // Same rule as the multipart parts: a body with no bytes is not a
+        // download. Staging it would only ever reach the verifier as a
+        // checksum mismatch, naming the wrong culprit.
+        guard Self.fileSize(at: tempURL) > 0 else {
+            handleUnusableDownload(id,
+                                   reason: "downloaded file is empty (0 bytes)",
+                                   event: "download_empty",
+                                   errorCode: "empty",
+                                   metadata: ["bytes": "0"])
+            return
+        }
         do {
             // WhisperKit directory artifact: install the zip (checksum is
             // verified inside) — no single-file staging/finalize, and no
@@ -376,6 +416,15 @@ final class ModelDownloadService: NSObject, ObservableObject {
 
     // MARK: - Helpers
 
+    /// Byte size of a file on disk (0 when it is missing or unreadable).
+    /// The download paths use it to tell "the artifact landed" from "an HTTP
+    /// error page landed": nothing about a URLSession completion says the
+    /// bytes are the model.
+    static func fileSize(at url: URL) -> Int64 {
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return (attributes?[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
     /// Concatenates `parts` IN ORDER (part 0 first) into `destination`,
     /// creating it fresh. Streams through a 1 MB buffer — a 2.5 GB
     /// reassembly must never sit in RAM — and throws on the first read or
@@ -411,14 +460,17 @@ final class ModelDownloadService: NSObject, ObservableObject {
     }
 
     private func emit(_ eventType: String, outcome: String,
-                      modelId: ModelID, errorCode: String?) {
+                      modelId: ModelID, errorCode: String?,
+                      metadata: [String: String] = [:]) {
+        var fields = metadata
+        fields["state"] = modelId.rawValue
         observabilityBus.emit(ObservabilityEvent(
             component: "model_download",
             eventType: eventType,
             durationMs: nil,
             outcome: outcome,
             errorCode: errorCode,
-            metadata: ["state": modelId.rawValue]
+            metadata: fields
         ))
     }
 }
@@ -569,6 +621,26 @@ private final class MultipartDownload: NSObject, URLSessionDownloadDelegate {
                     downloadTask: URLSessionDownloadTask,
                     didFinishDownloadingTo location: URL) {
         guard !isTerminal, let index = partIndex(of: downloadTask) else { return }
+
+        // THE HTTP STATUS IS PART OF THE RESULT. URLSession calls this for
+        // ANY completed transfer — an HTTP error page included. GitHub
+        // answers a mistyped asset name with `404` + a 9-byte `Not Found`
+        // body, so both parts of the v16 brain "landed" in ~400 ms,
+        // reassembled to 18 bytes and died in `finalize` as
+        // `finalize_checksum_mismatch`: a 2.5 GB download reported as a
+        // checksum failure, 423 ms after it started, without a byte of the
+        // model ever being fetched (2026-09-14 on-device report). Refuse a
+        // non-2xx HERE, naming the part and the status.
+        if let http = downloadTask.response as? HTTPURLResponse,
+           !(200..<300).contains(http.statusCode) {
+            fail(reason: "part \(index) could not be fetched: HTTP \(http.statusCode) "
+                        + HTTPURLResponse.localizedString(forStatusCode: http.statusCode),
+                 event: "download_part_http_error",
+                 errorCode: "part_http_error",
+                 metadata: ["part": "\(index)", "http_status": "\(http.statusCode)"])
+            return
+        }
+
         // MUST move now — iOS deletes `location` when this returns.
         let destination = tempDirectory.appendingPathComponent(
             String(format: "part%02d", index))
@@ -582,6 +654,19 @@ private final class MultipartDownload: NSObject, URLSessionDownloadDelegate {
             fail(reason: "\(error)", event: "download_failed", errorCode: "transport")
             return
         }
+
+        // A 2xx that carried no bytes is not a part either — same rule as
+        // the status above, so a silent short reassembly can never reach the
+        // verifier and come back as a "checksum" verdict.
+        let bytes = ModelDownloadService.fileSize(at: destination)
+        guard bytes > 0 else {
+            fail(reason: "part \(index) yielded 0 bytes",
+                 event: "download_part_empty",
+                 errorCode: "part_empty",
+                 metadata: ["part": "\(index)", "bytes": "0"])
+            return
+        }
+
         landedParts[index] = destination
         inFlight -= 1
         if landedParts.count == partURLs.count {
@@ -616,6 +701,22 @@ private final class MultipartDownload: NSObject, URLSessionDownloadDelegate {
                                             errorCode: "transport")
             return
         }
+        // Second lock on the same door as the per-part checks: a reassembly
+        // with no bytes in it can only ever come back from the verifier as
+        // "checksum", which is exactly the misdiagnosis this path now
+        // refuses to produce.
+        let assembledBytes = ordered.reduce(Int64(0)) {
+            $0 + ModelDownloadService.fileSize(at: $1)
+        }
+        guard assembledBytes > 0 else {
+            cleanUp(invalidate: true)
+            service?.handleMultipartFailure(modelId,
+                                            reason: "no part bytes were fetched",
+                                            event: "download_parts_empty",
+                                            errorCode: "part_empty",
+                                            metadata: ["parts": "\(partURLs.count)"])
+            return
+        }
         // Hand the ordered parts to the service (which concatenates,
         // verifies and installs synchronously), then drop the temp files —
         // success and failure both end with nothing left on disk.
@@ -623,12 +724,14 @@ private final class MultipartDownload: NSObject, URLSessionDownloadDelegate {
         cleanUp(invalidate: false)
     }
 
-    private func fail(reason: String, event: String, errorCode: String) {
+    private func fail(reason: String, event: String, errorCode: String,
+                      metadata: [String: String] = [:]) {
         guard !isTerminal else { return }
         isTerminal = true
         cleanUp(invalidate: true)
         service?.handleMultipartFailure(modelId, reason: reason,
-                                        event: event, errorCode: errorCode)
+                                        event: event, errorCode: errorCode,
+                                        metadata: metadata)
     }
 
     private func cleanUp(invalidate: Bool) {
@@ -670,6 +773,22 @@ private final class DownloadProxyDelegate: NSObject, URLSessionDownloadDelegate 
     func urlSession(_ session: URLSession,
                     downloadTask: URLSessionDownloadTask,
                     didFinishDownloadingTo location: URL) {
+        // An HTTP error page arrives through this same callback (see the
+        // multipart runner: a mistyped v16 asset name produced a 9-byte
+        // `Not Found` that only surfaced as "checksum failed"). Never hand
+        // an error page to the store as if it were the artifact.
+        if let http = downloadTask.response as? HTTPURLResponse,
+           !(200..<300).contains(http.statusCode) {
+            service?.handleUnusableDownload(
+                modelId,
+                reason: "HTTP \(http.statusCode) "
+                        + HTTPURLResponse.localizedString(forStatusCode: http.statusCode),
+                event: "download_http_error",
+                errorCode: "http_error",
+                metadata: ["http_status": "\(http.statusCode)"])
+            retainer = nil
+            return
+        }
         // Move IMMEDIATELY — iOS deletes `location` when this delegate
         // returns. Handled inside the service.
         service?.handleFinishedDownload(modelId, tempURL: location)

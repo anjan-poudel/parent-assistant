@@ -726,6 +726,20 @@ enum ModelCatalog {
             // the ASSEMBLED file's size, which is also what the service's
             // `MAX_MULTIPART_TOTAL_BYTES` guardrail measures.
             //
+            // ASSET NAMES (2026-09-14, the 423 ms on-device failure): the
+            // v16 release publishes these assets WITH the `-s42-` seed
+            // segment (`…slotcanon-s42-q4_k_m.gguf.partaa` / `.partab`).
+            // The URLs below previously omitted it, and GitHub answers a
+            // nonexistent asset name with `404` + a 9-byte `Not Found`
+            // body — which `URLSessionDownloadTask` hands to
+            // `didFinishDownloadingTo` exactly like artifact bytes. Both
+            // "parts" therefore landed in ~400 ms, reassembled to 18 bytes
+            // and died in `finalize` as `finalize_checksum_mismatch`: a
+            // 2.5 GB download blamed on a checksum over an error page. The
+            // `filename` above is the ON-DISK name and does not have to
+            // match the asset path; these URLs must match the release
+            // listing exactly (checked by `MultipartDownloadTests`).
+            //
             // sha256: the ASSEMBLED file's digest — `partaa` ++ `partab`,
             // in that order (the order IS the artifact). Verified
             // 2026-09-14 against the v16 release assets AND the uploaded
