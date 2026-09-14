@@ -95,6 +95,46 @@ final class IntentEncoderArtifactTests: XCTestCase {
         XCTAssertTrue(ModelCatalog.internalTestingEncoderEntries.contains { $0.id == entry.id })
     }
 
+    /// 2026-09-14: `INTENT_ENCODER_SPIKE_ZIP` also accepts a path RELATIVE
+    /// to the app's Documents directory. `devicectl` can copy the zip into
+    /// the app data container's `Documents/`
+    /// (`--domain-type appDataContainer --domain-identifier
+    /// com.elderlyassistant.app --destination Documents/`) but never
+    /// exposes the container UUID, so a tester cannot construct the
+    /// absolute path the override used to require — the bare filename is
+    /// the whole handshake now. Absolute values must keep their meaning.
+    func testSpikeZipOverrideResolvesRelativePathsUnderDocuments() throws {
+        let documents = FileManager.default.urls(for: .documentDirectory,
+                                                 in: .userDomainMask)[0]
+
+        // Relative (the devicectl route): resolved under Documents, not
+        // against the process working directory.
+        let relative = try XCTUnwrap(ModelCatalog.configuredIntentEncoderSpikeZipURL(
+            environment: ["INTENT_ENCODER_SPIKE_ZIP": "t033-encoder-int8-mlmodelc.zip"]))
+        XCTAssertEqual(relative,
+                       documents.appendingPathComponent("t033-encoder-int8-mlmodelc.zip"))
+        XCTAssertEqual(relative.deletingLastPathComponent().path, documents.path)
+        XCTAssertEqual(relative.scheme, "file")
+
+        // Subdirectory + surrounding whitespace behave the same way.
+        let nested = try XCTUnwrap(ModelCatalog.configuredIntentEncoderSpikeZipURL(
+            environment: ["INTENT_ENCODER_SPIKE_ZIP": "  staging/t033.zip  "]))
+        XCTAssertEqual(nested, documents.appendingPathComponent("staging/t033.zip"))
+
+        // Absolute: unchanged — used verbatim (whitespace trimmed only).
+        let absolute = try XCTUnwrap(ModelCatalog.configuredIntentEncoderSpikeZipURL(
+            environment: ["INTENT_ENCODER_SPIKE_ZIP": "  /tmp/t033-encoder-int8-mlmodelc.zip "]))
+        XCTAssertEqual(absolute.path, "/tmp/t033-encoder-int8-mlmodelc.zip")
+        XCTAssertEqual(absolute.scheme, "file")
+
+        // The picker/download entry point returns that same file URL, not
+        // the reserved-TLD placeholder.
+        XCTAssertEqual(
+            ModelCatalog.intentEncoderSpikeZipURL(
+                environment: ["INTENT_ENCODER_SPIKE_ZIP": "t033-encoder-int8-mlmodelc.zip"]),
+            relative)
+    }
+
     // MARK: Destination scoping (the T-035 §15.2 finding)
 
     func testInstallDestinationIsScopedAwayFromTheWhisperEncoderPath() throws {
