@@ -248,7 +248,13 @@ calibration:
     tolerance: 0.10
     below_floor: pool_upward_and_report
     corpus_floor: 8000                  # annotation_rules.mixture.supply_caps.corpus_floor
-    measurable_today: false             # T-033's 20-row corpus cannot fill 10 buckets
+    measurable_today: true              # corpus now 8000 rows (revision 7f71b8ae):
+                                        # T-033's 20-row corpus could not fill 10
+                                        # buckets; flatten to false until a corpus
+                                        # revision at or above corpus_floor exists.
+                                        # calibrate_encoder.py still ANDs this with
+                                        # len(rows) >= corpus_floor, so a trimmed
+                                        # corpus reports not-measurable, not a pass.
 
 # ---------------------------------------------------------------------------
 # Bands  (shipped policy; this design adds NO threshold)

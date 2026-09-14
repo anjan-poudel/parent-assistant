@@ -154,9 +154,13 @@ fits one, never null, because the interpreter divides by it.
 
 The calibration verdict is **tri-state**: `true` (measured, inside tolerance),
 `false` (measured, outside), or `null` — *not measurable*, because the golden
-corpus is below the contract's `corpus_floor` / `measurable_today=false`. `null`
-withholds publication exactly like `false`: with a 20-row corpus every bucket
-under-fills and pools, and an empty violation list must never be read as a pass.
+corpus is below the contract's `corpus_floor` or the contract still marks the
+gate `measurable_today=false`. `null` withholds publication exactly like
+`false`: with a 20-row corpus every bucket under-fills and pools, and an empty
+violation list must never be read as a pass. As of corpus revision `7f71b8ae`
+the corpus is 8,000 rows and `calibration.gate.measurable_today` is `true`, so
+the gate measures rather than withholds; the `null` path stays live for any
+corpus revision below the floor.
 
 Paths passed to a stage (`--sources`, `--build-report`, `--publish-dir`) are
 made absolute at the pipeline's entry point, because stages run with cwd set to

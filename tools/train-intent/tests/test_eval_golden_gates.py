@@ -29,6 +29,7 @@ SRC = ROOT / "src"
 FIXTURES = ROOT / "eval" / "fixtures"
 sys.path.insert(0, str(SRC))
 
+import encoder_rules  # noqa: E402  (path set above)
 import eval_golden  # noqa: E402  (path set above)
 from build_dataset import load_golden_keys, normalize  # noqa: E402
 
@@ -65,14 +66,33 @@ class CorpusFixtureTests(unittest.TestCase):
     """The held-out corpus / near-miss files meet the §9.1 + T-034 contract."""
 
     def test_corpus_covers_every_schema_v2_action(self):
+        """Every action present, per-action floor met, corpus at the gate floor.
+
+        Supersedes the 15-25 rows/action window: that band sized the corpus as a
+        boundary-case fixture. The calibration gate consumes a corpus twice over
+        — `corpus_floor: 8000` rows before `measurable_today` may be true, and
+        `per_action_floor: 0.25 x taxonomy.targets[action]` rows per action —
+        so this test pins the consumption contract instead. Both numbers come
+        from annotation_rules.yaml through encoder_rules (the T-034 source of
+        truth), never restated here.
+        """
+        rules = encoder_rules.load_rules()
         rows = _rows(CORPUS)
         counts: dict[str, int] = {}
         for r in rows:
             counts[r["intent"]] = counts.get(r["intent"], 0) + 1
         self.assertEqual(set(counts), VALID_ACTIONS)
+        self.assertGreaterEqual(
+            len(rows), rules.floors["corpus_min_rows"],
+            f"corpus has {len(rows)} rows, below the calibration corpus_floor "
+            f"({rules.floors['corpus_min_rows']})")
         for action, n in sorted(counts.items()):
-            self.assertGreaterEqual(n, 15, f"{action} has {n} rows (< 15)")
-            self.assertLessEqual(n, 25, f"{action} has {n} rows (> 25)")
+            target = rules.targets[action]
+            floor = int(target * rules.floors["per_action_min_frac"])
+            self.assertGreaterEqual(
+                n, floor,
+                f"{action} has {n} rows (< {floor} = "
+                f"{rules.floors['per_action_min_frac']} x taxonomy target {target})")
 
     def test_corpus_rows_carry_valid_spans_and_script_markers(self):
         for path in (CORPUS, NEARMISS):

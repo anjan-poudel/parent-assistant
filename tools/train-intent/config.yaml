@@ -135,6 +135,14 @@ encoder:
   #   consumed first was 8bc8be9/sha256 prefix 9926c7c93f87; the review commit
   #   only added notes + the interpreter `runtime.config` block, it did not
   #   touch the logit order, tags, loss or calibration gate.
+  # Then: branch worktree-8k-corpus (base master 9042805), blob ff0f8edcd47d,
+  #   sha256 prefix 09ffaaba427f. The ONLY change against b54d527 is
+  #   calibration.gate.measurable_today false -> true, made truthful by the
+  #   golden corpus reaching corpus_floor: 8000 rows at corpus revision
+  #   7f71b8ae (sha256 7f71b8aee37291a64deeba609864ac5f655c9926d6ecafda47377bedfad73648,
+  #   eval/golden_batches_manifest.jsonl). Open span->slot scoring decisions from
+  #   b54d527 are untouched; the logit order, tags, loss and gate numbers are
+  #   unchanged.
   pipeline:
     # Stage watchdog / retry policy for run_encoder_pipeline.py. 0 = no
     # watchdog: a training leg must never be killed by surprise on a shared
