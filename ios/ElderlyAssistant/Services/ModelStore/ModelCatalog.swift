@@ -293,6 +293,11 @@ enum ModelCatalog {
     ///
     ///     INTENT_ENCODER_SPIKE_ZIP=/path/to/t033-encoder-int8-mlmodelc.zip
     ///
+    /// A RELATIVE value is resolved against the app's Documents directory
+    /// instead — the `devicectl` route, where the tester can copy the zip
+    /// into `Documents/` but never learns the container UUID an absolute
+    /// path would need. See `configuredIntentEncoderSpikeZipURL`.
+    ///
     /// `environment` is injectable so tests can pin both branches without
     /// touching the process environment.
     static func intentEncoderSpikeZipURL(
@@ -308,6 +313,23 @@ enum ModelCatalog {
     /// The tester's own copy of the spike zip, or nil when the environment
     /// does not configure one.
     ///
+    /// The value is whitespace-trimmed, then:
+    ///   - an ABSOLUTE path (leading `/`) is used as given — the original
+    ///     behaviour, for a tester who has the file at a path they can
+    ///     name; or
+    ///   - any other value is a path RELATIVE to the app's Documents
+    ///     directory and is resolved against it. This exists because
+    ///     `devicectl` can copy a file into the app data container
+    ///     (`--domain-type appDataContainer --domain-identifier
+    ///     com.elderlyassistant.app --destination Documents/`) but does not
+    ///     expose the container UUID, so the tester cannot construct the
+    ///     absolute `/var/mobile/Containers/Data/Application/<uuid>/
+    ///     Documents/…` path. Staging the zip into `Documents/` and setting
+    ///
+    ///         INTENT_ENCODER_SPIKE_ZIP=t033-encoder-int8-mlmodelc.zip
+    ///
+    ///     is therefore the whole handshake.
+    ///
     /// [ENCODER-RUNTIME-READY] The install trigger
     /// (`IntentEncoderSpikeInstaller`) has to tell "not configured" apart
     /// from "configured": `intentEncoderSpikeZipURL` is deliberately total
@@ -317,9 +339,19 @@ enum ModelCatalog {
     /// not. Same key, same blank-string rule, one predicate.
     static func configuredIntentEncoderSpikeZipURL(
         environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
-        guard let path = environment["INTENT_ENCODER_SPIKE_ZIP"],
-              !path.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
-        return URL(fileURLWithPath: path)
+        guard let raw = environment["INTENT_ENCODER_SPIKE_ZIP"] else { return nil }
+        let path = raw.trimmingCharacters(in: .whitespaces)
+        guard !path.isEmpty else { return nil }
+        // Absolute: the tester's own staging location, used unchanged.
+        if path.hasPrefix("/") {
+            return URL(fileURLWithPath: path)
+        }
+        // Relative: a file the tester staged into the app's Documents
+        // directory (the devicectl route — the container UUID is unknowable
+        // from outside, so the absolute path cannot be written down).
+        let documents = FileManager.default.urls(for: .documentDirectory,
+                                                 in: .userDomainMask)[0]
+        return documents.appendingPathComponent(path)
     }
 
     /// The wake-word engine model (Slice A of voice-personalisation P0):
