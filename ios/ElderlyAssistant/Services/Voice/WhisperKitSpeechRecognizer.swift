@@ -50,7 +50,20 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     var turnTracer: VoiceTurnLatencyTracer?
 
     /// Which catalog artifact (a directory) to load in normal mode.
-    private let preferredModelID: ModelID
+    ///
+    /// [STT-SWITCHER] `private(set)`: the Settings picker's selection
+    /// arrives through `setPreferredModel(_:)` below, which adopts an id
+    /// only when it names a WhisperKit-delivered artifact — a whisper.cpp
+    /// ggml pick belongs to the CPU recognizer and must never repoint this
+    /// engine's load at a `.bin` it cannot read.
+    private(set) var preferredModelID: ModelID
+
+    /// The artifact this ANE runtime will load — what the Settings
+    /// "STT in use" caption reads (`AppCoordinator.updateActiveSTTName`).
+    /// Deliberately NOT the bench overrides (`modelFolderURL` /
+    /// `modelName`): those are test/bench hooks, not user picks, and the
+    /// label stays catalog-honest when they are set.
+    var effectiveModelID: ModelID { preferredModelID }
 
     // Bench hooks (env-driven, set by AppCoordinator's
     // makeWhisperKitBenchRecognizer): use a local folder or a named
@@ -131,6 +144,97 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
         self.preferredModelID = preferredModelID
+    }
+
+    // MARK: - Model preference (UI selection)  [STT-SWITCHER]
+
+    /// Applies the user's pick from Settings → AI मोडेल.
+    ///
+    /// ADOPTION RULE — the id is adopted only when it names an artifact
+    /// this runtime can load: a catalog entry delivered as a WhisperKit
+    /// model directory/zip (`whisperKitZipURL != nil` — see
+    /// `isWhisperKitArtifact(_:)` for why that field is the marker).
+    /// Everything else keeps the current artifact, deliberately:
+    ///
+    ///  - a whisper.cpp ggml pick (e.g. `whisperMediumV6`): its entry has
+    ///    no `whisperKitZipURL`. The CPU recognizer serves those
+    ///    (`WhisperSpeechRecognizer.setPreferredModel`), and repointing
+    ///    this engine at a `.bin` would not switch engines — it would make
+    ///    this one UNAVAILABLE (`isAvailable`/`loadDescriptor()` resolve
+    ///    `ModelStore.directoryURL(for: preferredModelID)`, and a ggml
+    ///    artifact is never installed there), silently killing the ANE
+    ///    path instead of handing the turn to whisper.cpp.
+    ///  - a non-catalog id (a removed/typo'd preference).
+    ///  - nil. nil is the picker's "Automatic" and must NOT unset the
+    ///    artifact: this engine has no automatic ORDER to fall back on
+    ///    (unlike `WhisperSpeechRecognizer.currentModelID()`, which walks
+    ///    the cached-model preference list). It loads exactly one catalog
+    ///    directory artifact and its documented default is
+    ///    `ModelCatalog.whisperKitNepaliMedium` (the init default). An
+    ///    unset would leave `loadDescriptor()` with nothing to resolve —
+    ///    `isAvailable` false — on a pick the user reads as "the app
+    ///    decides", so keeping the current artifact IS the automatic
+    ///    behavior for this engine.
+    ///
+    /// A real change releases a resident kit so the next turn reloads from
+    /// the new artifact instead of holding the old one's ~1.5 GB until the
+    /// post-turn policy releases it.
+    func setPreferredModel(_ id: ModelID?) {
+        guard let id,
+              Self.isWhisperKitArtifact(id),
+              id != preferredModelID else { return }
+        preferredModelID = id
+        // `released_model` states whether a resident kit was present when
+        // the pick landed (the release itself is asynchronous) — the
+        // content-free signal a dashboard needs to tell a cold switch
+        // from one that has to reload.
+        let hadResidentKit = kitInstance != nil
+        emit("preference_changed", errorCode: nil,
+             metadata: ["state": id.rawValue,
+                        "released_model": hadResidentKit ? "true" : "false"])
+        print("[whisperkit_stt] preference_changed model=\(id.rawValue) "
+            + "loaded=\(hadResidentKit)")
+        if hadResidentKit {
+            releaseLoadedKitForPreferenceChange()
+        }
+    }
+
+    /// True when `id` names an artifact WhisperKit can load: the catalog
+    /// entry is delivered as a WhisperKit model directory (a zip of the
+    /// model folder), i.e. carries a `whisperKitZipURL`.
+    ///
+    /// This one field IS the compatibility marker the rest of the app
+    /// already keys off:
+    ///  - `ModelCatalogEntry.whisperKitZipURL` documents the shape
+    ///    ("WhisperKit-format model delivered as a zip of the model
+    ///    directory (the ANE path)");
+    ///  - `ModelStore.isInstalled(_:)` uses exactly
+    ///    `entry.whisperKitZipURL != nil` to choose the DIRECTORY
+    ///    artifact check (`directoryURL(for:)`) over the single-file one;
+    ///  - `ModelStore.installWhisperKitModel(fromZip:for:)` is the only
+    ///    install path that writes `whisperKit/<id>` — the location both
+    ///    `isAvailable` and `loadDescriptor()` resolve.
+    /// A ggml `.bin` entry (whisper.cpp's kind) has no such URL.
+    static func isWhisperKitArtifact(_ id: ModelID) -> Bool {
+        ModelCatalog.entry(for: id)?.whisperKitZipURL != nil
+    }
+
+    /// [STT-SWITCHER] Drops a loaded kit after the artifact changed. Hops
+    /// to the inference queue (the queue the listening-start prewarm and
+    /// the per-turn inference entries run on) instead of writing
+    /// `kitInstance` from the caller's thread; the same public release the
+    /// memory-pressure path calls (`releaseModel()`).
+    ///
+    /// Not a hard guarantee against a load already in flight: `loadKit`
+    /// runs inside a `Task`, so a load started before the pick can still
+    /// land afterwards and fill `kitInstance` with the OLD artifact. That
+    /// is harmless — the descriptor embeds the model id, so the next
+    /// `loadKit(descriptor:)` sees a mismatch and builds the new artifact,
+    /// replacing the stale instance (worst case: one extra load).
+    private func releaseLoadedKitForPreferenceChange() {
+        inferenceQueue.async { [weak self] in
+            self?.releaseModel()
+        }
     }
 
     // MARK: - SpeechRecognizerProtocol

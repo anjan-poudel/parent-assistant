@@ -203,6 +203,24 @@ final class AppCoordinator: ObservableObject {
             UserDefaults.standard.set(sttModelPreference?.rawValue,
                                       forKey: Self.sttPreferenceKey)
             whisperSpeechRecognizer.setPreferredModel(sttModelPreference)
+            // [STT-SWITCHER] The ANE (WhisperKit) recognizer takes the pick
+            // too — without this line the selection never reached the
+            // engine DEVICES actually run (`OnDeviceSTTSelection` favors
+            // WhisperKit whenever it is available), so the status caption
+            // kept naming the v3 default while the user's pick was
+            // ignored. The recognizer adopts the id only when it names a
+            // WhisperKit-delivered artifact; a ggml pick stays with the
+            // CPU recognizer above (see `setPreferredModel`).
+            //
+            // The lazy accessor may be FORCED here on the first pick
+            // change. That is accepted (it mirrors the whisper.cpp line
+            // above, which forces its own recognizer + `modelStore` the
+            // same way, and `updateActiveSTTName()` below already touches
+            // this lazy) and cannot run during `init()`: a property
+            // observer never fires for the init-time restore assignment,
+            // so the factory's `sttModelPreference` read always happens
+            // after the restore.
+            whisperKitSpeechRecognizer.setPreferredModel(sttModelPreference)
             updateActiveSTTName()
         }
     }
@@ -990,10 +1008,21 @@ final class AppCoordinator: ObservableObject {
     /// [BOOT-REVIEW P0-1] FIRST USE, not `init()` (it forces `modelStore`,
     /// and the bench env probe + tracer/bias wiring live in the factory
     /// so the instance is fully configured on arrival).
+    ///
+    /// [STT-SWITCHER] The factory seeds the persisted pick, so the very
+    /// first load is the model the Settings picker already shows —
+    /// `sttModelPreference` is restored in `init()` (a DIRECT assignment
+    /// there: a didSet never fires during initialization, which is also
+    /// why the pick is not pushed through `setPreferredModel` before this
+    /// factory runs). Safe by construction: nothing in `init()` (or in any
+    /// other stored property's initializer) touches this lazy, so the
+    /// first evaluation is the boot's voice phase — provably after the
+    /// restore. `nil` (never picked) keeps the engine's own default.
     private lazy var whisperKitSpeechRecognizer: WhisperKitSpeechRecognizer = {
         let recognizer = WhisperKitSpeechRecognizer(
             observabilityBus: observabilityBus,
-            modelStore: modelStore
+            modelStore: modelStore,
+            preferredModelID: sttModelPreference ?? ModelCatalog.whisperKitNepaliMedium
         )
         // [TURN-TIMING] Both whisper recognizers mark `asr_loaded` with
         // their measured load ms when a load happens inside a live turn.
@@ -4466,9 +4495,12 @@ self.noteTalkContractChanged()
             return
         }
         // WhisperKit (ANE) wins the label whenever it's the recognizer the
-        // on-device stack will actually use.
+        // on-device stack will actually use. [STT-SWITCHER] The name comes
+        // from the recognizer's EFFECTIVE artifact — it used to be the
+        // hardcoded `whisperKitNepaliMedium` default, which is why a
+        // v6-medium pick still read "v3" below the picker.
         if voiceEngineStack == .onDevice, whisperKitSpeechRecognizer.isAvailable {
-            activeSTTNameKey = sttNameKey(for: ModelCatalog.whisperKitNepaliMedium)
+            activeSTTNameKey = sttNameKey(for: whisperKitSpeechRecognizer.effectiveModelID)
             return
         }
         let resolved = sttModelPreference
