@@ -710,11 +710,16 @@ enum ModelCatalog {
             // the ASSEMBLED file's size, which is also what the service's
             // `MAX_MULTIPART_TOTAL_BYTES` guardrail measures.
             //
-            // sha256: the coordinator supplies the digest after the v16
-            // upload — `pendingSHA256` is the clearly-marked placeholder
-            // until then, and the strict checksum path refuses to install
-            // from it (no household can end up with an unverified 2.5 GB
-            // brain).
+            // sha256: the ASSEMBLED file's digest — `partaa` ++ `partab`,
+            // in that order (the order IS the artifact). Verified
+            // 2026-09-14 against the v16 release assets AND the uploaded
+            // whole-file copy, which agree byte for byte:
+            //   1_500_000_000 + 997_278_784 = 2_497_278_784 bytes
+            //   -> 1662e2178c37ad7ab4f4eff9188adee90fd404fe649e23cbe421084d78f7a45f
+            // It is a LITERAL pin, not `pendingSHA256`: the placeholder is
+            // not a digest, so `ModelStore.finalize` could only ever answer
+            // "mismatch" — which is exactly how a correct 2.5 GB
+            // reassembly "failed checksum" on device (2026-09-14 report).
             filename: "intent-ne-qwen4b-slotcanon-q4_k_m.gguf",
             // `downloadURL` mirrors part 0 for readers that predate
             // `downloadPartURLs`; the service always takes the parts.
@@ -723,8 +728,12 @@ enum ModelCatalog {
                 URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v16/intent-ne-qwen4b-slotcanon-q4_k_m.gguf.partaa")!,
                 URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v16/intent-ne-qwen4b-slotcanon-q4_k_m.gguf.partab")!
             ],
-            sizeBytes: 2_497_278_752,
-            sha256: ModelCatalogEntry.pendingSHA256,
+            // The parts sum to 2_497_278_784 (the size the server and the
+            // uploaded whole file both report); the entry previously
+            // understated it by 32 bytes, which is what the download
+            // progress bar and the disk pre-flight measure against.
+            sizeBytes: 2_497_278_784,
+            sha256: "1662e2178c37ad7ab4f4eff9188adee90fd404fe649e23cbe421084d78f7a45f",
             // Same 4 GB floor as its seed-43 predecessor: 4B Q4_K_M is a
             // ~2.5 GB file and ~3.5-4 GB live, and the gate reads the
             // CURRENT free budget (`os_proc_available_memory`), not total

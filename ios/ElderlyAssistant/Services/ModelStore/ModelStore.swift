@@ -29,14 +29,21 @@ final class ModelStore {
     private let observabilityBus: ObservabilityBus
     private let rootDirectory: URL
     private let checksumPolicy: ModelChecksumPolicy
+    /// Catalog lookup this store resolves paths and digests through.
+    /// Injected via `init` purely as a TEST seam; production always gets the
+    /// shipped `ModelCatalog` (the default below), so every path/digest in
+    /// the app resolves exactly as before.
+    private let entryProvider: (ModelID) -> ModelCatalogEntry?
 
     init(fileManager: FileManager = .default,
          observabilityBus: ObservabilityBus,
          rootDirectoryOverride: URL? = nil,
-         checksumPolicy: ModelChecksumPolicy = .strict) throws {
+         checksumPolicy: ModelChecksumPolicy = .strict,
+         entryProvider: ((ModelID) -> ModelCatalogEntry?)? = nil) throws {
         self.fileManager = fileManager
         self.observabilityBus = observabilityBus
         self.checksumPolicy = checksumPolicy
+        self.entryProvider = entryProvider ?? ModelCatalog.entry(for:)
 
         if let override = rootDirectoryOverride {
             self.rootDirectory = override
@@ -57,7 +64,7 @@ final class ModelStore {
     /// URL where a fully-installed model file lives on disk. Nil if the file
     /// has never been downloaded, or was deleted since.
     func path(for id: ModelID) -> URL? {
-        guard let entry = ModelCatalog.entry(for: id) else { return nil }
+        guard let entry = entry(for: id) else { return nil }
         let url = finalURL(for: entry)
         return fileManager.fileExists(atPath: url.path) ? url : nil
     }
@@ -66,7 +73,7 @@ final class ModelStore {
     /// Kept out of the "final" area so half-downloaded files can't be
     /// mistaken for ready ones.
     func stagingURL(for id: ModelID) throws -> URL {
-        guard let entry = ModelCatalog.entry(for: id) else {
+        guard let entry = entry(for: id) else {
             throw ModelStoreError.unknownModel
         }
         let staging = rootDirectory.appendingPathComponent("staging", isDirectory: true)
@@ -75,16 +82,16 @@ final class ModelStore {
     }
 
     func isCached(_ id: ModelID) -> Bool {
-        if let entry = ModelCatalog.entry(for: id), entry.kind == .tts {
+        if let entry = entry(for: id), entry.kind == .tts {
             return ttsVoiceDirectory(for: id) != nil
         }
-        if let entry = ModelCatalog.entry(for: id), entry.kind == .kws {
+        if let entry = entry(for: id), entry.kind == .kws {
             return kwsModelDirectory(for: id) != nil
         }
         // [T-037-a] CoreML-only encoder: a DIRECTORY artifact with no ggml
         // sibling, so the single-file `path(for:)` check below is not the
         // right shape (it would also report a half-written staging file).
-        if let entry = ModelCatalog.entry(for: id), entry.kind == .intentEncoder {
+        if let entry = entry(for: id), entry.kind == .intentEncoder {
             return isCoreMLCached(id)
         }
         return path(for: id) != nil
@@ -107,7 +114,7 @@ final class ModelStore {
     /// URL of an installed TTS voice directory (contains model.onnx,
     /// tokens.txt, espeak-ng-data/). Nil when never installed.
     func ttsVoiceDirectory(for id: ModelID) -> URL? {
-        guard let entry = ModelCatalog.entry(for: id),
+        guard let entry = entry(for: id),
               entry.kind == .tts else { return nil }
         let dir = rootDirectory
             .appendingPathComponent("tts", isDirectory: true)
@@ -120,7 +127,7 @@ final class ModelStore {
     /// when already installed, nil when the catalog/bundle has no such
     /// voice (the caller then falls back to system TTS).
     func installBundledTTSVoice(for id: ModelID, bundle: Bundle = .main) -> URL? {
-        guard let entry = ModelCatalog.entry(for: id),
+        guard let entry = entry(for: id),
               entry.kind == .tts,
               let resourceName = entry.bundledResourceName,
               let source = bundle.url(forResource: resourceName,
@@ -153,7 +160,7 @@ final class ModelStore {
     /// when never installed. Mirrors the TTS-voice directory handling —
     /// KWS models are directory artifacts, not single files.
     func kwsModelDirectory(for id: ModelID) -> URL? {
-        guard let entry = ModelCatalog.entry(for: id),
+        guard let entry = entry(for: id),
               entry.kind == .kws else { return nil }
         let dir = rootDirectory
             .appendingPathComponent("kws", isDirectory: true)
@@ -170,7 +177,7 @@ final class ModelStore {
     /// (the wake-word selection then falls back exactly as before).
     @discardableResult
     func installBundledKWSModel(for id: ModelID, bundle: Bundle = .main) -> URL? {
-        guard let entry = ModelCatalog.entry(for: id),
+        guard let entry = entry(for: id),
               entry.kind == .kws,
               let resourceName = entry.bundledResourceName,
               let source = bundle.url(forResource: resourceName,
@@ -209,7 +216,7 @@ final class ModelStore {
     /// encoder.mlmodelc`), so we match that derivation exactly — a
     /// q5_1-preserving name here is silently ignored by the runtime.
     func coreMLBundleFinalURL(for id: ModelID) -> URL? {
-        guard let entry = ModelCatalog.entry(for: id) else { return nil }
+        guard let entry = entry(for: id) else { return nil }
         // [T-037-a] A CoreML-only encoder (kind .intentEncoder) has no ggml
         // sibling to derive a Whisper-style `<stem>-encoder.mlmodelc` name
         // from — the entry's own filename IS the installed directory name.
@@ -237,7 +244,7 @@ final class ModelStore {
     ///
     /// Returns the installed directory URL, nil on failure.
     func installCoreMLEncoder(fromZip zipURL: URL, for id: ModelID) throws -> URL? {
-        guard let entry = ModelCatalog.entry(for: id),
+        guard let entry = entry(for: id),
               let dest = coreMLBundleFinalURL(for: id) else { return nil }
         if entry.kind == .intentEncoder,
            !(try verifyChecksum(at: zipURL, expected: entry.sha256)) {
@@ -336,7 +343,7 @@ final class ModelStore {
     @discardableResult
     func installBundledCoreMLEncoder(for id: ModelID,
                                      bundle: Bundle = .main) -> URL? {
-        guard let entry = ModelCatalog.entry(for: id),
+        guard let entry = entry(for: id),
               let resourceName = entry.coreMLEncoderBundledName,
               let dest = coreMLBundleFinalURL(for: id) else {
             return nil
@@ -374,7 +381,7 @@ final class ModelStore {
     /// A model is "available" when it is cached AND all its declared
     /// dependencies are cached.
     func isAvailable(_ id: ModelID) -> Bool {
-        guard let entry = ModelCatalog.entry(for: id) else { return false }
+        guard let entry = entry(for: id) else { return false }
         guard isCached(entry.id) else { return false }
         if let dep = entry.dependsOn, !isCached(dep) { return false }
         return true
@@ -392,7 +399,7 @@ final class ModelStore {
     /// iCloud quota (the app re-downloads on demand).
     @discardableResult
     func finalize(_ id: ModelID) throws -> URL {
-        guard let entry = ModelCatalog.entry(for: id) else {
+        guard let entry = entry(for: id) else {
             throw ModelStoreError.unknownModel
         }
         let staged = try stagingURL(for: id)
@@ -444,7 +451,7 @@ final class ModelStore {
     /// Deletes a cached model file. Idempotent. Also removes the
     /// `-encoder.mlmodelc` sibling if present.
     func delete(_ id: ModelID) throws {
-        guard let entry = ModelCatalog.entry(for: id) else {
+        guard let entry = entry(for: id) else {
             throw ModelStoreError.unknownModel
         }
         let final = finalURL(for: entry)
@@ -499,7 +506,7 @@ final class ModelStore {
     func installBundledModel(for id: ModelID,
                              bundle: Bundle = .main,
                              progress: ((Int64, Int64) -> Void)? = nil) -> URL? {
-        guard let entry = ModelCatalog.entry(for: id),
+        guard let entry = entry(for: id),
               let resourceName = entry.bundledResourceName,
               let source = bundle.url(forResource: resourceName,
                                       withExtension: "bin") else {
@@ -601,7 +608,7 @@ final class ModelStore {
             .appendingPathComponent(id.rawValue, isDirectory: true)
         // Verify the zip against the catalog checksum before unpacking —
         // same strict policy as single-file `finalize`.
-        if let entry = ModelCatalog.entry(for: id),
+        if let entry = entry(for: id),
            !(try verifyChecksum(at: zipURL, expected: entry.sha256)) {
             emit("whisperkit_checksum_mismatch", outcome: "failure",
                  modelId: id, errorCode: "checksum")
@@ -668,6 +675,18 @@ final class ModelStore {
             .appendingPathComponent(entry.kind.rawValue, isDirectory: true)
             .appendingPathComponent(entry.filename,
                                     isDirectory: entry.kind.isDirectoryArtifact)
+    }
+
+    /// Catalog entry this store resolves `id` to. Production resolves the
+    /// shipped `ModelCatalog` (the default provider); tests may inject a
+    /// SYNTHETIC entry so the real download → concat → verify → install
+    /// path can be driven without a multi-GB release asset — the same seam
+    /// `ModelDownloadService.start(_ entry:)` provides on the service side,
+    /// without which the two halves disagree on whether a model exists
+    /// (the store would answer `unknownModel` for an id the service is
+    /// already downloading).
+    private func entry(for id: ModelID) -> ModelCatalogEntry? {
+        entryProvider(id)
     }
 
     private func ensureDirectory(_ url: URL) throws {

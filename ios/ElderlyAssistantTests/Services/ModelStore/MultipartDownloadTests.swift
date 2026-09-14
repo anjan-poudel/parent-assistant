@@ -29,10 +29,37 @@ final class MultipartDownloadTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    private func makeStore(policy: ModelChecksumPolicy = .skip) throws -> ModelStore {
+    /// `resolving:` injects a SYNTHETIC entry — one no release ships — so
+    /// the strict download → concat → verify → install path can run for it
+    /// without a multi-GB asset. Production resolves the shipped catalog;
+    /// the service side already takes a synthetic entry
+    /// (`ModelDownloadService.start(_ entry:)`), and this is the store half
+    /// of that same seam (without it the store answers `unknownModel` for
+    /// an id the service is already downloading).
+    private func makeStore(policy: ModelChecksumPolicy = .skip,
+                           resolving entry: ModelCatalogEntry? = nil) throws -> ModelStore {
         try ModelStore(observabilityBus: bus,
                        rootDirectoryOverride: tmpRoot,
-                       checksumPolicy: policy)
+                       checksumPolicy: policy,
+                       entryProvider: { id in
+                           if let entry, entry.id == id { return entry }
+                           return ModelCatalog.entry(for: id)
+                       })
+    }
+
+    /// Streaming sha256 the strict verifier would compute, for building a
+    /// REAL pin for a synthetic artifact.
+    private func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// Deterministic filler bytes for a part of `count` bytes.
+    private func patternedBytes(_ count: Int) -> Data {
+        let pattern = Array("0123456789abcdef".utf8)
+        var data = Data()
+        data.reserveCapacity(count)
+        while data.count < count { data.append(contentsOf: pattern) }
+        return Data(data.prefix(count))
     }
 
     /// A session factory whose sessions answer through the stub protocol
@@ -48,7 +75,8 @@ final class MultipartDownloadTests: XCTestCase {
     }
 
     private func makeEntry(id: String, sizeBytes: Int64,
-                           parts: [URL]? = nil) -> ModelCatalogEntry {
+                           parts: [URL]? = nil,
+                           sha: String = String(repeating: "a", count: 64)) -> ModelCatalogEntry {
         ModelCatalogEntry(
             id: ModelID(id),
             kind: .llamaBase,
@@ -57,7 +85,7 @@ final class MultipartDownloadTests: XCTestCase {
             downloadURL: parts?.first ?? URL(string: "https://example.com/\(id).gguf")!,
             downloadPartURLs: parts,
             sizeBytes: sizeBytes,
-            sha256: String(repeating: "a", count: 64),
+            sha256: sha,
             minDeviceRAMBytes: 1,
             languages: [])
     }
@@ -111,13 +139,26 @@ final class MultipartDownloadTests: XCTestCase {
         XCTAssertEqual(entry.displayName, "Brain — Qwen 4B · Nepali (gate-passing)")
         XCTAssertEqual(entry.kind, .llamaBase)
         XCTAssertEqual(entry.filename, "intent-ne-qwen4b-slotcanon-q4_k_m.gguf")
-        XCTAssertEqual(entry.sizeBytes, 2_497_278_752)
+        XCTAssertEqual(entry.sizeBytes, 2_497_278_784,
+                       "the ASSEMBLED size — what the v16 parts sum to "
+                       + "(1_500_000_000 + 997_278_784) and what the server "
+                       + "reports. The entry understated it by 32 bytes while "
+                       + "the download progress and disk pre-flight measure "
+                       + "against it")
         XCTAssertEqual(entry.minDeviceRAMBytes, 4_000_000_000)
         XCTAssertEqual(entry.languages, ["ne"])
-        XCTAssertEqual(entry.sha256, ModelCatalogEntry.pendingSHA256,
-                       "the digest lands with the v16 upload — the entry must "
-                       + "carry the clearly-marked placeholder, never a "
-                       + "fabricated 64-hex pin")
+        // THE REGRESSION (2026-09-14 on-device report): the entry must pin
+        // the digest the two parts CONCATENATE to. Verified against the v16
+        // release assets and the uploaded whole file, which agree byte for
+        // byte. A placeholder is not a digest, so the strict verifier could
+        // only ever answer "checksum failed" — after the user had already
+        // paid for the full 2.5 GB download.
+        XCTAssertEqual(entry.sha256,
+                       "1662e2178c37ad7ab4f4eff9188adee90fd404fe649e23cbe421084d78f7a45f",
+                       "the v16 pin is the ASSEMBLED file's digest")
+        XCTAssertNotEqual(entry.sha256, ModelCatalogEntry.pendingSHA256,
+                          "the v16 brain is uploaded — the entry must carry "
+                          + "its real digest, not the pre-upload placeholder")
         XCTAssertLessThanOrEqual(entry.sizeBytes, ModelDownloadService.maxMultipartTotalBytes,
                                  "the default brain must fit the size guardrail")
 
@@ -341,8 +382,13 @@ final class MultipartDownloadTests: XCTestCase {
         XCTAssertTrue(bus.emittedEvents.contains {
             $0.eventType == "download_completed" && $0.outcome == "success"
         })
-        XCTAssertTrue(partTempDirectories(for: id).isEmpty,
-                      "a completed reassembly must leave no part temp files behind")
+        // The runner deletes its temp directory on its own (delegate) queue
+        // right AFTER the service has the parts — i.e. after `.completed`
+        // is published — so this must be a wait, not an instantaneous read,
+        // or the assertion races the deletion. A real leak still fails.
+        waitUntil("the part temp files to be removed") {
+            self.partTempDirectories(for: id).isEmpty
+        }
     }
 
     /// A part that fails kills the whole attempt: the remaining parts are
@@ -404,6 +450,153 @@ final class MultipartDownloadTests: XCTestCase {
                        "a cancellation is not a failure")
         XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "download_cancelled" })
         XCTAssertNil(store.path(for: id))
+    }
+
+    // MARK: - STRICT end to end: the path the on-device report exercised
+    //
+    // The tests above only reach `finalize` with `.skip` (their bytes are
+    // fixtures, so a REAL digest would have to be fabricated). That left the
+    // strict half of the path — the one every production download takes —
+    // with no end-to-end coverage at all, which is how a 2.5 GB reassembly
+    // could be verified against a string that is not a digest. These three
+    // tests drive the SAME real flow with `.strict` and a genuine pin.
+
+    /// The reported bug, reproduced and closed: two small parts (3 bytes +
+    /// 2 bytes) whose ENTRY carries the assembled file's real sha256, run
+    /// through the real download → concat → verify → install flow on the
+    /// STRICT policy. It must install, and what lands must hash to the pin.
+    func testStrictMultipartDownloadInstallsEndToEndWithTheAssembledDigest() throws {
+        let partAA = Data("abc".utf8)                 // 3 bytes
+        let partAB = Data("de".utf8)                  // 2 bytes
+        let assembled = partAA + partAB
+        let digest = sha256Hex(assembled)             // a REAL full-file sha
+        let parts = [URL(string: "https://example.com/strict.gguf.partaa")!,
+                     URL(string: "https://example.com/strict.gguf.partab")!]
+        MultipartStubURLProtocol.payloads = [
+            "strict.gguf.partaa": partAA,
+            "strict.gguf.partab": partAB
+        ]
+        let entry = makeEntry(id: "synthetic-strict-multipart",
+                              sizeBytes: Int64(assembled.count),
+                              parts: parts,
+                              sha: digest)
+        let store = try makeStore(policy: .strict, resolving: entry)
+        let service = ModelDownloadService(store: store,
+                                           observabilityBus: bus,
+                                           sessionFactory: stubSessionFactory())
+
+        service.start(entry)
+        waitUntil("the strict multipart download to install") {
+            service.states[entry.id] == .completed
+        }
+
+        let installed = try XCTUnwrap(store.path(for: entry.id),
+                                      "an entry whose pin matches the reassembly "
+                                      + "must install — this is the flow the "
+                                      + "on-device report failed")
+        XCTAssertEqual(try Data(contentsOf: installed), assembled,
+                       "the installed file is part 0 then part 1")
+        XCTAssertEqual(sha256Hex(try Data(contentsOf: installed)), digest,
+                       "the file the strict verifier promoted IS the artifact "
+                       + "the entry pins")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "download_completed" && $0.outcome == "success"
+        })
+        XCTAssertFalse(bus.emittedEvents.contains {
+            $0.eventType == "download_checksum_failed"
+        }, "a correct reassembly must not be reported as a checksum failure")
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: try store.stagingURL(for: entry.id).path),
+            "a successful install promotes the staged file — nothing is left behind")
+        waitUntil("the part temp files to be removed") {
+            self.partTempDirectories(for: entry.id).isEmpty
+        }
+    }
+
+    /// The other half of the contract: the strict policy is genuinely ON for
+    /// this path. One hex character of the pin changed is enough to refuse
+    /// the install, publish `download_checksum_failed`, and leave neither an
+    /// installed file nor a staged one — the same assertions a placeholder
+    /// digest would have produced on device.
+    func testStrictMultipartDownloadRefusesAWrongDigestAndInstallsNothing() throws {
+        let partAA = Data("abc".utf8)
+        let partAB = Data("de".utf8)
+        let assembled = partAA + partAB
+        let good = sha256Hex(assembled)
+        var wrong = good
+        let firstCharacter = wrong.removeFirst()
+        wrong = (firstCharacter == "0" ? "1" : "0") + wrong
+        XCTAssertEqual(wrong.count, 64)
+        XCTAssertNotEqual(wrong, good)
+        let parts = [URL(string: "https://example.com/wrong.gguf.partaa")!,
+                     URL(string: "https://example.com/wrong.gguf.partab")!]
+        MultipartStubURLProtocol.payloads = [
+            "wrong.gguf.partaa": partAA,
+            "wrong.gguf.partab": partAB
+        ]
+        let entry = makeEntry(id: "synthetic-strict-wrong-digest",
+                              sizeBytes: Int64(assembled.count),
+                              parts: parts,
+                              sha: wrong)
+        let store = try makeStore(policy: .strict, resolving: entry)
+        let service = ModelDownloadService(store: store,
+                                           observabilityBus: bus,
+                                           sessionFactory: stubSessionFactory())
+
+        service.start(entry)
+        waitUntil("the strict verifier to refuse the reassembly") {
+            service.states[entry.id] == .failed(reason: "checksum failed")
+        }
+
+        XCTAssertNil(store.path(for: entry.id),
+                     "a reassembly that does not match the pin must install nothing")
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: try store.stagingURL(for: entry.id).path),
+            "the rejected staging file must be cleaned up")
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "download_checksum_failed" && $0.errorCode == "checksum"
+        })
+        waitUntil("the refused attempt's part temp files to be removed") {
+            self.partTempDirectories(for: entry.id).isEmpty
+        }
+    }
+
+    /// The reassembly streams through a 1 MB buffer, so the digest the strict
+    /// verifier checks has to survive parts that straddle it (and three
+    /// parts, which is the full concurrent window). A 3+2-byte fixture
+    /// cannot catch a truncated or duplicated chunk; this can.
+    func testStrictMultipartDownloadVerifiesARedassemblyThatStraddlesTheChunkBuffer() throws {
+        let payloads = [patternedBytes(1_500_000),      // > one 1 MB read
+                        patternedBytes(2),              // a mid-stream speck
+                        patternedBytes(900_000)]        // tail
+        let names = ["chunked.gguf.partaa", "chunked.gguf.partab", "chunked.gguf.partac"]
+        let parts = names.map { URL(string: "https://example.com/\($0)")! }
+        MultipartStubURLProtocol.payloads = Dictionary(
+            uniqueKeysWithValues: zip(names, payloads))
+        let assembled = payloads.reduce(Data(), +)
+        let entry = makeEntry(id: "synthetic-strict-chunked",
+                              sizeBytes: Int64(assembled.count),
+                              parts: parts,
+                              sha: sha256Hex(assembled))
+        let store = try makeStore(policy: .strict, resolving: entry)
+        let service = ModelDownloadService(store: store,
+                                           observabilityBus: bus,
+                                           sessionFactory: stubSessionFactory())
+
+        service.start(entry)
+        waitUntil("the chunked strict multipart download to install") {
+            service.states[entry.id] == .completed
+        }
+
+        let installed = try XCTUnwrap(store.path(for: entry.id))
+        let bytes = try Data(contentsOf: installed)
+        XCTAssertEqual(bytes.count, assembled.count,
+                       "every byte of every part must survive the reassembly")
+        XCTAssertEqual(bytes, assembled)
+        XCTAssertEqual(sha256Hex(bytes), entry.sha256,
+                       "the installed file hashes to the pin")
+        XCTAssertEqual(MultipartStubURLProtocol.requestedPaths.sorted(), names.sorted(),
+                       "all three parts are fetched exactly once")
     }
 
     // MARK: - The single-file path is unchanged
