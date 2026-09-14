@@ -69,6 +69,16 @@ final class AppCoordinator: ObservableObject {
     /// resolves against.
     var activeLocale: Locale { appLanguage.locale }
 
+    /// The region-qualified app locale — the Settings locale row's
+    /// binding (encoder-branch SettingsView, 2026-09-14). Bridged to
+    /// `AppLocale`'s own UserDefaults persistence; `activeLocale` keeps
+    /// following the language default until the locale-override wiring is
+    /// completed by the encoder-branch work.
+    var appLocale: AppLocale {
+        get { AppLocale.persisted(for: appLanguage) }
+        set { newValue.persist() }
+    }
+
     /// Pushes the active language into the services that build user-facing
     /// strings at call time — platform notifications, spoken confirmation
     /// challenges, and family alert payloads (spec §3.2). Runs once at the
@@ -651,6 +661,13 @@ final class AppCoordinator: ObservableObject {
     private let medicationScheduler: MedicationScheduler
     private let alarmScheduler: UNNotificationScheduler
     private let familyNotifier: APNsFamilyNotifier
+    /// [CAREGIVER-EVENTS] (2026-09-13) Per-event-type caregiver
+    /// notification preferences (Settings → "Notify caregivers"). Owned
+    /// here because three separate services read it at fire time
+    /// (`MedicationScheduler`, `RoutineScheduler`, and the event fire
+    /// handler); `SettingsView` binds the same instance, so a toggle flip
+    /// takes effect on the very next fire with no propagation step.
+    let caregiverNotifySettings: CaregiverNotifySettings
 
     /// Generalised routine reminders (v2 pivot Phase 1 — walk, exercise,
     /// meals, bedtime, …). NOT safety-critical: no ack window, no
@@ -1659,8 +1676,19 @@ final class AppCoordinator: ObservableObject {
         self.familyContacts = []
         self.familyNotifier = APNsFamilyNotifier(
             contacts: [],
-            apnsProvider: APNsProvider()
+            apnsProvider: APNsProvider(),
+            // The bus exists by now (the init snippet above creates it
+            // first) — `family_event_alerted` is the only evidence a
+            // caregiver alert was even attempted, since the APNs
+            // provider is still the stub.
+            observabilityBus: bus
         )
+
+        // [CAREGIVER-EVENTS] (2026-09-13) Preferences before the two
+        // schedulers that read them at fire time. Standard defaults, no
+        // keychain: UI preferences, not secrets.
+        let caregiverNotifySettings = CaregiverNotifySettings()
+        self.caregiverNotifySettings = caregiverNotifySettings
 
         // Saved navigation places (directions task, 2026-09-07) —
         // encrypted like the contacts above; the store self-heals legacy
@@ -1719,7 +1747,8 @@ final class AppCoordinator: ObservableObject {
             storage: storage,
             alarmScheduler: alarmScheduler,
             observabilityBus: bus,
-            familyNotifier: familyNotifier
+            familyNotifier: familyNotifier,
+            caregiverNotifySettings: caregiverNotifySettings
         )
 
         // Routine reminders (v2 pivot Phase 1): the medication path's
@@ -1737,7 +1766,12 @@ final class AppCoordinator: ObservableObject {
         let routineScheduler = RoutineScheduler(
             store: routineStore,
             alarmScheduler: routineAlarmScheduler,
-            observabilityBus: bus
+            observabilityBus: bus,
+            // [CAREGIVER-EVENTS] (2026-09-13) Routines had NO caregiver
+            // notification path at all; `markDelivered` is where the
+            // alert now fires from.
+            familyNotifier: familyNotifier,
+            caregiverNotifySettings: caregiverNotifySettings
         )
         self.routineScheduler = routineScheduler
         self.routinePlugin = RoutinePlugin(scheduler: routineScheduler)
@@ -2068,6 +2102,17 @@ final class AppCoordinator: ObservableObject {
         // Settings leaf observes the coordinator, so a toggle/delete/
         // timer-start must invalidate it through this sink.
         alarmTimersCancellable = alarmTimersService.objectWillChange
+            .sink { [weak self] _ in
+                self?.noteForwardedStateChanged()
+            }
+
+        // [CAREGIVER-EVENTS] (2026-09-13) Forward the caregiver-notify
+        // settings' publishes — nested ObservableObject, same pattern (and
+        // the same coalescing seam) as the two above: the Settings leaf
+        // observes the coordinator, so a toggle flip must invalidate it
+        // through this sink; the schedulers read the same instance at
+        // fire time and need no notification at all.
+        caregiverNotifySettingsCancellable = caregiverNotifySettings.objectWillChange
             .sink { [weak self] _ in
                 self?.noteForwardedStateChanged()
             }
@@ -2427,7 +2472,26 @@ final class AppCoordinator: ObservableObject {
         // timer-completion notifications, so the reader never speaks over
         // the bell, and routes a tap on a delivered timer notification
         // into the ringing alarm screen.
-        let facade = NotificationFacade(handlers: [timerAlarmEngine, notificationReader],
+        // [CAREGIVER-EVENTS] (2026-09-13) Third handler: turns a delivered
+        // routine/calendar event notification into a caregiver alert. It
+        // ALWAYS declines to claim (`willPresent` returns false), so the
+        // reader below it is never suppressed and the banners keep
+        // appearing — registration order here is for the read-aloud
+        // allowlist, not for claiming precedence.
+        let caregiverEventHandler = CaregiverEventFireHandler(
+            routineScheduler: routineScheduler,
+            familyNotifier: familyNotifier,
+            settings: caregiverNotifySettings,
+            // Resolved at FIRE time, exactly like the settings gate: the
+            // item may have been deleted (nil → the alert falls back to
+            // the notification's own body) or retitled by the family in
+            // the native app since the scan.
+            externalItemLookup: { [weak externalCalendar = self.externalCalendar] stableKey in
+                externalCalendar?.reminders.first { $0.id == stableKey }
+            },
+            observability: observabilityBus
+        )
+        let facade = NotificationFacade(handlers: [timerAlarmEngine, notificationReader, caregiverEventHandler],
                                          observability: observabilityBus)
         UNUserNotificationCenter.current().delegate = facade
         // [TIMER-ALARM] Foreground driver: evaluates the ringing engine
@@ -2655,7 +2719,8 @@ final class AppCoordinator: ObservableObject {
             guard let self else { return }
             self.familyContacts = batch.contacts
             self.familyNotifier.updateContacts(
-                Self.emergencyContacts(from: batch.contacts))
+                Self.emergencyContacts(from: batch.contacts,
+                                       defaultCallApp: self.defaultCallApp))
             self.savedPlaces = batch.places
             self.appointments = batch.appointments
             self.todayBriefing = batch.briefing
@@ -4608,14 +4673,38 @@ self.noteTalkContractChanged()
     /// Maps stored family contacts onto the notifier's contact type.
     /// Device tokens stay unprovisioned until the broker relay exists
     /// (review C6) — the list itself is real and wired.
-    private static func emergencyContacts(from contacts: [FamilyContact]) -> [EmergencyContact] {
-        contacts.map {
-            EmergencyContact(
-                id: $0.id,
-                displayName: $0.name,
+    ///
+    /// [CAREGIVER-EVENTS] (2026-09-13) Each contact also resolves its
+    /// EVENT-ALERT channel from the calling preference the elder already
+    /// chose: a contact the app calls on WhatsApp gets event alerts on
+    /// WhatsApp, one it calls on Messenger gets Messenger (and falls back
+    /// to SMS when no handle is on file — Messenger addresses people by
+    /// username, the same pre-gate `resolvedCallChannel` applies to the
+    /// call button), everything else rides SMS. `preferredCallApp` is
+    /// optional and per-contact, so the app-wide default fills in —
+    /// `notifyChannel` is a pure function of the two, kept out of this
+    /// mapper so the matrix is testable without constructing a contact.
+    ///
+    /// Note the deliberate hardcode below is NOT the pre-existing
+    /// `isEmergencyContact: true` one (out of scope here): the fallback
+    /// chain is explicit because a curated contact that is not a family
+    /// target still has to resolve to SOMETHING for the type's
+    /// non-optional field.
+    private static func emergencyContacts(from contacts: [FamilyContact],
+                                          defaultCallApp: CallApp) -> [EmergencyContact] {
+        contacts.map { contact in
+            let channel = NotifyChannel.resolve(
+                preferred: contact.preferredCallApp,
+                defaultApp: defaultCallApp,
+                messengerHandleAvailable: !(contact.messengerHandle ?? "").isEmpty
+            )
+            return EmergencyContact(
+                id: contact.id,
+                displayName: contact.name,
                 deviceToken: "",
                 isEmergencyContact: true,
-                isFamilyNotificationTarget: true
+                isFamilyNotificationTarget: true,
+                notifyChannel: channel
             )
         }
     }
@@ -4673,7 +4762,8 @@ self.noteTalkContractChanged()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.familyContacts = self.familyContactStore.load()
-            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts))
+            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts,
+                                   defaultCallApp: self.defaultCallApp))
         }
         return true
     }
@@ -4756,7 +4846,8 @@ self.noteTalkContractChanged()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.familyContacts = self.familyContactStore.load()
-            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts))
+            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts,
+                                   defaultCallApp: self.defaultCallApp))
         }
         return true
     }
@@ -4774,7 +4865,8 @@ self.noteTalkContractChanged()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.familyContacts = self.familyContactStore.load()
-            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts))
+            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts,
+                                   defaultCallApp: self.defaultCallApp))
         }
     }
 
@@ -5025,6 +5117,146 @@ self.noteTalkContractChanged()
             outcome: outcome,
             errorCode: nil,
             metadata: [:]  // app id only — no contact identifiers (C9)
+        ))
+    }
+
+    // MARK: - Voice-triggered calendar event (caregiver event-notifications, 2026-09-13)
+
+    /// A `create_calendar_event` interpretation pended for confirmation.
+    /// Holds the RESOLVED start instant, never the raw time expression:
+    /// the router parses once (`NepaliTimeParser` +
+    /// `CalendarEventTimeResolver`), so the confirmation prompt, the
+    /// written event and the spoken outcome can never disagree about
+    /// when the event is.
+    struct PendingCalendarEvent {
+        let title: String
+        let startDate: Date
+    }
+
+    @Published private(set) var pendingCalendarEvent: PendingCalendarEvent?
+
+    /// [CALENDAR-EVENTS] (2026-09-13) Router-side twin of
+    /// `pendingCalendarEvent != nil` — the router skips its generic
+    /// medication-flavored yes/no speech while an event is pended (see
+    /// `VoiceCommandCoordinating.isAwaitingCalendarEventConfirmation`).
+    var isAwaitingCalendarEventConfirmation: Bool { pendingCalendarEvent != nil }
+
+    /// The EventKit write seam for voice-created events — LAZY like
+    /// `calendarSync`: constructing it touches no permissions, and
+    /// nothing here runs until the elder actually asks for an event.
+    /// Unlike `calendarSync` it is NOT the mirror: it writes one-off
+    /// events to the user's DEFAULT calendar (see
+    /// `VoiceCalendarEventWriter`), which is what makes them flow back
+    /// through the external-calendar import and fire the caregiver
+    /// alert like any other calendar reminder.
+    private(set) lazy var voiceCalendarEventWriter: CalendarEventWriting =
+        EventKitCalendarEventWriter()
+
+    /// `create_calendar_event` (real executor — replaces the stub it
+    /// shared with `suggest_video`). Pends the resolved event, puts the
+    /// session in awaiting-confirmation and returns the prompt to speak;
+    /// nil when the calendar cannot be written at all right now, so the
+    /// router speaks its honest unavailable line instead of asking the
+    /// elder to confirm an action that can only fail.
+    ///
+    /// The spoken time is `SpokenTime`'s, never a `DateFormatter`'s: the
+    /// promise of the feature is that an elder HEARS "भोलि बिहान ८ बजे"
+    /// and can say yes to it, and a clock string read out as digits is
+    /// exactly the bug `SpokenTime` exists to prevent.
+    func requestCalendarEventConfirmation(title: String, startDate: Date) -> String? {
+        guard canWriteCalendarEvents else { return nil }
+        let event = PendingCalendarEvent(title: title, startDate: startDate)
+        pendingCalendarEvent = event
+        DispatchQueue.main.async { [weak self] in
+            self?.voiceSession.transition(to: .awaitingConfirmation)
+        }
+        return L10n.fmt("router.calendarEventConfirm",
+                        locale: activeLocale,
+                        event.title,
+                        SpokenTime.string(from: event.startDate, locale: activeLocale))
+    }
+
+    /// Whether a voice-created event can plausibly be written WITHOUT
+    /// prompting. `.writeOnly` counts — the voice flow only ever CREATES,
+    /// which is precisely what a write-only grant permits — and
+    /// `.notDetermined` counts because that is the one case where the
+    /// point-of-use ask (which happens AFTER the elder has confirmed)
+    /// can still succeed; refusing to ask would make the feature
+    /// unreachable on a fresh install. Only `denied`/`restricted` are
+    /// dead ends, and those must never be papered over with a
+    /// confirmation question.
+    private var canWriteCalendarEvents: Bool {
+        switch voiceCalendarEventWriter.eventsAccess {
+        case .fullAccess, .writeOnly, .notDetermined:
+            return true
+        case .denied, .restricted:
+            return false
+        }
+    }
+
+    /// Confirmed: ask if never asked, write, then speak the honest
+    /// outcome. Both halves are off-main (the access ask is a suspension
+    /// point, and `EKEventStore.save` is blocking IO) and the result
+    /// returns to the main queue to touch published state.
+    ///
+    /// The event is written to the DEFAULT calendar, so the normal
+    /// external-calendar import picks it up and arms its reminder — a
+    /// rescan here just makes that immediate instead of waiting for the
+    /// next foreground/BGTask scan. That is also the honest limit of
+    /// this path: if the family has the external-calendar import toggled
+    /// OFF, the event exists in the native calendar but the app has no
+    /// reminder to fire from (and therefore no caregiver alert either) —
+    /// the written event is still correct, and `router.calendarEventCreated`
+    /// claims only that it was added to the calendar.
+    private func executePendingCalendarEvent(_ event: PendingCalendarEvent) {
+        Task { [weak self] in
+            guard let self else { return }
+            if self.voiceCalendarEventWriter.eventsAccess == .notDetermined {
+                _ = await self.voiceCalendarEventWriter.requestAccess()
+            }
+            let created = self.voiceCalendarEventWriter.create(
+                title: event.title,
+                startDate: event.startDate,
+                durationMinutes: EventKitCalendarEventWriter.defaultDurationMinutes
+            )
+            DispatchQueue.main.async {
+                self.finishCalendarEventWrite(event, created: created)
+            }
+        }
+    }
+
+    /// Shared tail of a confirmed calendar write. A REFUSED write (access
+    /// vanished between the prompt and the save, or EventKit rejected it)
+    /// gets the honest unavailable line — never a success claim. No
+    /// PII event: only the outcome, and the event id hash never leaves
+    /// the alert context in any case.
+    private func finishCalendarEventWrite(_ event: PendingCalendarEvent, created: Bool) {
+        guard created else {
+            emitCalendarEvent(eventType: "command_calendar_event_write_failed",
+                              outcome: "blocked")
+            replyHonestly(key: "router.calendarEventCalendarUnavailable")
+            return
+        }
+        let text = L10n.fmt("router.calendarEventCreated",
+                            locale: activeLocale,
+                            event.title,
+                            SpokenTime.string(from: event.startDate, locale: activeLocale))
+        setOutcome(icon: "calendar.badge.plus", text: text)
+        speak(text: text)
+        Task { await externalCalendar.rescan() }
+    }
+
+    /// Observability for the calendar-event write path. Metadata-free by
+    /// construction (constitution C9): the event TITLE is user content
+    /// and never reaches the bus.
+    private func emitCalendarEvent(eventType: String, outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "app_coordinator",
+            eventType: eventType,
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]
         ))
     }
 
@@ -6542,6 +6774,14 @@ self.noteTalkContractChanged()
     /// pattern as `externalCalendarCancellable`).
     private var alarmTimersCancellable: AnyCancellable?
 
+    /// Forwards the caregiver-notify settings' publishes
+    /// ([CAREGIVER-EVENTS] 2026-09-13): nested ObservableObject — a
+    /// toggle flip alone would not invalidate views observing the
+    /// coordinator, so the Settings leaf's switch would not move until
+    /// something else repainted (same pattern as
+    /// `externalCalendarCancellable`).
+    private var caregiverNotifySettingsCancellable: AnyCancellable?
+
     /// Offline Bikram Sambat + tithi + festival overlay and festival
     /// notification scheduling (2026-09-06 BS calendar feature).
     private(set) lazy var festivalCalendar = FestivalCalendarService(observabilityBus: observabilityBus)
@@ -6855,6 +7095,28 @@ self.noteTalkContractChanged()
             }
             return
         }
+        // Calendar-event confirmations (caregiver event-notifications,
+        // 2026-09-13): same additive shape as the call block above —
+        // checked and returned early, so the medication path below stays
+        // untouched. A YES writes the event; a NO speaks the honest
+        // cancellation (same as the call and directions paths — an elder
+        // who says "होइन" must hear that they were heard, not silence).
+        if let event = pendingCalendarEvent {
+            pendingCalendarEvent = nil
+            if case .yes = response {
+                emitCalendarEvent(eventType: "command_calendar_event_confirmed",
+                                  outcome: "success")
+                executePendingCalendarEvent(event)
+            } else {
+                emitCalendarEvent(eventType: "command_calendar_event_cancelled",
+                                  outcome: "cancelled")
+                speak(text: L10n.str("router.calendarEventCancelled", locale: activeLocale))
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.voiceSession.transition(to: .idle)
+            }
+            return
+        }
         guard let entryId = pendingConfirmationEntryId else { return }
         _ = medicationScheduler.acknowledgeWithConfirmation(
             entryId: entryId,
@@ -6885,6 +7147,7 @@ self.noteTalkContractChanged()
     /// stays in force.
     var isAwaitingConfirmation: Bool {
         pendingConfirmationEntryId != nil || pendingCallAction != nil || pendingRephrase != nil
+            || pendingCalendarEvent != nil
             || !pendingNavigationWalk.isEmpty
     }
 

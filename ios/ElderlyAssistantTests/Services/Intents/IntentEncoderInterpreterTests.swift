@@ -939,6 +939,124 @@ final class IntentEncoderInterpreterTests: XCTestCase {
         XCTAssertEqual(IntentEncoderSchema.action(forRawValue: "create_calendar_event"),
                        .createCalendarEvent)
     }
+
+
+    // MARK: - [TURN-TIMING-BREAKDOWN] encoder stage instrumentation
+
+    /// The encoder's three stages — tokenizer, CoreML forward, decode —
+    /// are recorded for a timed turn, in canonical order, with
+    /// non-negative durations; the serving path is otherwise untouched.
+    func testEncoderStagesAreRecordedForATimedTurn() throws {
+        let transcript = "भोलि बिहान ८ बजे औषधि खान सम्झाइदिनु"
+        let context = ctx()
+        let store = try makeStore()
+        _ = try installArtifact(store: store)
+        let tokenizer = StubIntentEncoderTokenizer()
+        let spy = IntentEncoderRunnerSpy()
+        let manifest = testManifest()
+        let clean = InputSanitiser.sanitise(transcript, level: .quarantine)
+        let tokenization = try XCTUnwrap(tokenizer.tokenize(
+            sanitisedTranscript: clean, maxSequenceLength: 64))
+        let model = StubIntentEncoderModel()
+        model.logits = makeLogits(
+            manifest: manifest,
+            intent: "set_reminder",
+            wordTags: ["B-time", "I-time", "I-time", "I-time",
+                       "B-medication", "O", "O"],
+            tokenization: tokenization)
+        spy.make = { model }
+
+        let recorder = TurnTimingRecorder()
+        let interpreter = IntentEncoderInterpreter(
+            modelStore: store,
+            observabilityBus: bus,
+            modelId: ModelCatalog.intentEncoderSpike,
+            manifest: manifest,
+            tokenizer: tokenizer,
+            timingRecorder: recorder,
+            modelRunnerFactory: spy.makeRunner)
+        XCTAssertTrue(interpreter.isAvailable)
+
+        recorder.beginTurn()
+        var decoded: InterpretedCommand?
+        let exp = expectation(description: "interpret")
+        interpreter.interpret(transcript: transcript, context: context) { result in
+            decoded = result
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 5)
+        let breakdown = recorder.finishTurn()
+
+        XCTAssertNotNil(decoded, "the timed turn still serves its command")
+        XCTAssertEqual(breakdown.stages.map(\.stage),
+                       ["encoder_tokenizer", "encoder_inference", "encoder_decode"],
+                       "the encoder's three stages, in canonical order")
+        XCTAssertTrue(breakdown.stages.allSatisfy { $0.ms >= 0 },
+                      "measured durations are non-negative")
+        XCTAssertTrue(breakdown.stages.allSatisfy { $0.ms < 60_000 },
+                      "and are real measurements, not sentinels")
+        XCTAssertEqual(events("encoder_inference_done").count, 1,
+                       "instrumentation alters nothing: the graph ran once")
+    }
+
+    /// Pure instrumentation, pinned directly: the same transcript with and
+    /// without a recorder yields the same command AND the same event
+    /// sequence — no event added, removed or reordered.
+    func testRecorderChangesNeitherTheOutcomeNorTheEvents() throws {
+        let transcript = "भोलि बिहान ८ बजे औषधि खान सम्झाइदिनु"
+
+        func run(timed: Bool) throws
+            -> (action: InterpretedCommand.Action?, reply: String?,
+                served: Bool, eventTypes: [String]) {
+            let context = ctx()
+            let store = try makeStore()
+            _ = try installArtifact(store: store)
+            let localBus = RecordingObservabilityBus()
+            let tokenizer = StubIntentEncoderTokenizer()
+            let spy = IntentEncoderRunnerSpy()
+            let manifest = testManifest()
+            let clean = InputSanitiser.sanitise(transcript, level: .quarantine)
+            let tokenization = try XCTUnwrap(tokenizer.tokenize(
+                sanitisedTranscript: clean, maxSequenceLength: 64))
+            let model = StubIntentEncoderModel()
+            model.logits = makeLogits(
+                manifest: manifest,
+                intent: "set_reminder",
+                wordTags: ["B-time", "I-time", "I-time", "I-time",
+                           "B-medication", "O", "O"],
+                tokenization: tokenization)
+            spy.make = { model }
+
+            let recorder: TurnTimingRecorder? = timed ? TurnTimingRecorder() : nil
+            let interpreter = IntentEncoderInterpreter(
+                modelStore: store,
+                observabilityBus: localBus,
+                modelId: ModelCatalog.intentEncoderSpike,
+                manifest: manifest,
+                tokenizer: tokenizer,
+                timingRecorder: recorder,
+                modelRunnerFactory: spy.makeRunner)
+            recorder?.beginTurn()
+            var out: InterpretedCommand?
+            let exp = expectation(description: "interpret")
+            interpreter.interpret(transcript: transcript, context: context) { result in
+                out = result
+                exp.fulfill()
+            }
+            wait(for: [exp], timeout: 5)
+            recorder?.finishTurn()
+            return (out?.action, out?.reply, out != nil, localBus.eventTypes)
+        }
+
+        let untimed = try run(timed: false)
+        let timed = try run(timed: true)
+
+        XCTAssertTrue(untimed.served, "the fixture really serves a command")
+        XCTAssertEqual(timed.eventTypes, untimed.eventTypes,
+                       "timing adds, removes and reorders no event")
+        XCTAssertEqual(timed.action, untimed.action)
+        XCTAssertEqual(timed.reply, untimed.reply)
+    }
 }
 
 // MARK: - Pure decoder tests
@@ -1205,122 +1323,5 @@ final class IntentEncoderDecoderTests: XCTestCase {
         XCTAssertEqual(plain, 0.965, accuracy: 0.01)
         XCTAssertGreaterThan(calibrated, plain,
                              "T < 1 sharpens the calibrated confidence")
-    }
-
-    // MARK: - [TURN-TIMING-BREAKDOWN] encoder stage instrumentation
-
-    /// The encoder's three stages — tokenizer, CoreML forward, decode —
-    /// are recorded for a timed turn, in canonical order, with
-    /// non-negative durations; the serving path is otherwise untouched.
-    func testEncoderStagesAreRecordedForATimedTurn() throws {
-        let transcript = "भोलि बिहान ८ बजे औषधि खान सम्झाइदिनु"
-        let context = ctx()
-        let store = try makeStore()
-        _ = try installArtifact(store: store)
-        let tokenizer = StubIntentEncoderTokenizer()
-        let spy = IntentEncoderRunnerSpy()
-        let manifest = testManifest()
-        let clean = InputSanitiser.sanitise(transcript, level: .quarantine)
-        let tokenization = try XCTUnwrap(tokenizer.tokenize(
-            sanitisedTranscript: clean, maxSequenceLength: 64))
-        let model = StubIntentEncoderModel()
-        model.logits = makeLogits(
-            manifest: manifest,
-            intent: "set_reminder",
-            wordTags: ["B-time", "I-time", "I-time", "I-time",
-                       "B-medication", "O", "O"],
-            tokenization: tokenization)
-        spy.make = { model }
-
-        let recorder = TurnTimingRecorder()
-        let interpreter = IntentEncoderInterpreter(
-            modelStore: store,
-            observabilityBus: bus,
-            modelId: ModelCatalog.intentEncoderSpike,
-            manifest: manifest,
-            tokenizer: tokenizer,
-            timingRecorder: recorder,
-            modelRunnerFactory: spy.makeRunner)
-        XCTAssertTrue(interpreter.isAvailable)
-
-        recorder.beginTurn()
-        var decoded: InterpretedCommand?
-        let exp = expectation(description: "interpret")
-        interpreter.interpret(transcript: transcript, context: context) { result in
-            decoded = result
-            exp.fulfill()
-        }
-        wait(for: [exp], timeout: 5)
-        let breakdown = recorder.finishTurn()
-
-        XCTAssertNotNil(decoded, "the timed turn still serves its command")
-        XCTAssertEqual(breakdown.stages.map(\.stage),
-                       ["encoder_tokenizer", "encoder_inference", "encoder_decode"],
-                       "the encoder's three stages, in canonical order")
-        XCTAssertTrue(breakdown.stages.allSatisfy { $0.ms >= 0 },
-                      "measured durations are non-negative")
-        XCTAssertTrue(breakdown.stages.allSatisfy { $0.ms < 60_000 },
-                      "and are real measurements, not sentinels")
-        XCTAssertEqual(events("encoder_inference_done").count, 1,
-                       "instrumentation alters nothing: the graph ran once")
-    }
-
-    /// Pure instrumentation, pinned directly: the same transcript with and
-    /// without a recorder yields the same command AND the same event
-    /// sequence — no event added, removed or reordered.
-    func testRecorderChangesNeitherTheOutcomeNorTheEvents() throws {
-        let transcript = "भोलि बिहान ८ बजे औषधि खान सम्झाइदिनु"
-
-        func run(timed: Bool) throws
-            -> (action: InterpretedCommand.Action?, reply: String?,
-                served: Bool, eventTypes: [String]) {
-            let context = ctx()
-            let store = try makeStore()
-            _ = try installArtifact(store: store)
-            let localBus = RecordingObservabilityBus()
-            let tokenizer = StubIntentEncoderTokenizer()
-            let spy = IntentEncoderRunnerSpy()
-            let manifest = testManifest()
-            let clean = InputSanitiser.sanitise(transcript, level: .quarantine)
-            let tokenization = try XCTUnwrap(tokenizer.tokenize(
-                sanitisedTranscript: clean, maxSequenceLength: 64))
-            let model = StubIntentEncoderModel()
-            model.logits = makeLogits(
-                manifest: manifest,
-                intent: "set_reminder",
-                wordTags: ["B-time", "I-time", "I-time", "I-time",
-                           "B-medication", "O", "O"],
-                tokenization: tokenization)
-            spy.make = { model }
-
-            let recorder: TurnTimingRecorder? = timed ? TurnTimingRecorder() : nil
-            let interpreter = IntentEncoderInterpreter(
-                modelStore: store,
-                observabilityBus: localBus,
-                modelId: ModelCatalog.intentEncoderSpike,
-                manifest: manifest,
-                tokenizer: tokenizer,
-                timingRecorder: recorder,
-                modelRunnerFactory: spy.makeRunner)
-            recorder?.beginTurn()
-            var out: InterpretedCommand?
-            let exp = expectation(description: "interpret")
-            interpreter.interpret(transcript: transcript, context: context) { result in
-                out = result
-                exp.fulfill()
-            }
-            wait(for: [exp], timeout: 5)
-            recorder?.finishTurn()
-            return (out?.action, out?.reply, out != nil, localBus.eventTypes)
-        }
-
-        let untimed = try run(timed: false)
-        let timed = try run(timed: true)
-
-        XCTAssertTrue(untimed.served, "the fixture really serves a command")
-        XCTAssertEqual(timed.eventTypes, untimed.eventTypes,
-                       "timing adds, removes and reorders no event")
-        XCTAssertEqual(timed.action, untimed.action)
-        XCTAssertEqual(timed.reply, untimed.reply)
     }
 }
