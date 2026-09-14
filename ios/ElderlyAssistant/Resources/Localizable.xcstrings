@@ -9860,6 +9860,108 @@
         }
       }
     },
+    "settings.encoder.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Internal testing"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आन्तरिक परीक्षण"
+          }
+        }
+      }
+    },
+    "settings.encoder.toggleLabel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Use the on-device intent encoder as the local brain"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्थानीय दिमागको रूपमा यन्त्रभित्रको इन्टेन्ट इन्कोडर प्रयोग गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.encoder.note" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Internal builds only. On, the encoder answers locally as soon as its artifact is installed; off, the brain model picked above keeps the local slot. Emergency and medication replies are handled before either."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आन्तरिक बिल्डका लागि मात्र। खुला हुँदा, इन्कोडर फाइल स्थापना भएपछि इन्कोडरले स्थानीय जवाफ दिन्छ; बन्द हुँदा माथि छानिएको दिमाग मोडेलले स्थानीय स्थान राख्छ। आपतकालीन र औषधि सम्बन्धी जवाफ दुवैभन्दा पहिले व्यवस्थापन हुन्छ।"
+          }
+        }
+      }
+    },
+    "settings.encoder.artifact" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Encoder artifact: %@"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "इन्कोडर फाइल: %@"
+          }
+        }
+      }
+    },
+    "settings.encoder.cascadeLabel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fall back to the picked brain when the encoder is unsure"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "इन्कोडर अनिश्चित हुँदा माथि छानिएको दिमाग प्रयोग गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.encoder.cascadeNote" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On, the brain picked above answers the same turn whenever the encoder abstains or is unsure; off, the encoder answers alone. Ignored while the switch above is off."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "खुला हुँदा, इन्कोडरले जवाफ नदिएको वा अनिश्चित भएको बेला माथि छानिएको दिमागले उही पालोमा जवाफ दिन्छ; बन्द हुँदा इन्कोडर एक्लै जवाफ दिन्छ। माथिको स्विच बन्द हुँदा यो मान्य हुँदैन।"
+          }
+        }
+      }
+    },
     "settings.calendar.title" : {
       "extractionState" : "manual",
       "localizations" : {

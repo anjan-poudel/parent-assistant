@@ -1,0 +1,70 @@
+{
+  "_readme": [
+    "Companion copy of the producing training run's artifact/meta.json — the file the export zip does NOT contain.",
+    "The delivered zip (t033-encoder-int8-mlmodelc.zip) holds exactly one top-level directory, t033-encoder-int8.mlmodelc; the label sets and the fitted calibration temperature live only in the run's artifact/meta.json, so the runtime ships this unchanged subset of that file alongside the vocabulary table.",
+    "Keys _readme/_provenance are documentation for humans; IntentEncoderManifestResource decodes only the keys below.",
+    "Loader: ios/ElderlyAssistant/Services/Intents/IntentEncoderManifestResource.swift. Vocabulary table: encoder_xlmr_unigram.dat (tools/train-intent/src/encoder_tokenizer_export.py)."
+  ],
+  "manifest_id": "t036-v0-encoder",
+  "manifest_version": "t036-v0-1",
+  "intents": [
+    "ack_med",
+    "call",
+    "emergency",
+    "set_reminder",
+    "health_query",
+    "music",
+    "send_message",
+    "guide",
+    "create_calendar_event",
+    "suggest_video",
+    "query",
+    "none"
+  ],
+  "tags": [
+    "O",
+    "B-contact",
+    "I-contact",
+    "B-time",
+    "I-time",
+    "B-medication",
+    "I-medication",
+    "B-message",
+    "I-message",
+    "B-topic",
+    "I-topic",
+    "B-app",
+    "I-app"
+  ],
+  "span_labels": [
+    "contact",
+    "time",
+    "medication",
+    "message",
+    "topic",
+    "app"
+  ],
+  "max_len": 64,
+  "calibration": {
+    "status": "fitted",
+    "temperature": 0.779287,
+    "fit_rows": 128,
+    "method": "temperature scaling (single parameter, NLL, golden-section)",
+    "mechanism": "temperature_scaling",
+    "applied_in": "interpreter_code",
+    "graph_contains_temperature": false,
+    "calibration_sha256": "8cd46b13ddefea471446644c81796891cc1f4fddb9f2f4656496ebea6c2c4bec",
+    "contract_sha256": "60e0211c53cead0bedf4d07d7139f4d320a37caa6d48f55c233dcb83c9f4c68c"
+  },
+  "calibration_temperature": 0.779287,
+  "artifact_digest": "6d2989e95785",
+  "_provenance": {
+    "task": "T-036 (re-pinned to the T-036 v0 artifact by T-036-repin)",
+    "schema": "encoder-artifact/v1",
+    "producing_run": "clean-9af1d59-20260913-120652",
+    "artifact_digest_note": "artifact_digest above is the sha256 of the producing run's model.pt, recorded there in full; only the project's 12-character hex reference is committed (same convention as the checkpoint reference in ModelCatalog).",
+    "backbone": "cartesinus/multilingual_minilm-amazon-massive-intent (revision prefix 08dc4816), MIT — see tools/train-intent/src/encoder_tokenizer_export.py for the full attribution",
+    "delivered_zip": "t033-encoder-int8-mlmodelc.zip, 109086647 bytes, sha256 e0ff09231843c5a6e667db9f6a33d5994df9a2f37c9601f82e1a125073d7aaa5 (pinned in ModelCatalog.intentEncoderSpike; ModelStore verifies it strictly before unpacking)",
+    "contract": "tools/train-intent/encoder_contract.yaml (encoder-contract/v1)"
+  }
+}

@@ -239,3 +239,396 @@ baseline now names the revision that contains this file.
    Whisper-companion path keeps its pre-existing failure in the anomalous
    "encoder before its Whisper model" ordering, with the reasoning next to
    the code.
+
+---
+
+# [ENCODER-RUNTIME-READY] Swift tokenizer + install trigger — the device path is runnable (2026-09-13)
+
+Worktree `.claude/worktrees/encoder-runtime-ready`, branch
+`worktree-encoder-runtime-ready`, base master `e797f97a6d7d`. Commits:
+`e2cdfd9` (Swift XLM-R Unigram tokenizer + committed vocabulary resource +
+golden fixtures), `303461a` (companion meta + install trigger + deferred
+wiring behind `INTENT_ENCODER`), `6f66d2f` (differential harness).
+
+## What was built
+
+- **`XlmrUnigramTokenizer`** (`Services/Intents/`): the real tokenizer where
+  T-037-a had `UnavailableIntentEncoderTokenizer`, covering the whole HF
+  pipeline — precompiled charmap (shortest-prefix), Replace runs of spaces,
+  Metaspace, Unigram Viterbi with HF's unk/fuse/tie-break rules, `<s> A </s>`
+  with both specials reserved through truncation, words + wordIndices aligned
+  to the span decoder. `isReady` is false only when the resource is
+  missing/unusable; a load failure falls back to the explicit UNAVAILABLE
+  tokenizer, never to an approximation.
+- **Committed vocabulary resource** `Resources/Intents/encoder_xlmr_unigram.dat`
+  (5,690,908 bytes) built by `tools/train-intent/src/encoder_tokenizer_export.py`
+  (stdlib only) from the checkpoint's `tokenizer.json`; provenance + MIT
+  attribution in that script's docstring (repo
+  `cartesinus/multilingual_minilm-amazon-massive-intent`, revision prefix
+  `08dc4816`; the tokenizer files are XLM-R 250k, Copyright (c) Microsoft).
+  Regenerate / verify:
+
+  ```
+  python3 tools/train-intent/src/encoder_tokenizer_export.py --snapshot DIR \
+      --out ios/ElderlyAssistant/Resources/Intents/encoder_xlmr_unigram.dat [--verify]
+  ```
+
+- **Install trigger** `IntentEncoderSpikeInstaller`, reachable only through
+  `IntentEncoderInterpreter.requestReadiness()` in `INTENT_ENCODER` builds;
+  the only caller of `ModelStore.installCoreMLEncoder(fromZip:for:)` for the
+  spike entry. Strict sha256 and the scoped destination are untouched.
+- **Wiring**: `AppCoordinator` builds the interpreter from
+  `IntentEncoderRuntime.load()` (tokenizer + manifest together) and wraps the
+  slot in `IntentEncoderWiring.deferredEncoderPreference`, a `LocalBrainChain`
+  that re-reads `isAvailable` per turn.
+- **Tests**: `XlmrUnigramTokenizerTests` (11, the hard gate) and
+  `IntentEncoderRuntimeWiringTests` (15).
+
+## Gate (green)
+
+The canonical gate was run **on the committed code tip** `6f66d2f`:
+
+```
+IOS_DERIVED_DATA=<main>/ios/build/DerivedData \
+IOS_TEST_DERIVED_DATA=<main>/ios/build/DerivedDataTests \
+  <worktree>/ios/build.sh test:unit
+```
+
+Observed: `Executed 2841 tests, with 6 tests skipped and 0 failures` /
+`** TEST SUCCEEDED **`. xcresult summary:
+`{'result': 'Passed', 'totalTestCount': 2841, 'passedTests': 2835,
+'failedTests': 0, 'skippedTests': 6, 'expectedFailures': 0}`.
+Evidence copy (the live path in shared DerivedData is pruned by later runs):
+`ios/build/evidence/gate-1-6f66d2f.xcresult`. The gate was then re-run after
+this section was committed, on the revision that contains it; that run's
+evidence is `ios/build/evidence/gate-2-*.xcresult` and
+`ios/build/.last-tested-sha` names the revision it tested. The encoder
+suites: Tokenizer 11, RuntimeWiring 15, Interpreter 26, Decoder 13, Wiring
+10, Artifact 8 — all passing.
+
+Build-environment note recorded for the next worktree session: the
+gate first failed with `invalid symlink at
+…/ElderlyAssistant.app/tts/en_US-lessac-medium-int8` because the worktree
+provisioned the two voice dirs as symlinks; the copy phase dereferences a
+top-level symlink (`kws`, the whisper `.bin`) but preserves symlinks nested
+**inside** a folder reference, which `installd` rejects. Fixed by replacing
+those two entries with hard-linked trees (`cp -a -l`, same inodes, no extra
+disk) — the main checkout was not modified.
+
+## Tokenizer fidelity — measured evidence
+
+**Golden fixtures.** Generated from the PYTHON tokenizer (the source of
+truth) by `tools/train-intent/src/encoder_tokenizer_fixtures.py`:
+
+```
+python3 tools/train-intent/src/encoder_tokenizer_fixtures.py \
+    --snapshot /tmp/t036-scratch/hf --corpus-dir /tmp/t036-scratch/data \
+    --out ios/ElderlyAssistantTests/Services/Intents/Fixtures/encoder_tokenizer_golden.jsonl
+```
+
+Snapshot: a copy of the pinned training tokenizer (`tokenizer.json`
+17,098,081 B, `sentencepiece.bpe.model` 5,069,051 B, `tokenizer_config.json`,
+`special_tokens_map.json`, `config.json`), revision prefix `08dc4816`.
+Corpus: the T-036 `teacher.jsonl` + `noised.jsonl` + `edge_cases.jsonl`.
+Fixture set: **387 rows / 4,368 tokens** (`sha256
+cee1bbaad598b7aab54bbd5690c78fa2675a9f2454817a74b454a4c668611246`): a
+stratified sample per register, all of `edge_cases.jsonl`, digit-bearing
+rows, and 68 adversarial rows (empty, whitespace-only, 62/63/64/65/80 words,
+punctuation runs, literal `<s>`/`</s>`/`<mask>`, ZWJ/flags/keycap, Devanagari
+conjuncts + ZWNJ + nukta, control chars incl. NUL, BOM, fullwidth, meta-space
+literals, ZWSP/word-joiner/soft-hyphen, 300-char words …). Every row is
+re-validated against the committed Python reference before it is written.
+
+**Hard gate.** `XlmrUnigramTokenizerTests.testEveryGoldenFixtureRowMatchesThePythonTokenizerExactly`
+runs the Swift tokenizer over every row and requires identical ids, `words`,
+`wordIndices` and an all-ones mask: **0 id mismatches, 0 word mismatches,
+0 wordIndex mismatches, 0 mask violations**; the pinned totals (387 / 4,368)
+also guard against silent fixture edits. A second test asserts the
+tokenizer's `words` equal the decoder's own segmentation
+(`IntentEncoderDecoder.wordScalarOffsets`) on every row — the alignment
+boundary that would otherwise abstain at runtime.
+
+**Differential harness.** `tools/train-intent/src/encoder_tokenizer_diff_harness.py`
+compares the committed reference pipeline against
+`transformers.AutoTokenizer` on the FULL corpora:
+
+```
+python3 tools/train-intent/src/encoder_tokenizer_diff_harness.py \
+    --snapshot /tmp/t036-scratch/hf --corpus-dir /tmp/t036-scratch/data
+vocab=250002 unk=3 min_score=-20.3648 max_piece_bytes=48
+teacher.jsonl: {'rows': 18006, 'ids': 0, 'wids': 0}  (15.5s)
+noised.jsonl:  {'rows': 29304, 'ids': 0, 'wids': 0}  (39.2s)
+edge_cases.jsonl: {'rows': 109, 'ids': 0, 'wids': 0}  (39.3s)
+TOTALS: {'rows': 47419, 'ids_mismatch': 0, 'wid_mismatch': 0}
+VERDICT: IDENTICAL
+```
+
+47,419 rows, **0 divergences** (ids and word ids), exit 0.
+
+**Why the fixture words are not always `str.split()`.** The harness (and
+training) split with Python `str.split()`; the device splits with Foundation
+whitespace (`IntentEncoderDecoder.wordScalarOffsets`, 26 members including
+U+200B ZWSP). The fixture generator reproduces the RUNTIME rule so the gate
+tests what a device actually feeds the tokenizer; the two rows where the
+rules differ (`adv-040`, `adv-064`) are exactly the ZWSP/control-char cases,
+and the decoder-segmentation test above pins them from both sides.
+
+## meta.json delivery decision (measured, not assumed)
+
+The delivered `t033-encoder-int8-mlmodelc.zip` contains exactly one top-level
+directory, `t033-encoder-int8.mlmodelc` — **no `meta.json`** (the T-036
+export record lists the zip's single top-level entry, and the ModelStore
+install shape check re-asserts it). The label sets are therefore not
+recoverable from the
+artifact, and `IntentEncoderSchema.t033Spike`'s legacy labels would mislabel
+every schema-v2 span silently.
+
+Decision: ship the producing run's values as a companion bundled resource,
+`Resources/Intents/encoder_spike_meta.json`, decoded by
+`IntentEncoderManifestResource` — intents (12, contract order), tags (13 BIO
+labels), `max_len` 64, `calibration_temperature` 0.779287 (from
+`clean-9af1d59-20260913-120652`, `artifact_digest` prefix `6d2989e95785`),
+validated on load (`manifest_id`/version present, non-empty intents/tags,
+every tag decodable by the schema, `max_len` 2…512, finite temperature > 0,
+12-hex digest). Any failure degrades to the explicit UNAVAILABLE pair — never
+to a default temperature or a different label order. The temperature is
+applied in `IntentEncoderInterpreter` (divide the intent logits before
+softmax — argmax-preserving, the graph stays raw), which matches the
+artifact's own note (`graph_contains_temperature: false`).
+
+## Install trigger — exact behaviour
+
+- `INTENT_ENCODER_SPIKE_ZIP` names the tester's own copy of the pinned zip
+  (sha256 `e0ff09231843…`, 109,086,647 bytes, pinned in
+  `ModelCatalog.intentEncoderSpike`; `ModelStore` verifies it strictly before
+  unpacking). Unset or blank → decision `notConfigured`, no event, no
+  network, no placeholder URL.
+- Artifact already installed → `alreadyInstalled` +
+  `encoder_spike_install_skipped` (reason `already_installed`).
+- Otherwise `started` + `encoder_spike_install_started`, then the install
+  runs off the main thread; success is ModelStore's own
+  `coreml_encoder_installed`, failures are `encoder_spike_install_failed`
+  with `errorCode` `zip_missing` / `checksum` / `unzip` (a checksum mismatch
+  also emits `coreml_encoder_checksum_mismatch`). Events only ever carry
+  model id + machine reason — no paths, no content.
+- Every side effect is gated: `requestReadiness()` returns `.notConfigured`
+  unless `IntentEncoderFeature.isEnabled`, and on a non-gated build the
+  coordinator never even constructs the interpreter (the closure is the only
+  reference to the lazy var).
+
+## Runtime toggle — the serving switch ([ENCODER-RUNTIME-TOGGLE])
+
+Compiling the condition in is necessary but not sufficient: the tester also
+has to switch the encoder on, and can switch it off again without
+rebuilding. The switch exists so an A/B pass over the SAME installed
+artifact costs one tap instead of two installs — and so a flagged device can
+be handed to someone who never meets the encoder at all.
+
+- **Persistence.** `IntentEncoderPreferences.enabledKey` —
+  `"intentEncoder.enabled"`, a plain `UserDefaults` bool (a UI preference,
+  not a secret). **Default OFF**: an absent key reads as `false`, so a
+  device that never opened the screen serves the picker brain.
+- **Where.** Settings → AI मोडेल — the hidden internal screen (long-press
+  the Settings title ~1.5 s) → the "Internal testing" card. The card is
+  rendered only when `IntentEncoderFeature.isEnabled`, so a shipped build
+  holds no reference to the switch. Copy lands in `Localizable.xcstrings`
+  (`settings.encoder.*`, en + ne).
+- **Decision.** `IntentEncoderWiring.isServingEnabled(isCompiledIn:isToggleOn:)`
+  — the encoder may hold the local slot only when the compilation condition
+  is present AND the toggle is on. The toggle can only ever SUBTRACT: a
+  stale stored value cannot opt a build that lacks `INTENT_ENCODER` into the
+  encoder path (unit-pinned).
+- **Slot.** `AppCoordinator.installLocalBrainSlot(on:)` is the one call
+  site: it offers the encoder through `gatedEncoder`, requests readiness,
+  and installs the DEFERRED pair (`LocalBrainChain`) exactly as before. The
+  toggle's `didSet` persists and re-runs that same method, so a flip acts on
+  the NEXT TURN — no relaunch (the house hot-swap pattern, as with
+  `wakeWordEnabled`).
+- **Off / artifact missing ⇒ silent fall-through.** The picker brain
+  (`localIntentInterpreter`, else the LLaMA stand-in) answers; no selection
+  event is emitted for a slot the encoder does not hold, and nothing is
+  surfaced to the user — a missing artifact is the normal state, not an
+  error.
+- **Off ⇒ nothing is even constructed.** The readiness request, the
+  memory-pressure release and the re-arm path are gated on the toggle as
+  well as the compile gate, so a flagged build with the switch off has no
+  encoder object at all (the lazy factory never runs).
+- **On ⇒ the install starts.** `requestReadiness()` fires only when the
+  encoder is OFFERED, so flipping the switch on is what kicks off the
+  strict-checksum install of the tester's staged zip; the deferred pair
+  picks it up on the first turn after it lands.
+
+### Cascade — the A/B's third leg ([ENCODER-RUNTIME-CASCADE])
+
+A second switch on the SAME card (default OFF, same hot-swap contract)
+chooses what happens when the encoder does not clear the bar. The
+standalone encoder ends the turn on an abstention, so the utterance falls
+to the router's own policy (band → cloud escalation → generic re-prompt);
+with the cascade on, the picked brain answers that same turn instead.
+
+- **Persistence.** `IntentEncoderPreferences.cascadeKey` —
+  `"intentEncoder.cascade"`, a `UserDefaults` bool, **default OFF**. The
+  two keys are independent: switching the encoder on never switches the
+  cascade on.
+- **Decision.** `IntentEncoderWiring.servingMode(isEnabled:isCascadeOn:)` →
+  `.pickerBrain` / `.standaloneEncoder` / `.encoderFirstEscalate`. The
+  enable half is the composed gate (`isServingEnabled`: compile condition
+  AND enable toggle), so the cascade can only choose BETWEEN encoder modes
+  — it can never opt a build, or a device, into the encoder path.
+- **Band.** `IntentEncoderWiring.cascadeAcceptThreshold` IS
+  `IntentRouter.Config.default.acceptThreshold` (0.7) — one number, the
+  router's own, so "the encoder served" means exactly what it means in
+  `bandChecked`. Confidence ≥ 0.7 → the encoder's answer is the turn's
+  answer. Abstain, failure, or < 0.7 → the picker brain gets the turn.
+- **One turn, one answer.** The escalation happens INSIDE the local-brain
+  chain (`LocalBrainChain.Cascade`) — the picker brain is already that
+  chain's stand-in, so this is the existing local slot, not a new layer:
+  one completion, no second prompt, no re-run of the confirmation flow.
+  The router, the band policy, the cloud layer and the keyword safety net
+  are untouched; `CommandRouter` still consults its keyword net first, so
+  emergency / med-ack utterances never reach either brain.
+- **Cascade can only add.** With no picker brain available (no model
+  cached, released under memory pressure) the encoder's own answer stands
+  — the cascade degrades to exactly the standalone rule rather than
+  dropping the command. A failed encoder that the picker brain answers no
+  longer reports `local_failed_fallback`, because the local slot DID
+  answer; if both fail, the failure reason forwarded to the router is the
+  brain that actually served (pinned by test).
+- **Ignored while the encoder is off.** The UI disables the row; the mode
+  collapses to `.pickerBrain` regardless of the stored value.
+- **Evidence.** Each escalated turn emits `encoder_escalated_to_picker_brain`
+  (component `intent_encoder_wiring`) with `reason` ∈ {`abstained`,
+  `failed`, `subBandConfidence`} — fixed vocabulary, no content (C9
+  policy). Pair it with the encoder's own `encoder_*` events to tell "the
+  encoder answered" from "the encoder was overruled".
+
+## Device-test flow
+
+The paths below are the ones the tests drive; the staging command is the
+standard `devicectl` route and was **not** exercised here (no device was
+attached in this session).
+
+1. **Build with the gate on.** `INTENT_ENCODER` is not defined in any shipped
+   configuration. Add it to the app target's Active Compilation Conditions in
+   Xcode, or build via
+   `xcodebuild … SWIFT_ACTIVE_COMPILATION_CONDITIONS="$(inherited) INTENT_ENCODER"`.
+2. **Stage the zip into the app's container** (the path must be readable by
+   the app process):
+
+   ```
+   xcrun devicectl device copy to --device <UDID> \
+     --domain-type appDataContainer --domain-identifier com.elderlyassistant.app \
+     --source ~/path/to/t033-encoder-int8-mlmodelc.zip \
+     --destination Documents/t033-encoder-int8-mlmodelc.zip
+   ```
+
+3. **Set the environment variable** in the scheme (Run → Arguments →
+   Environment Variables) to the container path, e.g.
+   `INTENT_ENCODER_SPIKE_ZIP=/var/mobile/Containers/Data/Application/<uuid>/Documents/t033-encoder-int8-mlmodelc.zip`,
+   then launch from Xcode.
+4. **Install + select.** At boot the coordinator offers the encoder the local
+   slot and calls `requestReadiness()`; watch the console
+   (`ConsoleObservabilityBus`) for `encoder_spike_install_started` →
+   `coreml_encoder_installed`, then `encoder_selected_as_local_brain`
+   (component `intent_encoder_wiring`). No relaunch is needed: the deferred
+   preference re-reads availability every turn, so the encoder serves from
+   the first utterance after the install lands.
+5. **Verify a turn.** Speak a schema-v2 utterance; on success the event trail
+   shows `encoder_inference_done` (interpreter events carry model id /
+   duration / outcome only). An abstention shows `encoder_abstained` with a
+   machine `errorCode` (`word_alignment_mismatch` for a transcript longer
+   than the 64-token graph can hold — truncation abstains by policy rather
+   than decoding spans from a partially-seen sequence).
+6. **Compare against the picker brain — same install, one switch.** With the
+   toggle OFF the local slot serves the picker's brain (the Qwen fine-tune
+   entry selected above it, or the LLaMA stand-in when that cannot serve);
+   with the toggle ON the encoder takes the slot once its artifact is
+   installed. Run the same utterance set in both states and compare the
+   executed commands/replies plus the event trail (`encoder_*` events vs.
+   the GGUF brain's own events). The flip acts on the NEXT TURN, so one
+   build and one install cover both legs — see "Small-device A/B" below.
+   (Before [ENCODER-RUNTIME-TOGGLE] the baseline had to be a separate
+   env-unset session, because an available encoder always won the slot.)
+7. **Checksum failure is observable, not silent.** Point the variable at a
+   stale/different zip to confirm the strict path: the turn stays on the
+   picker brain and the trail shows `coreml_encoder_checksum_mismatch` +
+   `encoder_spike_install_failed` (`checksum`).
+
+## Small-device A/B — the exact flow
+
+For the "does the small tier fit this phone" question (encoder vs. the 1.7B
+brain on the same utterances):
+
+1. **Flagged build**: `INTENT_ENCODER` in the target's Active Compilation
+   Conditions (step 1 above) with `INTENT_ENCODER_SPIKE_ZIP` staged and set
+   in the scheme.
+2. **Open the switch**: Settings → long-press the title → AI मोडेल → the
+   "Internal testing" card. The artifact line reads "Not downloaded yet"
+   before the install lands and "Ready" after it.
+3. **Leg A — the 1.7B brain**: leave the toggle OFF and select the 1.7B in
+   the brain picker above (Brain — Qwen 1.7B · Nepali fine-tune, slim seed
+   43). Run the utterance set; this is the picker brain serving.
+4. **Leg B — the encoder**: flip the toggle ON (same session, same install)
+   and re-run the SAME utterances. The next turn goes to the encoder.
+5. **Leg C — the cascade**: leave the encoder on and flip the SECOND switch
+   (cascade) on. Re-run the SAME utterances. Now the encoder answers first
+   and the 1.7B answers the same turn whenever the encoder abstains or
+   lands below the 0.7 accept band — see the next section for what to read
+   in the trail.
+6. **Compare**: executed command/reply per utterance plus the event trail
+   (`encoder_*` vs. the GGUF brain's own events). Flip both switches OFF at
+   the end — that restores the shipped behaviour exactly.
+
+The three legs and what each one answers with:
+
+| leg | switches | who answers | what a low-confidence/abstain turn does |
+|---|---|---|---|
+| A | encoder OFF | the picked brain (1.7B/4B) | the picked brain's own answer; no encoder involved |
+| B | encoder ON, cascade OFF | the encoder alone | falls through the router's band policy → cloud escalation if configured → generic re-prompt |
+| C | encoder ON, cascade ON | the encoder first, else the picked brain the SAME turn | the picked brain answers this turn; `encoder_escalated_to_picker_brain` with `reason` says why |
+
+In leg C the encoder's own `encoder_inference_*` / `encoder_abstained`
+events plus `encoder_escalated_to_picker_brain` tell the whole story per
+utterance: whether the encoder answered, abstained, failed, or came back
+below the band — and therefore which brain the user actually heard.
+
+RAM floors (check these before handing a device to someone):
+
+| local brain | artifact on disk | catalog RAM gate |
+|---|---|---|
+| intent encoder (int8 CoreML) | ~109 MB zip → ~118 MB graph | 2 GB (`minDeviceRAMBytes` 2,000,000,000) |
+| Qwen 1.7B Nepali fine-tune (slim, s43) | 1,107,408,576 B ≈ 1.1 GB GGUF | 3 GB (`minDeviceRAMBytes` 3,000,000,000) |
+
+The encoder is the smaller tier on both axes: roughly a tenth of the disk
+and a 1 GB lower RAM gate than the 1.7B. Its gate is headroom for the
+100–120M-param student, not a measured peak — treat 2 GB as the entry
+point, not a measured requirement.
+
+Both gates are enforced at DOWNLOAD time (`ModelDownloadService` →
+`MemoryProbe.canFit`), not at selection: the picker still offers a brain the
+device cannot hold, and the download fails with the memory message instead.
+Check the device's physical RAM before the A/B, not after. (Verified
+2026-09-14: `intentQwenS43` is picker-selectable, its URL is HTTPS on the
+v14 GitHub release, and it survives the language resolver — `languages:
+["ne"]`, framing `.qwen3` — with no catalog change needed.)
+
+## Residual risk
+
+- **No device was attached in this session.** Everything above is verified in
+  the simulator/host: the bundled resource loads from the app bundle, the
+  interpreter runs the real tokenizer and manifest against a stub runner, and
+  the install trigger's events/decisions are exercised through ModelStore.
+  What is NOT measured here: ARM/ANE execution of the int8 graph, real
+  device latency, and the devicectl staging step.
+- **The 64-token graph limits the input length.** Longer transcripts abstain
+  (`word_alignment_mismatch`) rather than degrade — pinned by test. The
+  router's fail-soft ladder then takes the turn to another brain.
+- **Baseline quality, not quality**: the T-036 v0 artifact's own gates are
+  documented in `T-036-notes.md` (closed intent ≈ 0.53, publish withheld).
+  Installing it on a device tests mechanics and the runtime path, not the
+  model's usefulness.
+- **Load-boundedness** (from the fix round above) still applies: a graph load
+  that neither succeeds nor throws is not timer-bounded; acceptable while the
+  gate is off by default.
+- The full 40-character model-revision hash is deliberately not repeated in
+  this section; only the project's 12-character references are used.

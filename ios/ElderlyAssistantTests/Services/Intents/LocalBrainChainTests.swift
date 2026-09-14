@@ -89,6 +89,144 @@ final class LocalBrainChainTests: XCTestCase {
         XCTAssertNil(interpret(chain, "केही प्रश्न"))
     }
 
+    // MARK: - [ENCODER-RUNTIME-CASCADE] the opt-in encoder-first rule
+
+    private func cascadeChain(preferred: CommandInterpreter,
+                              standIn: CommandInterpreter,
+                              acceptThreshold: Double = 0.7,
+                              onEscalated: @escaping (LocalBrainChain.EscalationReason) -> Void = { _ in })
+    -> LocalBrainChain {
+        LocalBrainChain(preferred: preferred,
+                        standIn: standIn,
+                        cascade: LocalBrainChain.Cascade(acceptThreshold: acceptThreshold,
+                                                         onEscalated: onEscalated))
+    }
+
+    func testCascadeEscalatesAnAbstentionToTheStandInOnTheSameTurn() {
+        // The opt-in half of the gap pinned above: with a cascade the
+        // preferred brain's abstention does NOT end the turn — the
+        // stand-in answers it, one completion, no second prompt.
+        let preferred = StubCommandInterpreter(result: nil)
+        let answer = makeCommand(action: .query, confidence: 0.9, reply: "भोलि घाम लाग्नेछ।")
+        let standIn = StubCommandInterpreter(result: answer)
+        var reasons: [LocalBrainChain.EscalationReason] = []
+        let chain = cascadeChain(preferred: preferred, standIn: standIn) { reasons.append($0) }
+
+        XCTAssertEqual(interpret(chain, "केही प्रश्न"), answer)
+        XCTAssertEqual(preferred.callCount, 1)
+        XCTAssertEqual(standIn.callCount, 1)
+        XCTAssertEqual(reasons, [.abstained],
+                       "an abstention is not a failure — the reason says which")
+    }
+
+    func testCascadeEscalatesASubBandAnswerToTheStandIn() {
+        // Below the ACCEPT band the preferred answer is one the router
+        // would have had to rephrase or drop; the cascade hands the turn
+        // to the stand-in instead of spending the user's next exchange.
+        let subBand = makeCommand(action: .query, confidence: 0.55, reply: "encoder")
+        let answer = makeCommand(action: .query, confidence: 0.9, reply: "standin")
+        let preferred = StubCommandInterpreter(result: subBand)
+        let standIn = StubCommandInterpreter(result: answer)
+        var reasons: [LocalBrainChain.EscalationReason] = []
+        let chain = cascadeChain(preferred: preferred, standIn: standIn) { reasons.append($0) }
+
+        XCTAssertEqual(interpret(chain, "केही प्रश्न"), answer)
+        XCTAssertEqual(standIn.callCount, 1)
+        XCTAssertEqual(reasons, [.subBandConfidence])
+    }
+
+    func testCascadeServesThePreferredAnswerAtTheBand() {
+        // At the band the preferred brain IS the answer: the stand-in is
+        // never asked, and nothing is reported as escalated.
+        let atBand = makeCommand(action: .query, confidence: 0.7, reply: "encoder")
+        let preferred = StubCommandInterpreter(result: atBand)
+        let standIn = StubCommandInterpreter(result: makeCommand(action: .query, confidence: 0.9))
+        var reasons: [LocalBrainChain.EscalationReason] = []
+        let chain = cascadeChain(preferred: preferred, standIn: standIn) { reasons.append($0) }
+
+        XCTAssertEqual(interpret(chain, "केही प्रश्न"), atBand)
+        XCTAssertEqual(standIn.callCount, 0)
+        XCTAssertTrue(reasons.isEmpty)
+    }
+
+    func testCascadeReportsAFailureAsFailed() {
+        // Failure and abstention both arrive as nil; only the failure
+        // carries a reason, and the escalation event says which it was.
+        let standIn = StubCommandInterpreter(result: makeCommand(action: .query, confidence: 0.9))
+        var reasons: [LocalBrainChain.EscalationReason] = []
+        let chain = cascadeChain(preferred: FailingBrainStub(failureReason: "inference_timeout"),
+                                 standIn: standIn) { reasons.append($0) }
+
+        XCTAssertEqual(interpret(chain, "केही प्रश्न")?.action, .query)
+        XCTAssertEqual(reasons, [.failed])
+    }
+
+    func testCascadeDegradesToThePreferredAnswerWhenTheStandInIsUnavailable() {
+        // A cascade can only ADD: with no configured brain to escalate to,
+        // the preferred brain's own answer stands — byte-identical to the
+        // standalone rule.
+        let subBand = makeCommand(action: .query, confidence: 0.55, reply: "encoder")
+        let standIn = StubCommandInterpreter(available: false,
+                                             result: makeCommand(action: .query, confidence: 0.9))
+        var reasons: [LocalBrainChain.EscalationReason] = []
+        let chain = cascadeChain(preferred: StubCommandInterpreter(result: subBand),
+                                 standIn: standIn) { reasons.append($0) }
+
+        XCTAssertEqual(interpret(chain, "केही प्रश्न"), subBand)
+        XCTAssertEqual(standIn.callCount, 0, "an unavailable brain is never asked")
+        XCTAssertTrue(reasons.isEmpty, "nothing escalated — there was nowhere to escalate to")
+    }
+
+    func testCascadeKeepsTheAvailabilityRuleWhenThePreferredBrainIsUnavailable() {
+        // The cascade changes what happens AFTER a preferred answer, never
+        // the availability substitution: an unavailable preferred brain is
+        // not asked and nothing was "escalated".
+        let answer = makeCommand(action: .query, confidence: 0.9, reply: "standin")
+        let standIn = StubCommandInterpreter(result: answer)
+        let preferred = StubCommandInterpreter(available: false, result: nil)
+        var reasons: [LocalBrainChain.EscalationReason] = []
+        let chain = cascadeChain(preferred: preferred, standIn: standIn) { reasons.append($0) }
+
+        XCTAssertEqual(interpret(chain, "केही प्रश्न"), answer)
+        XCTAssertEqual(preferred.callCount, 0)
+        XCTAssertEqual(standIn.callCount, 1)
+        XCTAssertTrue(reasons.isEmpty)
+    }
+
+    func testDefaultChainStillPassesASubBandAnswerThrough() {
+        // The opt-in boundary: without a cascade the chain keeps the
+        // documented exclusive rule (and the open gap I-2 stays pinned) —
+        // the encoder A/B cannot change shipped behaviour by accident.
+        let subBand = makeCommand(action: .query, confidence: 0.55, reply: "encoder")
+        let preferred = StubCommandInterpreter(result: subBand)
+        let standIn = StubCommandInterpreter(result: makeCommand(action: .query, confidence: 0.9))
+        let chain = LocalBrainChain(preferred: preferred, standIn: standIn)
+
+        XCTAssertEqual(interpret(chain, "केही प्रश्न"), subBand)
+        XCTAssertEqual(standIn.callCount, 0)
+    }
+
+    func testCascadeFailureReasonFollowsTheBrainThatServed() {
+        // The router's LAT-EVIDENCE path reads `lastInferenceFailureReason`
+        // through the chain: under a cascade it must describe the brain
+        // that actually answered, or a stand-in answer would be logged as
+        // the preferred brain's failure — and vice versa.
+        let standIn = FailingBrainStub(failureReason: "truncated_json")
+        let chain = cascadeChain(preferred: FailingBrainStub(failureReason: "inference_timeout"),
+                                 standIn: standIn)
+        XCTAssertNil(interpret(chain, "केही प्रश्न"))
+        XCTAssertEqual(chain.lastInferenceFailureReason, "truncated_json",
+                       "the stand-in served, so its failure is the honest one")
+        XCTAssertEqual(standIn.callCount, 1)
+
+        // …and the exclusive chain still reports the preferred brain's own
+        // failure (the unchanged rule).
+        let exclusive = LocalBrainChain(preferred: FailingBrainStub(failureReason: "inference_timeout"),
+                                        standIn: FailingBrainStub(failureReason: "truncated_json"))
+        XCTAssertNil(interpret(exclusive, "केही प्रश्न"))
+        XCTAssertEqual(exclusive.lastInferenceFailureReason, "inference_timeout")
+    }
+
     // MARK: - Router integration (the reported bug's shape)
 
     func testOnDeviceStackPlainQueryAnsweredThroughRouter() {
@@ -118,5 +256,28 @@ final class LocalBrainChainTests: XCTestCase {
         XCTAssertEqual(out, answer,
                        "the on-device stack must reach a real interpreter for a plain query")
         XCTAssertEqual(standIn.callCount, 1)
+    }
+}
+
+/// [ENCODER-RUNTIME-CASCADE] A brain that FAILED — nil plus an
+/// `InterpreterFailureReporting` reason, the shape a timeout or truncated
+/// output leaves behind (the distinction `IntentRouter`'s LAT-EVIDENCE
+/// path reads). Configurable so two of them can be told apart.
+private final class FailingBrainStub: CommandInterpreter, InterpreterFailureReporting {
+    private let failureReason: String?
+    private(set) var callCount = 0
+
+    init(failureReason: String? = "inference_timeout") {
+        self.failureReason = failureReason
+    }
+
+    var isAvailable: Bool { true }
+    var lastInferenceFailureReason: String? { failureReason }
+
+    func interpret(transcript: String,
+                   context: InterpreterContext,
+                   completion: @escaping (InterpretedCommand?) -> Void) {
+        callCount += 1
+        DispatchQueue.main.async { completion(nil) }
     }
 }

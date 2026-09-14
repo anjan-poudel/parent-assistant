@@ -55,14 +55,6 @@ final class AppCoordinator: ObservableObject {
     @Published var appLanguage: AppLanguage {
         didSet {
             appLanguage.persist()
-            // Language and locale are independent settings (2026-09-13):
-            // a language switch re-defaults the region (ne → ne-NP,
-            // en → en-US) but the household can then override it. A
-            // deliberate override is only cleared when it would leak into
-            // the new language (e.g. en-IN surviving a switch to Nepali).
-            if appLocale.language != appLanguage {
-                appLocale = AppLocale.defaultLocale(for: appLanguage)
-            }
             syncServiceLocales()
             // Model preferences only churn on a REAL change: re-tapping the
             // already-selected language must not override a deliberate
@@ -73,21 +65,9 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    /// The household's formatting locale — language + region, persisted
-    /// separately from `appLanguage` (spec §4.4.1 "Language & region").
-    /// Defaults to the language's region (`ne` → `ne-NP`); settable on its
-    /// own so a Nepali-speaking family in India runs Nepali UI with `ne-IN`
-    /// date/number conventions.
-    @Published var appLocale: AppLocale = .nepaliNepal {
-        didSet {
-            appLocale.persist()
-            syncServiceLocales()
-        }
-    }
-
     /// The locale every piece of non-View code (router speech, formatters)
     /// resolves against.
-    var activeLocale: Locale { appLocale.locale }
+    var activeLocale: Locale { appLanguage.locale }
 
     /// Pushes the active language into the services that build user-facing
     /// strings at call time — platform notifications, spoken confirmation
@@ -101,10 +81,6 @@ final class AppCoordinator: ObservableObject {
         routineAlarmScheduler.locale = activeLocale
         routineScheduler.locale = activeLocale
         externalCalendar.locale = activeLocale
-        // [CALENDAR-TEJ-LOCALE] (2026-09-13) Mirror-event titles written
-        // into the family's shared calendar follow the active locale too
-        // (was a hardcoded bare "ne" at the composition sites).
-        calendarSync.locale = activeLocale
         alarmTimersService.locale = activeLocale
         alarmTimersService.setSystemSchedulerLocale(activeLocale)
         // Voice-OS shell v1: the briefing composes in the app language,
@@ -113,10 +89,6 @@ final class AppCoordinator: ObservableObject {
         // [NEWS-READER] (2026-09-08) The news digest composes in the app
         // language too — same injection pattern.
         newsReader?.locale = activeLocale
-        // [CALENDAR-TEJ-LOCALE] (2026-09-13) Festival notifications are
-        // composed by the service at schedule time — it must follow the
-        // active locale, not a hardcoded bare "ne".
-        festivalCalendar.locale = activeLocale
     }
 
     /// Language-aware model selection (2026-09-13): the app language picks
@@ -519,28 +491,15 @@ final class AppCoordinator: ObservableObject {
     /// Encrypted, bounded (100-entry) log of what THIS app itself
     /// called/messaged — the Recent activity leaf's source of truth.
     /// Never the system call log, never other apps' messages (iOS
-    /// platform wall). The ONE exception is the unanswered-call row
-    /// (missed-calls task, 2026-09-07): a presence-only fact the live-call
-    /// observer saw — a call ended without ever connecting — recorded
-    /// with no name and no number, never the identity the system call log
-    /// would carry (iOS does not expose it). Since the call-tracking task
-    /// (2026-09-13) that row is ATTRIBUTED when it can honestly be: if
-    /// the app itself opened a call moments earlier and no call ever
-    /// connected in between, the row carries the contact the app dialed
-    /// (`openedCallAttributor` below). Everything else stays anonymous.
-    /// Lazy like `chatHistoryStore`: `storage` is assigned at the top of
-    /// `init`, long before any call/message path can record. Main-queue
-    /// confined by contract.
+    /// platform wall). The ONE exception is the anonymous unanswered-call
+    /// row (missed-calls task, 2026-09-07): a presence-only fact the
+    /// live-call observer saw — a call ended without ever connecting —
+    /// recorded with no name and no number, never the identity the
+    /// system call log would carry (iOS does not expose it). Lazy like
+    /// `chatHistoryStore`: `storage` is assigned at the top of `init`,
+    /// long before any call/message path can record. Main-queue confined
+    /// by contract.
     private(set) lazy var activityLog = AppActivityLog(storage: storage)
-
-    /// Matches the app's OWN call opens to the anonymous unanswered events
-    /// the live-call observer reports (call-tracking task, 2026-09-13),
-    /// so a call the app placed that was never picked up is recorded as a
-    /// missed call WITH its contact instead of an anonymous row. The
-    /// decision itself — window, connect-clears, consume-once — is the
-    /// pure `OpenedCallAttributor`; this property is only the wiring.
-    /// Main-queue confined, like every other piece of activity recording.
-    private let openedCallAttributor = OpenedCallAttributor()
 
     /// Published window over `activityLog`, newest first — the leaf's
     /// read side. Mirrors the `conversationHistory` window pattern:
@@ -678,13 +637,6 @@ final class AppCoordinator: ObservableObject {
     private let medicationScheduler: MedicationScheduler
     private let alarmScheduler: UNNotificationScheduler
     private let familyNotifier: APNsFamilyNotifier
-    /// [CAREGIVER-EVENTS] (2026-09-13) Per-event-type caregiver
-    /// notification preferences (Settings → "Notify caregivers"). Owned
-    /// here because three separate services read it at fire time
-    /// (`MedicationScheduler`, `RoutineScheduler`, and the event fire
-    /// handler); `SettingsView` binds the same instance, so a toggle flip
-    /// takes effect on the very next fire with no propagation step.
-    let caregiverNotifySettings: CaregiverNotifySettings
 
     /// Generalised routine reminders (v2 pivot Phase 1 — walk, exercise,
     /// meals, bedtime, …). NOT safety-critical: no ack window, no
@@ -972,17 +924,7 @@ final class AppCoordinator: ObservableObject {
     /// only resolved by the boot's voice phase, the warm, and downloads.
     lazy var modelStore: ModelStore = {
         do {
-            // [T-036 SIDELOAD] The store resolves entries through the
-            // shipped catalog PLUS the internal-testing encoder sideload
-            // (`ModelCatalog.entryIncludingInternalSideload(for:)` — the
-            // shipped catalog stays authoritative and is consulted first;
-            // the resolver can only ever ADD the one sideload id). Without
-            // this, `installCoreMLEncoder`/`coreMLBundleFinalURL` would
-            // resolve the sideload id to nil and the gated encoder could
-            // never see the artifact it is supposed to serve.
-            return try ModelStore(
-                observabilityBus: observabilityBus,
-                entryProvider: ModelCatalog.entryIncludingInternalSideload(for:))
+            return try ModelStore(observabilityBus: observabilityBus)
         } catch {
             fatalError("Cannot initialise ModelStore: \(error)")
         }
@@ -1190,42 +1132,201 @@ final class AppCoordinator: ObservableObject {
                                                timeoutSeconds: 10),
         pluginRegistry: pluginRegistry
     )
-    /// [T-037-a] The on-device CoreML intent encoder — now serving the
-    /// TRAINED T-036 artifact (`IntentEncoderSideload`, internal testing
-    /// only; the T-033/T-036-v0 spike pin stays in the catalog as the
-    /// historical baseline). Deliberately NOT constructed on normal
-    /// builds: every reference to it is guarded by
-    /// `IntentEncoderFeature.isEnabled`, so the `lazy` factory never runs
-    /// without the `INTENT_ENCODER` compilation condition. Its
-    /// `isAvailable` is false unless the artifact is installed in
-    /// `ModelStore` AND a tokenizer is ready — `UnavailableIntentEncoderTokenizer`
-    /// is the production default until the Swift XLM-R tokenizer exists,
-    /// so the shipped behaviour is unchanged either way.
+    /// [ENCODER-RUNTIME-TOGGLE] Settings → AI मोडेल (hidden) → the
+    /// internal-testing switch that lets the encoder take the local-brain
+    /// slot. Persisted under
+    /// `IntentEncoderPreferences.enabledKey` ("intentEncoder.enabled"),
+    /// **default OFF** — a flagged build ships the incumbent brain until a
+    /// tester opts in, and flipping the switch ACTS ON THE NEXT TURN (no
+    /// relaunch): the didSet persists and re-installs the slot through the
+    /// SAME `installLocalBrainSlot` the composition used.
     ///
-    /// The manifest is the artifact's OWN label order + fitted calibration
-    /// temperature: pinning the sideload artifact while keeping
-    /// `.t033Spike`'s 10 intents / 5 tags would silently mislabel every
-    /// utterance (see `IntentEncoderSideload.manifest`).
-    private lazy var intentEncoderInterpreter = IntentEncoderInterpreter(
-        modelStore: modelStore,
-        observabilityBus: observabilityBus,
-        modelId: IntentEncoderSideload.modelID,
-        manifest: IntentEncoderSideload.manifest,
-        tokenizer: UnavailableIntentEncoderTokenizer(),
-        config: .default
-    )
-    /// [T-036 SIDELOAD] LAN fetch + install of the trained encoder
-    /// artifact — INTERNAL TESTING, publish blocked on the 8,000-row
-    /// calibration corpus (T-035/T-038); see `IntentEncoderSideload`.
-    /// Constructed only behind `IntentEncoderFeature.isEnabled`, matching
-    /// the interpreter's lazy-factory invariant above.
-    private lazy var intentEncoderSideloadInstaller = IntentEncoderSideloadInstaller(
-        modelStore: modelStore,
-        observabilityBus: observabilityBus
-    )
+    /// OFF is a silent fall-through, never an error surface: the picker
+    /// brain (`localIntentInterpreter`, or the LLaMA stand-in when it
+    /// cannot serve) answers exactly as it does on a non-gated build.
+    @Published var intentEncoderEnabled: Bool = false {
+        didSet {
+            intentEncoderPreferences.setEnabled(intentEncoderEnabled)
+            guard oldValue != intentEncoderEnabled else { return }
+            reinstallLocalBrainSlotIfGated()
+        }
+    }
+
+    /// [ENCODER-RUNTIME-CASCADE] Settings → AI मोडेल (hidden) → the
+    /// cascade switch, on the SAME internal card as the enable switch.
+    /// Persisted under `IntentEncoderPreferences.cascadeKey`
+    /// ("intentEncoder.cascade"), **default OFF**.
+    ///
+    /// OFF (the default) is `intentEncoderEnabled`'s own behaviour: the
+    /// encoder holds the local slot alone, so an abstention falls through
+    /// to the router's band/cloud policy as it always has. ON widens the
+    /// turn: the encoder answers first and the picker brain (the model
+    /// selected above it) answers the SAME turn — one turn, one answer, no
+    /// second prompt — whenever the encoder abstains or comes back below
+    /// the router's ACCEPT band. Nothing changes downstream: the keyword
+    /// safety net still runs upstream of this chain, and the cloud layer
+    /// still receives whatever the local slot does not answer.
+    ///
+    /// Ignored while the enable switch is OFF (`servingMode` collapses to
+    /// the picker brain), which is why the UI disables the row until the
+    /// encoder is on. Same hot-swap contract as the enable switch: the
+    /// didSet persists and re-installs the slot, so a flip acts on the
+    /// NEXT TURN, not the next launch.
+    @Published var intentEncoderCascadeEnabled: Bool = false {
+        didSet {
+            intentEncoderPreferences.setCascadeEnabled(intentEncoderCascadeEnabled)
+            guard oldValue != intentEncoderCascadeEnabled else { return }
+            reinstallLocalBrainSlotIfGated()
+        }
+    }
+
+    /// Both internal-testing switches act through here. Non-gated builds
+    /// never reach it (no UI exposes the switches), but the guard keeps
+    /// the invariant local: only a build that compiles the encoder in may
+    /// touch the slot.
+    private func reinstallLocalBrainSlotIfGated() {
+        guard IntentEncoderFeature.isEnabled else { return }
+        if let intentRouter {
+            installLocalBrainSlot(on: intentRouter)
+        }
+    }
+
+    private let intentEncoderPreferences = IntentEncoderPreferences()
+
+    /// [T-037-a] The on-device CoreML intent encoder (internal testing
+    /// only; artifact pinned to the T-036 v0 export). Deliberately NOT
+    /// constructed on normal builds: every reference to it is guarded by
+    /// `IntentEncoderFeature.isEnabled` (the serving decision and the
+    /// re-arm path additionally by `intentEncoderEnabled`), so the `lazy`
+    /// factory never runs without the `INTENT_ENCODER` compilation
+    /// condition — and, with the compile condition present, still not
+    /// until a tester switches the encoder on. Its
+    /// `isAvailable` is false unless the artifact is installed in
+    /// `ModelStore` AND both bundled resources load — the Swift XLM-R
+    /// tokenizer ([ENCODER-RUNTIME-READY]) with the artifact's companion
+    /// meta.json. When either resource is unavailable,
+    /// `IntentEncoderRuntime.load` returns the explicit UNAVAILABLE pair,
+    /// so the shipped behaviour is unchanged.
+    private lazy var intentEncoderInterpreter: IntentEncoderInterpreter = {
+        let resources = IntentEncoderRuntime.load()
+        return IntentEncoderInterpreter(
+            modelStore: modelStore,
+            observabilityBus: observabilityBus,
+            modelId: ModelCatalog.intentEncoderSpike,
+            manifest: resources.manifest,
+            tokenizer: resources.tokenizer,
+            config: .default,
+            artifactInstaller: IntentEncoderSpikeInstaller(
+                modelStore: modelStore,
+                observabilityBus: observabilityBus)
+        )
+    }()
     /// Level-2 memory-warning observer for the encoder (nil unless the
     /// internal-testing gate is on).
     private var intentEncoderMemoryObserver: NSObjectProtocol?
+
+    /// True once the encoder has actually been OFFERED the slot, i.e. the
+    /// lazy instance exists. A/B means a tester can switch the encoder on
+    /// and then off again WITHOUT the process ending, which leaves a
+    /// constructed, idle encoder holding its CoreML weights: the release
+    /// half of the memory-pressure contract must still reach it. The flag
+    /// is what distinguishes that case from "never constructed", where the
+    /// same call would construct the object it is trying to free.
+    private var intentEncoderOffered = false
+
+    /// [T-037-a]/[ENCODER-RUNTIME-TOGGLE] Installs the local-brain slot:
+    /// the encoder when the compilation condition is present AND the
+    /// tester's toggle is ON AND the artifact can serve, else the
+    /// incumbent brain untouched. Called once at composition time and
+    /// again on every toggle flip — that re-entry is what makes the
+    /// Settings switch act on the next turn instead of the next launch.
+    ///
+    /// The decision is `IntentEncoderWiring`'s (a pure, tested function
+    /// set); this method only sequences it and emits the selection event,
+    /// so the shipped call site is what the wiring tests exercise.
+    ///
+    /// [ENCODER-RUNTIME-READY] Readiness is requested at the moment the
+    /// encoder is OFFERED the local-brain slot: with
+    /// INTENT_ENCODER_SPIKE_ZIP set (the tester's own copy of the pinned
+    /// zip) this starts a background install through ModelStore's strict
+    /// sha256 path; unset, it is an explicit no-op decision. No UI, no
+    /// network, and nothing here runs on a non-gated build — or with the
+    /// toggle off, which is why switching the encoder ON is also what
+    /// starts its install.
+    ///
+    /// The slot itself is the DEFERRED pair, so an install that lands
+    /// after the switch is flipped is picked up on the next turn without
+    /// a relaunch; while the encoder is unavailable the chain serves
+    /// exactly the fallback the selection event describes.
+    ///
+    /// [ENCODER-RUNTIME-CASCADE] The second switch only chooses the slot's
+    /// SHAPE (standalone vs. encoder-first with a same-turn escalation to
+    /// the picker brain); it never changes which brain is offered, never
+    /// constructs anything, and is ignored unless the enable switch is on.
+    private func installLocalBrainSlot(on router: IntentRouter) {
+        let servingEnabled = IntentEncoderWiring.isServingEnabled(
+            isToggleOn: intentEncoderEnabled)
+        let offeredEncoder = IntentEncoderWiring.gatedEncoder(
+            isEnabled: servingEnabled
+        ) {
+            intentEncoderInterpreter
+        }
+        if let offeredEncoder {
+            intentEncoderOffered = true
+            offeredEncoder.requestReadiness()
+        }
+        // "Can it serve now?" — decides the selection event, unchanged
+        // (and unchanged in meaning with the toggle off: no encoder is
+        // offered, so no event is emitted for a slot it does not hold).
+        let encoderAvailableNow = IntentEncoderWiring.preferredLocalBrain(
+            encoder: offeredEncoder,
+            fallback: localIntentInterpreter)
+        if let selectionMetadata = IntentEncoderWiring.selectionEventMetadata(
+                preferred: encoderAvailableNow, encoder: offeredEncoder) {
+            observabilityBus.emit(ObservabilityEvent(
+                component: "intent_encoder_wiring",
+                eventType: "encoder_selected_as_local_brain",
+                durationMs: nil,
+                outcome: "info",
+                errorCode: nil,
+                metadata: selectionMetadata
+            ))
+        }
+        // [ENCODER-RUNTIME-CASCADE] The slot's SHAPE follows the two
+        // switches: standalone (the encoder alone — the pre-cascade
+        // behaviour, and the default), or encoder-first with the picker
+        // brain escalating on the same turn. The decision is the pure
+        // `servingMode`; this call site only feeds it the switches, so the
+        // mode truth table the tests pin IS the shipped one.
+        let mode = IntentEncoderWiring.servingMode(
+            isEnabled: servingEnabled,
+            isCascadeOn: intentEncoderCascadeEnabled)
+        router.localBrain = IntentEncoderWiring.localBrainSlot(
+            mode: mode,
+            encoder: offeredEncoder,
+            encoderFallback: encoderAvailableNow,
+            pickerBrain: llamaCommandInterpreter,
+            onEscalated: { [weak self] reason in
+                self?.emitEncoderEscalatedToPickerBrain(reason)
+            })
+    }
+
+    /// [ENCODER-RUNTIME-CASCADE] The A/B evidence for a cascade turn: the
+    /// encoder did not serve (abstained, failed, or answered below the
+    /// ACCEPT band) and the picker brain answered instead. Fixed
+    /// vocabulary only — the reason enum and a literal — never transcript
+    /// or reply content (C9 policy). Pair it with `encoder_inference_*`
+    /// to tell "the encoder answered" from "the encoder was overruled".
+    private func emitEncoderEscalatedToPickerBrain(_ reason: LocalBrainChain.EscalationReason) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "intent_encoder_wiring",
+            eventType: "encoder_escalated_to_picker_brain",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: ["reason": reason.rawValue]
+        ))
+    }
 
     /// The fine-tuned intent model (spec 2026-09-05 §8) — the local brain
     /// `IntentRouter` prefers once its GGUF is cached (the preferred half
@@ -1324,12 +1425,9 @@ final class AppCoordinator: ObservableObject {
     /// selectability (2026-09-06) the Settings "AI मोडेल" screen offers
     /// every `ModelCatalog.availableBrainEntries` model; the LIVE
     /// choice is `resolvedBrainModelID`.
-    // The default brain is the slot-canonical Qwen 4B retrain (v16, the
-    // curated list's leader and the only entry that clears all five ship
-    // gates) — the legacy LLaMA 1B and the superseded seed-43 4B are
-    // hidden from the picker now. It is a >2 GiB artifact, so it arrives
-    // as two ordered parts (ModelDownloadService reassembles them).
-    static let defaultBrainModelID = ModelCatalog.intentQwen4BSlotCanon
+    // The Qwen 1.7B intent fine-tune (v12, seed 42) is the default
+    // brain — the legacy LLaMA 1B is hidden from the picker now.
+    static let defaultBrainModelID = ModelCatalog.intentQwen4BS43
 
     /// The brain model the interpreter actually uses: the stored
     /// preference when it names a real catalog entry, else the default.
@@ -1510,19 +1608,8 @@ final class AppCoordinator: ObservableObject {
         self.familyContacts = []
         self.familyNotifier = APNsFamilyNotifier(
             contacts: [],
-            apnsProvider: APNsProvider(),
-            // The bus exists by now (the init snippet above creates it
-            // first) — `family_event_alerted` is the only evidence a
-            // caregiver alert was even attempted, since the APNs
-            // provider is still the stub.
-            observabilityBus: bus
+            apnsProvider: APNsProvider()
         )
-
-        // [CAREGIVER-EVENTS] (2026-09-13) Preferences before the two
-        // schedulers that read them at fire time. Standard defaults, no
-        // keychain: UI preferences, not secrets.
-        let caregiverNotifySettings = CaregiverNotifySettings()
-        self.caregiverNotifySettings = caregiverNotifySettings
 
         // Saved navigation places (directions task, 2026-09-07) —
         // encrypted like the contacts above; the store self-heals legacy
@@ -1581,8 +1668,7 @@ final class AppCoordinator: ObservableObject {
             storage: storage,
             alarmScheduler: alarmScheduler,
             observabilityBus: bus,
-            familyNotifier: familyNotifier,
-            caregiverNotifySettings: caregiverNotifySettings
+            familyNotifier: familyNotifier
         )
 
         // Routine reminders (v2 pivot Phase 1): the medication path's
@@ -1600,12 +1686,7 @@ final class AppCoordinator: ObservableObject {
         let routineScheduler = RoutineScheduler(
             store: routineStore,
             alarmScheduler: routineAlarmScheduler,
-            observabilityBus: bus,
-            // [CAREGIVER-EVENTS] (2026-09-13) Routines had NO caregiver
-            // notification path at all; `markDelivered` is where the
-            // alert now fires from.
-            familyNotifier: familyNotifier,
-            caregiverNotifySettings: caregiverNotifySettings
+            observabilityBus: bus
         )
         self.routineScheduler = routineScheduler
         self.routinePlugin = RoutinePlugin(scheduler: routineScheduler)
@@ -1659,15 +1740,8 @@ final class AppCoordinator: ObservableObject {
         self.timerAlarmEngine = timerAlarmEngine
 
         // Language — restore the persisted choice, defaulting to the Nepali
-        // pilot language (spec §3.2). The locale (language + region) is a
-        // SEPARATE persisted setting (2026-09-13): restore it against the
-        // restored language so a value that no longer matches (a stored
-        // `en-IN` after the household switched to Nepali) falls back to the
-        // language's region default instead of leaking across.
-        let restoredLanguage = AppLanguage.persisted()
-        let restoredAppLocale = AppLocale.persisted(for: restoredLanguage)
-        self.appLanguage = restoredLanguage
-        self.appLocale = restoredAppLocale
+        // pilot language (spec §3.2).
+        self.appLanguage = AppLanguage.persisted()
 
         // Theme — restore the persisted background theme (skinnable home,
         // 2026-09-07). Unknown/missing raw values fall back to `.cream`
@@ -1688,12 +1762,10 @@ final class AppCoordinator: ObservableObject {
         // date line composes lazily on the first refresh.
         let calendarDisplayStore = CalendarDisplaySettingsStore()
         self.calendarDisplayStore = calendarDisplayStore
-        // The locals restored above (not self.appLanguage / self.appLocale)
-        // — init is not complete at this point, so the property reads are
-        // illegal; the persisted values ARE what the properties will hold.
-        // The active LOCALE seeds the display default (2026-09-13: it is
-        // now a setting of its own, not derived from the device region).
-        let calendarDisplay = calendarDisplayStore.load(locale: restoredAppLocale.locale)
+        // AppLanguage.persisted() (not self.appLanguage) — init is
+        // not complete at this point, so the property read is illegal;
+        // the persisted value IS what the property will hold.
+        let calendarDisplay = calendarDisplayStore.load(locale: AppLanguage.persisted().locale)
         self.calendarDisplayDefault = calendarDisplay.defaultCalendar
         self.showBSOverlay = calendarDisplay.showBSOverlay
         self.showTithiOverlay = calendarDisplay.showTithiOverlay
@@ -1857,6 +1929,18 @@ final class AppCoordinator: ObservableObject {
         self.wakeWordEnabled = wakeWordPreferences.isEnabled
         wakeWordActivityGate.setEnabled(wakeWordEnabled)
 
+        // [ENCODER-RUNTIME-TOGGLE] Restore the persisted internal-testing
+        // encoder switch (default OFF). Assigned directly — the house
+        // pattern: didSet does not fire in init. The slot is installed
+        // later, in `composePostFirstFrame()`, which reads this value; on
+        // a build without `INTENT_ENCODER` nothing reads it at all.
+        self.intentEncoderEnabled = intentEncoderPreferences.isEnabled
+        // [ENCODER-RUNTIME-CASCADE] …and its cascade sibling (same
+        // default OFF, same restore rule). Restored even while the enable
+        // switch is off: the value is irrelevant in that state, and the
+        // tester's choice must survive an off/on round trip.
+        self.intentEncoderCascadeEnabled = intentEncoderPreferences.isCascadeEnabled
+
         // Restore the persisted STT model choice. The didSet observer
         // pushes it to the recognizer and refreshes the label. Unknown
         // IDs (a model removed from the catalog, or a bad stored value)
@@ -1933,17 +2017,6 @@ final class AppCoordinator: ObservableObject {
         // Settings leaf observes the coordinator, so a toggle/delete/
         // timer-start must invalidate it through this sink.
         alarmTimersCancellable = alarmTimersService.objectWillChange
-            .sink { [weak self] _ in
-                self?.noteForwardedStateChanged()
-            }
-
-        // [CAREGIVER-EVENTS] (2026-09-13) Forward the caregiver-notify
-        // settings' publishes — nested ObservableObject, same pattern (and
-        // the same coalescing seam) as the two above: the Settings leaf
-        // observes the coordinator, so a toggle flip must invalidate it
-        // through this sink; the schedulers read the same instance at
-        // fire time and need no notification at all.
-        caregiverNotifySettingsCancellable = caregiverNotifySettings.objectWillChange
             .sink { [weak self] _ in
                 self?.noteForwardedStateChanged()
             }
@@ -2288,26 +2361,7 @@ final class AppCoordinator: ObservableObject {
         // timer-completion notifications, so the reader never speaks over
         // the bell, and routes a tap on a delivered timer notification
         // into the ringing alarm screen.
-        // [CAREGIVER-EVENTS] (2026-09-13) Third handler: turns a delivered
-        // routine/calendar event notification into a caregiver alert. It
-        // ALWAYS declines to claim (`willPresent` returns false), so the
-        // reader below it is never suppressed and the banners keep
-        // appearing — registration order here is for the read-aloud
-        // allowlist, not for claiming precedence.
-        let caregiverEventHandler = CaregiverEventFireHandler(
-            routineScheduler: routineScheduler,
-            familyNotifier: familyNotifier,
-            settings: caregiverNotifySettings,
-            // Resolved at FIRE time, exactly like the settings gate: the
-            // item may have been deleted (nil → the alert falls back to
-            // the notification's own body) or retitled by the family in
-            // the native app since the scan.
-            externalItemLookup: { [weak externalCalendar = self.externalCalendar] stableKey in
-                externalCalendar?.reminders.first { $0.id == stableKey }
-            },
-            observability: observabilityBus
-        )
-        let facade = NotificationFacade(handlers: [timerAlarmEngine, notificationReader, caregiverEventHandler],
+        let facade = NotificationFacade(handlers: [timerAlarmEngine, notificationReader],
                                          observability: observabilityBus)
         UNUserNotificationCenter.current().delegate = facade
         // [TIMER-ALARM] Foreground driver: evaluates the ringing engine
@@ -2372,51 +2426,29 @@ final class AppCoordinator: ObservableObject {
         //
         // [T-037-a] Internal-testing encoder slot: when the INTENT_ENCODER
         // compilation condition is present AND the ModelStore artifact is
-        // installed AND a tokenizer is ready, the encoder takes the
-        // `preferred` slot; otherwise `preferredLocalBrain` returns
+        // installed AND the bundled resources load, the encoder takes the
+        // `preferred` slot; otherwise the chain serves
         // `localIntentInterpreter` UNCHANGED (the shipped default). The
         // stand-in (`llamaCommandInterpreter`) and every other layer are
         // untouched — the keyword safety net still runs upstream of this
         // whole chain.
+        //
+        // [ENCODER-RUNTIME-READY] The slot is wired through
+        // `deferredEncoderPreference`, so availability is re-read every
+        // turn: a tester whose artifact installs after launch (the
+        // readiness request below) gets the encoder on the next turn
+        // instead of needing a relaunch.
         //
         // `gatedEncoder` is what protects the lazy factory: the closure is
         // evaluated only when the gate is on, so a non-gated build never
         // even CONSTRUCTS the interpreter (see the lazy var's docs). The
         // wiring decision and the selection event both live in
         // `IntentEncoderWiring`, so the shipped call site is the tested one.
-        let offeredEncoder = IntentEncoderWiring.gatedEncoder {
-            intentEncoderInterpreter
-        }
-        // [T-036 SIDELOAD] INTERNAL TESTING — publish blocked on the
-        // 8,000-row calibration corpus (T-035/T-038). On a gated build,
-        // fetch the TRAINED artifact from the LAN web root into the
-        // ModelStore the encoder above reads, unless it is already
-        // installed. `installIfNeeded` returns synchronously (fetch +
-        // checksum + unzip run on its own queue) and re-checks the
-        // compile-time gate first, so a shipped build neither downloads
-        // nor even constructs the installer; the brain chain re-checks
-        // `isAvailable` every turn, so a successful install is picked up
-        // without a reload. `INTENT_ENCODER_SIDELOAD_URL=` (blank)
-        // disables the fetch entirely for a tester who staged the zip.
-        if IntentEncoderFeature.isEnabled {
-            _ = intentEncoderSideloadInstaller.installIfNeeded()
-        }
-        let preferredLocal = IntentEncoderWiring.preferredLocalBrain(
-            encoder: offeredEncoder,
-            fallback: localIntentInterpreter)
-        if let selectionMetadata = IntentEncoderWiring.selectionEventMetadata(
-                preferred: preferredLocal, encoder: offeredEncoder) {
-            observabilityBus.emit(ObservabilityEvent(
-                component: "intent_encoder_wiring",
-                eventType: "encoder_selected_as_local_brain",
-                durationMs: nil,
-                outcome: "info",
-                errorCode: nil,
-                metadata: selectionMetadata
-            ))
-        }
-        router3.localBrain = LocalBrainChain(preferred: preferredLocal,
-                                             standIn: llamaCommandInterpreter)
+        // [ENCODER-RUNTIME-TOGGLE] The decision moved into a method because
+        // the tester can now flip the encoder on and off at runtime: the
+        // Settings switch re-runs this same installation, so the slot is
+        // hot-swapped on the next turn rather than frozen at boot.
+        installLocalBrainSlot(on: router3)
         router3.cloudBrain = geminiInterpreter
         router3.cloudEnabled = (voiceEngineStack == .gemini)
         // [LAT-M3] (2026-09-11) Cloud-FIRST open-domain interpretation
@@ -2557,8 +2589,7 @@ final class AppCoordinator: ObservableObject {
             guard let self else { return }
             self.familyContacts = batch.contacts
             self.familyNotifier.updateContacts(
-                Self.emergencyContacts(from: batch.contacts,
-                                       defaultCallApp: self.defaultCallApp))
+                Self.emergencyContacts(from: batch.contacts))
             self.savedPlaces = batch.places
             self.appointments = batch.appointments
             self.todayBriefing = batch.briefing
@@ -4511,38 +4542,14 @@ self.noteTalkContractChanged()
     /// Maps stored family contacts onto the notifier's contact type.
     /// Device tokens stay unprovisioned until the broker relay exists
     /// (review C6) — the list itself is real and wired.
-    ///
-    /// [CAREGIVER-EVENTS] (2026-09-13) Each contact also resolves its
-    /// EVENT-ALERT channel from the calling preference the elder already
-    /// chose: a contact the app calls on WhatsApp gets event alerts on
-    /// WhatsApp, one it calls on Messenger gets Messenger (and falls back
-    /// to SMS when no handle is on file — Messenger addresses people by
-    /// username, the same pre-gate `resolvedCallChannel` applies to the
-    /// call button), everything else rides SMS. `preferredCallApp` is
-    /// optional and per-contact, so the app-wide default fills in —
-    /// `notifyChannel` is a pure function of the two, kept out of this
-    /// mapper so the matrix is testable without constructing a contact.
-    ///
-    /// Note the deliberate hardcode below is NOT the pre-existing
-    /// `isEmergencyContact: true` one (out of scope here): the fallback
-    /// chain is explicit because a curated contact that is not a family
-    /// target still has to resolve to SOMETHING for the type's
-    /// non-optional field.
-    private static func emergencyContacts(from contacts: [FamilyContact],
-                                          defaultCallApp: CallApp) -> [EmergencyContact] {
-        contacts.map { contact in
-            let channel = NotifyChannel.resolve(
-                preferred: contact.preferredCallApp,
-                defaultApp: defaultCallApp,
-                messengerHandleAvailable: !(contact.messengerHandle ?? "").isEmpty
-            )
-            return EmergencyContact(
-                id: contact.id,
-                displayName: contact.name,
+    private static func emergencyContacts(from contacts: [FamilyContact]) -> [EmergencyContact] {
+        contacts.map {
+            EmergencyContact(
+                id: $0.id,
+                displayName: $0.name,
                 deviceToken: "",
                 isEmergencyContact: true,
-                isFamilyNotificationTarget: true,
-                notifyChannel: channel
+                isFamilyNotificationTarget: true
             )
         }
     }
@@ -4600,8 +4607,7 @@ self.noteTalkContractChanged()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.familyContacts = self.familyContactStore.load()
-            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts,
-                                   defaultCallApp: self.defaultCallApp))
+            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts))
         }
         return true
     }
@@ -4684,8 +4690,7 @@ self.noteTalkContractChanged()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.familyContacts = self.familyContactStore.load()
-            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts,
-                                   defaultCallApp: self.defaultCallApp))
+            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts))
         }
         return true
     }
@@ -4703,8 +4708,7 @@ self.noteTalkContractChanged()
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.familyContacts = self.familyContactStore.load()
-            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts,
-                                   defaultCallApp: self.defaultCallApp))
+            self.familyNotifier.updateContacts(Self.emergencyContacts(from: self.familyContacts))
         }
     }
 
@@ -4955,146 +4959,6 @@ self.noteTalkContractChanged()
             outcome: outcome,
             errorCode: nil,
             metadata: [:]  // app id only — no contact identifiers (C9)
-        ))
-    }
-
-    // MARK: - Voice-triggered calendar event (caregiver event-notifications, 2026-09-13)
-
-    /// A `create_calendar_event` interpretation pended for confirmation.
-    /// Holds the RESOLVED start instant, never the raw time expression:
-    /// the router parses once (`NepaliTimeParser` +
-    /// `CalendarEventTimeResolver`), so the confirmation prompt, the
-    /// written event and the spoken outcome can never disagree about
-    /// when the event is.
-    struct PendingCalendarEvent {
-        let title: String
-        let startDate: Date
-    }
-
-    @Published private(set) var pendingCalendarEvent: PendingCalendarEvent?
-
-    /// [CALENDAR-EVENTS] (2026-09-13) Router-side twin of
-    /// `pendingCalendarEvent != nil` — the router skips its generic
-    /// medication-flavored yes/no speech while an event is pended (see
-    /// `VoiceCommandCoordinating.isAwaitingCalendarEventConfirmation`).
-    var isAwaitingCalendarEventConfirmation: Bool { pendingCalendarEvent != nil }
-
-    /// The EventKit write seam for voice-created events — LAZY like
-    /// `calendarSync`: constructing it touches no permissions, and
-    /// nothing here runs until the elder actually asks for an event.
-    /// Unlike `calendarSync` it is NOT the mirror: it writes one-off
-    /// events to the user's DEFAULT calendar (see
-    /// `VoiceCalendarEventWriter`), which is what makes them flow back
-    /// through the external-calendar import and fire the caregiver
-    /// alert like any other calendar reminder.
-    private(set) lazy var voiceCalendarEventWriter: CalendarEventWriting =
-        EventKitCalendarEventWriter()
-
-    /// `create_calendar_event` (real executor — replaces the stub it
-    /// shared with `suggest_video`). Pends the resolved event, puts the
-    /// session in awaiting-confirmation and returns the prompt to speak;
-    /// nil when the calendar cannot be written at all right now, so the
-    /// router speaks its honest unavailable line instead of asking the
-    /// elder to confirm an action that can only fail.
-    ///
-    /// The spoken time is `SpokenTime`'s, never a `DateFormatter`'s: the
-    /// promise of the feature is that an elder HEARS "भोलि बिहान ८ बजे"
-    /// and can say yes to it, and a clock string read out as digits is
-    /// exactly the bug `SpokenTime` exists to prevent.
-    func requestCalendarEventConfirmation(title: String, startDate: Date) -> String? {
-        guard canWriteCalendarEvents else { return nil }
-        let event = PendingCalendarEvent(title: title, startDate: startDate)
-        pendingCalendarEvent = event
-        DispatchQueue.main.async { [weak self] in
-            self?.voiceSession.transition(to: .awaitingConfirmation)
-        }
-        return L10n.fmt("router.calendarEventConfirm",
-                        locale: activeLocale,
-                        event.title,
-                        SpokenTime.string(from: event.startDate, locale: activeLocale))
-    }
-
-    /// Whether a voice-created event can plausibly be written WITHOUT
-    /// prompting. `.writeOnly` counts — the voice flow only ever CREATES,
-    /// which is precisely what a write-only grant permits — and
-    /// `.notDetermined` counts because that is the one case where the
-    /// point-of-use ask (which happens AFTER the elder has confirmed)
-    /// can still succeed; refusing to ask would make the feature
-    /// unreachable on a fresh install. Only `denied`/`restricted` are
-    /// dead ends, and those must never be papered over with a
-    /// confirmation question.
-    private var canWriteCalendarEvents: Bool {
-        switch voiceCalendarEventWriter.eventsAccess {
-        case .fullAccess, .writeOnly, .notDetermined:
-            return true
-        case .denied, .restricted:
-            return false
-        }
-    }
-
-    /// Confirmed: ask if never asked, write, then speak the honest
-    /// outcome. Both halves are off-main (the access ask is a suspension
-    /// point, and `EKEventStore.save` is blocking IO) and the result
-    /// returns to the main queue to touch published state.
-    ///
-    /// The event is written to the DEFAULT calendar, so the normal
-    /// external-calendar import picks it up and arms its reminder — a
-    /// rescan here just makes that immediate instead of waiting for the
-    /// next foreground/BGTask scan. That is also the honest limit of
-    /// this path: if the family has the external-calendar import toggled
-    /// OFF, the event exists in the native calendar but the app has no
-    /// reminder to fire from (and therefore no caregiver alert either) —
-    /// the written event is still correct, and `router.calendarEventCreated`
-    /// claims only that it was added to the calendar.
-    private func executePendingCalendarEvent(_ event: PendingCalendarEvent) {
-        Task { [weak self] in
-            guard let self else { return }
-            if self.voiceCalendarEventWriter.eventsAccess == .notDetermined {
-                _ = await self.voiceCalendarEventWriter.requestAccess()
-            }
-            let created = self.voiceCalendarEventWriter.create(
-                title: event.title,
-                startDate: event.startDate,
-                durationMinutes: EventKitCalendarEventWriter.defaultDurationMinutes
-            )
-            DispatchQueue.main.async {
-                self.finishCalendarEventWrite(event, created: created)
-            }
-        }
-    }
-
-    /// Shared tail of a confirmed calendar write. A REFUSED write (access
-    /// vanished between the prompt and the save, or EventKit rejected it)
-    /// gets the honest unavailable line — never a success claim. No
-    /// PII event: only the outcome, and the event id hash never leaves
-    /// the alert context in any case.
-    private func finishCalendarEventWrite(_ event: PendingCalendarEvent, created: Bool) {
-        guard created else {
-            emitCalendarEvent(eventType: "command_calendar_event_write_failed",
-                              outcome: "blocked")
-            replyHonestly(key: "router.calendarEventCalendarUnavailable")
-            return
-        }
-        let text = L10n.fmt("router.calendarEventCreated",
-                            locale: activeLocale,
-                            event.title,
-                            SpokenTime.string(from: event.startDate, locale: activeLocale))
-        setOutcome(icon: "calendar.badge.plus", text: text)
-        speak(text: text)
-        Task { await externalCalendar.rescan() }
-    }
-
-    /// Observability for the calendar-event write path. Metadata-free by
-    /// construction (constitution C9): the event TITLE is user content
-    /// and never reaches the bus.
-    private func emitCalendarEvent(eventType: String, outcome: String) {
-        observabilityBus.emit(ObservabilityEvent(
-            component: "app_coordinator",
-            eventType: eventType,
-            durationMs: nil,
-            outcome: outcome,
-            errorCode: nil,
-            metadata: [:]
         ))
     }
 
@@ -5698,61 +5562,25 @@ self.noteTalkContractChanged()
                                             phone: phone,
                                             messengerHandle: messengerHandle,
                                             body: storedBody))
-        // Arm the missed-call attribution (call-tracking task, 2026-09-13):
-        // a call the app genuinely OPENED is the one event iOS's anonymous
-        // unanswered report may honestly be matched to. Only the real call
-        // channels qualify — a Messenger thread open is recorded as a call
-        // attempt but is not a call, WhatsApp opens a chat, and an
-        // `.unanswered` row is the observer's own event (never a dial of
-        // ours), so none of them can become a candidate.
-        if kind == .call, Self.attributableCallChannels.contains(channel) {
-            openedCallAttributor.recordOpenedCall(name: contactName,
-                                                  phone: phone,
-                                                  at: timestamp)
-        }
         refreshRecentActivity()
     }
 
-    /// The channels whose open IS a placed call (call-tracking task,
-    /// 2026-09-13) — the only ones `OpenedCallAttributor` may match an
-    /// unanswered event to. Messenger is deliberately absent: its "call"
-    /// request resolves to an opened THREAD (no documented scheme starts a
-    /// Messenger call), so no call exists to go unanswered.
-    private static let attributableCallChannels: Set<AppActivityEntry.Channel> = [
-        .phone, .faceTimeVideo, .faceTimeAudio
-    ]
-
-    /// Records one unanswered call — the coordinator side of the
-    /// live-call detector's `onUnanswered` (missed-calls task, 2026-09-07;
-    /// attribution, call-tracking task, 2026-09-13). Fired when
-    /// CXCallObserver reported a call that ended without ever connecting:
-    /// a missed or declined incoming call, or an attempted outgoing call
-    /// nobody picked up. iOS masks calls that involve other apps so
-    /// completely that these are indistinguishable, so the row claims only
-    /// the shared fact, "a call ended unanswered".
-    ///
-    /// TWO shapes, and the difference is what the app can prove:
-    ///  - ATTRIBUTED — the app itself opened a call to a contact moments
-    ///    before the event and no call ever connected in between
-    ///    (`OpenedCallAttributor`): the row carries that contact, because
-    ///    the app already knew who it dialed and the ended-unconnected
-    ///    event is that dial's outcome.
-    ///  - ANONYMOUS — everything else. `contactName` and `phone` are EMPTY
-    ///    ON PURPOSE: the caller's identity AND number are masked by iOS —
-    ///    there is no name to store, no number to look up or dial, and no
-    ///    address-book match is possible — and the UI renders the
-    ///    localized "Unanswered call" label (`history.unanswered`) instead
-    ///    of a stored locale string.
-    /// Either way the row's action opens the Phone app (`PhoneAppOpener`),
-    /// where the call genuinely lives (its Recents tab, one tap from the
-    /// dialer).
+    /// Records one ANONYMOUS unanswered call — the coordinator side of
+    /// the live-call detector's `onUnanswered` (missed-calls task,
+    /// 2026-09-07). Fired when CXCallObserver reported a call that ended
+    /// without ever connecting: a missed or declined incoming call, or
+    /// an attempted outgoing call nobody picked up. iOS masks calls that
+    /// involve other apps so completely that these are
+    /// indistinguishable — this row claims only the shared fact, "a call
+    /// ended unanswered". `contactName` and `phone` are EMPTY ON
+    /// PURPOSE: the caller's identity AND number are masked by iOS —
+    /// there is no name to store, no number to look up or dial, and no
+    /// address-book match is possible — and the UI renders the localized
+    /// "Unanswered call" label (`history.unanswered`) instead of a
+    /// stored locale string. The row's action opens the Phone app
+    /// (`PhoneAppOpener`), where the caller's identity genuinely lives
+    /// (its Recents tab, one tap from the dialer).
     private func recordUnansweredCall(at timestamp: Date) {
-        if let opened = openedCallAttributor.attributedMissedCall(endedAt: timestamp) {
-            recordActivity(kind: .call, channel: .unanswered,
-                           contactName: opened.name, phone: opened.phone,
-                           timestamp: timestamp)
-            return
-        }
         recordActivity(kind: .call, channel: .unanswered,
                        contactName: "", phone: "", timestamp: timestamp)
     }
@@ -5773,16 +5601,7 @@ self.noteTalkContractChanged()
         let detector = LiveCallDetector(
             provider: CXCallStateProvider(),
             onChange: { [weak self] active in
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    self.liveCallActive = active
-                    // A connected call clears the attribution candidate
-                    // (call-tracking task, 2026-09-13): something was
-                    // ANSWERED, so if an unanswered event lands later it
-                    // is not the app's dial — better to record it
-                    // anonymously than to name the wrong contact.
-                    if active { self.openedCallAttributor.noteCallConnected() }
-                }
+                DispatchQueue.main.async { self?.liveCallActive = active }
             },
             onUnanswered: { [weak self] timestamp in
                 // Record the anonymous unanswered row (missed-calls task,
@@ -6484,15 +6303,26 @@ self.noteTalkContractChanged()
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
-            self?.intentEncoderInterpreter.handleMemoryPressure()
+            self?.handleIntentEncoderMemoryPressureIfEnabled()
         }
     }
 
+    /// [ENCODER-RUNTIME-TOGGLE] The observer is installed once (under the
+    /// compile gate) and this body decides whether the message applies: an
+    /// encoder that was never offered holds nothing, and must not be
+    /// CONSTRUCTED just to find that out — but one that a tester switched
+    /// on and then off is still resident and must release.
+    private func handleIntentEncoderMemoryPressureIfEnabled() {
+        guard IntentEncoderFeature.isEnabled, intentEncoderOffered else { return }
+        intentEncoderInterpreter.handleMemoryPressure()
+    }
+
     /// Re-arms the encoder after a memory-pressure unload at the start of
-    /// a voice turn (no-op unless the internal-testing gate is on, so the
-    /// lazy encoder object is never even constructed otherwise).
+    /// a voice turn (no-op unless the internal-testing gate is on AND the
+    /// runtime toggle is ON, so the lazy encoder object is never even
+    /// constructed otherwise).
     private func rearmIntentEncoderIfEnabled() {
-        guard IntentEncoderFeature.isEnabled else { return }
+        guard IntentEncoderFeature.isEnabled, intentEncoderEnabled else { return }
         intentEncoderInterpreter.rearmAfterMemoryPressure()
     }
 
@@ -6645,14 +6475,6 @@ self.noteTalkContractChanged()
     /// alone would not invalidate views observing the coordinator (same
     /// pattern as `externalCalendarCancellable`).
     private var alarmTimersCancellable: AnyCancellable?
-
-    /// Forwards the caregiver-notify settings' publishes
-    /// ([CAREGIVER-EVENTS] 2026-09-13): nested ObservableObject — a
-    /// toggle flip alone would not invalidate views observing the
-    /// coordinator, so the Settings leaf's switch would not move until
-    /// something else repainted (same pattern as
-    /// `externalCalendarCancellable`).
-    private var caregiverNotifySettingsCancellable: AnyCancellable?
 
     /// Offline Bikram Sambat + tithi + festival overlay and festival
     /// notification scheduling (2026-09-06 BS calendar feature).
@@ -6967,28 +6789,6 @@ self.noteTalkContractChanged()
             }
             return
         }
-        // Calendar-event confirmations (caregiver event-notifications,
-        // 2026-09-13): same additive shape as the call block above —
-        // checked and returned early, so the medication path below stays
-        // untouched. A YES writes the event; a NO speaks the honest
-        // cancellation (same as the call and directions paths — an elder
-        // who says "होइन" must hear that they were heard, not silence).
-        if let event = pendingCalendarEvent {
-            pendingCalendarEvent = nil
-            if case .yes = response {
-                emitCalendarEvent(eventType: "command_calendar_event_confirmed",
-                                  outcome: "success")
-                executePendingCalendarEvent(event)
-            } else {
-                emitCalendarEvent(eventType: "command_calendar_event_cancelled",
-                                  outcome: "cancelled")
-                speak(text: L10n.str("router.calendarEventCancelled", locale: activeLocale))
-            }
-            DispatchQueue.main.async { [weak self] in
-                self?.voiceSession.transition(to: .idle)
-            }
-            return
-        }
         guard let entryId = pendingConfirmationEntryId else { return }
         _ = medicationScheduler.acknowledgeWithConfirmation(
             entryId: entryId,
@@ -7019,7 +6819,6 @@ self.noteTalkContractChanged()
     /// stays in force.
     var isAwaitingConfirmation: Bool {
         pendingConfirmationEntryId != nil || pendingCallAction != nil || pendingRephrase != nil
-            || pendingCalendarEvent != nil
             || !pendingNavigationWalk.isEmpty
     }
 

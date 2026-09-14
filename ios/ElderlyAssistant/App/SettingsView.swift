@@ -3295,6 +3295,15 @@ struct AIModelsSettingsView: View {
                 .background(DesignTokens.card)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
 
+                // [ENCODER-RUNTIME-TOGGLE] The internal-testing encoder
+                // switch. Compiled away on a shipped build (the `if` is the
+                // compilation condition, folded at compile time), so this
+                // card neither renders nor constructs anything unless the
+                // internal `INTENT_ENCODER` build is in use.
+                if IntentEncoderFeature.isEnabled {
+                    encoderCard
+                }
+
                 // TTS / VAD / KWS management — deliberately left as it
                 // was by the STT/brain split (the voice rows this screen
                 // has always managed).
@@ -3354,6 +3363,88 @@ struct AIModelsSettingsView: View {
             get: { coordinator.brainModelPreference },
             set: { coordinator.brainModelPreference = $0 }
         )
+    }
+
+    /// [ENCODER-RUNTIME-TOGGLE] The internal-testing switch for the
+    /// on-device intent encoder (an internal artifact whose published run
+    /// does not meet every harness gate — see the catalog entry).
+    ///
+    /// OFF (the default) is the shipped behaviour: the brain picker above
+    /// serves. ON lets the encoder take the local slot the moment its
+    /// artifact is installed — and flipping it acts on the NEXT TURN, not
+    /// the next launch, so an A/B pass over the same utterances costs one
+    /// switch, not two installs. The card only exists on a build that
+    /// compiles `INTENT_ENCODER` in (see the caller) and sits on the
+    /// hidden internal screen, so a household user never meets this switch
+    /// or its vocabulary.
+    ///
+    /// [ENCODER-RUNTIME-CASCADE] The second switch on the card is the A/B's
+    /// third leg: OFF the encoder answers alone; ON the brain picked above
+    /// answers the same turn whenever the encoder abstains or is unsure.
+    private var encoderCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("settings.encoder.title")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundStyle(DesignTokens.textPrimary)
+            Toggle(isOn: Binding(
+                get: { coordinator.intentEncoderEnabled },
+                set: { coordinator.intentEncoderEnabled = $0 }
+            )) {
+                Text("settings.encoder.toggleLabel")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            Text("settings.encoder.note")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            // [ENCODER-RUNTIME-CASCADE] The A/B's third leg: encoder first,
+            // the picked brain answering the same turn when the encoder is
+            // unsure. Disabled (not hidden) while the encoder is off —
+            // the mode collapses to the picker brain there, so the row
+            // would do nothing, and the disabled state says so honestly.
+            Toggle(isOn: Binding(
+                get: { coordinator.intentEncoderCascadeEnabled },
+                set: { coordinator.intentEncoderCascadeEnabled = $0 }
+            )) {
+                Text("settings.encoder.cascadeLabel")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .disabled(!coordinator.intentEncoderEnabled)
+            Text("settings.encoder.cascadeNote")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 6) {
+                Image(systemName: encoderArtifactInstalled
+                      ? "checkmark.seal.fill"
+                      : "tray.and.arrow.down")
+                    .foregroundStyle(DesignTokens.textSecondary)
+                Text(L10n.fmt("settings.encoder.artifact",
+                              locale: coordinator.appLanguage.locale,
+                              L10n.str(encoderArtifactInstalled ? "model.ready"
+                                                                : "model.notDownloaded",
+                                       locale: coordinator.appLanguage.locale)))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(DesignTokens.textSecondary)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// The encoder artifact's install state, resolved through the same
+    /// `isInstalled` seam the model rows use (live download state first,
+    /// then what is on disk).
+    private var encoderArtifactInstalled: Bool {
+        isInstalled(ModelCatalog.intentEncoderSpike)
     }
 
     private func startDownloadIfNeeded(_ id: ModelID) {

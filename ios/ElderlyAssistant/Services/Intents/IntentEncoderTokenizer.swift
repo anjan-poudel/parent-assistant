@@ -2,30 +2,31 @@ import Foundation
 
 /// [T-037-a] The tokenizer seam for the intent encoder.
 ///
-/// ## Why a seam and not an implementation (honest gap)
+/// ## Why a seam (and what now sits behind it)
 ///
 /// The encoder's CoreML graph consumes `input_ids` / `attention_mask`
-/// (int32, shape `[1, 1...64]`) produced by the T-033-selected model's
-/// XLM-R SentencePiece vocabulary — a 250k-piece `sentencepiece.bpe.model`
-/// plus a 17 MB HF `tokenizer.json`. There is currently NO Swift-side
-/// implementation of that vocabulary in the repo or in any linked
-/// dependency (Foundation/Accelerate/CoreML have none; the vendored
-/// packages are whisper.cpp, llama.cpp, WhisperKit, ZIPFoundation and
-/// sherpa-onnx — none exposes an XLM-R tokenizer).
+/// (int32, shape `[1, 1...64]`) from the model's XLM-R SentencePiece
+/// vocabulary — a 250k-piece `sentencepiece.bpe.model` plus a 17 MB HF
+/// `tokenizer.json`. No linked dependency ships an XLM-R tokenizer
+/// (Foundation/Accelerate/CoreML have none; the vendored packages are
+/// whisper.cpp, llama.cpp, WhisperKit, ZIPFoundation and sherpa-onnx), so
+/// the runtime carries its own:
+/// `XlmrUnigramTokenizer` ([ENCODER-RUNTIME-READY]) implements the full
+/// pipeline — precompiled-charsmap normalisation, Replace, Metaspace
+/// pre-tokenization, Unigram Viterbi, `<s>`/`</s>` post-processing,
+/// truncation — from a compact committed vocabulary table, and is gated on
+/// a golden-fixture suite whose rows come from the PYTHON tokenizer, the
+/// source of truth (`ios/ElderlyAssistantTests/Services/Intents/
+/// XlmrUnigramTokenizerTests.swift`).
 ///
-/// T-037-a therefore ships the runtime wired end-to-end EXCEPT this one
-/// edge, which sits behind this protocol. The production tokenizer is
-/// `UnavailableIntentEncoderTokenizer`: it reports `isReady == false`, so
-/// `IntentEncoderInterpreter.isAvailable` is false and the app behaves
-/// exactly as before the encoder existed (the local brain stays the LLaMA
-/// stand-in). Nothing is faked: there is no "stub tokenizer" that returns
-/// plausible-looking ids, because fabricated ids would produce fabricated
-/// logits and a fabricated command.
-///
-/// Closing the gap (tracked in the task notes as the phase's top risk)
-/// means either porting HF's Unigram tokenizer (the `tokenizer.json` can
-/// drive it) or adding a dependency that already ships one; the seam below
-/// is the only integration point that changes.
+/// The protocol is what keeps the failure mode honest: a tokenizer that
+/// cannot serve reports `isReady == false`
+/// (`UnavailableIntentEncoderTokenizer`) and the interpreter's
+/// `isAvailable` is false, so the app behaves exactly as before the
+/// encoder existed (the local brain stays the LLaMA stand-in). Nothing is
+/// ever faked: there is no "stub tokenizer" that returns plausible-looking
+/// ids, because fabricated ids would produce fabricated logits and a
+/// fabricated command.
 ///
 /// ## Contract
 ///
@@ -70,9 +71,11 @@ struct IntentEncoderTokenization: Equatable {
     let words: [String]
 }
 
-/// The production tokenizer until a Swift XLM-R SentencePiece/Unigram
-/// implementation exists. Reports not-ready and refuses to tokenise —
-/// an explicit, observable unavailability (no silent stub), by design.
+/// Reports not-ready and refuses to tokenise — an explicit, observable
+/// unavailability (no silent stub), by design. Still the default the
+/// interpreter's initialiser takes, and still the object
+/// `IntentEncoderRuntime.load` returns when the bundled vocabulary or the
+/// companion meta.json cannot be read.
 final class UnavailableIntentEncoderTokenizer: IntentEncoderTokenizing {
     let tokenizerID = "xlm-r-250k-unavailable"
     var isReady: Bool { false }
