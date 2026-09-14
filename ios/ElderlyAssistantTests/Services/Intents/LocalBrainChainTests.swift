@@ -227,6 +227,65 @@ final class LocalBrainChainTests: XCTestCase {
         XCTAssertEqual(exclusive.lastInferenceFailureReason, "inference_timeout")
     }
 
+    // MARK: - [TURN-TIMING-BREAKDOWN] the cascade's decision span
+    //
+    // The serve-or-escalate decision is the one piece of the local-brain
+    // path no other stage covers: the breakdown must show it was taken,
+    // not just that two brains ran. It is timed on BOTH outcomes (a
+    // serve is a decision too), and it stays absent on a chain with no
+    // cascade — a nil recorder and a cascade-less chain both change
+    // nothing about the rule itself.
+
+    func testCascadeDecisionStageIsRecordedWhenTheAnswerServes() {
+        let recorder = TurnTimingRecorder()
+        recorder.beginTurn()
+        let atBand = makeCommand(action: .query, confidence: 0.7, reply: "encoder")
+        let chain = LocalBrainChain(
+            preferred: StubCommandInterpreter(result: atBand),
+            standIn: StubCommandInterpreter(result: makeCommand(action: .query, confidence: 0.9)),
+            cascade: LocalBrainChain.Cascade(acceptThreshold: 0.7),
+            timingRecorder: recorder)
+
+        XCTAssertEqual(interpret(chain, "केही प्रश्न"), atBand)
+        let stages = recorder.finishTurn().stages
+        XCTAssertEqual(stages.map(\.stage), ["cascade_decision"],
+                       "the decision is timed even when it serves")
+        XCTAssertTrue(stages.allSatisfy { $0.ms >= 0 },
+                      "measured durations are non-negative")
+    }
+
+    func testCascadeDecisionStageIsRecordedWhenItEscalates() {
+        let recorder = TurnTimingRecorder()
+        recorder.beginTurn()
+        var reasons: [LocalBrainChain.EscalationReason] = []
+        let answer = makeCommand(action: .query, confidence: 0.9, reply: "standin")
+        let chain = LocalBrainChain(
+            preferred: StubCommandInterpreter(result: nil),
+            standIn: StubCommandInterpreter(result: answer),
+            cascade: LocalBrainChain.Cascade(acceptThreshold: 0.7) { reasons.append($0) },
+            timingRecorder: recorder)
+
+        XCTAssertEqual(interpret(chain, "केही प्रश्न"), answer)
+        XCTAssertEqual(reasons, [.abstained], "the escalation rule is unchanged")
+        XCTAssertEqual(recorder.finishTurn().stages.map(\.stage),
+                       ["cascade_decision"],
+                       "an escalated turn still shows its decision")
+    }
+
+    func testChainWithoutACascadeRecordsNoDecisionStage() {
+        let recorder = TurnTimingRecorder()
+        recorder.beginTurn()
+        let chain = LocalBrainChain(
+            preferred: StubCommandInterpreter(result: nil),
+            standIn: StubCommandInterpreter(result: makeCommand(action: .query, confidence: 0.9)),
+            timingRecorder: recorder)
+
+        XCTAssertNil(interpret(chain, "केही प्रश्न"),
+                     "no cascade: the exclusive rule is byte-identical")
+        XCTAssertTrue(recorder.finishTurn().isEmpty,
+                      "a chain with no cascade has no decision to time")
+    }
+
     // MARK: - Router integration (the reported bug's shape)
 
     func testOnDeviceStackPlainQueryAnsweredThroughRouter() {

@@ -295,6 +295,52 @@ final class LlamaCommandInterpreterTests: XCTestCase {
         XCTAssertTrue(interp.isAvailable, "seam must stand in for the llama.cpp runtime")
     }
 
+    // MARK: - [TURN-TIMING-BREAKDOWN] picker stage instrumentation
+
+    /// The picker brain's two stages are recorded for a timed turn: the
+    /// prompt build (synchronous, on the caller's queue) and the
+    /// round-trip — the `generateOverride` seam here, llama.cpp in
+    /// production — in canonical order, non-negative, with the answer
+    /// itself unchanged.
+    func testPickerStagesAreRecordedForATimedTurn() {
+        let recorder = TurnTimingRecorder()
+        let interp = LlamaCommandInterpreter(modelStore: store,
+                                             observabilityBus: bus,
+                                             timingRecorder: recorder)
+        interp.generateOverride = { _, _ in
+            #"{"intent":"query","response":"भोलि घाम लाग्नेछ।","confidence":0.9}"#
+        }
+        XCTAssertTrue(interp.isAvailable)
+
+        recorder.beginTurn()
+        let cmd = interpret(interp)
+        let stages = recorder.finishTurn().stages
+
+        XCTAssertEqual(cmd?.action, .query, "the timed turn still answers")
+        XCTAssertEqual(stages.map(\.stage),
+                       ["picker_prompt_build", "picker_inference"],
+                       "the picker's two stages, in canonical order")
+        XCTAssertTrue(stages.allSatisfy { $0.ms >= 0 },
+                      "measured durations are non-negative")
+    }
+
+    /// Outside a turn nothing is recorded: a read-aloud or a warm-up
+    /// consult of the picker brain must never open or extend a turn's
+    /// breakdown.
+    func testPickerStagesAreNotRecordedOutsideATurn() {
+        let recorder = TurnTimingRecorder()
+        let interp = LlamaCommandInterpreter(modelStore: store,
+                                             observabilityBus: bus,
+                                             timingRecorder: recorder)
+        interp.generateOverride = { _, _ in
+            #"{"intent":"query","response":"ठीक छ।","confidence":0.9}"#
+        }
+
+        XCTAssertNotNil(interpret(interp), "the untimed call still answers")
+        XCTAssertTrue(recorder.finishTurn().isEmpty,
+                      "no turn was open — nothing may be recorded")
+    }
+
     // MARK: - Warm seam ([LAT-M1])
 
     func testWarmReportsFailedWhenModelNotCached() {

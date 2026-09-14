@@ -330,6 +330,11 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     private let bundle: Bundle
     /// [TURN-TIMING] Turn-scoped stage tracer (nil = timing off).
     private let turnTracer: VoiceTurnLatencyTracer?
+    /// [TURN-TIMING-BREAKDOWN] Turn-scoped stage stopwatch for
+    /// `tts_start` — handed-to-speaker → audio start (voice resolution +
+    /// synthesis ramp), NOT the playback duration. Nil on every
+    /// configuration but an `INTENT_ENCODER` build.
+    private let timingRecorder: TurnTimingRecorder?
     /// [LAT-M2] Shared pre-ack WAV cache the warm-time build writes and
     /// the router's fast-lane player reads. A nil injection gets a
     /// private instance pointing at the SAME default directory — the
@@ -351,12 +356,14 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
          silenceFallback: Speaker = NullSpeaker(),
          bundle: Bundle = .main,
          turnTracer: VoiceTurnLatencyTracer? = nil,
+         timingRecorder: TurnTimingRecorder? = nil,
          ackCache: AckAudioCache? = nil) {
         self.fallback = fallback
         self.silenceFallback = silenceFallback
         self.observabilityBus = observabilityBus
         self.modelStore = modelStore
         self.turnTracer = turnTracer
+        self.timingRecorder = timingRecorder
         self.ackCache = ackCache ?? AckAudioCache()
         let sherpa = SherpaTTSEngine()
         // [TURN-TIMING] Voice engine ready — the load ms rides as a point
@@ -436,6 +443,12 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     func speak(_ text: String, locale: Locale) async {
         cancel()
         cancelled = false
+        // [TURN-TIMING-BREAKDOWN] `tts_start` opens when the utterance is
+        // handed to the speaker and closes at the moment audio starts —
+        // on the fallback branches too, where the fallback speaker IS the
+        // audio. A cancelled utterance never finishes its span, so it
+        // records nothing (no speech started).
+        let ttsStartSpan = timingRecorder?.start(.ttsStart)
         let spec = resolveVoiceSpec(for: text, locale: locale)
         if spec.usedAudition || spec.speakerID != 0
             || spec.voiceID != Self.voiceID(for: spec.locale) {
@@ -445,6 +458,7 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         guard let voiceDir = modelStore.ttsVoiceDirectory(for: spec.voiceID)
                 ?? modelStore.installBundledTTSVoice(for: spec.voiceID, bundle: bundle) else {
             emit("tts_voice_missing_fallback", locale: spec.locale)
+            ttsStartSpan?.finish()
             await fallbackSpeaker(for: spec.locale).speak(text, locale: spec.locale)
             return
         }
@@ -462,12 +476,17 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         guard let wav, !cancelled else {
             if wav == nil && !cancelled {
                 emit("tts_synthesis_failed_fallback", locale: spec.locale)
+                ttsStartSpan?.finish()
                 await fallbackSpeaker(for: spec.locale).speak(text, locale: spec.locale)
             }
             return
         }
         defer { try? FileManager.default.removeItem(at: wav) }
         emit("speak", locale: spec.locale)
+        // Audio starts with the player — the span closes here, not after
+        // playback (the playback duration is the tracer's `speak_finished`
+        // span, not this one).
+        ttsStartSpan?.finish()
         await play(wav, text: text, locale: spec.locale)
     }
 

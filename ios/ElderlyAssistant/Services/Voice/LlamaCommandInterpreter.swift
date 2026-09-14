@@ -311,6 +311,12 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     private let modelStore: ModelStore
     private let observabilityBus: ObservabilityBus
     private let config: Config
+    /// [TURN-TIMING-BREAKDOWN] Turn-scoped stage stopwatch for the picker
+    /// brain's two stages (prompt build / inference). Nil — every
+    /// configuration except an `INTENT_ENCODER` build — makes each
+    /// measurement a nil check around the UNCHANGED calls. Instrumentation
+    /// only: no prompt byte, no sampling parameter and no decision reads it.
+    private let timingRecorder: TurnTimingRecorder?
     /// [LAT-EVIDENCE] The honest reason the LAST inference failed
     /// ("inference_timeout" / "inference_empty_output") — the router
     /// consults it after a nil result to escalate to the cloud instead
@@ -385,12 +391,14 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
          observabilityBus: ObservabilityBus,
          preferredBaseId: ModelID = ModelCatalog.llama3_2_1B,
          config: Config = .default,
-         pluginRegistry: PluginRegistry? = nil) {
+         pluginRegistry: PluginRegistry? = nil,
+         timingRecorder: TurnTimingRecorder? = nil) {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
         self.preferredBaseId = preferredBaseId
         self.config = config
         self.pluginRegistry = pluginRegistry
+        self.timingRecorder = timingRecorder
     }
 
     /// The base model this interpreter currently loads (read-only outside;
@@ -450,10 +458,25 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         // on-device context (1,024 tokens) cannot fit them (see the
         // pluginRegistry property docs); `IntentPrompt.build` defaults to
         // no plugins.
-        let prompt = IntentPrompt.build(transcript: clean, context: context)
+        //
+        // [TURN-TIMING-BREAKDOWN] `picker_prompt_build` — the prompt
+        // construction only (sanitisation above is deliberately outside
+        // the span: it is a guard keystone, not prompt assembly, and it
+        // runs before the transcript can reach any prompt string).
+        let prompt = timingRecorder.measure(.pickerPromptBuild) {
+            IntentPrompt.build(transcript: clean, context: context)
+        }
 
         inferenceQueue.async { [weak self] in
+            // [TURN-TIMING-BREAKDOWN] `picker_inference` — opened when the
+            // round-trip starts and closed by the completion, which
+            // `runInference` calls exactly once on every path (seam,
+            // success, empty output, timeout). The first picker turn's
+            // llama.cpp model load lands inside this span — the same
+            // honest conflation the tracer's coarse `llm` stage carries.
+            let inferenceSpan = self?.timingRecorder?.start(.pickerInference)
             self?.runInference(prompt: prompt) { json in
+                inferenceSpan?.finish()
                 let parsed = Self.parse(json: json)
                 if let p = parsed, p.confidence < (self?.config.confidenceThreshold ?? 0.7) {
                     // Below the threshold — treat as "not confident" so the
