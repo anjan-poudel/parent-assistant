@@ -186,6 +186,111 @@ final class IntentEncoderWiringTests: XCTestCase {
             preferred: preferredEncoder, encoder: offered))
     }
 
+    // MARK: [ENCODER-RUNTIME-TOGGLE] the persisted serving switch
+
+    /// The toggle can only ever SUBTRACT from what the compilation
+    /// condition allows — a stale UserDefaults value must not be able to
+    /// talk a build that lacks `INTENT_ENCODER` into the encoder path.
+    func testServingNeedsBothTheCompileGateAndTheToggle() {
+        XCTAssertFalse(IntentEncoderWiring.isServingEnabled(isCompiledIn: false,
+                                                            isToggleOn: false))
+        XCTAssertFalse(IntentEncoderWiring.isServingEnabled(isCompiledIn: false,
+                                                            isToggleOn: true),
+                       "no shipped build may be opted in by a stored preference")
+        XCTAssertFalse(IntentEncoderWiring.isServingEnabled(isCompiledIn: true,
+                                                            isToggleOn: false),
+                       "the gate alone is not consent — the toggle defaults OFF")
+        XCTAssertTrue(IntentEncoderWiring.isServingEnabled(isCompiledIn: true,
+                                                           isToggleOn: true))
+    }
+
+    /// Toggle OFF on a gated build: the picker brain serves, nothing is
+    /// constructed, no event is emitted — and there is no error surface,
+    /// because nothing failed.
+    func testToggleOffKeepsThePickerBrainAndConstructsNothing() throws {
+        let store = try makeStore()
+        try installArtifact(store: store)   // a fully installed artifact …
+        let fallback = StubCommandInterpreter(result: makeCommand(action: .query))
+
+        var resolutions = 0
+        let offered = IntentEncoderWiring.gatedEncoder(
+            isEnabled: IntentEncoderWiring.isServingEnabled(isCompiledIn: true,
+                                                            isToggleOn: false)
+        ) {
+            resolutions += 1
+            return self.makeEncoder(store: store)   // … is never even built
+        }
+        XCTAssertNil(offered)
+        XCTAssertEqual(resolutions, 0,
+                       "toggle off must not construct the interpreter")
+
+        let preferred = IntentEncoderWiring.preferredLocalBrain(encoder: offered,
+                                                                fallback: fallback)
+        XCTAssertTrue(preferred === fallback,
+                      "the picker brain keeps the local slot, untouched")
+        XCTAssertNil(IntentEncoderWiring.selectionEventMetadata(preferred: preferred,
+                                                                encoder: offered),
+                     "no selection event for a slot the encoder does not hold")
+        XCTAssertTrue(IntentEncoderWiring.deferredEncoderPreference(
+            encoder: offered, fallback: fallback) === fallback,
+                      "the deferred pair is not installed either")
+    }
+
+    /// Toggle ON: the deferred pair goes in immediately, so the artifact
+    /// landing later is picked up on the NEXT TURN; until then the picker
+    /// brain answers (the same fallback the boot decision would install).
+    func testToggleOnDefersUntilTheArtifactIsInstalled() throws {
+        let store = try makeStore()
+        let fallback = StubCommandInterpreter(result: makeCommand(action: .query))
+        let encoder = makeEncoder(store: store)
+
+        let offered = IntentEncoderWiring.gatedEncoder(
+            isEnabled: IntentEncoderWiring.isServingEnabled(isCompiledIn: true,
+                                                            isToggleOn: true)
+        ) { encoder }
+        XCTAssertTrue(offered === encoder, "toggle on: the encoder is offered")
+
+        // Offered but not installed yet → the picker brain serves.
+        XCTAssertTrue(IntentEncoderWiring.preferredLocalBrain(encoder: offered,
+                                                              fallback: fallback) === fallback)
+        let deferred = IntentEncoderWiring.deferredEncoderPreference(
+            encoder: offered, fallback: fallback)
+        XCTAssertTrue(deferred is LocalBrainChain,
+                      "the deferred pair is installed while the artifact is missing")
+
+        // The install lands (the readiness request's own path) → the SAME
+        // instance takes the slot, with the manifest identity as the only
+        // event metadata.
+        try installArtifact(store: store)
+        let preferred = IntentEncoderWiring.preferredLocalBrain(encoder: offered,
+                                                                fallback: fallback)
+        XCTAssertTrue(preferred === encoder)
+        XCTAssertEqual(IntentEncoderWiring.selectionEventMetadata(preferred: preferred,
+                                                                  encoder: offered)?["model_id"],
+                       "t033-c3-minilm-int8")
+    }
+
+    /// The persisted switch itself: absent key ⇒ OFF (the shipped
+    /// default), and a flip survives a new reader (a relaunch).
+    func testEncoderToggleDefaultsOffAndRoundTrips() throws {
+        let name = "intent-encoder-toggle-\(UUID().uuidString)"
+        let suite = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { suite.removePersistentDomain(forName: name) }
+
+        let prefs = IntentEncoderPreferences(defaults: suite)
+        XCTAssertEqual(IntentEncoderPreferences.enabledKey, "intentEncoder.enabled")
+        XCTAssertFalse(prefs.isEnabled,
+                       "an absent key reads as OFF — a flagged build ships the picker brain")
+
+        prefs.setEnabled(true)
+        XCTAssertTrue(prefs.isEnabled)
+        XCTAssertTrue(IntentEncoderPreferences(defaults: suite).isEnabled,
+                      "the tester's choice survives a relaunch")
+
+        prefs.setEnabled(false)
+        XCTAssertFalse(IntentEncoderPreferences(defaults: suite).isEnabled)
+    }
+
     // MARK: LocalBrainChain semantics
 
     func testChainUsesTheEncoderWhenAvailable() throws {

@@ -416,6 +416,48 @@ artifact's own note (`graph_contains_temperature: false`).
   coordinator never even constructs the interpreter (the closure is the only
   reference to the lazy var).
 
+## Runtime toggle — the serving switch ([ENCODER-RUNTIME-TOGGLE])
+
+Compiling the condition in is necessary but not sufficient: the tester also
+has to switch the encoder on, and can switch it off again without
+rebuilding. The switch exists so an A/B pass over the SAME installed
+artifact costs one tap instead of two installs — and so a flagged device can
+be handed to someone who never meets the encoder at all.
+
+- **Persistence.** `IntentEncoderPreferences.enabledKey` —
+  `"intentEncoder.enabled"`, a plain `UserDefaults` bool (a UI preference,
+  not a secret). **Default OFF**: an absent key reads as `false`, so a
+  device that never opened the screen serves the picker brain.
+- **Where.** Settings → AI मोडेल — the hidden internal screen (long-press
+  the Settings title ~1.5 s) → the "Internal testing" card. The card is
+  rendered only when `IntentEncoderFeature.isEnabled`, so a shipped build
+  holds no reference to the switch. Copy lands in `Localizable.xcstrings`
+  (`settings.encoder.*`, en + ne).
+- **Decision.** `IntentEncoderWiring.isServingEnabled(isCompiledIn:isToggleOn:)`
+  — the encoder may hold the local slot only when the compilation condition
+  is present AND the toggle is on. The toggle can only ever SUBTRACT: a
+  stale stored value cannot opt a build that lacks `INTENT_ENCODER` into the
+  encoder path (unit-pinned).
+- **Slot.** `AppCoordinator.installLocalBrainSlot(on:)` is the one call
+  site: it offers the encoder through `gatedEncoder`, requests readiness,
+  and installs the DEFERRED pair (`LocalBrainChain`) exactly as before. The
+  toggle's `didSet` persists and re-runs that same method, so a flip acts on
+  the NEXT TURN — no relaunch (the house hot-swap pattern, as with
+  `wakeWordEnabled`).
+- **Off / artifact missing ⇒ silent fall-through.** The picker brain
+  (`localIntentInterpreter`, else the LLaMA stand-in) answers; no selection
+  event is emitted for a slot the encoder does not hold, and nothing is
+  surfaced to the user — a missing artifact is the normal state, not an
+  error.
+- **Off ⇒ nothing is even constructed.** The readiness request, the
+  memory-pressure release and the re-arm path are gated on the toggle as
+  well as the compile gate, so a flagged build with the switch off has no
+  encoder object at all (the lazy factory never runs).
+- **On ⇒ the install starts.** `requestReadiness()` fires only when the
+  encoder is OFFERED, so flipping the switch on is what kicks off the
+  strict-checksum install of the tester's staged zip; the deferred pair
+  picks it up on the first turn after it lands.
+
 ## Device-test flow
 
 The paths below are the ones the tests drive; the staging command is the
@@ -453,18 +495,60 @@ attached in this session).
    machine `errorCode` (`word_alignment_mismatch` for a transcript longer
    than the 64-token graph can hold — truncation abstains by policy rather
    than decoding spans from a partially-seen sequence).
-6. **Compare against the Qwen brain.** With the encoder unavailable (env
-   unset, or no artifact) the local slot serves the shipped local brain —
-   the picker's intent GGUF (the Qwen fine-tune entry). Run the same
-   utterance set once with that baseline and once with the encoder
-   installed, and compare the executed commands/replies plus the event trail
-   (`encoder_*` events vs. the GGUF brain's own events). The encoder always
-   takes the slot when it is available, so the baseline is the env-unset
-   session, not a picker switch.
+6. **Compare against the picker brain — same install, one switch.** With the
+   toggle OFF the local slot serves the picker's brain (the Qwen fine-tune
+   entry selected above it, or the LLaMA stand-in when that cannot serve);
+   with the toggle ON the encoder takes the slot once its artifact is
+   installed. Run the same utterance set in both states and compare the
+   executed commands/replies plus the event trail (`encoder_*` events vs.
+   the GGUF brain's own events). The flip acts on the NEXT TURN, so one
+   build and one install cover both legs — see "Small-device A/B" below.
+   (Before [ENCODER-RUNTIME-TOGGLE] the baseline had to be a separate
+   env-unset session, because an available encoder always won the slot.)
 7. **Checksum failure is observable, not silent.** Point the variable at a
    stale/different zip to confirm the strict path: the turn stays on the
-   baseline brain and the trail shows `coreml_encoder_checksum_mismatch` +
+   picker brain and the trail shows `coreml_encoder_checksum_mismatch` +
    `encoder_spike_install_failed` (`checksum`).
+
+## Small-device A/B — the exact flow
+
+For the "does the small tier fit this phone" question (encoder vs. the 1.7B
+brain on the same utterances):
+
+1. **Flagged build**: `INTENT_ENCODER` in the target's Active Compilation
+   Conditions (step 1 above) with `INTENT_ENCODER_SPIKE_ZIP` staged and set
+   in the scheme.
+2. **Open the switch**: Settings → long-press the title → AI मोडेल → the
+   "Internal testing" card. The artifact line reads "Not downloaded yet"
+   before the install lands and "Ready" after it.
+3. **Leg A — the 1.7B brain**: leave the toggle OFF and select the 1.7B in
+   the brain picker above (Brain — Qwen 1.7B · Nepali fine-tune, slim seed
+   43). Run the utterance set; this is the picker brain serving.
+4. **Leg B — the encoder**: flip the toggle ON (same session, same install)
+   and re-run the SAME utterances. The next turn goes to the encoder.
+5. **Compare**: executed command/reply per utterance plus the event trail
+   (`encoder_*` vs. the GGUF brain's own events). Flip the toggle OFF at the
+   end — that restores the shipped behaviour exactly.
+
+RAM floors (check these before handing a device to someone):
+
+| local brain | artifact on disk | catalog RAM gate |
+|---|---|---|
+| intent encoder (int8 CoreML) | ~109 MB zip → ~118 MB graph | 2 GB (`minDeviceRAMBytes` 2,000,000,000) |
+| Qwen 1.7B Nepali fine-tune (slim, s43) | 1,107,408,576 B ≈ 1.1 GB GGUF | 3 GB (`minDeviceRAMBytes` 3,000,000,000) |
+
+The encoder is the smaller tier on both axes: roughly a tenth of the disk
+and a 1 GB lower RAM gate than the 1.7B. Its gate is headroom for the
+100–120M-param student, not a measured peak — treat 2 GB as the entry
+point, not a measured requirement.
+
+Both gates are enforced at DOWNLOAD time (`ModelDownloadService` →
+`MemoryProbe.canFit`), not at selection: the picker still offers a brain the
+device cannot hold, and the download fails with the memory message instead.
+Check the device's physical RAM before the A/B, not after. (Verified
+2026-09-14: `intentQwenS43` is picker-selectable, its URL is HTTPS on the
+v14 GitHub release, and it survives the language resolver — `languages:
+["ne"]`, framing `.qwen3` — with no catalog change needed.)
 
 ## Residual risk
 

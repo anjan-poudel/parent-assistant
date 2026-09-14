@@ -1132,11 +1132,41 @@ final class AppCoordinator: ObservableObject {
                                                timeoutSeconds: 10),
         pluginRegistry: pluginRegistry
     )
+    /// [ENCODER-RUNTIME-TOGGLE] Settings → AI मोडेल (hidden) → the
+    /// internal-testing switch that lets the encoder take the local-brain
+    /// slot. Persisted under
+    /// `IntentEncoderPreferences.enabledKey` ("intentEncoder.enabled"),
+    /// **default OFF** — a flagged build ships the incumbent brain until a
+    /// tester opts in, and flipping the switch ACTS ON THE NEXT TURN (no
+    /// relaunch): the didSet persists and re-installs the slot through the
+    /// SAME `installLocalBrainSlot` the composition used.
+    ///
+    /// OFF is a silent fall-through, never an error surface: the picker
+    /// brain (`localIntentInterpreter`, or the LLaMA stand-in when it
+    /// cannot serve) answers exactly as it does on a non-gated build.
+    @Published var intentEncoderEnabled: Bool {
+        didSet {
+            intentEncoderPreferences.setEnabled(intentEncoderEnabled)
+            guard oldValue != intentEncoderEnabled else { return }
+            // Non-gated builds never reach this (no UI exposes the
+            // switch), but the guard keeps the invariant local: only a
+            // build that compiles the encoder in may touch the slot.
+            guard IntentEncoderFeature.isEnabled else { return }
+            if let intentRouter {
+                installLocalBrainSlot(on: intentRouter)
+            }
+        }
+    }
+    private let intentEncoderPreferences = IntentEncoderPreferences()
+
     /// [T-037-a] The on-device CoreML intent encoder (internal testing
     /// only; artifact pinned to the T-036 v0 export). Deliberately NOT
     /// constructed on normal builds: every reference to it is guarded by
-    /// `IntentEncoderFeature.isEnabled`, so the `lazy` factory never runs
-    /// without the `INTENT_ENCODER` compilation condition. Its
+    /// `IntentEncoderFeature.isEnabled` (the serving decision and the
+    /// re-arm path additionally by `intentEncoderEnabled`), so the `lazy`
+    /// factory never runs without the `INTENT_ENCODER` compilation
+    /// condition — and, with the compile condition present, still not
+    /// until a tester switches the encoder on. Its
     /// `isAvailable` is false unless the artifact is installed in
     /// `ModelStore` AND both bundled resources load — the Swift XLM-R
     /// tokenizer ([ENCODER-RUNTIME-READY]) with the artifact's companion
@@ -1160,6 +1190,74 @@ final class AppCoordinator: ObservableObject {
     /// Level-2 memory-warning observer for the encoder (nil unless the
     /// internal-testing gate is on).
     private var intentEncoderMemoryObserver: NSObjectProtocol?
+
+    /// True once the encoder has actually been OFFERED the slot, i.e. the
+    /// lazy instance exists. A/B means a tester can switch the encoder on
+    /// and then off again WITHOUT the process ending, which leaves a
+    /// constructed, idle encoder holding its CoreML weights: the release
+    /// half of the memory-pressure contract must still reach it. The flag
+    /// is what distinguishes that case from "never constructed", where the
+    /// same call would construct the object it is trying to free.
+    private var intentEncoderOffered = false
+
+    /// [T-037-a]/[ENCODER-RUNTIME-TOGGLE] Installs the local-brain slot:
+    /// the encoder when the compilation condition is present AND the
+    /// tester's toggle is ON AND the artifact can serve, else the
+    /// incumbent brain untouched. Called once at composition time and
+    /// again on every toggle flip — that re-entry is what makes the
+    /// Settings switch act on the next turn instead of the next launch.
+    ///
+    /// The decision is `IntentEncoderWiring`'s (a pure, tested function
+    /// set); this method only sequences it and emits the selection event,
+    /// so the shipped call site is what the wiring tests exercise.
+    ///
+    /// [ENCODER-RUNTIME-READY] Readiness is requested at the moment the
+    /// encoder is OFFERED the local-brain slot: with
+    /// INTENT_ENCODER_SPIKE_ZIP set (the tester's own copy of the pinned
+    /// zip) this starts a background install through ModelStore's strict
+    /// sha256 path; unset, it is an explicit no-op decision. No UI, no
+    /// network, and nothing here runs on a non-gated build — or with the
+    /// toggle off, which is why switching the encoder ON is also what
+    /// starts its install.
+    ///
+    /// The slot itself is the DEFERRED pair, so an install that lands
+    /// after the switch is flipped is picked up on the next turn without
+    /// a relaunch; while the encoder is unavailable the chain serves
+    /// exactly the fallback the selection event describes.
+    private func installLocalBrainSlot(on router: IntentRouter) {
+        let offeredEncoder = IntentEncoderWiring.gatedEncoder(
+            isEnabled: IntentEncoderWiring.isServingEnabled(
+                isToggleOn: intentEncoderEnabled)
+        ) {
+            intentEncoderInterpreter
+        }
+        if let offeredEncoder {
+            intentEncoderOffered = true
+            offeredEncoder.requestReadiness()
+        }
+        // "Can it serve now?" — decides the selection event, unchanged
+        // (and unchanged in meaning with the toggle off: no encoder is
+        // offered, so no event is emitted for a slot it does not hold).
+        let encoderAvailableNow = IntentEncoderWiring.preferredLocalBrain(
+            encoder: offeredEncoder,
+            fallback: localIntentInterpreter)
+        if let selectionMetadata = IntentEncoderWiring.selectionEventMetadata(
+                preferred: encoderAvailableNow, encoder: offeredEncoder) {
+            observabilityBus.emit(ObservabilityEvent(
+                component: "intent_encoder_wiring",
+                eventType: "encoder_selected_as_local_brain",
+                durationMs: nil,
+                outcome: "info",
+                errorCode: nil,
+                metadata: selectionMetadata
+            ))
+        }
+        let preferredLocal = IntentEncoderWiring.deferredEncoderPreference(
+            encoder: offeredEncoder,
+            fallback: encoderAvailableNow)
+        router.localBrain = LocalBrainChain(preferred: preferredLocal,
+                                            standIn: llamaCommandInterpreter)
+    }
 
     /// The fine-tuned intent model (spec 2026-09-05 §8) — the local brain
     /// `IntentRouter` prefers once its GGUF is cached (the preferred half
@@ -1762,6 +1860,13 @@ final class AppCoordinator: ObservableObject {
         self.wakeWordEnabled = wakeWordPreferences.isEnabled
         wakeWordActivityGate.setEnabled(wakeWordEnabled)
 
+        // [ENCODER-RUNTIME-TOGGLE] Restore the persisted internal-testing
+        // encoder switch (default OFF). Assigned directly — the house
+        // pattern: didSet does not fire in init. The slot is installed
+        // later, in `composePostFirstFrame()`, which reads this value; on
+        // a build without `INTENT_ENCODER` nothing reads it at all.
+        self.intentEncoderEnabled = intentEncoderPreferences.isEnabled
+
         // Restore the persisted STT model choice. The didSet observer
         // pushes it to the recognizer and refreshes the label. Unknown
         // IDs (a model removed from the catalog, or a bad stored value)
@@ -2265,43 +2370,11 @@ final class AppCoordinator: ObservableObject {
         // even CONSTRUCTS the interpreter (see the lazy var's docs). The
         // wiring decision and the selection event both live in
         // `IntentEncoderWiring`, so the shipped call site is the tested one.
-        let offeredEncoder = IntentEncoderWiring.gatedEncoder {
-            intentEncoderInterpreter
-        }
-        // [ENCODER-RUNTIME-READY] Readiness is requested at the moment the
-        // encoder is OFFERED the local-brain slot: with
-        // INTENT_ENCODER_SPIKE_ZIP set (the tester's own copy of the pinned
-        // zip) this starts a background install through ModelStore's strict
-        // sha256 path; unset, it is an explicit no-op decision. No UI, no
-        // network, and nothing here runs on a non-gated build (the closure
-        // above is the only way this object exists at all).
-        if let offeredEncoder {
-            offeredEncoder.requestReadiness()
-        }
-        // "Can it serve now?" — decides the selection event, unchanged.
-        let encoderAvailableNow = IntentEncoderWiring.preferredLocalBrain(
-            encoder: offeredEncoder,
-            fallback: localIntentInterpreter)
-        if let selectionMetadata = IntentEncoderWiring.selectionEventMetadata(
-                preferred: encoderAvailableNow, encoder: offeredEncoder) {
-            observabilityBus.emit(ObservabilityEvent(
-                component: "intent_encoder_wiring",
-                eventType: "encoder_selected_as_local_brain",
-                durationMs: nil,
-                outcome: "info",
-                errorCode: nil,
-                metadata: selectionMetadata
-            ))
-        }
-        // The slot itself is the DEFERRED pair, so an install that lands
-        // after boot is picked up on the next turn without a relaunch;
-        // while the encoder is unavailable the chain serves exactly the
-        // fallback the event above describes.
-        let preferredLocal = IntentEncoderWiring.deferredEncoderPreference(
-            encoder: offeredEncoder,
-            fallback: encoderAvailableNow)
-        router3.localBrain = LocalBrainChain(preferred: preferredLocal,
-                                             standIn: llamaCommandInterpreter)
+        // [ENCODER-RUNTIME-TOGGLE] The decision moved into a method because
+        // the tester can now flip the encoder on and off at runtime: the
+        // Settings switch re-runs this same installation, so the slot is
+        // hot-swapped on the next turn rather than frozen at boot.
+        installLocalBrainSlot(on: router3)
         router3.cloudBrain = geminiInterpreter
         router3.cloudEnabled = (voiceEngineStack == .gemini)
         // [LAT-M3] (2026-09-11) Cloud-FIRST open-domain interpretation
@@ -6156,15 +6229,26 @@ self.noteTalkContractChanged()
             forName: UIApplication.didReceiveMemoryWarningNotification,
             object: nil, queue: .main
         ) { [weak self] _ in
-            self?.intentEncoderInterpreter.handleMemoryPressure()
+            self?.handleIntentEncoderMemoryPressureIfEnabled()
         }
     }
 
+    /// [ENCODER-RUNTIME-TOGGLE] The observer is installed once (under the
+    /// compile gate) and this body decides whether the message applies: an
+    /// encoder that was never offered holds nothing, and must not be
+    /// CONSTRUCTED just to find that out — but one that a tester switched
+    /// on and then off is still resident and must release.
+    private func handleIntentEncoderMemoryPressureIfEnabled() {
+        guard IntentEncoderFeature.isEnabled, intentEncoderOffered else { return }
+        intentEncoderInterpreter.handleMemoryPressure()
+    }
+
     /// Re-arms the encoder after a memory-pressure unload at the start of
-    /// a voice turn (no-op unless the internal-testing gate is on, so the
-    /// lazy encoder object is never even constructed otherwise).
+    /// a voice turn (no-op unless the internal-testing gate is on AND the
+    /// runtime toggle is ON, so the lazy encoder object is never even
+    /// constructed otherwise).
     private func rearmIntentEncoderIfEnabled() {
-        guard IntentEncoderFeature.isEnabled else { return }
+        guard IntentEncoderFeature.isEnabled, intentEncoderEnabled else { return }
         intentEncoderInterpreter.rearmAfterMemoryPressure()
     }
 
