@@ -51,6 +51,25 @@ final class LogSanitiserTests: XCTestCase {
         XCTAssertFalse(value.contains("9812345678"), "phone-shaped metadata is scrubbed")
     }
 
+    /// [MULTIPART-DOWNLOAD] The part-diagnostic keys are numeric-only and
+    /// must survive the bus: without them the on-device log for a failed
+    /// part reads exactly like the 2026-09-14 report — an event with no
+    /// part, no status, and no way to tell a 404 from a corrupt file.
+    func testDownloadPartDiagnosticKeysSurviveTheBus() {
+        let clean = sanitiser.sanitise(event(metadata: [
+            "part": "0",
+            "parts": "2",
+            "bytes": "0",
+            "http_status": "404"
+        ]))
+        XCTAssertEqual(clean.metadata["part"], "0")
+        XCTAssertEqual(clean.metadata["parts"], "2")
+        XCTAssertEqual(clean.metadata["bytes"], "0")
+        XCTAssertEqual(clean.metadata["http_status"], "404")
+        // The allow-list is still an allow-list.
+        XCTAssertNil(sanitiser.sanitise(event(metadata: ["part_url": "https://x/y"])).metadata["part_url"])
+    }
+
     func testTopLevelNonContentFieldsPassThroughUnchanged() {
         let original = ObservabilityEvent(component: "c", eventType: "e", durationMs: 7,
                                           outcome: "failure", errorCode: nil, metadata: [:])

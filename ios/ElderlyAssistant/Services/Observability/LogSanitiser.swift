@@ -66,7 +66,17 @@ struct LogSanitiser {
         // [TURN-TIMING] The serialized per-turn stage list
         // (`[{stage, ms}, …]`) — stage names and integer durations only,
         // never transcript or reply text (see VoiceTurnLatencyTracer).
-        "stages"
+        "stages",
+        // [MULTIPART-DOWNLOAD] Which part of a multi-asset download failed
+        // and why — the on-device report that drove this was three lines
+        // ("download_started" … "download_checksum_failed") with nothing
+        // naming the part or the HTTP status. NUMERIC ONLY by contract:
+        // `part` / `parts` are indices and counts, `bytes` a byte count,
+        // `http_status` an HTTP status code. Never a URL, never a body.
+        "part",
+        "parts",
+        "bytes",
+        "http_status"
     ]
 
     private static let piiPatterns: [NSRegularExpression] = {

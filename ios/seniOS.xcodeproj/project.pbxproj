@@ -158,6 +158,7 @@
 		517F7092B944DA9F449B888F /* FeedService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F43D783E7D83EF2A3FE0B5FB /* FeedService.swift */; };
 		518ADD3B18173AAFB2FF8B95 /* CallMethod.swift in Sources */ = {isa = PBXBuildFile; fileRef = 217C88EEE4C13EB59E70F612 /* CallMethod.swift */; };
 		51A1484398D9895D9F425AA0 /* YouTubePluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 634F4CB3294C0340AC9C67B9 /* YouTubePluginTests.swift */; };
+		52572BD2516796AB72D9A548 /* MultipartDownloadLoopbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDA096BFB72B02E2C75774CB /* MultipartDownloadLoopbackTests.swift */; };
 		52AD5F1B420319210845C090 /* AlarmKitSystemScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5835F05602FF8F952479823 /* AlarmKitSystemScheduler.swift */; };
 		52FB2CA82D0156774A459124 /* VoiceTurnTimingSeamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B45155CFD55E2FB76CC7380 /* VoiceTurnTimingSeamTests.swift */; };
 		5315C2DDD9FA5F65473922D1 /* DialectLexicon.json in Resources */ = {isa = PBXBuildFile; fileRef = 151B13AEC9B0FEF80AC8DD9F /* DialectLexicon.json */; };
@@ -957,6 +958,7 @@
 		DC12144DFFE16EF70B50C134 /* WakeWordAcousticSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeWordAcousticSmokeTests.swift; sourceTree = "<group>"; };
 		DC819B3F4B2CFA0092570634 /* CallLinksTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLinksTests.swift; sourceTree = "<group>"; };
 		DD162BE8935894B1124A7B49 /* ApplianceManualLibraryModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceManualLibraryModel.swift; sourceTree = "<group>"; };
+		DDA096BFB72B02E2C75774CB /* MultipartDownloadLoopbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultipartDownloadLoopbackTests.swift; sourceTree = "<group>"; };
 		DDDC79A9FC3252073D710B0A /* AppActivityLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppActivityLog.swift; sourceTree = "<group>"; };
 		DE1DFF8F9710FE47A345319B /* ApplianceHelperSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceHelperSessionTests.swift; sourceTree = "<group>"; };
 		DF026EB13A6A65D75AD61832 /* LocalToolLogStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalToolLogStore.swift; sourceTree = "<group>"; };
@@ -1855,6 +1857,7 @@
 				F0B9AE2BCE28CF90E46EDE91 /* ModelCatalogLanguageTests.swift */,
 				4B8D7DEC413B2AB3DF3B0511 /* ModelCatalogSTTNamingTests.swift */,
 				0DE0C8888C181B27FA3038C6 /* ModelStoreTests.swift */,
+				DDA096BFB72B02E2C75774CB /* MultipartDownloadLoopbackTests.swift */,
 				C6C03207F9D203E034BFEDD1 /* MultipartDownloadTests.swift */,
 				CE7E6C15D13A58EC3684BA2E /* TTSVoiceCatalogTests.swift */,
 				2DB7A838F1F21B8B1915EC98 /* TTSVoiceInstallTests.swift */,
@@ -2605,6 +2608,7 @@
 				83754640B43DA1A512B5130D /* ModelStoreTests.swift in Sources */,
 				A8446F4A51736E642C5071C3 /* MorningBriefingStoreTests.swift in Sources */,
 				872D679F12ABF43E3057C7B4 /* MorningBriefingTests.swift in Sources */,
+				52572BD2516796AB72D9A548 /* MultipartDownloadLoopbackTests.swift in Sources */,
 				887B44AE9F2851432101C97A /* MultipartDownloadTests.swift in Sources */,
 				04E79D4F02F4ED38C7365B9F /* NepaliCalendarPluginTests.swift in Sources */,
 				ABCE1D7CB2B0B75A90F1371F /* NepaliTextNormalizerTests.swift in Sources */,

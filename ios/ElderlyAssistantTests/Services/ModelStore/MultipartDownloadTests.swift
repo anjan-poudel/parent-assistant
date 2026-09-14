@@ -13,6 +13,16 @@ final class MultipartDownloadTests: XCTestCase {
     private var tmpRoot: URL!
     private var bus: MockObservabilityBus!
 
+    /// Room for the tests that drive the REAL catalog entry (2.5 GB): the
+    /// download service's disk pre-flight measures the HOST volume, so
+    /// without this those tests fail on any machine with less than
+    /// `entry.sizeBytes + 300 MB` free — a property of the machine, not of
+    /// the flow under test (three of them did exactly that, with
+    /// "not enough disk space", on a shared nearly-full host). The guard's
+    /// own refusal path is pinned deterministically instead, by
+    /// `testDiskGuardRefusesBeforeTheTransportIsTouched`.
+    private let roomyFreeSpace: () -> Int64? = { 100_000_000_000 }
+
     override func setUpWithError() throws {
         try super.setUpWithError()
         tmpRoot = FileManager.default.temporaryDirectory
@@ -111,6 +121,35 @@ final class MultipartDownloadTests: XCTestCase {
         XCTAssertTrue(condition(), "timed out waiting for \(description)")
     }
 
+    /// Wait for the stub's process-wide request record to stop growing, and
+    /// call it from any test that interrupts work still in flight.
+    ///
+    /// The stub records into a `static` (`requestedPaths`), and the cancel
+    /// tests stop tasks that are deliberately hanging. A task whose resume
+    /// raced the cancel can still deliver its `startLoading` a few
+    /// milliseconds later — after `tearDown` has reset the record — and the
+    /// straggler then lands in whichever test is running by then, which is
+    /// how the disk-guard test (that same entry, `hangs`) could see a part
+    /// request it never made. Draining here keeps the request inside the
+    /// test that caused it, so "nothing was requested" stays a statement
+    /// about the flow under test rather than about scheduling luck.
+    private func drainStubRequests(quietFor: TimeInterval = 0.15,
+                                   timeout: TimeInterval = 2) {
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastCount = -1
+        var quietSince = Date()
+        while Date() < deadline {
+            let count = MultipartStubURLProtocol.requestedPaths.count
+            if count != lastCount {
+                lastCount = count
+                quietSince = Date()
+            } else if Date().timeIntervalSince(quietSince) >= quietFor {
+                return
+            }
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        }
+    }
+
     /// Collects the progress the service publishes for one model so a test
     /// can assert on the whole sequence, not just the final value.
     private final class ProgressRecorder {
@@ -163,6 +202,14 @@ final class MultipartDownloadTests: XCTestCase {
                                  "the default brain must fit the size guardrail")
 
         let parts = try XCTUnwrap(entry.downloadPartURLs)
+        // THE ASSET NAMES THE RELEASE ACTUALLY PUBLISHES (2026-09-14). The
+        // v16 assets carry the `-s42-` seed segment. This expectation used
+        // to pin the name WITHOUT it — and GitHub answers a nonexistent
+        // asset with `404` + a 9-byte `Not Found` body, which the download
+        // path staged as a "part", reassembled to 18 bytes and reported as
+        // a checksum failure on device 423 ms after the download started.
+        // The pin must mirror the RELEASE LISTING; the entry's local
+        // `filename` is an on-disk name and does not have to match.
         XCTAssertEqual(parts.map(\.lastPathComponent), [
             "intent-ne-qwen4b-slotcanon-s42-q4_k_m.gguf.partaa",
             "intent-ne-qwen4b-slotcanon-s42-q4_k_m.gguf.partab"
@@ -341,8 +388,8 @@ final class MultipartDownloadTests: XCTestCase {
         let partAA = Data("PART-AA ".utf8)
         let partAB = Data("PART-AB".utf8)
         MultipartStubURLProtocol.payloads = [
-            "intent-ne-qwen4b-slotcanon-q4_k_m.gguf.partaa": partAA,
-            "intent-ne-qwen4b-slotcanon-q4_k_m.gguf.partab": partAB
+            "intent-ne-qwen4b-slotcanon-s42-q4_k_m.gguf.partaa": partAA,
+            "intent-ne-qwen4b-slotcanon-s42-q4_k_m.gguf.partab": partAB
         ]
         let entry = try XCTUnwrap(ModelCatalog.entry(for: id))
         // `.skip`: the v16 digest is the pre-upload placeholder, so the
@@ -351,7 +398,8 @@ final class MultipartDownloadTests: XCTestCase {
         let store = try makeStore(policy: .skip)
         let service = ModelDownloadService(store: store,
                                            observabilityBus: bus,
-                                           sessionFactory: stubSessionFactory())
+                                           sessionFactory: stubSessionFactory(),
+                                           availableBytesProvider: roomyFreeSpace)
         let progress = ProgressRecorder()
         let subscription = service.$states.sink { states in
             if case .downloading(let received, let total) = states[id] {
@@ -397,15 +445,16 @@ final class MultipartDownloadTests: XCTestCase {
     func testFailedPartCancelsTheRestAndLeavesNothingBehind() throws {
         let id = ModelCatalog.intentQwen4BSlotCanon
         MultipartStubURLProtocol.payloads = [
-            "intent-ne-qwen4b-slotcanon-q4_k_m.gguf.partaa": Data("PART-AA ".utf8)
+            "intent-ne-qwen4b-slotcanon-s42-q4_k_m.gguf.partaa": Data("PART-AA ".utf8)
         ]
         MultipartStubURLProtocol.failures = [
-            "intent-ne-qwen4b-slotcanon-q4_k_m.gguf.partab": URLError(.networkConnectionLost)
+            "intent-ne-qwen4b-slotcanon-s42-q4_k_m.gguf.partab": URLError(.networkConnectionLost)
         ]
         let store = try makeStore()
         let service = ModelDownloadService(store: store,
                                            observabilityBus: bus,
-                                           sessionFactory: stubSessionFactory())
+                                           sessionFactory: stubSessionFactory(),
+                                           availableBytesProvider: roomyFreeSpace)
         service.start(id)
         waitUntil("the failed state") {
             if case .failed = service.states[id] ?? .notStarted { return true }
@@ -418,13 +467,17 @@ final class MultipartDownloadTests: XCTestCase {
         XCTAssertFalse(reason.isEmpty)
         XCTAssertTrue(bus.emittedEvents.contains {
             $0.eventType == "download_failed" && $0.errorCode == "transport"
-        })
+        }, "the failing part must be reported as a transport failure — "
+           + "reason=\(reason), events="
+           + bus.emittedEvents.map { "\($0.eventType)/\($0.errorCode ?? "-")" }
+               .joined(separator: ","))
         XCTAssertNil(store.path(for: id),
                      "a failed reassembly must install nothing")
         XCTAssertFalse(FileManager.default.fileExists(atPath: try store.stagingURL(for: id).path),
                        "a failed reassembly must not leave a staged file")
         XCTAssertTrue(partTempDirectories(for: id).isEmpty,
                       "every part temp file must be deleted on failure")
+        drainStubRequests()
     }
 
     /// Cancel mid-flight: the in-flight part tasks are cancelled, the temp
@@ -436,7 +489,8 @@ final class MultipartDownloadTests: XCTestCase {
         let store = try makeStore()
         let service = ModelDownloadService(store: store,
                                            observabilityBus: bus,
-                                           sessionFactory: stubSessionFactory())
+                                           sessionFactory: stubSessionFactory(),
+                                           availableBytesProvider: roomyFreeSpace)
         service.start(id)
         // Let the runner create its temp directory and start its tasks.
         waitUntil("the multipart attempt to start") {
@@ -450,6 +504,7 @@ final class MultipartDownloadTests: XCTestCase {
                        "a cancellation is not a failure")
         XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "download_cancelled" })
         XCTAssertNil(store.path(for: id))
+        drainStubRequests()
     }
 
     // MARK: - STRICT end to end: the path the on-device report exercised
@@ -617,6 +672,132 @@ final class MultipartDownloadTests: XCTestCase {
         XCTAssertEqual(MultipartStubURLProtocol.requestedPaths,
                        ["ggml-silero-v5.1.2.bin"],
                        "the single-file path must fetch exactly the one URL")
+    }
+
+    // MARK: - Disk pre-flight (deterministic)
+
+    /// The disk guard, without depending on the host's free space: a
+    /// free-space reading of 1 byte refuses the entry BEFORE any transport
+    /// work, with its own reason and event, and nothing is requested or
+    /// left behind. (Until now the guard could only be reached by actually
+    /// filling a disk, so its refusal path had no test at all — and the
+    /// tests that DID depend on the host having room failed on a shared
+    /// nearly-full machine: "not enough disk space" for a 2.5 GB entry.)
+    func testDiskGuardRefusesBeforeTheTransportIsTouched() throws {
+        let id = ModelCatalog.intentQwen4BSlotCanon
+        let entry = try XCTUnwrap(ModelCatalog.entry(for: id))
+        let store = try makeStore()
+        let service = ModelDownloadService(store: store,
+                                           observabilityBus: bus,
+                                           sessionFactory: stubSessionFactory(),
+                                           availableBytesProvider: { 1 })
+
+        service.start(entry)
+        waitUntil("the disk refusal") {
+            if case .failed = service.states[id] ?? .notStarted { return true }
+            return false
+        }
+
+        XCTAssertEqual(service.states[id], .failed(reason: "not enough disk space"))
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "download_disk_full" && $0.errorCode == "disk_full"
+        }, "the refusal must be reported as a disk refusal")
+        XCTAssertTrue(MultipartStubURLProtocol.requestedPaths.isEmpty,
+                      "the guard must refuse before a single part is requested")
+        XCTAssertTrue(partTempDirectories(for: id).isEmpty,
+                      "a refused download leaves no temp files")
+    }
+
+    // MARK: - Live release guard (opt-in)
+
+    /// The check that would have caught the 2026-09-14 regression before a
+    /// user paid 2.5 GB for it: every URL the catalog hands the download
+    /// service must actually exist in the hosted release. GitHub answers a
+    /// mistyped asset name with `404` + a 9-byte `Not Found` body, which
+    /// `URLSession` delivers through `didFinishDownloadingTo` like any
+    /// other transfer. The download path now refuses that explicitly, but
+    /// the cheapest place to catch a renamed asset is here, against the
+    /// real host, BEFORE the pin ships.
+    ///
+    /// Skipped by default: CI has no business reaching GitHub and a
+    /// network flake must never redden the suite. Two ways to opt in,
+    /// because a simulator test process does NOT inherit the environment
+    /// of the shell that launched `xcodebuild` (an exported
+    /// `CATALOG_LIVE_URL_CHECK=1` never reaches this code — verified):
+    ///
+    ///  - Xcode: set `CATALOG_LIVE_URL_CHECK=1` on the scheme's Test action
+    ///    (Edit Scheme → Test → Arguments → Environment Variables).
+    ///  - CLI: drop the marker in the app's data container —
+    ///
+    ///        P=$(xcrun simctl get_app_container booted \
+    ///              com.elderlyassistant.app data)
+    ///        touch "$P/Documents/catalog-live-url-check"
+    ///
+    ///    then run the single test as usual.
+    func testLiveCatalogAssetURLsResolveAgainstTheRealRelease() async throws {
+        try XCTSkipUnless(
+            liveCheckIsOptedIn,
+            "opt-in network check: set CATALOG_LIVE_URL_CHECK=1 on the "
+            + "scheme (or drop Documents/catalog-live-url-check in the app "
+            + "container) to verify every catalog asset name against the "
+            + "hosted release")
+
+        var missing: [String] = []
+        for entry in ModelCatalog.all {
+            let urls = [entry.downloadURL] + (entry.downloadPartURLs ?? [])
+                + [entry.whisperKitZipURL, entry.coreMLEncoderDownloadURL].compactMap { $0 }
+            for url in urls where Self.isPublicReleaseURL(url) {
+                var request = URLRequest(url: url)
+                request.httpMethod = "HEAD"
+                request.timeoutInterval = 15
+                do {
+                    let (_, response) = try await URLSession.shared.data(for: request)
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                    if !(200..<300).contains(status) {
+                        missing.append("\(status) \(url.lastPathComponent) <- \(url)")
+                    }
+                } catch {
+                    missing.append("unreachable (\(error.localizedDescription)) "
+                                   + "\(url.lastPathComponent) <- \(url)")
+                }
+            }
+        }
+        XCTAssertTrue(missing.isEmpty,
+                      "catalog assets missing from the release:\n"
+                      + missing.joined(separator: "\n"))
+    }
+
+    /// Public-host filter for the live check: only URLs that are supposed to
+    /// come off the internet are checked. Two catalog URLs are deliberately
+    /// NOT public — the RFC 2606 `.invalid` documentation placeholder and
+    /// the LAN dev server (`http://192.168.1.117:8765`) that serves the
+    /// internal 4B Nepali build — and HEADing either can only hang until
+    /// the request times out (which is exactly what the first run of this
+    /// check did).
+    private static func isPublicReleaseURL(_ url: URL) -> Bool {
+        guard url.scheme == "https", let host = url.host else { return false }
+        if host == "localhost" || host.hasSuffix(".invalid") { return false }
+        let parts = host.split(separator: ".")
+        if let first = parts.first, ["127", "10", "192", "169"].contains(first) {
+            return false
+        }
+        if parts.first == "172", parts.count > 1,
+           let second = Int(parts[1]), (16...31).contains(second) {
+            return false   // RFC 1918: 172.16.0.0 – 172.31.255.255
+        }
+        return true
+    }
+
+    /// The live check's opt-in: the scheme environment variable (the Xcode
+    /// path) or a marker file in the app's own container (the CLI path —
+    /// the two commands are in the test's doc comment).
+    private var liveCheckIsOptedIn: Bool {
+        if ProcessInfo.processInfo.environment["CATALOG_LIVE_URL_CHECK"] == "1" {
+            return true
+        }
+        let marker = URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Documents/catalog-live-url-check")
+        return FileManager.default.fileExists(atPath: marker.path)
     }
 }
 
