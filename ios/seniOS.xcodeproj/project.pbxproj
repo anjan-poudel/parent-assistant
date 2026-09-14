@@ -327,6 +327,7 @@
 		AE6778AE48C116BEC75A9C41 /* ModelCatalogSTTNamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B8D7DEC413B2AB3DF3B0511 /* ModelCatalogSTTNamingTests.swift */; };
 		AF589ADE0665DD8433BCC200 /* StartupDataBatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4565222B482D35D3233C2498 /* StartupDataBatchTests.swift */; };
 		AFA35E445E49A49F01D8F2B8 /* PiperVoiceSpeakerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6D0122346CB9657139E6909 /* PiperVoiceSpeakerTests.swift */; };
+		AFF3663FC04C804DB6DCA7B7 /* TurnTimingBreakdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99F8BFB236F42C6680633A6F /* TurnTimingBreakdown.swift */; };
 		B077987B5623105525365732 /* TimerAlarmEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EDA2D35E433C9B6200F167F /* TimerAlarmEngine.swift */; };
 		B0D5D07D489F52CE1C3EA398 /* IntentRouterLocalFailureFallbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72E21D0D77581263F91D291B /* IntentRouterLocalFailureFallbackTests.swift */; };
 		B0DB371B38805A29A5D859A9 /* timer-alarm-bell.wav in Resources */ = {isa = PBXBuildFile; fileRef = F839609F2F906E517A513FBF /* timer-alarm-bell.wav */; };
@@ -556,6 +557,7 @@
 		0953D6FA7E17D6F04CD5F7B9 /* LocationFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationFetcher.swift; sourceTree = "<group>"; };
 		095684F9EB8E66E96F89D67D /* NewsSourceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsSourceStore.swift; sourceTree = "<group>"; };
 		0A61F0E9B07D88E8F258E591 /* XlmrUnigramTokenizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XlmrUnigramTokenizer.swift; sourceTree = "<group>"; };
+		0A8217368352E8BC744B3C06 /* IntentEncoderSideloadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentEncoderSideloadTests.swift; sourceTree = "<group>"; };
 		0BA65C9612E3B29D1B74E2FE /* NepaliCalendarPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliCalendarPluginTests.swift; sourceTree = "<group>"; };
 		0BB5C4A4994FE6A86DB2CFA5 /* GeminiSpeechRecognizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiSpeechRecognizerTests.swift; sourceTree = "<group>"; };
 		0BC86AD5E0D8C9FE1AAE7633 /* WhisperKitSpeechRecognizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperKitSpeechRecognizerTests.swift; sourceTree = "<group>"; };
@@ -842,6 +844,7 @@
 		98573B9EA24313548CD58B10 /* CallOverrideParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallOverrideParserTests.swift; sourceTree = "<group>"; };
 		98930B8EC7CE463FFD1AEF78 /* NepaliTimeParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliTimeParserTests.swift; sourceTree = "<group>"; };
 		98A9D74AC2A84318AF78C19B /* GeminiConfigStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiConfigStoreTests.swift; sourceTree = "<group>"; };
+		99F8BFB236F42C6680633A6F /* TurnTimingBreakdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnTimingBreakdown.swift; sourceTree = "<group>"; };
 		9AA00B88AADB64F15A1BC85C /* whisper-medium-ne-q5_1.bin */ = {isa = PBXFileReference; lastKnownFileType = archive.macbinary; path = "whisper-medium-ne-q5_1.bin"; sourceTree = "<group>"; };
 		9AD22F253FD8BA87501C3442 /* VoiceBiometricStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceBiometricStoreTests.swift; sourceTree = "<group>"; };
 		9AE54E6D163F8A4276A95D35 /* VoicePipelineNoiseFilterSeamTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePipelineNoiseFilterSeamTests.swift; sourceTree = "<group>"; };
@@ -1776,6 +1779,7 @@
 				E7064EC4167F0B0E7CFD11F5 /* IntentEncoderManifestResource.swift */,
 				F2C7F2A543AF240BCE8B40F0 /* IntentEncoderRuntime.swift */,
 				BCECE50E094CF4B91A393824 /* IntentEncoderSchema.swift */,
+				D6F17A5CFBE8685CA704EC32 /* IntentEncoderSideload.swift */,
 				BE04E560EEE33F1E1DCCBE28 /* IntentEncoderSpikeInstaller.swift */,
 				EB7378E6CDE8A5D08B7B28D5 /* IntentEncoderTokenizer.swift */,
 				4B339E88261CBDAD03F41078 /* IntentLogStore.swift */,
@@ -1947,6 +1951,7 @@
 				83DFDE9A1EB7508FB720FFC0 /* TalkBootContract.swift */,
 				9B97C16366222C54ED70E03C /* TopicPreAnswer.swift */,
 				8E873864734A0F0500AE4D63 /* TranscriptSanityGuard.swift */,
+				99F8BFB236F42C6680633A6F /* TurnTimingBreakdown.swift */,
 				7F9CB2D914CCA960DB69EEFA /* VoiceBiometricStore.swift */,
 				80462B405AD704A16369558F /* VoiceContactSearchRoute.swift */,
 				F6C6DC7636D26D44A73A7D71 /* VoiceEnrollmentRecorder.swift */,
@@ -2016,6 +2021,7 @@
 				040169ACAC28343657CF901A /* IntentCommandCacheTests.swift */,
 				41A63F14FC1963B4B60A9BE3 /* IntentEncoderInterpreterTests.swift */,
 				422ED2D8377A5302E63F9D87 /* IntentEncoderRuntimeWiringTests.swift */,
+				0A8217368352E8BC744B3C06 /* IntentEncoderSideloadTests.swift */,
 				2B1EAD3C9B3C8ADC37839024 /* IntentEncoderWiringTests.swift */,
 				719AA0AA9C2BB68B77B82DD2 /* IntentLogStoreTests.swift */,
 				35BB076904A5D3983FE128ED /* IntentRouterCloudFirstTests.swift */,
@@ -2346,6 +2352,7 @@
 				4571683A532D3A11FD1C9378 /* IntentEncoderManifestResource.swift in Sources */,
 				2EE176E2036702A5D47F5E5E /* IntentEncoderRuntime.swift in Sources */,
 				436577B69A2543A6778BB46C /* IntentEncoderSchema.swift in Sources */,
+				CD56ED5D795DE6D632ED0EAE /* IntentEncoderSideload.swift in Sources */,
 				F039EE9131C1D41BA979E60D /* IntentEncoderSpikeInstaller.swift in Sources */,
 				EA8AA7D2290468E2CC236370 /* IntentEncoderTokenizer.swift in Sources */,
 				E036F7780694F57EA7B2E72E /* IntentLogReviewView.swift in Sources */,
@@ -2448,6 +2455,7 @@
 				EAF519D4E9EBCDA78AF63BD9 /* ToolLogReviewView.swift in Sources */,
 				8BF37B5627241532432A7D13 /* TopicPreAnswer.swift in Sources */,
 				D4175E7CBA4AF5F86F7464B3 /* TranscriptSanityGuard.swift in Sources */,
+				AFF3663FC04C804DB6DCA7B7 /* TurnTimingBreakdown.swift in Sources */,
 				E4EC3CD2D5EC4A124169B1BF /* UnifiedContactSearch.swift in Sources */,
 				1D5933AF5B6C45ECD2C8641D /* UpdatesView.swift in Sources */,
 				57387874E58EC854768F3E6A /* UserManualCatalog.swift in Sources */,
@@ -2576,6 +2584,7 @@
 				2B5D966E209F4EA484DAFE67 /* IntentEncoderArtifactTests.swift in Sources */,
 				82DA11A0D2D0D938B561811A /* IntentEncoderInterpreterTests.swift in Sources */,
 				0DBD7F7EC9248C9012A676C4 /* IntentEncoderRuntimeWiringTests.swift in Sources */,
+				3A2D4DACC10DFD5C9A1D3F94 /* IntentEncoderSideloadTests.swift in Sources */,
 				DB6F635E4B7D944A3ADA471C /* IntentEncoderWiringTests.swift in Sources */,
 				45C7D93F774317633EEA0D5B /* IntentLogStoreTests.swift in Sources */,
 				AA62756932C412DFA9021A13 /* IntentPromptTests.swift in Sources */,
