@@ -12,5 +12,8 @@
 | [TG-08](TG-08-nepali-intent-encoder/index.md) | Nepali Intent Encoder | 6 tasks (T-033–T-038) | ~31–55 days | PENDING |
 | [TG-09](TG-09-plugin-recognition-contract/index.md) | Plugin Recognition & Contract | 6 tasks (T-039–T-044) | ~21–38 days | PENDING |
 | [TG-10](TG-10-continuous-learning-loop/index.md) | Continuous Learning Loop | 9 tasks (T-052–T-060) | ~22–45 days | PENDING |
+| [TG-12](TG-12-crux-resolution-pipeline/index.md) | Crux-Resolution Pipeline | 10 tasks (T-070–T-079) | ~24–40 days | PENDING |
+
+> **Reserved IDs.** TG-11 (Linguistic Robustness, T-061–T-069) and TG-13 (Environment Robustness Benchmark, T-080–T-089) are drafted in parallel worktrees; they are not listed above until they land. TG-12 occupies T-070–T-079, the ten contiguous IDs between them, which is why the group has ten tasks rather than the brief's eleven — its latency and end-to-end verifications are one task. See TG-12's index and design §12.
 
 > **Rework tasks (security-test NO_GO).** [T-049](../TG-02-voice-interface/T-049-release-build-transcript-prints.md) (TG-02) and [T-050](../TG-01-foundation-infrastructure/T-050-api-key-error-code-log-leak.md) (TG-01) are the B1/B2 remediation tasks raised by the `security-test` SECURITY-NO_GO (`specs/security-test.md`). They are listed in their owning groups above; this note carries the cross-group link, because B2's emitter sites span TG-01, TG-02, TG-03 and TG-09 and are owned by TG-01 alone.
