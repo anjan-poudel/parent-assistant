@@ -3882,6 +3882,13 @@ struct TTSVoicesSettingsView: View {
     /// A voice whose install-from-bundle failed at apply time.
     @State private var installFailure: ModelID?
 
+    /// [VOLUME-BOOST] The spoken-reply output volume this screen edits:
+    /// the persisted percentage, loaded on appear and saved on every step
+    /// (`VoiceOutputVolume` owns the key + clamping). The SPEAKER reads
+    /// the same key at playback time, so a change applies from the next
+    /// reply — no restart, no re-synthesis.
+    @State private var volumePercent: Int = VoiceOutputVolume.defaultPercent
+
     enum VoiceStatus {
         case installed   // in the ModelStore, ready to speak
         case bundled     // inside the app bundle; installs on first use
@@ -4015,6 +4022,8 @@ struct TTSVoicesSettingsView: View {
                         // voice personalisation P0 covers Nepali voices.
                         voiceRow(ModelCatalog.entry(for: ModelCatalog.piperEnglishUS)!)
 
+                        volumeCard
+
                         Button {
                             coordinator.speak(text: L10n.str("settings.voices.sampleGreeting",
                                                              locale: coordinator.activeLocale))
@@ -4063,6 +4072,12 @@ struct TTSVoicesSettingsView: View {
             }
         }
         .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            // [VOLUME-BOOST] The persisted value is the source of truth
+            // (clamped on read — an out-of-range stored value shows the
+            // clamped number, never an impossible one).
+            volumePercent = VoiceOutputVolume.percent()
+        }
         .confirmationDialog(
             Text("settings.voices.confirmTitle"),
             isPresented: Binding(
@@ -4086,6 +4101,79 @@ struct TTSVoicesSettingsView: View {
                               optionName(voice)))
             }
         }
+    }
+
+    // MARK: - [VOLUME-BOOST] Spoken-reply volume (50–150 %, default 100)
+
+    /// The one loudness control for the assistant's spoken replies. Two
+    /// big tap targets in 10 % steps rather than a slider: a drag is the
+    /// wrong gesture for shaky hands, and every step is a discrete,
+    /// readable number. The copy carries both honest limits — the boost
+    /// can only amplify what the voice already contains, and the peak
+    /// limiter trades loudness for slight compression at the top of the
+    /// range (see Localizable.xcstrings, `settings.voice.volumeNote`).
+    private var volumeCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("settings.voice.volumeLabel")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundStyle(DesignTokens.textPrimary)
+
+            HStack(spacing: 16) {
+                volumeStepButton(steps: -1, systemImage: "minus",
+                                 labelKey: "settings.voice.volumeDown",
+                                 enabled: volumePercent > VoiceOutputVolume.minimumPercent)
+                Spacer(minLength: 8)
+                Text(verbatim: "\(volumePercent)%")
+                    .font(.system(size: DesignTokens.titlePointSize, weight: .bold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .frame(minWidth: 128)
+                    .accessibilityLabel(Text(verbatim: "\(volumePercent)%"))
+                Spacer(minLength: 8)
+                volumeStepButton(steps: +1, systemImage: "plus",
+                                 labelKey: "settings.voice.volumeUp",
+                                 enabled: volumePercent < VoiceOutputVolume.maximumPercent)
+            }
+
+            Text("settings.voice.volumeNote")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// One step button; disabled at the ends of the range (no dead press,
+    /// and the dimmed state shows the user where the range ends).
+    private func volumeStepButton(steps: Int, systemImage: String,
+                                  labelKey: LocalizedStringKey,
+                                  enabled: Bool) -> some View {
+        Button {
+            stepVolume(bySteps: steps)
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 26, weight: .bold))
+                .foregroundStyle(enabled ? DesignTokens.textPrimary
+                                         : DesignTokens.textSecondary)
+                .frame(minWidth: DesignTokens.minTapTargetSize + 24,
+                       minHeight: DesignTokens.minTapTargetSize + 24)
+                .background(DesignTokens.background)
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(Text(labelKey))
+    }
+
+    /// Persists the next step (saturating at 50 % / 150 %). One writer:
+    /// this screen; the speaker only ever reads.
+    private func stepVolume(bySteps steps: Int) {
+        let next = VoiceOutputVolume.stepped(volumePercent, bySteps: steps)
+        guard next != volumePercent else { return }
+        volumePercent = next
+        VoiceOutputVolume.set(next)
     }
 
     // MARK: - Option cards

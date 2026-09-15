@@ -5,8 +5,11 @@ import XCTest
 /// ([VOICE-SETTINGS]): toggle persistence round-trips (noise filter via
 /// the AppCoordinator seam, accent biasing via UserDefaults), the
 /// status-resolver → presentation mapping, and the enrollment flow state
-/// machine. Pure logic only — fakes stand in for the audio recorder, the
-/// pipeline suspender, and the biometric service; no real audio, no UI.
+/// machine — plus the [VOLUME-BOOST] spoken-reply volume persistence
+/// (round-trip + range clamping; the setting lives with the playback path
+/// in Speaker.swift, its persistence is a voice-settings concern). Pure
+/// logic only — fakes stand in for the audio recorder, the pipeline
+/// suspender, and the biometric service; no real audio, no UI.
 @MainActor
 final class VoiceSettingsModelTests: XCTestCase {
 
@@ -243,6 +246,76 @@ final class VoiceSettingsModelTests: XCTestCase {
                                        defaults: defaults)
         XCTAssertTrue(third.accentBiasEnabled,
                       "a new model must read the persisted ON state")
+    }
+
+    // MARK: - [VOLUME-BOOST] Spoken-reply volume (persistence + clamping)
+
+    func testVolumeDefaultsToOneHundredWhenUnset() {
+        XCTAssertNil(defaults.object(forKey: VoiceOutputVolume.defaultsKey),
+                     "nothing is written until the user steps the control")
+        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 100,
+                       "the shipped loudness is the default — no silent boost")
+        XCTAssertEqual(VoiceOutputVolume.defaultsKey, "voice.outputVolumePercent",
+                       "the persisted key is part of the contract — a rename "
+                       + "silently resets every user's setting")
+    }
+
+    func testVolumeRoundTripsThroughThePersistedKey() {
+        VoiceOutputVolume.set(130, defaults: defaults)
+        XCTAssertEqual(defaults.integer(forKey: "voice.outputVolumePercent"), 130,
+                       "the value is stored as an Int under the documented key")
+        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 130,
+                       "a fresh read sees the persisted value")
+
+        VoiceOutputVolume.set(50, defaults: defaults)
+        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 50)
+        VoiceOutputVolume.set(150, defaults: defaults)
+        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 150)
+    }
+
+    func testVolumeClampsOutOfRangeValuesOnWrite() {
+        VoiceOutputVolume.set(500, defaults: defaults)
+        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 150,
+                       "above the range clamps to the 150 % boost ceiling")
+        VoiceOutputVolume.set(10, defaults: defaults)
+        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 50,
+                       "below the range clamps to the 50 % floor")
+    }
+
+    func testVolumeClampsOutOfRangeValuesOnRead() {
+        // A value already on disk (an older range, a hand-edited plist)
+        // must clamp on READ too — the limiter can never see it, and the
+        // UI can never show an impossible number.
+        defaults.set(9_999, forKey: VoiceOutputVolume.defaultsKey)
+        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 150)
+        defaults.set(-40, forKey: VoiceOutputVolume.defaultsKey)
+        XCTAssertEqual(VoiceOutputVolume.percent(defaults: defaults), 50)
+    }
+
+    func testVolumeStepsInTensAndSaturatesAtTheRangeEnds() {
+        XCTAssertEqual(VoiceOutputVolume.stepped(100, bySteps: 1), 110)
+        XCTAssertEqual(VoiceOutputVolume.stepped(100, bySteps: -1), 90)
+        XCTAssertEqual(VoiceOutputVolume.stepped(150, bySteps: 1), 150,
+                       "the top of the range is a hard stop, not a wrap")
+        XCTAssertEqual(VoiceOutputVolume.stepped(50, bySteps: -1), 50)
+        // Every value the control can reach is on the 10 % grid inside
+        // 50–150 — the range the copy promises.
+        for percent in stride(from: VoiceOutputVolume.minimumPercent,
+                              through: VoiceOutputVolume.maximumPercent,
+                              by: VoiceOutputVolume.stepPercent) {
+            XCTAssertEqual(VoiceOutputVolume.clamp(percent), percent)
+        }
+        XCTAssertEqual(VoiceOutputVolume.minimumPercent, 50)
+        XCTAssertEqual(VoiceOutputVolume.maximumPercent, 150)
+        XCTAssertEqual(VoiceOutputVolume.stepPercent, 10)
+    }
+
+    func testVolumeSettingTouchesNoOtherVoiceKey() {
+        VoiceOutputVolume.set(140, defaults: defaults)
+        XCTAssertNil(defaults.object(forKey: DialectBiasSettings.defaultsKey),
+                     "the volume control must not write the accent key")
+        XCTAssertNil(defaults.object(forKey: VoiceSettingsModel.timingDebugKey),
+                     "the volume control must not write the timing-debug key")
     }
 
     // MARK: - Status resolver → presentation mapping

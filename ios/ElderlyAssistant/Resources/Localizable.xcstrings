@@ -11815,6 +11815,74 @@
         }
       }
     },
+    "settings.voice.volumeDown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Quieter"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आवाज सानो बनाउनुहोस्"
+          }
+        }
+      }
+    },
+    "settings.voice.volumeLabel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Assistant voice volume"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सहायकको आवाजको ठूलोपन"
+          }
+        }
+      }
+    },
+    "settings.voice.volumeNote" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plays the assistant's spoken replies louder or quieter. Above 100% the voice is boosted before it plays, with a limiter so it does not distort — but louder may sound slightly compressed, and a reply that is already near full volume will change little. It is not a hearing aid. Applies from the next reply; alarms, the wake-word cue and other sounds are unaffected."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सहायकले बोल्ने जवाफको आवाज ठूलो वा सानो बनाउँछ। 100% भन्दा माथि आवाज बज्नु अघि नै बढाइन्छ र विकृत नहोस् भनेर लिमिटर लगाइन्छ — तर धेरै ठूलो बनाउँदा आवाज अलिकति दबिएको (कम्प्रेस्ड) सुनिन सक्छ, र पहिले नै पूरा ठूलो भएको जवाफमा खासै फरक पर्दैन। यो श्रवण यन्त्र होइन। अर्को जवाफदेखि लागू हुन्छ; अलार्म, वेक-वर्डको आवाज र अन्य ध्वनिमा असर पर्दैन।"
+          }
+        }
+      }
+    },
+    "settings.voice.volumeUp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Louder"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आवाज ठूलो बनाउनुहोस्"
+          }
+        }
+      }
+    },
     "settings.voiceEngine.explanation" : {
       "extractionState" : "manual",
       "localizations" : {

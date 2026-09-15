@@ -55,6 +55,14 @@ import AVFoundation
 //    voices/locales are inert (a miss, not a wrong-voice ack) — the
 //    cache is keyed, so a stale file can never play for the wrong
 //    voice.
+//  - [VOLUME-BOOST] The spoken-reply volume setting applies to the ack
+//    as well (it is the assistant speaking): at any non-100 % setting
+//    the player transforms the cached WAV into a temp copy before
+//    playing it — a file read + write on a path whose budget is ~200 ms,
+//    single-digit milliseconds for the short ack clips, and 0 for the
+//    default 100 % setting. The cached file itself is never rewritten
+//    (it is shared with later turns), and a transform failure plays the
+//    unprocessed file rather than a missed fast lane.
 
 // MARK: - Router seam
 
@@ -268,17 +276,28 @@ final class AckFastLanePlayer: NSObject, PreAckPlaying, AVAudioPlayerDelegate {
     private let observabilityBus: ObservabilityBus
     /// Injectable for tests; production builds the real AVAudioPlayer.
     private let playerFactory: (URL) throws -> AVAudioPlayer
+    /// [VOLUME-BOOST] Source of the spoken-reply output volume. Injected
+    /// so tests can pin a value; production reads the persisted setting
+    /// AT PLAYBACK TIME (a Settings change applies from the next ack).
+    private let gainPercentProvider: () -> Int
     private var player: AVAudioPlayer?
     private var playbackPending = false
+    /// [VOLUME-BOOST] The gained temp copy this playback owns (nil when
+    /// the ack played at 100 % — the default path never makes one).
+    private var gainedFile: URL?
 
     init(cache: AckAudioCache,
          observabilityBus: ObservabilityBus,
          playerFactory: @escaping (URL) throws -> AVAudioPlayer = {
              try AVAudioPlayer(contentsOf: $0)
+         },
+         gainPercentProvider: @escaping () -> Int = {
+             VoiceOutputVolume.percent()
          }) {
         self.cache = cache
         self.observabilityBus = observabilityBus
         self.playerFactory = playerFactory
+        self.gainPercentProvider = gainPercentProvider
         super.init()
     }
 
@@ -291,9 +310,19 @@ final class AckFastLanePlayer: NSObject, PreAckPlaying, AVAudioPlayerDelegate {
         // A second ack while one still plays: the previous settles
         // first (its finished note fires), then the new one starts.
         cancel()
+        // [VOLUME-BOOST] A pre-ack is the assistant speaking too, so it
+        // gets the same gain + limiter as the reply that follows — an
+        // ack that stayed at 100 % while the reply boomed would read as a
+        // defect to the hard-of-hearing user this setting exists for.
+        // 100 % (the default) hands the cached file straight to the
+        // player: no temp copy, no extra IO — the fast lane's latency
+        // budget is untouched for everyone who has not moved the slider.
+        // A processing failure plays the cached file as-is (never worse).
+        let playbackURL = gainAdjusted(url)
+        gainedFile = playbackURL == url ? nil : playbackURL
         do {
             let setupStart = CFAbsoluteTimeGetCurrent()
-            let newPlayer = try playerFactory(url)
+            let newPlayer = try playerFactory(playbackURL)
             newPlayer.delegate = self
             newPlayer.volume = 1.0
             newPlayer.prepareToPlay()
@@ -309,6 +338,7 @@ final class AckFastLanePlayer: NSObject, PreAckPlaying, AVAudioPlayerDelegate {
                  durationMs: setupMs, spec: spec)
             return true
         } catch {
+            discardGainedFile()
             emit("ack_player_failed", outcome: "failure",
                  errorCode: "\((error as NSError).domain)", spec: spec)
             return false
@@ -326,8 +356,27 @@ final class AckFastLanePlayer: NSObject, PreAckPlaying, AVAudioPlayerDelegate {
     private func settle() {
         guard playbackPending else { return }
         playbackPending = false
+        discardGainedFile()
         ResponsePlaybackModeSeam.end()
         onPlaybackFinished?()
+    }
+
+    /// [VOLUME-BOOST] The URL this ack plays from: the cached file at
+    /// 100 % (the default — identical to the pre-task behavior), else a
+    /// gained+limited temp copy. Honest failure: if the transform fails
+    /// the cached file plays unprocessed — a quieter ack, never a silent
+    /// one, and never a missed fast lane.
+    private func gainAdjusted(_ url: URL) -> URL {
+        let percent = gainPercentProvider()
+        guard percent != VoiceOutputVolume.defaultPercent else { return url }
+        return (try? SpokenReplyGainProcessor.playbackURL(for: url, percent: percent)) ?? url
+    }
+
+    /// Removes the gained temp copy (idempotent; a no-op at 100 %).
+    private func discardGainedFile() {
+        guard let gainedFile else { return }
+        try? FileManager.default.removeItem(at: gainedFile)
+        self.gainedFile = nil
     }
 
     // MARK: AVAudioPlayerDelegate

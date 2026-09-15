@@ -23,6 +23,303 @@ enum ResponsePlaybackModeSeam {
     static var end: () -> Void = {}
 }
 
+// MARK: - [VOLUME-BOOST] Spoken-reply output volume (poor hearing)
+
+/// Persisted loudness setting for the assistant's SPOKEN REPLIES: percent
+/// of the voice file's own amplitude, 50–150 % in 10 % steps, default
+/// 100 % (the loudness the app shipped with). The top of the range is the
+/// boost; the range goes below 100 % so a quiet room can be covered too.
+///
+/// Scope: a pure PLAYBACK-side parameter of the TTS output path. Nothing
+/// routes, decides, or synthesizes differently because of it, and it is
+/// never the system output volume — the alarm bell, the wake-word cue and
+/// other apps' audio are untouched (see `VoiceOutputGain`).
+///
+/// One writer: the Settings → Voices screen (`TTSVoicesSettingsView`).
+/// Every playback site reads through `percent(defaults:)`. Out-of-range
+/// stored values (an older range, a hand-edited plist) clamp on READ as
+/// well as on write, so a bad value can never reach the limiter.
+enum VoiceOutputVolume {
+    /// Stable UserDefaults key — never rename it: a rename silently
+    /// resets every user's setting to 100 %.
+    static let defaultsKey = "voice.outputVolumePercent"
+    static let defaultPercent = 100
+    static let minimumPercent = 50
+    static let maximumPercent = 150
+    static let stepPercent = 10
+
+    /// Range clamp — the single definition both the write path and the
+    /// read path use.
+    static func clamp(_ percent: Int) -> Int {
+        min(maximumPercent, max(minimumPercent, percent))
+    }
+
+    /// The effective percentage: the persisted value (clamped), or
+    /// `defaultPercent` when the key was never written.
+    static func percent(defaults: UserDefaults = .standard) -> Int {
+        guard defaults.object(forKey: defaultsKey) != nil else {
+            return defaultPercent
+        }
+        return clamp(defaults.integer(forKey: defaultsKey))
+    }
+
+    /// Persists a clamped value (the only write path).
+    static func set(_ percent: Int, defaults: UserDefaults = .standard) {
+        defaults.set(clamp(percent), forKey: defaultsKey)
+    }
+
+    /// One Settings ±-press: moves `percent` by one step, saturating at
+    /// the ends of the range.
+    static func stepped(_ percent: Int, bySteps steps: Int) -> Int {
+        clamp(percent + steps * stepPercent)
+    }
+}
+
+/// [VOLUME-BOOST] The playback gain + peak limiter for one spoken reply.
+///
+/// Gain — linear factor = percent / 100, i.e. 0.5× … 1.5×
+/// (−6.0 dB … +3.5 dB). It is applied to the SAMPLES of the reply WAV
+/// that is about to play — never to the shared audio session, never to a
+/// global/system volume — so no other audio path in the app can change
+/// because of it.
+///
+/// Limiter — normalize-then-limit, whole buffer in hand (a zero-attack
+/// look-ahead, one scale factor for the entire utterance):
+///
+///     peakIn  = max |sample| over every channel
+///     boosted = peakIn × requested gain
+///     applied = boosted ≤ ceiling ? requested gain : ceiling / peakIn
+///     out[i]  = clamp(in[i] × applied, −ceiling, +ceiling)
+///
+/// One factor for every channel keeps the stereo image unshifted; the
+/// final clamp is the float-rounding / non-finite safety net, so the
+/// output can never exceed the ceiling. Ceiling = −1 dBFS (≈ 0.891
+/// linear), leaving headroom for the route's own processing.
+///
+/// Honest limits — this is NOT a hearing aid and makes no such claim:
+///  · The gain can only amplify what the voice file already contains.
+///    The bundled Piper exports are already close to full scale, so most
+///    of the 100 → 150 % range buys little loudness there, and the
+///    intelligibility gain flattens as the base amplitude approaches
+///    0 dBFS. Quiet synthesis benefits most; a file that is already at
+///    the ceiling simply gets limited.
+///  · Above the ceiling the limiter trades loudness for compression:
+///    loud passages are pulled down to the ceiling while quiet passages
+///    keep the full gain, so speech near the top of the range can sound
+///    slightly compressed rather than simply louder.
+///  · Broadband gain only — no frequency shaping, no per-band
+///    compression, no assistive-device claims.
+///
+/// The system-speech fallback (`SystemSpeechSpeaker`) cannot exceed
+/// unity at all: `AVSpeechUtterance.volume` caps at 1.0, so replies that
+/// fall back to OS speech are unaffected by this setting — an honest
+/// limit, not a hidden one.
+enum VoiceOutputGain {
+
+    /// Target peak ceiling in dBFS.
+    static let ceilingDBFS: Float = -1
+
+    /// The ceiling as a linear amplitude (≈ 0.8913).
+    static var ceilingLinear: Float { powf(10, ceilingDBFS / 20) }
+
+    /// Percent → linear multiplier. Clamped first: the limiter must
+    /// never see an out-of-range gain.
+    static func linearFactor(percent: Int) -> Float {
+        Float(VoiceOutputVolume.clamp(percent)) / 100
+    }
+
+    /// Percent → dB, for logs and diagnostics (the DSP uses the linear
+    /// form). 100 % = 0 dB.
+    static func decibels(percent: Int) -> Float {
+        20 * log10f(linearFactor(percent: percent))
+    }
+
+    /// What the limiter did to one buffer (diagnostics + tests).
+    struct LimiterResult: Equatable {
+        /// Factor actually applied to every sample (≤ the requested gain).
+        var appliedGain: Float
+        /// Peak |sample| of the input.
+        var peakIn: Float
+        /// Peak |sample| of the output (never above the ceiling).
+        var peakOut: Float
+        /// True when the requested gain would have crossed the ceiling,
+        /// so the limiter pulled the whole buffer down instead.
+        var didLimit: Bool
+
+        /// Output peak in dBFS (−∞ for digital silence).
+        var peakOutDBFS: Float {
+            peakOut > 0 ? 20 * log10f(peakOut) : -.infinity
+        }
+    }
+
+    /// The loudest |sample| of one channel. Non-finite samples are
+    /// ignored (they are handled as silence downstream, never as a peak).
+    static func peak(of channel: [Float]) -> Float {
+        var peak: Float = 0
+        for value in channel where value.isFinite {
+            peak = max(peak, abs(value))
+        }
+        return peak
+    }
+
+    /// The factor the limiter applies to a buffer whose loudest sample is
+    /// `peak`: the requested gain when it still fits under the ceiling,
+    /// else the largest factor that does.
+    static func scaleFactor(peak: Float, gain: Float,
+                            ceiling: Float = VoiceOutputGain.ceilingLinear) -> Float {
+        let requested = max(0, gain)
+        guard peak.isFinite, peak > 0, requested > 0 else { return 0 }
+        let boosted = peak * requested
+        guard boosted.isFinite else { return 0 }
+        return boosted <= ceiling ? requested : ceiling / peak
+    }
+
+    /// The buffer-wide decision: one factor derived from the loudest
+    /// channel peak, so every channel is scaled identically.
+    static func scale(gain: Float, peaks: [Float],
+                      ceiling: Float = VoiceOutputGain.ceilingLinear) -> LimiterResult {
+        let peakIn = peaks.reduce(Float(0)) { max($0, $1.isFinite ? $1 : 0) }
+        guard peakIn > 0 else {
+            // Digital silence (or a broken buffer): silence stays silent.
+            return LimiterResult(appliedGain: 0, peakIn: 0, peakOut: 0, didLimit: false)
+        }
+        let requested = max(0, gain)
+        let applied = scaleFactor(peak: peakIn, gain: requested, ceiling: ceiling)
+        return LimiterResult(appliedGain: applied,
+                             peakIn: peakIn,
+                             peakOut: min(peakIn * applied, ceiling),
+                             didLimit: peakIn * requested > ceiling)
+    }
+
+    /// One sample through the limiter. Non-finite input (a broken
+    /// synthesis, not a signal) becomes silence — never NaN into the
+    /// player.
+    static func limited(_ sample: Float, gain: Float,
+                        ceiling: Float = VoiceOutputGain.ceilingLinear) -> Float {
+        guard sample.isFinite else { return 0 }
+        let boosted = sample * gain
+        guard boosted.isFinite else { return 0 }
+        return min(ceiling, max(-ceiling, boosted))
+    }
+
+    /// In-place gain + limit for one channel.
+    @discardableResult
+    static func apply(gain: Float, to samples: inout [Float],
+                      ceiling: Float = VoiceOutputGain.ceilingLinear) -> LimiterResult {
+        let result = scale(gain: gain, peaks: [peak(of: samples)], ceiling: ceiling)
+        for i in samples.indices {
+            samples[i] = limited(samples[i], gain: result.appliedGain, ceiling: ceiling)
+        }
+        return result
+    }
+
+    /// In-place gain + limit for a multi-channel buffer (each `[[Float]]`
+    /// is one channel; all channels share the factor).
+    @discardableResult
+    static func apply(gain: Float, toChannels channels: inout [[Float]],
+                      ceiling: Float = VoiceOutputGain.ceilingLinear) -> LimiterResult {
+        let result = scale(gain: gain, peaks: channels.map(peak(of:)), ceiling: ceiling)
+        for c in channels.indices {
+            for i in channels[c].indices {
+                channels[c][i] = limited(channels[c][i], gain: result.appliedGain,
+                                         ceiling: ceiling)
+            }
+        }
+        return result
+    }
+}
+
+/// [VOLUME-BOOST] File-domain application of `VoiceOutputGain` to a
+/// synthesized reply WAV — the "gain applied before playback" step.
+///
+/// Why a file transform rather than a player property:
+///  · `AVAudioPlayer.volume` is 0…1 — it can only attenuate, so a boost
+///    is impossible there (the reason the boost has to touch samples);
+///  · doing the limiting here is what keeps a 150 % boost from clipping —
+///    a bare gain would hard-clip every full-scale passage.
+///
+/// Honest limits: this is a broadband gain + peak limiter applied to the
+/// reply's own WAV, nothing more (no frequency shaping, no hearing-aid
+/// behavior). It can only amplify what the file contains — see
+/// `VoiceOutputGain`. If the file cannot be read/rewritten as PCM the
+/// caller plays the ORIGINAL file: processing can degrade loudness,
+/// never speech.
+enum SpokenReplyGainProcessor {
+
+    enum GainError: Error, Equatable {
+        case unreadable(URL)
+        case unsupportedFormat
+        case writeFailed(URL)
+    }
+
+    /// The URL to hand `AVAudioPlayer` for `wav` at `percent`:
+    ///  · 100 % → the input URL itself (byte-identical legacy path —
+    ///    no temp file, no extra IO);
+    ///  · otherwise → a processed copy in the temporary directory that
+    ///    the CALLER owns and deletes.
+    ///
+    /// The source file is never rewritten in place: it may be a shared
+    /// asset (the ack cache slot is read by later turns), and rewriting
+    /// it would leak the gain into every reader.
+    static func playbackURL(for wav: URL, percent: Int,
+                            fileManager: FileManager = .default) throws -> URL {
+        let gain = VoiceOutputGain.linearFactor(percent: percent)
+        guard gain != 1 else { return wav }
+
+        let source: AVAudioFile
+        do { source = try AVAudioFile(forReading: wav) }
+        catch { throw GainError.unreadable(wav) }
+
+        let format = source.processingFormat          // Float32, native channels
+        let frames = AVAudioFrameCount(source.length)
+        guard frames > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: format,
+                                            frameCapacity: frames) else {
+            throw GainError.unsupportedFormat
+        }
+        do { try source.read(into: buffer) }
+        catch { throw GainError.unreadable(wav) }
+        guard let data = buffer.floatChannelData else { throw GainError.unsupportedFormat }
+
+        // Peak FIRST (every channel), then one factor for the whole
+        // utterance — the limiter needs the entire buffer in hand before
+        // it can decide, which is exactly what a file transform gives us.
+        let channelCount = Int(format.channelCount)
+        let length = Int(buffer.frameLength)
+        var peaks: [Float] = []
+        peaks.reserveCapacity(channelCount)
+        for ch in 0..<channelCount {
+            let samples = data[ch]
+            var peak: Float = 0
+            for i in 0..<length {
+                let value = samples[i]
+                if value.isFinite { peak = max(peak, abs(value)) }
+            }
+            peaks.append(peak)
+        }
+        let decision = VoiceOutputGain.scale(gain: gain, peaks: peaks)
+        for ch in 0..<channelCount {
+            let samples = data[ch]
+            for i in 0..<length {
+                samples[i] = VoiceOutputGain.limited(samples[i],
+                                                     gain: decision.appliedGain)
+            }
+        }
+
+        let dest = fileManager.temporaryDirectory
+            .appendingPathComponent("reply-gain-\(UUID().uuidString).wav")
+        do {
+            let output = try AVAudioFile(forWriting: dest,
+                                         settings: source.fileFormat.settings)
+            try output.write(from: buffer)
+        } catch {
+            try? fileManager.removeItem(at: dest)
+            throw GainError.writeFailed(dest)
+        }
+        return dest
+    }
+}
+
 // MARK: - AVSpeechSynthesizer (default)
 
 final class SystemSpeechSpeaker: NSObject, Speaker {
@@ -535,8 +832,21 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     // MARK: - Playback
 
     private func play(_ wav: URL, text: String, locale: Locale) async {
+        // [VOLUME-BOOST] The assistant's spoken reply gets the user's
+        // output volume applied to its samples (gain + peak limiter, see
+        // `SpokenReplyGainProcessor`) before playback starts. At the
+        // default 100 % this returns `wav` itself — the pre-task path,
+        // byte-identical, with no temp file and no extra IO. A processing
+        // failure falls back to the unprocessed file (never worse) and
+        // says so on the events bus.
+        let playbackURL = gainedPlaybackURL(for: wav, locale: locale)
+        defer {
+            if playbackURL != wav {
+                try? FileManager.default.removeItem(at: playbackURL)
+            }
+        }
         do {
-            let player = try AVAudioPlayer(contentsOf: wav)
+            let player = try AVAudioPlayer(contentsOf: playbackURL)
             self.player = player
             player.delegate = self
             player.prepareToPlay()
@@ -551,6 +861,21 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         } catch {
             emit("tts_player_failed_fallback", locale: locale)
             await fallbackSpeaker(for: locale).speak(text, locale: locale)
+        }
+    }
+
+    /// [VOLUME-BOOST] The file this reply should play from: the
+    /// synthesized WAV at 100 %, else a gained+limited temp copy. Reading
+    /// the setting here (at playback time, not at synthesis time) is what
+    /// makes a Settings change apply from the very next reply.
+    private func gainedPlaybackURL(for wav: URL, locale: Locale) -> URL {
+        let percent = VoiceOutputVolume.percent()
+        guard percent != VoiceOutputVolume.defaultPercent else { return wav }
+        do {
+            return try SpokenReplyGainProcessor.playbackURL(for: wav, percent: percent)
+        } catch {
+            emit("tts_gain_failed_raw_playback", locale: locale)
+            return wav
         }
     }
 

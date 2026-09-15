@@ -172,6 +172,45 @@ final class AckFastLaneTests: XCTestCase {
         return url
     }
 
+    /// [VOLUME-BOOST] A tiny WAV whose loudest sample is `peak` — the
+    /// worst case a boost can meet (a file already close to full scale).
+    private func writeHotWAV(_ name: String, peak: Float) throws -> URL {
+        let url = tempRoot.appendingPathComponent(name)
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                   sampleRate: 22_050, channels: 1,
+                                   interleaved: false)!
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        let frames = AVAudioFrameCount(2_205)
+        let buf = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
+        buf.frameLength = frames
+        let samples = buf.floatChannelData![0]
+        for i in 0..<Int(frames) {
+            samples[i] = i % 2 == 0 ? peak : -peak / 2
+        }
+        try file.write(from: buf)
+        return url
+    }
+
+    /// Loudest |sample| of a finite-normal audio file (nil when the file
+    /// cannot be read back).
+    private func peakOfWAV(at url: URL) -> Float? {
+        guard let file = try? AVAudioFile(forReading: url) else { return nil }
+        let frames = AVAudioFrameCount(file.length)
+        guard frames > 0,
+              let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat,
+                                         frameCapacity: frames) else { return nil }
+        try? file.read(into: buf)
+        guard let data = buf.floatChannelData else { return nil }
+        var peak: Float = 0
+        for ch in 0..<Int(file.processingFormat.channelCount) {
+            for i in 0..<Int(buf.frameLength) {
+                let value = data[ch][i]
+                if value.isFinite { peak = max(peak, abs(value)) }
+            }
+        }
+        return peak
+    }
+
     // MARK: - Cache store/lookup
 
     func testCacheHitOnlyAfterStore() throws {
@@ -429,6 +468,83 @@ final class AckFastLaneTests: XCTestCase {
         XCTAssertEqual(finished, 1, "the finished note fires exactly once per started playback")
         player.cancel()
         XCTAssertEqual(finished, 1, "a cancel with nothing playing is a no-op")
+    }
+
+    // MARK: - [VOLUME-BOOST] The ack carries the reply volume
+
+    func testPlayerAtOneHundredPercentHandsTheCachedFileStraightThrough() throws {
+        // The shipped default: no temp copy, no extra IO — the fast lane's
+        // latency budget is untouched, and the file that plays IS the
+        // cached one.
+        let bus = RecordingBus()
+        var played: [URL] = []
+        let player = AckFastLanePlayer(
+            cache: cache, observabilityBus: bus,
+            playerFactory: { url in
+                played.append(url)
+                return try AVAudioPlayer(contentsOf: url)
+            },
+            gainPercentProvider: { 100 })
+        let spec = AckVoiceSpec.resolve(locale: ne)
+        let cached = try writeTinyWAV("ack-volume-100.wav")
+        try cache.store(wav: cached, variant: 1, spec: spec)
+        let cachedURL = try XCTUnwrap(cache.wavURL(variant: 1, spec: spec))
+
+        XCTAssertTrue(player.playCachedAck(variant: 1, locale: ne))
+        XCTAssertEqual(played, [cachedURL],
+                       "100 % plays the cached slot itself — no processed copy")
+
+        player.cancel()
+    }
+
+    func testPlayerAppliesTheGainToTheAckWhenBoosted() throws {
+        // A boosted setting must reach the ack too (it is the assistant
+        // speaking): the played file is a temp COPY, the shared cache slot
+        // is never rewritten, the copy is limited to the ceiling, and the
+        // copy is cleaned up when playback settles.
+        let bus = RecordingBus()
+        var played: [URL] = []
+        let player = AckFastLanePlayer(
+            cache: cache, observabilityBus: bus,
+            playerFactory: { url in
+                played.append(url)
+                return try AVAudioPlayer(contentsOf: url)
+            },
+            gainPercentProvider: { 150 })
+        let spec = AckVoiceSpec.resolve(locale: ne)
+        let cached = try writeHotWAV("ack-volume-150.wav", peak: 0.95)
+        try cache.store(wav: cached, variant: 1, spec: spec)
+        let cachedURL = try XCTUnwrap(cache.wavURL(variant: 1, spec: spec))
+        let cachedBytes = try Data(contentsOf: cachedURL)
+
+        XCTAssertTrue(player.playCachedAck(variant: 1, locale: ne))
+        let playedURL = try XCTUnwrap(played.first)
+        XCTAssertNotEqual(playedURL, cachedURL,
+                          "a boosted ack plays from a processed copy")
+        XCTAssertEqual(try Data(contentsOf: cachedURL), cachedBytes,
+                       "the cache slot is shared with later turns — never rewritten")
+        let peak = try XCTUnwrap(peakOfWAV(at: playedURL))
+        XCTAssertLessThanOrEqual(peak, VoiceOutputGain.ceilingLinear + 0.0001,
+                                 "0.95 × 1.5 would clip; the limiter holds −1 dBFS")
+
+        player.cancel()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: playedURL.path),
+                       "the temp copy is removed once playback settles")
+    }
+
+    func testTheTransformRefusesUnreadableAudioRatherThanGuessing() throws {
+        // The player's fallback (play the cached file as-is) rests on this
+        // contract: the processor THROWS on anything it cannot decode
+        // instead of inventing samples, so the caller can play the
+        // original — a quieter ack, never a broken one.
+        let notAudio = tempRoot.appendingPathComponent("not-audio.wav")
+        try Data([0x00, 0x01, 0x02, 0x03]).write(to: notAudio)
+        XCTAssertThrowsError(try SpokenReplyGainProcessor.playbackURL(for: notAudio,
+                                                                      percent: 150))
+        XCTAssertEqual(try SpokenReplyGainProcessor.playbackURL(for: notAudio,
+                                                               percent: 100),
+                       notAudio,
+                       "100 % never opens the file, so it can never fail on it")
     }
 
     // MARK: - Speaker warm seam
