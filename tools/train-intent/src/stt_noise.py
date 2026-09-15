@@ -13,6 +13,9 @@ the utterance. Both the clean and noised versions stay in the mixture
 
 Resumable: reads data/teacher.jsonl, appends to data/noised.jsonl; ids
 already noised are skipped. Id format: "{source_id}:noise{n}".
+`--in/--out` override both paths (round-2 points them at
+data/round2/round2_clean.jsonl and data/round2/round2_noised.jsonl); the
+defaults are unchanged for every existing call site.
 
 Requires: piper TTS + whisper.cpp (paths in config.yaml:stt_noise).
 """
@@ -100,11 +103,20 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--backend", choices=["hf", "cli"], default="hf",
                         help="hf = GPU transformers (default, needs the GPU free); cli = CPU whisper-cli")
+    parser.add_argument("--in", dest="in_path", default="",
+                        help="input jsonl (default: data/teacher.jsonl). Round-2 "
+                             "passes data/round2/round2_clean.jsonl so the campaign's "
+                             "rows carry their own file-level accounting; the round-1 "
+                             "default is unchanged.")
+    parser.add_argument("--out", dest="out_path", default="",
+                        help="output jsonl, appended and resumable by id (default: "
+                             "data/noised.jsonl)")
     args, cfg = load_config(parser)
 
     root = Path(__file__).parent.parent
-    src_path = root / "data" / "teacher.jsonl"
-    out_path = root / "data" / "noised.jsonl"
+    src_path = Path(args.in_path).expanduser() if args.in_path else root / "data" / "teacher.jsonl"
+    out_path = Path(args.out_path).expanduser() if args.out_path else root / "data" / "noised.jsonl"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     done: set[str] = set()
     if out_path.exists():
