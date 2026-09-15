@@ -71,3 +71,7 @@
 ## Requirement traceability
 
 No traceability-table change was needed. `plan.md`'s task-to-requirements mapping already carries `T-052 | NFR-015, NFR-016` and `T-053 | NFR-015, NFR-016, NFR-032` (lines 166-167), which is exactly what both task files declare and what both reports serve. Only the Task Group Summary's done-count for TG-10 and the total row were updated.
+
+## Escalation decisions (user, 2026-09-15)
+1. **Consent path: APPROVED** — the learning loop is recorded as a second consent-gated, non-default path (opt-in, OD-12's five obligations, strict payload rules), review-by 2026-10-13.
+2. **Teacher transit: LOCAL TEACHER ONLY** — mined/corrected utterances may go to the local teacher; Gemini transit stays blocked unless a separate explicit consent exists.
