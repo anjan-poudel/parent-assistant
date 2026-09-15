@@ -10030,6 +10030,40 @@
         }
       }
     },
+    "settings.encoder.lastCorrection" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Last correction"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "पछिल्लो सुधार"
+          }
+        }
+      }
+    },
+    "settings.encoder.lastCorrection.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No correction decision yet"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अहिलेसम्म कुनै सुधार निर्णय भएको छैन"
+          }
+        }
+      }
+    },
     "settings.calendar.title" : {
       "extractionState" : "manual",
       "localizations" : {

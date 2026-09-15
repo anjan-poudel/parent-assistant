@@ -1603,11 +1603,52 @@ struct IntentTranscriptPair: Equatable, Sendable {
     let degraded: Bool
     let tableRevision: String
     let notes: [String]
+    /// [TG-12] The STT-error corrector's result for this turn, when the layer
+    /// ran inside `IntentInputCanonicalization.prepare`. `nil` means "the
+    /// corrector did not run" (a pair built by hand, an older caller) — NOT
+    /// "it ran and found nothing", which is a result whose `mode` is `.off` or
+    /// `.shadow`, or whose `applications` is empty.
+    ///
+    /// The result is carried whole rather than reduced to a string because a
+    /// consumer needs three different things from it and they must not drift:
+    /// the corrected text (`canonical` above is the corrected text
+    /// CANONICALIZED), the per-token decisions (the debug readout) and the
+    /// count-only metadata (the event).
+    let correction: CorrectionResult?
+
+    init(original: String,
+         canonical: String,
+         applications: [CanonicalVariantApplication] = [],
+         degraded: Bool = false,
+         tableRevision: String,
+         notes: [String] = [],
+         correction: CorrectionResult? = nil) {
+        self.original = original
+        self.canonical = canonical
+        self.applications = applications
+        self.degraded = degraded
+        self.tableRevision = tableRevision
+        self.notes = notes
+        self.correction = correction
+    }
 
     /// What the *intent model* reads. Identity to `original` while the
     /// canonicalizer is inert (compile gate off, toggle off, policy disabled,
     /// or no rule matched).
+    ///
+    /// [TG-12] This is the CANONICALIZED CORRECTED text: the corrector runs
+    /// first (§4.6's order — typo-fix, then canonicalize, then the encoder), so
+    /// the canonicalizer's input is `correction.corrected`, never `original`.
+    /// While the corrector is off, `correction.corrected == original` and this
+    /// expression is byte-for-byte the one that ran before the layer existed.
     var modelInput: String { canonical }
+
+    /// [TG-12] The text the canonicalizer actually saw — the corrector's
+    /// output, or `original` when the corrector did not run. Exposed so a
+    /// consumer that must reason about the intermediate (a Phase-2 span
+    /// remap, a debugger) reads it from the pair rather than re-running the
+    /// corrector and hoping the two agree.
+    var correctedInput: String { correction?.corrected ?? original }
 
     /// What the *keyword safety net* reads: the original, forever (D-1,
     /// `CommandRouter.routeSafetyNet`). Canonicalization may never gate,
@@ -1626,7 +1667,14 @@ struct IntentTranscriptPair: Equatable, Sendable {
     var pickerBrainInput: String { original }
 
     /// True when nothing was rewritten, so `modelInput == original`.
-    var isIdentity: Bool { applications.isEmpty }
+    ///
+    /// [TG-12] BOTH layers have to be identity for the pair to be: a turn the
+    /// corrector rewrote and the canonicalizer passed through is not an
+    /// identity turn, and reporting it as one would tell the encoder (and the
+    /// event) that the model input is the transcript when it is not.
+    var isIdentity: Bool {
+        applications.isEmpty && (correction?.isIdentity ?? true)
+    }
 
     /// What the encoder emits when `isIdentity` is false: rule ids, table ids,
     /// kinds and counts, plus the table revision and the fixed-vocabulary
@@ -1634,12 +1682,39 @@ struct IntentTranscriptPair: Equatable, Sendable {
     /// transcript (§6.6, NFR-016, R-9) — assembled by the same builder the
     /// canonicalization result uses, so the pair cannot disclose more than the
     /// result it came from.
+    ///
+    /// [TG-12] The corrector's own count-only keys are merged in on the same
+    /// terms (A-16: buckets and row ids, never a surface form) — but only when
+    /// the layer actually PARTICIPATED. A corrector that is off adds no keys:
+    /// the metadata for a canonicalization-only turn stays exactly what it was
+    /// before this layer existed (the seam's own invariant, and the reason a
+    /// disabled layer cannot change the shape of an event).
     var observabilityMetadata: [String: String] {
+        var metadata = canonicalizationMetadata
+        if let correction, correction.mode != .off || correction.degraded {
+            for (key, value) in correction.observabilityMetadata {
+                metadata[key] = value
+            }
+        }
+        return metadata
+    }
+
+    /// The canonicalizer's own payload, exactly what `observabilityMetadata`
+    /// returned before the corrector existed. Kept as its own accessor because
+    /// `encoder_input_canonicalized` is the CANONICALIZER's event: a turn the
+    /// corrector rewrote and the canonicalizer passed through must not fire it,
+    /// and when it does fire it must carry the canonicalization keys alone.
+    var canonicalizationMetadata: [String: String] {
         CanonicalizationObservability.metadata(tableRevision: tableRevision,
                                                applications: applications,
                                                degraded: degraded,
                                                notes: notes)
     }
+
+    /// The canonicalizer's half of `isIdentity`. The encoder's existing
+    /// canonicalization event gates on this, so turning the corrector on cannot
+    /// change when that event fires or what it says.
+    var canonicalizationIsIdentity: Bool { applications.isEmpty }
 
     /// How a decoded span maps back onto the original transcript (§4.5).
     enum SpanMapping: Equatable, Sendable {
@@ -1726,11 +1801,41 @@ enum IntentInputCanonicalization {
     /// sanitised transcript byte-identical as both `original` and `canonical`,
     /// with no applications: the seam is a pass-through and no downstream
     /// behaviour differs from before this file existed.
+    ///
+    /// [TG-12] ORDER (§4.6, addendum §3.1): CORRECT, then CANONICALIZE, then
+    /// the encoder. The corrector sees the sanitised transcript and nothing
+    /// else; the canonicalizer sees the corrector's output; `modelInput` is the
+    /// result of both. The two layers share this one seam and the same
+    /// compile gate, and a correction can never reach anything but the intent
+    /// model: `original` — what the keyword safety net, the emergency path and
+    /// the medication-acknowledgement path read — is still the sanitised
+    /// transcript, untouched by either layer, and `safetyNetInput` still hands
+    /// it over.
+    ///
+    /// The corrector's policy is resolved HERE, from the lexicon that will
+    /// actually be read, rather than taken as a defaulted argument evaluated
+    /// before the caller's lexicon is known: a threshold fitted on one bank and
+    /// applied with another is the drift A-12 exists to prevent. Passing
+    /// `correctionPolicy` explicitly (tests, a future settings surface) skips
+    /// that resolution and uses exactly what was passed.
     static func prepare(sanitisedTranscript: String,
                         dialect: DialectLabel = DialectPreference.persisted(),
                         tables: VariantTableSet = VariantTableSet.bundled,
-                        policy: Policy = Policy.runtime()) -> IntentTranscriptPair {
-        let result = DialectCanonicalizer.canonicalize(sanitisedTranscript,
+                        policy: Policy = Policy.runtime(),
+                        correctionPolicy: STTCorrector.Policy? = nil,
+                        correctionLexicon: CorrectionLexicon? = CorrectionLexicon.bundled)
+        -> IntentTranscriptPair {
+        let correctionPolicy = correctionPolicy
+            ?? STTCorrector.Policy.runtime(lexicon: correctionLexicon)
+        // The corrector runs FIRST and its output is what the canonicalizer
+        // reads. While its mode is `.off` (the shipped default: absent
+        // preference key, or the compile gate off) `corrected` is the input
+        // string itself, so the canonicalizer's input is byte-identical to the
+        // expression that ran before this layer existed.
+        let correction = STTCorrector.correct(sanitisedTranscript,
+                                              lexicon: correctionLexicon,
+                                              policy: correctionPolicy)
+        let result = DialectCanonicalizer.canonicalize(correction.corrected,
                                                        dialect: dialect,
                                                        tables: tables,
                                                        policy: policy)
@@ -1739,7 +1844,8 @@ enum IntentInputCanonicalization {
                                     applications: result.applications,
                                     degraded: result.degraded,
                                     tableRevision: result.tableRevision,
-                                    notes: result.notes)
+                                    notes: result.notes,
+                                    correction: correction)
     }
 
     typealias Policy = DialectCanonicalizer.Policy

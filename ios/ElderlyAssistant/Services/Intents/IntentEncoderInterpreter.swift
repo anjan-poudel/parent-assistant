@@ -186,6 +186,19 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
     /// no allocation, and no decision anywhere consults it.
     private let timingRecorder: TurnTimingRecorder?
 
+    /// [TG-12] Handed the corrector's readout after every turn in which the
+    /// layer PARTICIPATED (mode on; never for `.off`), on the calling thread —
+    /// the coordinator hops to main to publish the card's line. Mirrors
+    /// `TurnLatencyReporter.onReported`: nil on every non-gated
+    /// configuration, and with no reporter attached the readout is simply not
+    /// forwarded (the decisions and the event are unaffected).
+    ///
+    /// The readout carries the user's own words (the card is an on-device
+    /// debugger surface). It is never persisted, never logged and never
+    /// placed in an event — the event carries `observabilityMetadata` instead,
+    /// which is a different and count-only payload.
+    var onCorrection: ((CorrectionReadout) -> Void)?
+
     private let inferenceQueue = DispatchQueue(label: "intent.encoder",
                                                qos: .userInitiated)
     private let timeoutQueue = DispatchQueue(label: "intent.encoder.timeout")
@@ -325,13 +338,36 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
         // `CommandRouter`, whose safety net keeps reading the raw transcript
         // upstream of every interpreter (D-1).
         let input = IntentInputCanonicalization.prepare(sanitisedTranscript: clean)
-        if !input.isIdentity {
+        if !input.canonicalizationIsIdentity {
             // Rule ids, table ids, kinds and counts ONLY — never the words
             // being rewritten (C9 / NFR-016 / §6.6). Unreachable while the
             // switch is off.
             emit("encoder_input_canonicalized", outcome: "info",
                  durationMs: Self.elapsedMs(since: started),
-                 extra: input.observabilityMetadata)
+                 extra: input.canonicalizationMetadata)
+        }
+        // [TG-12] Phase 1's correction event — the layer's own observability,
+        // and the only place it is reported. COUNT-ONLY and BINNED (A-16):
+        // mode, token/application counts, decision-reason histogram, the
+        // satisfied pair-table ROW IDs, error classes, and bucketed scores.
+        // Never a surface form, never the transcript, never a raw score.
+        // Unreachable while the mode key is absent (the shipped default): the
+        // corrector applies nothing, `applications` is empty, and no event is
+        // emitted — so a configuration nobody opted into cannot change the
+        // event stream. Nothing downstream branches on this signal (A-14).
+        if let correction = input.correction, !correction.applications.isEmpty {
+            emit("turn_correction", outcome: "info",
+                 durationMs: Self.elapsedMs(since: started),
+                 extra: correction.observabilityMetadata)
+        }
+        // [TG-12] The card's line, last turn only, in memory only. Forwarded
+        // when the layer participated at all — including a pass-through, whose
+        // readout says WHY nothing was corrected, which is the question a
+        // debugger actually has. `readout` is nil for an empty transcript.
+        if let correction = input.correction,
+           correction.mode != .off || correction.degraded,
+           let readout = correction.readout {
+            onCorrection?(readout)
         }
         // [TURN-TIMING-BREAKDOWN] `encoder_tokenizer` — the tokenizer call
         // is wrapped, never restructured: nil recorder (every non-gated

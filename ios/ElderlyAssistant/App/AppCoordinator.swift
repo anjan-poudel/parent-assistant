@@ -1258,6 +1258,19 @@ final class AppCoordinator: ObservableObject {
     /// reporter exists to fill it.
     @Published private(set) var lastTurnTimingBreakdown: TurnTimingBreakdown?
 
+    /// [TG-12] The LAST turn's correction readout, behind the
+    /// internal-testing card's "Last correction" line — the same shape and
+    /// the same rules as `lastTurnTimingBreakdown` above.
+    ///
+    /// IN MEMORY ONLY — never persisted, never written to the encrypted
+    /// stores, never logged, and NOT what the `turn_correction` event carries
+    /// (the event carries `CorrectionResult.observabilityMetadata`, which is
+    /// count-only and PII-free; this is the debugger's view and it may name
+    /// the words being rewritten, to the person holding the device). Nil
+    /// until a turn runs with the corrector switched on — and permanently
+    /// nil on a non-gated build, where no interpreter and no card exist.
+    @Published private(set) var lastCorrectionReadout: CorrectionReadout?
+
     /// Both internal-testing switches act through here. Non-gated builds
     /// never reach it (no UI exposes the switches), but the guard keeps
     /// the invariant local: only a build that compiles the encoder in may
@@ -1287,7 +1300,7 @@ final class AppCoordinator: ObservableObject {
     /// so the shipped behaviour is unchanged.
     private lazy var intentEncoderInterpreter: IntentEncoderInterpreter = {
         let resources = IntentEncoderRuntime.load()
-        return IntentEncoderInterpreter(
+        let interpreter = IntentEncoderInterpreter(
             modelStore: modelStore,
             observabilityBus: observabilityBus,
             modelId: ModelCatalog.intentEncoderSpike,
@@ -1303,6 +1316,17 @@ final class AppCoordinator: ObservableObject {
             // only ever constructed on such a build anyway.
             timingRecorder: turnTimingRecorder
         )
+        // [TG-12] The corrector's readout for the card's "Last correction"
+        // line, wired at construction exactly as the turn-timing reporter is
+        // (see `turnLatencyReporter?.onReported` below): the interpreter hands
+        // it over on the calling thread and the publish hops to main. In
+        // memory only — see `lastCorrectionReadout`.
+        interpreter.onCorrection = { [weak self] readout in
+            DispatchQueue.main.async {
+                self?.lastCorrectionReadout = readout
+            }
+        }
+        return interpreter
     }()
     /// Level-2 memory-warning observer for the encoder (nil unless the
     /// internal-testing gate is on).

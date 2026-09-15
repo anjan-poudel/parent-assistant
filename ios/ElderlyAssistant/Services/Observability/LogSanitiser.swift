@@ -76,7 +76,34 @@ struct LogSanitiser {
         "part",
         "parts",
         "bytes",
-        "http_status"
+        "http_status",
+        // [TG-12] The STT-error corrector's `turn_correction` payload. Each
+        // value is count-only or binned BY CONSTRUCTION (A-16,
+        // `CorrectionResult.observabilityMetadata`): mode and state are fixed
+        // vocabulary, the counts are integers, `correction_reasons` and
+        // `correction_classes` are `<token>:<count>` histograms over closed
+        // vocabularies, `correction_entry_ids` are the bank's own row ids
+        // (`lex-<n>` ordinals or authored `stt-reduction-*` ids — never a
+        // surface form), the veto is a rule name, and the two buckets are
+        // 0.05-wide ranges written `0.80~0.85` — a TILDE separator, because the
+        // phone-number guard below matches a hyphenated six-digit run and would
+        // redact the whole bucket. No key here may ever carry a transcript word,
+        // a correction target or a raw score; a test pins that claim against the
+        // builder, so a new key cannot be added to the event without being
+        // added here deliberately.
+        "correction_mode",
+        "correction_state",
+        "correction_lexicon_revision",
+        "correction_tokens_considered",
+        "correction_applied_count",
+        "correction_threshold_bucket",
+        "correction_reasons",
+        "correction_veto",
+        "correction_entry_ids",
+        "correction_classes",
+        "correction_class_origins",
+        "correction_best_bucket",
+        "correction_margin_bucket"
     ]
 
     private static let piiPatterns: [NSRegularExpression] = {

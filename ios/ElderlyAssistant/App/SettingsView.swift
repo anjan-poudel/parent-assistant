@@ -3492,6 +3492,42 @@ struct AIModelsSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            // [TG-12] The last turn's correction decision, mirroring "Last
+            // turn" above: the same label/value rows, the same in-memory
+            // last-turn value (never persisted, never logged), the same
+            // monospaced diagnostic vocabulary — the row labels ("corrected",
+            // "conf", "class") are tokens the device log is read against, so
+            // they stay unlocalized like the stage names.
+            //
+            // This line MAY NAME THE WORDS the corrector rewrote: it is the
+            // on-device debugger's view, and a debugger that cannot see the
+            // pair cannot tell a wrong correction from a missing one. The
+            // `turn_correction` EVENT never carries them — it is count-only
+            // and binned by construction.
+            Divider()
+            VStack(alignment: .leading, spacing: 6) {
+                Text("settings.encoder.lastCorrection")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                if let correction = coordinator.lastCorrectionReadout,
+                   !correction.isEmpty {
+                    ForEach(correction.rows) { row in
+                        HStack(spacing: 8) {
+                            Text(row.label)
+                            Spacer(minLength: 8)
+                            Text(row.value)
+                        }
+                        .font(.system(size: DesignTokens.minCaptionPointSize,
+                                      design: .monospaced))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                    }
+                } else {
+                    Text("settings.encoder.lastCorrection.empty")
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
