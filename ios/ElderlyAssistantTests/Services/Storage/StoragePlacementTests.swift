@@ -23,6 +23,21 @@ final class StoragePlacementTests: XCTestCase {
         }
     }
 
+    /// [T-056-A] T-054 §3.4 makes this membership a REQUIREMENT, not a
+    /// preference: the policy's default for an unknown key is
+    /// `.encryptedFile`, so an unlisted salt would silently land on the
+    /// file channel — where `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`
+    /// and `kSecAttrSynchronizable = false`, the two properties that make
+    /// it this-device-only and never-backup, do not apply.
+    func testTheLearningLoopSaltIsKeychainResident() {
+        XCTAssertEqual(StoragePlacementPolicy.placement(for: LearningLoopSalt.storageKey),
+                       .keychain,
+                       "the loop salt must keep the Keychain's this-device-only protection")
+        XCTAssertEqual(StoragePlacementPolicy.placement(for: "learningLoop.salt"), .keychain,
+                       "pinned by literal too — a renamed constant must not silently"
+                       + " move the salt to disk")
+    }
+
     func testTheKeychainSetIsExactlyTheReviewedSecrets() {
         // Set equality, not a containment check: every Keychain-resident
         // key is a deliberate decision about a small secret, and a new one
@@ -30,7 +45,8 @@ final class StoragePlacementTests: XCTestCase {
         // conscious edit to this list.
         XCTAssertEqual(StoragePlacementPolicy.keychainResidentKeys,
                        ["gemini.apiKey", "search.apiKey", "search.engineId",
-                        "youtube.apiKey", "gemini.model"])
+                        "youtube.apiKey", "gemini.model",
+                        "learningLoop.salt"])
     }
 
     // MARK: - What moves to encrypted files
@@ -69,6 +85,13 @@ final class StoragePlacementTests: XCTestCase {
             "call.confirmedMethodHistory",
             "intents.commandCache",
             "intents.recentConfirmedActions",
+            // [T-056-A] The loop's structured artifacts — the consent
+            // record (L-3) and the content store (L-1). Both belong on the
+            // encrypted-file side: L-1 holds utterance text, which is why
+            // it is NOT the plaintext JSONL `IntentLogStore` writes, and
+            // L-3 is a small structured payload like its neighbours here.
+            "learningLoop.consent",
+            "learningLoop.utterances",
         ]
         for key in structuredKeys {
             XCTAssertEqual(StoragePlacementPolicy.placement(for: key),
