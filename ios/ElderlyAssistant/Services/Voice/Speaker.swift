@@ -332,8 +332,9 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     private let turnTracer: VoiceTurnLatencyTracer?
     /// [TURN-TIMING-BREAKDOWN] Turn-scoped stage stopwatch for
     /// `tts_start` — handed-to-speaker → audio start (voice resolution +
-    /// synthesis ramp), NOT the playback duration. Nil on every
-    /// configuration but an `INTENT_ENCODER` build.
+    /// synthesis ramp), NOT the playback duration. Nil unless the build
+    /// carries `INTENT_ENCODER` — [ENCODER-ALWAYS-ON] the default build
+    /// does, so the recorder is live here (the toggle still gates service).
     private let timingRecorder: TurnTimingRecorder?
     /// [LAT-M2] Shared pre-ack WAV cache the warm-time build writes and
     /// the router's fast-lane player reads. A nil injection gets a

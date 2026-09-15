@@ -1050,12 +1050,19 @@ extension DialectIdentifierTests {
             .runtime(defaults: defaults, isCompiledIn: true, isToggleOn: nil).enabled)
         XCTAssertFalse(DialectCanonicalizer.Policy
             .runtime(defaults: defaults, isCompiledIn: false, isToggleOn: nil).enabled)
-        // The shipped default (a real build with no INTENT_ENCODER condition)
-        // is therefore inert even with the stored key present.
-        XCTAssertFalse(DialectCanonicalizer.Policy.runtime(defaults: defaults).enabled)
+        // [ENCODER-ALWAYS-ON] The `INTENT_ENCODER` condition is part of the
+        // app target's DEFAULT compilation conditions now (ios/project.yml),
+        // so the defaulted `isCompiledIn` reads TRUE in this build and the
+        // runtime policy follows the STORED key — which is why the shipped
+        // default rests on that key being absent, pinned above and by the
+        // reset below. The compile-time half still cannot be talked round
+        // (the `isCompiledIn: false` cases above and below).
+        XCTAssertTrue(DialectCanonicalizer.Policy.runtime(defaults: defaults).enabled)
 
         preferences.reset()
         XCTAssertFalse(preferences.canonicalizerEnabled)
+        XCTAssertFalse(DialectCanonicalizer.Policy.runtime(defaults: defaults).enabled,
+                       "a fresh install is inert again")
     }
 
     // MARK: Fail-closed per table (D-4)

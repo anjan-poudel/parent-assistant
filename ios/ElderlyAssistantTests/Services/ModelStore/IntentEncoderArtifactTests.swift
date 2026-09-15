@@ -64,26 +64,29 @@ final class IntentEncoderArtifactTests: XCTestCase {
         XCTAssertEqual(entry.sha256.count, 64, "a full SHA-256 hex digest")
         XCTAssertTrue(entry.sha256.hasPrefix("e0ff09231843"),
                       "the T-036 v0 export's measured zip hash")
-        // No machine-specific path is committed. The default is a
-        // reserved-TLD placeholder (RFC 2606 `.invalid` never resolves);
-        // an internal tester points the entry at their own copy via the
-        // environment override.
-        XCTAssertEqual(entry.downloadURL.host, "invalid.invalid",
-                       "non-routable placeholder — never a device-reachable URL")
-        XCTAssertEqual(entry.downloadURL.path,
-                       "/t033-spike/t033-encoder-int8-mlmodelc.zip")
+        // No machine-specific path is committed, and no environment
+        // variable is required: with the process environment this test runs
+        // under (no override), the entry points at the app's own Documents
+        // copy — `devicectl`/AirDrop is the whole handshake.
+        if ProcessInfo.processInfo.environment["INTENT_ENCODER_SPIKE_ZIP"] == nil {
+            XCTAssertEqual(entry.downloadURL,
+                           ModelCatalog.intentEncoderSpikeDocumentsZipURL())
+            XCTAssertEqual(entry.downloadURL.lastPathComponent,
+                           "t033-encoder-int8-mlmodelc.zip")
+        }
         XCTAssertFalse(entry.downloadURL.absoluteString.contains("/Users/"),
                        "a personal home-directory path must not be committed")
         let override = ModelCatalog.intentEncoderSpikeZipURL(
             environment: ["INTENT_ENCODER_SPIKE_ZIP": "/tmp/t033-encoder-int8-mlmodelc.zip"])
         XCTAssertEqual(override.scheme, "file")
         XCTAssertEqual(override.path, "/tmp/t033-encoder-int8-mlmodelc.zip")
-        let placeholder = ModelCatalog.intentEncoderSpikeZipURL(environment: [:])
-        XCTAssertEqual(ModelCatalog.intentEncoderSpikeZipURL(
-            environment: ["INTENT_ENCODER_SPIKE_ZIP": "   "]),
-            placeholder,
-            "a blank override falls back to the placeholder")
-        XCTAssertEqual(placeholder.host, "invalid.invalid")
+        // Only an EXPLICITLY blank override reaches the reserved-TLD
+        // placeholder (RFC 2606 `.invalid` never resolves) — that is the
+        // "internal-testing install switched off" state, not the default.
+        let blanked = ModelCatalog.intentEncoderSpikeZipURL(
+            environment: ["INTENT_ENCODER_SPIKE_ZIP": "   "])
+        XCTAssertEqual(blanked.host, "invalid.invalid")
+        XCTAssertNotEqual(blanked, ModelCatalog.intentEncoderSpikeZipURL(environment: [:]))
         XCTAssertEqual(entry.dependsOn, nil)
         XCTAssertTrue(ModelKind.intentEncoder.isDirectoryArtifact)
         XCTAssertFalse(ModelKind.whisperBase.isDirectoryArtifact,
@@ -133,6 +136,65 @@ final class IntentEncoderArtifactTests: XCTestCase {
             ModelCatalog.intentEncoderSpikeZipURL(
                 environment: ["INTENT_ENCODER_SPIKE_ZIP": "t033-encoder-int8-mlmodelc.zip"]),
             relative)
+    }
+
+    /// [ENCODER-ALWAYS-ON] `INTENT_ENCODER_SPIKE_ZIP` is an OVERRIDE, not a
+    /// requirement: with the environment empty, BOTH the display/download
+    /// URL and the installer's source resolve to the app-container
+    /// `Documents/t033-encoder-int8-mlmodelc.zip`, so staging that one file
+    /// is the whole setup — no environment variable, no container UUID.
+    func testNoEnvironmentVariableIsNeededToResolveTheZipSource() throws {
+        let documents = FileManager.default.urls(for: .documentDirectory,
+                                                 in: .userDomainMask)[0]
+        let expected = documents.appendingPathComponent("t033-encoder-int8-mlmodelc.zip")
+
+        // The download/picker URL the catalog entry carries…
+        XCTAssertEqual(ModelCatalog.intentEncoderSpikeZipURL(environment: [:]),
+                       expected)
+        // …and the source the INSTALL TRIGGER reads (the two must agree, or
+        // the card would show a path that never installs).
+        XCTAssertEqual(ModelCatalog.configuredIntentEncoderSpikeZipURL(environment: [:]),
+                       expected)
+        XCTAssertEqual(expected.lastPathComponent,
+                       ModelCatalog.intentEncoderSpikeZipFilename)
+        XCTAssertEqual(expected.deletingLastPathComponent().path, documents.path)
+        XCTAssertEqual(expected.scheme, "file")
+
+        // The ONLY "no source" state is an explicitly blank override (the
+        // install switched off) — and it is honest about it at both seams.
+        XCTAssertNil(ModelCatalog.configuredIntentEncoderSpikeZipURL(
+            environment: ["INTENT_ENCODER_SPIKE_ZIP": "   "]))
+        XCTAssertNil(ModelCatalog.configuredIntentEncoderSpikeZipURL(
+            environment: ["INTENT_ENCODER_SPIKE_ZIP": "\t \n "]),
+            "whitespace-only is blank, not a filename")
+        XCTAssertNil(ModelCatalog.configuredIntentEncoderSpikeZipURL(
+            environment: ["INTENT_ENCODER_SPIKE_ZIP": ""]))
+    }
+
+    /// The override still WINS over the Documents default — every value
+    /// shape it already accepted keeps its meaning, and an override naming
+    /// a file elsewhere never silently degrades to the default path.
+    func testTheEnvironmentOverrideTakesPrecedenceOverTheDocumentsDefault() throws {
+        let documents = FileManager.default.urls(for: .documentDirectory,
+                                                 in: .userDomainMask)[0]
+
+        let absolute = try XCTUnwrap(ModelCatalog.configuredIntentEncoderSpikeZipURL(
+            environment: ["INTENT_ENCODER_SPIKE_ZIP": "  /tmp/elsewhere.zip "]))
+        XCTAssertEqual(absolute.path, "/tmp/elsewhere.zip")
+        XCTAssertNotEqual(absolute, ModelCatalog.intentEncoderSpikeDocumentsZipURL())
+
+        let nested = try XCTUnwrap(ModelCatalog.configuredIntentEncoderSpikeZipURL(
+            environment: ["INTENT_ENCODER_SPIKE_ZIP": "staging/t033.zip"]))
+        XCTAssertEqual(nested, documents.appendingPathComponent("staging/t033.zip"))
+        XCTAssertNotEqual(nested, ModelCatalog.intentEncoderSpikeDocumentsZipURL())
+
+        // The display URL follows the same precedence.
+        XCTAssertEqual(ModelCatalog.intentEncoderSpikeZipURL(
+            environment: ["INTENT_ENCODER_SPIKE_ZIP": "  /tmp/elsewhere.zip "]),
+            absolute)
+        XCTAssertEqual(ModelCatalog.intentEncoderSpikeZipURL(
+            environment: ["INTENT_ENCODER_SPIKE_ZIP": "staging/t033.zip"]),
+            nested)
     }
 
     // MARK: Destination scoping (the T-035 §15.2 finding)

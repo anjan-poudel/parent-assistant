@@ -275,30 +275,56 @@ enum ModelCatalog {
     /// (`IntentEncoderSchema`).
     ///
     /// No hosted URL exists for this spike and the catalog must not embed
-    /// a machine-specific path (`intentEncoderSpikeZipURL(environment:)`
-    /// documents the override). The supported internal-testing route does
-    /// not need a URL at all: pass the zip directly to
-    /// `ModelStore.installCoreMLEncoder(fromZip:for:)`. A device-side
-    /// install needs the zip copied over first (AirDrop / `devicectl`) —
-    /// the standard downloader would need a real HTTP URL, which is
-    /// deliberately not invented here.
+    /// a machine-specific path. The supported internal-testing route is the
+    /// app's OWN `Documents/` directory, with NO environment variable
+    /// required: `Documents/t033-encoder-int8-mlmodelc.zip` is the default
+    /// source, and `INTENT_ENCODER_SPIKE_ZIP` merely overrides it (see
+    /// `configuredIntentEncoderSpikeZipURL`). A device-side install needs
+    /// the zip copied over first (AirDrop / `devicectl`) — the standard
+    /// downloader would need a real HTTP URL, which is deliberately not
+    /// invented here.
     static let intentEncoderSpike = ModelID("intent-encoder-t033-c3-minilm-int8")
+
+    /// The filename the internal-testing install reads from the app's
+    /// `Documents/` directory when no environment override is set.
+    static let intentEncoderSpikeZipFilename = "t033-encoder-int8-mlmodelc.zip"
+
+    /// `Documents/t033-encoder-int8-mlmodelc.zip` in the app container —
+    /// the DEFAULT source for the spike zip, so staging the file is the
+    /// whole handshake and no environment variable is needed.
+    ///
+    /// This is the path a tester can always construct: `devicectl` copies a
+    /// file into the app data container (`--domain-type appDataContainer
+    /// --domain-identifier com.elderlyassistant.app --destination
+    /// Documents/`) but never exposes the container UUID, so an absolute
+    /// `/var/mobile/Containers/Data/Application/<uuid>/Documents/…` path
+    /// cannot be written down from outside the device.
+    static func intentEncoderSpikeDocumentsZipURL() -> URL {
+        FileManager.default.urls(for: .documentDirectory,
+                                 in: .userDomainMask)[0]
+            .appendingPathComponent(intentEncoderSpikeZipFilename)
+    }
 
     /// The local zip the internal-testing encoder entry points at.
     ///
-    /// A personal home-directory path must not be committed (nobody else
-    /// could resolve it), so the default is a reserved-TLD placeholder
-    /// (`.invalid` — RFC 2606, can never resolve) and a tester who wants
-    /// the download/picker path to find their own copy sets:
+    /// Total on purpose — the Settings/download path needs a URL to show —
+    /// so it is the resolved source when one is configured, else the
+    /// reserved-TLD placeholder below. With no override the resolved source
+    /// is the app's own Documents copy
+    ///
+    ///     Documents/t033-encoder-int8-mlmodelc.zip
+    ///
+    /// which needs no environment variable and no personal path in source
+    /// (a home-directory literal would be unresolvable for every other
+    /// tester). A tester who keeps the zip somewhere else — or who wants the
+    /// internal-testing install OFF — sets the OPTIONAL override instead:
     ///
     ///     INTENT_ENCODER_SPIKE_ZIP=/path/to/t033-encoder-int8-mlmodelc.zip
     ///
-    /// A RELATIVE value is resolved against the app's Documents directory
-    /// instead — the `devicectl` route, where the tester can copy the zip
-    /// into `Documents/` but never learns the container UUID an absolute
-    /// path would need. See `configuredIntentEncoderSpikeZipURL`.
+    /// A RELATIVE value is resolved against the app's Documents directory.
+    /// See `configuredIntentEncoderSpikeZipURL`.
     ///
-    /// `environment` is injectable so tests can pin both branches without
+    /// `environment` is injectable so tests can pin every branch without
     /// touching the process environment.
     static func intentEncoderSpikeZipURL(
         environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
@@ -306,14 +332,22 @@ enum ModelCatalog {
             return configured
         }
         // Documentation-only placeholder: .invalid is reserved by RFC 2606
-        // and never resolves. The internal-testing install does not use it.
+        // and never resolves. Reached only when the override is explicitly
+        // BLANKED (the install switched off) — the unset case resolves to
+        // the Documents copy above.
         return URL(string: "https://invalid.invalid/t033-spike/t033-encoder-int8-mlmodelc.zip")!
     }
 
-    /// The tester's own copy of the spike zip, or nil when the environment
-    /// does not configure one.
+    /// The zip the internal-testing install reads, or nil when it is
+    /// explicitly switched off.
     ///
-    /// The value is whitespace-trimmed, then:
+    /// The environment override is OPTIONAL: the install needs no
+    /// environment variable at all. The value is whitespace-trimmed, then:
+    ///   - UNSET is `Documents/t033-encoder-int8-mlmodelc.zip`
+    ///     (`intentEncoderSpikeDocumentsZipURL`) — the default handshake,
+    ///     where staging the zip into Documents is the whole setup. A
+    ///     missing file there fails honestly at install time (`zip_missing`
+    ///     in `IntentEncoderSpikeInstaller`), never as a silent success;
     ///   - an ABSOLUTE path (leading `/`) is used as given — the original
     ///     behaviour, for a tester who has the file at a path they can
     ///     name; or
@@ -328,19 +362,28 @@ enum ModelCatalog {
     ///
     ///         INTENT_ENCODER_SPIKE_ZIP=t033-encoder-int8-mlmodelc.zip
     ///
-    ///     is therefore the whole handshake.
+    ///     is therefore the whole handshake, for a copy that has to live
+    ///     somewhere other than the default filename; or
+    ///   - an explicitly BLANK value is nil — the internal-testing install
+    ///     is switched OFF outright (the same "blank disables" convention
+    ///     as `IntentEncoderSideload`'s `INTENT_ENCODER_SIDELOAD_URL`).
     ///
     /// [ENCODER-RUNTIME-READY] The install trigger
-    /// (`IntentEncoderSpikeInstaller`) has to tell "not configured" apart
-    /// from "configured": `intentEncoderSpikeZipURL` is deliberately total
+    /// (`IntentEncoderSpikeInstaller`) has to tell "read this" apart from
+    /// "install disabled": `intentEncoderSpikeZipURL` is deliberately total
     /// (the Settings/download path needs a URL to show), but installing its
     /// `.invalid` placeholder would be a silent no-op, and the trigger's
     /// contract is that a readiness request either installs or reports why
     /// not. Same key, same blank-string rule, one predicate.
     static func configuredIntentEncoderSpikeZipURL(
         environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
-        guard let raw = environment["INTENT_ENCODER_SPIKE_ZIP"] else { return nil }
+        guard let raw = environment["INTENT_ENCODER_SPIKE_ZIP"] else {
+            // No override: the Documents copy is the default source, so
+            // the internal-testing install needs no environment variable.
+            return intentEncoderSpikeDocumentsZipURL()
+        }
         let path = raw.trimmingCharacters(in: .whitespaces)
+        // Explicitly blank: the tester switched the install off.
         guard !path.isEmpty else { return nil }
         // Absolute: the tester's own staging location, used unchanged.
         if path.hasPrefix("/") {
@@ -349,8 +392,7 @@ enum ModelCatalog {
         // Relative: a file the tester staged into the app's Documents
         // directory (the devicectl route — the container UUID is unknowable
         // from outside, so the absolute path cannot be written down).
-        let documents = FileManager.default.urls(for: .documentDirectory,
-                                                 in: .userDomainMask)[0]
+        let documents = intentEncoderSpikeDocumentsZipURL().deletingLastPathComponent()
         return documents.appendingPathComponent(path)
     }
 
@@ -1107,10 +1149,12 @@ enum ModelCatalog {
             // The installed DIRECTORY name inside the ModelStore; the zip
             // contains exactly this directory at its top level.
             filename: "t033-encoder-int8.mlmodelc",
-            // Non-routable placeholder, or the tester's own copy when
-            // INTENT_ENCODER_SPIKE_ZIP is set; the 109 MB spike zip itself
-            // is deliberately not committed and is installed by passing it
-            // to `installCoreMLEncoder(fromZip:for:)`. See
+            // The tester's own copy of the zip: the app's Documents copy by
+            // default, or the INTENT_ENCODER_SPIKE_ZIP path when one is set
+            // (the reserved-TLD placeholder only if the override is
+            // explicitly blanked). The 109 MB spike zip itself is
+            // deliberately not committed and is installed by passing it to
+            // `installCoreMLEncoder(fromZip:for:)`. See
             // `intentEncoderSpikeZipURL(environment:)`.
             downloadURL: intentEncoderSpikeZipURL(),
             sizeBytes: 109_079_441,

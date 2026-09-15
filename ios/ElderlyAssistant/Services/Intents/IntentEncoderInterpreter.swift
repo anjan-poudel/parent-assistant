@@ -180,8 +180,9 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
     /// on every other configuration (tests, and any future non-spike use).
     private let artifactInstaller: IntentEncoderArtifactInstalling?
     /// [TURN-TIMING-BREAKDOWN] Turn-scoped stage stopwatch for the three
-    /// encoder stages (tokenizer / CoreML forward / decode). Nil — every
-    /// configuration except an `INTENT_ENCODER` build — makes each
+    /// encoder stages (tokenizer / CoreML forward / decode). Nil — no build
+    /// without `INTENT_ENCODER` ([ENCODER-ALWAYS-ON] the default one has
+    /// it) — makes each
     /// measurement a nil check around the UNCHANGED call: no clock read,
     /// no allocation, and no decision anywhere consults it.
     private let timingRecorder: TurnTimingRecorder?
@@ -479,12 +480,15 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
     /// offers this interpreter the local-brain slot (the gated wiring site
     /// in `AppCoordinator`).
     ///
-    /// With `INTENT_ENCODER_SPIKE_ZIP` set to a tester's own copy of the
-    /// pinned zip, this starts a background install of
+    /// With a zip source configured — the app's `Documents/` copy by
+    /// default, or the tester's own copy via `INTENT_ENCODER_SPIKE_ZIP` —
+    /// this starts a background install of
     /// `ModelCatalog.intentEncoderSpike` through
     /// `ModelStore.installCoreMLEncoder(fromZip:for:)` (strict sha256
-    /// unchanged — see `IntentEncoderSpikeInstaller`). Without it, the call
-    /// is an explicit no-op decision (`notConfigured`), not a silent one.
+    /// unchanged — see `IntentEncoderSpikeInstaller`). A missing file
+    /// fails with an explicit `zip_missing` event, and only an explicitly
+    /// BLANK override is the no-op decision (`notConfigured`) — never a
+    /// silent one.
     ///
     /// The hard `IntentEncoderFeature.isEnabled` guard is intentional
     /// defense in depth: the compiler condition is what keeps this type out

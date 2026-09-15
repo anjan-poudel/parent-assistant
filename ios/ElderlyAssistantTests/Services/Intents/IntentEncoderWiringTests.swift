@@ -92,35 +92,71 @@ final class IntentEncoderWiringTests: XCTestCase {
         return router
     }
 
-    // MARK: The gate keeps the shipped default
+    // MARK: The UI gate is unconditional; the toggle keeps the shipped default
 
-    func testTheGateIsOffInThisBuildSoTheShippedDefaultIsUnchanged() {
-        // The unit-test target is built WITHOUT the INTENT_ENCODER
-        // condition. This exercises the coordinator's real decisions
-        // (`IntentEncoderWiring.gatedEncoder` / `preferredLocalBrain` /
-        // `selectionEventMetadata`) — note the resolve closure counts its
-        // own invocations, so the launch-time lazy construction the review
-        // flagged would fail this test.
-        XCTAssertFalse(IntentEncoderFeature.isEnabled)
+    /// [ENCODER-ALWAYS-ON] The encoder UI is NOT optional any more: the
+    /// `INTENT_ENCODER` condition is part of the app target's DEFAULT
+    /// compilation conditions (`ios/project.yml`), so the Settings card and
+    /// the hidden-screen door exist in every build, Debug and Release.
+    /// `IntentEncoderFeature.isEnabled` is a compile-time constant of the
+    /// APP build this test bundle runs inside, so a project.yml change that
+    /// dropped the condition fails HERE — instead of silently losing the
+    /// whole encoder UI, which is the recurring pain this test exists for.
+    ///
+    /// The shipped DEFAULT is still preserved, but by the persisted toggle
+    /// (default OFF) rather than by the absence of the code: this also
+    /// exercises the coordinator's real decisions
+    /// (`IntentEncoderWiring.gatedEncoder` / `preferredLocalBrain` /
+    /// `selectionEventMetadata`) — the resolve closure counts its own
+    /// invocations, so a launch-time lazy construction would fail it.
+    func testEncoderUIIsUnconditionalAndTheToggleKeepsTheShippedDefault() throws {
+        XCTAssertTrue(IntentEncoderFeature.isEnabled,
+                      "the encoder UI must be present in every build — "
+                      + "the app target's SWIFT_ACTIVE_COMPILATION_CONDITIONS "
+                      + "carries INTENT_ENCODER (ios/project.yml)")
+
+        let name = "intent-encoder-always-on-\(UUID().uuidString)"
+        let suite = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { suite.removePersistentDomain(forName: name) }
+
+        // The coordinator's gate is the SERVING decision: the (now always
+        // true) compile gate AND the tester's persisted switch.
+        let withToggleOff = IntentEncoderWiring.isServingEnabled(
+            isCompiledIn: IntentEncoderFeature.isEnabled,
+            isToggleOn: IntentEncoderPreferences(defaults: suite).isEnabled)
+        XCTAssertFalse(withToggleOff,
+                       "an untouched install still serves the picker brain")
 
         var resolutions = 0
-        let offered = IntentEncoderWiring.gatedEncoder {
+        let offered = IntentEncoderWiring.gatedEncoder(isEnabled: withToggleOff) {
             resolutions += 1
             return nil   // stand-in for the lazy `intentEncoderInterpreter`
         }
         XCTAssertNil(offered)
         XCTAssertEqual(resolutions, 0,
-                       "without the gate the coordinator must not even resolve "
+                       "toggle off: the coordinator must not even resolve "
                        + "the lazy encoder")
+
+        // …and the gate that IS compiled in does resolve the factory once
+        // the tester has switched the encoder on (the lazy construction is
+        // gated by the switch, not by a build flag).
+        var resolutionsWithToggleOn = 0
+        _ = IntentEncoderWiring.gatedEncoder(isEnabled: true) {
+            resolutionsWithToggleOn += 1
+            return nil
+        }
+        XCTAssertEqual(resolutionsWithToggleOn, 1,
+                       "the compilation condition is present — the only "
+                       + "remaining gate is the toggle")
 
         let fallback = StubCommandInterpreter(result: makeCommand(action: .query))
         let preferred = IntentEncoderWiring.preferredLocalBrain(encoder: offered,
                                                                 fallback: fallback)
         XCTAssertTrue(preferred === fallback,
-                      "without the gate the coordinator installs the SAME fallback instance")
+                      "toggle off: the coordinator installs the SAME fallback instance")
         XCTAssertNil(IntentEncoderWiring.selectionEventMetadata(preferred: preferred,
                                                                 encoder: offered),
-                     "no selection event without the gate")
+                     "no selection event for a slot the encoder does not hold")
     }
 
     func testEncoderIsPreferredOnlyWhenOfferedAndAvailable() throws {

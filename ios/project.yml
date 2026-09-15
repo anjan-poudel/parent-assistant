@@ -233,6 +233,25 @@ targets:
         # Home-screen icon: AppIcon.appiconset (cropped from the user's
         # supplied artwork, 2026-09-08).
         ASSETCATALOG_COMPILER_APPICON_NAME: "AppIcon"
+        # [ENCODER-ALWAYS-ON] The internal-testing intent-encoder path —
+        # runtime files AND the Settings → AI मोडेल encoder card — is
+        # compiled into EVERY build of this target, Debug and Release, so
+        # the UI can never be silently missing because a build forgot
+        # SWIFT_ACTIVE_COMPILATION_CONDITIONS on the command line. This is
+        # the DEFAULT build configuration, not an opt-in.
+        #
+        # Compiling the condition in is not consent to SERVE the encoder:
+        # the persisted enable toggle still defaults OFF
+        # (`IntentEncoderPreferences`) and the 109 MB artifact still has to
+        # be installed, so a household device keeps today's local brain
+        # (`LocalIntentInterpreter`) until a tester flips the switch on the
+        # hidden screen. The keyword safety net (emergency, explicit
+        # med-ack) runs upstream of every interpreter either way — FR-009.
+        #
+        # `$(inherited)` preserves the project-level `DEBUG` that XcodeGen
+        # sets for the Debug configuration, so Debug keeps `DEBUG
+        # INTENT_ENCODER` and Release carries `INTENT_ENCODER` alone.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) INTENT_ENCODER"
     dependencies:
       # vDSP FFT for the spectral-gate denoiser ([NOISE-FILTER] P1
       # front-end, Services/Voice/SpectralGateCore.swift). Declared

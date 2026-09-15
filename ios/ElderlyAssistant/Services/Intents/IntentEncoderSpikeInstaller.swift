@@ -5,14 +5,15 @@ import Foundation
 /// a test (and the caller's event trail) can tell a real install attempt
 /// from a no-op without waiting on a 109 MB unzip.
 enum IntentEncoderInstallDecision: Equatable {
-    /// A zip is configured, the artifact is not installed, and the install
-    /// is now running on the installer's own queue.
+    /// A zip source resolved, the artifact is not installed, and the
+    /// install is now running on the installer's own queue.
     case started
     /// The artifact is already in the ModelStore — nothing to do.
     case alreadyInstalled
-    /// `INTENT_ENCODER_SPIKE_ZIP` is unset/blank: the internal-testing path
-    /// has no artifact source, so the encoder stays unavailable. This is
-    /// the shipped default — no UI, no placeholder URL, no network.
+    /// `INTENT_ENCODER_SPIKE_ZIP` is explicitly BLANK: the tester switched
+    /// the internal-testing install off, so the encoder stays unavailable.
+    /// No UI, no placeholder URL, no network. (The UNset case is not this:
+    /// it reads the app's Documents copy, see below.)
     case notConfigured
     /// An install from an earlier readiness check is still running.
     case inFlight
@@ -26,14 +27,19 @@ protocol IntentEncoderArtifactInstalling: AnyObject {
 }
 
 /// Installs the pinned internal-testing encoder artifact from the tester's
-/// own copy of the zip (`INTENT_ENCODER_SPIKE_ZIP`).
+/// own copy of the zip — the app's `Documents/`
+/// (`t033-encoder-int8-mlmodelc.zip`) by DEFAULT, or the path
+/// `INTENT_ENCODER_SPIKE_ZIP` overrides it to.
 ///
 /// ## Contract
 ///
 ///  - **Reachable only in `INTENT_ENCODER` builds.** The only caller is
 ///    `IntentEncoderInterpreter.requestReadiness()`, which refuses unless
 ///    `IntentEncoderFeature.isEnabled`; the coordinator calls that only on
-///    the gated path. A normal build has no reference to this type.
+///    the gated path. (`INTENT_ENCODER` is in this target's default
+///    compilation conditions — see `ios/project.yml` — so the condition is
+///    present in a normal build and the RUNTIME toggle is what keeps the
+///    encoder out of service: it defaults OFF.)
 ///  - **No UI, no network.** The zip is a local file the tester staged
 ///    (`ModelCatalog.configuredIntentEncoderSpikeZipURL`); the reserved-TLD
 ///    placeholder URL is deliberately NOT installed from.

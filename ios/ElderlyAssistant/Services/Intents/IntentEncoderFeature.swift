@@ -10,18 +10,26 @@ import Foundation
 /// behind this gate. It must therefore be impossible for the encoder to
 /// become the local brain in a release build by accident.
 ///
-/// The gate is a Swift compilation condition, so a build WITHOUT
-/// `INTENT_ENCODER` cannot even construct the interpreter's wiring — the
-/// app builds and behaves exactly as it does today.
+/// The gate is a Swift compilation condition. [ENCODER-ALWAYS-ON] It is
+/// part of this target's DEFAULT build settings
+/// (`ios/project.yml` → `SWIFT_ACTIVE_COMPILATION_CONDITIONS:
+/// "$(inherited) INTENT_ENCODER"`), so every build of the app — Debug and
+/// Release — carries the encoder runtime and its Settings card. A build
+/// can no longer silently lose the whole encoder UI because a caller
+/// forgot the flag on the command line; passing the condition to
+/// `xcodebuild` was the old opt-in and is no longer required.
 ///
 /// [ENCODER-RUNTIME-TOGGLE] Compiling the condition in is necessary but
-/// no longer sufficient: the tester ALSO has to switch the encoder on in
+/// never sufficient: the tester ALSO has to switch the encoder on in
 /// Settings → AI मोडेल (hidden; long-press the Settings title) →
 /// "on-device intent encoder". The toggle is the persisted
 /// `IntentEncoderPreferences` value (`intentEncoder.enabled`, default
-/// OFF), so a flagged build still ships the incumbent brain until someone
-/// opts in, and a flagged device can A/B the encoder against the picker
-/// brain from the same install by flipping one switch.
+/// OFF), so every build still serves the incumbent brain until someone
+/// opts in, and a device can A/B the encoder against the picker brain
+/// from the same install by flipping one switch. The artifact must still
+/// be installed (`ModelStore`), the tokenizer still has to be ready, and
+/// a build that genuinely removed the condition still cannot even
+/// construct the interpreter's wiring — the `#if` is the belt.
 ///
 /// [ENCODER-RUNTIME-CASCADE] A second, independent switch
 /// (`intentEncoder.cascade`, same card, default OFF) widens the A/B to a
@@ -31,26 +39,33 @@ import Foundation
 /// [ENCODER-RUNTIME-TOGGLE] behaviour). It is ignored while the enable
 /// switch is off — see `IntentEncoderWiring.servingMode`.
 ///
-/// Internal-testing enablement (Debug/internal builds only):
+/// Internal-testing enablement (no build flags, no environment):
 ///
-///   xcodebuild ... SWIFT_ACTIVE_COMPILATION_CONDITIONS="\$(inherited) INTENT_ENCODER"
+///   1. the condition is already in the default build settings (above);
+///   2. stage the artifact — `t033-encoder-int8-mlmodelc.zip` in the
+///      app's `Documents/` directory (AirDrop / `devicectl`), or point
+///      `INTENT_ENCODER_SPIKE_ZIP` at a copy elsewhere;
+///   3. switch the encoder ON on the hidden internal screen — that is
+///      also what starts the install.
 ///
-/// or add `INTENT_ENCODER` to the target's Active Compilation Conditions
-/// in the Xcode UI for the internal-testing scheme. With the condition
-/// present AND the runtime toggle ON AND the artifact installed in
-/// `ModelStore` AND a ready tokenizer, `AppCoordinator` offers the
+/// With all of that AND a ready tokenizer, `AppCoordinator` offers the
 /// encoder as `LocalBrainChain.preferred`; otherwise the chain keeps
 /// today's brain (`LocalIntentInterpreter`, LLaMA stand-in) and no error
 /// is surfaced — a missing artifact or a flipped-off switch is a normal,
-/// silent fall-through, never a failure the user has to read.
+/// silent fall-through, never a failure the user has to read. A missing
+/// zip file is the one exception that is reported, to the event trail
+/// only: `zip_missing`, never a silent success.
 ///
 /// Even when enabled, the keyword safety net (emergency, explicit
 /// med-ack) runs upstream of every interpreter in `CommandRouter`, so no
 /// encoder output can intercept or suppress those paths (FR-009).
 enum IntentEncoderFeature {
 
-    /// True when the build defines `INTENT_ENCODER`. Compiled-out on a
-    /// non-gated build, so no test can flip it at runtime.
+    /// True when the build defines `INTENT_ENCODER` — which, since
+    /// [ENCODER-ALWAYS-ON], every build of the app target does by default
+    /// (see `ios/project.yml`). Still a compile-time constant: no test and
+    /// no stored preference can flip it at runtime, and a build that
+    /// deliberately drops the condition compiles the encoder out.
     static var isEnabled: Bool {
         #if INTENT_ENCODER
         return true

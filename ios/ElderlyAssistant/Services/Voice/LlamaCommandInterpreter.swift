@@ -312,8 +312,9 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     private let observabilityBus: ObservabilityBus
     private let config: Config
     /// [TURN-TIMING-BREAKDOWN] Turn-scoped stage stopwatch for the picker
-    /// brain's two stages (prompt build / inference). Nil — every
-    /// configuration except an `INTENT_ENCODER` build — makes each
+    /// brain's two stages (prompt build / inference). Nil — no build
+    /// without `INTENT_ENCODER` ([ENCODER-ALWAYS-ON] the default one has
+    /// it) — makes each
     /// measurement a nil check around the UNCHANGED calls. Instrumentation
     /// only: no prompt byte, no sampling parameter and no decision reads it.
     private let timingRecorder: TurnTimingRecorder?

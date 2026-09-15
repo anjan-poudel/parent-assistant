@@ -664,13 +664,17 @@ final class AppCoordinator: ObservableObject {
     private let turnTracer: VoiceTurnLatencyTracer
 
     /// [TURN-TIMING-BREAKDOWN] The per-turn stage stopwatch behind the
-    /// intent-model timing breakdown. Non-nil ONLY on a build that
+    /// intent-model timing breakdown. Non-nil only on a build that
     /// compiles `INTENT_ENCODER` in (`IntentEncoderFeature.isEnabled` is
-    /// a compile-time constant, so a shipped build constructs neither the
-    /// recorder nor the reporter and every instrumented call site sees
-    /// nil — the zero-cost requirement). Injected into the encoder, the
-    /// picker brain, the cascade chain and the speaker; the coordinator
-    /// itself never reads a stage.
+    /// a compile-time constant, so a build that drops the condition
+    /// constructs neither the recorder nor the reporter and every
+    /// instrumented call site sees nil). [ENCODER-ALWAYS-ON] Every build
+    /// of this target carries the condition by default, so the
+    /// instrumentation is live here — the same compile-time gate that
+    /// makes the encoder card render, and the card's "Last turn"
+    /// breakdown is what reads it. Injected into the encoder, the picker
+    /// brain, the cascade chain and the speaker; the coordinator itself
+    /// never reads a stage.
     private let turnTimingRecorder: TurnTimingRecorder?
     /// [TURN-TIMING-BREAKDOWN] The breakdown's single emission point —
     /// attached to `turnTracer` in `composePostFirstFrame()`, where the
@@ -1353,12 +1357,14 @@ final class AppCoordinator: ObservableObject {
     /// so the shipped call site is what the wiring tests exercise.
     ///
     /// [ENCODER-RUNTIME-READY] Readiness is requested at the moment the
-    /// encoder is OFFERED the local-brain slot: with
-    /// INTENT_ENCODER_SPIKE_ZIP set (the tester's own copy of the pinned
-    /// zip) this starts a background install through ModelStore's strict
-    /// sha256 path; unset, it is an explicit no-op decision. No UI, no
-    /// network, and nothing here runs on a non-gated build — or with the
-    /// toggle off, which is why switching the encoder ON is also what
+    /// encoder is OFFERED the local-brain slot: this resolves the tester's
+    /// own copy of the pinned zip (the app's `Documents/` copy by default —
+    /// no environment variable needed — or the `INTENT_ENCODER_SPIKE_ZIP`
+    /// path when one is set) and starts a background install through
+    /// ModelStore's strict sha256 path. A missing file is an explicit
+    /// `zip_missing` failure; only an explicitly blanked override is a
+    /// no-op decision. No UI, no network — and with the toggle off nothing
+    /// here runs at all, which is why switching the encoder ON is also what
     /// starts its install.
     ///
     /// The slot itself is the DEFERRED pair, so an install that lands

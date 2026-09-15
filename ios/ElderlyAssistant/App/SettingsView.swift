@@ -88,11 +88,15 @@ struct SettingsView: View {
                         // same seam the coordinator installed.
                         degradationDiagnosticsSection
                         // [ENCODER-RUNTIME-TOGGLE] Visible door to the
-                        // internal AI screen on flagged builds: a single
-                        // tap opens the same hidden sheet the title
-                        // long-press opens, so the A/B card needs no
-                        // gesture hunt. Gated by the same compile-time
-                        // IntentEncoderFeature.isEnabled.
+                        // internal AI screen: a single tap opens the same
+                        // hidden sheet the title long-press opens, so the
+                        // A/B card needs no gesture hunt. Gated by the same
+                        // IntentEncoderFeature.isEnabled, which
+                        // [ENCODER-ALWAYS-ON] is now part of this target's
+                        // DEFAULT compilation conditions — the door is
+                        // present in every build, and what keeps the
+                        // encoder out of service is the toggle inside
+                        // (default OFF), not the absence of the UI.
                         if IntentEncoderFeature.isEnabled {
                             Button {
                                 showHiddenAIModels = true
@@ -3321,10 +3325,13 @@ struct AIModelsSettingsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
 
                 // [ENCODER-RUNTIME-TOGGLE] The internal-testing encoder
-                // switch. Compiled away on a shipped build (the `if` is the
-                // compilation condition, folded at compile time), so this
-                // card neither renders nor constructs anything unless the
-                // internal `INTENT_ENCODER` build is in use.
+                // switch. [ENCODER-ALWAYS-ON] The `if` is the compilation
+                // condition, and the condition is part of this target's
+                // default build settings (ios/project.yml) — so the card
+                // renders in EVERY build, Debug and Release, on the hidden
+                // internal screen. Compiling it in does not enable it: both
+                // switches on the card default OFF, so a household device
+                // still serves the brain picked above.
                 if IntentEncoderFeature.isEnabled {
                     encoderCard
                 }
@@ -3398,10 +3405,18 @@ struct AIModelsSettingsView: View {
     /// serves. ON lets the encoder take the local slot the moment its
     /// artifact is installed — and flipping it acts on the NEXT TURN, not
     /// the next launch, so an A/B pass over the same utterances costs one
-    /// switch, not two installs. The card only exists on a build that
-    /// compiles `INTENT_ENCODER` in (see the caller) and sits on the
-    /// hidden internal screen, so a household user never meets this switch
-    /// or its vocabulary.
+    /// switch, not two installs. [ENCODER-ALWAYS-ON] The card renders in
+    /// every build (the compile condition is in this target's default
+    /// build settings) and sits on the hidden internal screen, so a
+    /// household user never meets this switch or its vocabulary — and the
+    /// switches themselves default OFF, so nothing serves the encoder
+    /// until a tester opts in.
+    ///
+    /// The artifact itself needs no environment variable either: the
+    /// tester stages `t033-encoder-int8-mlmodelc.zip` in the app's
+    /// `Documents/` directory (`INTENT_ENCODER_SPIKE_ZIP` only overrides
+    /// that path), and switching the encoder ON is what starts the
+    /// install.
     ///
     /// [ENCODER-RUNTIME-CASCADE] The second switch on the card is the A/B's
     /// third leg: OFF the encoder answers alone; ON the brain picked above
