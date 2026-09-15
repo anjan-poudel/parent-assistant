@@ -1,0 +1,335 @@
+# T-062 — Dialect / style / degradation banks, as data.
+#
+# Determination record: specs/T-062-notes.md  (this file is its machine-readable half)
+# Consumer: T-063 lands the `dialects:` and `degradation:` blocks into
+#   tools/train-intent/annotation_rules.yaml; T-064 authors rows from the variant
+#   banks; T-069 renders `claim_wording` and the degradation naming fields into the
+#   evidence pack. Authoring and evaluation then read ONE artifact, not prose.
+#
+# Conventions
+#   kind:          orthographic | lexical | morphophonemic   (design §5.3)
+#   model_impact:  known_word  = a spelling of a word the model knows (subword-overlapping)
+#                  new_word    = a genuinely different word form (needs training mass)
+#                  unknown     = cannot be told without measurement (T-061-style) — never guessed
+#   status:        confirmed   = attested in a committed artifact (cite it)
+#                  unconfirmed = needs the native-speaker answer named in `resolves`
+#   resolves:      the review-pack question id in specs/T-062-notes.md Part G that
+#                  decides the entry. An `unconfirmed` entry with no question is a defect.
+#
+# Rule (task DoD): no variant is filed into a slice on geography alone. Every entry
+# below is either cited to a committed artifact or carries a question id.
+# No audio was recorded and no real transcript collected to produce this file.
+
+schema: dialect-axis/v1
+task: T-062
+determination_record: specs/T-062-notes.md
+
+dialects:
+  # `standard` is the comparison anchor and is defined as the AUTHORED standard
+  # Devanagari register the pinned corpus already is — never as a geography
+  # (published standard Nepali is itself Eastern-based; see notes Part B/C.1).
+  anchor: standard
+
+  slices:
+    - id: standard
+      status: claimed          # claimed | conditional | unclaimed
+      definition: the authored standard register (pinned corpus rows)
+      evidence: tools/train-intent/eval/golden_corpus.jsonl  # script=devanagari, 5508 rows (measured in T-062)
+      claim_wording: "the comparison anchor for every dialect statement"
+
+    - id: eastern
+      status: conditional
+      definition: >-
+        Eastern Nepali (Koshi/Purbeli-speaking hill belt). Matches the shipped
+        DialectLabel.eastern and the literature's Eastern dialect area.
+      evidence:
+        - ios/ElderlyAssistant/Services/Voice/DialectIdentifier.swift:44-46
+        - ios/ElderlyAssistant/Resources/DialectLexicon.json  # SEED-LEXICON entry, linguist-review-pending
+      claim_wording: >-
+        "on the authored eastern holdout (<fixture>@<sha8>, <n> matched twin pairs),
+        closed-intent accuracy did not fall more than 5 points below the matched
+        standard twin, with side-effect precision >= 0.97 and emergency recall 1.00"
+      forbidden_wording:
+        - "supports Eastern Nepali"
+      resolves: [N1, N2, N5, N9, N10]
+      variants:
+        - surface: गइछ
+          standard: गएछ
+          kind: morphophonemic
+          model_impact: unknown
+          status: confirmed        # attested: DialectLexicon.json generation.path
+          resolves: N10
+          note: >-
+            Third person only. The product's ack_med bank is FIRST person
+            (खाएँ/खाइसकें), so this attested eastern marker does not fit an ack row;
+            its only reachable rows are third-person query/none rows, which supervise
+            NO spans (measured in T-062). Intent-head effect only.
+        - surface: भइछ
+          standard: भएछ
+          kind: morphophonemic
+          model_impact: unknown
+          status: confirmed
+          resolves: N10
+        - surface: खाइछ
+          standard: खाएछ
+          kind: morphophonemic
+          model_impact: unknown
+          status: confirmed
+          resolves: N10
+        - surface: दिउसो
+          standard: दिउँसो
+          kind: orthographic
+          model_impact: known_word
+          status: unconfirmed
+          resolves: N5
+        - surface: बेल्का
+          standard: बेलुका
+          kind: orthographic
+          model_impact: known_word
+          status: unconfirmed
+          resolves: N5
+        - surface: साझ
+          standard: साँझ
+          kind: orthographic
+          model_impact: known_word
+          status: unconfirmed
+          resolves: N5
+        - surface: रात
+          standard: राति
+          kind: lexical
+          model_impact: unknown
+          status: unconfirmed
+          resolves: N5
+
+    - id: doteli
+      status: conditional
+      definition: >-
+        Doteli / Dotyali (ISO 639-3 dty) — the far-western variety. Filed as
+        LANGUAGE-level, not dialect-level: a doteli row is a translation pair with
+        its standard twin, not a spelling pair.
+      evidence:
+        - ios/ElderlyAssistant/Services/Voice/DialectIdentifier.swift:46-48
+        - ios/ElderlyAssistant/Resources/DialectLexicon.json  # SEED-LEXICON entry
+        - docs/research-sections/accent-adaptation.md:189-190  # far-west Doteli complex = most distinct
+      claim_wording: >-
+        "on the authored doteli holdout (<fixture>@<sha8>, <n> matched twin pairs),
+        closed-intent accuracy did not fall more than 5 points below the matched
+        standard twin, with side-effect precision >= 0.97 and emergency recall 1.00"
+      forbidden_wording:
+        - "speaks/understands Doteli"
+        - "supports the Doteli language"
+      resolves: [N1, N4, N6, N8, N11]
+      variants:
+        - surface: भया
+          standard: भयो
+          kind: morphophonemic
+          model_impact: unknown
+          status: confirmed        # attested: DialectLexicon.json generation.path
+          resolves: N11
+          note: >-
+            Third-person past. Reachable rows are third-person query/none predicates
+            (e.g. 'अब कति बज्यो', 'बाटो खुल्यो'), which supervise no spans.
+        - surface: रह्याको
+          standard: रहेको
+          kind: morphophonemic
+          model_impact: unknown
+          status: confirmed
+          resolves: N11
+        - surface: भण्याको
+          standard: भनेको
+          kind: morphophonemic
+          model_impact: unknown
+          status: confirmed
+          resolves: N11
+
+  # Spelling drift that is pan-regional and therefore NOT dialect evidence.
+  # Kept in a separate table so it can never be filed as a slice's variant.
+  pan_regional_orthographic:
+    - {surface: भोली, standard: भोलि, basis: "design §5.3 named pair; drift, not region"}
+    - {surface: औषधी, standard: औषधि, basis: "halanta/visarga-level drift, not region", resolves: N6}
+    - {surface: गर्नुहोस, standard: गर्नुहोस्, basis: "halanta dropped in writing", resolves: N5}
+    - {surface: ह्वाट्सएपमा, standard: वाट्सएपमा, basis: "already both in METHODS bank (golden_corpus_batches.py:251-258) — loanword spelling"}
+    - {surface: "८", standard: "8", basis: "digit script, pinned at annotation_rules.yaml:299"}
+    - surface: गर्नुस्
+      standard: गर्नुहोस्
+      basis: "NOT dialect and NOT pan-regional spelling — quick-speech reduction the STT noise pass already produces; belongs to the articulation axis (Part E), never the dialect axis. Recorded here to stop re-filing. Same class as an attached-vs-separate clitic (माइक्रोवेभ/माइक्रोवेभमा, design §5.3): a segmentation effect, not a dialect variant."
+      resolves: N5
+
+  # Labels the design proposed and this review DROPS. Kept in the file so a
+  # later reader does not re-introduce them by accident.
+  dropped_values:
+    - id: central
+      reason: >-
+        Ambiguous: the published "Central" is Jumli/Khasani (Karnali), while an
+        engineer's "central" means the Kathmandu-standard middle — which collides
+        with `standard`. If a Karnali slice is ever wanted it must be named `jumli`
+        and starts unclaimed.
+      resolves: N2
+    - id: western
+      reason: >-
+        No evidenced slice to carry it: the far-west variety is Doteli (ISO dty),
+        already a label (see slices.doteli). Two labels for one slice is the drift
+        T-062 exists to prevent.
+      resolves: N1
+    - id: terai
+      reason: >-
+        Not a Nepali dialect region. The Terai's mother tongues are distinct
+        languages (Maithili, Bhojpuri, Bajjika, Awadhi, Tharu, Urdu — 2021 census);
+        one `terai` value would assert they are one dialect of Nepali. A
+        Terai-accented Nepali (L2) is an ACCENT phenomenon this text axis cannot
+        express. See gaps.GAP-5.
+      resolves: N3
+
+  unclaimed:
+    - id: jumli
+    - id: "western-midhills"
+    - id: "terai-contact"
+    - id: "maithili-bhojpuri-bajjika-awadhi-tharu-urdu"   # different languages; never a Nepali dialect claim
+
+style:
+  # Row metadata beside `register`; selects no mixture bucket (verified: the bucket
+  # map is annotation_rules.yaml:210-215 / build_dataset.py:77-82 and neither key
+  # appears there). No new register is required -> the 60/25/15 arithmetic is
+  # UNCHANGED. If that ever changes it is a separate, explicit decision.
+  values:
+    - id: neutral
+      status: keep
+    - id: clipped
+      status: keep
+      definition: "grammatical tail elided under the §4.2 content-core partition (design §7.4a)"
+      orthogonality: >-
+        co-occurs with any register (a clipped row can be devanagari/romanized/
+        code_switched). `elder_fragmented` is a single register value and cannot
+        express that combination — they are NOT duplicates.
+      relation_to_elder_fragmented: >-
+        elder_fragmented names a speaker population and remains undefined/unpopulated
+        in the pinned corpus (generator cycle golden_corpus_batches.py:117-118 omits
+        it). It must never be used as the carrier of tail elision.
+      resolves: N12
+    - id: honorific
+      status: keep_metadata_only
+      gated: false
+      reason: "politeness dimension, not a degradation; slicing metadata only"
+      resolves: N9
+    - id: mixed_code
+      status: drop
+      reason: >-
+        A different phenomenon from `code_switched` (different source languages,
+        different contact direction) but with NO data: authoring it means authoring
+        in languages the project has no corpus for, and it was only meaningful
+        paired with the dropped `terai` slice. See gaps.GAP-5.
+      resolves: N13   # answers design OQ-5
+
+degradation:
+  # Naming is CONTRACT TEXT: T-069 renders these strings into the pack, the gate
+  # output and the manifest. A qualification that lives only in prose beside a
+  # table is the first thing a summary drops, so it is a field here.
+  naming:
+    articulation_dimension:
+      permitted: "reduced-articulation proxy"
+      forbidden: ["dysarthria", "dysarthric", "slurred speech", "stuttering", "elder-speech coverage"]
+      definition: "synthesis-parameter grid (rate, quality) through piper->Whisper; a recognition stress test"
+    noise_dimension:
+      permitted: "stationary additive white noise"
+      forbidden: ["babble", "room noise", "market noise", "street noise", "TV noise", "real-world noise"]
+      mixing_domain: required_unrecorded   # waveform | mel — must be declared per run (design OQ-7, R-13)
+    piper_round_trip:
+      permitted: "synthetic STT-error profile induced by a non-native (Hindi) TTS rendering of Nepali text"
+      forbidden: ["accent modelling", "accent robustness", "accent coverage", "regional accent measurement"]
+    multi_voice:
+      permitted: "speaker-variation proxy"
+      forbidden: ["regional accent", "dialect coverage"]
+      status: unwired   # >= 2 Nepali piper voices needed first — see gaps.GAP-3
+
+  noise_ladder:
+    levels_db: [clean, 15, 10, 5, 3]     # endpoints = the STT model's own augmentation band
+    anchor_evidence: "tools/train/src/dataset.py:32, :39-43 (train-only augmentation, uniform 3-15 dB)"
+    anchor_statement: >-
+      "the ladder is bounded by the band the SHIPPED STT MODEL was trained with"
+      (the encoder under test never sees noise; the anchor is the Whisper fine-tune).
+    thresholds: {15: 0.03, 10: 0.05, 5: 0.05, 3: fail_safe}
+    preconditions:
+      - "each level must produce a MEASURED transcript change on a reference subset before it is gated"
+      - "a level with no transcript change is reported `no_effect` and DROPPED, never counted as a pass"
+      - "monotonicity: a ladder that improves with more noise beyond a 3-point tolerance is a fixture/scoring defect"
+
+  articulation_cells:
+    # Reshaped by T-062 (notes Part E.3). The design's ±rate cells mixed an
+    # improving direction with degrading ones and conflated articulation with
+    # synthesis-quality knobs that may change no transcript at all.
+    rule: "each cell moves exactly ONE non-noise parameter (rate); the noise level is a declared held background"
+    cells:
+      - id: slow_moderate        # elder-realism cell, NOT a degradation claim
+        length_scale: "rate x0.8 (slow)"
+        noise_scale: mild
+        noise_w: mild
+        snr_db: 10
+        pass: "A >= A_clean - 0.05 plus absolute clauses"
+      - id: fast_moderate        # degradation direction
+        length_scale: "rate x1.2 (fast)"
+        noise_scale: mild
+        noise_w: mild
+        snr_db: 10
+        pass: "A >= A_clean - 0.05 plus absolute clauses"
+      - id: fast_severe
+        length_scale: "rate x1.4 (fast)"
+        noise_scale: strong
+        noise_w: strong
+        snr_db: 5
+        pass: "fail-safe clause binds (abstention rises; confident errors do not)"
+    knobs:
+      length_scale: "duration multiplier over the VITS duration predictor; >1 slows, <1 speeds up — the ONLY rate knob"
+      noise_scale: "generator noise level (sampling variability of the waveform) — a synthesis-quality knob, not articulation"
+      noise_w: "phoneme-width (duration) noise — timing jitter, not articulation"
+      caveat: >-
+        flag spelling is version-dependent (--length_scale/--noise_scale/--noise_w in
+        archived rhasspy/piper; --length-scale/--noise-scale/--noise-w-scale in
+        piper1-gpl) and the installed version is NOT pinned in the repo.
+    requirements_for_T066:
+      - "pin the piper version and the voice model by digest; record both in the run manifest"
+      - "declare the exact flag set used and assert the tool accepts it (capability probe) — an unsupported flag must fail loudly, never default silently"
+      - "a tuple is a cell only after it passes the transcript-change precondition"
+
+gaps:
+  GAP-1:
+    dimension: real-world noise
+    unmeasurable_because: "only white noise exists (dataset.py:42-43); synthesize mixes nothing (stt_noise.py:33-50)"
+    needed: "licensed noise corpus with per-scene labels + mixing policy (scene x SNR) + declared mixing domain"
+    candidate_class: "MUSAN (OpenSLR SLR17, CC BY 4.0) is of the right class and licence; babble/street scene labels are not guaranteed"
+  GAP-2:
+    dimension: real slurred / dysarthric / elder speech; hearing-aid and telephone-channel effects
+    unmeasurable_because: "a synthetic VITS voice cannot be dysarthric; FR-005 keeps accent tuning on-device (requirements.md:29-31)"
+    needed: "consented recordings of the target population + a privacy basis compatible with FR-005 + acquisition protocol + retention/deletion policy"
+    commissioned_here: false
+  GAP-3:
+    dimension: accent (multi-voice)
+    unmeasurable_because: "the voice bank holds ONE voice and it is Hindi (config.yaml:23); synthesize passes no speaker parameter"
+    needed: ">= 2 (ideally 3) Nepali-capable piper voices; piper-CLI format (.onnx + .onnx.json); count/variety/licence/provenance pinned"
+    candidate_assets:
+      - voice: ne_NP-google-medium
+        variety: "Nepali, standard read speech (OpenSLR SLR43)"
+        licence: "CC BY-SA 4.0 (attribution + share-alike recorded)"
+        provenance_pin: "bundled in-app; fetch-tts-voices.sh:28 sha256 currently EMPTY (legacy tier) — backfill"
+      - voice: ne_NP-chitwan-medium
+        variety: "Nepali, second source (OHF-Voice/voice-datasets)"
+        licence: "CC0"
+        provenance_pin: "fetch-tts-voices.sh:30 sha256 prefix deb1592e + size 21165758, REQUIRED-VERIFY at fetch"
+    caveats:
+      - "both are STANDARD read speech — neither is Eastern nor Doteli; adding them makes the gate non-vacuous as speaker variation, NOT as regional accent"
+      - "in-tree assets are sherpa-onnx int8 layouts for the iOS TTS engine; the round trip needs piper-CLI-loadable .onnx + .onnx.json"
+      - "piper phonemization uses espeak-ng (GPL) — the recorded GPL gate applies to server-side use"
+  GAP-4:
+    dimension: dialect slices
+    unmeasurable_because: "zero dialect-tagged rows exist; the axis is unpopulated (measured in T-062)"
+    needed: "T-063's amendment + T-064's authored twin pairs (>= 300 per claimed slice)"
+  GAP-5:
+    dimension: Terai-accented Nepali (L2) and within-Nepali contact mixing
+    unmeasurable_because: "no data, and no `dialect` value can express an accent; the Terai languages are not varieties of Nepali"
+    needed: "attested Terai-accented Nepali speech + native-speaker validation"
+    relation: "closes the dropped `terai` slice and the dropped `mixed_code` style (design OQ-5)"
+
+fr005_boundary: >-
+  This file covers the CORPUS/EVALUATION half of FR-005 only. The personalisation
+  half (enrolment samples, on-device adaptation, pack selection) is runtime work
+  (TG-02/TG-09, plan.md risk 35) and is untouched here.
+data_discipline: "no audio recorded, no real transcript collected, no consent-bearing data; fixtures are synthetic over the existing banks (NFR-015/NFR-016)"
