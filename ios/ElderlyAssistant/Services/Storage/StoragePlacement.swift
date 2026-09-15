@@ -51,6 +51,15 @@ enum StoragePlacementPolicy {
         // The chosen Gemini model name: a small scalar kept beside the key
         // it is used with, so one store is not split across two channels.
         "gemini.model",
+        // [T-056-A] The learning loop's per-install salt (T-054 §3.4, L-4):
+        // 32 random bytes that key the on-device utterance handle AND the
+        // egressed per-record code, and whose destruction is the opt-out's
+        // single guarantee. T-054 §3.4 REQUIRES the membership: an
+        // unlisted key would silently land on the encrypted-file channel,
+        // where `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` and
+        // `kSecAttrSynchronizable = false` — the two properties that make
+        // it this-device-only and never-backup — do not apply.
+        "learningLoop.salt",
     ]
 
     static func placement(for key: String) -> StoragePlacement {

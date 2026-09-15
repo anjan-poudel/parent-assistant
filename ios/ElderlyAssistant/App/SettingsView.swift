@@ -3727,30 +3727,131 @@ private struct ModelManagementRow: View {
 
 // MARK: - 5. Privacy & about (spec §4.4.5)
 
+/// [T-056-A] The learning loop's state in the user's words — the
+/// indicator pair T-053 §7.1 fixes, plus the two refusal strings T-054
+/// §5.3.2 adds. Shared by the Settings card (where the control lives) and
+/// `IntentLogReviewView` (where the family reviews the data), because
+/// C-17 requires a refusing loop to be shown wherever the indicator is —
+/// a loop that is ON and not sending must never read as simply "ON".
+extension LearningLoopStatus {
+
+    /// The xcstrings key, as a `String` so non-View code can resolve it
+    /// through `L10n.str(_:locale:)`.
+    var stringKey: String {
+        switch self {
+        case .off: return "settings.learningLoop.indicatorOff"
+        case .on: return "settings.learningLoop.indicator"
+        case .egressPending: return "settings.learningLoop.egressPending"
+        case .egressNeedsUpdate: return "settings.learningLoop.egressNeedsUpdate"
+        }
+    }
+
+    /// True for the two fail-closed states, which are shown in the error
+    /// colour so a blocked loop reads differently at a glance.
+    var isRefusing: Bool { self == .egressPending || self == .egressNeedsUpdate }
+}
+
 struct PrivacySettingsView: View {
     @Environment(\.locale) private var locale
+    /// [T-056-A] The loop's control lives HERE and not in Voice settings:
+    /// the loop is not a voice-stack choice, and the disclosure it amends
+    /// is this screen's policy text (T-054 §5.2).
+    @EnvironmentObject private var coordinator: AppCoordinator
+    /// S1 CONSENTING and S3 REVOKING are VIEW state, deliberately (T-054
+    /// §5.1): a cancelled consent must leave no minted salt and no written
+    /// handle, and the only way to guarantee that is for the dialog to be
+    /// the only thing that exists until it is confirmed.
+    @State private var confirmingConsent = false
+    @State private var confirmingOptOut = false
 
     var body: some View {
         LeafScreen(titleKey: "settings.privacy.title") {
             VStack(spacing: 16) {
-                Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 44))
-                    .foregroundStyle(DesignTokens.accent)
-                Text("settings.privacy.body")
-                    .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                    .lineSpacing(6)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
-                    Text(L10n.fmt("settings.about.version", locale: locale, version))
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
-                }
+                policyCard
+                learningLoopCard
+                    .alert(L10n.str("settings.learningLoop.consentQuestion", locale: locale),
+                           isPresented: $confirmingConsent) {
+                        Button(L10n.str("settings.learningLoop.consentConfirm", locale: locale)) {
+                            coordinator.enableLearningLoop()
+                        }
+                        Button(L10n.str("settings.learningLoop.consentCancel", locale: locale),
+                               role: .cancel) {}
+                    }
             }
-            .padding(20)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
         }
+        .alert(L10n.str("settings.learningLoop.optOutConfirm", locale: locale),
+               isPresented: $confirmingOptOut) {
+            Button(L10n.str("settings.learningLoop.optOut", locale: locale),
+                   role: .destructive) {
+                coordinator.disableLearningLoop()
+            }
+            Button(L10n.str("settings.learningLoop.optOutCancel", locale: locale),
+                   role: .cancel) {}
+        }
+    }
+
+    private var policyCard: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(DesignTokens.accent)
+            Text("settings.privacy.body")
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .foregroundStyle(DesignTokens.textPrimary)
+                .lineSpacing(6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
+                Text(L10n.fmt("settings.about.version", locale: locale, version))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(DesignTokens.textSecondary)
+            }
+        }
+        .padding(20)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// The loop's opt-in card. The disclosure sits ABOVE the switch and on
+    /// the same card, so it is visible before the switch can be turned on
+    /// (T-053 §5.4.3), and turning it on is a question, never an immediate
+    /// toggle (T-053 §5.4.1).
+    ///
+    /// The caption is the state in words — one of the four strings in
+    /// `LearningLoopStatus.stringKey` — and the two refusing states are in
+    /// the error colour, following the shipped interpreter-state caption
+    /// and the recovering-card precedent T-054 §5.2 cites.
+    private var learningLoopCard: some View {
+        let status = coordinator.learningLoopStatus
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("settings.learningLoop.explanation")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .multilineTextAlignment(.leading)
+            Toggle(isOn: Binding(
+                get: { coordinator.learningLoopStatus != .off },
+                set: { wantsOn in
+                    if wantsOn { confirmingConsent = true } else { confirmingOptOut = true }
+                }
+            )) {
+                Text("settings.learningLoop.title")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            Text(LocalizedStringKey(status.stringKey))
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .foregroundStyle(status.isRefusing ? DesignTokens.stateError
+                                                   : DesignTokens.textSecondary)
+            Text("settings.learningLoop.neverLeaves")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .multilineTextAlignment(.leading)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 }
 

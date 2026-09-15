@@ -4,9 +4,28 @@ import XCTest
 final class IntentLogStoreTests: XCTestCase {
 
     private func makeStore() -> IntentLogStore {
-        let dir = FileManager.default.temporaryDirectory
+        IntentLogStore(directory: makeDirectory())
+    }
+
+    private func makeDirectory() -> URL {
+        FileManager.default.temporaryDirectory
             .appendingPathComponent("intentlog-tests-\(UUID().uuidString)", isDirectory: true)
-        return IntentLogStore(directory: dir)
+    }
+
+    /// The raw JSONL the store wrote — the file itself, not the decoded
+    /// records, for the tests that are about what is ON DISK (V5, V8).
+    private func rawLogText(in dir: URL) -> String {
+        (try? String(contentsOf: dir.appendingPathComponent("intent-log.jsonl"),
+                     encoding: .utf8)) ?? ""
+    }
+
+    /// The key set of one JSONL line, parsed — never compared as bytes:
+    /// `JSONEncoder`'s key ordering is unspecified, so line bytes are not
+    /// a stable artifact (T-054 §2.5, V5).
+    private func keysOfLine(_ line: String) throws -> Set<String> {
+        let object = try JSONSerialization.jsonObject(with: Data(line.utf8))
+        let dict = try XCTUnwrap(object as? [String: Any])
+        return Set(dict.keys)
     }
 
     func testAppendAndRecentNewestFirst() throws {
@@ -101,6 +120,162 @@ final class IntentLogStoreTests: XCTestCase {
         XCTAssertEqual(records.first?.outcome, "confirmed")
         XCTAssertNil(records.first?.confidence, "legacy records read as confidence-unknown")
         XCTAssertNil(records.first?.latencyMs)
+    }
+
+    // MARK: - [T-056-A] loop capture schema — T-054 §2.5 vectors V1–V7
+
+    private func write(_ lines: [String], to dir: URL) throws {
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try (lines.joined(separator: "\n") + "\n")
+            .write(to: dir.appendingPathComponent("intent-log.jsonl"),
+                   atomically: true, encoding: .utf8)
+    }
+
+    private func recordLine(extra: String = "") -> String {
+        """
+        {"id":"\(UUID().uuidString)","timestamp":\(Date().timeIntervalSinceReferenceDate),\
+        "path":"model","action":"call","slots":{"contact":"maiya"},"outcome":"confirmed"\(extra)}
+        """
+    }
+
+    /// V1 — a line written before the loop existed. It must decode, it must
+    /// keep every optional nil, and `readAll`'s `compactMap` must NOT drop
+    /// it: dropping it would silently delete the family's whole history.
+    func testV1PreExtensionLineDecodesWithNilHandle() throws {
+        let dir = makeDirectory()
+        // The minimum a shipped line ever carried: the five mandatory keys.
+        try write([#"""
+        {"id":"\#(UUID().uuidString)","timestamp":\#(Date().timeIntervalSinceReferenceDate),"path":"model","action":"call","outcome":"confirmed"}
+        """#], to: dir)
+
+        let records = IntentLogStore(directory: dir).recent()
+        XCTAssertEqual(records.count, 1, "V1: the line is still a record")
+        XCTAssertNil(records.first?.utteranceHandle)
+        XCTAssertNil(records.first?.slots)
+        XCTAssertNil(records.first?.confidence)
+        XCTAssertNil(records.first?.latencyMs)
+        XCTAssertNil(records.first?.correctedTo)
+    }
+
+    /// V2 — an opt-in line keeps its handle through a round trip.
+    func testV2OptInLineDecodesItsHandle() throws {
+        let dir = makeDirectory()
+        try write([recordLine(extra: #","utteranceHandle":"3f9a1c7d2b6e8405""#)], to: dir)
+
+        let records = IntentLogStore(directory: dir).recent()
+        XCTAssertEqual(records.first?.utteranceHandle, "3f9a1c7d2b6e8405")
+    }
+
+    /// V3 — an explicit null. The writer never emits this (a nil optional
+    /// is omitted), but a reader that chokes on it would drop a line some
+    /// other producer wrote.
+    func testV3ExplicitNullHandleDecodesAsNil() throws {
+        let dir = makeDirectory()
+        try write([recordLine(extra: #","utteranceHandle":null"#)], to: dir)
+
+        let records = IntentLogStore(directory: dir).recent()
+        XCTAssertEqual(records.count, 1)
+        XCTAssertNil(records.first?.utteranceHandle)
+    }
+
+    /// V4 — the downgrade-safety proof: a line from a LATER schema (an
+    /// unknown key) must not make this build drop the record.
+    func testV4ForwardCompatibleLineWithUnknownKeyIsKept() throws {
+        let dir = makeDirectory()
+        try write([recordLine(extra: #","egressBucket":"ge_0_7","minedAt":12345"#)], to: dir)
+
+        let records = IntentLogStore(directory: dir).recent()
+        XCTAssertEqual(records.count, 1, "V4: a future field must not delete the line")
+        XCTAssertEqual(records.first?.action, "call")
+        XCTAssertNil(records.first?.utteranceHandle)
+    }
+
+    /// V5 — the C-7 proof, through the REAL seam: the same verdict written
+    /// with the loop OFF carries exactly the shipped keys, and no
+    /// `utteranceHandle` key at all (omitted, never null). Key SETS, not
+    /// bytes: `JSONEncoder`'s ordering is unspecified.
+    func testV5OptInOffRecordIsFieldForFieldTheShippedRecord() throws {
+        let dir = makeDirectory()
+        let store = IntentLogStore(directory: dir)
+        let now = Date()
+        let verdictAt = now.addingTimeInterval(1.5)
+        // The shipped shape, built the way the pre-loop code built it —
+        // same verdict, same slots, same confidence, same latency.
+        store.append(IntentLogStore.Record(path: "model", action: "call",
+                                           slots: ["contact": "maiya"],
+                                           outcome: "confirmed",
+                                           confidence: 0.7, latencyMs: 1500,
+                                           timestamp: now))
+        // The same verdict through the capture seam with no handle — the
+        // only value the seam passes while the opt-in is off.
+        store.append(IntentLogStore.Capture(action: "call",
+                                            slots: ["contact": "maiya"],
+                                            confidence: 0.7,
+                                            requestedAt: now)
+            .record(.confirmed, utteranceHandle: nil, at: verdictAt))
+        try waitFor(store) { $0.count == 2 }
+
+        let lines = rawLogText(in: dir).split(separator: "\n").map(String.init)
+        XCTAssertEqual(lines.count, 2)
+        let shipped = try keysOfLine(lines[0])
+        let seamed = try keysOfLine(lines[1])
+        XCTAssertEqual(shipped, seamed, "V5: the OFF record's key set is unchanged")
+        XCTAssertEqual(shipped, ["id", "timestamp", "path", "action", "slots",
+                                 "outcome", "confidence", "latencyMs"],
+                       "the shipped key set, with no loop field in it")
+        XCTAssertFalse(lines[1].contains("utteranceHandle"),
+                       "the key is omitted, never written as null")
+    }
+
+    /// V7 — the opt-out strip. A mix of handle-bearing and handle-free
+    /// lines; after the strip every line still decodes with no handle, and
+    /// nothing else about the log moved.
+    func testV7OptOutStripRemovesEveryHandleAndPreservesOrder() throws {
+        let dir = makeDirectory()
+        let store = IntentLogStore(directory: dir)
+        store.append(IntentLogStore.Record(path: "model", action: "call",
+                                           slots: ["contact": "a"], outcome: "confirmed",
+                                           utteranceHandle: "3f9a1c7d2b6e8405",
+                                           timestamp: Date().addingTimeInterval(1)))
+        store.append(IntentLogStore.Record(path: "model", action: "call",
+                                           slots: ["contact": "b"], outcome: "denied",
+                                           timestamp: Date().addingTimeInterval(2)))
+        store.append(IntentLogStore.Record(path: "override", action: "call",
+                                           slots: ["contact": "c"], outcome: "corrected",
+                                           utteranceHandle: "0011223344556677",
+                                           timestamp: Date().addingTimeInterval(3)))
+        try waitFor(store) { $0.count == 3 }
+        let idsBefore = store.recent(limit: 10).map(\.id)
+
+        store.stripUtteranceHandles()
+
+        let after = store.recent(limit: 10)
+        XCTAssertEqual(after.count, 3, "V7: the strip deletes no record")
+        XCTAssertEqual(after.map(\.id), idsBefore,
+                       "V7: identity and file order are preserved")
+        XCTAssertTrue(after.allSatisfy { $0.utteranceHandle == nil })
+        XCTAssertFalse(rawLogText(in: dir).contains("utteranceHandle"),
+                       "after the strip the file is the shipped file again")
+        // ...and the export is field-for-field the shipped export.
+        let export = try XCTUnwrap(store.exportURL())
+        let exported = try String(contentsOf: export, encoding: .utf8)
+        XCTAssertFalse(exported.contains("utteranceHandle"))
+        XCTAssertTrue(exported.contains(#""outcome":"corrected""#))
+    }
+
+    /// The strip is a no-op when no line carries a handle — an opt-out on
+    /// a loop that never ran must not rewrite the family's log.
+    func testStripIsANoOpWithoutHandles() throws {
+        let dir = makeDirectory()
+        let store = IntentLogStore(directory: dir)
+        store.append(IntentLogStore.Record(path: "model", action: "call",
+                                           outcome: "confirmed"))
+        try waitFor(store) { $0.count == 1 }
+        let before = rawLogText(in: dir)
+
+        store.stripUtteranceHandles()
+
+        XCTAssertEqual(rawLogText(in: dir), before)
     }
 
     // MARK: - [INTENTLOG-CAPTURE] verdict → record mapping
@@ -218,6 +393,38 @@ final class IntentLogStoreTests: XCTestCase {
         XCTAssertEqual(capture.confidence, 0.83, "the interpreter's confidence rides along")
         XCTAssertEqual(capture.requestedAt, action.requestedAt)
         XCTAssertEqual(capture.record(.confirmed).outcome, "confirmed")
+        // [T-056-A] The utterance travels with the capture — the loop's
+        // handle is derived from it at append time (T-054 §2.3).
+        XCTAssertEqual(capture.transcript, "मैयालाई फोन गर")
+    }
+
+    /// [T-056-A] A correction has two ends, and the loop needs both: the
+    /// `corrected` record's handle resolves to the MISHEARD utterance, and
+    /// the amended action's own (confirmed) record resolves to the
+    /// AMENDMENT. This pins the seam that makes the second end reachable —
+    /// the amendment utterance replaces the source transcript on the
+    /// rebuilt action, and the original is untouched for the record
+    /// already written.
+    func testCallPendingActionAmendmentTranscriptTakesOverTheCapture() {
+        let command = makeCommand(action: .call, contact: "maiya", confidence: 0.55)
+        var amended = AppCoordinator.PendingCallAction(
+            contact: FamilyContact(name: "maiya", phone: "+9779800000000",
+                                   relationship: "daughter"),
+            method: .facetimeAudio,
+            unsupportedRequestedApp: nil,
+            sourceTranscript: "मैयालाई फेसटाइम गर",
+            sourceCommand: command)
+
+        XCTAssertEqual(amended.capture.transcript, "मैयालाई फेसटाइम गर",
+                       "before the correction the action's own utterance is the source")
+
+        amended.amendmentTranscript = "होइन, फोन नै गर"
+
+        XCTAssertEqual(amended.capture.transcript, "होइन, फोन नै गर",
+                       "the amendment is what the amended action's verdict is about")
+        XCTAssertEqual(amended.sourceTranscript, "मैयालाई फेसटाइम गर",
+                       "the original utterance is preserved — the corrected record"
+                       + " still points at the misheard plan")
     }
 
     func testTouchOriginatedCallCaptureHasNoConfidence() {
