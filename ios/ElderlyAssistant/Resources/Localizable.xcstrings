@@ -11611,19 +11611,240 @@
         }
       }
     },
+    "settings.learningLoop.consentCancel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not now"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अहिले नहोस्"
+          }
+        }
+      }
+    },
+    "settings.learningLoop.consentConfirm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yes, turn it on"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "हो, खोल्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.learningLoop.consentQuestion" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn this on? Nothing you say is sent — only counts and codes."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "यो खोल्ने हो? तपाईंले भन्नुभएको कुरा पठाइँदैन — गन्ती र कोड मात्र पठाइन्छ।"
+          }
+        }
+      }
+    },
+    "settings.learningLoop.egressNeedsUpdate" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sharing is on. Nothing is sent until the app is updated."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "गन्ती र कोड पठाउने सुविधा खुला छ। एप अपडेट नभएसम्म केही पठाइँदैन।"
+          }
+        }
+      }
+    },
+    "settings.learningLoop.egressPending" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sharing is on. This phone is waiting to send; nothing is lost."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "गन्ती र कोड पठाउने सुविधा खुला छ। यो फोनले पठाउन बाँकी छ; केही हराउँदैन।"
+          }
+        }
+      }
+    },
+    "settings.learningLoop.explanation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When you turn this on, this phone counts the times you corrected the assistant, the times you said no, the times you did not answer, and how sure it was. Only those counts, small codes (which action, which kind of correction, how sure), and one scrambled code for each sentence leave this phone. The words you say, names, medicine names and messages never leave this phone. This helps the assistant get better at Nepali. You can turn it off at any time."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "यो खोल्दा, तपाईंले सहायकलाई सुधार्नुभएको, नाइँ भन्नुभएको, जवाफ नदिनुभएको, र सहायक कति विश्वस्त थियो भन्ने कुराको गन्ती यही फोनले राख्छ। यही फोनबाट बाहिर जाने कुरा: ती गन्ती, साना कोड (कुन काम, कस्तो सुधार, कति विश्वस्त), र हरेक वाक्यको एउटा अव्यवस्थित कोड मात्र जान्छ। तपाईंले भन्नुभएका शब्द, नाम, औषधिका नाम र सन्देश यही फोनमा रहन्छन्। यसले सहायकलाई नेपालीमा अझ राम्रो बनाउन मद्दत गर्छ। तपाईं जहिले पनि यो बन्द गर्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "settings.learningLoop.indicator" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sharing counts and codes: ON"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "गन्ती र कोड पठाउने सुविधा: खुला छ"
+          }
+        }
+      }
+    },
+    "settings.learningLoop.indicatorOff" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sharing counts and codes: OFF"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "गन्ती र कोड पठाउने सुविधा: बन्द छ"
+          }
+        }
+      }
+    },
+    "settings.learningLoop.neverLeaves" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your words, contact names, medicine names, messages and health information never leave this phone, on any setting."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "तपाईंका शब्द, सम्पर्कका नाम, औषधिका नाम, सन्देश र स्वास्थ्य जानकारी कुनै पनि सेटिङमा यही फोनबाट बाहिर जाँदैनन्।"
+          }
+        }
+      }
+    },
+    "settings.learningLoop.optOut" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn off and delete"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "बन्द गरी मेट्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.learningLoop.optOutCancel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cancel"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "रद्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.learningLoop.optOutConfirm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Turn this off? Everything not yet sent is deleted right away. What was already sent is kept for up to 6 months, but it can no longer be linked to anything you say from now on. The assistant keeps working exactly as it does now."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "यो बन्द गर्ने हो? अहिलेसम्म नपठाइएका सबै कुरा तुरुन्तै मेटिन्छन्। पहिले पठाइसकेका कुरा बढीमा ६ महिनासम्म राखिन्छन्, तर ती अब तपाईंले अबदेखि भन्ने कुनै पनि कुरासँग जोडिन सक्दैनन्। सहायक अहिले जस्तै चलिरहन्छ।"
+          }
+        }
+      }
+    },
+    "settings.learningLoop.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Help improve the assistant"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सहायक सुधार्न मद्दत गर्नुहोस्"
+          }
+        }
+      }
+    },
     "settings.privacy.body" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Your voice, health information, contacts, and conversations stay on this phone. Nothing is sent to the cloud for AI processing. Health data is only read from HealthKit with your permission. Family notifications are sent only when a configured alert fires."
+            "value" : "Your voice, health information, contacts, and conversations stay on this phone. The assistant can work fully on this phone. If you choose the Gemini voice engine, what you say is sent to Google to be written down as text; you can switch to an on-device engine at any time in Settings and keep every feature. If you turn on 'Help improve the assistant', only counts, small codes, and one scrambled code for each sentence leave the phone — never your words. If your family exports the assistant activity log, that file leaves the phone with the names in it; only your family can start that export. Health data is only read from HealthKit with your permission. Family notifications are sent only when a configured alert fires."
           }
         },
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "तपाईंको आवाज, स्वास्थ्य जानकारी, सम्पर्क र कुराकानी यही फोनमा रहन्छन्। AI प्रशोधनका लागि कुनै पनि कुरा क्लाउडमा पठाइँदैन। स्वास्थ्य जानकारी तपाईंको अनुमतिमा मात्र HealthKit बाट पढिन्छ। परिवारलाई सूचना तोकिएको अलर्ट सक्रिय भएमा मात्र पठाइन्छ।"
+            "value" : "तपाईंको आवाज, स्वास्थ्य जानकारी, सम्पर्क र कुराकानी यही फोनमा रहन्छन्। सहायक यही फोनमै पूरै चल्न सक्छ। यदि तपाईं जेमिनी आवाज इन्जिन छान्नुहुन्छ भने, तपाईंले भन्नुभएको कुरा लेखाइको रूपमा परिणत गर्न Google मा पठाइन्छ; तपाईं जहिले पनि सेटिङमा गएर यन्त्रमै चल्ने इन्जिन छान्न सक्नुहुन्छ र सबै सुविधा यथावत् रहन्छ। यदि तपाईं 'सहायक सुधार्न मद्दत गर्नुहोस्' खोल्नुहुन्छ भने, गन्ती, साना कोड र हरेक वाक्यको एउटा अव्यवस्थित कोड मात्र फोनबाट बाहिर जान्छ — तपाईंका शब्द कदापि जाँदैनन्। यदि परिवारले 'सहायकको गतिविधि' को निर्यात गर्नुभयो भने, त्यो फाइलमा नामहरू सहित फोनबाट बाहिर जान्छ — त्यो निर्यात परिवारले मात्र सुरु गर्न सक्छ। स्वास्थ्य जानकारी तपाईंको अनुमतिमा मात्र HealthKit बाट पढिन्छ। परिवारलाई सूचना तोकिएको अलर्ट सक्रिय भएमा मात्र पठाइन्छ।"
           }
         }
       }

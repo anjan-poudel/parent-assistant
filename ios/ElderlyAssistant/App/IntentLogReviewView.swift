@@ -18,6 +18,7 @@ struct IntentLogReviewView: View {
         // the back affordance and moves the actions in-content.
         LeafScreen(titleKey: "settings.intentLog.title") {
             VStack(spacing: 12) {
+                loopStateRow
                 if !records.isEmpty {
                     HStack(spacing: 12) {
                         if let exportURL {
@@ -81,6 +82,7 @@ struct IntentLogReviewView: View {
         .onAppear {
             records = coordinator.intentLogStore.recent()
             exportURL = coordinator.intentLogStore.exportURL()
+            coordinator.refreshLearningLoopStatus()
         }
         .alert(L10n.str("intentLog.clearTitle", locale: coordinator.activeLocale),
                isPresented: $showClearConfirm) {
@@ -93,6 +95,31 @@ struct IntentLogReviewView: View {
             Button(L10n.str("intentLog.clearCancel", locale: coordinator.activeLocale),
                    role: .cancel) {}
         }
+    }
+
+    /// [T-056-A] The learning loop's state, in the same words the Settings
+    /// → Privacy card uses (C-17, T-053 §7.2): *"A switch that is on but
+    /// invisible on the review surface is not compliance with this ruling
+    /// — the family reviews the data, so the family sees the state."* The
+    /// two refusal states are included, so a loop that is ON and not
+    /// sending is never read here as simply "ON".
+    private var loopStateRow: some View {
+        let status = coordinator.learningLoopStatus
+        return HStack(spacing: 10) {
+            Image(systemName: status.isRefusing ? "exclamationmark.triangle.fill"
+                                                : (status == .off ? "lock.fill" : "lock.open.fill"))
+                .foregroundStyle(status.isRefusing ? DesignTokens.stateError
+                                                   : DesignTokens.accent)
+            Text(L10n.str(status.stringKey, locale: coordinator.activeLocale))
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .foregroundStyle(status.isRefusing ? DesignTokens.stateError
+                                                   : DesignTokens.textSecondary)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
     private func icon(for record: IntentLogStore.Record) -> String {
