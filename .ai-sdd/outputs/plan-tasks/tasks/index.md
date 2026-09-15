@@ -14,5 +14,8 @@
 | [TG-10](TG-10-continuous-learning-loop/index.md) | Continuous Learning Loop | 9 tasks (T-052–T-060) | ~22–45 days | PENDING |
 | [TG-11](TG-11-linguistic-robustness/index.md) | Linguistic Robustness | 9 tasks (T-061–T-069) | ~24–38 days | PENDING |
 | [TG-12](TG-12-crux-resolution-pipeline/index.md) | Crux-Resolution Pipeline | 10 tasks (T-070–T-079) | ~24–40 days | PENDING |
+| [TG-13](TG-13-environment-robustness-benchmark/index.md) | Environment Robustness Benchmark | 10 tasks (T-080–T-089) | ~26–42 days | PENDING |
+> **In-flight groups (not in this checkout).** [TG-11](TG-11-linguistic-robustness/index.md) (Linguistic Robustness, T-061–T-068) and [TG-12](TG-12-crux-resolution-pipeline/index.md) (Crux-Resolution Pipeline, T-069–T-079) are being authored in their own worktrees; their rows and directories land with their own integrations. Their ID ranges are reserved, which is why TG-13 starts at **T-080** rather than the T-063 the original brief assumed. TG-13 consumes TG-11's fixtures (T-064, T-066, T-068) and TG-12's canonicalizer (T-074) by path and cross-references their gates rather than re-declaring them.
+
 
 > **Rework tasks (security-test NO_GO).** [T-049](../TG-02-voice-interface/T-049-release-build-transcript-prints.md) (TG-02) and [T-050](../TG-01-foundation-infrastructure/T-050-api-key-error-code-log-leak.md) (TG-01) are the B1/B2 remediation tasks raised by the `security-test` SECURITY-NO_GO (`specs/security-test.md`). They are listed in their owning groups above; this note carries the cross-group link, because B2's emitter sites span TG-01, TG-02, TG-03 and TG-09 and are owned by TG-01 alone.
