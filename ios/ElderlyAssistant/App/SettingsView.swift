@@ -3421,6 +3421,17 @@ struct AIModelsSettingsView: View {
     /// [ENCODER-RUNTIME-CASCADE] The second switch on the card is the A/B's
     /// third leg: OFF the encoder answers alone; ON the brain picked above
     /// answers the same turn whenever the encoder abstains or is unsure.
+    ///
+    /// [CORRECTION-TOGGLES] The card then carries the two switches for the
+    /// pre-intent layers the encoder's input passes through — the STT-error
+    /// corrector and the dialect canonicalizer — so a tester can run each of
+    /// them in isolation and in combination without a debugger, a relaunch
+    /// or a second install. Both persist through `AppCoordinator`'s
+    /// `intentCorrectorEnabled` / `intentCanonicalizerEnabled` and both are
+    /// disabled while the encoder switch above is off (the layers correct
+    /// and canonicalize THAT model's input). The card's existing "Last
+    /// correction" line is the corrector's readout and already renders
+    /// only when the corrector participated in the last turn.
     private var encoderCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("settings.encoder.title")
@@ -3457,6 +3468,51 @@ struct AIModelsSettingsView: View {
             .frame(minHeight: DesignTokens.minTapTargetSize)
             .disabled(!coordinator.intentEncoderEnabled)
             Text("settings.encoder.cascadeNote")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            // [CORRECTION-TOGGLES] The two pre-intent layers, on the SAME
+            // card so all four switches are together and the four-way matrix
+            // (corrector only / canonicalizer only / both / neither) is a
+            // matter of flipping two rows. They answer the two questions the
+            // layers themselves are asked, in the order they run:
+            // `sanitise → correct → canonicalize → tokenize`.
+            //
+            // Both are disabled (not hidden) while the encoder switch is off,
+            // exactly like the cascade row: the layers sit on the encoder's
+            // input, so with the encoder out of the slot they have nothing to
+            // act on and the disabled state says so honestly. The RUNTIME
+            // gates are the layers' own (`STTCorrector.Policy.runtime`,
+            // `DialectCanonicalizer.Policy.runtime`); this is the UI half of
+            // the same statement, and it mirrors the fact that neither switch
+            // can conjure the encoder into the slot.
+            Toggle(isOn: Binding(
+                get: { coordinator.intentCorrectorEnabled },
+                set: { coordinator.intentCorrectorEnabled = $0 }
+            )) {
+                Text("settings.encoder.correctorLabel")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .disabled(!coordinator.intentEncoderEnabled)
+            Text("settings.encoder.correctorNote")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Toggle(isOn: Binding(
+                get: { coordinator.intentCanonicalizerEnabled },
+                set: { coordinator.intentCanonicalizerEnabled = $0 }
+            )) {
+                Text("settings.encoder.canonicalizerLabel")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .disabled(!coordinator.intentEncoderEnabled)
+            Text("settings.encoder.canonicalizerNote")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
                 .foregroundStyle(DesignTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

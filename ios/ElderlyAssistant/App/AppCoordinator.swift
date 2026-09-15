@@ -1248,6 +1248,49 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// [CORRECTION-TOGGLES] Settings → AI मोडेल (hidden) → the SAME internal
+    /// card, third switch: the STT-error corrector, the layer that runs
+    /// FIRST at the intent seam (§6.1 `sanitise → correct → canonicalize →
+    /// tokenize`). Persisted under
+    /// `IntentEncoderPreferences.correctorKey` ("intentEncoder.corrector"),
+    /// **default OFF**.
+    ///
+    /// Unlike the two switches above there is no slot to re-install and no
+    /// `didSet` sequencing: the corrector is not a brain, and it resolves
+    /// its policy from the stored key on EVERY turn
+    /// (`STTCorrector.Policy.runtime` through
+    /// `IntentInputCanonicalization.prepare`), so the flip acts on the next
+    /// turn by itself. The didSet persists and stops.
+    ///
+    /// ON rewrites model input only: nothing downstream branches on the
+    /// result (A-14 — no band, no cache, no route, and `LocalBrainChain` /
+    /// `CommandRouter` are untouched), and the keyword safety net keeps
+    /// reading the ORIGINAL transcript (`IntentTranscriptPair.safetyNetInput`,
+    /// D-1). The UI row is disabled while the encoder switch is off, because
+    /// the layer only has an input to correct while the encoder is the one
+    /// answering.
+    @Published var intentCorrectorEnabled: Bool = false {
+        didSet { intentEncoderPreferences.setCorrectorEnabled(intentCorrectorEnabled) }
+    }
+
+    /// [CORRECTION-TOGGLES] …and the card's fourth switch: the dialect
+    /// canonicalizer, which runs SECOND — on the CORRECTOR's output, never
+    /// on the raw transcript. Same key shape
+    /// (`IntentEncoderPreferences.canonicalizerKey`,
+    /// "intentEncoder.canonicalizer"), same default OFF, and the same
+    /// per-turn resolution through `DialectCanonicalizer.Policy.runtime`.
+    ///
+    /// Deliberately a SEPARATE switch from the corrector's: the two layers
+    /// are independently observable, and the card has to be able to run the
+    /// whole matrix — corrector only, canonicalizer only, both, neither —
+    /// each combination exercising the real seam in the intended order.
+    /// Safety is unchanged in every one of them: `original` (what the
+    /// safety net, the emergency path and the med-ack path read) is the
+    /// sanitised transcript, untouched by either layer.
+    @Published var intentCanonicalizerEnabled: Bool = false {
+        didSet { intentEncoderPreferences.setCanonicalizerEnabled(intentCanonicalizerEnabled) }
+    }
+
     /// [TURN-TIMING-BREAKDOWN] The LAST finalized turn's stage breakdown,
     /// behind the internal-testing card's "Last turn" readout: each stage
     /// the turn actually spent time in, with its milliseconds.
@@ -2084,6 +2127,13 @@ final class AppCoordinator: ObservableObject {
         // switch is off: the value is irrelevant in that state, and the
         // tester's choice must survive an off/on round trip.
         self.intentEncoderCascadeEnabled = intentEncoderPreferences.isCascadeEnabled
+        // [CORRECTION-TOGGLES] …and the two pre-intent layers' switches on
+        // that same card (same default OFF, same restore rule). Neither
+        // touches the local-brain slot, so nothing else has to be
+        // re-installed for them to act: the policies they gate are resolved
+        // per turn.
+        self.intentCorrectorEnabled = intentEncoderPreferences.isCorrectorEnabled
+        self.intentCanonicalizerEnabled = intentEncoderPreferences.isCanonicalizerEnabled
 
         // Restore the persisted STT model choice. The didSet observer
         // pushes it to the recognizer and refreshes the label. Unknown

@@ -9996,6 +9996,74 @@
         }
       }
     },
+    "settings.encoder.correctorLabel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Repair likely speech-recognition errors before the encoder reads the text"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "इन्कोडरले पाठ पढ्नु अघि आवाज पहिचानका सम्भावित त्रुटिहरू सुधार्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.encoder.correctorNote" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On, a measured table repairs the tokens speech recognition most likely got wrong, after sanitising and before the encoder reads the text; off, the transcript reaches the encoder untouched. Only the encoder's input changes — emergency and medication replies are still matched on the original transcript. Ignored while the encoder switch above is off."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "खुला हुँदा, मापन गरिएको तालिकाले आवाज पहिचानले सम्भवतः बिगारेका शब्दहरू इन्कोडरले पाठ पढ्नु अघि सुधार्छ; बन्द हुँदा पाठ इन्कोडरसम्म यथावत् पुग्छ। इन्कोडरको इनपुट मात्र परिवर्तन हुन्छ — आपतकालीन र औषधि सम्बन्धी जवाफ मूल पाठकै आधारमा मिलाइन्छ। माथिको इन्कोडर स्विच बन्द हुँदा यो मान्य हुँदैन।"
+          }
+        }
+      }
+    },
+    "settings.encoder.canonicalizerLabel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rewrite dialect and spelling variants onto the forms the encoder knows"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "बोली र हिज्जेका भिन्न रूपहरूलाई इन्कोडरले चिन्ने रूपमा बदल्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.encoder.canonicalizerNote" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "On, attested variants are rewritten onto their canonical forms after the corrector has run; off, the corrected transcript is passed through as it is. Runs second, on the corrector's output, never on the raw transcript. Ignored while the encoder switch above is off."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "खुला हुँदा, प्रमाणित भिन्न रूपहरू सुधारक चलेपछि तिनका मानक रूपमा बदलिन्छन्; बन्द हुँदा सुधारिएको पाठ जस्ताको तस्तै जान्छ। यो दोस्रो चरणमा, सुधारकको नतिजामाथि चल्छ, मूल पाठमाथि होइन। माथिको इन्कोडर स्विच बन्द हुँदा यो मान्य हुँदैन।"
+          }
+        }
+      }
+    },
     "settings.encoder.lastTurn" : {
       "extractionState" : "manual",
       "localizations" : {

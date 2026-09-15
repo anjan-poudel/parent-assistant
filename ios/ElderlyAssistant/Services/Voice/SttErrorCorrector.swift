@@ -1429,7 +1429,7 @@ enum STTCorrector {
         /// compile-time `INTENT_ENCODER` condition (read through the SHIPPED
         /// gate function `IntentEncoderWiring.isServingEnabled`, so "both gates
         /// are required" cannot drift between the encoder's switch, the
-        /// canonicalizer's and this one) and the persisted mode, which reads an
+        /// canonicalizer's and this one) and the persisted arm, which reads an
         /// ABSENT key as OFF (house pattern: `CanonicalizerPreferences`,
         /// `IntentEncoderPreferences`, `DialectBiasSettings`). A release build
         /// therefore cannot rewrite model input by accident, and a gated build
@@ -1437,16 +1437,39 @@ enum STTCorrector {
         /// `.shadow` arm, which is why the mode is a three-way setting rather
         /// than a boolean.
         ///
+        /// [CORRECTION-TOGGLES] The persisted UI switch
+        /// (`intentEncoder.corrector`, default OFF) is the second source of
+        /// "which arm", and the two compose in a fixed precedence:
+        ///
+        ///   1. an explicit `isModeOn` argument (tests, a future settings
+        ///      surface) — always wins;
+        ///   2. else a persisted `sttCorrection.mode` — the debugger's arm,
+        ///      which is what turns this layer on today and must keep
+        ///      working;
+        ///   3. else the UI switch — ON is `.apply` (what a switch labelled
+        ///      "STT error corrector" means), OFF is the control arm.
+        ///
+        /// So the internal-testing card can run the whole four-way matrix
+        /// (corrector only / canonicalizer only / both / neither) with no
+        /// debugger and no relaunch, while a stored arm still outranks it.
+        /// A stored `.off` is a deliberate control-arm pin, not an absence:
+        /// `reset()` is what clears it.
+        ///
         /// When the bank is missing or unusable the threshold is the inert end
         /// and the range collapses to it, so the card cannot offer a setting
         /// the data does not support.
         static func runtime(defaults: UserDefaults = .standard,
                             isCompiledIn: Bool = IntentEncoderFeature.isEnabled,
+                            isToggleOn: Bool? = nil,
                             isModeOn: Mode? = nil,
                             lexicon: CorrectionLexicon? = CorrectionLexicon.bundled)
             -> Policy {
             let settings = STTCorrectionSettings(defaults: defaults, lexicon: lexicon)
-            let mode = isModeOn ?? settings.mode
+            let toggle = isToggleOn
+                ?? IntentEncoderPreferences(defaults: defaults).isCorrectorEnabled
+            let mode = isModeOn
+                ?? settings.storedMode
+                ?? (toggle ? .apply : .off)
             let serving = IntentEncoderWiring.isServingEnabled(
                 isCompiledIn: isCompiledIn, isToggleOn: mode != .off)
             var policy = Policy()
@@ -1914,9 +1937,17 @@ struct STTCorrectionSettings {
     /// The kill switch. ABSENT READS OFF: this layer rewrites the text a model
     /// reads, so serving it is an explicit decision (the same rule as
     /// `CanonicalizerPreferences.canonicalizerEnabled`).
-    var mode: STTCorrector.Mode {
+    var mode: STTCorrector.Mode { storedMode ?? .off }
+
+    /// [CORRECTION-TOGGLES] The stored arm, or nil when no one has written
+    /// one. Distinguished from `mode` because the two absences are different
+    /// facts: "no arm has been chosen" (nobody has opted in — the shipped
+    /// state, where the internal-testing switch is what opts in) and "the
+    /// `.off` arm was chosen deliberately" (the debugger's control-arm pin,
+    /// which `Policy.runtime` honours over the switch).
+    var storedMode: STTCorrector.Mode? {
         guard let raw = defaults.string(forKey: Self.modeKey),
-              let mode = STTCorrector.Mode(rawValue: raw) else { return .off }
+              let mode = STTCorrector.Mode(rawValue: raw) else { return nil }
         return mode
     }
 

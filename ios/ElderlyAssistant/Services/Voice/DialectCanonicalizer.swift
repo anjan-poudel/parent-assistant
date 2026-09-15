@@ -1557,7 +1557,10 @@ enum DialectCanonicalizer {
 /// the text a model reads, so serving it must be an explicit decision. The key
 /// is deliberately namespaced away from the shipped preferences, so it can be
 /// set or cleared from a debugger or a UITest launch argument without touching
-/// a user-facing setting. `Policy.runtime` is also gated on
+/// a user-facing setting. [CORRECTION-TOGGLES] That namespaced key is now the
+/// one the internal-testing card writes (`intentEncoder.canonicalizer`); the
+/// original key stays readable beside it — see `canonicalizerEnabled`.
+/// `Policy.runtime` is also gated on
 /// `IntentEncoderFeature.isEnabled`, so this toggle cannot switch
 /// canonicalization on in a build that cannot compile the encoder path either.
 final class CanonicalizerPreferences {
@@ -1570,16 +1573,40 @@ final class CanonicalizerPreferences {
     }
 
     /// True only when someone has explicitly switched canonicalization on.
+    ///
+    /// [CORRECTION-TOGGLES] Two keys can say yes, and either is enough:
+    ///
+    ///   - `intentEncoder.canonicalizer` — the Settings switch on the
+    ///     internal-testing card, in the encoder's namespaced family
+    ///     (`IntentEncoderPreferences`), which is what makes the four-way
+    ///     matrix (corrector only / canonicalizer only / both / neither)
+    ///     driven from one card;
+    ///   - `canonicalizer.enabled` — the key this class shipped with, kept
+    ///     READABLE so a device, a debugger or a UITest launch argument that
+    ///     set it is not silently switched off by the arrival of the switch
+    ///     above.
+    ///
+    /// Both read absent-as-false, so nothing here changes the shipped
+    /// default: a fresh install is inert.
     var canonicalizerEnabled: Bool {
+        if IntentEncoderPreferences(defaults: defaults).isCanonicalizerEnabled {
+            return true
+        }
         guard defaults.object(forKey: Self.canonicalizerEnabledKey) != nil else { return false }
         return defaults.bool(forKey: Self.canonicalizerEnabledKey)
     }
 
+    /// Writes BOTH keys, so a set→get round trip agrees whichever key a
+    /// reader consults — a debugger reading the legacy key sees the same
+    /// truth the runtime gate does, and `set…(false)` really is off
+    /// whichever key was previously on.
     func setCanonicalizerEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: IntentEncoderPreferences.canonicalizerKey)
         defaults.set(enabled, forKey: Self.canonicalizerEnabledKey)
     }
 
     func reset() {
+        defaults.removeObject(forKey: IntentEncoderPreferences.canonicalizerKey)
         defaults.removeObject(forKey: Self.canonicalizerEnabledKey)
     }
 }

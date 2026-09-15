@@ -92,11 +92,29 @@ enum IntentEncoderFeature {
 /// The key is deliberately namespaced away from the shipped preferences:
 /// `intentEncoder.enabled` can be set (or cleared) from a debugger or a
 /// UITest launch argument without touching any user-facing setting.
+///
+/// [CORRECTION-TOGGLES] The two pre-intent layers the encoder's input
+/// passes through — the STT-error corrector and the dialect canonicalizer —
+/// carry switches of the SAME shape and the SAME default here
+/// (`intentEncoder.corrector`, `intentEncoder.canonicalizer`), so all four
+/// switches on the internal-testing card are persisted in one namespace
+/// with one rule: absent reads OFF. These two do not touch the local-brain
+/// slot (nothing is re-installed when they flip — the encoder resolves both
+/// policies from the stored keys on every turn); they only flip the gates
+/// the two layers already had (`STTCorrector.Policy.runtime`,
+/// `DialectCanonicalizer.Policy.runtime`).
 final class IntentEncoderPreferences {
     static let enabledKey = "intentEncoder.enabled"
     /// [ENCODER-RUNTIME-CASCADE] The cascade switch, same treatment and
     /// same default.
     static let cascadeKey = "intentEncoder.cascade"
+    /// [CORRECTION-TOGGLES] The STT-error corrector's switch (§5.5.1:
+    /// "correction rewrites the text a model reads, so serving it is an
+    /// explicit decision").
+    static let correctorKey = "intentEncoder.corrector"
+    /// [CORRECTION-TOGGLES] The dialect canonicalizer's switch, the same
+    /// rule at the same seam.
+    static let canonicalizerKey = "intentEncoder.canonicalizer"
 
     private let defaults: UserDefaults
 
@@ -105,26 +123,51 @@ final class IntentEncoderPreferences {
     }
 
     /// True only when someone has explicitly switched the encoder on.
-    var isEnabled: Bool {
-        guard defaults.object(forKey: Self.enabledKey) != nil else { return false }
-        return defaults.bool(forKey: Self.enabledKey)
-    }
+    var isEnabled: Bool { flag(Self.enabledKey) }
 
     func setEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Self.enabledKey)
+    }
+
+    /// [CORRECTION-TOGGLES] True only when someone has explicitly switched
+    /// the corrector on. Absent reads false, so a device that never opened
+    /// the internal card still rewrites nothing.
+    var isCorrectorEnabled: Bool { flag(Self.correctorKey) }
+
+    func setCorrectorEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: Self.correctorKey)
+    }
+
+    /// [CORRECTION-TOGGLES] True only when someone has explicitly switched
+    /// the canonicalizer on — the same rule again, and deliberately a
+    /// SEPARATE key from the corrector's: the two layers must be testable
+    /// one at a time, and a single switch could not express that.
+    var isCanonicalizerEnabled: Bool { flag(Self.canonicalizerKey) }
+
+    func setCanonicalizerEnabled(_ enabled: Bool) {
+        defaults.set(enabled, forKey: Self.canonicalizerKey)
     }
 
     /// [ENCODER-RUNTIME-CASCADE] True only when someone has explicitly
     /// switched the cascade on. Absent key reads as false, so an
     /// enable-only device gets the standalone encoder, and the cascade is
     /// never in play on a build whose enable switch was never touched.
-    var isCascadeEnabled: Bool {
-        guard defaults.object(forKey: Self.cascadeKey) != nil else { return false }
-        return defaults.bool(forKey: Self.cascadeKey)
-    }
+    var isCascadeEnabled: Bool { flag(Self.cascadeKey) }
 
     func setCascadeEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Self.cascadeKey)
+    }
+
+    /// One rule for all four switches in this namespace: an absent key is
+    /// OFF. `bool(forKey:)` alone would read an absent key as false too, but
+    /// it would also read a key someone stored as a non-Bool (a string, a
+    /// number from an old build) as false silently; checking for the
+    /// object's existence first is the shape `DialectBiasSettings` and
+    /// `CanonicalizerPreferences` already use, and having ONE reader is what
+    /// keeps the four switches from drifting into four readings of "unset".
+    private func flag(_ key: String) -> Bool {
+        guard defaults.object(forKey: key) != nil else { return false }
+        return defaults.bool(forKey: key)
     }
 }
 

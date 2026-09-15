@@ -404,6 +404,105 @@ final class IntentEncoderWiringTests: XCTestCase {
         XCTAssertFalse(IntentEncoderPreferences(defaults: suite).isCascadeEnabled)
     }
 
+    // MARK: [CORRECTION-TOGGLES] the two pre-intent layers' switches
+
+    /// The corrector's and the canonicalizer's switches, in the same
+    /// namespace and under the same rule as the two above: absent ⇒ OFF (the
+    /// shipped default), a flip survives a relaunch, and each switch moves
+    /// only its own key. The four-way matrix the internal-testing card offers
+    /// is only expressible because they are separate — one switch could not
+    /// say "corrector only".
+    func testCorrectionLayerTogglesDefaultOffAndRoundTrip() throws {
+        let name = "intent-encoder-correction-toggles-\(UUID().uuidString)"
+        let suite = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { suite.removePersistentDomain(forName: name) }
+
+        let prefs = IntentEncoderPreferences(defaults: suite)
+        XCTAssertEqual(IntentEncoderPreferences.correctorKey, "intentEncoder.corrector")
+        XCTAssertEqual(IntentEncoderPreferences.canonicalizerKey,
+                       "intentEncoder.canonicalizer")
+        for key in [IntentEncoderPreferences.correctorKey,
+                    IntentEncoderPreferences.canonicalizerKey] {
+            XCTAssertFalse([IntentEncoderPreferences.enabledKey,
+                            IntentEncoderPreferences.cascadeKey].contains(key),
+                           "the layers get their own keys, never the encoder's: "
+                           + "\(key)")
+        }
+
+        XCTAssertFalse(prefs.isCorrectorEnabled, "an absent key reads as OFF")
+        XCTAssertFalse(prefs.isCanonicalizerEnabled, "an absent key reads as OFF")
+
+        // No other switch may IMPLY either layer: both rewrite the text the
+        // model reads, so switching the encoder — or its cascade — on must
+        // leave them exactly where the tester left them.
+        prefs.setEnabled(true)
+        prefs.setCascadeEnabled(true)
+        XCTAssertFalse(prefs.isCorrectorEnabled)
+        XCTAssertFalse(prefs.isCanonicalizerEnabled)
+
+        prefs.setCorrectorEnabled(true)
+        XCTAssertTrue(IntentEncoderPreferences(defaults: suite).isCorrectorEnabled,
+                      "the tester's choice survives a relaunch")
+        XCTAssertFalse(prefs.isCanonicalizerEnabled,
+                       "the corrector's switch is not the canonicalizer's")
+        XCTAssertTrue(prefs.isEnabled, "and it never disturbs the encoder's")
+
+        prefs.setCanonicalizerEnabled(true)
+        XCTAssertTrue(IntentEncoderPreferences(defaults: suite).isCanonicalizerEnabled)
+        XCTAssertTrue(prefs.isCorrectorEnabled)
+
+        prefs.setCorrectorEnabled(false)
+        XCTAssertFalse(IntentEncoderPreferences(defaults: suite).isCorrectorEnabled)
+        XCTAssertTrue(prefs.isCanonicalizerEnabled,
+                      "and turning one off leaves the other where it was")
+    }
+
+    /// What the card's disabled rows SAY, tested as far as it can be without
+    /// a view harness: the two rows carry
+    /// `.disabled(!coordinator.intentEncoderEnabled)` (`encoderCard`, the
+    /// same treatment the cascade row gets), because both layers act on the
+    /// ENCODER's input and nothing else consumes them.
+    ///
+    /// The behavioural half of that statement is pinned here: while the
+    /// encoder switch is off, the interpreter that resolves either policy
+    /// (`IntentEncoderInterpreter` → `IntentInputCanonicalization.prepare`)
+    /// is not even constructed, so a stored ON cannot reach a turn the
+    /// encoder is not answering — and the stored choices are left intact for
+    /// the moment the tester switches the encoder back on.
+    func testTheLayerSwitchesCannotOutrunTheEncoderSwitch() throws {
+        let name = "intent-encoder-layers-gated-\(UUID().uuidString)"
+        let suite = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { suite.removePersistentDomain(forName: name) }
+
+        let prefs = IntentEncoderPreferences(defaults: suite)
+        prefs.setCorrectorEnabled(true)
+        prefs.setCanonicalizerEnabled(true)
+        XCTAssertTrue(prefs.isCorrectorEnabled)
+        XCTAssertTrue(prefs.isCanonicalizerEnabled)
+
+        // The encoder switch is untouched: OFF, so the serving gate is closed
+        // and the coordinator's `installLocalBrainSlot` resolves nothing —
+        // neither layer can switch the encoder on, which is the row's point.
+        XCTAssertFalse(prefs.isEnabled)
+        var resolutions = 0
+        let offered = IntentEncoderWiring.gatedEncoder(
+            isEnabled: IntentEncoderWiring.isServingEnabled(isCompiledIn: true,
+                                                            isToggleOn: prefs.isEnabled)) {
+            resolutions += 1
+            return nil   // stand-in for the lazy `intentEncoderInterpreter`
+        }
+        XCTAssertNil(offered)
+        XCTAssertEqual(resolutions, 0,
+                       "with the encoder off there is no interpreter to consume "
+                       + "either layer, whatever the two rows say")
+
+        // …and the encoder switch does not clear them, so the card re-enables
+        // the rows with the tester's matrix still in place.
+        prefs.setEnabled(true)
+        XCTAssertTrue(prefs.isCorrectorEnabled)
+        XCTAssertTrue(prefs.isCanonicalizerEnabled)
+    }
+
     /// The shipped slot builder: `.standaloneEncoder` keeps the encoder's
     /// abstention untouched (the picker brain is never consulted), and
     /// `.encoderFirstEscalate` escalates the SAME abstention to the picker

@@ -2266,4 +2266,352 @@ extension DialectIdentifierTests {
         XCTAssertEqual(pair.observabilityMetadata, pair.canonicalizationMetadata)
         XCTAssertFalse(pair.observabilityMetadata.keys.contains { $0.hasPrefix("correction_") })
     }
+
+    // MARK: [CORRECTION-TOGGLES] The four-way matrix
+
+    /// The two switches the internal-testing card carries for the
+    /// pre-intent layers, in the order they run:
+    /// `sanitise → correct → canonicalize → tokenize`. Every combination
+    /// below is produced by WRITING THE STORED KEYS (through the same
+    /// `IntentEncoderPreferences` the coordinator's `didSet` writes) and
+    /// resolving both policies through the SHIPPED gate functions
+    /// (`STTCorrector.Policy.runtime`, `DialectCanonicalizer.Policy.runtime`)
+    /// with no explicit `isToggleOn` / `correctionPolicy` override — so the
+    /// suite exercises the real pairing, not a hand-built `Policy`.
+    private enum LayerSwitch: String, CaseIterable {
+        case neither
+        case correctorOnly
+        case canonicalizerOnly
+        case both
+
+        var corrector: Bool { self == .correctorOnly || self == .both }
+        var canonicalizer: Bool { self == .canonicalizerOnly || self == .both }
+    }
+
+    /// One transcript, one measured correction row and two canonicalization
+    /// rules, arranged so every arm of the matrix is OBSERVABLE — a
+    /// combination that quietly did nothing would otherwise be
+    /// indistinguishable from one that ran:
+    ///
+    ///   - the corrector's row is `सम्झाइदिनु → सम्झाइदिनुस`, above the
+    ///     fixture bank's 0.65 floor;
+    ///   - rule A (`test-order`) is keyed on the CORRECTOR'S OUTPUT
+    ///     (`सम्झाइदिनुस → सम्झाइदिनुस्`), so it can fire only when the
+    ///     corrector ran first — the §6.1 order, made observable rather than
+    ///     asserted;
+    ///   - rule B (`test-plain`) is keyed on a token the corrector never
+    ///     touches (`गर्नुहोस → गर्नुहोस्`; it is not in the bank and is
+    ///     outside every candidate window), so the canonicalizer-only arm
+    ///     rewrites something instead of looking identical to the inert one.
+    private func makeToggleMatrixFixture()
+    -> (lexicon: CorrectionLexicon, tables: VariantTableSet, transcript: String) {
+        let lexicon = makeCorrectionLexicon(
+            threshold: 0.65,
+            lexicon: ["सम्झाइदिनुस", "होस्"],
+            rows: [("fixture-hos", "होस", "होस्", "truncation", 5)])
+        let tables = makeSet(orthographic: makeTable("canonical-orthographic", entries: [
+            makeEntry("test-order",
+                      variant: "सम्झाइदिनुस",
+                      canonical: "सम्झाइदिनुस्",
+                      examples: ["सम्झाइदिनुस", "भोलि सम्झाइदिनुस"]),
+            makeEntry("test-plain",
+                      variant: "गर्नुहोस",
+                      canonical: "गर्नुहोस्",
+                      examples: ["गर्नुहोस", "अब गर्नुहोस"])
+        ]))
+        return (lexicon, tables, "भोलि सम्झाइदिनु गर्नुहोस")
+    }
+
+    /// The seam for one combination: the switches are persisted first, then
+    /// both policies are resolved from the SAME store — which is the whole
+    /// point of the matrix, since a switch that never reaches a policy would
+    /// make every arm below agree.
+    private func matrixPair(_ combination: LayerSwitch,
+                            defaults: UserDefaults,
+                            fixture: (lexicon: CorrectionLexicon,
+                                      tables: VariantTableSet,
+                                      transcript: String))
+    -> (pair: IntentTranscriptPair, policy: DialectCanonicalizer.Policy) {
+        let preferences = IntentEncoderPreferences(defaults: defaults)
+        preferences.setCorrectorEnabled(combination.corrector)
+        preferences.setCanonicalizerEnabled(combination.canonicalizer)
+
+        let policy = DialectCanonicalizer.Policy.runtime(defaults: defaults,
+                                                         isCompiledIn: true)
+        let pair = IntentInputCanonicalization.prepare(
+            sanitisedTranscript: fixture.transcript,
+            dialect: .default,
+            tables: fixture.tables,
+            policy: policy,
+            correctionPolicy: STTCorrector.Policy.runtime(defaults: defaults,
+                                                          isCompiledIn: true,
+                                                          lexicon: fixture.lexicon),
+            correctionLexicon: fixture.lexicon)
+        return (pair, policy)
+    }
+
+    /// The matrix itself: each combination's policy outcome, its effect at the
+    /// seam, and the invariants that must hold in ALL FOUR — the safety net's
+    /// input, the picker brain's input, and the ORDER (the canonicalizer's
+    /// input is the corrector's output, never the raw transcript).
+    func testTheFourWayMatrixResolvesAndRunsEveryCombinationInOrder() throws {
+        let fixture = makeToggleMatrixFixture()
+        let defaults = isolateDefaults()
+        let original = fixture.transcript
+
+        var seen: [LayerSwitch: IntentTranscriptPair] = [:]
+        for combination in LayerSwitch.allCases {
+            let (pair, policy) = matrixPair(combination, defaults: defaults,
+                                            fixture: fixture)
+            seen[combination] = pair
+
+            // D-1, in every combination, on every arm: the keyword safety net
+            // and the picker brain read the ORIGINAL sanitised transcript.
+            XCTAssertEqual(pair.safetyNetInput, original,
+                           "\(combination): the safety net must read the original")
+            XCTAssertEqual(pair.pickerBrainInput, original,
+                           "\(combination): the picker brain reads the original too")
+
+            // The order invariant, stated as an equality that a reversed
+            // composition would fail: re-canonicalizing the pair's own
+            // `correctedInput` reproduces exactly what the seam produced. If
+            // the canonicalizer had read the raw transcript, this would agree
+            // only by accident — and rule A is written so that it cannot.
+            let rederived = DialectCanonicalizer.canonicalize(pair.correctedInput,
+                                                              dialect: .default,
+                                                              tables: fixture.tables,
+                                                              policy: policy)
+            XCTAssertEqual(pair.modelInput, rederived.canonical,
+                           "\(combination): modelInput must be the canonicalization "
+                           + "OF the corrector's output")
+            XCTAssertEqual(pair.applications.map(\.ruleID),
+                           rederived.applications.map(\.ruleID),
+                           "\(combination): provenance must agree with the re-derivation")
+
+            // The corrector's own gate: on exactly when the switch is on.
+            XCTAssertEqual(pair.correction?.mode == .off, !combination.corrector,
+                           "\(combination): the corrector's arm follows its switch")
+            if combination.corrector {
+                XCTAssertEqual(pair.correction?.applications.count, 1,
+                               "\(combination): one measured row fires, and the "
+                               + "canonicalizer's rule-B token is left alone")
+            }
+        }
+
+        let neither = try XCTUnwrap(seen[.neither])
+        let correctorOnly = try XCTUnwrap(seen[.correctorOnly])
+        let canonicalizerOnly = try XCTUnwrap(seen[.canonicalizerOnly])
+        let both = try XCTUnwrap(seen[.both])
+
+        // NEITHER — the shipped default, and a byte-identical pass-through.
+        XCTAssertEqual(neither.modelInput, original)
+        XCTAssertEqual(neither.correctedInput, original)
+        XCTAssertTrue(neither.isIdentity)
+        XCTAssertTrue(neither.applications.isEmpty)
+        XCTAssertEqual(neither.correction?.mode, .off)
+        XCTAssertFalse(neither.observabilityMetadata.keys.contains {
+            $0.hasPrefix("correction_")
+        }, "a layer that did not run adds no keys to the payload")
+        XCTAssertEqual(neither.observabilityMetadata, neither.canonicalizationMetadata)
+
+        // CORRECTOR ONLY — the corrected text, canonicalized by nobody. Rule A
+        // is keyed on the corrected form and does NOT fire here: the
+        // canonicalizer is genuinely off, not merely unmatched.
+        XCTAssertEqual(correctorOnly.correctedInput, "भोलि सम्झाइदिनुस गर्नुहोस")
+        XCTAssertEqual(correctorOnly.modelInput, "भोलि सम्झाइदिनुस गर्नुहोस",
+                       "rule A's variant is not in the raw text and rule B's is "
+                       + "not in the corrected one")
+        XCTAssertTrue(correctorOnly.applications.isEmpty)
+        XCTAssertFalse(correctorOnly.isIdentity)
+        XCTAssertTrue(correctorOnly.observabilityMetadata.keys.contains {
+            $0.hasPrefix("correction_")
+        }, "the corrector's own count-only keys ride the payload when it ran")
+        XCTAssertNil(correctorOnly.observabilityMetadata["rule_ids"],
+                     "and the canonicalizer's provenance stays absent")
+
+        // CANONICALIZER ONLY — the raw text went in and rule B fired; rule A
+        // could not, because the corrector never produced its variant.
+        XCTAssertEqual(canonicalizerOnly.correctedInput, original)
+        XCTAssertEqual(canonicalizerOnly.modelInput, "भोलि सम्झाइदिनु गर्नुहोस्")
+        XCTAssertEqual(canonicalizerOnly.applications.map(\.ruleID), ["test-plain"])
+        XCTAssertEqual(canonicalizerOnly.correction?.mode, .off)
+        XCTAssertFalse(canonicalizerOnly.observabilityMetadata.keys.contains {
+            $0.hasPrefix("correction_")
+        })
+
+        // BOTH — the one combination in which rule A can fire, because it is
+        // keyed on what only the corrector can produce. This is the order
+        // invariant with teeth: reverse the composition and this expectation
+        // is unreachable, not merely different.
+        XCTAssertEqual(both.correctedInput, "भोलि सम्झाइदिनुस गर्नुहोस")
+        XCTAssertEqual(both.modelInput, "भोलि सम्झाइदिनुस् गर्नुहोस्")
+        XCTAssertEqual(both.applications.map(\.ruleID).sorted(),
+                       ["test-order", "test-plain"])
+        XCTAssertEqual(both.correction?.applications.count, 1)
+        XCTAssertFalse(both.isIdentity)
+        XCTAssertFalse(both.canonicalizationIsIdentity)
+    }
+
+    /// The policy outcomes themselves, one row per combination: the corrector
+    /// switch moves the corrector's arm and ONLY the corrector's, the
+    /// canonicalizer switch moves the canonicalizer's gate and only that, and
+    /// the compile gate still cannot be talked round by either stored value —
+    /// the property that keeps a release build inert whatever the card says.
+    func testEachSwitchMovesOnlyItsOwnGateAndTheCompileGateStillWins() {
+        let lexicon = makeCorrectionLexicon(threshold: 0.65,
+                                            lexicon: ["सम्झाइदिनुस", "होस्"],
+                                            rows: [("fixture-hos", "होस", "होस्",
+                                                    "truncation", 5)])
+
+        for combination in LayerSwitch.allCases {
+            let defaults = isolateDefaults()
+            let preferences = IntentEncoderPreferences(defaults: defaults)
+            preferences.setCorrectorEnabled(combination.corrector)
+            preferences.setCanonicalizerEnabled(combination.canonicalizer)
+
+            // The stored keys are what they were set to (an absent key would
+            // read OFF, so the round trip is part of the matrix).
+            XCTAssertEqual(preferences.isCorrectorEnabled, combination.corrector,
+                           "\(combination): the corrector switch round-trips")
+            XCTAssertEqual(preferences.isCanonicalizerEnabled,
+                           combination.canonicalizer,
+                           "\(combination): the canonicalizer switch round-trips")
+
+            let correctorPolicy = STTCorrector.Policy.runtime(defaults: defaults,
+                                                              isCompiledIn: true,
+                                                              lexicon: lexicon)
+            let canonicalizerPolicy = DialectCanonicalizer.Policy.runtime(
+                defaults: defaults, isCompiledIn: true)
+
+            XCTAssertEqual(correctorPolicy.mode == .apply, combination.corrector,
+                           "\(combination): the corrector's arm follows its own switch")
+            XCTAssertEqual(canonicalizerPolicy.enabled, combination.canonicalizer,
+                           "\(combination): the canonicalizer's gate follows its own "
+                           + "switch")
+            // The loop is itself the independence proof: across the four rows
+            // each gate moves only when ITS switch moves ((correctorOnly) vs
+            // (both) differs only in the canonicalizer's, and (neither) vs
+            // (correctorOnly) only in the corrector's).
+
+            // The compile gate is still a gate: with INTENT_ENCODER absent,
+            // BOTH layers are inert in every combination — including the
+            // stored `.apply` the corrector's own key would otherwise select.
+            XCTAssertEqual(STTCorrector.Policy.runtime(defaults: defaults,
+                                                       isCompiledIn: false,
+                                                       lexicon: lexicon).mode,
+                           .off,
+                           "\(combination): the compile gate cannot be stored round")
+            XCTAssertFalse(DialectCanonicalizer.Policy.runtime(defaults: defaults,
+                                                               isCompiledIn: false)
+                .enabled,
+                           "\(combination): nor can the canonicalizer's")
+        }
+    }
+
+    /// The corrector's arm resolution, pinned: an explicit argument wins, then
+    /// a stored three-way mode (the debugger's arm, which must keep working),
+    /// then the card's switch. The switch is what makes the matrix reachable
+    /// with no debugger at all; the stored arm is what keeps a deliberate
+    /// `.shadow` or `.off` pin meaningful.
+    func testTheCorrectorSwitchIsTheThirdSourceOfTheArm() {
+        let lexicon = makeCorrectionLexicon(threshold: 0.65,
+                                            lexicon: ["होस्"],
+                                            rows: [("fixture-hos", "होस", "होस्",
+                                                    "truncation", 5)])
+        let settings = STTCorrectionSettings(defaults: isolateDefaults(),
+                                             lexicon: lexicon)
+
+        // No stored mode, switch off: the control arm — the shipped state.
+        // (`settings` is here to pin the type's own defaults; the assertions
+        // below go through the store `Policy.runtime` actually reads.)
+        let offDefaults = isolateDefaults()
+        XCTAssertNil(STTCorrectionSettings(defaults: offDefaults, lexicon: lexicon)
+            .storedMode, "an absent key is an ABSENT arm, not a stored .off")
+        XCTAssertEqual(STTCorrector.Policy.runtime(defaults: offDefaults,
+                                                   isCompiledIn: true,
+                                                   lexicon: lexicon).mode, .off)
+
+        // No stored mode, switch on: `.apply` — the card can turn the layer on
+        // with no debugger and no second key.
+        let onDefaults = isolateDefaults()
+        IntentEncoderPreferences(defaults: onDefaults).setCorrectorEnabled(true)
+        XCTAssertEqual(STTCorrector.Policy.runtime(defaults: onDefaults,
+                                                   isCompiledIn: true,
+                                                   lexicon: lexicon).mode, .apply)
+
+        // A stored arm outranks the switch, in both directions: the
+        // debugger's `.shadow` survives a switch that is on, and a stored
+        // `.off` is a deliberate control-arm pin rather than an absence.
+        let shadowDefaults = isolateDefaults()
+        IntentEncoderPreferences(defaults: shadowDefaults).setCorrectorEnabled(true)
+        STTCorrectionSettings(defaults: shadowDefaults, lexicon: lexicon).setMode(.shadow)
+        XCTAssertEqual(STTCorrector.Policy.runtime(defaults: shadowDefaults,
+                                                   isCompiledIn: true,
+                                                   lexicon: lexicon).mode, .shadow)
+
+        let pinnedOffDefaults = isolateDefaults()
+        IntentEncoderPreferences(defaults: pinnedOffDefaults).setCorrectorEnabled(true)
+        STTCorrectionSettings(defaults: pinnedOffDefaults, lexicon: lexicon).setMode(.off)
+        XCTAssertEqual(STTCorrector.Policy.runtime(defaults: pinnedOffDefaults,
+                                                   isCompiledIn: true,
+                                                   lexicon: lexicon).mode, .off)
+        // `reset()` is what clears the pin.
+        STTCorrectionSettings(defaults: pinnedOffDefaults, lexicon: lexicon).reset()
+        XCTAssertNil(STTCorrectionSettings(defaults: pinnedOffDefaults, lexicon: lexicon)
+            .storedMode)
+        XCTAssertEqual(STTCorrector.Policy.runtime(defaults: pinnedOffDefaults,
+                                                   isCompiledIn: true,
+                                                   lexicon: lexicon).mode, .apply,
+                       "with the pin cleared the switch is the arm again")
+
+        // An explicit argument outranks everything — the call sites that pass
+        // one (tests, a future settings surface) are not silently re-routed.
+        XCTAssertEqual(STTCorrector.Policy.runtime(defaults: pinnedOffDefaults,
+                                                   isCompiledIn: true,
+                                                   isModeOn: .shadow,
+                                                   lexicon: lexicon).mode, .shadow)
+        // The settings type's own reading of an absent key, unchanged by any
+        // of the above: the conservative value.
+        XCTAssertEqual(settings.mode, .off)
+        XCTAssertNil(settings.threshold, "no debugger has moved the threshold either")
+    }
+
+    /// The canonicalizer's two keys: the card's switch
+    /// (`intentEncoder.canonicalizer`) turns the gate on, the key this class
+    /// shipped with stays READABLE beside it (a device or a debugger that set
+    /// it is not silently switched off), and `reset()` clears both.
+    func testTheCanonicalizerSwitchAndTheOlderKeyBothRead() {
+        let defaults = isolateDefaults()
+        let preferences = CanonicalizerPreferences(defaults: defaults)
+        XCTAssertEqual(IntentEncoderPreferences.canonicalizerKey,
+                       "intentEncoder.canonicalizer")
+
+        // The card's switch alone: on.
+        IntentEncoderPreferences(defaults: defaults).setCanonicalizerEnabled(true)
+        XCTAssertTrue(preferences.canonicalizerEnabled,
+                      "the internal-testing switch is a source of the gate")
+        XCTAssertTrue(DialectCanonicalizer.Policy.runtime(defaults: defaults,
+                                                          isCompiledIn: true).enabled)
+
+        // The older key alone: still on (nothing is silently switched off).
+        let legacyOnly = isolateDefaults()
+        legacyOnly.set(true, forKey: CanonicalizerPreferences.canonicalizerEnabledKey)
+        XCTAssertTrue(CanonicalizerPreferences(defaults: legacyOnly).canonicalizerEnabled)
+
+        // The class's own setter keeps BOTH keys in step, so a debugger
+        // reading either one sees the truth.
+        preferences.setCanonicalizerEnabled(false)
+        XCTAssertFalse(preferences.canonicalizerEnabled)
+        XCTAssertFalse(defaults.bool(forKey: CanonicalizerPreferences.canonicalizerEnabledKey))
+        XCTAssertFalse(DialectCanonicalizer.Policy.runtime(defaults: defaults,
+                                                           isCompiledIn: true).enabled)
+
+        IntentEncoderPreferences(defaults: defaults).setCanonicalizerEnabled(true)
+        preferences.setCanonicalizerEnabled(true)
+        preferences.reset()
+        XCTAssertFalse(preferences.canonicalizerEnabled,
+                       "reset clears the switch as well as the older key")
+        XCTAssertNil(defaults.object(forKey: IntentEncoderPreferences.canonicalizerKey))
+        XCTAssertNil(defaults.object(forKey: CanonicalizerPreferences.canonicalizerEnabledKey))
+    }
 }
