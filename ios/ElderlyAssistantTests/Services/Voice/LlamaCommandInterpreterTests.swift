@@ -467,4 +467,90 @@ final class LlamaCommandInterpreterTests: XCTestCase {
         XCTAssertTrue(prompt?.contains("\"intent\"") == true)
         XCTAssertFalse(prompt?.contains("\"action\"") == true)
     }
+
+    // MARK: - [PIPELINE-TRACE] the picker brain's rows
+    //
+    // The picker brain is the FINAL LLM of the turn, so its round-trip is
+    // the number the whole trace exists to show. Pinned here with a
+    // scripted clock: the row's milliseconds are exactly the span's, and
+    // the prompt's size rides the row as a structured count (an estimate —
+    // no tokenizer in this process measures the llama.cpp prompt).
+    // When the brain cannot run at all, both of its stages are MARKED off
+    // with the reason, never omitted.
+
+    /// One scripted nanosecond reading per `now()` call — the trace
+    /// recorder's injectable clock, so a row's ms are exact.
+    private final class ScriptedTraceClock {
+        private let lock = NSLock()
+        private var readings: [UInt64]
+        init(_ readings: [UInt64]) { self.readings = readings }
+        func now() -> UInt64 {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !readings.isEmpty else { return 0 }
+            return readings.removeFirst()
+        }
+    }
+
+    func testTraceCapturesThePickerBrainsFinalLLMTime() throws {
+        let recorder = PipelineTraceRecorder()
+        // start(prompt) = 0, finish(prompt) = 10 ms, start(inference) =
+        // 20 ms, finish(inference) = 20 ms + 1234 ms.
+        recorder.now = ScriptedTraceClock(
+            [0, 10_000_000, 20_000_000, 1_254_000_000]).now
+        let interp = LlamaCommandInterpreter(modelStore: store,
+                                             observabilityBus: bus,
+                                             traceRecorder: recorder)
+        interp.generateOverride = { _, _ in
+            #"{"intent":"query","response":"भोलि घाम लाग्नेछ।","confidence":0.9}"#
+        }
+        XCTAssertTrue(interp.isAvailable)
+
+        recorder.beginTurn()
+        let cmd = interpret(interp)
+        let trace = recorder.finishTurn()
+
+        XCTAssertEqual(cmd?.action, .query, "the traced turn still answers")
+        XCTAssertEqual(trace.rows.map(\.stage), PipelineTraceStage.allCases,
+                       "one row per stage, in canonical pipeline order")
+        XCTAssertTrue(trace.rows.allSatisfy { $0.durationMs >= 0 })
+
+        let prompt = try XCTUnwrap(trace.rows.first { $0.stage == .pickerPrompt })
+        XCTAssertTrue(prompt.ran)
+        XCTAssertEqual(prompt.decision, "built")
+        XCTAssertEqual(prompt.durationMs, 10, "the prompt build's own span")
+        XCTAssertTrue(prompt.outputSummary.contains("tok (est)"),
+                      "the prompt's size, labelled as the estimate it is")
+        XCTAssertGreaterThan(prompt.tokenCount ?? 0, 0)
+
+        let llm = try XCTUnwrap(trace.rows.first { $0.stage == .pickerInference })
+        XCTAssertTrue(llm.ran, "the final LLM's round-trip is traced")
+        XCTAssertEqual(llm.durationMs, 1_234,
+                       "…with the LLM's OWN milliseconds — the number the turn waited on")
+        XCTAssertEqual(llm.decision, "command")
+        XCTAssertTrue(llm.outputSummary.contains("query"))
+        XCTAssertEqual(llm.tokenCount, prompt.tokenCount,
+                       "the prompt size rides the round-trip's row too")
+    }
+
+    func testTraceMarksBothPickerStagesOffWhenTheBrainIsUnavailable() {
+        let recorder = PipelineTraceRecorder()
+        let interp = LlamaCommandInterpreter(modelStore: store,
+                                             observabilityBus: bus,
+                                             traceRecorder: recorder)
+        XCTAssertFalse(interp.isAvailable, "no cached model, no override")
+
+        recorder.beginTurn()
+        XCTAssertNil(interpret(interp))
+        let trace = recorder.finishTurn()
+
+        XCTAssertEqual(trace.ranCount, 0)
+        for stage in [PipelineTraceStage.pickerPrompt, .pickerInference] {
+            let row = trace.rows.first { $0.stage == stage }
+            XCTAssertEqual(row?.ran, false, "\(stage.rawValue) did not run")
+            XCTAssertEqual(row?.decision, "picker_unavailable",
+                           "marked with the reason, not omitted")
+            XCTAssertEqual(row?.decisionText, "off(picker_unavailable)")
+        }
+    }
 }

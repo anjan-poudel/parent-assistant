@@ -676,6 +676,16 @@ final class AppCoordinator: ObservableObject {
     /// brain, the cascade chain and the speaker; the coordinator itself
     /// never reads a stage.
     private let turnTimingRecorder: TurnTimingRecorder?
+    /// [PIPELINE-TRACE] The full-width debug trace's recorder: one row per
+    /// pipeline gate (input, output, decision, ms) for the LAST turn,
+    /// in memory only. Gated exactly like the timing recorder above (the
+    /// same compile-time condition, so a build without `INTENT_ENCODER`
+    /// constructs neither), and injected into every gate that can describe
+    /// its own step: the pipeline (STT), the encoder (its three stages),
+    /// the cascade chain, the picker brain, the router's band policy and
+    /// the speaker. The coordinator only PUBLISHES the assembled trace
+    /// (`lastPipelineTrace`) — it never reads a row.
+    private let pipelineTraceRecorder: PipelineTraceRecorder?
     /// [TURN-TIMING-BREAKDOWN] The breakdown's single emission point —
     /// attached to `turnTracer` in `composePostFirstFrame()`, where the
     /// tracer's handlers are wired. Nil exactly when the recorder is.
@@ -1198,7 +1208,9 @@ final class AppCoordinator: ObservableObject {
         // [TURN-TIMING-BREAKDOWN] Nil on every build but an
         // `INTENT_ENCODER` one — the picker brain's prompt-build and
         // inference spans cost a nil check there.
-        timingRecorder: turnTimingRecorder
+        timingRecorder: turnTimingRecorder,
+        // [PIPELINE-TRACE] …and the picker brain's two trace rows.
+        traceRecorder: pipelineTraceRecorder
     )
     /// [ENCODER-RUNTIME-TOGGLE] Settings → AI मोडेल (hidden) → the
     /// internal-testing switch that lets the encoder take the local-brain
@@ -1305,6 +1317,22 @@ final class AppCoordinator: ObservableObject {
     /// reporter exists to fill it.
     @Published private(set) var lastTurnTimingBreakdown: TurnTimingBreakdown?
 
+    /// [PIPELINE-TRACE] The LAST finalized turn's full pipeline trace,
+    /// behind the internal-testing card's "Pipeline trace" section: one row
+    /// per gate — STT, corrector, canonicalizer, the encoder's three
+    /// stages, the band policy, the cascade, the picker brain's prompt and
+    /// its FINAL LLM round-trip, and the TTS start — each with its input
+    /// summary, output summary, decision token and milliseconds.
+    ///
+    /// IN MEMORY ONLY — never persisted, never written to the encrypted
+    /// stores. Unlike the breakdown above, the rows MAY name words (the
+    /// recognised text, a corrected form, a decoded slot, the spoken
+    /// reply): the card is the debugger's view on the device, the same
+    /// disclosure posture the "Last correction" line above already ships,
+    /// and the value disappears with the process. The observability
+    /// events are the count-only half — see `PipelineTrace.eventMetadata`.
+    @Published private(set) var lastPipelineTrace: PipelineTrace?
+
     /// [TG-12] The LAST turn's correction readout, behind the
     /// internal-testing card's "Last correction" line — the same shape and
     /// the same rules as `lastTurnTimingBreakdown` above.
@@ -1361,7 +1389,10 @@ final class AppCoordinator: ObservableObject {
             // (tokenizer / CoreML forward / decode). Non-nil exactly when
             // this build compiles `INTENT_ENCODER` in — the encoder is
             // only ever constructed on such a build anyway.
-            timingRecorder: turnTimingRecorder
+            timingRecorder: turnTimingRecorder,
+            // [PIPELINE-TRACE] …and the same three stages' trace rows
+            // (token count / decoded intent+slots / decision).
+            traceRecorder: pipelineTraceRecorder
         )
         // [TG-12] The corrector's readout for the card's "Last correction"
         // line, wired at construction exactly as the turn-timing reporter is
@@ -1465,6 +1496,8 @@ final class AppCoordinator: ObservableObject {
             // [TURN-TIMING-BREAKDOWN] The cascade's decision span rides
             // the chain that owns the decision; nil on non-gated builds.
             timingRecorder: turnTimingRecorder,
+            // [PIPELINE-TRACE] …and the cascade's trace row.
+            traceRecorder: pipelineTraceRecorder,
             onEscalated: { [weak self] reason in
                 self?.emitEncoderEscalatedToPickerBrain(reason)
             })
@@ -1762,8 +1795,16 @@ final class AppCoordinator: ObservableObject {
         let timingRecorder: TurnTimingRecorder? =
             IntentEncoderFeature.isEnabled ? TurnTimingRecorder() : nil
         self.turnTimingRecorder = timingRecorder
+        // [PIPELINE-TRACE] The debug trace's recorder, gated by the same
+        // flag and handed to the reporter below so its turn edges ride the
+        // SAME attach point the timing recorder's do — the two can never
+        // disagree about where a turn began.
+        let traceRecorder: PipelineTraceRecorder? =
+            IntentEncoderFeature.isEnabled ? PipelineTraceRecorder() : nil
+        self.pipelineTraceRecorder = traceRecorder
         self.turnLatencyReporter = timingRecorder.map {
-            TurnLatencyReporter(observabilityBus: bus, recorder: $0)
+            TurnLatencyReporter(observabilityBus: bus, recorder: $0,
+                                traceRecorder: traceRecorder)
         }
         self.alarmScheduler = UNNotificationScheduler()
         // [STARTUP-PERF] The keychain-backed stores below are CREATED
@@ -2514,6 +2555,15 @@ final class AppCoordinator: ObservableObject {
                 self?.lastTurnTimingBreakdown = breakdown
             }
         }
+        // [PIPELINE-TRACE] The trace's readout, published on the same
+        // hop: the reporter assembles it on the finalizing thread and this
+        // hands it to the "Pipeline trace" section (in-memory only — see
+        // `lastPipelineTrace`).
+        turnLatencyReporter?.onTraceReported = { [weak self] trace in
+            DispatchQueue.main.async {
+                self?.lastPipelineTrace = trace
+            }
+        }
         turnLatencyReporter?.attach(to: turnTracer)
         // [LAT-M2] Ack fast lane: one shared file-backed pre-ack cache —
         // the speaker pre-synthesizes the ack variants into it at warm
@@ -2528,6 +2578,8 @@ final class AppCoordinator: ObservableObject {
             // [TURN-TIMING-BREAKDOWN] The speaker's `tts_start` ramp
             // (handed-to-speaker → audio start). Nil on non-gated builds.
             timingRecorder: turnTimingRecorder,
+            // [PIPELINE-TRACE] …and the trace's `tts` row.
+            traceRecorder: pipelineTraceRecorder,
             ackCache: ackAudioCache
         )
         let ackFastLanePlayer = AckFastLanePlayer(cache: ackAudioCache,
@@ -2655,7 +2707,11 @@ final class AppCoordinator: ObservableObject {
             pluginRegistry: pluginRegistry
         )
         self.geminiCommandInterpreter = geminiInterpreter
-        let router3 = IntentRouter(cache: intentCache, observabilityBus: observabilityBus)
+        let router3 = IntentRouter(cache: intentCache, observabilityBus: observabilityBus,
+                                   // [PIPELINE-TRACE] The band policy's own
+                                   // row (score in, branch out); nil on
+                                   // non-gated builds.
+                                   traceRecorder: pipelineTraceRecorder)
         // Local brain = the fine-tuned intent model while its GGUF is
         // cached (spec §8), else the LLaMA interpreter as the spec's
         // "LLaMA today" stand-in. Installing the fine-tuned model bare
@@ -3533,7 +3589,11 @@ self.noteTalkContractChanged()
             voiceActivityDetector: voiceActivityDetector,
             router: router,
             observabilityBus: observabilityBus,
-            turnTracer: turnTracer
+            turnTracer: turnTracer,
+            // [PIPELINE-TRACE] The pipeline is the one place the
+            // recognizer's result exists, so the `.stt` row is recorded
+            // there; nil on non-gated builds.
+            traceRecorder: pipelineTraceRecorder
         )
         // [NOISE-FILTER] Attach the restored A/B stage (nil when OFF —
         // the hot-swap seam emits the honest engine name either way).

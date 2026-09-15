@@ -61,6 +61,12 @@ final class IntentRouter: CommandInterpreter {
     private let cache: IntentCommandCache
     private let observabilityBus: ObservabilityBus
     private let config: Config
+    /// [PIPELINE-TRACE] The debug trace's recorder — the `band` row is
+    /// recorded here, where the band policy makes its call (score in, the
+    /// branch taken out). Nil (the default, and tests) makes each call
+    /// below a nil check. Instrumentation only: the policy never reads a
+    /// row, and the returned command is byte-identical either way.
+    private let traceRecorder: PipelineTraceRecorder?
 
     /// Optional brains — nil/unavailable means that layer simply doesn't
     /// run. Swapped by `AppCoordinator` as model availability changes.
@@ -98,10 +104,12 @@ final class IntentRouter: CommandInterpreter {
 
     init(cache: IntentCommandCache,
          observabilityBus: ObservabilityBus,
-         config: Config = .default) {
+         config: Config = .default,
+         traceRecorder: PipelineTraceRecorder? = nil) {
         self.cache = cache
         self.observabilityBus = observabilityBus
         self.config = config
+        self.traceRecorder = traceRecorder
     }
 
     // MARK: - Cloud preparse bridge (collapse #1)
@@ -209,6 +217,15 @@ final class IntentRouter: CommandInterpreter {
                                                                 final: !canEscalate) {
                     completion(accepted)
                 } else if canEscalate {
+                    // [PIPELINE-TRACE] A nil command never reached the
+                    // band policy (`bandChecked` was not called at all),
+                    // so the escalation — not a band outcome — is what
+                    // the row reports. A command that WAS banded and
+                    // dropped already left its own (scored) row, and is
+                    // deliberately not overwritten here.
+                    if command == nil {
+                        self.recordBandNoCommand("escalate", source: "local")
+                    }
                     if (local as? InterpreterFailureReporting)?
                         .lastInferenceFailureReason != nil {
                         // The legacy ladder escalates any nil, but a
@@ -229,10 +246,20 @@ final class IntentRouter: CommandInterpreter {
                     // when a key + budget allow, the cloud answers with
                     // the honest reason event instead of a bare
                     // apology.
+                    if command == nil {
+                        self.recordBandNoCommand("escalate", source: "local")
+                    }
                     self.emitLocalFailedFallback()
                     self.escalateToCloud(transcript: transcript, context: context,
                                          completion: completion)
                 } else {
+                    // [PIPELINE-TRACE] The turn ends in the router: a nil
+                    // command never reached the band policy at all. A
+                    // command that was banded and dropped keeps its own
+                    // (scored) row.
+                    if command == nil {
+                        self.recordBandNoCommand("abstain", source: "local")
+                    }
                     completion(nil)
                 }
             }
@@ -303,6 +330,38 @@ final class IntentRouter: CommandInterpreter {
         }
     }
 
+    // MARK: - Band policy ([PIPELINE-TRACE] renderings)
+
+    /// `set_reminder 0.55 via local` — what came into the policy: the
+    /// action, its score, and which layer produced it (the `source` token
+    /// is closed vocabulary: preparse / local / local_fallback / cloud).
+    static func bandInput(_ command: InterpretedCommand, source: String) -> String {
+        PipelineTraceSummary.text(
+            "\(command.action.rawValue) \(PipelineTraceSummary.score(command.confidence)) via \(source)")
+    }
+
+    /// `accept/local score=0.83` — the branch taken, the layer, and the
+    /// number. A closed-vocabulary token plus a numeric reading, so the
+    /// RELEASE console line (which prints the decision and nothing else)
+    /// still says where the turn's score landed.
+    static func bandDecision(_ outcome: String, source: String,
+                             confidence: Double) -> String {
+        "\(outcome)/\(source) score=\(PipelineTraceSummary.score(confidence))"
+    }
+
+    /// The no-command row: the policy never saw a command, so there is no
+    /// score to band — the token says which way the turn went instead
+    /// (`escalate` when a higher layer takes it, `abstain` when the turn
+    /// ends here, as it does in the router's final `else`).
+    private func recordBandNoCommand(_ outcome: String, source: String) {
+        traceRecorder?.record(.band,
+                              input: "no command",
+                              output: outcome == "escalate"
+                                  ? "nothing to band — the cloud takes the turn"
+                                  : "nothing to band — the turn ends here",
+                              decision: "\(outcome)/\(source)")
+    }
+
     // MARK: - Band policy
 
     /// ACCEPT at ≥acceptThreshold; REPHRASE band dispatches
@@ -313,19 +372,47 @@ final class IntentRouter: CommandInterpreter {
     /// is RETURNED, and `CommandRouter` turns it into a yes/no
     /// rephrase-as-question (spec §4 REPHRASE band, open decision #6):
     /// asking costs one exchange; dropping costs the whole command.
+    ///
+    /// [PIPELINE-TRACE] Every branch below also closes the turn's `band`
+    /// row — the one place that knows WHICH branch the score landed in
+    /// (the caller only sees the return value, and the two drop reasons
+    /// are indistinguishable from it). Instrumentation only: the span is
+    /// opened and finished around the UNCHANGED checks, and no branch
+    /// reads it.
     private func bandChecked(_ command: InterpretedCommand, source: String,
                              final: Bool = false) -> InterpretedCommand? {
-        if command.confidence >= config.acceptThreshold { return command }
-        guard command.confidence >= config.rephraseThreshold else { return nil }
+        let traceSpan = traceRecorder?.start(
+            .band, input: Self.bandInput(command, source: source))
+        if command.confidence >= config.acceptThreshold {
+            traceSpan?.finish(output: "in the accept band",
+                              decision: Self.bandDecision("accept", source: source,
+                                                          confidence: command.confidence))
+            return command
+        }
+        guard command.confidence >= config.rephraseThreshold else {
+            traceSpan?.finish(output: "below the rephrase floor — dropped",
+                              decision: Self.bandDecision("drop", source: source,
+                                                          confidence: command.confidence))
+            return nil
+        }
         guard ConfirmationTier.tier(for: command.action) == .confirm else {
             if final {
                 emit("rephrase_band_question", outcome: "info")
+                traceSpan?.finish(output: "mid-band, tier-free, no layers left — rephrase question",
+                                  decision: Self.bandDecision("rephrase", source: source,
+                                                              confidence: command.confidence))
                 return command
             }
             emit("rephrase_band_dropped", outcome: "info")
+            traceSpan?.finish(output: "mid-band, tier-free — dropped for the next layer",
+                              decision: Self.bandDecision("escalate", source: source,
+                                                          confidence: command.confidence))
             return nil
         }
         emit("rephrase_band_confirmed_via_tier1", outcome: "info")
+        traceSpan?.finish(output: "mid-band, tier-confirm — confirmation question",
+                          decision: Self.bandDecision("confirm", source: source,
+                                                      confidence: command.confidence))
         return command
     }
 

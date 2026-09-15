@@ -83,6 +83,14 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
     /// Instrumentation only — the decision itself never reads it.
     private let timingRecorder: TurnTimingRecorder?
 
+    /// [PIPELINE-TRACE] The debug trace's recorder — the same decision the
+    /// timing span above measures, told in full (the preferred brain's
+    /// answer in, the branch taken out, the escalation vocabulary as the
+    /// decision). Nil (the default, and every non-gated build) makes every
+    /// call below a nil check. Instrumentation only: no branch here reads
+    /// a row.
+    private let traceRecorder: PipelineTraceRecorder?
+
     /// Which brain answered the LAST turn (true = preferred), so the
     /// failure reason below describes the brain that actually served —
     /// under a cascade the preferred brain's timeout must not be reported
@@ -94,11 +102,13 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
     init(preferred: CommandInterpreter,
          standIn: CommandInterpreter,
          cascade: Cascade? = nil,
-         timingRecorder: TurnTimingRecorder? = nil) {
+         timingRecorder: TurnTimingRecorder? = nil,
+         traceRecorder: PipelineTraceRecorder? = nil) {
         self.preferred = preferred
         self.standIn = standIn
         self.cascade = cascade
         self.timingRecorder = timingRecorder
+        self.traceRecorder = traceRecorder
     }
 
     var isAvailable: Bool {
@@ -120,11 +130,21 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
                    completion: @escaping (InterpretedCommand?) -> Void) {
         guard preferred.isAvailable else {
             // Availability-only substitution — the rule in every mode.
+            // [PIPELINE-TRACE] The cascade stage did not run: this turn
+            // never reached it (the encoder-first brain is missing), and
+            // the row says which precondition failed rather than
+            // vanishing.
+            traceRecorder?.recordOff([.cascade], reason: "preferred_unavailable")
             serveFromStandIn(transcript: transcript, context: context,
                              completion: completion)
             return
         }
         guard let cascade else {
+            // [PIPELINE-TRACE] No cascade configured — the availability
+            // pair only, so the stage is off with the stage's own reason
+            // token (one source, so a reworded token cannot drift).
+            traceRecorder?.recordOff([.cascade],
+                                     reason: PipelineTraceStage.cascade.offReason)
             lastServedPreferred = true
             preferred.interpret(transcript: transcript, context: context,
                                 completion: completion)
@@ -144,8 +164,19 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
             // one duration is recorded per turn. Instrumentation only —
             // no branch below reads the span.
             let decisionSpan = self.timingRecorder?.start(.cascadeDecision)
+            // [PIPELINE-TRACE] The cascade's own row, opened on the same
+            // edge: the preferred brain's answer is the input, the branch
+            // taken is the output, and the escalation vocabulary is the
+            // decision. Finished at EACH branch below, before the
+            // stand-in is dispatched, so the row can never absorb the
+            // stand-in's run; `finish` is one-shot, so exactly one row is
+            // recorded per turn. Instrumentation only.
+            let traceSpan = self.traceRecorder?.start(
+                .cascade,
+                input: Self.answerSummary(of: command, preferred: self.preferred))
             if let command, command.confidence >= cascade.acceptThreshold {
                 decisionSpan?.finish()
+                traceSpan?.finish(output: "served at the band", decision: "served")
                 self.lastServedPreferred = true
                 completion(command)
                 return
@@ -155,14 +186,18 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
                 // brain's own answer stands, so a cascade turn can never
                 // be WORSE than the standalone rule.
                 decisionSpan?.finish()
+                traceSpan?.finish(output: "preferred answer stands — no escalation target",
+                                  decision: "served_no_target")
                 self.lastServedPreferred = true
                 completion(command)
                 return
             }
             self.lastServedPreferred = false
             decisionSpan?.finish()
-            cascade.onEscalated?(Self.escalationReason(for: command,
-                                                       preferred: self.preferred))
+            let reason = Self.escalationReason(for: command, preferred: self.preferred)
+            traceSpan?.finish(output: "escalated to the stand-in",
+                              decision: reason.rawValue)
+            cascade.onEscalated?(reason)
             self.standIn.interpret(transcript: transcript, context: context,
                                    completion: completion)
         }
@@ -188,5 +223,25 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting {
         let failed = (preferred as? InterpreterFailureReporting)?
             .lastInferenceFailureReason != nil
         return failed ? .failed : .abstained
+    }
+
+    /// [PIPELINE-TRACE] One line describing what the preferred brain
+    /// handed the cascade: the action and confidence when it produced a
+    /// command, or the content-free failure token it produced instead of
+    /// one (the same `InterpreterFailureReporting` reason the
+    /// LAT-EVIDENCE path reads). The action name is a schema token, never
+    /// a slot value — this summary reaches the card, and the RELEASE
+    /// console line beside it carries only the decision.
+    private static func answerSummary(of command: InterpretedCommand?,
+                                      preferred: CommandInterpreter) -> String {
+        if let command {
+            return PipelineTraceSummary.text(
+                "\(command.action.rawValue) \(PipelineTraceSummary.score(command.confidence))")
+        }
+        guard let failure = (preferred as? InterpreterFailureReporting)?
+            .lastInferenceFailureReason else {
+            return "no command"
+        }
+        return PipelineTraceSummary.text("no command (\(failure))")
     }
 }

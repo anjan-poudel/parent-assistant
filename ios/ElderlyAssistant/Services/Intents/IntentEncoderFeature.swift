@@ -234,6 +234,7 @@ enum IntentEncoderWiring {
                                encoderFallback: CommandInterpreter,
                                pickerBrain: CommandInterpreter,
                                timingRecorder: TurnTimingRecorder? = nil,
+                               traceRecorder: PipelineTraceRecorder? = nil,
                                onEscalated: @escaping (LocalBrainChain.EscalationReason) -> Void = { _ in })
     -> CommandInterpreter {
         let preferredLocal = deferredEncoderPreference(encoder: encoder,
@@ -248,7 +249,11 @@ enum IntentEncoderWiring {
         return LocalBrainChain(preferred: preferredLocal,
                                standIn: pickerBrain,
                                cascade: cascade,
-                               timingRecorder: timingRecorder)
+                               timingRecorder: timingRecorder,
+                               // [PIPELINE-TRACE] The same chain's trace
+                               // row; nil (non-gated builds) leaves the
+                               // chain's behavior and cost identical.
+                               traceRecorder: traceRecorder)
     }
 
     /// Returns the encoder when the caller OFFERS it (feature gate passed)

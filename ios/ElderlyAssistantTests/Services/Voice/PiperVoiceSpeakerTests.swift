@@ -200,4 +200,73 @@ final class PiperVoiceSpeakerTests: XCTestCase {
         speaker.cancel()
         XCTAssertTrue(bus.emittedEvents.isEmpty)
     }
+
+    // MARK: - [PIPELINE-TRACE] the tts hand-off row
+    //
+    // The trace's last stage: the reply handed to the speaker in, the
+    // branch the speaker took out. The stage's duration is the ramp to
+    // audio START (the playback itself is the tracer's `speak_finished`
+    // span), so a cancelled utterance that never began audio leaves the
+    // span unfinished — and the row then reads `off(not_spoken)` rather
+    // than claiming a start that never happened.
+
+    private func makeTracedSpeaker(_ recorder: PipelineTraceRecorder) -> PiperVoiceSpeaker {
+        PiperVoiceSpeaker(
+            fallback: SystemSpeechSpeaker(observabilityBus: bus),
+            observabilityBus: bus,
+            modelStore: store,
+            engine: engine,
+            bundle: Bundle(url: tempRoot)!,   // empty bundle → no bundled voices
+            traceRecorder: recorder)
+    }
+
+    func testTtsRowRecordsTheUtteranceAndAudioStarted() async throws {
+        try installFakeVoice(ModelCatalog.piperNepali)
+        let recorder = PipelineTraceRecorder()
+        let traced = makeTracedSpeaker(recorder)
+
+        recorder.beginTurn()
+        await traced.speak("औषधि खानुहोस्", locale: Locale(identifier: "ne-NP"))
+        let trace = recorder.finishTurn()
+
+        XCTAssertEqual(trace.rows.map(\.stage), PipelineTraceStage.allCases,
+                       "the tts row is one of the full trace's stages")
+        let tts = try XCTUnwrap(trace.rows.first { $0.stage == .tts })
+        XCTAssertTrue(tts.ran)
+        XCTAssertEqual(tts.decision, "spoken")
+        XCTAssertEqual(tts.inputSummary, "औषधि खानुहोस्",
+                       "what was handed to the speaker, on the card's line")
+        XCTAssertGreaterThanOrEqual(tts.durationMs, 0)
+        XCTAssertEqual(trace.ranCount, 1,
+                       "the speaker was this fixture's only traced stage")
+    }
+
+    func testTtsRowRecordsTheFallbackBranchWhenTheVoiceIsMissing() async {
+        let recorder = PipelineTraceRecorder()
+        let traced = makeTracedSpeaker(recorder)
+
+        recorder.beginTurn()
+        await traced.speak("नमस्ते", locale: Locale(identifier: "ne-NP"))
+
+        let tts = recorder.finishTurn().rows.first { $0.stage == .tts }
+        XCTAssertEqual(tts?.ran, true)
+        XCTAssertEqual(tts?.decision, "fallback",
+                       "the branch taken is the row's decision — never a silent fallthrough")
+        XCTAssertTrue(tts?.outputSummary.contains("voice missing") == true)
+    }
+
+    func testTtsRowRecordsASynthesisFailure() async throws {
+        try installFakeVoice(ModelCatalog.piperNepali)
+        engine.fail = true
+        let recorder = PipelineTraceRecorder()
+        let traced = makeTracedSpeaker(recorder)
+
+        recorder.beginTurn()
+        await traced.speak("नमस्ते", locale: Locale(identifier: "ne-NP"))
+
+        let tts = recorder.finishTurn().rows.first { $0.stage == .tts }
+        XCTAssertEqual(tts?.ran, true,
+                       "the stage DID run — it failed, and says so")
+        XCTAssertEqual(tts?.decision, "failed")
+    }
 }

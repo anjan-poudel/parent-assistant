@@ -169,7 +169,8 @@ final class IntentEncoderInterpreterTests: XCTestCase {
         tokenizer: IntentEncoderTokenizing,
         spy: IntentEncoderRunnerSpy,
         manifest: IntentEncoderManifest = .t033Spike,
-        config: IntentEncoderInterpreter.Config = .default
+        config: IntentEncoderInterpreter.Config = .default,
+        traceRecorder: PipelineTraceRecorder? = nil
     ) -> IntentEncoderInterpreter {
         IntentEncoderInterpreter(
             modelStore: store,
@@ -178,6 +179,7 @@ final class IntentEncoderInterpreterTests: XCTestCase {
             manifest: manifest,
             tokenizer: tokenizer,
             config: config,
+            traceRecorder: traceRecorder,
             modelRunnerFactory: spy.makeRunner)
     }
 
@@ -1056,6 +1058,171 @@ final class IntentEncoderInterpreterTests: XCTestCase {
                        "timing adds, removes and reorders no event")
         XCTAssertEqual(timed.action, untimed.action)
         XCTAssertEqual(timed.reply, untimed.reply)
+    }
+
+    // MARK: - [PIPELINE-TRACE] the encoder's rows
+    //
+    // The same three stages the breakdown times now carry their full
+    // story: text in, tokens out, the interpreter's own gate as the
+    // decision — and, when the interpreter bails before the pipeline, all
+    // three MARKED off with the honest reason rather than disappearing
+    // (a stage that threw or timed out must not read as one that never
+    // ran). Instrumentation only: the outcome and the events are pinned
+    // unchanged by the tests above.
+
+    /// The trace fixture: the real interpreter on the stub seams, a
+    /// command-serving logits set, one recorder — everything a row needs.
+    private func makeTracedEncoderFixture(
+        intent: String = "set_reminder"
+    ) throws -> (interpreter: IntentEncoderInterpreter,
+                 tokenizer: StubIntentEncoderTokenizer,
+                 model: StubIntentEncoderModel,
+                 tokenization: IntentEncoderTokenization,
+                 recorder: PipelineTraceRecorder,
+                 transcript: String) {
+        let transcript = "भोलि बिहान ८ बजे औषधि खान सम्झाइदिनु"
+        let store = try makeStore()
+        _ = try installArtifact(store: store)
+        let tokenizer = StubIntentEncoderTokenizer()
+        let spy = IntentEncoderRunnerSpy()
+        let manifest = testManifest()
+        let clean = InputSanitiser.sanitise(transcript, level: .quarantine)
+        let tokenization = try XCTUnwrap(tokenizer.tokenize(
+            sanitisedTranscript: clean, maxSequenceLength: 64))
+        let model = StubIntentEncoderModel()
+        model.logits = makeLogits(
+            manifest: manifest,
+            intent: intent,
+            wordTags: ["B-time", "I-time", "I-time", "I-time",
+                       "B-medication", "O", "O"],
+            tokenization: tokenization)
+        spy.make = { model }
+        let recorder = PipelineTraceRecorder()
+        let interpreter = makeInterpreter(store: store, tokenizer: tokenizer,
+                                          spy: spy, manifest: manifest,
+                                          traceRecorder: recorder)
+        return (interpreter, tokenizer, model, tokenization, recorder, transcript)
+    }
+
+    func testTraceRecordsTheEncodersThreeStagesWithTokensAndDecisions() throws {
+        let fixture = try makeTracedEncoderFixture()
+        XCTAssertTrue(fixture.interpreter.isAvailable)
+
+        fixture.recorder.beginTurn()
+        let command = try XCTUnwrap(interpret(fixture.interpreter, fixture.transcript))
+        let trace = fixture.recorder.finishTurn()
+
+        XCTAssertEqual(command.action, .setReminder, "the traced turn still serves")
+        XCTAssertEqual(trace.rows.map(\.stage), PipelineTraceStage.allCases,
+                       "the encoder's rows are three of the full trace's stages, in order")
+        XCTAssertTrue(trace.rows.allSatisfy { $0.durationMs >= 0 })
+
+        let tokenCount = fixture.tokenization.tokenIds.count
+        let tokenize = try XCTUnwrap(trace.rows.first { $0.stage == .encoderTokenizer })
+        XCTAssertTrue(tokenize.ran)
+        XCTAssertEqual(tokenize.decision, "tokenized")
+        XCTAssertEqual(tokenize.tokenCount, tokenCount,
+                       "a REAL token count, not an estimate")
+        XCTAssertTrue(tokenize.outputSummary.contains("\(tokenCount) tok"))
+
+        let inference = try XCTUnwrap(trace.rows.first { $0.stage == .encoderInference })
+        XCTAssertTrue(inference.ran)
+        XCTAssertEqual(inference.decision, "ran")
+        XCTAssertEqual(inference.tokenCount, tokenCount,
+                       "the forward pass's input size")
+
+        let decode = try XCTUnwrap(trace.rows.first { $0.stage == .encoderDecode })
+        XCTAssertTrue(decode.ran)
+        XCTAssertEqual(decode.decision, "command",
+                       "the interpreter's own gate applied to the decode")
+        XCTAssertTrue(decode.outputSummary.contains("set_reminder"),
+                      "the card may name the decoded action")
+        XCTAssertTrue(decode.outputSummary.contains("[time="),
+                      "…and its slot surfaces — the on-device posture")
+        XCTAssertEqual(fixture.model.predictCount, 1,
+                       "instrumentation alters nothing: the graph ran once")
+    }
+
+    func testTraceMarksAllThreeEncoderStagesOffWhenTheModelIsNotCached() throws {
+        let store = try makeStore()          // nothing installed
+        let recorder = PipelineTraceRecorder()
+        let interpreter = makeInterpreter(store: store,
+                                          tokenizer: StubIntentEncoderTokenizer(),
+                                          spy: IntentEncoderRunnerSpy(),
+                                          traceRecorder: recorder)
+        XCTAssertFalse(interpreter.isAvailable)
+
+        recorder.beginTurn()
+        XCTAssertNil(interpret(interpreter, "भोलि औषधि खाने सम्झाउनु"))
+        let trace = recorder.finishTurn()
+
+        XCTAssertEqual(trace.rows.count, PipelineTraceStage.allCases.count)
+        XCTAssertEqual(trace.ranCount, 0)
+        for row in trace.rows
+        where IntentEncoderInterpreter.encoderStages.contains(row.stage) {
+            XCTAssertFalse(row.ran, "\(row.stage.rawValue) did not run")
+            XCTAssertEqual(row.decision, "model_not_cached",
+                           "the interpreter's own reason, not a generic one")
+            XCTAssertEqual(row.decisionText, "off(model_not_cached)")
+            XCTAssertEqual(row.durationMs, 0)
+        }
+    }
+
+    func testTraceMarksAllThreeEncoderStagesOffWhenTheTokenizerIsNotReady() throws {
+        let store = try makeStore()
+        _ = try installArtifact(store: store)
+        let recorder = PipelineTraceRecorder()
+        let interpreter = makeInterpreter(store: store,
+                                          tokenizer: StubIntentEncoderTokenizer(ready: false),
+                                          spy: IntentEncoderRunnerSpy(),
+                                          traceRecorder: recorder)
+
+        recorder.beginTurn()
+        XCTAssertNil(interpret(interpreter, "भोलि औषधि खाने सम्झाउनु"))
+
+        for row in recorder.finishTurn().rows
+        where IntentEncoderInterpreter.encoderStages.contains(row.stage) {
+            XCTAssertFalse(row.ran)
+            XCTAssertEqual(row.decision,
+                           IntentEncoderAbstention.tokenizerUnavailable.rawValue)
+            XCTAssertEqual(row.decisionText,
+                           "off(\(IntentEncoderAbstention.tokenizerUnavailable.rawValue))")
+        }
+    }
+
+    func testTraceMarksTheTimedOutStagesOffAndKeepsTheOneThatRan() throws {
+        let store = try makeStore()
+        _ = try installArtifact(store: store)
+        let tokenizer = StubIntentEncoderTokenizer()
+        let spy = IntentEncoderRunnerSpy()
+        let model = StubIntentEncoderModel()
+        model.predictDelay = 0.5
+        model.logits = IntentEncoderLogits(intentLogits: [6, -6], slotLogits: [[0, 0]])
+        spy.make = { model }
+        let recorder = PipelineTraceRecorder()
+        let interpreter = makeInterpreter(
+            store: store, tokenizer: tokenizer, spy: spy,
+            manifest: testManifest(intents: ["query", "none"]),
+            config: IntentEncoderInterpreter.Config(confidenceThreshold: 0.4,
+                                                    timeoutSeconds: 0.05),
+            traceRecorder: recorder)
+
+        recorder.beginTurn()
+        XCTAssertNil(interpret(interpreter, "केही सोध्नु छ"))
+        let trace = recorder.finishTurn()
+
+        let tokenize = try XCTUnwrap(trace.rows.first { $0.stage == .encoderTokenizer })
+        XCTAssertTrue(tokenize.ran,
+                      "the tokenizer finished inside the budget — its row stays")
+        XCTAssertEqual(tokenize.decision, "tokenized")
+        for stage in [PipelineTraceStage.encoderInference, .encoderDecode] {
+            let row = try XCTUnwrap(trace.rows.first { $0.stage == stage })
+            XCTAssertFalse(row.ran, "\(stage.rawValue) never returned inside the budget")
+            XCTAssertEqual(row.decision, "inference_timeout")
+            XCTAssertEqual(row.decisionText, "off(inference_timeout)")
+        }
+        XCTAssertEqual(interpreter.lastInferenceFailureReason, "inference_timeout",
+                       "the row describes the same failure the status reports")
     }
 }
 

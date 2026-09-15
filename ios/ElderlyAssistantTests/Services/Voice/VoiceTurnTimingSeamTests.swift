@@ -191,9 +191,14 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
         let tracer: VoiceTurnLatencyTracer
         let router: CommandRouter
         let pipeline: VoicePipeline
+        /// [PIPELINE-TRACE] The trace recorder the pipeline records its
+        /// `.stt` row into — nil (the default) is every test above this
+        /// section: the same pipeline, byte-identical, with no trace.
+        let traceRecorder: PipelineTraceRecorder?
 
-        init() {
+        init(traceRecorder: PipelineTraceRecorder? = nil) {
             let bus = self.bus
+            self.traceRecorder = traceRecorder
             tracer = VoiceTurnLatencyTracer(observabilityBus: bus)
             router = CommandRouter(
                 coordinator: MockVoiceCommandCoordinator(),
@@ -215,7 +220,8 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
                 voiceActivityDetector: vad,
                 router: router,
                 observabilityBus: bus,
-                turnTracer: tracer
+                turnTracer: tracer,
+                traceRecorder: traceRecorder
             )
         }
 
@@ -673,5 +679,234 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
         XCTAssertEqual(events.count, 1,
                        "exactly one vad_frame_latency per capture, even without a VAD end")
         XCTAssertEqual(events.first?.metadata["frames"], "4")
+    }
+
+    // MARK: - [PIPELINE-TRACE] the full-width per-gate trace
+    //
+    // The trace is wired to the SAME turn edges the breakdown rides
+    // (`TurnLatencyReporter.attach(to:)`), so one real LLM-path turn
+    // produces one trace holding a row for EVERY stage of the pipeline —
+    // the ones that ran with their summaries and decisions, the ones that
+    // did not marked `off(…)`. The event it emits beside the readout
+    // carries stage tokens and milliseconds and nothing else; the card's
+    // copy is the only surface that may name the words.
+
+    /// Collects the traces the reporter hands the card, on whichever
+    /// thread the turn finalized.
+    private final class TraceSink {
+        private let lock = NSLock()
+        private var traces: [PipelineTrace] = []
+        func append(_ trace: PipelineTrace) {
+            lock.lock()
+            traces.append(trace)
+            lock.unlock()
+        }
+        var all: [PipelineTrace] {
+            lock.lock()
+            defer { lock.unlock() }
+            return traces
+        }
+    }
+
+    /// One traced turn's handles. The reporter is HELD here — `attach(to:)`
+    /// stores it weakly on the tracer, so a caller that let it go would
+    /// silently lose the readout.
+    private final class TracedTurn {
+        let harness: Harness
+        let reporter: TurnLatencyReporter
+        let sink: TraceSink
+
+        init(harness: Harness, reporter: TurnLatencyReporter, sink: TraceSink) {
+            self.harness = harness
+            self.reporter = reporter
+            self.sink = sink
+        }
+
+        var trace: PipelineTrace? { sink.all.first }
+    }
+
+    /// The production wiring — a trace recorder on the tracer's own turn
+    /// edges, assembled by the reporter — plus one full LLM-path turn
+    /// through the seam.
+    private func tracedLLMTurn() -> TracedTurn {
+        let traceRecorder = PipelineTraceRecorder()
+        let h = Harness(traceRecorder: traceRecorder)
+        let reporter = TurnLatencyReporter(observabilityBus: h.bus,
+                                           recorder: TurnTimingRecorder(),
+                                           traceRecorder: traceRecorder,
+                                           isInstrumentationEnabled: true)
+        let sink = TraceSink()
+        let reported = expectation(description: "trace reported")
+        reporter.onTraceReported = { trace in
+            sink.append(trace)
+            reported.fulfill()
+        }
+        reporter.attach(to: h.tracer)
+
+        h.pipeline.debugEnterIdleForTesting()
+        h.pipeline.simulateWakeWordDetection()
+        h.recognizer.complete(with: .success(Self.openQuestionTranscript))
+        h.interpreter.completeNext(with: InterpretedCommand(
+            action: .query,
+            entryId: nil, contact: nil, time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil, topic: nil,
+            steps: nil, pluginAction: nil, pluginEntities: nil,
+            confidence: 0.9, reply: "सबै ठीक छ।"
+        ))
+        wait(for: [reported], timeout: 2)
+        return TracedTurn(harness: h, reporter: reporter, sink: sink)
+    }
+
+    /// One row per stage, in canonical pipeline order, every duration a
+    /// non-negative measurement — and the stages this turn never reached
+    /// MARKED `off(…)`, never omitted (a trace with holes cannot be read
+    /// as a trace). The `.stt` row's duration is the tracer's own ASR
+    /// span REUSED, not a second clock reading of the same work.
+    func testTraceCarriesEveryStageInCanonicalOrder() throws {
+        let turn = tracedLLMTurn()
+        let h = turn.harness
+
+        XCTAssertEqual(turn.sink.all.count, 1, "exactly one trace per turn")
+        let trace = try XCTUnwrap(turn.trace, "the reporter published the turn's trace")
+        XCTAssertEqual(trace.rows.map(\.stage), PipelineTraceStage.allCases,
+                       "every stage, in canonical order, regardless of record order")
+        XCTAssertTrue(trace.rows.allSatisfy { $0.durationMs >= 0 },
+                      "no measured duration is ever negative")
+
+        let stt = trace.rows[0]
+        XCTAssertEqual(stt.stage, .stt)
+        XCTAssertTrue(stt.ran, "the recognizer ran this turn")
+        XCTAssertEqual(stt.decision, "recognized")
+        XCTAssertTrue(stt.outputSummary.contains(Self.openQuestionTranscript),
+                      "the readout names what the recognizer heard")
+
+        // The reused ASR span, decoded from the timing event the same turn
+        // emitted — the two readouts can never disagree about it.
+        let raw = h.bus.turnTimingEvents[0].metadata["stages"] ?? "[]"
+        let tracerStages = (try? JSONDecoder()
+            .decode([VoiceTurnLatencyTracer.StageTiming].self,
+                    from: Data(raw.utf8))) ?? []
+        let asrMs = tracerStages.first { $0.stage == "asr_done" }?.ms
+        XCTAssertNotNil(asrMs, "the tracer timed the recognizer")
+        XCTAssertEqual(stt.durationMs, asrMs ?? -1,
+                       "the STT row reuses the tracer's asr_done span")
+
+        // This turn reached no corrector, no encoder, no band policy, no
+        // cascade, no picker brain and no speaker — all present, all off.
+        for row in trace.rows.dropFirst() {
+            XCTAssertFalse(row.ran, "\(row.stage.rawValue) did not run this turn")
+            XCTAssertTrue(row.decisionText.hasPrefix("off("),
+                          "an unrun stage says off: \(row.decisionText)")
+            XCTAssertEqual(row.durationMs, 0)
+            XCTAssertEqual(row.decision, row.stage.offReason,
+                           "the row carries the stage's own off reason")
+        }
+        XCTAssertEqual(trace.ranCount, 1, "the STT stage was this turn's only work")
+
+        // The trace's own event: one per turn, beside the breakdown's.
+        XCTAssertEqual(h.bus.events.filter {
+            $0.eventType == PipelineTrace.eventType
+        }.count, 1)
+        XCTAssertEqual(h.bus.events.filter {
+            $0.eventType == TurnLatencyReporter.eventType
+        }.count, 1, "the breakdown event is untouched by the trace")
+    }
+
+    /// The disclosure split, pinned on the seam: the EVENT carries the
+    /// stage tokens and milliseconds only (the breakdown's own wire
+    /// shape), while the card's readout — and the Debug console shape —
+    /// carries the summaries. Nothing PII-shaped can reach the bus.
+    func testTraceEventCarriesStageTokensOnlyWhileTheReadoutNamesTheWords() throws {
+        let turn = tracedLLMTurn()
+        let h = turn.harness
+        let trace = try XCTUnwrap(turn.trace)
+
+        let events = h.bus.events.filter { $0.eventType == PipelineTrace.eventType }
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events[0].component, PipelineTrace.component)
+        XCTAssertNotNil(events[0].durationMs)
+        XCTAssertEqual(Array(events[0].metadata.keys), ["stages"],
+                       "the trace event carries the stage list and nothing else")
+
+        // The payload decodes through the SAME decoder the breakdown uses,
+        // with the closed stage vocabulary as its keys.
+        let raw = events[0].metadata["stages"] ?? "[]"
+        let stages = (try? JSONDecoder()
+            .decode([VoiceTurnLatencyTracer.StageTiming].self,
+                    from: Data(raw.utf8))) ?? []
+        XCTAssertEqual(stages.map(\.stage),
+                       PipelineTraceStage.allCases.map(\.rawValue),
+                       "the egressing payload is stage tokens, in canonical order")
+        XCTAssertTrue(stages.allSatisfy { $0.ms >= 0 })
+
+        // …and no value anywhere in the event names what the user said or
+        // what the trace's summaries hold.
+        let words = (Self.openQuestionTranscript + " " + "सबै ठीक छ।")
+            .components(separatedBy: .whitespaces)
+            .filter { $0.count > 1 }
+        for value in events[0].metadata.values {
+            for word in words {
+                XCTAssertFalse(value.contains(word),
+                               "the event leaked on-device content: \(value)")
+            }
+            XCTAssertFalse(value.contains("in:"),
+                           "the event never carries a summary line")
+        }
+
+        // The readout, by contrast, is the on-device view and names them.
+        XCTAssertTrue(trace.rows[0].summaryText.contains(Self.openQuestionTranscript))
+        XCTAssertEqual(trace.rows[0].inputSummary, "audio capture")
+    }
+
+    /// The console split ([PIPELINE-TRACE], the B1 release-log rule): the
+    /// Debug shape carries the summaries, the RELEASE shape carries the
+    /// stage token, the milliseconds, the decision token and the
+    /// structured token count — and no words. Pinned on the pure
+    /// renderer, which is the one place both shapes exist.
+    func testConsoleShapesSplitDebugSummariesFromTheReleaseTokens() {
+        let trace = PipelineTrace(rows: [
+            PipelineTraceRow(
+                stage: .pickerInference,
+                inputSummary: "~42 tok (est)",
+                outputSummary: "query 0.90 reply=भोलि घाम लाग्नेछ।",
+                durationMs: 1_234,
+                decision: "command",
+                ran: true,
+                tokenCount: 42),
+            PipelineTraceRow(
+                stage: .encoderDecode,
+                inputSummary: "—",
+                outputSummary: "not run",
+                durationMs: 0,
+                decision: PipelineTraceStage.encoderDecode.offReason,
+                ran: false),
+        ])
+
+        let debug = trace.consoleLines(includeSummaries: true)
+        let release = trace.consoleLines(includeSummaries: false)
+
+        XCTAssertEqual(debug.count, 2)
+        XCTAssertEqual(release.count, 2, "the off row prints in BOTH shapes")
+        XCTAssertTrue(debug[0].hasPrefix(PipelineTrace.consolePrefix),
+                      "greppable in a captured console")
+        XCTAssertTrue(debug[0].contains("picker_inference"))
+        XCTAssertTrue(debug[0].contains(trace.rows[0].durationText))
+        XCTAssertTrue(debug[0].contains("tok=42"))
+        XCTAssertTrue(debug[0].contains("भोलि घाम लाग्नेछ।"),
+                      "the Debug console is the internal-testing surface")
+
+        XCTAssertFalse(release[0].contains("भोलि"),
+                       "the Release console never carries summary text")
+        XCTAssertFalse(release[0].contains("~42 tok (est)"))
+        XCTAssertFalse(release[0].contains("in:"))
+        XCTAssertTrue(release[0].contains("picker_inference"),
+                      "the stage token is release-safe")
+        XCTAssertTrue(release[0].contains("command"),
+                      "so is the decision token")
+        XCTAssertTrue(release[0].contains("tok=42"),
+                      "and so is the structured count")
+        XCTAssertTrue(release[1].contains("off(encoder_not_serving)"),
+                      "an unrun stage is marked off on the console too")
+        XCTAssertTrue(debug[1].contains("off(encoder_not_serving)"))
     }
 }

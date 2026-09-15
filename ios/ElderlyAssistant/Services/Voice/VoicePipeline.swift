@@ -73,6 +73,12 @@ final class VoicePipeline {
     /// [TURN-TIMING] Turn-scoped stage tracer (nil = timing off — tests
     /// and any construction site that does not opt in).
     private let turnTracer: VoiceTurnLatencyTracer?
+    /// [PIPELINE-TRACE] The debug trace's recorder — the `.stt` row is
+    /// recorded here (transcript in, transcript out), because this is the
+    /// one place the recognizer's result exists. Nil (the default, and
+    /// tests) makes each call a nil check; its DURATION comes from the
+    /// tracer's own `asr_done` span at assembly, not from this file.
+    private let traceRecorder: PipelineTraceRecorder?
 
     private let audioEngine: AVAudioEngine
     private let processingQueue = DispatchQueue(label: "voice.pipeline.processing",
@@ -259,7 +265,8 @@ final class VoicePipeline {
          noiseSuppressor: NoiseSuppressor? = nil,
          router: CommandRouter,
          observabilityBus: ObservabilityBus,
-         turnTracer: VoiceTurnLatencyTracer? = nil) {
+         turnTracer: VoiceTurnLatencyTracer? = nil,
+         traceRecorder: PipelineTraceRecorder? = nil) {
         self.audioSession = audioSession
         self.audioEngine = audioEngine
         self.wakeWordEngine = wakeWordEngine
@@ -270,6 +277,7 @@ final class VoicePipeline {
         self.router = router
         self.observabilityBus = observabilityBus
         self.turnTracer = turnTracer
+        self.traceRecorder = traceRecorder
 
         self.wakeWordEngine.onDetection = { [weak self] in
             self?.handleWakeDetected()
@@ -847,6 +855,16 @@ final class VoicePipeline {
             self.state = .routing
             switch result {
             case .success(let transcript):
+                // [PIPELINE-TRACE] The `.stt` row: audio capture in, the
+                // recognizer's text out. Its DURATION is deliberately not
+                // measured here — the tracer's `asr_done` span above is
+                // the one clock reading of this work, and the report
+                // fills the row with it (`finishTurn(asrMs:)`).
+                self.traceRecorder?.record(
+                    .stt,
+                    input: "audio capture",
+                    output: PipelineTraceSummary.text(transcript),
+                    decision: "recognized")
                 _ = self.router.route(transcript: transcript)
                 // [TURN-TIMING] The router's synchronous decision is made.
                 self.turnTracer?.mark("router_done")
@@ -855,6 +873,15 @@ final class VoicePipeline {
                 // the error's description — a transport error's
                 // description embeds the failing URL.
                 let code = ErrorCodeMapper.code(for: err)
+                // [PIPELINE-TRACE] The STT stage DID run — it just
+                // produced no text — so the row carries the failure as
+                // its decision (a content-free code, never the error's
+                // description) instead of claiming the stage was off.
+                self.traceRecorder?.record(
+                    .stt,
+                    input: "audio capture",
+                    output: "no transcript",
+                    decision: "failed(\(code))")
                 self.emit("recognition_failed", outcome: "failure",
                           errorCode: code)
                 // The error callback is surfaced to the UI/logs as a

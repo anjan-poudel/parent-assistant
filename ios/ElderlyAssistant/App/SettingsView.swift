@@ -3599,6 +3599,67 @@ struct AIModelsSettingsView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            // [PIPELINE-TRACE] The full pipeline trace, one row per gate in
+            // the order the gates run: STT, corrector, canonicalizer, the
+            // encoder's three stages, the band policy, the cascade, the
+            // picker brain's prompt and its FINAL LLM round-trip, and the
+            // TTS start. Each row carries what went in, what came out, the
+            // decision taken and the milliseconds — so a wrong correction
+            // can be told from a missing one, an abstention from a
+            // timeout, and a 7-second reply from a 900 ms one.
+            //
+            // LIKE "Last correction", THIS SECTION MAY NAME WORDS: it is
+            // the on-device debugger's view (internal-testing screen), the
+            // value is the coordinator's in-memory LAST-TURN trace (never
+            // persisted, never written to the encrypted stores), and the
+            // observability events beside it stay count-only — they carry
+            // stage tokens and milliseconds, never a summary.
+            //
+            // The stage labels and decision tokens are the DIAGNOSTIC
+            // vocabulary of the device log, so they stay unlocalized like
+            // "Last turn"'s stage names and the correction line's labels.
+            // The section is scrollable because eleven stages do not fit
+            // on one screen at this type size; the rest of Settings keeps
+            // its own scroll.
+            Divider()
+            VStack(alignment: .leading, spacing: 6) {
+                Text("settings.encoder.pipelineTrace")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                if let trace = coordinator.lastPipelineTrace, !trace.isEmpty {
+                    Text(L10n.fmt("settings.encoder.pipelineTrace.count",
+                                  locale: coordinator.appLanguage.locale,
+                                  trace.ranCount, trace.rows.count))
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                    ScrollView(.vertical) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(trace.rows) { row in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 8) {
+                                        Text(row.label)
+                                        Spacer(minLength: 8)
+                                        Text(row.durationText)
+                                        Text(row.decisionText)
+                                    }
+                                    Text(row.summaryText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                .font(.system(size: DesignTokens.minCaptionPointSize,
+                                              design: .monospaced))
+                                .foregroundStyle(DesignTokens.textSecondary)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(maxHeight: 260)
+                } else {
+                    Text("settings.encoder.pipelineTrace.empty")
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

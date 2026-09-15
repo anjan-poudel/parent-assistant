@@ -1845,12 +1845,21 @@ enum IntentInputCanonicalization {
     /// applied with another is the drift A-12 exists to prevent. Passing
     /// `correctionPolicy` explicitly (tests, a future settings surface) skips
     /// that resolution and uses exactly what was passed.
+    ///
+    /// [PIPELINE-TRACE] `traceRecorder` is PURE INSTRUMENTATION: it opens one
+    /// span per layer (the corrector's, then the canonicalizer's) so the
+    /// internal-testing card can show what each layer saw, what it produced and
+    /// which closed-vocabulary decision it took. Nil — every production call
+    /// site without the internal-testing gate, and every existing test — leaves
+    /// the two expressions below byte-for-byte what they were; the rows live in
+    /// memory for one turn and no decision anywhere reads them.
     static func prepare(sanitisedTranscript: String,
                         dialect: DialectLabel = DialectPreference.persisted(),
                         tables: VariantTableSet = VariantTableSet.bundled,
                         policy: Policy = Policy.runtime(),
                         correctionPolicy: STTCorrector.Policy? = nil,
-                        correctionLexicon: CorrectionLexicon? = CorrectionLexicon.bundled)
+                        correctionLexicon: CorrectionLexicon? = CorrectionLexicon.bundled,
+                        traceRecorder: PipelineTraceRecorder? = nil)
         -> IntentTranscriptPair {
         let correctionPolicy = correctionPolicy
             ?? STTCorrector.Policy.runtime(lexicon: correctionLexicon)
@@ -1859,13 +1868,37 @@ enum IntentInputCanonicalization {
         // preference key, or the compile gate off) `corrected` is the input
         // string itself, so the canonicalizer's input is byte-identical to the
         // expression that ran before this layer existed.
+        let correctorSpan = traceRecorder?.start(
+            .corrector,
+            input: PipelineTraceSummary.text(sanitisedTranscript))
         let correction = STTCorrector.correct(sanitisedTranscript,
                                               lexicon: correctionLexicon,
                                               policy: correctionPolicy)
+        if correction.mode == .off {
+            // The control arm did not participate: the row is marked off
+            // with the layer's own word for it, and the span opened above
+            // is simply never finished (an unfinshed span records
+            // nothing — `PipelineTraceSpan`).
+            traceRecorder?.recordOff([.corrector], reason: "disabled")
+        } else {
+            correctorSpan?.finish(
+                output: PipelineTraceSummary.text(correction.corrected),
+                decision: Self.correctorDecision(correction))
+        }
+        let canonicalizerSpan = traceRecorder?.start(
+            .canonicalizer,
+            input: PipelineTraceSummary.text(correction.corrected))
         let result = DialectCanonicalizer.canonicalize(correction.corrected,
                                                        dialect: dialect,
                                                        tables: tables,
                                                        policy: policy)
+        if policy.enabled {
+            canonicalizerSpan?.finish(
+                output: PipelineTraceSummary.text(result.canonical),
+                decision: Self.canonicalizerDecision(result))
+        } else {
+            traceRecorder?.recordOff([.canonicalizer], reason: "disabled")
+        }
         return IntentTranscriptPair(original: sanitisedTranscript,
                                     canonical: result.canonical,
                                     applications: result.applications,
@@ -1873,6 +1906,39 @@ enum IntentInputCanonicalization {
                                     tableRevision: result.tableRevision,
                                     notes: result.notes,
                                     correction: correction)
+    }
+
+    /// [PIPELINE-TRACE] The corrector row's decision token — the layer's own
+    /// closed vocabulary (`CorrectionDecision.reason`, which the correction
+    /// event already carries), never a surface form:
+    ///
+    ///  · `corrected` (`CorrectionDecision.corrected(…).reason`) when at
+    ///    least one token was rewritten;
+    ///  · `shadow` for the counterfactual arm, which decides but applies
+    ///    nothing — its "why" is the arm itself;
+    ///  · else the first considered token's own reason (`no_candidate`,
+    ///    `below_threshold`, `ambiguous`, `safety_veto`, `required_span`,
+    ///    `degraded`) — the debugger's question is "why did nothing
+    ///    change", and the first token's reason is the layer's answer;
+    ///  · `no_tokens` for an empty transcript, which considers nothing.
+    ///
+    /// (`.disabled` cannot appear here: an off layer is marked off before
+    /// this is called.)
+    static func correctorDecision(_ correction: CorrectionResult) -> String {
+        if correction.mode == .shadow { return "shadow" }
+        if !correction.applications.isEmpty { return "corrected" }
+        return correction.decisions.first?.decision.reason ?? "no_tokens"
+    }
+
+    /// [PIPELINE-TRACE] The canonicalizer row's decision token — the applied
+    /// rule ids when anything fired (the layer's own reviewable row identities,
+    /// which its event already carries), else `identity` / `degraded` for a
+    /// table that fell out, so a pass-through says WHY it passed through.
+    static func canonicalizerDecision(_ result: CanonicalizationResult) -> String {
+        if !result.applications.isEmpty {
+            return "applied " + result.applications.map(\.ruleID).joined(separator: ",")
+        }
+        return result.degraded ? "degraded" : "identity"
     }
 
     typealias Policy = DialectCanonicalizer.Policy

@@ -633,6 +633,10 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     /// carries `INTENT_ENCODER` — [ENCODER-ALWAYS-ON] the default build
     /// does, so the recorder is live here (the toggle still gates service).
     private let timingRecorder: TurnTimingRecorder?
+    /// [PIPELINE-TRACE] The debug trace's recorder: the reply handed to
+    /// the speaker in, "audio started" (or the fallback branch taken) out.
+    /// Nil (the default) makes every call below a nil check.
+    private let traceRecorder: PipelineTraceRecorder?
     /// [LAT-M2] Shared pre-ack WAV cache the warm-time build writes and
     /// the router's fast-lane player reads. A nil injection gets a
     /// private instance pointing at the SAME default directory — the
@@ -655,6 +659,7 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
          bundle: Bundle = .main,
          turnTracer: VoiceTurnLatencyTracer? = nil,
          timingRecorder: TurnTimingRecorder? = nil,
+         traceRecorder: PipelineTraceRecorder? = nil,
          ackCache: AckAudioCache? = nil) {
         self.fallback = fallback
         self.silenceFallback = silenceFallback
@@ -662,6 +667,7 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         self.modelStore = modelStore
         self.turnTracer = turnTracer
         self.timingRecorder = timingRecorder
+        self.traceRecorder = traceRecorder
         self.ackCache = ackCache ?? AckAudioCache()
         let sherpa = SherpaTTSEngine()
         // [TURN-TIMING] Voice engine ready — the load ms rides as a point
@@ -747,6 +753,14 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         // audio. A cancelled utterance never finishes its span, so it
         // records nothing (no speech started).
         let ttsStartSpan = timingRecorder?.start(.ttsStart)
+        // [PIPELINE-TRACE] The tts row rides the same edges as the timing
+        // span above: the utterance is the input, and the branch taken is
+        // the output. A cancelled utterance finishes neither span, so the
+        // row falls to the fill's `off(not_spoken)` — no audio started is
+        // the honest readout.
+        let ttsTrace = traceRecorder?.start(
+            .tts,
+            input: PipelineTraceSummary.text(text))
         let spec = resolveVoiceSpec(for: text, locale: locale)
         if spec.usedAudition || spec.speakerID != 0
             || spec.voiceID != Self.voiceID(for: spec.locale) {
@@ -757,6 +771,8 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
                 ?? modelStore.installBundledTTSVoice(for: spec.voiceID, bundle: bundle) else {
             emit("tts_voice_missing_fallback", locale: spec.locale)
             ttsStartSpan?.finish()
+            ttsTrace?.finish(output: "voice missing — system fallback",
+                             decision: "fallback")
             await fallbackSpeaker(for: spec.locale).speak(text, locale: spec.locale)
             return
         }
@@ -775,6 +791,8 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
             if wav == nil && !cancelled {
                 emit("tts_synthesis_failed_fallback", locale: spec.locale)
                 ttsStartSpan?.finish()
+                ttsTrace?.finish(output: "synthesis failed — system fallback",
+                                 decision: "failed")
                 await fallbackSpeaker(for: spec.locale).speak(text, locale: spec.locale)
             }
             return
@@ -785,6 +803,7 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         // playback (the playback duration is the tracer's `speak_finished`
         // span, not this one).
         ttsStartSpan?.finish()
+        ttsTrace?.finish(output: "audio started", decision: "spoken")
         await play(wav, text: text, locale: spec.locale)
     }
 

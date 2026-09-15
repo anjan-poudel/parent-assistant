@@ -16218,8 +16218,59 @@
           }
         }
       }
-    }
+    },
 
+    "settings.encoder.pipelineTrace" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pipeline trace"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "पाइपलाइन ट्रेस"
+          }
+        }
+      }
+    },
+    "settings.encoder.pipelineTrace.count" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d/%d stages ran"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d/%d चरण चले"
+          }
+        }
+      }
+    },
+    "settings.encoder.pipelineTrace.empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No turn traced yet"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अहिलेसम्म कुनै पालोको ट्रेस भएको छैन"
+          }
+        }
+      }
+    }
   },
   "version" : "1.0"
 }

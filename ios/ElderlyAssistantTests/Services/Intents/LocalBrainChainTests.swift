@@ -286,6 +286,118 @@ final class LocalBrainChainTests: XCTestCase {
                       "a chain with no cascade has no decision to time")
     }
 
+    // MARK: - [PIPELINE-TRACE] the cascade's own row
+    //
+    // The cascade decision now has a full-width row beside its timing
+    // span: the preferred brain's answer in, the branch taken out, the
+    // escalation vocabulary as the decision. Instrumentation only — every
+    // rule above is asserted unchanged by the same tests.
+
+    func testCascadeRowRecordsTheServedBranch() {
+        let recorder = PipelineTraceRecorder()
+        recorder.beginTurn()
+        let atBand = makeCommand(action: .query, confidence: 0.7, reply: "encoder")
+        let chain = LocalBrainChain(
+            preferred: StubCommandInterpreter(result: atBand),
+            standIn: StubCommandInterpreter(result: makeCommand(action: .query, confidence: 0.9)),
+            cascade: LocalBrainChain.Cascade(acceptThreshold: 0.7),
+            traceRecorder: recorder)
+
+        XCTAssertEqual(interpret(chain, "केही प्रश्न"), atBand)
+
+        let trace = recorder.finishTurn()
+        XCTAssertEqual(trace.rows.map(\.stage), PipelineTraceStage.allCases,
+                       "the cascade is one row of the full trace, in canonical order")
+        XCTAssertTrue(trace.rows.allSatisfy { $0.durationMs >= 0 })
+        let cascade = trace.rows.first { $0.stage == .cascade }
+        XCTAssertEqual(cascade?.ran, true)
+        XCTAssertEqual(cascade?.decision, "served",
+                       "the decision that served is recorded too — a serve is a decision")
+        XCTAssertEqual(cascade?.inputSummary, "query 0.70",
+                       "the preferred brain's answer, bounded to one line")
+    }
+
+    func testCascadeRowCarriesTheEscalationReason() {
+        let recorder = PipelineTraceRecorder()
+        recorder.beginTurn()
+        let answer = makeCommand(action: .query, confidence: 0.9, reply: "standin")
+        let chain = LocalBrainChain(
+            preferred: StubCommandInterpreter(result: nil),
+            standIn: StubCommandInterpreter(result: answer),
+            cascade: LocalBrainChain.Cascade(acceptThreshold: 0.7),
+            traceRecorder: recorder)
+
+        XCTAssertEqual(interpret(chain, "केही प्रश्न"), answer)
+
+        let cascade = recorder.finishTurn().rows.first { $0.stage == .cascade }
+        XCTAssertEqual(cascade?.ran, true)
+        XCTAssertEqual(cascade?.decision, LocalBrainChain.EscalationReason.abstained.rawValue,
+                       "the row speaks the escalation vocabulary, not a private token")
+        XCTAssertEqual(cascade?.inputSummary, "no command")
+    }
+
+    func testCascadeRowCarriesTheSubBandReason() {
+        let recorder = PipelineTraceRecorder()
+        recorder.beginTurn()
+        let subBand = makeCommand(action: .query, confidence: 0.55, reply: "encoder")
+        let chain = LocalBrainChain(
+            preferred: StubCommandInterpreter(result: subBand),
+            standIn: StubCommandInterpreter(result: makeCommand(action: .query, confidence: 0.9)),
+            cascade: LocalBrainChain.Cascade(acceptThreshold: 0.7),
+            traceRecorder: recorder)
+
+        XCTAssertEqual(interpret(chain, "केही प्रश्न")?.confidence, 0.9)
+
+        let cascade = recorder.finishTurn().rows.first { $0.stage == .cascade }
+        XCTAssertEqual(cascade?.decision,
+                       LocalBrainChain.EscalationReason.subBandConfidence.rawValue,
+                       "an under-band answer says why it was not served")
+        XCTAssertEqual(cascade?.inputSummary, "query 0.55")
+    }
+
+    func testChainWithoutACascadeMarksTheRowOffRatherThanOmittingIt() {
+        let recorder = PipelineTraceRecorder()
+        recorder.beginTurn()
+        let chain = LocalBrainChain(
+            preferred: StubCommandInterpreter(result: nil),
+            standIn: StubCommandInterpreter(result: makeCommand(action: .query, confidence: 0.9)),
+            traceRecorder: recorder)
+
+        XCTAssertNil(interpret(chain, "केही प्रश्न"),
+                     "no cascade: the exclusive rule is byte-identical")
+
+        let trace = recorder.finishTurn()
+        let cascade = trace.rows.first { $0.stage == .cascade }
+        XCTAssertEqual(cascade?.ran, false, "the stage did not run…")
+        XCTAssertEqual(cascade?.decision, PipelineTraceStage.cascade.offReason,
+                       "…and it says so with the stage's own reason token")
+        XCTAssertEqual(cascade?.decisionText, "off(cascade_off)",
+                       "marked off, never omitted")
+        XCTAssertEqual(cascade?.durationMs, 0)
+        XCTAssertEqual(trace.ranCount, 0, "this turn ran no traced stage")
+    }
+
+    func testUnavailablePreferredBrainMarksTheRowOffWithItsOwnReason() {
+        // The availability substitution happens BEFORE the cascade: the
+        // stage did not run, and the row names the precondition that
+        // failed rather than the generic "cascade off".
+        let recorder = PipelineTraceRecorder()
+        recorder.beginTurn()
+        let answer = makeCommand(action: .query, confidence: 0.9, reply: "standin")
+        let chain = LocalBrainChain(
+            preferred: StubCommandInterpreter(available: false, result: nil),
+            standIn: StubCommandInterpreter(result: answer),
+            cascade: LocalBrainChain.Cascade(acceptThreshold: 0.7),
+            traceRecorder: recorder)
+
+        XCTAssertEqual(interpret(chain, "केही प्रश्न"), answer)
+
+        let cascade = recorder.finishTurn().rows.first { $0.stage == .cascade }
+        XCTAssertEqual(cascade?.ran, false)
+        XCTAssertEqual(cascade?.decision, "preferred_unavailable")
+        XCTAssertEqual(cascade?.decisionText, "off(preferred_unavailable)")
+    }
+
     // MARK: - Router integration (the reported bug's shape)
 
     func testOnDeviceStackPlainQueryAnsweredThroughRouter() {

@@ -318,6 +318,13 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// measurement a nil check around the UNCHANGED calls. Instrumentation
     /// only: no prompt byte, no sampling parameter and no decision reads it.
     private let timingRecorder: TurnTimingRecorder?
+    /// [PIPELINE-TRACE] The debug trace's recorder — the picker brain's
+    /// two stages written out in full (the prompt that went in, the JSON
+    /// that came back, the FINAL LLM round-trip's own milliseconds). Nil
+    /// (the default, and every non-gated build) makes every call below a
+    /// nil check. Instrumentation only: no prompt byte, no sampling
+    /// parameter and no decision reads a row.
+    private let traceRecorder: PipelineTraceRecorder?
     /// [LAT-EVIDENCE] The honest reason the LAST inference failed
     /// ("inference_timeout" / "inference_empty_output") — the router
     /// consults it after a nil result to escalate to the cloud instead
@@ -393,13 +400,15 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
          preferredBaseId: ModelID = ModelCatalog.llama3_2_1B,
          config: Config = .default,
          pluginRegistry: PluginRegistry? = nil,
-         timingRecorder: TurnTimingRecorder? = nil) {
+         timingRecorder: TurnTimingRecorder? = nil,
+         traceRecorder: PipelineTraceRecorder? = nil) {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
         self.preferredBaseId = preferredBaseId
         self.config = config
         self.pluginRegistry = pluginRegistry
         self.timingRecorder = timingRecorder
+        self.traceRecorder = traceRecorder
     }
 
     /// The base model this interpreter currently loads (read-only outside;
@@ -445,6 +454,11 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         // reason belongs to the LAST attempt only.
         lastInferenceFailureReason = nil
         guard isAvailable else {
+            // [PIPELINE-TRACE] The picker never ran — no cached brain
+            // model. Both of its stages are marked off (never omitted)
+            // with the reason the row can act on.
+            traceRecorder?.recordOff([.pickerPrompt, .pickerInference],
+                                     reason: "picker_unavailable")
             DispatchQueue.main.async { completion(nil) }
             return
         }
@@ -452,6 +466,11 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         // (NFR-013 / review H3 / spec §5.2).
         let clean = InputSanitiser.sanitise(transcript, level: .quarantine)
         guard !clean.isEmpty else {
+            // [PIPELINE-TRACE] Same shape as the encoder's abstention
+            // token for the same condition: there is nothing to prompt
+            // with.
+            traceRecorder?.recordOff([.pickerPrompt, .pickerInference],
+                                     reason: "empty_after_sanitise")
             DispatchQueue.main.async { completion(nil) }
             return
         }
@@ -464,9 +483,21 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         // construction only (sanitisation above is deliberately outside
         // the span: it is a guard keystone, not prompt assembly, and it
         // runs before the transcript can reach any prompt string).
+        // [PIPELINE-TRACE] The row opens on the sanitised input and
+        // closes with the built prompt's SIZE — an estimate, because no
+        // tokenizer in this process measures the llama.cpp prompt (see
+        // `PipelineTraceSummary.estimatedPromptTokenCount`) — which is
+        // the number that explains an overflow.
+        let promptTrace = traceRecorder?.start(
+            .pickerPrompt,
+            input: PipelineTraceSummary.text(clean))
         let prompt = timingRecorder.measure(.pickerPromptBuild) {
             IntentPrompt.build(transcript: clean, context: context)
         }
+        promptTrace?.finish(
+            output: PipelineTraceSummary.estimatedPromptTokens(prompt),
+            decision: "built",
+            tokenCount: PipelineTraceSummary.estimatedPromptTokenCount(prompt))
 
         inferenceQueue.async { [weak self] in
             // [TURN-TIMING-BREAKDOWN] `picker_inference` — opened when the
@@ -476,10 +507,23 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             // llama.cpp model load lands inside this span — the same
             // honest conflation the tracer's coarse `llm` stage carries.
             let inferenceSpan = self?.timingRecorder?.start(.pickerInference)
+            // [PIPELINE-TRACE] The FINAL LLM's own row: same edges as the
+            // timing span above, so the milliseconds the card shows for
+            // `picker LLM` are exactly the ones the breakdown reports.
+            let traceSpan = self?.traceRecorder?.start(
+                .pickerInference,
+                input: PipelineTraceSummary.estimatedPromptTokens(prompt))
             self?.runInference(prompt: prompt) { json in
                 inferenceSpan?.finish()
                 let parsed = Self.parse(json: json)
-                if let p = parsed, p.confidence < (self?.config.confidenceThreshold ?? 0.7) {
+                let failure = self?.lastInferenceFailureReason
+                let threshold = self?.config.confidenceThreshold ?? 0.7
+                traceSpan?.finish(
+                    output: Self.traceSummary(of: parsed, failure: failure),
+                    decision: Self.traceDecision(of: parsed, threshold: threshold,
+                                                 failure: failure),
+                    tokenCount: PipelineTraceSummary.estimatedPromptTokenCount(prompt))
+                if let p = parsed, p.confidence < threshold {
                     // Below the threshold — treat as "not confident" so the
                     // router falls back to keyword matching.
                     DispatchQueue.main.async { completion(nil) }
@@ -926,6 +970,40 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         emit("inference_unavailable", outcome: "info")
         completion(nil)
         #endif
+    }
+
+    // MARK: - Pipeline trace ([PIPELINE-TRACE]) summaries
+
+    /// `set_reminder 0.82 reply=…` — the FINAL LLM's answer, action and
+    /// confidence first and the spoken reply behind it (bounded by
+    /// `PipelineTraceSummary.text`). The card may name the reply — it is
+    /// the same on-device posture as the "Last correction" line — while
+    /// the RELEASE console line beside it carries the decision only.
+    static func traceSummary(of command: InterpretedCommand?,
+                             failure: String?) -> String {
+        guard let command else {
+            guard let failure else { return "no command" }
+            return PipelineTraceSummary.text("no command (\(failure))")
+        }
+        var text = "\(command.action.rawValue) "
+            + "\(PipelineTraceSummary.score(command.confidence))"
+        if !command.reply.isEmpty { text += " reply=\(command.reply)" }
+        return PipelineTraceSummary.text(text)
+    }
+
+    /// `command` / `abstained(low_confidence)` / `failed(<reason>)` —
+    /// closed vocabulary: the picker's own threshold gate applied, or the
+    /// runtime's failure token when nothing parsed. Token-only, because a
+    /// Release console prints this field.
+    static func traceDecision(of command: InterpretedCommand?,
+                              threshold: Double,
+                              failure: String?) -> String {
+        if let command {
+            return command.confidence < threshold
+                ? "abstained(low_confidence)" : "command"
+        }
+        guard let failure else { return "abstained(no_command)" }
+        return "failed(\(failure))"
     }
 
     // MARK: - Parse
