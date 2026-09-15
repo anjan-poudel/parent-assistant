@@ -880,13 +880,20 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
                 durationMs: 0,
                 decision: PipelineTraceStage.encoderDecode.offReason,
                 ran: false),
+            PipelineTraceRow(
+                stage: .corrector,
+                inputSummary: "—",
+                outputSummary: "not run",
+                durationMs: 0,
+                decision: PipelineTraceStage.corrector.offReason,
+                ran: false),
         ])
 
         let debug = trace.consoleLines(includeSummaries: true)
         let release = trace.consoleLines(includeSummaries: false)
 
-        XCTAssertEqual(debug.count, 2)
-        XCTAssertEqual(release.count, 2, "the off row prints in BOTH shapes")
+        XCTAssertEqual(debug.count, 3)
+        XCTAssertEqual(release.count, 3, "the off rows print in BOTH shapes")
         XCTAssertTrue(debug[0].hasPrefix(PipelineTrace.consolePrefix),
                       "greppable in a captured console")
         XCTAssertTrue(debug[0].contains("picker_inference"))
@@ -908,5 +915,10 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
         XCTAssertTrue(release[1].contains("off(encoder_not_serving)"),
                       "an unrun stage is marked off on the console too")
         XCTAssertTrue(debug[1].contains("off(encoder_not_serving)"))
+        XCTAssertTrue(release[2].contains("off(seam_not_run)"),
+                      "the pre-intent layers' own off token — the vocabulary "
+                      + "the seam and the backfill agree on, pinned here so a "
+                      + "reworded token is a failing test and not a silent drift")
+        XCTAssertTrue(debug[2].contains("off(seam_not_run)"))
     }
 }

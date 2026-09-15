@@ -407,12 +407,18 @@ enum PipelineTraceStage: String, CaseIterable {
         switch self {
         case .stt:
             return "no_capture"
-        case .corrector, .canonicalizer,
-             .encoderTokenizer, .encoderInference, .encoderDecode:
-            // The two pre-intent layers sit on the ENCODER's input, so
-            // they are off in every mode where the encoder is not the
-            // brain that served (a switch-off reads the same way: the
-            // layer did not see this turn).
+        case .corrector, .canonicalizer:
+            // [CORRECTION-ANYBRAIN] The two pre-intent layers now run at
+            // the LOCAL SLOT's input, whichever brain serves it — so this
+            // token is the backfill for a turn the seam never ran on (no
+            // input seam attached, i.e. a caller outside the slot). A
+            // layer that ran with its switch off is marked with the
+            // layer's own `disabled` instead, from the seam itself.
+            return "seam_not_run"
+        case .encoderTokenizer, .encoderInference, .encoderDecode:
+            // The three encoder stages exist only while the encoder is the
+            // brain that served; in every other mode the turn never
+            // reached them.
             return "encoder_not_serving"
         case .band:
             return "no_command_reached_the_band_policy"
