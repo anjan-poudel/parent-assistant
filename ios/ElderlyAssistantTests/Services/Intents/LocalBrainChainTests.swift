@@ -398,6 +398,136 @@ final class LocalBrainChainTests: XCTestCase {
         XCTAssertEqual(cascade?.decisionText, "off(preferred_unavailable)")
     }
 
+    // MARK: - [CORRECTION-ANYBRAIN] the local slot's input seam
+    //
+    // The composition point MOVED here from `IntentEncoderInterpreter`: the
+    // corrected → canonicalized pair is now prepared once, at the slot's
+    // input, and handed to whichever brain serves. These tests pin the chain's
+    // half of that contract with a hand-built seam (no banks, no policies), so
+    // they cannot be satisfied by a policy fixture that quietly did nothing.
+
+    func testTheSeamRunsOnceAndAProducingBrainReadsThePair() {
+        let seam = RecordingInputSeam(rewrite: { "\($0) भोलि" })
+        let encoder = PreparedBrainSpy()
+        let chain = LocalBrainChain(preferred: encoder,
+                                    standIn: StubCommandInterpreter(result: nil),
+                                    inputSeam: seam.seam)
+
+        XCTAssertEqual(interpret(chain, "भोलि मौसम")?.action, .query)
+        XCTAssertEqual(seam.callCount, 1, "one turn, one run of the layers")
+        XCTAssertEqual(seam.inputs,
+                       [InputSanitiser.sanitise("भोलि मौसम", level: .quarantine)],
+                       "the seam is handed the SANITISED transcript")
+        XCTAssertEqual(encoder.pairs.count, 1,
+                       "a brain that consumes the pair is handed the pair")
+        XCTAssertTrue(encoder.transcripts.isEmpty,
+                      "…and never the plain-string entry point")
+        XCTAssertEqual(encoder.pairs.first?.canonical, "भोलि मौसम भोलि")
+        XCTAssertEqual(encoder.pairs.first?.modelInput, "भोलि मौसम भोलि")
+    }
+
+    func testAPlainBrainReadsThePreparedTextAndTheSafetyHalfIsTheOriginal() {
+        let seam = RecordingInputSeam(rewrite: { "\($0) भोलि" })
+        let standIn = StubCommandInterpreter(result: makeCommand(action: .query))
+        // The picker brain's shape: a plain interpreter, with the slot served
+        // by nobody else (the encoder-off configuration this change exists for).
+        let chain = LocalBrainChain(preferred: StubCommandInterpreter(available: false,
+                                                                      result: nil),
+                                    standIn: standIn,
+                                    inputSeam: seam.seam)
+
+        XCTAssertNotNil(interpret(chain, "भोलि मौसम"))
+        XCTAssertEqual(standIn.lastTranscript, "भोलि मौसम भोलि",
+                       "a plain brain reads the prepared text once a layer "
+                       + "rewrote something — the switch must be visible")
+        XCTAssertEqual(seam.callCount, 1)
+        XCTAssertEqual(seam.pairs.first?.original, "भोलि मौसम",
+                       "D-1: the safety half is the sanitised transcript")
+        XCTAssertEqual(seam.pairs.first?.safetyNetInput, "भोलि मौसम",
+                       "…and no accessor hands the prepared form to it")
+    }
+
+    func testAnInertPairPassesTheTranscriptThroughByteIdentically() {
+        // The shipped default (both switches absent): the seam runs, rewrites
+        // nothing, and the brain must read exactly what the router was handed
+        // — the pre-relocation string, byte for byte.
+        let seam = RecordingInputSeam()
+        let standIn = StubCommandInterpreter(result: makeCommand(action: .query))
+        let chain = LocalBrainChain(preferred: StubCommandInterpreter(available: false,
+                                                                      result: nil),
+                                    standIn: standIn,
+                                    inputSeam: seam.seam)
+
+        XCTAssertNotNil(interpret(chain, "भोलि मौसम"))
+        XCTAssertTrue(seam.pairs.first?.isIdentity == true)
+        XCTAssertEqual(standIn.lastTranscript, "भोलि मौसम",
+                       "an inert pair leaves the input untouched")
+    }
+
+    func testAChainWithoutASeamIsThePreRelocationPath() {
+        // `inputSeam: nil` — the default, the nested chain's construction, and
+        // every call site that predates the relocation. Nothing is prepared and
+        // nothing changes, including for a brain that COULD consume a pair: it
+        // is reached through the string entry point, which is where the
+        // encoder's own direct-caller preparation lives.
+        let consumer = PreparedBrainSpy()
+        let chain = LocalBrainChain(preferred: consumer,
+                                    standIn: StubCommandInterpreter(result: nil))
+
+        XCTAssertNotNil(interpret(chain, "भोलि मौसम"))
+        XCTAssertEqual(consumer.transcripts, ["भोलि मौसम"],
+                       "no seam → no pair, so the string path is the one taken")
+        XCTAssertTrue(consumer.pairs.isEmpty)
+    }
+
+    func testANestedChainDoesNotPrepareASecondTime() {
+        // The shipped shape: the slot's outer chain owns the seam, the nested
+        // chain in the `preferred` slot (`IntentEncoderWiring
+        // .deferredEncoderPreference`) owns none. A seam on the nested chain
+        // too — the mis-wiring this guards — must still run ZERO times when the
+        // nested chain is entered with the pair, because the pair path never
+        // consults a seam.
+        let outerSeam = RecordingInputSeam(rewrite: { "\($0) भोलि" })
+        let nestedSeam = RecordingInputSeam(rewrite: { "\($0) नेस्टेड" })
+        let encoder = PreparedBrainSpy()
+        let nested = LocalBrainChain(preferred: encoder,
+                                     standIn: StubCommandInterpreter(result: nil),
+                                     inputSeam: nestedSeam.seam)
+        let slot = LocalBrainChain(preferred: nested,
+                                   standIn: StubCommandInterpreter(result: nil),
+                                   inputSeam: outerSeam.seam)
+
+        XCTAssertNotNil(interpret(slot, "भोलि मौसम"))
+        XCTAssertEqual(outerSeam.callCount, 1, "the slot ran the layers once")
+        XCTAssertEqual(nestedSeam.callCount, 0,
+                       "the nested chain must not run them again — a "
+                       + "correct∘correct turn is not a turn any switch asks for")
+        XCTAssertEqual(encoder.pairs.first?.canonical, "भोलि मौसम भोलि",
+                       "the slot's pair is what reached the brain, verbatim")
+    }
+
+    func testACascadeTurnPreparesOnceAndFeedsBothBrainsTheSamePreparedText() {
+        // Under a cascade BOTH brains answer the same turn — and they read the
+        // SAME prepared input: escalation chooses a brain, never an input, or
+        // the layer's effect would depend on which brain happened to serve.
+        let seam = RecordingInputSeam(rewrite: { "\($0) भोलि" })
+        let abstaining = PreparedBrainSpy(result: nil)
+        let picker = StubCommandInterpreter(result: makeCommand(action: .query))
+        var reasons: [LocalBrainChain.EscalationReason] = []
+        let chain = LocalBrainChain(
+            preferred: abstaining,
+            standIn: picker,
+            cascade: LocalBrainChain.Cascade(acceptThreshold: 0.7) { reasons.append($0) },
+            inputSeam: seam.seam)
+
+        XCTAssertNotNil(interpret(chain, "भोलि मौसम"))
+        XCTAssertEqual(reasons, [.abstained])
+        XCTAssertEqual(seam.callCount, 1, "one turn, one run — despite two brains")
+        XCTAssertEqual(abstaining.pairs.first?.modelInput, "भोलि मौसम भोलि")
+        XCTAssertEqual(picker.lastTranscript, "भोलि मौसम भोलि",
+                       "the escalated brain reads the SAME prepared text")
+    }
+
     // MARK: - Router integration (the reported bug's shape)
 
     func testOnDeviceStackPlainQueryAnsweredThroughRouter() {

@@ -3423,15 +3423,22 @@ struct AIModelsSettingsView: View {
     /// answers the same turn whenever the encoder abstains or is unsure.
     ///
     /// [CORRECTION-TOGGLES] The card then carries the two switches for the
-    /// pre-intent layers the encoder's input passes through — the STT-error
-    /// corrector and the dialect canonicalizer — so a tester can run each of
-    /// them in isolation and in combination without a debugger, a relaunch
-    /// or a second install. Both persist through `AppCoordinator`'s
-    /// `intentCorrectorEnabled` / `intentCanonicalizerEnabled` and both are
-    /// disabled while the encoder switch above is off (the layers correct
-    /// and canonicalize THAT model's input). The card's existing "Last
-    /// correction" line is the corrector's readout and already renders
-    /// only when the corrector participated in the last turn.
+    /// pre-intent layers the local brain's input passes through — the
+    /// STT-error corrector and the dialect canonicalizer — so a tester can run
+    /// each of them in isolation and in combination without a debugger, a
+    /// relaunch or a second install. Both persist through `AppCoordinator`'s
+    /// `intentCorrectorEnabled` / `intentCanonicalizerEnabled`.
+    ///
+    /// [CORRECTION-ANYBRAIN] Unlike the cascade row above, neither is disabled
+    /// while the encoder switch is off: the layers act at the LOCAL SLOT's
+    /// input (`LocalBrainChain.InputSeam`), so with the encoder out of the slot
+    /// they correct and canonicalize what the brain picked above reads — which
+    /// is exactly the corrector-only / canonicalizer-only A/B against the
+    /// picker brain this card exists to make possible. The card's existing
+    /// "Last correction" line is the corrector's readout and renders when the
+    /// corrector participated in the last turn the ENCODER ran (the readout is
+    /// encoder telemetry; a picker-brain turn reports the layer's effect, not
+    /// its readout).
     private var encoderCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("settings.encoder.title")
@@ -3478,14 +3485,18 @@ struct AIModelsSettingsView: View {
             // layers themselves are asked, in the order they run:
             // `sanitise → correct → canonicalize → tokenize`.
             //
-            // Both are disabled (not hidden) while the encoder switch is off,
-            // exactly like the cascade row: the layers sit on the encoder's
-            // input, so with the encoder out of the slot they have nothing to
-            // act on and the disabled state says so honestly. The RUNTIME
-            // gates are the layers' own (`STTCorrector.Policy.runtime`,
-            // `DialectCanonicalizer.Policy.runtime`); this is the UI half of
-            // the same statement, and it mirrors the fact that neither switch
-            // can conjure the encoder into the slot.
+            // [CORRECTION-ANYBRAIN] Unlike the cascade row above, neither is
+            // disabled while the encoder switch is off — and that difference
+            // is the point of these two rows, not an oversight. The layers act
+            // at the LOCAL SLOT's input (`LocalBrainChain.InputSeam`), which
+            // is the boundary in front of whichever local brain answers, so
+            // with the encoder out of the slot they correct and canonicalize
+            // what the PICKER brain reads. That is what makes the corrector
+            // testable alone against the 1.7B, which no encoder-gated row
+            // could ever express. The RUNTIME gates are the layers' own
+            // (`STTCorrector.Policy.runtime`,
+            // `DialectCanonicalizer.Policy.runtime`); neither row can conjure
+            // the encoder into the slot, and neither needs to.
             Toggle(isOn: Binding(
                 get: { coordinator.intentCorrectorEnabled },
                 set: { coordinator.intentCorrectorEnabled = $0 }
@@ -3496,7 +3507,9 @@ struct AIModelsSettingsView: View {
             }
             .tint(DesignTokens.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
-            .disabled(!coordinator.intentEncoderEnabled)
+            // [CORRECTION-ANYBRAIN] Deliberately NOT
+            // `.disabled(!coordinator.intentEncoderEnabled)`: the layer acts
+            // at the slot's input, so it works with the picker brain too.
             Text("settings.encoder.correctorNote")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
                 .foregroundStyle(DesignTokens.textSecondary)
@@ -3511,7 +3524,8 @@ struct AIModelsSettingsView: View {
             }
             .tint(DesignTokens.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
-            .disabled(!coordinator.intentEncoderEnabled)
+            // [CORRECTION-ANYBRAIN] Same as the corrector row above: usable
+            // with the encoder off, because it acts at the slot's input.
             Text("settings.encoder.canonicalizerNote")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
                 .foregroundStyle(DesignTokens.textSecondary)

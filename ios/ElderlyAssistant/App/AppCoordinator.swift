@@ -1270,17 +1270,22 @@ final class AppCoordinator: ObservableObject {
     /// Unlike the two switches above there is no slot to re-install and no
     /// `didSet` sequencing: the corrector is not a brain, and it resolves
     /// its policy from the stored key on EVERY turn
-    /// (`STTCorrector.Policy.runtime` through
-    /// `IntentInputCanonicalization.prepare`), so the flip acts on the next
-    /// turn by itself. The didSet persists and stops.
+    /// (`STTCorrector.Policy.runtime` through the local slot's input seam,
+    /// `IntentEncoderWiring.localSlotInputSeam`), so the flip acts on the
+    /// next turn by itself. The didSet persists and stops.
     ///
-    /// ON rewrites model input only: nothing downstream branches on the
-    /// result (A-14 — no band, no cache, no route, and `LocalBrainChain` /
-    /// `CommandRouter` are untouched), and the keyword safety net keeps
-    /// reading the ORIGINAL transcript (`IntentTranscriptPair.safetyNetInput`,
-    /// D-1). The UI row is disabled while the encoder switch is off, because
-    /// the layer only has an input to correct while the encoder is the one
-    /// answering.
+    /// ON rewrites the LOCAL BRAIN'S input only: nothing downstream branches
+    /// on the result (A-14 — no band, no cache, no route, and the chain's
+    /// routing decisions and `CommandRouter` are untouched), and the keyword
+    /// safety net keeps reading the ORIGINAL transcript
+    /// (`IntentTranscriptPair.safetyNetInput`, D-1).
+    ///
+    /// [CORRECTION-ANYBRAIN] The row is NOT gated on the encoder switch: the
+    /// layer acts at the local slot's input, so it corrects what the picker
+    /// brain reads too — which is what lets a tester run the corrector alone
+    /// against the 1.7B. The layer's own compile gate still applies
+    /// (`STTCorrector.Policy.runtime`), so a build without `INTENT_ENCODER`
+    /// stays inert whatever this switch says.
     @Published var intentCorrectorEnabled: Bool = false {
         didSet { intentEncoderPreferences.setCorrectorEnabled(intentCorrectorEnabled) }
     }
@@ -1299,6 +1304,12 @@ final class AppCoordinator: ObservableObject {
     /// Safety is unchanged in every one of them: `original` (what the
     /// safety net, the emergency path and the med-ack path read) is the
     /// sanitised transcript, untouched by either layer.
+    ///
+    /// [CORRECTION-ANYBRAIN] Same rule as the corrector's row: it acts at the
+    /// local slot's input, so it is not gated on the encoder switch, and with
+    /// the encoder off it canonicalizes what the picker brain reads (in the
+    /// matrix's intended order — on the CORRECTOR's output, never on the raw
+    /// transcript).
     @Published var intentCanonicalizerEnabled: Bool = false {
         didSet { intentEncoderPreferences.setCanonicalizerEnabled(intentCanonicalizerEnabled) }
     }
@@ -1496,6 +1507,20 @@ final class AppCoordinator: ObservableObject {
             // [TURN-TIMING-BREAKDOWN] The cascade's decision span rides
             // the chain that owns the decision; nil on non-gated builds.
             timingRecorder: turnTimingRecorder,
+            // [CORRECTION-ANYBRAIN] The slot's input seam: the corrector and
+            // the canonicalizer run HERE, once per turn, so the two layer
+            // switches act whichever brain answers — including the picker
+            // brain with the encoder off. Unconditional: the seam is inert
+            // while both switches read OFF (the shipped default), and it is
+            // what makes those switches independent of the encoder switch.
+            //
+            // [PIPELINE-TRACE] The trace recorder rides the seam it
+            // traces: the corrector and canonicalizer rows are opened
+            // inside `IntentInputCanonicalization.prepare`, which moved
+            // here with the seam — handing the recorder to the chain
+            // alone would leave both rows off on every production turn.
+            inputSeam: IntentEncoderWiring.localSlotInputSeam(
+                traceRecorder: pipelineTraceRecorder),
             // [PIPELINE-TRACE] …and the cascade's trace row.
             traceRecorder: pipelineTraceRecorder,
             onEscalated: { [weak self] reason in

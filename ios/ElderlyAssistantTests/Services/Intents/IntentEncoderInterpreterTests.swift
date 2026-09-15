@@ -943,6 +943,187 @@ final class IntentEncoderInterpreterTests: XCTestCase {
     }
 
 
+    // MARK: - [CORRECTION-ANYBRAIN] the prepared entry point (the slot's)
+
+    /// A pair whose two halves are provably different, built by hand so the
+    /// strings below cannot be confused for one another: `original` is what a
+    /// safety consumer reads, `modelInput` is what a model reads.
+    private func preparedPair(original: String,
+                              canonical: String,
+                              correction: CorrectionResult? = nil)
+    -> IntentTranscriptPair {
+        IntentTranscriptPair(original: original,
+                             canonical: canonical,
+                             applications: [],
+                             degraded: false,
+                             tableRevision: "test-pair/v1",
+                             correction: correction)
+    }
+
+    @discardableResult
+    private func interpretPrepared(_ interpreter: IntentEncoderInterpreter,
+                                   _ pair: IntentTranscriptPair,
+                                   waitTimeout: TimeInterval = 5)
+    -> InterpretedCommand? {
+        var out: InterpretedCommand?
+        let exp = expectation(description: "interpret prepared")
+        interpreter.interpret(preparedInput: pair, context: ctx()) { result in
+            out = result
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: waitTimeout)
+        return out
+    }
+
+    /// The slot's entry point runs the model on the PAIR's text — the string
+    /// the layers produced — and prepares nothing itself.
+    ///
+    /// This is the double-apply guard, made observable: with the shipped
+    /// defaults both layer switches are absent, so an interpreter that
+    /// prepared the pair's `original` again would hand the tokenizer the raw
+    /// transcript (`भोलि सम्झाइदिनु`) instead of the pair's model text
+    /// (`भोलि सम्झाइदिनुस्`). The assertion below fails in exactly that case.
+    func testThePreparedEntryPointRunsOnThePairsTextAndNeverRePreparesIt() throws {
+        let store = try makeStore()
+        try installArtifact(store: store)
+        let tokenizer = StubIntentEncoderTokenizer()
+        let spy = IntentEncoderRunnerSpy()
+        let model = StubIntentEncoderModel()
+        let manifest = IntentEncoderManifest.t033Spike
+        let interpreter = makeInterpreter(store: store, tokenizer: tokenizer,
+                                          spy: spy, manifest: manifest)
+        let pair = preparedPair(original: "भोलि सम्झाइदिनु",
+                                canonical: "भोलि सम्झाइदिनुस्")
+        // A confident `set_reminder` whose time span is the FIRST word, with
+        // the spike's tag order (B-time is index 3).
+        model.logits = IntentEncoderLogits(
+            intentLogits: manifest.intents.map { $0 == "set_reminder" ? 6 : -6 },
+            slotLogits: [[-6, -6, -6, 6, 6]])
+        spy.make = { model }
+
+        let result = interpretPrepared(interpreter, pair)
+
+        XCTAssertEqual(tokenizer.lastSanitisedTranscript, "भोलि सम्झाइदिनुस्",
+                       "the tokenizer must read the pair's model text — a "
+                       + "re-preparation of the pair's `original` would show up "
+                       + "here as the raw transcript")
+        XCTAssertNotEqual(tokenizer.lastSanitisedTranscript, pair.original,
+                          "…and never the safety half")
+        XCTAssertEqual(result?.action, .setReminder,
+                       "the turn ran normally on the prepared text")
+    }
+
+    /// The direct entry point is unchanged: a caller that hands the
+    /// interpreter a RAW transcript (a test, a future call site) still gets
+    /// the sanitised boundary and the seam — which, with both layer switches
+    /// absent (the shipped default), is a byte-identical pass-through.
+    func testTheDirectEntryPointStillPreparesForRawTranscriptCallers() throws {
+        let store = try makeStore()
+        try installArtifact(store: store)
+        let tokenizer = StubIntentEncoderTokenizer()
+        let spy = IntentEncoderRunnerSpy()
+        let interpreter = makeInterpreter(store: store, tokenizer: tokenizer, spy: spy)
+
+        interpret(interpreter, "  भोलि सम्झाइदिनु  ")
+
+        XCTAssertEqual(tokenizer.lastSanitisedTranscript,
+                       InputSanitiser.sanitise("  भोलि सम्झाइदिनु  ", level: .quarantine),
+                       "the direct path sanitises first, as every interpreter "
+                       + "does, and the inert seam leaves it at that")
+    }
+
+    /// An empty prepared text abstains the same way an empty sanitised
+    /// transcript does — an abstention with the `emptyAfterSanitise` reason
+    /// and no tokenizer call — rather than running the model on nothing.
+    func testAnEmptyPreparedTextAbstainsWithoutTouchingTheTokenizer() throws {
+        let store = try makeStore()
+        try installArtifact(store: store)
+        let tokenizer = StubIntentEncoderTokenizer()
+        let interpreter = makeInterpreter(store: store, tokenizer: tokenizer,
+                                          spy: IntentEncoderRunnerSpy())
+
+        XCTAssertNil(interpretPrepared(interpreter,
+                                       preparedPair(original: "", canonical: "")))
+        XCTAssertEqual(tokenizer.callCount, 0)
+        let abstained = events("encoder_abstained")
+        XCTAssertEqual(abstained.last?.metadata["error_code"],
+                       IntentEncoderAbstention.emptyAfterSanitise.rawValue)
+    }
+
+    /// The seam's telemetry belongs to the turn the ENCODER ran, whichever
+    /// side prepared the pair: the correction event and the card's readout
+    /// still fire when the slot hands the pair over.
+    ///
+    /// This is the regression the relocation could have caused silently — the
+    /// readout is how the internal card answers "what did the corrector do
+    /// last turn", and the event is the only trail a shipped encoder turn
+    /// leaves for either layer.
+    func testThePreparedEntryPointStillReportsTheSeamsTelemetry() throws {
+        let store = try makeStore()
+        try installArtifact(store: store)
+        let interpreter = makeInterpreter(store: store,
+                                          tokenizer: StubIntentEncoderTokenizer(),
+                                          spy: IntentEncoderRunnerSpy())
+        var readouts: [CorrectionReadout] = []
+        interpreter.onCorrection = { readouts.append($0) }
+
+        let correction = syntheticCorrection(original: "भोलि होस",
+                                             corrected: "भोलि होस्")
+        let pair = preparedPair(original: "भोलि होस",
+                                canonical: "भोलि होस्",
+                                correction: correction)
+        interpretPrepared(interpreter, pair)
+
+        let event = try XCTUnwrap(events("turn_correction").last)
+        XCTAssertEqual(event.metadata["correction_state"], "applied")
+        XCTAssertEqual(readouts.count, 1,
+                       "the card's readout is forwarded on the slot's path too")
+        XCTAssertEqual(readouts.first?.rows.first?.label, "corrected",
+                       "…and it is the corrector's own readout, row for row")
+
+        // The direct path keeps reporting it as well — one emitter, two entry
+        // points, and nothing reported twice for a single turn.
+        interpret(interpreter, "भोलि होस")
+        XCTAssertEqual(events("turn_correction").count, 1,
+                       "the inert direct-path turn adds no correction event")
+    }
+
+    /// A correction result with one applied row, built by hand. Counts and
+    /// modes only — the surfaces stay out of every payload by construction.
+    private func syntheticCorrection(original: String,
+                                     corrected: String) -> CorrectionResult {
+        let evidence = CorrectionEvidence(similarity: 0.9, prefixCompletion: 0.9,
+                                          phoneticKey: 0.9, frameFit: 0.0,
+                                          pairedKeyword: 0.0)
+        let application = STTCorrectionApplication(
+            entryID: "fixture-hos",
+            lexiconID: "fixture-bank",
+            lexiconRevision: "fixture/v1",
+            errorClass: .truncation,
+            originalRange: 0..<4,
+            correctedRange: 0..<5,
+            score: 0.9,
+            margin: 0.5,
+            evidence: evidence)
+        let decision = TokenDecision(
+            originalRange: 0..<4,
+            surface: original,
+            decision: .corrected(application),
+            best: TokenDecision.BestCandidate(surface: corrected,
+                                              entryID: "fixture-hos",
+                                              errorClass: .truncation,
+                                              score: 0.9),
+            margin: 0.5)
+        return CorrectionResult(corrected: corrected,
+                                applications: [application],
+                                decisions: [decision],
+                                lexiconRevision: "fixture/v1",
+                                thresholdUsed: 0.65,
+                                degraded: false,
+                                mode: .apply,
+                                original: original)
+    }
+
     // MARK: - [TURN-TIMING-BREAKDOWN] encoder stage instrumentation
 
     /// The encoder's three stages — tokenizer, CoreML forward, decode —

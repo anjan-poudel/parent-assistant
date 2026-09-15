@@ -978,7 +978,14 @@ extension DialectIdentifierTests {
 
     // MARK: Composition (§4.6 / D-1)
 
-    func testSafetyAndPickerInputsKeepTheOriginal() {
+    /// The pair's two consumers, pulled apart: the safety half is the
+    /// ORIGINAL, forever (D-1), and the model half is the prepared text —
+    /// which, since [CORRECTION-ANYBRAIN], is what the PICKER brain reads
+    /// too. The two accessors deliberately no longer agree, and this is the
+    /// test that says so: `pickerBrainInput` used to BE `safetyNetInput`
+    /// (§4.6 / E-17), which is exactly the rule the layer switches needed
+    /// lifted to be testable against the picker brain.
+    func testSafetyNetKeepsTheOriginalWhileThePickerBrainReadsThePreparedText() {
         let tables = makeSet(orthographic: makeTable(
             "canonical-orthographic",
             entries: [makeEntry("test-halanta", variant: "गर्नुहोस",
@@ -994,9 +1001,36 @@ extension DialectIdentifierTests {
         XCTAssertFalse(pair.isIdentity)
         // D-1: the keyword safety net reads the original, forever.
         XCTAssertEqual(pair.safetyNetInput, "अब यो काम गर्नुहोस")
-        // §4.6: the picker brain reads the original sanitised transcript.
+        // [CORRECTION-ANYBRAIN] §4.6 as relocated: a MODEL reads the prepared
+        // text, and the picker brain is a model — so a canonicalization that
+        // rewrote the text a model reads reaches the picker's prompt, not the
+        // router.
+        XCTAssertEqual(pair.pickerBrainInput, "अब यो काम गर्नुहोस्")
+        XCTAssertEqual(pair.pickerBrainInput, pair.modelInput,
+                       "the two model consumers read the same string")
+        XCTAssertNotEqual(pair.safetyNetInput, pair.pickerBrainInput,
+                          "the fixture must actually rewrite, or this test "
+                          + "proves nothing about the two consumers")
+    }
+
+    /// The INERT half of the same rule: while no layer rewrote anything the
+    /// two accessors are the same string again, which is what keeps the
+    /// shipped default (both keys absent) byte-identical — a picker brain
+    /// that reads `pickerBrainInput` cannot tell this pair from the raw
+    /// transcript.
+    func testAnInertPairStillHandsThePickerBrainTheOriginal() {
+        let pair = IntentInputCanonicalization.prepare(
+            sanitisedTranscript: "अब यो काम गर्नुहोस",
+            dialect: .default,
+            tables: VariantTableSet(orthographic: nil, panRegional: nil,
+                                    sttReductions: nil, dialectTables: [:],
+                                    loadIssues: []),
+            policy: DialectCanonicalizer.Policy(enabled: false))
+
+        XCTAssertTrue(pair.isIdentity)
         XCTAssertEqual(pair.pickerBrainInput, "अब यो काम गर्नुहोस")
-        XCTAssertEqual(pair.safetyNetInput, pair.pickerBrainInput)
+        XCTAssertEqual(pair.pickerBrainInput, pair.original)
+        XCTAssertEqual(pair.pickerBrainInput, pair.safetyNetInput)
     }
 
     func testDisabledPolicyIsAByteIdenticalPassThrough() {
@@ -2225,7 +2259,12 @@ extension DialectIdentifierTests {
         // D-1: the safety net, the emergency path and the med-ack path read the
         // ORIGINAL, whatever either layer did.
         XCTAssertEqual(pair.safetyNetInput, "भोलि सम्झाइदिनु")
-        XCTAssertEqual(pair.pickerBrainInput, "भोलि सम्झाइदिनु")
+        // [CORRECTION-ANYBRAIN] …while both MODELS read the prepared text, and
+        // in the matrix's order: the canonicalizer's output, not the
+        // corrector's and not the raw transcript.
+        XCTAssertEqual(pair.pickerBrainInput, "भोलि सम्झाइदिनुस्")
+        XCTAssertEqual(pair.pickerBrainInput, pair.modelInput)
+        XCTAssertNotEqual(pair.pickerBrainInput, pair.correctedInput)
 
         // Neither layer's surface forms may reach the egressing payload.
         for (key, value) in pair.observabilityMetadata {
@@ -2352,8 +2391,9 @@ extension DialectIdentifierTests {
 
     /// The matrix itself: each combination's policy outcome, its effect at the
     /// seam, and the invariants that must hold in ALL FOUR — the safety net's
-    /// input, the picker brain's input, and the ORDER (the canonicalizer's
-    /// input is the corrector's output, never the raw transcript).
+    /// input stays the ORIGINAL, the MODEL's input is the prepared text, and
+    /// the ORDER (the canonicalizer's input is the corrector's output, never
+    /// the raw transcript).
     func testTheFourWayMatrixResolvesAndRunsEveryCombinationInOrder() throws {
         let fixture = makeToggleMatrixFixture()
         let defaults = isolateDefaults()
@@ -2366,11 +2406,22 @@ extension DialectIdentifierTests {
             seen[combination] = pair
 
             // D-1, in every combination, on every arm: the keyword safety net
-            // and the picker brain read the ORIGINAL sanitised transcript.
+            // reads the ORIGINAL sanitised transcript.
             XCTAssertEqual(pair.safetyNetInput, original,
                            "\(combination): the safety net must read the original")
-            XCTAssertEqual(pair.pickerBrainInput, original,
-                           "\(combination): the picker brain reads the original too")
+            // [CORRECTION-ANYBRAIN] The model's input is the prepared text in
+            // every combination — the same string the encoder's tokenizer and
+            // the picker brain's prompt are handed, so "which brain answers"
+            // cannot change what the layers did. Inert combinations (neither)
+            // make the two agree again, which is the shipped default.
+            XCTAssertEqual(pair.pickerBrainInput, pair.modelInput,
+                           "\(combination): every model consumer reads modelInput")
+            if !combination.corrector && !combination.canonicalizer {
+                XCTAssertEqual(pair.pickerBrainInput, original,
+                               "\(combination): with both switches off nothing "
+                               + "was rewritten, so the model's input is the "
+                               + "transcript itself")
+            }
 
             // The order invariant, stated as an equality that a reversed
             // composition would fail: re-canonicalizing the pair's own
@@ -2405,6 +2456,9 @@ extension DialectIdentifierTests {
 
         // NEITHER — the shipped default, and a byte-identical pass-through.
         XCTAssertEqual(neither.modelInput, original)
+        XCTAssertEqual(neither.pickerBrainInput, original,
+                       "the picker brain reads the transcript itself — the "
+                       + "pre-relocation string, byte for byte")
         XCTAssertEqual(neither.correctedInput, original)
         XCTAssertTrue(neither.isIdentity)
         XCTAssertTrue(neither.applications.isEmpty)
@@ -2421,6 +2475,9 @@ extension DialectIdentifierTests {
         XCTAssertEqual(correctorOnly.modelInput, "भोलि सम्झाइदिनुस गर्नुहोस",
                        "rule A's variant is not in the raw text and rule B's is "
                        + "not in the corrected one")
+        XCTAssertEqual(correctorOnly.pickerBrainInput, "भोलि सम्झाइदिनुस गर्नुहोस",
+                       "corrector only: the PICKER brain is handed the corrected "
+                       + "text and the canonicalizer's rule never fires")
         XCTAssertTrue(correctorOnly.applications.isEmpty)
         XCTAssertFalse(correctorOnly.isIdentity)
         XCTAssertTrue(correctorOnly.observabilityMetadata.keys.contains {
@@ -2433,6 +2490,9 @@ extension DialectIdentifierTests {
         // could not, because the corrector never produced its variant.
         XCTAssertEqual(canonicalizerOnly.correctedInput, original)
         XCTAssertEqual(canonicalizerOnly.modelInput, "भोलि सम्झाइदिनु गर्नुहोस्")
+        XCTAssertEqual(canonicalizerOnly.pickerBrainInput, "भोलि सम्झाइदिनु गर्नुहोस्",
+                       "canonicalizer only: the picker brain is handed the "
+                       + "canonical text")
         XCTAssertEqual(canonicalizerOnly.applications.map(\.ruleID), ["test-plain"])
         XCTAssertEqual(canonicalizerOnly.correction?.mode, .off)
         XCTAssertFalse(canonicalizerOnly.observabilityMetadata.keys.contains {
@@ -2445,11 +2505,232 @@ extension DialectIdentifierTests {
         // is unreachable, not merely different.
         XCTAssertEqual(both.correctedInput, "भोलि सम्झाइदिनुस गर्नुहोस")
         XCTAssertEqual(both.modelInput, "भोलि सम्झाइदिनुस् गर्नुहोस्")
+        XCTAssertEqual(both.pickerBrainInput, "भोलि सम्झाइदिनुस् गर्नुहोस्",
+                       "both: the picker brain is handed the one string only "
+                       + "the ordered composition can produce")
         XCTAssertEqual(both.applications.map(\.ruleID).sorted(),
                        ["test-order", "test-plain"])
         XCTAssertEqual(both.correction?.applications.count, 1)
         XCTAssertFalse(both.isIdentity)
         XCTAssertFalse(both.canonicalizationIsIdentity)
+    }
+
+    // MARK: [CORRECTION-ANYBRAIN] the matrix at the LOCAL SLOT's input
+    //
+    // The pair-level matrix above says what the seam produces. These say
+    // WHERE the shipped seam runs and WHO reads its output: the local slot's
+    // input (`LocalBrainChain.InputSeam`), in front of whichever brain serves
+    // — the encoder (`PreparedTranscriptInterpreting`) or the picker brain.
+    // Before the relocation the seam lived inside `IntentEncoderInterpreter`,
+    // so with the encoder off neither switch had any effect at all.
+
+    /// One turn of a chain.
+    @discardableResult
+    private func runChain(_ chain: LocalBrainChain,
+                          _ transcript: String) -> InterpretedCommand? {
+        let exp = expectation(description: "chain")
+        var out: InterpretedCommand?
+        chain.interpret(transcript: transcript,
+                        context: InterpreterContext(pendingMedications: [],
+                                                    userLanguageHint: "ne")) { result in
+            out = result
+            exp.fulfill()
+        }
+        wait(for: [exp], timeout: 2)
+        return out
+    }
+
+    /// The seam the local slot runs for one matrix combination: the SHIPPED
+    /// composition (`IntentEncoderWiring.localSlotInputSeam`'s body —
+    /// `IntentInputCanonicalization.prepare`, both policies resolved from the
+    /// stored switches), with the fixture's tables and lexicon in place of the
+    /// bundled ones, plus a record of what it was run on. The two switches are
+    /// written FIRST, through the same `IntentEncoderPreferences` the
+    /// coordinator's `didSet` writes, so every cell below is produced by
+    /// flipping the two keys and letting the shipped resolution do the rest.
+    private func makeMatrixProbe(_ combination: LayerSwitch,
+                                 defaults: UserDefaults,
+                                 fixture: (lexicon: CorrectionLexicon,
+                                           tables: VariantTableSet,
+                                           transcript: String)) -> SlotSeamProbe {
+        let preferences = IntentEncoderPreferences(defaults: defaults)
+        preferences.setCorrectorEnabled(combination.corrector)
+        preferences.setCanonicalizerEnabled(combination.canonicalizer)
+        let tables = fixture.tables
+        let lexicon = fixture.lexicon
+        return SlotSeamProbe { text in
+            IntentInputCanonicalization.prepare(
+                sanitisedTranscript: text,
+                dialect: .default,
+                tables: tables,
+                policy: DialectCanonicalizer.Policy.runtime(defaults: defaults,
+                                                            isCompiledIn: true),
+                correctionPolicy: STTCorrector.Policy.runtime(defaults: defaults,
+                                                              isCompiledIn: true,
+                                                              lexicon: lexicon),
+                correctionLexicon: lexicon)
+        }
+    }
+
+    /// A seam plus its record: how often the slot ran it, on what text, and the
+    /// pair it produced. "Once per turn" and "on the SANITISED transcript" are
+    /// measured here rather than promised in a comment.
+    private final class SlotSeamProbe {
+        private(set) var callCount = 0
+        private(set) var preparedInputs: [String] = []
+        private(set) var pairs: [IntentTranscriptPair] = []
+        private let prepare: (String) -> IntentTranscriptPair
+
+        init(prepare: @escaping (String) -> IntentTranscriptPair) {
+            self.prepare = prepare
+        }
+
+        var seam: LocalBrainChain.InputSeam {
+            LocalBrainChain.InputSeam { [self] text in
+                callCount += 1
+                preparedInputs.append(text)
+                let pair = prepare(text)
+                pairs.append(pair)
+                return pair
+            }
+        }
+    }
+
+    /// The four-way matrix at the SLOT's input with the PICKER BRAIN serving —
+    /// the encoder switch OFF case this relocation exists for.
+    ///
+    /// Before it, the picker brain's prompt was the raw transcript and the two
+    /// rows had no effect at all while the encoder was off (the rows were
+    /// disabled in Settings, and the composition lived inside the encoder's
+    /// interpreter). Now the same stored keys rewrite the text the picker brain
+    /// reads, in every combination — and the pair the seam actually produced
+    /// still carries the ORIGINAL for the safety half.
+    func testTheFourWayMatrixReachesThePickerBrainWhenTheEncoderIsOff() throws {
+        let fixture = makeToggleMatrixFixture()
+        let defaults = isolateDefaults()
+        let original = fixture.transcript
+        let sanitised = InputSanitiser.sanitise(original, level: .quarantine)
+
+        for combination in LayerSwitch.allCases {
+            let probe = makeMatrixProbe(combination, defaults: defaults, fixture: fixture)
+            let picker = StubCommandInterpreter(
+                result: makeCommand(action: .query, confidence: 0.9))
+            // The slot with the encoder out of it: `preferred` cannot serve, so
+            // the chain falls through to the stand-in — the picker brain.
+            let chain = LocalBrainChain(
+                preferred: StubCommandInterpreter(available: false, result: nil),
+                standIn: picker,
+                inputSeam: probe.seam)
+
+            XCTAssertNotNil(runChain(chain, original),
+                            "\(combination): the picker brain answers")
+
+            let pair = try XCTUnwrap(probe.pairs.last,
+                                     "\(combination): the slot must have run the seam")
+            let expected = matrixPair(combination, defaults: defaults,
+                                      fixture: fixture).pair
+            XCTAssertEqual(pair, expected,
+                           "\(combination): the slot's seam is the shipped "
+                           + "composition, resolved from the stored switches")
+
+            XCTAssertEqual(probe.callCount, 1,
+                           "\(combination): once per turn — not once per brain, "
+                           + "and not once per entry point")
+            XCTAssertEqual(probe.preparedInputs, [sanitised],
+                           "\(combination): the seam sees sanitised text only — "
+                           + "the sanitiser stays the boundary and stays first")
+            // The safety half, in EVERY combination, on the pair that ran.
+            XCTAssertEqual(pair.safetyNetInput, original,
+                           "\(combination): the safety net's input is the original")
+            XCTAssertEqual(picker.lastTranscript, pair.pickerBrainInput,
+                           "\(combination): the picker brain reads the pair's "
+                           + "prepared text")
+            XCTAssertEqual(picker.lastTranscript, pair.modelInput,
+                           "\(combination): the same string the encoder would "
+                           + "tokenize")
+            if combination.corrector || combination.canonicalizer {
+                XCTAssertNotEqual(picker.lastTranscript, original,
+                                  "\(combination): a switch that is ON must change "
+                                  + "what the picker brain reads — the whole point")
+            } else {
+                XCTAssertEqual(picker.lastTranscript, original,
+                               "\(combination): nothing rewritten, so the picker "
+                               + "brain reads the transcript itself, byte for byte")
+            }
+        }
+    }
+
+    /// The same four cells with the ENCODER's shape serving: a brain that
+    /// consumes the pair is handed the PAIR — never a string — and the seam ran
+    /// exactly once for the turn, so no brain can correct its own output.
+    func testTheFourWayMatrixReachesTheEncoderShapeWithoutASecondRun() throws {
+        let fixture = makeToggleMatrixFixture()
+        let defaults = isolateDefaults()
+        let original = fixture.transcript
+
+        for combination in LayerSwitch.allCases {
+            let probe = makeMatrixProbe(combination, defaults: defaults, fixture: fixture)
+            let encoder = PreparedBrainSpy()
+            let picker = StubCommandInterpreter(
+                result: makeCommand(action: .query, confidence: 0.9))
+            let chain = LocalBrainChain(preferred: encoder,
+                                        standIn: picker,
+                                        inputSeam: probe.seam)
+
+            XCTAssertNotNil(runChain(chain, original),
+                            "\(combination): the encoder shape answers")
+            let pair = try XCTUnwrap(probe.pairs.last)
+
+            XCTAssertEqual(encoder.pairs, [pair],
+                           "\(combination): the pair itself reached the brain that "
+                           + "consumes it")
+            XCTAssertTrue(encoder.transcripts.isEmpty,
+                          "\(combination): a prepared brain must not be reached "
+                          + "through the string entry point while a pair exists")
+            XCTAssertEqual(probe.callCount, 1,
+                           "\(combination): the layers ran once — the consuming "
+                           + "brain prepares nothing (no correct∘correct)")
+            XCTAssertEqual(picker.callCount, 0,
+                           "\(combination): an available encoder-shaped brain is "
+                           + "the only brain consulted")
+            XCTAssertEqual(encoder.pairs.last?.safetyNetInput, original,
+                           "\(combination): the safety half is untouched on the "
+                           + "encoder's arm too")
+            XCTAssertEqual(encoder.pairs.last?.modelInput, pair.modelInput,
+                           "\(combination): the pair is handed over verbatim")
+        }
+    }
+
+    /// The cascade's leg of the contract: when the encoder abstains and the
+    /// picker brain answers the SAME turn, it answers the PREPARED text.
+    /// Escalation chooses a brain, never an input — a picker that quietly
+    /// reverted to the raw transcript would make the two layer switches
+    /// untestable in exactly the mode the card offers.
+    func testCascadeEscalationHandsThePickerBrainThePreparedText() throws {
+        let fixture = makeToggleMatrixFixture()
+        let defaults = isolateDefaults()
+        let original = fixture.transcript
+        let both = matrixPair(.both, defaults: defaults, fixture: fixture).pair
+        let probe = makeMatrixProbe(.both, defaults: defaults, fixture: fixture)
+        let abstaining = PreparedBrainSpy(result: nil)
+        let picker = StubCommandInterpreter(
+            result: makeCommand(action: .query, confidence: 0.9))
+        var reasons: [LocalBrainChain.EscalationReason] = []
+        let chain = LocalBrainChain(
+            preferred: abstaining,
+            standIn: picker,
+            cascade: LocalBrainChain.Cascade(acceptThreshold: 0.7) { reasons.append($0) },
+            inputSeam: probe.seam)
+
+        XCTAssertEqual(runChain(chain, original)?.confidence, 0.9,
+                       "one turn, one answer: the picker brain answered")
+        XCTAssertEqual(reasons, [.abstained])
+        XCTAssertEqual(picker.lastTranscript, both.pickerBrainInput,
+                       "the escalated brain reads the prepared text")
+        XCTAssertNotEqual(picker.lastTranscript, original,
+                          "escalation must not revert the input")
+        XCTAssertEqual(probe.callCount, 1,
+                       "the escalation reuses the turn's one prepared pair")
     }
 
     /// The policy outcomes themselves, one row per combination: the corrector
@@ -2613,5 +2894,145 @@ extension DialectIdentifierTests {
                        "reset clears the switch as well as the older key")
         XCTAssertNil(defaults.object(forKey: IntentEncoderPreferences.canonicalizerKey))
         XCTAssertNil(defaults.object(forKey: CanonicalizerPreferences.canonicalizerEnabledKey))
+    }
+
+    // MARK: - [PIPELINE-TRACE] the two pre-intent rows at the slot's input
+    //
+    // The trace's first two rows are born where the layers run, and the
+    // layers moved (`IntentEncoderInterpreter` → `LocalBrainChain.InputSeam`)
+    // after the trace did: a recorder that rides only the chain would leave
+    // both rows off on EVERY production turn, because the chain does not
+    // prepare the pair itself. These tests drive the shipped composition
+    // (`IntentEncoderWiring.localSlotInputSeam`'s body) with a recorder
+    // attached and pin what each row says.
+
+    /// The shipped composition for one combination, with a recorder.
+    private func tracedMatrixPair(_ combination: LayerSwitch,
+                                  defaults: UserDefaults,
+                                  fixture: (lexicon: CorrectionLexicon,
+                                            tables: VariantTableSet,
+                                            transcript: String),
+                                  recorder: PipelineTraceRecorder)
+    -> IntentTranscriptPair {
+        let preferences = IntentEncoderPreferences(defaults: defaults)
+        preferences.setCorrectorEnabled(combination.corrector)
+        preferences.setCanonicalizerEnabled(combination.canonicalizer)
+        return IntentInputCanonicalization.prepare(
+            sanitisedTranscript: fixture.transcript,
+            dialect: .default,
+            tables: fixture.tables,
+            policy: DialectCanonicalizer.Policy.runtime(defaults: defaults,
+                                                        isCompiledIn: true),
+            correctionPolicy: STTCorrector.Policy.runtime(defaults: defaults,
+                                                          isCompiledIn: true,
+                                                          lexicon: fixture.lexicon),
+            correctionLexicon: fixture.lexicon,
+            traceRecorder: recorder)
+    }
+
+    /// The rows exist in canonical order whenever the seam runs, whatever the
+    /// switches say — a stage that did not participate is marked off, never
+    /// omitted (the trace's own rule, and the reason a reader can tell "the
+    /// corrector was off" from "the corrector was not reached").
+    func testTheSeamEmitsBothPreIntentRowsInCanonicalOrder() throws {
+        let recorder = PipelineTraceRecorder()
+        recorder.beginTurn()
+        _ = tracedMatrixPair(.both, defaults: isolateDefaults(),
+                             fixture: makeToggleMatrixFixture(),
+                             recorder: recorder)
+
+        let trace = recorder.finishTurn()
+        XCTAssertEqual(trace.rows.map(\.stage), PipelineTraceStage.allCases,
+                       "one row per stage, in the trace's canonical order")
+        XCTAssertTrue(trace.rows.allSatisfy { $0.durationMs >= 0 })
+    }
+
+    /// The corrector's row, in full: what the layer was handed in, what it
+    /// produced out, and its own decision word. The words ARE on this row —
+    /// the same on-device readout posture as the correction line, which the
+    /// observability events beside it never carry.
+    func testTheCorrectorRowCarriesTheWordsItSawAndProduced() throws {
+        let fixture = makeToggleMatrixFixture()
+        let recorder = PipelineTraceRecorder()
+        recorder.beginTurn()
+        let pair = tracedMatrixPair(.correctorOnly, defaults: isolateDefaults(),
+                                    fixture: fixture, recorder: recorder)
+        let trace = recorder.finishTurn()
+
+        let corrector = try XCTUnwrap(trace.rows.first { $0.stage == .corrector })
+        XCTAssertTrue(corrector.ran)
+        XCTAssertEqual(corrector.decision, "corrected",
+                       "the row speaks the corrector's own decision vocabulary")
+        XCTAssertEqual(corrector.inputSummary,
+                       PipelineTraceSummary.text(
+                        InputSanitiser.sanitise(fixture.transcript,
+                                                level: .quarantine)),
+                       "the input column is what the layer actually read")
+        XCTAssertEqual(corrector.outputSummary,
+                       PipelineTraceSummary.text(try XCTUnwrap(pair.correction)
+                        .corrected),
+                       "…and the output column is what it produced, words and all")
+        XCTAssertNotEqual(corrector.inputSummary, corrector.outputSummary,
+                          "a layer that rewrote something must not read as inert")
+    }
+
+    /// The ORDER, on the readout: the canonicalizer's input column is the
+    /// corrector's output column — the same chaining the pair's own
+    /// `correctedInput` invariant pins, stated in the trace's vocabulary. A row
+    /// pair that recorded the raw transcript twice would fail this and still
+    /// look plausible on the card.
+    func testTheCanonicalizerRowIsChainedOntoTheCorrectorsOutput() throws {
+        let fixture = makeToggleMatrixFixture()
+        let recorder = PipelineTraceRecorder()
+        recorder.beginTurn()
+        let pair = tracedMatrixPair(.both, defaults: isolateDefaults(),
+                                    fixture: fixture, recorder: recorder)
+        let trace = recorder.finishTurn()
+
+        let corrector = try XCTUnwrap(trace.rows.first { $0.stage == .corrector })
+        let canonicalizer = try XCTUnwrap(trace.rows.first { $0.stage == .canonicalizer })
+        XCTAssertTrue(corrector.ran, "the switch is on, so the layer ran")
+        XCTAssertTrue(canonicalizer.ran)
+        XCTAssertEqual(canonicalizer.inputSummary, corrector.outputSummary,
+                       "the canonicalizer reads the corrector's output, never "
+                       + "the raw transcript")
+        XCTAssertEqual(canonicalizer.outputSummary,
+                       PipelineTraceSummary.text(pair.modelInput),
+                       "…and the last row's output IS what the brain is handed")
+        XCTAssertEqual(canonicalizer.decision, "applied test-order",
+                       "the row names the rules that fired, by id")
+        let stages = trace.rows.map(\.stage)
+        XCTAssertEqual(stages.firstIndex(of: .corrector)! + 1,
+                       stages.firstIndex(of: .canonicalizer)!,
+                       "the corrector's row comes first — the chaining above is "
+                       + "not a coincidence of two identical summaries")
+    }
+
+    /// The other half of the same contract: with both switches off — the
+    /// shipped default — the two rows are MARKED OFF with the layers' own word
+    /// rather than omitted, carry no duration, and the readout still shows the
+    /// turn had two pre-intent stages (which did not participate). A card that
+    /// silently dropped them could not distinguish "off" from "never wired".
+    func testBothSeamRowsAreMarkedOffWhenTheSwitchesAreOff() throws {
+        let recorder = PipelineTraceRecorder()
+        recorder.beginTurn()
+        _ = tracedMatrixPair(.neither, defaults: isolateDefaults(),
+                             fixture: makeToggleMatrixFixture(),
+                             recorder: recorder)
+        let trace = recorder.finishTurn()
+
+        for stage in [PipelineTraceStage.corrector, .canonicalizer] {
+            let row = try XCTUnwrap(trace.rows.first { $0.stage == stage })
+            XCTAssertFalse(row.ran, "\(stage): the layer did not run")
+            XCTAssertEqual(row.decision, "disabled",
+                           "\(stage): the layer's own word for an off switch")
+            XCTAssertEqual(row.decisionText, "off(disabled)")
+            XCTAssertEqual(row.durationMs, 0,
+                           "\(stage): an off stage has no duration to report")
+            XCTAssertTrue(row.summaryText.isEmpty == false,
+                          "\(stage): and it keeps its place on the readout")
+        }
+        XCTAssertEqual(trace.ranCount, 0,
+                       "no traced stage ran on an inert turn")
     }
 }

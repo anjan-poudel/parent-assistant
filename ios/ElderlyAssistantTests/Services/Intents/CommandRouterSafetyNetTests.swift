@@ -409,8 +409,17 @@ extension CommandRouterSafetyNetTests {
                        "the fixture must actually rewrite, or this test proves nothing")
         XCTAssertNotEqual(pair.modelInput, pair.original)
         XCTAssertEqual(pair.safetyNetInput, utterance)
-        XCTAssertEqual(pair.pickerBrainInput, utterance,
-                       "the picker brain reads the original too (§4.6)")
+        // [CORRECTION-ANYBRAIN] …while the MODEL's input is the canonical form.
+        // The picker brain is a model, so it reads the canonical text now — the
+        // separation §4.6 protects is safety-consumer vs model, not
+        // router vs picker (§4.6 / E-17's "the picker reads the original" was
+        // the pre-relocation rule, when only the encoder's input was prepared).
+        XCTAssertEqual(pair.pickerBrainInput, pair.modelInput,
+                       "the picker brain reads the same prepared text the "
+                       + "encoder would tokenize")
+        XCTAssertNotEqual(pair.pickerBrainInput, pair.safetyNetInput,
+                          "the two consumers must not be handed the same string "
+                          + "in this fixture, or the test proves nothing")
         XCTAssertTrue(CanonicalSafetyFreeze.isKeywordLayerLossless(
             original: pair.original, canonical: pair.modelInput),
             "a legal rule must change no routing clause")
