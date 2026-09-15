@@ -1,0 +1,33 @@
+{"id": "gc-query-001:noise1", "clean_utterance": "भोलि मौसम कस्तो हुन्छ", "utterance": "भोलि मौस कस्तो हुन्छ", "source": "stt_noise:devanagari", "notes": "truncation: the worked example"}
+{"id": "gc-query-001:noise2", "clean_utterance": "भोलि मौसम कस्तो हुन्छ", "utterance": "भोलि मौसम कस्तो हुन्", "source": "stt_noise:devanagari", "notes": "truncation of the final verb"}
+{"id": "gc-ack-004:noise1", "clean_utterance": "दवाई खाएँ", "utterance": "दवाई खाए", "source": "stt_noise:devanagari", "notes": "truncation: khae < khaem"}
+{"id": "gc-health-001:noise1", "clean_utterance": "मेरो रक्तचाप कस्तो हुनुपर्छ", "utterance": "मेरो रक्तचाप कस्तो हुनुपर्", "source": "stt_noise:devanagari", "notes": "truncation mid-cluster"}
+{"id": "gc-ack-001:noise1", "clean_utterance": "औषधि खाएँ", "utterance": "औषधि खाएँ", "source": "stt_noise:devanagari", "notes": "identical round trip: discarded"}
+{"id": "gc-ack-001:noise2", "clean_utterance": "औषधि खाएँ", "utterance": "औषधि खाएँँ", "source": "stt_noise:devanagari", "notes": "prefix_extension: decoder ran on"}
+{"id": "gc-call-002:noise1", "clean_utterance": "maiya lai phone gara", "utterance": "maiya lai phone garaa", "source": "stt_noise:romanized", "notes": "prefix_extension romanized"}
+{"id": "gc-ack-001:noise3", "clean_utterance": "औषधि खाएँ", "utterance": "औषधी खाएँ", "source": "stt_noise:devanagari", "notes": "phonetic_confusion vowel_length i/ii"}
+{"id": "gc-call-001:noise1", "clean_utterance": "माइयालाई फोन गर", "utterance": "माइयालाइ फोन गर", "source": "stt_noise:devanagari", "notes": "phonetic_confusion vowel_length ai/ai"}
+{"id": "gen-sib-001:noise1", "clean_utterance": "साथी लाई फोन गर", "utterance": "शाथी लाई फोन गर", "source": "stt_noise:devanagari", "notes": "phonetic_confusion sibilant s/sh"}
+{"id": "gen-voi-001:noise1", "clean_utterance": "बजे पानी पिउ", "utterance": "पजे पानी पिउ", "source": "stt_noise:devanagari", "notes": "phonetic_confusion voicing b/p"}
+{"id": "gen-ret-001:noise1", "clean_utterance": "टाउको दुख्छ", "utterance": "ताउको दुख्छ", "source": "stt_noise:devanagari", "notes": "phonetic_confusion retroflex/dental"}
+{"id": "gen-asp-001:noise1", "clean_utterance": "कति बज्यो", "utterance": "खति बज्यो", "source": "stt_noise:devanagari", "notes": "phonetic_confusion aspiration k/kh"}
+{"id": "gen-nas-001:noise1", "clean_utterance": "किन आउनु भयो", "utterance": "किं आउनु भयो", "source": "stt_noise:devanagari", "notes": "phonetic_confusion nasal n/anusvara"}
+{"id": "gen-sem-001:noise1", "clean_utterance": "दवाई लिनु", "utterance": "दबाई लिनु", "source": "stt_noise:devanagari", "notes": "phonetic_confusion semivowel v/b"}
+{"id": "gen-sem-002:noise1", "clean_utterance": "दबाई लिनु", "utterance": "दवाई लिनु", "source": "stt_noise:devanagari", "notes": "phonetic_confusion semivowel, the twin direction (key collision)"}
+{"id": "gen-hal-001:noise1", "clean_utterance": "औषधि सम्झाउनु", "utterance": "औषधि समझाउनु", "source": "stt_noise:devanagari", "notes": "halanta dropped mid-word (fold scalar deletion)"}
+{"id": "gen-hal-002:noise1", "clean_utterance": "खान् आउनु", "utterance": "खान आउनु", "source": "stt_noise:devanagari", "notes": "word-final virama drop reads as a truncation; adds खान् to the lexicon", "cell": "empty_cell"}
+{"id": "gen-oth-001:noise1", "clean_utterance": "गीत चलाउ", "utterance": "गीत चलाई", "source": "stt_noise:devanagari", "notes": "equal length, no measured group: substitution_other"}
+{"id": "gc-ack-001:noise4", "clean_utterance": "औषधि खाएँ", "utterance": "औषधि र खाएँ", "source": "stt_noise:devanagari", "notes": "pure insertion"}
+{"id": "gc-reminder-001:noise1", "clean_utterance": "बिहान ८ बजे औषधि खान सम्झाउनु", "utterance": "बिहान ८ बजे औषधि खान", "source": "stt_noise:devanagari", "notes": "pure deletion of the final verb"}
+{"id": "gen-mrg-001:noise1", "clean_utterance": "औषधि", "utterance": "औषधी खायो", "source": "stt_noise:devanagari", "notes": "merger: one clean token to two noisy tokens"}
+{"id": "gen-spl-001:noise1", "clean_utterance": "फोन गर", "utterance": "फोनगर", "source": "stt_noise:devanagari", "notes": "split: two clean tokens to one noisy token"}
+{"id": "gc-call-001:noise2", "clean_utterance": "फोन गर", "utterance": "phone gara", "source": "stt_noise:code_switched", "notes": "script_drift on both positions"}
+{"id": "gc-reminder-001:noise2", "clean_utterance": "बिहान ८ बजे औषधि खान सम्झाउनु", "utterance": "बिहान 8 बजे औषधि खान सम्झाउनु", "source": "stt_noise:devanagari", "notes": "numeral_fold devanagari to ascii"}
+{"id": "gc-reminder-002:noise1", "clean_utterance": "साढे ७ बजे हिँड्न सम्झाउनुहोस्", "utterance": "साढे 7 बजे हिँड्न सम्झाउनुहोस्", "source": "stt_noise:devanagari", "notes": "numeral_fold again"}
+{"id": "gen-pun-001:noise1", "clean_utterance": "aaunus aaunus", "utterance": "aaunus, aaunus", "source": "stt_noise:romanized", "notes": "punctuation-only: the decoder was right"}
+{"id": "gc-music-002:noise1", "clean_utterance": "bhajan bajau na", "utterance": "bhajan, bajau na", "source": "stt_noise:romanized", "notes": "punctuation-only, two correct positions"}
+{"id": "gen-haz-001:noise1", "clean_utterance": "खाने बेला भयो", "utterance": "खाने बेला भयौ", "source": "stt_noise:devanagari", "notes": "adds खाने to the lexicon: खान becomes ambiguous (hazard)"}
+{"id": "gen-haz-002:noise1", "clean_utterance": "औषधि खान सम्झाउनु", "utterance": "औषधि खान सम्झाउनुहोस्", "source": "stt_noise:devanagari", "notes": "a correct खान position with two continuations"}
+{"id": "gen-unal-001:noise1", "clean_utterance": "एक दुई तीन चार पाँच", "utterance": "छ सात आठ नौ दश", "source": "stt_noise:devanagari", "notes": "distance 5 > bound 3: unaligned, counted"}
+{"id": "gen-cell-001:noise1", "clean_utterance": "आज मौसम कस्तो छ", "utterance": "आज मौस कस्तो छ", "source": "stt_noise:devanagari", "notes": "cell-tagged truncation", "cell": "noise_snr_15"}
+{"id": "gen-cell-001:noise2", "clean_utterance": "आज मौसम कस्तो छ", "utterance": "आज मौसम कस्तो छौ", "source": "stt_noise:devanagari", "notes": "cell-tagged prefix extension", "cell": "noise_snr_15"}
