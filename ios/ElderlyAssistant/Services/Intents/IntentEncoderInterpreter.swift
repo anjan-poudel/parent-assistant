@@ -616,7 +616,7 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
                     try runner.predict(tokenIds: tokenization.tokenIds,
                                        attentionMask: tokenization.attentionMask)
                 }
-                inferenceTrace?.finish(output: "\(logits.count) logits row(s)",
+                inferenceTrace?.finish(output: "logits row",
                                        decision: "ran",
                                        tokenCount: tokenization.tokenIds.count)
                 let span = self.traceRecorder?.start(

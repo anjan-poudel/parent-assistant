@@ -3648,15 +3648,15 @@ struct AIModelsSettingsView: View {
                         .foregroundStyle(DesignTokens.textSecondary)
                     ScrollView(.vertical) {
                         VStack(alignment: .leading, spacing: 8) {
-                            ForEach(trace.rows) { row in
+                            ForEach(Array(trace.rows.enumerated()), id: \.offset) { _, row in
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 8) {
-                                        Text(row.label)
+                                        Text(row.stage.rawValue)
                                         Spacer(minLength: 8)
                                         Text(row.durationText)
                                         Text(row.decisionText)
                                     }
-                                    Text(row.summaryText)
+                                    Text("\(row.inputSummary) → \(row.outputSummary)")
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
                                 .font(.system(size: DesignTokens.minCaptionPointSize,
