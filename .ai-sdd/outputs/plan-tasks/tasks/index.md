@@ -12,5 +12,6 @@
 | [TG-08](TG-08-nepali-intent-encoder/index.md) | Nepali Intent Encoder | 6 tasks (T-033–T-038) | ~31–55 days | PENDING |
 | [TG-09](TG-09-plugin-recognition-contract/index.md) | Plugin Recognition & Contract | 6 tasks (T-039–T-044) | ~21–38 days | PENDING |
 | [TG-10](TG-10-continuous-learning-loop/index.md) | Continuous Learning Loop | 9 tasks (T-052–T-060) | ~22–45 days | PENDING |
+| [TG-11](TG-11-linguistic-robustness/index.md) | Linguistic Robustness | 9 tasks (T-061–T-069) | ~24–38 days | PENDING |
 
 > **Rework tasks (security-test NO_GO).** [T-049](../TG-02-voice-interface/T-049-release-build-transcript-prints.md) (TG-02) and [T-050](../TG-01-foundation-infrastructure/T-050-api-key-error-code-log-leak.md) (TG-01) are the B1/B2 remediation tasks raised by the `security-test` SECURITY-NO_GO (`specs/security-test.md`). They are listed in their owning groups above; this note carries the cross-group link, because B2's emitter sites span TG-01, TG-02, TG-03 and TG-09 and are owned by TG-01 alone.
