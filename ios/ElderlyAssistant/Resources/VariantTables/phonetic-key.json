@@ -1,0 +1,1196 @@
+{
+  "formatVersion": 1,
+  "tableID": "phonetic-key",
+  "generation": {
+    "status": "MEASURED-FROM-CORPUS",
+    "path": "extraction run correction-banks/v3#e133253b; a fold is admitted only with measured support (A-3) and a zero-support fold is not in the key",
+    "date": "2026-09-15"
+  },
+  "keyRule": "tuple(fold(scalar) for scalar in token) with admitted elisions dropped — a function of scalars, not of words",
+  "resolvedKey": {
+    "unify": {
+      "ँ": "न",
+      "ं": "ँ",
+      "आ": "अ",
+      "ई": "इ",
+      "ऊ": "उ",
+      "ऐ": "ए",
+      "क": "ग",
+      "ख": "क",
+      "घ": "ग",
+      "ङ": "न",
+      "छ": "च",
+      "ज": "च",
+      "ठ": "ट",
+      "ड": "ट",
+      "ढ": "ठ",
+      "ण": "न",
+      "त": "ट",
+      "थ": "त",
+      "द": "ड",
+      "ध": "द",
+      "प": "ब",
+      "फ": "प",
+      "भ": "ब",
+      "र": "ल",
+      "ल": "न",
+      "व": "ब",
+      "श": "स",
+      "ष": "स",
+      "ी": "ि",
+      "ू": "ु",
+      "ै": "े",
+      "ौ": "ो"
+    },
+    "elide": [
+      "्"
+    ],
+    "rule": "unify: scalar -> representative, conflicts resolved by measured count (higher wins, ties by representative); elide: scalar dropped from the key. The runtime consumes THIS block, never the entries below it.",
+    "conflicts": [
+      {
+        "scalar": "ढ",
+        "chosen": "ठ",
+        "chosenGroup": "voicing",
+        "chosenCount": 3,
+        "rejected": [
+          {
+            "representative": "ड",
+            "group": "aspiration",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "scalar": "द",
+        "chosen": "ड",
+        "chosenGroup": "retroflex_dental",
+        "chosenCount": 32,
+        "rejected": [
+          {
+            "representative": "त",
+            "group": "voicing",
+            "count": 22
+          }
+        ]
+      },
+      {
+        "scalar": "ध",
+        "chosen": "द",
+        "chosenGroup": "aspiration",
+        "chosenCount": 5,
+        "rejected": [
+          {
+            "representative": "थ",
+            "group": "voicing",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "scalar": "फ",
+        "chosen": "प",
+        "chosenGroup": "aspiration",
+        "chosenCount": 9,
+        "rejected": [
+          {
+            "representative": "भ",
+            "group": "voicing",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "scalar": "ठ",
+        "chosen": "ट",
+        "chosenGroup": "aspiration",
+        "chosenCount": 7,
+        "rejected": [
+          {
+            "representative": "थ",
+            "group": "retroflex_dental",
+            "count": 2
+          }
+        ]
+      },
+      {
+        "scalar": "ं",
+        "chosen": "ँ",
+        "chosenGroup": "nasal",
+        "chosenCount": 37,
+        "rejected": [
+          {
+            "representative": "न",
+            "group": "nasal",
+            "count": 2
+          }
+        ]
+      }
+    ]
+  },
+  "collision": {
+    "entries": 3899,
+    "distinct_keys": 3692,
+    "colliding_keys": 191,
+    "entries_in_collisions": 398,
+    "collision_rate": 0.053091,
+    "top": [
+      {
+        "key": [
+          "ग",
+          "ल"
+        ],
+        "members": [
+          "कल",
+          "गर",
+          "गर्",
+          "घर"
+        ],
+        "n": 4
+      },
+      {
+        "key": [
+          "प",
+          "थ",
+          "ा",
+          "इ",
+          "त",
+          "े",
+          "उ"
+        ],
+        "members": [
+          "पठाइदेउ",
+          "पठाइदेऊ",
+          "पठाईदेउ",
+          "पठाईदेऊ"
+        ],
+        "n": 4
+      },
+      {
+        "key": [
+          "ब",
+          "च",
+          "ा",
+          "उ"
+        ],
+        "members": [
+          "बचाउ",
+          "बचाऊ",
+          "बजाउ",
+          "बजाऊ"
+        ],
+        "n": 4
+      },
+      {
+        "key": [
+          "ब",
+          "च",
+          "ा",
+          "इ",
+          "त",
+          "े",
+          "उ"
+        ],
+        "members": [
+          "बजाइदेउ",
+          "बजाइदेऊ",
+          "बजाईदेउ",
+          "बजाईदेऊ"
+        ],
+        "n": 4
+      },
+      {
+        "key": [
+          "ब",
+          "ा",
+          "ट",
+          "स",
+          "ए",
+          "प",
+          "म",
+          "ा"
+        ],
+        "members": [
+          "वाटसएपमा",
+          "वाटस्एपमा",
+          "वाट्सएपमा",
+          "वाट्स्एपमा"
+        ],
+        "n": 4
+      },
+      {
+        "key": [
+          "अ",
+          "इ"
+        ],
+        "members": [
+          "अई",
+          "आइ",
+          "आई"
+        ],
+        "n": 3
+      },
+      {
+        "key": [
+          "औ",
+          "स",
+          "थ",
+          "ि"
+        ],
+        "members": [
+          "औषधि",
+          "औषधी",
+          "औसधि"
+        ],
+        "n": 3
+      },
+      {
+        "key": [
+          "ग",
+          "ल",
+          "।"
+        ],
+        "members": [
+          "कल।",
+          "गर्।",
+          "गर।"
+        ],
+        "n": 3
+      },
+      {
+        "key": [
+          "त",
+          "ा",
+          "इ"
+        ],
+        "members": [
+          "ताई",
+          "दाइ",
+          "दाई"
+        ],
+        "n": 3
+      },
+      {
+        "key": [
+          "प",
+          "ल",
+          "ि",
+          "च"
+        ],
+        "members": [
+          "प्लिज",
+          "प्लीज",
+          "फ्रिज"
+        ],
+        "n": 3
+      },
+      {
+        "key": [
+          "ब",
+          "च",
+          "ा",
+          "उ",
+          "।"
+        ],
+        "members": [
+          "बचाऊ।",
+          "बजाउ।",
+          "बजाऊ।"
+        ],
+        "n": 3
+      },
+      {
+        "key": [
+          "अ",
+          "ँ"
+        ],
+        "members": [
+          "अँ",
+          "अं"
+        ],
+        "n": 2
+      },
+      {
+        "key": [
+          "अ",
+          "ग",
+          "ा",
+          "ट",
+          "ि"
+        ],
+        "members": [
+          "अगाडि",
+          "अगाडी"
+        ],
+        "n": 2
+      },
+      {
+        "key": [
+          "अ",
+          "ल",
+          "ि"
+        ],
+        "members": [
+          "अरि",
+          "अलि"
+        ],
+        "n": 2
+      },
+      {
+        "key": [
+          "अ",
+          "ल",
+          "ु"
+        ],
+        "members": [
+          "अरु",
+          "अरू"
+        ],
+        "n": 2
+      },
+      {
+        "key": [
+          "अ",
+          "ह"
+        ],
+        "members": [
+          "अह",
+          "आह"
+        ],
+        "n": 2
+      },
+      {
+        "key": [
+          "अ",
+          "ह",
+          "ँ"
+        ],
+        "members": [
+          "अहँ",
+          "अहं"
+        ],
+        "n": 2
+      },
+      {
+        "key": [
+          "अ",
+          "इ",
+          "ल",
+          "ह",
+          "े",
+          "ग",
+          "ो"
+        ],
+        "members": [
+          "आइरहेको",
+          "आईरहेको"
+        ],
+        "n": 2
+      },
+      {
+        "key": [
+          "अ",
+          "उ"
+        ],
+        "members": [
+          "आउ",
+          "आऊ"
+        ],
+        "n": 2
+      },
+      {
+        "key": [
+          "अ",
+          "उ",
+          "च"
+        ],
+        "members": [
+          "आउच",
+          "आउछ"
+        ],
+        "n": 2
+      }
+    ]
+  },
+  "entries": [
+    {
+      "id": "phon-sibilant-001",
+      "kind": "orthographic",
+      "group": "sibilant",
+      "foldKind": "unify",
+      "variant": "श",
+      "canonical": "स",
+      "scalars": [
+        "श",
+        "स"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 22,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured sibilant group (25 events)"
+    },
+    {
+      "id": "phon-sibilant-002",
+      "kind": "orthographic",
+      "group": "sibilant",
+      "foldKind": "unify",
+      "variant": "ष",
+      "canonical": "स",
+      "scalars": [
+        "ष",
+        "स"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 3,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured sibilant group (25 events)"
+    },
+    {
+      "id": "phon-vowel_length-003",
+      "kind": "orthographic",
+      "group": "vowel_length",
+      "foldKind": "unify",
+      "variant": "अ",
+      "canonical": "अ",
+      "scalars": [
+        "अ",
+        "आ"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 127,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured vowel_length group (2827 events)"
+    },
+    {
+      "id": "phon-vowel_length-004",
+      "kind": "orthographic",
+      "group": "vowel_length",
+      "foldKind": "unify",
+      "variant": "इ",
+      "canonical": "इ",
+      "scalars": [
+        "इ",
+        "ई"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 259,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured vowel_length group (2827 events)"
+    },
+    {
+      "id": "phon-vowel_length-005",
+      "kind": "orthographic",
+      "group": "vowel_length",
+      "foldKind": "unify",
+      "variant": "उ",
+      "canonical": "उ",
+      "scalars": [
+        "उ",
+        "ऊ"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 189,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured vowel_length group (2827 events)"
+    },
+    {
+      "id": "phon-vowel_length-006",
+      "kind": "orthographic",
+      "group": "vowel_length",
+      "foldKind": "unify",
+      "variant": "ए",
+      "canonical": "ए",
+      "scalars": [
+        "ए",
+        "ऐ"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 4,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured vowel_length group (2827 events)"
+    },
+    {
+      "id": "phon-vowel_length-007",
+      "kind": "orthographic",
+      "group": "vowel_length",
+      "foldKind": "unify",
+      "variant": "ि",
+      "canonical": "ि",
+      "scalars": [
+        "ि",
+        "ी"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 500,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured vowel_length group (2827 events)"
+    },
+    {
+      "id": "phon-vowel_length-008",
+      "kind": "orthographic",
+      "group": "vowel_length",
+      "foldKind": "unify",
+      "variant": "ु",
+      "canonical": "ु",
+      "scalars": [
+        "ु",
+        "ू"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 40,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured vowel_length group (2827 events)"
+    },
+    {
+      "id": "phon-vowel_length-009",
+      "kind": "orthographic",
+      "group": "vowel_length",
+      "foldKind": "unify",
+      "variant": "े",
+      "canonical": "े",
+      "scalars": [
+        "े",
+        "ै"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 374,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured vowel_length group (2827 events)"
+    },
+    {
+      "id": "phon-vowel_length-010",
+      "kind": "orthographic",
+      "group": "vowel_length",
+      "foldKind": "unify",
+      "variant": "ो",
+      "canonical": "ो",
+      "scalars": [
+        "ो",
+        "ौ"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 131,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured vowel_length group (2827 events)"
+    },
+    {
+      "id": "phon-halanta-011",
+      "kind": "orthographic",
+      "group": "halanta",
+      "foldKind": "elide",
+      "variant": "्",
+      "canonical": "",
+      "scalars": [
+        "्"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 226,
+        "rowIDs": []
+      },
+      "note": "elide fold from the measured halanta group (226 events)"
+    },
+    {
+      "id": "phon-voicing-012",
+      "kind": "orthographic",
+      "group": "voicing",
+      "foldKind": "unify",
+      "variant": "क",
+      "canonical": "ग",
+      "scalars": [
+        "क",
+        "ग"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 97,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured voicing group (385 events)"
+    },
+    {
+      "id": "phon-voicing-013",
+      "kind": "orthographic",
+      "group": "voicing",
+      "foldKind": "unify",
+      "variant": "च",
+      "canonical": "च",
+      "scalars": [
+        "च",
+        "ज"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 140,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured voicing group (385 events)"
+    },
+    {
+      "id": "phon-voicing-014",
+      "kind": "orthographic",
+      "group": "voicing",
+      "foldKind": "unify",
+      "variant": "ट",
+      "canonical": "ट",
+      "scalars": [
+        "ट",
+        "ड"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 43,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured voicing group (385 events)"
+    },
+    {
+      "id": "phon-voicing-015",
+      "kind": "orthographic",
+      "group": "voicing",
+      "foldKind": "unify",
+      "variant": "ठ",
+      "canonical": "ठ",
+      "scalars": [
+        "ठ",
+        "ढ"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 3,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured voicing group (385 events)"
+    },
+    {
+      "id": "phon-voicing-016",
+      "kind": "orthographic",
+      "group": "voicing",
+      "foldKind": "unify",
+      "variant": "त",
+      "canonical": "त",
+      "scalars": [
+        "त",
+        "द"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 22,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured voicing group (385 events)"
+    },
+    {
+      "id": "phon-voicing-017",
+      "kind": "orthographic",
+      "group": "voicing",
+      "foldKind": "unify",
+      "variant": "थ",
+      "canonical": "थ",
+      "scalars": [
+        "थ",
+        "ध"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 1,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured voicing group (385 events)"
+    },
+    {
+      "id": "phon-voicing-018",
+      "kind": "orthographic",
+      "group": "voicing",
+      "foldKind": "unify",
+      "variant": "प",
+      "canonical": "ब",
+      "scalars": [
+        "प",
+        "ब"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 19,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured voicing group (385 events)"
+    },
+    {
+      "id": "phon-voicing-019",
+      "kind": "orthographic",
+      "group": "voicing",
+      "foldKind": "unify",
+      "variant": "फ",
+      "canonical": "भ",
+      "scalars": [
+        "फ",
+        "भ"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 1,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured voicing group (385 events)"
+    },
+    {
+      "id": "phon-retroflex_dental-020",
+      "kind": "orthographic",
+      "group": "retroflex_dental",
+      "foldKind": "unify",
+      "variant": "ट",
+      "canonical": "ट",
+      "scalars": [
+        "ट",
+        "त"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 49,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured retroflex_dental group (134 events)"
+    },
+    {
+      "id": "phon-retroflex_dental-021",
+      "kind": "orthographic",
+      "group": "retroflex_dental",
+      "foldKind": "unify",
+      "variant": "ठ",
+      "canonical": "थ",
+      "scalars": [
+        "ठ",
+        "थ"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 2,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured retroflex_dental group (134 events)"
+    },
+    {
+      "id": "phon-retroflex_dental-022",
+      "kind": "orthographic",
+      "group": "retroflex_dental",
+      "foldKind": "unify",
+      "variant": "ड",
+      "canonical": "ड",
+      "scalars": [
+        "ड",
+        "द"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 32,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured retroflex_dental group (134 events)"
+    },
+    {
+      "id": "phon-retroflex_dental-023",
+      "kind": "orthographic",
+      "group": "retroflex_dental",
+      "foldKind": "unify",
+      "variant": "ण",
+      "canonical": "न",
+      "scalars": [
+        "ण",
+        "न"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 6,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured retroflex_dental group (134 events)"
+    },
+    {
+      "id": "phon-aspiration-024",
+      "kind": "orthographic",
+      "group": "aspiration",
+      "foldKind": "unify",
+      "variant": "क",
+      "canonical": "क",
+      "scalars": [
+        "क",
+        "ख"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 10,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured aspiration group (295 events)"
+    },
+    {
+      "id": "phon-aspiration-025",
+      "kind": "orthographic",
+      "group": "aspiration",
+      "foldKind": "unify",
+      "variant": "ग",
+      "canonical": "ग",
+      "scalars": [
+        "ग",
+        "घ"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 40,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured aspiration group (295 events)"
+    },
+    {
+      "id": "phon-aspiration-026",
+      "kind": "orthographic",
+      "group": "aspiration",
+      "foldKind": "unify",
+      "variant": "च",
+      "canonical": "च",
+      "scalars": [
+        "च",
+        "छ"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 76,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured aspiration group (295 events)"
+    },
+    {
+      "id": "phon-aspiration-027",
+      "kind": "orthographic",
+      "group": "aspiration",
+      "foldKind": "unify",
+      "variant": "ट",
+      "canonical": "ट",
+      "scalars": [
+        "ट",
+        "ठ"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 7,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured aspiration group (295 events)"
+    },
+    {
+      "id": "phon-aspiration-028",
+      "kind": "orthographic",
+      "group": "aspiration",
+      "foldKind": "unify",
+      "variant": "ड",
+      "canonical": "ड",
+      "scalars": [
+        "ड",
+        "ढ"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 1,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured aspiration group (295 events)"
+    },
+    {
+      "id": "phon-aspiration-029",
+      "kind": "orthographic",
+      "group": "aspiration",
+      "foldKind": "unify",
+      "variant": "त",
+      "canonical": "त",
+      "scalars": [
+        "त",
+        "थ"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 17,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured aspiration group (295 events)"
+    },
+    {
+      "id": "phon-aspiration-030",
+      "kind": "orthographic",
+      "group": "aspiration",
+      "foldKind": "unify",
+      "variant": "द",
+      "canonical": "द",
+      "scalars": [
+        "द",
+        "ध"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 5,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured aspiration group (295 events)"
+    },
+    {
+      "id": "phon-aspiration-031",
+      "kind": "orthographic",
+      "group": "aspiration",
+      "foldKind": "unify",
+      "variant": "प",
+      "canonical": "प",
+      "scalars": [
+        "प",
+        "फ"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 9,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured aspiration group (295 events)"
+    },
+    {
+      "id": "phon-aspiration-032",
+      "kind": "orthographic",
+      "group": "aspiration",
+      "foldKind": "unify",
+      "variant": "ब",
+      "canonical": "ब",
+      "scalars": [
+        "ब",
+        "भ"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 131,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured aspiration group (295 events)"
+    },
+    {
+      "id": "phon-nasal-033",
+      "kind": "orthographic",
+      "group": "nasal",
+      "foldKind": "unify",
+      "variant": "ँ",
+      "canonical": "ँ",
+      "scalars": [
+        "ँ",
+        "ं"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 37,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured nasal group (247 events)"
+    },
+    {
+      "id": "phon-nasal-034",
+      "kind": "orthographic",
+      "group": "nasal",
+      "foldKind": "unify",
+      "variant": "ँ",
+      "canonical": "न",
+      "scalars": [
+        "ँ",
+        "न"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 124,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured nasal group (247 events)"
+    },
+    {
+      "id": "phon-nasal-035",
+      "kind": "orthographic",
+      "group": "nasal",
+      "foldKind": "unify",
+      "variant": "ं",
+      "canonical": "न",
+      "scalars": [
+        "ं",
+        "न"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 2,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured nasal group (247 events)"
+    },
+    {
+      "id": "phon-nasal-036",
+      "kind": "orthographic",
+      "group": "nasal",
+      "foldKind": "unify",
+      "variant": "ङ",
+      "canonical": "न",
+      "scalars": [
+        "ङ",
+        "न"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 23,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured nasal group (247 events)"
+    },
+    {
+      "id": "phon-semivowel-037",
+      "kind": "orthographic",
+      "group": "semivowel",
+      "foldKind": "unify",
+      "variant": "न",
+      "canonical": "न",
+      "scalars": [
+        "न",
+        "ल"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 31,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured semivowel group (176 events)"
+    },
+    {
+      "id": "phon-semivowel-038",
+      "kind": "orthographic",
+      "group": "semivowel",
+      "foldKind": "unify",
+      "variant": "ब",
+      "canonical": "ब",
+      "scalars": [
+        "ब",
+        "व"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 59,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured semivowel group (176 events)"
+    },
+    {
+      "id": "phon-semivowel-039",
+      "kind": "orthographic",
+      "group": "semivowel",
+      "foldKind": "unify",
+      "variant": "र",
+      "canonical": "ल",
+      "scalars": [
+        "र",
+        "ल"
+      ],
+      "evidence": {
+        "source": "corpus",
+        "corpusRevision": "7f71b8ae",
+        "runRevision": "correction-banks/v3#e133253b",
+        "occurrences": 47,
+        "rowIDs": []
+      },
+      "note": "unify fold from the measured semivowel group (176 events)"
+    }
+  ],
+  "unsupportedGroups": []
+}
