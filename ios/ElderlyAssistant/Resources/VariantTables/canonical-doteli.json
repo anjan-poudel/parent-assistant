@@ -1,0 +1,58 @@
+{
+  "formatVersion": 1,
+  "tableID": "canonical-doteli",
+  "dialect": "doteli",
+  "generation": {
+    "status": "SEED-CANONICAL",
+    "path": "Authored from specs/T-062-dialect-banks.yaml slices.doteli, which T-062 files as status: conditional pending the native-speaker answers N1, N4, N6, N8, N11 — and as LANGUAGE-level (a doteli row is a translation pair with its standard twin, not a spelling pair). Ships as DATA ONLY: with Policy.includeConditionalTables = false the table cannot fire. The commitment to ship every T-062 doteli row met the safety gate: भया -> भयो is refused and recorded in refusedEntries, so this file carries the two rows that are safe to apply, plus the machine-readable reason the third is not.",
+    "date": null
+  },
+  "refusedEntries": [
+    {
+      "id": "dot-past-bhaya",
+      "variant": "भया",
+      "canonical": "भयो",
+      "t062Status": "confirmed",
+      "t062Reference": "specs/T-062-dialect-banks.yaml slices.doteli variants[0]",
+      "reason": "REFUSED BY THE SAFETY GATE, not by review. भयो is a member of the shipped medication-acknowledgement TOKENS (CommandRouter ackTokens, :1528-1529), so this rule maps a form ONTO frozen material. §4.7 forbids that in both directions ('no rule may map a form onto one of these, or away from one of these'), and clause (b) of the losslessness invariant fails concretely: the input भया matches no keyword list, while the output भयो matches the ack token set, so matches(canonical) != matches(original) and the rewrite would be able to turn a non-acknowledgement into an acknowledgement. T-062 files this row as confirmed and it is attested in DialectLexicon.json — the linguistic attestation is not in doubt; the REWRITE is what is unsafe. One defective entry refuses its whole table (§4.3, D-4), so shipping it as an entry would silence the safe रह्याको and भण्याको rows too. It is recorded here and pinned as the failing fixture that proves negationMarkerTouched trips (DialectCanonicalizerTests.testNegationMarkerTouchedRefusesBhayaToBhayo). Any future acceptance of this mapping must come from T-077's re-check against the shipped matchers, never from a table edit."
+    }
+  ],
+  "entries": [
+    {
+      "id": "dot-past-rahyako",
+      "kind": "morphophonemic",
+      "variant": "रह्याको",
+      "canonical": "रहेको",
+      "modelImpact": "unknown",
+      "resolves": [
+        "N11"
+      ],
+      "note": "Attested in DialectLexicon.json (SEED-LEXICON). No keyword-layer interaction: neither side is, or contains, a frozen form.",
+      "evidence": {
+        "source": "authored",
+        "fixtureExamples": [
+          "रह्याको",
+          "त्यो घर रह्याको छ"
+        ]
+      }
+    },
+    {
+      "id": "dot-past-bhanyako",
+      "kind": "morphophonemic",
+      "variant": "भण्याको",
+      "canonical": "भनेको",
+      "modelImpact": "unknown",
+      "resolves": [
+        "N11"
+      ],
+      "note": "Attested in DialectLexicon.json (SEED-LEXICON). No keyword-layer interaction. Distinct from the refused भया row: भनेको is not a keyword token and does not contain one; भयो is an ack token.",
+      "evidence": {
+        "source": "authored",
+        "fixtureExamples": [
+          "भण्याको",
+          "उहाँले भण्याको कुरा"
+        ]
+      }
+    }
+  ]
+}

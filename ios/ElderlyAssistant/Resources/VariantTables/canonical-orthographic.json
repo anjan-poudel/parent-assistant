@@ -1,0 +1,47 @@
+{
+  "formatVersion": 1,
+  "tableID": "canonical-orthographic",
+  "generation": {
+    "status": "SEED-CANONICAL",
+    "path": "Hand-authored halanta/diacritic drift class, transcribed from specs/T-062-dialect-banks.yaml pan_regional_orthographic (rows गर्नुहोस and औषधी). Pan-regional only: neither row is a region claim, so this table runs at stage 1 for every speaker and waits on none of the T-062 native-speaker answers N1-N14. The inventory planned further orthographic classes (anusvara, visarga, chandrabindu, ZWJ/ZWNJ); none has an attested pair in a committed artifact, so none is authored here — an unfounded spelling rule is the black box D-2 forbids. The Devanagari digit fold (T-062 row ८ -> 8) is deliberately NOT an entry: it is a closed, total script map, implemented as the builtin DevanagariDigitTransform so that a table edit cannot disable it.",
+    "date": null
+  },
+  "entries": [
+    {
+      "id": "orth-halanta-garnuhos",
+      "kind": "orthographic",
+      "variant": "गर्नुहोस",
+      "canonical": "गर्नुहोस्",
+      "modelImpact": "known_word",
+      "resolves": [
+        "N5"
+      ],
+      "note": "T-062 basis: \"halanta dropped in writing\".",
+      "evidence": {
+        "source": "authored",
+        "fixtureExamples": [
+          "गर्नुहोस",
+          "अब यो काम गर्नुहोस"
+        ]
+      }
+    },
+    {
+      "id": "orth-halanta-aushadhi",
+      "kind": "orthographic",
+      "variant": "औषधी",
+      "canonical": "औषधि",
+      "modelImpact": "known_word",
+      "resolves": [
+        "N6"
+      ],
+      "note": "T-062 basis: \"halanta/visarga-level drift, not region\". Both spellings already appear in the shipped keyword lists (औषधी खाएको छैन in the denial guard; औषधि खाएँ and औषधि खाए in the ack phrases), so the keyword-layer match set is identical on both sides and the medication-confirmation flow cannot flip. Pinned by fixture.",
+      "evidence": {
+        "source": "authored",
+        "fixtureExamples": [
+          "औषधी",
+          "औषधी लिनुहोस"
+        ]
+      }
+    }
+  ]
+}

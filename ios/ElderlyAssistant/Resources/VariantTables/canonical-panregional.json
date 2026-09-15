@@ -1,0 +1,41 @@
+{
+  "formatVersion": 1,
+  "tableID": "canonical-panregional",
+  "generation": {
+    "status": "SEED-CANONICAL",
+    "path": "Hand-authored pan-regional spelling-drift class, transcribed from specs/T-062-dialect-banks.yaml pan_regional_orthographic (rows भोली and ह्वाट्सएपमा). T-062 keeps this drift OUT of the dialect slices precisely so it can never be filed as a region's evidence; it is filed here instead, consulted for every speaker, and carries no dialect label.",
+    "date": null
+  },
+  "entries": [
+    {
+      "id": "pan-drift-bholi",
+      "kind": "orthographic",
+      "variant": "भोली",
+      "canonical": "भोलि",
+      "modelImpact": "known_word",
+      "note": "T-062 basis: \"design §5.3 named pair; drift, not region\".",
+      "evidence": {
+        "source": "authored",
+        "fixtureExamples": [
+          "भोली",
+          "भोली बिहान आउनुहोस"
+        ]
+      }
+    },
+    {
+      "id": "pan-loan-whatsapp",
+      "kind": "orthographic",
+      "variant": "ह्वाट्सएपमा",
+      "canonical": "वाट्सएपमा",
+      "modelImpact": "known_word",
+      "note": "T-062 basis: \"already both in METHODS bank (golden_corpus_batches.py:251-258) — loanword spelling\". Routing check: the variant and the canonical BOTH contain the sensitive-call phrase वाट्सएप as a substring (ह्वाट्सएपमा = ह् + वाट्सएप + मा), so CommandRouter's post-LLM call block is entered on both sides and the rewrite adds no routing decision.",
+      "evidence": {
+        "source": "authored",
+        "fixtureExamples": [
+          "ह्वाट्सएपमा",
+          "यो फोटो ह्वाट्सएपमा पठाउनुहोस"
+        ]
+      }
+    }
+  ]
+}

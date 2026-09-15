@@ -1,0 +1,29 @@
+{
+  "formatVersion": 1,
+  "tableID": "canonical-stt-reductions",
+  "generation": {
+    "status": "SEED-CANONICAL",
+    "path": "Landing site for the MEASURED STT-error lexicon, plus the one reduction T-062 itself attests. tools/train-intent/src/extract_stt_errors.py is committed and emits noisy->corrected rows carrying evidence.runRevision, evidence.occurrences, evidence.registers and evidence.rowIDs; its output is PENDING a server run, so no measured row is authored here yet. When the run lands its rows attach as entries in this file with evidence.source = corpus — no code change. The one shipped entry is the quick-speech reduction T-062 records in order to stop it being re-filed onto the dialect axis.",
+    "date": null
+  },
+  "entries": [
+    {
+      "id": "stt-reduction-garnus",
+      "kind": "misSegmentation",
+      "variant": "गर्नुस्",
+      "canonical": "गर्नुहोस्",
+      "modelImpact": "unknown",
+      "resolves": [
+        "N5"
+      ],
+      "note": "T-062 basis: \"NOT dialect and NOT pan-regional spelling — quick-speech reduction the STT noise pass already produces; belongs to the articulation axis (Part E), never the dialect axis. Recorded here to stop re-filing. Same class as an attached-vs-separate clitic (माइक्रोवेभ/माइक्रोवेभमा, design §5.3): a segmentation effect, not a dialect variant.\" — filed here as the segmentation/reduction effect T-062 says it is, NOT as orthographic drift: the two forms differ in a consonant (स / ह), so calling this a spelling variant would mis-file an articulation-axis fact onto the text axis. It carries no dialect label and applies to every speaker.",
+      "evidence": {
+        "source": "authored",
+        "fixtureExamples": [
+          "गर्नुस्",
+          "कृपया यो गर्नुस्"
+        ]
+      }
+    }
+  ]
+}

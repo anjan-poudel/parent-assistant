@@ -1,0 +1,142 @@
+{
+  "formatVersion": 1,
+  "tableID": "canonical-eastern",
+  "dialect": "eastern",
+  "generation": {
+    "status": "SEED-CANONICAL",
+    "path": "Authored from specs/T-062-dialect-banks.yaml slices.eastern, which T-062 files as status: conditional pending the native-speaker answers N1, N2, N5, N9, N10. This file therefore ships as DATA ONLY: with Policy.includeConditionalTables = false (the default) it is loaded, revision-anchored and reported inert, and no entry can fire. The three confirmed -इछ perfectives are attested in the committed DialectLexicon.json (status SEED-LEXICON, pre-linguist-review); the four unconfirmed rows wait on N5 and are recorded with their kind and model_impact so that the answer lands as data, not code.",
+    "date": null
+  },
+  "entries": [
+    {
+      "id": "east-perfective-gaincha",
+      "kind": "morphophonemic",
+      "variant": "गइछ",
+      "canonical": "गएछ",
+      "modelImpact": "unknown",
+      "resolves": [
+        "N10"
+      ],
+      "note": "T-062: Third person only. The product's ack_med bank is FIRST person (खाएँ/खाइसकें), so this attested eastern marker does not fit an ack row; its only reachable rows are third-person query/none rows, which supervise NO spans (measured in T-062). Intent-head effect only.",
+      "evidence": {
+        "source": "authored",
+        "fixtureExamples": [
+          "गइछ",
+          "उहाँ हिजो गइछ"
+        ]
+      }
+    },
+    {
+      "id": "east-perfective-bhaincha",
+      "kind": "morphophonemic",
+      "variant": "भइछ",
+      "canonical": "भएछ",
+      "modelImpact": "unknown",
+      "resolves": [
+        "N10"
+      ],
+      "note": "Attested in DialectLexicon.json (SEED-LEXICON). Same perfective class as गइछ; neither side is, or contains, a frozen form.",
+      "evidence": {
+        "source": "authored",
+        "fixtureExamples": [
+          "भइछ",
+          "काम भइछ"
+        ]
+      }
+    },
+    {
+      "id": "east-perfective-khaincha",
+      "kind": "morphophonemic",
+      "variant": "खाइछ",
+      "canonical": "खाएछ",
+      "modelImpact": "unknown",
+      "resolves": [
+        "N10"
+      ],
+      "note": "Attested in DialectLexicon.json (SEED-LEXICON). THIRD person, unlike the product's first-person ack tokens (खाएँ / खाए, CommandRouter ackTokens): the canonical खाएछ is not an ack token and that token is not a substring of it, which is what keeps this row clear of the खाए ⊂ नखाए hazard. T-062 measures its only reachable rows as third-person query/none predicates, which supervise no spans.",
+      "evidence": {
+        "source": "authored",
+        "fixtureExamples": [
+          "खाइछ",
+          "उहाँले खाना खाइछ"
+        ]
+      }
+    },
+    {
+      "id": "east-ortho-diuso",
+      "kind": "orthographic",
+      "variant": "दिउसो",
+      "canonical": "दिउँसो",
+      "status": "unconfirmed",
+      "modelImpact": "known_word",
+      "resolves": [
+        "N5"
+      ],
+      "note": "UNCONFIRMED — awaits N5 (is दिउसो a spelling of दिउँसो, or a distinct form?). Recorded with its candidate canonical so the answer lands as data. Fires at no policy setting: an unconfirmed entry is not authored yet.",
+      "evidence": {
+        "source": "authored",
+        "fixtureExamples": [
+          "दिउसो",
+          "दिउसो खाना खानुहोस"
+        ]
+      }
+    },
+    {
+      "id": "east-ortho-belka",
+      "kind": "orthographic",
+      "variant": "बेल्का",
+      "canonical": "बेलुका",
+      "status": "unconfirmed",
+      "modelImpact": "known_word",
+      "resolves": [
+        "N5"
+      ],
+      "note": "UNCONFIRMED — awaits N5. Same class as दिउसो/दिउँसो: an anusvara/halanta-level spelling question, not a word-form claim.",
+      "evidence": {
+        "source": "authored",
+        "fixtureExamples": [
+          "बेल्का",
+          "बेल्का खाना खानुहोस"
+        ]
+      }
+    },
+    {
+      "id": "east-ortho-sanjh",
+      "kind": "orthographic",
+      "variant": "साझ",
+      "canonical": "साँझ",
+      "status": "unconfirmed",
+      "modelImpact": "known_word",
+      "resolves": [
+        "N5"
+      ],
+      "note": "UNCONFIRMED — awaits N5. Spelling-level only; the two sides are not separable by any keyword-layer list.",
+      "evidence": {
+        "source": "authored",
+        "fixtureExamples": [
+          "साझ",
+          "साझ भएको छ"
+        ]
+      }
+    },
+    {
+      "id": "east-lex-rat",
+      "kind": "lexical",
+      "variant": "रात",
+      "canonical": "राति",
+      "status": "unconfirmed",
+      "modelImpact": "unknown",
+      "resolves": [
+        "N5"
+      ],
+      "note": "UNCONFIRMED — awaits N5, and the one row T-062 files as LEXICAL rather than orthographic: रात/राति is a word-form difference, not a spelling one. Filed at stage 3 accordingly, so it runs after the orthographic pass rather than with it.",
+      "evidence": {
+        "source": "authored",
+        "fixtureExamples": [
+          "रात",
+          "रात भयो"
+        ]
+      }
+    }
+  ]
+}

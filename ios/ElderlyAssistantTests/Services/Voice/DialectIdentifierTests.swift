@@ -418,3 +418,923 @@ final class DialectIdentifierTests: XCTestCase {
         XCTAssertLessThan(result.confidence, 0.6)
     }
 }
+
+// MARK: - [TG-12] The dialect canonicalizer
+
+/// The canonicalization layer's suite
+/// (`Services/Voice/DialectCanonicalizer.swift`). It lives beside the
+/// dialect-identifier tests because the two consume the same axis with the
+/// same resource-loading shape: this file already reads a shipped JSON table
+/// out of the app bundle and already refuses to trust content the calibration
+/// pipeline has not produced yet.
+///
+/// AUTHORED UNDER A TESTING HOLD. No `xcodebuild`, simulator or gate was run
+/// for this task, so nothing below is evidence of a green suite — the task's
+/// verification is `swiftc -parse` plus the reasoning in each test's comment.
+/// The three safety tests (`testPinnedSafetyFixturesAreLossless`…,
+/// `testNegationMarkerTouchedRefusesBhayaToBhayo`,
+/// `testSafetyAndPickerInputsKeepTheOriginal`) are the ones that must actually
+/// run before the canonicalizer is switched on.
+extension DialectIdentifierTests {
+
+    // MARK: Fixtures and helpers
+
+    private func makeEntry(_ id: String,
+                           kind: String = "orthographic",
+                           variant: String,
+                           canonical: String,
+                           status: VariantTableEntry.Status = .confirmed,
+                           examples: [String]? = nil) -> VariantTableEntry {
+        VariantTableEntry(
+            id: id,
+            kindRaw: kind,
+            variant: variant,
+            canonical: canonical,
+            status: status,
+            modelImpact: "known_word",
+            resolves: ["N5"],
+            note: "synthetic test entry",
+            evidence: VariantTableEntry.Evidence(
+                source: .authored,
+                corpusRevision: nil,
+                rowIDs: [],
+                occurrences: 0,
+                fixtureExamples: examples ?? [variant, variant + " भन्नुहोस"])
+        )
+    }
+
+    private func makeTable(_ id: String,
+                           dialect: DialectLabel? = nil,
+                           entries: [VariantTableEntry]) -> VariantTable {
+        VariantTable(formatVersion: 1,
+                     tableID: id,
+                     dialectRaw: dialect?.rawValue,
+                     generation: VariantTable.Generation(status: "TEST",
+                                                         path: "test",
+                                                         date: nil),
+                     entries: entries)
+    }
+
+    private func makeSet(orthographic: VariantTable? = nil,
+                         panRegional: VariantTable? = nil,
+                         sttReductions: VariantTable? = nil,
+                         dialectTables: [DialectLabel: VariantTable] = [:])
+    -> VariantTableSet {
+        VariantTableSet(orthographic: orthographic,
+                        panRegional: panRegional,
+                        sttReductions: sttReductions,
+                        dialectTables: dialectTables,
+                        loadIssues: [])
+    }
+
+    /// Every table admitted, every conditional region included — the widest
+    /// policy the layer can run under, so the safety tests below are not
+    /// quietly testing an inert configuration.
+    private func widestPolicy() -> DialectCanonicalizer.Policy {
+        DialectCanonicalizer.Policy(enabled: true,
+                                    orthographicOnly: false,
+                                    includeConditionalTables: true)
+    }
+
+    private func canonicalize(_ text: String,
+                              dialect: DialectLabel = .default,
+                              tables: VariantTableSet,
+                              policy: DialectCanonicalizer.Policy)
+    -> CanonicalizationResult {
+        DialectCanonicalizer.canonicalize(text,
+                                          dialect: dialect,
+                                          tables: tables,
+                                          policy: policy)
+    }
+
+    /// The shipped set, or a skip when the app bundle has not been generated.
+    private func bundledVariantTables() throws -> VariantTableSet {
+        let tables = VariantTableSet.load()
+        guard tables.orthographic != nil else {
+            throw XCTSkip("VariantTables/*.json not bundled yet "
+                          + "(run xcodegen generate + build)")
+        }
+        return tables
+    }
+
+    // MARK: The shipped rule inventory, pinned
+
+    /// Every shipped rule as (input, expected output, rule id, dialect).
+    /// Written out literally rather than read from the tables so it is an
+    /// INDEPENDENT second source: a rule added, renamed or silently retargeted
+    /// in a JSON file fails `testEveryShippedRuleHasAPinnedInOutPair` instead
+    /// of travelling with the data it would have to disagree with.
+    ///
+    /// The dialect is part of the row because a runnable region rule only fires
+    /// for the label its table declares — a pinned pair that forgot it would
+    /// pass for the wrong reason on a pan-regional row and fail for the wrong
+    /// reason on a doteli one.
+    private static let pinnedRulePairs: [(input: String, expected: String,
+                                          ruleID: String, dialect: DialectLabel)] = [
+        // canonical-orthographic (dialect-agnostic)
+        ("गर्नुहोस", "गर्नुहोस्", "orth-halanta-garnuhos", .default),
+        ("औषधी", "औषधि", "orth-halanta-aushadhi", .default),
+        // canonical-panregional (dialect-agnostic)
+        ("भोली", "भोलि", "pan-drift-bholi", .default),
+        ("ह्वाट्सएपमा", "वाट्सएपमा", "pan-loan-whatsapp", .default),
+        // canonical-stt-reductions (dialect-agnostic)
+        ("गर्नुस्", "गर्नुहोस्", "stt-reduction-garnus", .default),
+        // canonical-eastern (conditional, confirmed rows)
+        ("गइछ", "गएछ", "east-perfective-gaincha", .eastern),
+        ("भइछ", "भएछ", "east-perfective-bhaincha", .eastern),
+        ("खाइछ", "खाएछ", "east-perfective-khaincha", .eastern),
+        // canonical-doteli (conditional, confirmed rows)
+        ("रह्याको", "रहेको", "dot-past-rahyako", .doteli),
+        ("भण्याको", "भनेको", "dot-past-bhanyako", .doteli),
+    ]
+
+    /// Rules that must ship but must NOT fire: the four unconfirmed eastern
+    /// rows awaiting T-062's N5. Pinned for the same reason — an entry that
+    /// became runnable without an answer would show up here.
+    private static let pinnedInertPairs: [(input: String, ruleID: String)] = [
+        ("दिउसो", "east-ortho-diuso"),
+        ("बेल्का", "east-ortho-belka"),
+        ("साझ", "east-ortho-sanjh"),
+        ("रात", "east-lex-rat"),
+    ]
+
+    /// The safety fixture set: every member of the three frozen classes plus
+    /// carrier sentences that put frozen material NEXT TO text the tables do
+    /// rewrite — the positions where a rewrite could disturb a match. Literal
+    /// for the same reason as the pairs above: the freeze's own copy must not
+    /// be able to shrink the test.
+    private static let pinnedSafetyFixtures: [String] = [
+        // emergency (CommandRouter.emergencyPhrases)
+        "help", "emergency", "i fell", "fell down", "chest pain",
+        "can't breathe", "cant breathe",
+        "मद्दत", "सहयोग गर", "बचाउ", "आपतकाल", "लडेँ", "लडें",
+        "लड्नुभयो", "सास फेर्न सकिन", "सास फेर्न गाह्रो", "छाती दुख्यो",
+        // denial guard
+        "i didn't", "i did not", "not yet", "haven't", "havent",
+        "औषधि खाएको छैन", "औषधी खाएको छैन", "खाएको छैन",
+        "नखाए", "नखाएको", "लिएको छैन", "भएन", "छैन",
+        // medication acknowledgement, phrases
+        "i took", "i've taken", "ive taken", "took my medication",
+        "took my medicine", "taken my medication", "taken my medicine",
+        "yes i took it",
+        "औषधि खाएँ", "औषधि खाए", "औषधी खाएँ", "औषधी खाए",
+        "दवाई खाएँ", "दवाई खाए", "दबाइ खाएँ", "दबाइ खाए",
+        "औषधि लिएको छु", "औषधी लिएको छु", "दवाई लिएको छु",
+        "लिइसकेँ", "लिइसकें", "खाइसकेँ", "खाइसकें",
+        // medication acknowledgement, whole tokens
+        "done", "taken", "took", "ate", "खाएँ", "खाए", "भयो",
+        // frozen material beside text a rule DOES rewrite
+        "मैले औषधी खाएको छैन", "बुबा नखाए", "आमाले खाए भन्नुभयो",
+        "मद्दत गर्नुहोस्", "छाती दुख्यो, औषधी खाएको छैन",
+        "भयो भन्नुभयो", "खाए, भयो", "भोली औषधि खाएँ",
+        "औषधी खाएको छैन भोली", "गर्नुहोस भोली",
+        // the routing lists beyond the net
+        "कसैलाई फोन गर", "यो फोटो ह्वाट्सएपमा पठाउनुहोस",
+        "हो", "होइन", "yes", "no", "correct", "nope",
+        "मेरो ब्रीफिङ सुनाऊ", "समाचार सुनाऊ", "खबर पढ",
+    ]
+
+    // MARK: Shipped-table schema
+
+    func testBundledVariantTablesValidateAndDeclareTheirDialect() throws {
+        let tables = try bundledVariantTables()
+
+        XCTAssertFalse(tables.hasLoadDegradation,
+                       "no shipped table may be undecodable or mislabelled: "
+                       + "\(tables.loadIssues)")
+
+        for table in [tables.orthographic, tables.panRegional, tables.sttReductions]
+            .compactMap({ $0 }) {
+            XCTAssertTrue(table.tableID.hasPrefix("canonical-"),
+                          "unexpected table id \(table.tableID)")
+        }
+        for label in DialectLabel.allCases where label != .default {
+            guard let table = tables.dialectTables[label] else {
+                XCTFail("region table missing for \(label.rawValue)")
+                continue
+            }
+            // The filename/declaration cross-check the loader enforces — a
+            // region file that declares no dialect would otherwise be
+            // consulted as the pan-regional set for every speaker.
+            XCTAssertEqual(table.dialectRaw, label.rawValue,
+                           "canonical-\(label.rawValue).json must declare its own dialect")
+        }
+    }
+
+    func testShippedEntriesPassEveryStructuralIssueCheck() throws {
+        let tables = try bundledVariantTables()
+        let all = [tables.orthographic, tables.panRegional, tables.sttReductions]
+            .compactMap { $0 } + tables.dialectTables.values
+
+        XCTAssertGreaterThanOrEqual(all.count, 5)
+        for table in all {
+            XCTAssertEqual(table.issues(), [],
+                           "\(table.tableID) must validate: \(table.issues())")
+            XCTAssertFalse(table.entries.isEmpty)
+            XCTAssertEqual(Set(table.entries.map(\.id)).count, table.entries.count)
+            for entry in table.entries {
+                XCTAssertNotNil(entry.kind, "unknown kind \(entry.kindRaw)")
+                XCTAssertNotEqual(entry.variant, entry.canonical)
+                XCTAssertGreaterThanOrEqual(entry.evidence.fixtureExamples.count, 2,
+                                            "\(entry.id) needs two cited examples")
+                for example in entry.evidence.fixtureExamples {
+                    XCTAssertTrue(example.contains(entry.variant),
+                                  "\(entry.id) fixture does not contain the variant: \(example)")
+                }
+            }
+        }
+    }
+
+    func testEveryShippedRuleHasAPinnedInOutPair() throws {
+        let tables = try bundledVariantTables()
+        let shippedIDs = Set(([tables.orthographic, tables.panRegional, tables.sttReductions]
+            .compactMap { $0 } + tables.dialectTables.values)
+            .flatMap { $0.entries.map(\.id) })
+        let pinnedIDs = Set(Self.pinnedRulePairs.map(\.ruleID)
+            + Self.pinnedInertPairs.map(\.ruleID))
+
+        XCTAssertEqual(shippedIDs, pinnedIDs,
+                       "a shipped rule was added or removed without a pinned "
+                       + "in/out pair (or an inert-pair row) in this file")
+    }
+
+    func testShippedRulePairsCanonicalizeExactlyAsPinned() throws {
+        let tables = try bundledVariantTables()
+        let policy = widestPolicy()
+
+        for pair in Self.pinnedRulePairs {
+            let result = canonicalize(pair.input,
+                                      dialect: pair.dialect,
+                                      tables: tables,
+                                      policy: policy)
+            XCTAssertEqual(result.canonical, pair.expected,
+                           "\(pair.ruleID) failed on \(pair.input)")
+            XCTAssertEqual(result.applications.map(\.ruleID), [pair.ruleID],
+                           "\(pair.ruleID) must be the single recorded application")
+            let application = try XCTUnwrap(result.applications.first)
+            XCTAssertFalse(application.original.isEmpty)
+            XCTAssertFalse(application.canonical.isEmpty)
+            // Provenance names the table that contributed the rule, and the
+            // dialect that is the table's — which is what makes a log line
+            // traceable to a reviewable row rather than to "a normalizer".
+            XCTAssertEqual(application.dialect,
+                           pair.dialect == .default ? nil : pair.dialect)
+        }
+    }
+
+    func testUnconfirmedRulesShipButNeverFire() throws {
+        let tables = try bundledVariantTables()
+        let policy = widestPolicy()
+
+        for pair in Self.pinnedInertPairs {
+            let result = canonicalize(pair.input,
+                                      dialect: .eastern,
+                                      tables: tables,
+                                      policy: policy)
+            XCTAssertEqual(result.canonical, pair.input,
+                           "\(pair.ruleID) is unconfirmed and must not fire")
+            XCTAssertTrue(result.isIdentity)
+            XCTAssertFalse(result.applications.map(\.ruleID).contains(pair.ruleID))
+        }
+
+        // …and the table says so: the four unconfirmed rows are reported inert
+        // rather than silently absent.
+        let selection = tables.selection(for: .eastern, policy: policy)
+        XCTAssertTrue(selection.notes.contains("inert_entries:canonical-eastern:4"),
+                      "notes were \(selection.notes)")
+    }
+
+    // MARK: Conditional gating (T-062's open questions)
+
+    func testRegionTablesAreNotConsultedUntilTheAnswersLand() throws {
+        let tables = try bundledVariantTables()
+
+        // Default policy: region-marked tables are loaded but never consulted.
+        let closed = canonicalize("गइछ", dialect: .eastern, tables: tables,
+                                  policy: DialectCanonicalizer.Policy(enabled: true))
+        XCTAssertEqual(closed.canonical, "गइछ")
+        XCTAssertTrue(closed.isIdentity)
+        XCTAssertTrue(closed.notes.contains("dialect_table_conditional:eastern"),
+                      "notes were \(closed.notes)")
+
+        // …and for a `.default` speaker they are not even a candidate.
+        let defaultSpeaker = canonicalize("गइछ", dialect: .default, tables: tables,
+                                          policy: widestPolicy())
+        XCTAssertEqual(defaultSpeaker.canonical, "गइछ",
+                       "a dialect rule must never fire for a speaker with no label")
+
+        // Opened deliberately, they run.
+        let open = canonicalize("गइछ", dialect: .eastern, tables: tables,
+                                policy: widestPolicy())
+        XCTAssertEqual(open.canonical, "गएछ")
+    }
+
+    func testADialectNeverBorrowsAnotherRegionsTable() throws {
+        let tables = try bundledVariantTables()
+        let result = canonicalize("गइछ", dialect: .doteli, tables: tables,
+                                  policy: widestPolicy())
+        XCTAssertEqual(result.canonical, "गइछ",
+                       "an eastern rule must not fire for a doteli speaker: "
+                       + "introducing another region's error is the one "
+                       + "direction a canonicalizer must never move")
+    }
+
+    // MARK: The losslessness invariant (§4.7)
+
+    /// The shipped rules that fail the WIDER keyword-layer invariant. MEASURED
+    /// with the real matcher over the committed banks (offline harness,
+    /// 2026-09-15) rather than reasoned: Swift's `String.contains` matches at
+    /// GRAPHEME CLUSTER boundaries, so `वाट्सएप` is found inside `वाट्सएपमा` but
+    /// NOT inside `ह्वाट्सएपमा`, where it starts mid-cluster after the `ह्`
+    /// conjunct. `ह्वाट्सएपमा → वाट्सएपमा` therefore moves an utterance INTO the
+    /// sensitive-call block.
+    ///
+    /// It ships anyway because the COMPOSITION keeps canonical text away from
+    /// every routing consumer (D-1) — and it is asserted as an exception below,
+    /// so a stale or silently widened set fails rather than passes.
+    private static let keywordLayerExceptions: Set<String> = ["pan-loan-whatsapp"]
+
+    /// §4.7's invariant, plus the wider keyword-layer invariant with the
+    /// measured exceptions applied to the rules that are allowed to differ.
+    private func assertNoRoutingDrift(_ result: CanonicalizationResult,
+                                      original: String,
+                                      line: UInt = #line) {
+        XCTAssertTrue(CanonicalSafetyFreeze.isLossless(original: original,
+                                                       canonical: result.canonical),
+                      "§4.7 violated for \(original) -> \(result.canonical)", line: line)
+        let applied = result.applications.map(\.ruleID)
+        let before = CanonicalSafetyFreeze.matchedKeywordClauses(in: original)
+        let after = CanonicalSafetyFreeze.matchedKeywordClauses(in: result.canonical)
+        guard !Set(applied).isDisjoint(with: Self.keywordLayerExceptions) else {
+            XCTAssertEqual(after, before,
+                           "a keyword-layer match changed for \(original) -> "
+                           + "\(result.canonical) via \(applied)", line: line)
+            return
+        }
+        // An excepted rule may only move an utterance INTO the call block. Any
+        // other difference — a clause dropped, a safety clause touched — is a
+        // failure even for an excepted rule.
+        XCTAssertTrue(after.contains(.sensitiveCall),
+                      "the documented exception must actually introduce the call "
+                      + "clause (\(original) -> \(result.canonical))", line: line)
+        XCTAssertTrue(after.subtracting(before).isSubset(of: [.sensitiveCall]),
+                      "an excepted rule changed more than the call clause: "
+                      + "\(before) -> \(after)", line: line)
+        XCTAssertTrue(before.subtracting(after).isEmpty,
+                      "an excepted rule REMOVED a clause: \(before) -> \(after)",
+                      line: line)
+    }
+
+    func testPinnedSafetyFixturesAreLossless() throws {
+        let tables = try bundledVariantTables()
+        let policy = widestPolicy()
+        var rewritten = 0
+
+        for fixture in Self.pinnedSafetyFixtures {
+            for dialect in DialectLabel.allCases {
+                let result = canonicalize(fixture, dialect: dialect,
+                                          tables: tables, policy: policy)
+                if result.canonical != fixture { rewritten += 1 }
+                assertNoRoutingDrift(result, original: fixture)
+            }
+        }
+        XCTAssertGreaterThan(rewritten, 0, "the fixture set must include text that "
+                              + "is actually rewritten, or the gate is vacuous")
+    }
+
+    func testFrozenClassesSurviveEveryShippedRule() throws {
+        let tables = try bundledVariantTables()
+        let policy = widestPolicy()
+        var sawRewrite = false
+
+        // Carrier sentences place each frozen form next to each shipped rule's
+        // surface, so a rule that rewrote ACROSS a frozen form — the hazard the
+        // token boundary exists for — cannot pass by rewriting nothing.
+        for frozen in CanonicalSafetyFreeze.substringLists + CanonicalSafetyFreeze.tokenList {
+            for pair in Self.pinnedRulePairs {
+                for carrier in ["\(frozen) \(pair.input)", "\(pair.input) \(frozen)"] {
+                    let result = canonicalize(carrier, dialect: pair.dialect,
+                                              tables: tables, policy: policy)
+                    if result.canonical != carrier { sawRewrite = true }
+                    assertNoRoutingDrift(result, original: carrier)
+                }
+            }
+        }
+        XCTAssertTrue(sawRewrite, "carriers must include rewritten text or this "
+                      + "test proves nothing")
+    }
+
+    func testLosslessnessTracksTheKeywordLayerNotJustTheNet() {
+        // The one shipped rule that fails the WIDER invariant, and the reason
+        // "measured, not reasoned" is written on it: Swift's `String.contains`
+        // matches at grapheme-cluster boundaries, so वाट्सएप is found inside
+        // वाट्सएपमा but NOT inside ह्वाट्सएपमा — there it starts mid-cluster,
+        // after the ह् conjunct. A scalar-based matcher (Python's `in`) says the
+        // opposite, which is how the false version of this comment survived
+        // review until the offline harness ran the real matcher.
+        XCTAssertFalse(CanonicalSafetyFreeze.matchedKeywordClauses(in: "ह्वाट्सएपमा")
+            .contains(.sensitiveCall))
+        XCTAssertTrue(CanonicalSafetyFreeze.matchedKeywordClauses(in: "वाट्सएपमा")
+            .contains(.sensitiveCall))
+        // Pinned as a KNOWN EXCEPTION (see `keywordLayerExceptions`), stated in
+        // the failing direction so it cannot go stale silently.
+        XCTAssertFalse(CanonicalSafetyFreeze
+            .isKeywordLayerLossless(original: "ह्वाट्सएपमा",
+                                    canonical: "वाट्सएपमा"))
+        // What IS load-bearing in the shipped composition: §4.7's invariant over
+        // the safety net, which holds for that rule.
+        XCTAssertTrue(CanonicalSafetyFreeze.isLossless(original: "ह्वाट्सएपमा",
+                                                       canonical: "वाट्सएपमा"))
+        // The wider invariant still catches a rewrite that moves an utterance
+        // between SAFETY clauses — it is not decoration.
+        XCTAssertFalse(CanonicalSafetyFreeze
+            .isKeywordLayerLossless(original: "भया", canonical: "भयो"))
+        XCTAssertFalse(CanonicalSafetyFreeze
+            .isKeywordLayerLossless(original: "नखाए", canonical: "खाए"))
+    }
+
+    func testThePhraseListsAreClausesNotMembers() {
+        // The clause-level reading, pinned on the case that forced it: both
+        // औषधी खाए and औषधि खाए are ack-list members, so moving between them
+        // fires the SAME clause and cannot change the medication flow. A
+        // member-level comparison would have refused a rule the design ships.
+        XCTAssertEqual(CanonicalSafetyFreeze.matchedClauses(in: "औषधी खाए"),
+                       CanonicalSafetyFreeze.matchedClauses(in: "औषधि खाए"))
+        XCTAssertTrue(CanonicalSafetyFreeze.isLossless(original: "औषधी खाए",
+                                                       canonical: "औषधि खाए"))
+        // Sanity: the clause sets are otherwise not all equal — the fixture
+        // would prove nothing if everything matched everything.
+        XCTAssertNotEqual(CanonicalSafetyFreeze.matchedClauses(in: "औषधि खाए"),
+                          CanonicalSafetyFreeze.matchedClauses(in: "भयो"))
+        XCTAssertEqual(CanonicalSafetyFreeze.matchedClauses(in: "भयो"),
+                       [.acknowledgementToken])
+        XCTAssertTrue(CanonicalSafetyFreeze.matchedClauses(in: "आपतकाल")
+            .contains(.emergency))
+    }
+
+    func testLosslessnessTripsWhenARuleWouldIntroduceAFrozenMatch() {
+        // The invariant must actually be able to FAIL, or it is decoration.
+        XCTAssertFalse(CanonicalSafetyFreeze
+            .isLossless(original: "भया", canonical: "भयो"))
+        XCTAssertFalse(CanonicalSafetyFreeze
+            .isLossless(original: "नखाए", canonical: "खाए"))
+        XCTAssertFalse(CanonicalSafetyFreeze
+            .isLossless(original: "औषधि खाएको छैन", canonical: "औषधि खाए"))
+    }
+
+    func testTheFreezeFoldsWhitespaceTheWayTheNetDoes() {
+        // The net collapses interior whitespace before its emergency check
+        // (CommandRouter.swift:606-620 — the STT joins per-segment text with
+        // single spaces, so an utterance arrives with interior runs), and the
+        // freeze's matchers fold identically. Parity matters in BOTH
+        // directions: a transcript the net acts on but the freeze reads as
+        // harmless would let a table rewrite a distress utterance, and one the
+        // freeze refuses but the net ignores would refuse a legal table.
+        XCTAssertTrue(CanonicalSafetyFreeze.matchedClauses(in: "मद्दत  गर्नुहोस्")
+            .contains(.emergency))
+        XCTAssertTrue(CanonicalSafetyFreeze
+            .isLossless(original: "मद्दत  गर्नुहोस्", canonical: "मद्दत गर्नुहोस्"))
+        // A rewrite that INTRODUCED an emergency phrase under the folded
+        // reading is an introduction clause (b) must catch, not wave through.
+        XCTAssertFalse(CanonicalSafetyFreeze
+            .isLossless(original: "सहयोग", canonical: "सहयोग  गर"))
+        XCTAssertTrue(CanonicalSafetyFreeze.touches(variant: "सहयोग",
+                                                    canonical: "सहयोग  गर"))
+    }
+
+    // MARK: Negation-marker refusal (§4.3 `negationMarkerTouched`)
+
+    func testNegationMarkerTouchedRefusesBhayaToBhayo() {
+        // The live finding behind this test: T-062 files भया -> भयो as
+        // CONFIRMED (it is attested in DialectLexicon.json), but भयो is a
+        // shipped medication-ack TOKEN. The rewrite maps a form ONTO frozen
+        // material, which §4.7 forbids outright — a text that would have
+        // reached no safety branch would start matching the ack branch.
+        XCTAssertTrue(CanonicalSafetyFreeze.touches(variant: "भया", canonical: "भयो"))
+
+        let entry = makeEntry("dot-past-bhaya",
+                              kind: "morphophonemic",
+                              variant: "भया",
+                              canonical: "भयो")
+        let table = makeTable("canonical-doteli", dialect: .doteli, entries: [entry])
+        XCTAssertTrue(table.issues().contains(.negationMarkerTouched(entry: "dot-past-bhaya")),
+                      "issues were \(table.issues())")
+
+        // Per-table fail-closed: ONE defective entry refuses the WHOLE table
+        // (D-4), because a partially applied table yields a transcript that is
+        // neither the original nor a known canonical form.
+        let tables = makeSet(dialectTables: [.doteli: table])
+        let result = canonicalize("भया", dialect: .doteli, tables: tables,
+                                  policy: widestPolicy())
+        XCTAssertEqual(result.canonical, "भया", "the table must canonicalize nothing")
+        XCTAssertTrue(result.isIdentity)
+        XCTAssertTrue(result.degraded)
+        XCTAssertTrue(result.notes.contains("table_rejected:canonical-doteli:1"),
+                      "notes were \(result.notes)")
+    }
+
+    func testNegationMarkerTouchedRefusesTheNakhayeToKhayeHazard() {
+        // The hazard the shipped comment names: खाए sits inside नखाए.
+        XCTAssertTrue(CanonicalSafetyFreeze.touches(variant: "नखाए", canonical: "खाए"))
+        // …and the same rule written the other way round (an ack turned into a
+        // refusal) is refused too: §4.7 freezes both directions.
+        XCTAssertTrue(CanonicalSafetyFreeze.touches(variant: "खाए", canonical: "नखाए"))
+        // A prefix-attached marker that neither side spells as a token.
+        XCTAssertTrue(CanonicalSafetyFreeze.touches(variant: "खाएको", canonical: "नखाएको"))
+    }
+
+    func testNegationMarkerTouchedLeavesEveryShippedRuleAlone() throws {
+        let tables = try bundledVariantTables()
+        for table in ([tables.orthographic, tables.panRegional, tables.sttReductions]
+            .compactMap { $0 } + tables.dialectTables.values) {
+            for entry in table.entries {
+                XCTAssertFalse(CanonicalSafetyFreeze
+                    .touches(variant: entry.variant, canonical: entry.canonical),
+                               "\(entry.id) would be refused")
+            }
+        }
+    }
+
+    func testTheShippedDoteliTableDocumentsItsRefusal() throws {
+        // The refused row is not silently missing: the file says why, so a
+        // later reader cannot "restore" it by adding a table entry.
+        guard let url = Bundle.main.url(forResource: "canonical-doteli",
+                                        withExtension: "json",
+                                        subdirectory: VariantTableSet.resourceSubdirectory)
+            ?? Bundle.main.url(forResource: "canonical-doteli", withExtension: "json") else {
+            throw XCTSkip("canonical-doteli.json not bundled yet")
+        }
+        let data = try Data(contentsOf: url)
+        let json = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let refused = try XCTUnwrap(json["refusedEntries"] as? [[String: Any]])
+        let heading = try XCTUnwrap(refused.first)
+        XCTAssertEqual(heading["variant"] as? String, "भया")
+        XCTAssertEqual(heading["canonical"] as? String, "भयो")
+        let reason = try XCTUnwrap(heading["reason"] as? String)
+        XCTAssertTrue(reason.contains("ackTokens"))
+        XCTAssertTrue(reason.contains("T-077"))
+    }
+
+    // MARK: Composition (§4.6 / D-1)
+
+    func testSafetyAndPickerInputsKeepTheOriginal() {
+        let tables = makeSet(orthographic: makeTable(
+            "canonical-orthographic",
+            entries: [makeEntry("test-halanta", variant: "गर्नुहोस",
+                                canonical: "गर्नुहोस्")]))
+        let pair = IntentInputCanonicalization.prepare(
+            sanitisedTranscript: "अब यो काम गर्नुहोस",
+            dialect: .default,
+            tables: tables,
+            policy: widestPolicy())
+
+        XCTAssertEqual(pair.original, "अब यो काम गर्नुहोस")
+        XCTAssertEqual(pair.modelInput, "अब यो काम गर्नुहोस्")
+        XCTAssertFalse(pair.isIdentity)
+        // D-1: the keyword safety net reads the original, forever.
+        XCTAssertEqual(pair.safetyNetInput, "अब यो काम गर्नुहोस")
+        // §4.6: the picker brain reads the original sanitised transcript.
+        XCTAssertEqual(pair.pickerBrainInput, "अब यो काम गर्नुहोस")
+        XCTAssertEqual(pair.safetyNetInput, pair.pickerBrainInput)
+    }
+
+    func testDisabledPolicyIsAByteIdenticalPassThrough() {
+        let tables = makeSet(orthographic: makeTable(
+            "canonical-orthographic",
+            entries: [makeEntry("test-halanta", variant: "गर्नुहोस",
+                                canonical: "गर्नुहोस्")]))
+        for text in ["अब यो काम गर्नुहोस", "औषधी खाएको छैन", "", "भया"] {
+            let pair = IntentInputCanonicalization.prepare(
+                sanitisedTranscript: text,
+                dialect: .default,
+                tables: tables,
+                policy: DialectCanonicalizer.Policy(enabled: false))
+            XCTAssertEqual(pair.canonical, text)
+            XCTAssertEqual(pair.original, text)
+            XCTAssertTrue(pair.isIdentity)
+            XCTAssertTrue(pair.applications.isEmpty)
+            // No rule_ids key: metadata for an inert pass must carry no
+            // provenance, so a consumer cannot believe a rewrite happened.
+            XCTAssertNil(pair.observabilityMetadata["rule_ids"])
+        }
+    }
+
+    func testEmptyTranscriptIsIdentityUnderTheWidestPolicy() {
+        let result = canonicalize("", dialect: .eastern,
+                                  tables: makeSet(), policy: widestPolicy())
+        XCTAssertEqual(result.canonical, "")
+        XCTAssertTrue(result.isIdentity)
+    }
+
+    // MARK: The kill switch
+
+    func testCanonicalizerPreferenceDefaultsOff() {
+        let defaults = isolateDefaults()
+        let preferences = CanonicalizerPreferences(defaults: defaults)
+
+        XCTAssertFalse(preferences.canonicalizerEnabled,
+                       "an absent key must read as OFF")
+
+        // …and the runtime policy composes BOTH gates with the shipped gate
+        // function, so the toggle alone can never enable it.
+        XCTAssertFalse(DialectCanonicalizer.Policy
+            .runtime(defaults: defaults, isCompiledIn: true, isToggleOn: nil).enabled)
+        XCTAssertFalse(DialectCanonicalizer.Policy
+            .runtime(defaults: defaults, isCompiledIn: false, isToggleOn: true).enabled,
+                       "the compile-time gate cannot be talked round by a stored value")
+
+        preferences.setCanonicalizerEnabled(true)
+        XCTAssertTrue(preferences.canonicalizerEnabled)
+        XCTAssertTrue(DialectCanonicalizer.Policy
+            .runtime(defaults: defaults, isCompiledIn: true, isToggleOn: nil).enabled)
+        XCTAssertFalse(DialectCanonicalizer.Policy
+            .runtime(defaults: defaults, isCompiledIn: false, isToggleOn: nil).enabled)
+        // The shipped default (a real build with no INTENT_ENCODER condition)
+        // is therefore inert even with the stored key present.
+        XCTAssertFalse(DialectCanonicalizer.Policy.runtime(defaults: defaults).enabled)
+
+        preferences.reset()
+        XCTAssertFalse(preferences.canonicalizerEnabled)
+    }
+
+    // MARK: Fail-closed per table (D-4)
+
+    func testOneBadEntryRefusesOnlyItsOwnTable() {
+        let good = makeTable("canonical-orthographic", entries: [
+            makeEntry("good-halanta", variant: "गर्नुहोस", canonical: "गर्नुहोस्")
+        ])
+        let bad = makeTable("canonical-panregional", entries: [
+            makeEntry("bad-evidence", variant: "भोली", canonical: "भोलि",
+                      examples: ["भोली"])  // one example: below the §4.3.1 floor
+        ])
+        let tables = makeSet(orthographic: good, panRegional: bad)
+        let result = canonicalize("गर्नुहोस भोली", dialect: .default,
+                                  tables: tables, policy: widestPolicy())
+
+        XCTAssertEqual(result.canonical, "गर्नुहोस् भोली",
+                       "the valid table still runs; the rejected one changes nothing")
+        XCTAssertTrue(result.degraded)
+        XCTAssertTrue(result.notes.contains("table_rejected:canonical-panregional:1"),
+                      "notes were \(result.notes)")
+    }
+
+    func testStructuralIssuesFailTheTable() {
+        func issues(_ entry: VariantTableEntry, formatVersion: Int = 1) -> [VariantTable.Issue] {
+            VariantTable(formatVersion: formatVersion,
+                         tableID: "t",
+                         dialectRaw: nil,
+                         generation: VariantTable.Generation(status: "TEST", path: "t", date: nil),
+                         entries: [entry]).issues()
+        }
+
+        XCTAssertEqual(issues(makeEntry("e", variant: "क", canonical: "ख"), formatVersion: 2),
+                       [.unsupportedFormatVersion(2)])
+        XCTAssertTrue(issues(makeEntry("e", kind: "transliteration",
+                                       variant: "क", canonical: "ख"))
+            .contains(.unknownKind("transliteration")))
+        XCTAssertTrue(issues(makeEntry("e", variant: "", canonical: "ख"))
+            .contains(.emptyVariantOrCanonical(entry: "e")))
+        XCTAssertTrue(issues(makeEntry("e", variant: "क", canonical: "क"))
+            .contains(.variantEqualsCanonical(entry: "e")))
+
+        // No evidence at all, versus evidence that refutes its own source.
+        let blank = VariantTableEntry(
+            id: "e", kindRaw: "orthographic", variant: "क", canonical: "ख",
+            status: .confirmed, modelImpact: nil, resolves: [], note: nil,
+            evidence: .authoredEmpty)
+        XCTAssertTrue(issues(blank).contains(.evidenceMissing(entry: "e")))
+
+        let corpusWithoutCount = VariantTableEntry(
+            id: "e", kindRaw: "orthographic", variant: "क", canonical: "ख",
+            status: .confirmed, modelImpact: nil, resolves: [], note: nil,
+            evidence: VariantTableEntry.Evidence(source: .corpus,
+                                                 corpusRevision: "rev-1",
+                                                 rowIDs: ["r1"],
+                                                 occurrences: 0,
+                                                 fixtureExamples: []))
+        XCTAssertTrue(issues(corpusWithoutCount)
+            .contains(.evidenceContradictsSource(entry: "e")))
+
+        // Duplicate ids and an unusable dialect label.
+        let duplicate = VariantTable(formatVersion: 1, tableID: "t",
+                                     dialectRaw: nil,
+                                     generation: VariantTable.Generation(status: "TEST",
+                                                                         path: "t", date: nil),
+                                     entries: [makeEntry("e", variant: "क", canonical: "ख"),
+                                               makeEntry("e", variant: "ग", canonical: "घ")])
+        XCTAssertTrue(duplicate.issues().contains(.duplicateEntryID("e")))
+
+        let mislabelled = VariantTable(formatVersion: 1, tableID: "t",
+                                       dialectRaw: "western",
+                                       generation: VariantTable.Generation(status: "TEST",
+                                                                           path: "t", date: nil),
+                                       entries: [makeEntry("e", variant: "क", canonical: "ख")])
+        XCTAssertTrue(mislabelled.issues().contains(.unknownDialect("western")))
+        XCTAssertNil(mislabelled.dialect)
+
+        let empty = VariantTable(formatVersion: 1, tableID: "t", dialectRaw: nil,
+                                 generation: VariantTable.Generation(status: "TEST",
+                                                                     path: "t", date: nil),
+                                 entries: [])
+        XCTAssertTrue(empty.issues().contains(.emptyEntries))
+    }
+
+    func testMalformedStatusFailsTheFileClosed() throws {
+        let json = """
+        {"formatVersion": 1, "tableID": "t", "generation": {"status": "TEST", "path": "t"},
+         "entries": [{"id": "e", "kind": "orthographic", "variant": "क",
+                      "canonical": "ख", "status": "probably"}]}
+        """
+        XCTAssertThrowsError(try JSONDecoder().decode(VariantTable.self,
+                                                      from: Data(json.utf8)),
+                             "an unrecognised status must not silently become "
+                             + "`confirmed` — the file fails closed instead")
+    }
+
+    func testRevisionMovesWithContentAndIsStableOtherwise() {
+        let first = makeSet(orthographic: makeTable("canonical-orthographic", entries: [
+            makeEntry("a", variant: "गर्नुहोस", canonical: "गर्नुहोस्")
+        ]))
+        let same = makeSet(orthographic: makeTable("canonical-orthographic", entries: [
+            makeEntry("a", variant: "गर्नुहोस", canonical: "गर्नुहोस्")
+        ]))
+        let changed = makeSet(orthographic: makeTable("canonical-orthographic", entries: [
+            makeEntry("a", variant: "गर्नुहोस", canonical: "गर्नुहोस्"),
+            makeEntry("b", variant: "गर्नुस्", canonical: "गर्नुहोस्")
+        ]))
+
+        XCTAssertEqual(first.revision, same.revision)
+        XCTAssertNotEqual(first.revision, changed.revision)
+        XCTAssertTrue(first.revision.hasPrefix("TEST#"))
+        XCTAssertEqual(VariantTableSet.empty.revision, "none")
+    }
+
+    // MARK: Provenance and the §4.5 span map
+
+    func testApplicationsCarryExactRangesAndSurfaceForms() throws {
+        let tables = makeSet(panRegional: makeTable("canonical-panregional", entries: [
+            makeEntry("bholi", variant: "भोली", canonical: "भोलि")
+        ]))
+        let text = "भोली बिहान"
+        let result = canonicalize(text, dialect: .default, tables: tables,
+                                  policy: widestPolicy())
+
+        XCTAssertEqual(result.canonical, "भोलि बिहान")
+        let application = try XCTUnwrap(result.applications.first)
+        XCTAssertEqual(application.ruleID, "bholi")
+        XCTAssertEqual(application.tableID, "canonical-panregional")
+        XCTAssertNil(application.dialect)
+        XCTAssertEqual(application.original, "भोली")
+        XCTAssertEqual(application.canonical, "भोलि")
+        XCTAssertEqual(application.originalRange, 0..<4)
+        XCTAssertEqual(application.canonicalRange, 0..<4)
+
+        // The ranges are only meaningful if they SLICE the two strings to the
+        // recorded surfaces — the property the span decoder will rely on.
+        let textScalars = Array(text.unicodeScalars)
+        let canonicalScalars = Array(result.canonical.unicodeScalars)
+        XCTAssertEqual(String(String.UnicodeScalarView(
+            textScalars[application.originalRange])), application.original)
+        XCTAssertEqual(String(String.UnicodeScalarView(
+            canonicalScalars[application.canonicalRange])), application.canonical)
+    }
+
+    func testLengthChangingRewriteRecordsBothRanges() {
+        // A halanta-added rewrite is one scalar longer, which is the case that
+        // makes the provenance arithmetic non-trivial.
+        let tables = makeSet(orthographic: makeTable("canonical-orthographic", entries: [
+            makeEntry("halanta", variant: "गर्नुहोस", canonical: "गर्नुहोस्")
+        ]))
+        let text = "काम गर्नुहोस भोली"
+        let result = canonicalize(text, dialect: .default, tables: tables,
+                                  policy: widestPolicy())
+
+        XCTAssertEqual(result.canonical, "काम गर्नुहोस् भोली")
+        let application = result.applications.first
+        XCTAssertEqual(application?.originalRange, 4..<12)
+        XCTAssertEqual(application?.canonicalRange, 4..<13)
+
+        let scalars = Array(text.unicodeScalars)
+        XCTAssertEqual(String(String.UnicodeScalarView(scalars[4..<12])), "गर्नुहोस")
+        XCTAssertEqual(String(String.UnicodeScalarView(scalars[4..<13])), "गर्नुहोस्")
+    }
+
+    func testDigitFoldAndNFCBuiltinsAreRecorded() {
+        // O-5: the digit fold is a builtin, not a table row, and it is still
+        // recorded as an application (D-5: `applications` is never empty when
+        // `canonical != original`).
+        let digits = canonicalize("८ बजे", dialect: .default,
+                                  tables: makeSet(), policy: widestPolicy())
+        XCTAssertEqual(digits.canonical, "8 बजे")
+        XCTAssertEqual(digits.applications.map(\.ruleID),
+                       ["builtin-devanagari-digit-fold"])
+
+        // O-1: NFC is a no-op for Devanagari matras (the two-part vowel signs
+        // have no canonical decomposition), so that class is pinned as
+        // unchanged…
+        let nepali = canonicalize("को नि", dialect: .default,
+                                  tables: makeSet(), policy: widestPolicy())
+        XCTAssertEqual(nepali.canonical, "को नि")
+        XCTAssertTrue(nepali.isIdentity)
+
+        // …and the transform itself is pinned on a run where it does compose,
+        // including the length change (2 scalars → 1) that the offset
+        // arithmetic has to survive.
+        let composed = canonicalize("cafe\u{0301}", dialect: .default,
+                                    tables: makeSet(), policy: widestPolicy())
+        XCTAssertEqual(composed.canonical, "café")
+        XCTAssertEqual(composed.applications.map(\.ruleID),
+                       ["builtin-nfc-precomposition"])
+        XCTAssertEqual(composed.applications.first?.originalRange, 3..<5)
+        XCTAssertEqual(composed.applications.first?.canonicalRange, 3..<4)
+    }
+
+    func testSpanMapIsExactInsideAnApplicationAndWidenedAcrossOne() {
+        let tables = makeSet(panRegional: makeTable("canonical-panregional", entries: [
+            makeEntry("bholi", variant: "भोली", canonical: "भोलि")
+        ]))
+        let result = canonicalize("भोली बिहान", dialect: .default,
+                                  tables: tables, policy: widestPolicy())
+        let pair = IntentTranscriptPair(original: "भोली बिहान",
+                                        canonical: result.canonical,
+                                        applications: result.applications,
+                                        degraded: result.degraded,
+                                        tableRevision: result.tableRevision,
+                                        notes: result.notes)
+
+        // Untouched region.
+        XCTAssertEqual(pair.originalRange(forCanonicalRange: 5..<10), .untouched(5..<10))
+        // Wholly inside the application → the application's own original range.
+        XCTAssertEqual(pair.originalRange(forCanonicalRange: 0..<4), .exact(0..<4))
+        // Straddling an application boundary → widened, and the caller must
+        // then abstain for any span a side effect depends on (§4.5).
+        let straddle = pair.originalRange(forCanonicalRange: 3..<6)
+        XCTAssertTrue(straddle.requiresAbstention)
+        XCTAssertEqual(straddle, .widened(0..<10))
+    }
+
+    func testObservabilityMetadataCarriesNoSurfaceForms() {
+        let tables = makeSet(panRegional: makeTable("canonical-panregional", entries: [
+            makeEntry("bholi", variant: "भोली", canonical: "भोलि")
+        ]))
+        let result = canonicalize("भोली बिहान", dialect: .default,
+                                  tables: tables, policy: widestPolicy())
+        let metadata = result.observabilityMetadata
+
+        XCTAssertEqual(metadata["application_count"], "1")
+        XCTAssertEqual(metadata["rule_ids"], "bholi")
+        XCTAssertEqual(metadata["table_ids"], "canonical-panregional")
+        XCTAssertEqual(metadata["kinds"], "orthographic")
+        XCTAssertEqual(metadata["degraded"], "false")
+        for (key, value) in metadata {
+            XCTAssertFalse(value.contains("भोली"), "\(key) leaked an original form")
+            XCTAssertFalse(value.contains("भोलि"), "\(key) leaked a canonical form")
+            XCTAssertFalse(value.contains("बिहान"), "\(key) leaked a transcript")
+        }
+
+        // The payload the ENCODER emits from is the pair's — and it is the same
+        // one, assembled by the same builder, so the two cannot drift into
+        // different disclosure rules.
+        let pair = IntentInputCanonicalization.prepare(sanitisedTranscript: "भोली बिहान",
+                                                       dialect: .default,
+                                                       tables: tables,
+                                                       policy: widestPolicy())
+        XCTAssertEqual(pair.observabilityMetadata, metadata)
+        for (key, value) in pair.observabilityMetadata {
+            XCTAssertFalse(value.contains("भोली"), "\(key) leaked an original form")
+            XCTAssertFalse(value.contains("भोलि"), "\(key) leaked a canonical form")
+            XCTAssertFalse(value.contains("बिहान"), "\(key) leaked a transcript")
+        }
+    }
+
+    // MARK: Stages
+
+    func testStageOrderIsTheDesignsAndARuleCannotRewriteAnothersOutput() {
+        XCTAssertEqual(CanonicalizationKind.allCases
+            .sorted { $0.stageOrder < $1.stageOrder }
+            .map(\.rawValue),
+                       ["orthographic", "misSegmentation", "lexicalVariant", "clippedForm"])
+        // T-062's dialect-axis vocabulary maps onto the same four stages, so a
+        // dialect bank is loadable as data unchanged.
+        XCTAssertEqual(CanonicalizationKind.mapping("morphophonemic"), .lexicalVariant)
+        XCTAssertEqual(CanonicalizationKind.mapping("lexical"), .lexicalVariant)
+        XCTAssertEqual(CanonicalizationKind.mapping("clipped"), nil)
+
+        // A stage-1 rule produces "गर्नुहोस्"; a stage-3 rule that would then
+        // rewrite that output must not: edits are sealed, so no rule can
+        // consume another rule's production.
+        let stageOne = makeEntry("stage-one", kind: "orthographic",
+                                 variant: "गर्नुहोस", canonical: "गर्नुहोस्")
+        let stageThree = makeEntry("stage-three", kind: "lexicalVariant",
+                                   variant: "गर्नुहोस्", canonical: "कुरा")
+        let tables = makeSet(orthographic: makeTable("canonical-orthographic",
+                                                     entries: [stageOne]),
+                             panRegional: makeTable("canonical-panregional",
+                                                    entries: [stageThree]))
+        let result = canonicalize("गर्नुहोस", dialect: .default, tables: tables,
+                                  policy: widestPolicy())
+        XCTAssertEqual(result.canonical, "गर्नुहोस्")
+        XCTAssertEqual(result.applications.map(\.ruleID), ["stage-one"])
+    }
+}

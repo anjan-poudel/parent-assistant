@@ -303,12 +303,42 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
             DispatchQueue.main.async { completion(nil) }
             return
         }
+        // [TG-12] Canonicalization seam — §4.6's composition, and the ONLY
+        // place in this file that knows the canonicalizer exists.
+        //
+        // The sanitised transcript stays the boundary: `clean` is still what
+        // the emptiness guard above tests and still the ORIGINAL the pair
+        // carries. The pair's `modelInput` is what the tokenizer and the
+        // decoder are handed — and the decoder MUST be handed the same string
+        // the tokenizer was, because `IntentEncoderSpan` offsets index that
+        // exact text (its `sanitisedTranscript` is the span offset space).
+        // Passing the canonical text to one and not the other would produce
+        // spans that slice the wrong words.
+        //
+        // INERT BY DEFAULT. `IntentInputCanonicalization.prepare` reads an
+        // absent preference as OFF and `Policy.runtime` additionally requires
+        // the INTENT_ENCODER compilation condition, so on every shipped
+        // configuration `modelInput == clean`, `applications` is empty, and
+        // the expressions below are the ones that ran before this seam
+        // existed. There is no branch on canonicalization anywhere else: not
+        // in this interpreter's control flow, not in `LocalBrainChain`, not in
+        // `CommandRouter`, whose safety net keeps reading the raw transcript
+        // upstream of every interpreter (D-1).
+        let input = IntentInputCanonicalization.prepare(sanitisedTranscript: clean)
+        if !input.isIdentity {
+            // Rule ids, table ids, kinds and counts ONLY — never the words
+            // being rewritten (C9 / NFR-016 / §6.6). Unreachable while the
+            // switch is off.
+            emit("encoder_input_canonicalized", outcome: "info",
+                 durationMs: Self.elapsedMs(since: started),
+                 extra: input.observabilityMetadata)
+        }
         // [TURN-TIMING-BREAKDOWN] `encoder_tokenizer` — the tokenizer call
         // is wrapped, never restructured: nil recorder (every non-gated
         // build) runs the identical expression with no clock read.
         let tokenization: IntentEncoderTokenization? =
             timingRecorder.measure(.encoderTokenizer) {
-                tokenizer.tokenize(sanitisedTranscript: clean,
+                tokenizer.tokenize(sanitisedTranscript: input.modelInput,
                                    maxSequenceLength: manifest.maxSequenceLength)
             }
         guard let tokenization else {
@@ -387,7 +417,7 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
                         logits: logits,
                         manifest: manifest,
                         tokenization: tokenization,
-                        sanitisedTranscript: clean)
+                        sanitisedTranscript: input.modelInput)
                 }
                 attempt.finish {
                     self.settle(outcome, started: started,

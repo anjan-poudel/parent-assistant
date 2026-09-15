@@ -204,6 +204,20 @@ targets:
       - path: ElderlyAssistant/Resources/Intents
         buildPhase: resources
         type: folder
+      # [TG-12] Bundled dialect canonicalization tables —
+      # Resources/VariantTables/canonical-*.json, one file per table
+      # (schema + loader: Services/Voice/DialectCanonicalizer.swift,
+      # `VariantTableSet.load`). Blue folder reference: the directory lands
+      # in the bundle as VariantTables/, the subdirectory
+      # `VariantTableSet.resourceSubdirectory` looks up, so adding a region
+      # or attaching the measured STT-error bank = dropping in a JSON file,
+      # with no project.yml or parser change (same rationale as
+      # NumberWords/ above). The tables are INERT unless
+      # `CanonicalizerPreferences.canonicalizerEnabled` is on in an
+      # INTENT_ENCODER build — see `Policy.runtime`.
+      - path: ElderlyAssistant/Resources/VariantTables
+        buildPhase: resources
+        type: folder
     # Do NOT add an `info:` block here — that would make XcodeGen overwrite
     # ElderlyAssistant/Info.plist on every `./build.sh generate`, wiping the
     # real permission descriptions and BGTaskScheduler identifiers. Instead,
