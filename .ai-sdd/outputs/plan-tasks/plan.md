@@ -115,8 +115,8 @@ No new security BLOCKERs are introduced by TG-10. The loop is opt-in (recorded d
 | [TG-07](tasks/TG-07-remote-configuration/index.md) | Remote Configuration | 3 | 2 (T-032) | HIGH/MEDIUM |
 | [TG-08](tasks/TG-08-nepali-intent-encoder/index.md) | Nepali Intent Encoder | 6 | 2 (T-037) | HIGH (GO/NO-GO gate) |
 | [TG-09](tasks/TG-09-plugin-recognition-contract/index.md) | Plugin Recognition & Contract | 6 | 0 | HIGH (governance + doc-contract) |
-| [TG-10](tasks/TG-10-continuous-learning-loop/index.md) | Continuous Learning Loop | 9 | 0 | HIGH (privacy boundary + promotion gate) |
-| **Total** | | **49** | **26** | |
+| [TG-10](tasks/TG-10-continuous-learning-loop/index.md) | Continuous Learning Loop | 9 | 2 (T-052, T-053) | HIGH (privacy boundary + promotion gate) |
+| **Total** | | **49** | **28** | |
 
 ---
 
