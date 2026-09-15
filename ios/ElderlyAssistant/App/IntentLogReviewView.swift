@@ -96,10 +96,19 @@ struct IntentLogReviewView: View {
     }
 
     private func icon(for record: IntentLogStore.Record) -> String {
+        // [INTENTLOG-CAPTURE] The verdict outranks the action for the two
+        // NEW negative outcomes: a declined call must not wear the same
+        // phone glyph as a placed one.
+        switch record.outcome {
+        case "denied": return "xmark.circle.fill"
+        case "timeout": return "questionmark.circle.fill"
+        default: break
+        }
         switch record.action {
         case "call": return record.outcome == "corrected" ? "pencil.circle.fill" : "phone.fill"
         case "send_message": return "message.fill"
         case "set_reminder": return "clock.fill"
+        case "create_calendar_event": return "calendar.badge.plus"
         case "music": return "music.note"
         default: return "checkmark.circle.fill"
         }
@@ -111,6 +120,16 @@ struct IntentLogReviewView: View {
         if record.outcome == "corrected", let to = record.correctedTo?["method"] {
             return L10n.fmt("intentLog.corrected", locale: locale, contact, to)
         }
-        return L10n.fmt("intentLog.confirmed", locale: locale, record.action, contact)
+        // [INTENTLOG-CAPTURE] denied and timeout are recorded verdicts of
+        // their own since 2026-09-15 — rendering them with the confirmed
+        // line would be a lie this screen must not tell the family.
+        switch record.outcome {
+        case "denied":
+            return L10n.fmt("intentLog.denied", locale: locale, record.action, contact)
+        case "timeout":
+            return L10n.fmt("intentLog.timeout", locale: locale, record.action, contact)
+        default:
+            return L10n.fmt("intentLog.confirmed", locale: locale, record.action, contact)
+        }
     }
 }

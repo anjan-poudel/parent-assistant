@@ -5984,6 +5984,23 @@
         }
       }
     },
+    "intentLog.denied" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ declined: %2$@"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ अस्वीकार: %2$@"
+          }
+        }
+      }
+    },
     "intentLog.empty" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6014,6 +6031,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "निर्यात गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "intentLog.timeout" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ not answered: %2$@"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ को जवाफ आएन: %2$@"
           }
         }
       }

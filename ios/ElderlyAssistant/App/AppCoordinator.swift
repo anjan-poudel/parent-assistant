@@ -2079,6 +2079,11 @@ final class AppCoordinator: ObservableObject {
         voiceSession.onConfirmationTimeout = { [weak self] in
             DispatchQueue.main.async {
                 guard let self else { return }
+                // [INTENTLOG-CAPTURE] A window that expired unanswered is
+                // a verdict too — the one that says "this question was
+                // too hard / too slow to answer", which is what the
+                // accept-band and the 45 s budget are tuned against.
+                self.recordConfirmationTimeout()
                 self.pendingConfirmationEntryId = nil
                 self.pendingRephrase = nil
                 self.speak(key: "router.confirmationTimeout")
@@ -5163,6 +5168,20 @@ self.noteTalkContractChanged()
     struct PendingCalendarEvent {
         let title: String
         let startDate: Date
+        /// [INTENTLOG-CAPTURE] When the confirmation question was asked —
+        /// the flywheel's latency start (question → verdict).
+        let requestedAt: Date = Date()
+
+        /// This event's flywheel identity, for whichever verdict lands
+        /// (confirmed / denied / timeout). Deliberately carries NO slots:
+        /// the title is user content with no reviewed capture policy
+        /// (contact names are the only slot values the log stores by
+        /// design), so the record says which ACTION the elder confirmed,
+        /// never what it was about.
+        var capture: IntentLogStore.Capture {
+            IntentLogStore.Capture(action: "create_calendar_event",
+                                   requestedAt: requestedAt)
+        }
     }
 
     @Published private(set) var pendingCalendarEvent: PendingCalendarEvent?
@@ -5275,6 +5294,11 @@ self.noteTalkContractChanged()
                             SpokenTime.string(from: event.startDate, locale: activeLocale))
         setOutcome(icon: "calendar.badge.plus", text: text)
         speak(text: text)
+        // [INTENTLOG-CAPTURE] The confirmed verdict is recorded on the
+        // WRITE, not on the "yes": a confirmed event that EventKit
+        // refused taught the system nothing (same rule the call path
+        // holds for a failed open).
+        appendCapture(event.capture, .confirmed)
         Task { await externalCalendar.rescan() }
     }
 
@@ -5323,6 +5347,25 @@ self.noteTalkContractChanged()
         /// actions; overrides inherit them from the action they amend.
         let sourceTranscript: String?
         let sourceCommand: InterpretedCommand?
+        /// [INTENTLOG-CAPTURE] When the confirmation question was asked —
+        /// the flywheel's latency start (question → verdict). Reset when
+        /// a correction re-pends an amended action: the elder is being
+        /// asked a NEW question, so the new question's clock is the one
+        /// the answer belongs to.
+        let requestedAt: Date = Date()
+
+        /// This action's flywheel identity, for whichever verdict lands
+        /// (confirmed / denied / corrected / timeout). The slots are the
+        /// two values the confirmation question named (who, and through
+        /// which app); the confidence is the interpreted command's — nil
+        /// for a touch-originated action, which no interpreter produced.
+        var capture: IntentLogStore.Capture {
+            IntentLogStore.Capture(
+                action: "call",
+                slots: ["contact": contact.name, "method": method.rawValue],
+                confidence: sourceCommand?.confidence,
+                requestedAt: requestedAt)
+        }
     }
 
     @Published private(set) var pendingCallAction: PendingCallAction?
@@ -5430,12 +5473,14 @@ self.noteTalkContractChanged()
                                         sourceTranscript: action.sourceTranscript,
                                         sourceCommand: action.sourceCommand)
         pendingCallAction = amended
-        // Flywheel gold (spec §11): original plan → corrected plan.
-        intentLogStore.append(IntentLogStore.Record(
-            path: "override", action: "call",
-            slots: ["contact": action.contact.name, "method": action.method.rawValue],
-            outcome: "corrected",
-            correctedTo: ["method": override.rawValue]))
+        // Flywheel gold (spec §11): original plan → corrected plan. The
+        // capture is the ORIGINAL action's — the plan the elder rejected
+        // — with the amendment in `correctedTo`, so its slots and its
+        // confidence are the misheard interpretation's, which is exactly
+        // the training pair the miner wants.
+        appendCapture(action.capture, .corrected,
+                      path: "override",
+                      correctedTo: ["method": override.rawValue])
         speak(text: confirmationPrompt(for: amended, isRepeat: false))
         return true
     }
@@ -5569,10 +5614,7 @@ self.noteTalkContractChanged()
         if let transcript = action.sourceTranscript, let command = action.sourceCommand {
             intentRouter?.recordConfirmedExecution(transcript: transcript, command: command)
         }
-        intentLogStore.append(IntentLogStore.Record(
-            path: "model", action: "call",
-            slots: ["contact": action.contact.name, "method": action.method.rawValue],
-            outcome: "confirmed"))
+        appendCapture(action.capture, .confirmed)
     }
 
     /// Tap-originated call from a ContactTile video/audio button
@@ -7074,6 +7116,34 @@ self.noteTalkContractChanged()
         return prompt
     }
 
+    // MARK: - [INTENTLOG-CAPTURE] Flywheel capture (T-054 precursor)
+
+    /// The flywheel's single capture seam (spec 2026-09-05 §11). Every
+    /// confirm-tier verdict — confirmed, denied, corrected, timeout —
+    /// travels through here, so the log can no longer record two of its
+    /// four outcomes. The record's SHAPE belongs to
+    /// `IntentLogStore.Capture` (and to each pending action's own
+    /// `capture` property); this only writes it.
+    private func appendCapture(_ capture: IntentLogStore.Capture,
+                               _ verdict: IntentLogStore.Verdict,
+                               path: String = "model",
+                               correctedTo: [String: String]? = nil) {
+        intentLogStore.append(capture.record(verdict, path: path, correctedTo: correctedTo))
+    }
+
+    /// A confirm-tier confirmation whose 45 s window expired (C12). The
+    /// action stays pended exactly as before — this records the verdict,
+    /// it does not change what the flow does with it. The medication
+    /// challenge is NOT captured: that flow is `neverGated` and its
+    /// pending entry is a dose, not a confirm-tier intent.
+    private func recordConfirmationTimeout() {
+        if let action = pendingCallAction {
+            appendCapture(action.capture, .timeout)
+        } else if let event = pendingCalendarEvent {
+            appendCapture(event.capture, .timeout)
+        }
+    }
+
     /// User's yes/no follow-up to a pending confirmation challenge.
     /// Routes through the scheduler's dementia path so the double-dose
     /// check fires and the log is written with `confirmationPassed`
@@ -7120,6 +7190,11 @@ self.noteTalkContractChanged()
             case .yes:
                 performCallAction(action)
             case .no:
+                // [INTENTLOG-CAPTURE] A declined confirmation is signal —
+                // the negative half of the flywheel. Recorded BEFORE the
+                // speech so the verdict can never be lost to a speaker
+                // failure.
+                appendCapture(action.capture, .denied)
                 speak(text: L10n.fmt("router.call.cancelled", locale: activeLocale, action.contact.name))
             }
             DispatchQueue.main.async { [weak self] in
@@ -7142,6 +7217,9 @@ self.noteTalkContractChanged()
             } else {
                 emitCalendarEvent(eventType: "command_calendar_event_cancelled",
                                   outcome: "cancelled")
+                // [INTENTLOG-CAPTURE] Same negative-half capture as the
+                // call path above.
+                appendCapture(event.capture, .denied)
                 speak(text: L10n.str("router.calendarEventCancelled", locale: activeLocale))
             }
             DispatchQueue.main.async { [weak self] in
