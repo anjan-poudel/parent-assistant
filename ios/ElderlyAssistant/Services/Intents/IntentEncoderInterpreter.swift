@@ -130,7 +130,33 @@ enum IntentEncoderModelError: Error, Equatable {
 ///    whose existing `ReplySanityGate` speaks the honest "didn't catch
 ///    that" fallback rather than silence. Answer generation is the LLM
 ///    brain's job, not the classifier's.
-final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureReporting {
+///
+/// ## [CORRECTION-ANYBRAIN] Where the pre-intent layers run
+///
+/// The STT-error corrector and the dialect canonicalizer are NOT this
+/// interpreter's private pre-processing any more: their composition
+/// (`IntentInputCanonicalization.prepare`) lives at the local SLOT's input
+/// (`LocalBrainChain.InputSeam`), so the two switches act on whichever brain
+/// answers — the encoder, or the picker brain standing in for it — and a
+/// tester can measure each layer in isolation against either.
+///
+/// This interpreter therefore has two entry points, and the difference
+/// between them is the double-apply guard:
+///
+///  - `interpret(preparedInput:)` — how the local slot reaches the encoder.
+///    The pair was prepared ONCE, upstream; nothing in this file runs the two
+///    layers on it, so the encoder can never correct an already-corrected
+///    transcript.
+///  - `interpret(transcript:)` — the direct-caller entry point (tests, and
+///    any future standalone use), which still sanitises and prepares its own
+///    pair. It is not the shipped path: the slot dispatches a conforming
+///    brain through the prepared entry point.
+///
+/// Both hand the tokenizer and the decoder the SAME string
+/// (`IntentTranscriptPair.modelInput`), because the decoder's span offsets
+/// index that exact text.
+final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureReporting,
+                                      PreparedTranscriptInterpreting {
 
     /// Every value is a parameter, not a constant buried in the
     /// implementation — mirrors `LocalIntentInterpreter.Config` and the
@@ -193,6 +219,14 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
     /// `TurnLatencyReporter.onReported`: nil on every non-gated
     /// configuration, and with no reporter attached the readout is simply not
     /// forwarded (the decisions and the event are unaffected).
+    ///
+    /// [CORRECTION-ANYBRAIN] Scoped to turns THIS interpreter ran. The layers
+    /// now act on the local slot's input whichever brain answers, so a turn
+    /// the picker brain answers is corrected and canonicalized but reports no
+    /// readout here — the card's line is the encoder telemetry, not the
+    /// seam's. Extending it to picker-brain turns means giving the slot an
+    /// owner for that report; until then the honest statement is "the last
+    /// turn the encoder ran".
     ///
     /// The readout carries the user's own words (the card is an on-device
     /// debugger surface). It is never persisted, never logged and never
@@ -277,9 +311,18 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
 
     // MARK: - CommandInterpreter
 
-    func interpret(transcript: String,
-                   context: InterpreterContext,
-                   completion: @escaping (InterpretedCommand?) -> Void) {
+    /// One attempt's timing + memory state, resolved by `beginTurn`.
+    private struct TurnStart {
+        let started: Date
+        let wasUnloaded: Bool
+    }
+
+    /// The preamble BOTH entry points share, so the two paths cannot drift:
+    /// the failure reason belongs to the last attempt only, the
+    /// memory-pressure hold is cleared here, and the two availability guards
+    /// report through `completion`. Returns nil when the turn cannot run —
+    /// the completion has already been delivered.
+    private func beginTurn(completion: @escaping (InterpretedCommand?) -> Void) -> TurnStart? {
         // A fresh attempt starts clean — the reason belongs to the last one.
         lastInferenceFailureReason = nil
         // Every abstention/failure event carries the attempt's duration
@@ -297,48 +340,105 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
         guard installedModelDirectory != nil else {
             emit("encoder_unavailable", outcome: "info", errorCode: "model_not_cached")
             DispatchQueue.main.async { completion(nil) }
-            return
+            return nil
         }
         guard tokenizer.isReady else {
             emit("encoder_unavailable", outcome: "info",
                  errorCode: IntentEncoderAbstention.tokenizerUnavailable.rawValue)
             lastInferenceFailureReason = IntentEncoderAbstention.tokenizerUnavailable.rawValue
             DispatchQueue.main.async { completion(nil) }
-            return
+            return nil
         }
+        return TurnStart(started: started, wasUnloaded: wasUnloaded)
+    }
 
+    func interpret(transcript: String,
+                   context: InterpreterContext,
+                   completion: @escaping (InterpretedCommand?) -> Void) {
+        guard let turn = beginTurn(completion: completion) else { return }
         // Sanitise BEFORE any token reaches the encoder (NFR-013 / spec
         // §5.2 — `quarantine` level, same as every other interpreter).
         let clean = InputSanitiser.sanitise(transcript, level: .quarantine)
         guard !clean.isEmpty else {
             emit("encoder_abstained", outcome: "info",
-                 durationMs: Self.elapsedMs(since: started),
+                 durationMs: Self.elapsedMs(since: turn.started),
                  errorCode: IntentEncoderAbstention.emptyAfterSanitise.rawValue)
             DispatchQueue.main.async { completion(nil) }
             return
         }
-        // [TG-12] Canonicalization seam — §4.6's composition, and the ONLY
-        // place in this file that knows the canonicalizer exists.
+        // [CORRECTION-ANYBRAIN] This entry point still owns the seam for
+        // DIRECT callers — a test, or a caller that hands this interpreter a
+        // raw transcript. The local slot does NOT reach the encoder this way:
+        // `LocalBrainChain` prepares the pair once and hands it over through
+        // `interpret(preparedInput:)`, which runs the layers not at all. That
+        // is what makes `correct∘correct` impossible on the shipped path: the
+        // seam is run by whoever owns the slot's input, and the pair below is
+        // exactly one run of it.
         //
-        // The sanitised transcript stays the boundary: `clean` is still what
-        // the emptiness guard above tests and still the ORIGINAL the pair
-        // carries. The pair's `modelInput` is what the tokenizer and the
-        // decoder are handed — and the decoder MUST be handed the same string
-        // the tokenizer was, because `IntentEncoderSpan` offsets index that
-        // exact text (its `sanitisedTranscript` is the span offset space).
-        // Passing the canonical text to one and not the other would produce
-        // spans that slice the wrong words.
-        //
-        // INERT BY DEFAULT. `IntentInputCanonicalization.prepare` reads an
+        // Inert by default: `IntentInputCanonicalization.prepare` reads an
         // absent preference as OFF and `Policy.runtime` additionally requires
         // the INTENT_ENCODER compilation condition, so on every shipped
         // configuration `modelInput == clean`, `applications` is empty, and
-        // the expressions below are the ones that ran before this seam
-        // existed. There is no branch on canonicalization anywhere else: not
-        // in this interpreter's control flow, not in `LocalBrainChain`, not in
-        // `CommandRouter`, whose safety net keeps reading the raw transcript
-        // upstream of every interpreter (D-1).
+        // every expression below is the one that ran before this seam existed.
         let input = IntentInputCanonicalization.prepare(sanitisedTranscript: clean)
+        reportSeamParticipation(input, started: turn.started)
+        runTurn(input: input, turn: turn, completion: completion)
+    }
+
+    /// [CORRECTION-ANYBRAIN] The local slot's other entry point: the pair
+    /// `LocalBrainChain` prepared once for this turn, handed down to whichever
+    /// brain serves.
+    ///
+    /// The seam is NOT run again here — that is the point of the relocation
+    /// (the layers act on whichever brain answers, and they act exactly once).
+    /// The pair's `original` is `InputSanitiser.sanitise(_:level:.quarantine)`
+    /// output by the seam's own contract, so the sanitised boundary and the
+    /// span offset space (`modelInput`) are the same strings they were when
+    /// this interpreter prepared the pair itself.
+    ///
+    /// The pair's `modelInput` is what the tokenizer and the decoder are
+    /// handed — the decoder MUST get the same string the tokenizer did,
+    /// because `IntentEncoderSpan` offsets index that exact text; passing the
+    /// canonical text to one and not the other would slice the wrong words.
+    ///
+    /// The seam's TELEMETRY still belongs here: the readout the internal card
+    /// shows and the two count-only events describe the pair whichever side
+    /// prepared it, and this is the one participant that both knows the pair
+    /// and holds the artifact identity the event payload carries. The slot
+    /// never reports, so a turn is reported exactly once — by the encoder, on
+    /// the turns the encoder actually ran.
+    func interpret(preparedInput input: IntentTranscriptPair,
+                   context: InterpreterContext,
+                   completion: @escaping (InterpretedCommand?) -> Void) {
+        guard let turn = beginTurn(completion: completion) else { return }
+        // The emptiness guard the direct path applies to the sanitised
+        // transcript, applied to the text this turn would actually run on.
+        // An abstention, not a failure: the reason stays nil.
+        guard !input.modelInput.isEmpty else {
+            emit("encoder_abstained", outcome: "info",
+                 durationMs: Self.elapsedMs(since: turn.started),
+                 errorCode: IntentEncoderAbstention.emptyAfterSanitise.rawValue)
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
+        reportSeamParticipation(input, started: turn.started)
+        runTurn(input: input, turn: turn, completion: completion)
+    }
+
+    /// [TG-12] The seam's own telemetry, emitted from BOTH entry points and
+    /// exactly once per turn the encoder ran — the slot does not report, so
+    /// there is no second emitter to double with. The payloads are
+    /// COUNT-ONLY and BINNED (A-16): mode, counts, reason histograms, table
+    /// ROW IDs, error classes and bucketed scores — never a surface form,
+    /// never a transcript, never a raw score. Nothing downstream branches on
+    /// either signal (A-14).
+    ///
+    /// [CORRECTION-ANYBRAIN] A turn the PICKER brain answers reports nothing
+    /// here, as before the relocation: these events carry this artifact's
+    /// identity and describe the layers' participation on the encoder's
+    /// input.
+    private func reportSeamParticipation(_ input: IntentTranscriptPair,
+                                         started: Date) {
         if !input.canonicalizationIsIdentity {
             // Rule ids, table ids, kinds and counts ONLY — never the words
             // being rewritten (C9 / NFR-016 / §6.6). Unreachable while the
@@ -347,15 +447,11 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
                  durationMs: Self.elapsedMs(since: started),
                  extra: input.canonicalizationMetadata)
         }
-        // [TG-12] Phase 1's correction event — the layer's own observability,
-        // and the only place it is reported. COUNT-ONLY and BINNED (A-16):
-        // mode, token/application counts, decision-reason histogram, the
-        // satisfied pair-table ROW IDs, error classes, and bucketed scores.
-        // Never a surface form, never the transcript, never a raw score.
+        // [TG-12] Phase 1's correction event — the layer's own observability.
         // Unreachable while the mode key is absent (the shipped default): the
         // corrector applies nothing, `applications` is empty, and no event is
         // emitted — so a configuration nobody opted into cannot change the
-        // event stream. Nothing downstream branches on this signal (A-14).
+        // event stream.
         if let correction = input.correction, !correction.applications.isEmpty {
             emit("turn_correction", outcome: "info",
                  durationMs: Self.elapsedMs(since: started),
@@ -370,6 +466,16 @@ final class IntentEncoderInterpreter: CommandInterpreter, InterpreterFailureRepo
            let readout = correction.readout {
             onCorrection?(readout)
         }
+    }
+
+    /// Tokenize, run the graph, decode — the part of a turn that is identical
+    /// whichever entry point got here, and the only part that touches the
+    /// model.
+    private func runTurn(input: IntentTranscriptPair,
+                         turn: TurnStart,
+                         completion: @escaping (InterpretedCommand?) -> Void) {
+        let started = turn.started
+        let wasUnloaded = turn.wasUnloaded
         // [TURN-TIMING-BREAKDOWN] `encoder_tokenizer` — the tokenizer call
         // is wrapped, never restructured: nil recorder (every non-gated
         // build) runs the identical expression with no clock read.

@@ -93,16 +93,18 @@ enum IntentEncoderFeature {
 /// `intentEncoder.enabled` can be set (or cleared) from a debugger or a
 /// UITest launch argument without touching any user-facing setting.
 ///
-/// [CORRECTION-TOGGLES] The two pre-intent layers the encoder's input
-/// passes through — the STT-error corrector and the dialect canonicalizer —
-/// carry switches of the SAME shape and the SAME default here
-/// (`intentEncoder.corrector`, `intentEncoder.canonicalizer`), so all four
-/// switches on the internal-testing card are persisted in one namespace
-/// with one rule: absent reads OFF. These two do not touch the local-brain
-/// slot (nothing is re-installed when they flip — the encoder resolves both
-/// policies from the stored keys on every turn); they only flip the gates
-/// the two layers already had (`STTCorrector.Policy.runtime`,
-/// `DialectCanonicalizer.Policy.runtime`).
+/// [CORRECTION-TOGGLES] The two pre-intent layers — the STT-error corrector
+/// and the dialect canonicalizer — carry switches of the SAME shape and the
+/// SAME default here (`intentEncoder.corrector`, `intentEncoder.canonicalizer`),
+/// so all four switches on the internal-testing card are persisted in one
+/// namespace with one rule: absent reads OFF.
+///
+/// [CORRECTION-ANYBRAIN] They do not touch the local-brain slot's SHAPE:
+/// nothing is re-installed when one flips, because both policies are
+/// re-resolved from the stored keys on every turn at the slot's input seam
+/// (`IntentEncoderWiring.localSlotInputSeam`). That seam feeds whichever
+/// local brain serves — encoder or picker — so neither switch is gated on
+/// the encoder switch, and a stored ON cannot silently mean nothing.
 final class IntentEncoderPreferences {
     static let enabledKey = "intentEncoder.enabled"
     /// [ENCODER-RUNTIME-CASCADE] The cascade switch, same treatment and
@@ -229,11 +231,21 @@ enum IntentEncoderWiring {
     ///
     /// `onEscalated` is consulted only in the cascade mode; the default
     /// no-op keeps the non-cascading call sites honest (nothing to report).
+    ///
+    /// [CORRECTION-ANYBRAIN] `inputSeam` is the local slot's input seam — the
+    /// corrector + canonicalizer composition, run ONCE per turn here and
+    /// handed to whichever brain serves (see `localSlotInputSeam`). It is
+    /// attached to THIS OUTER chain only, and it is deliberately independent
+    /// of `mode`: in every mode the chain is the boundary between the
+    /// transcript the router routed on and the input a local brain reads, so
+    /// the two layer switches act whichever brain answers. Nil (the default,
+    /// and the pre-relocation shape) leaves the transcript byte-identical.
     static func localBrainSlot(mode: ServingMode,
                                encoder: IntentEncoderInterpreter?,
                                encoderFallback: CommandInterpreter,
                                pickerBrain: CommandInterpreter,
                                timingRecorder: TurnTimingRecorder? = nil,
+                               inputSeam: LocalBrainChain.InputSeam? = nil,
                                onEscalated: @escaping (LocalBrainChain.EscalationReason) -> Void = { _ in })
     -> CommandInterpreter {
         let preferredLocal = deferredEncoderPreference(encoder: encoder,
@@ -248,7 +260,28 @@ enum IntentEncoderWiring {
         return LocalBrainChain(preferred: preferredLocal,
                                standIn: pickerBrain,
                                cascade: cascade,
-                               timingRecorder: timingRecorder)
+                               timingRecorder: timingRecorder,
+                               inputSeam: inputSeam)
+    }
+
+    /// [CORRECTION-ANYBRAIN] The SHIPPED local-slot input seam: §4.6's
+    /// composition (`sanitise → correct → canonicalize`), resolved from the
+    /// two stored switches on EVERY turn.
+    ///
+    /// It is a value, not an instance: `IntentInputCanonicalization.prepare`
+    /// reads the persisted policies itself (absent key = OFF, and the layers'
+    /// own compile gate still applies), so flipping a row in Settings acts on
+    /// the next turn with nothing re-installed — neither layer is a brain,
+    /// and no availability question is asked of them.
+    ///
+    /// Extracted here rather than inlined in `AppCoordinator` for the house
+    /// reason: the shipped call site is the tested one, so a wiring test can
+    /// drive the same seam the app installs.
+    static func localSlotInputSeam() -> LocalBrainChain.InputSeam {
+        LocalBrainChain.InputSeam { sanitisedTranscript in
+            IntentInputCanonicalization.prepare(
+                sanitisedTranscript: sanitisedTranscript)
+        }
     }
 
     /// Returns the encoder when the caller OFFERS it (feature gate passed)
@@ -316,6 +349,14 @@ enum IntentEncoderWiring {
     /// from `selectionEventMetadata(preferred:encoder:)` fed by
     /// `preferredLocalBrain` — the encoder-available-now decision — not by
     /// this wrapper.
+    ///
+    /// [CORRECTION-ANYBRAIN] This nested chain is built WITHOUT an input seam
+    /// on purpose. It sits inside the slot's outer chain, so its input has
+    /// already been prepared; a seam here would run the corrector and the
+    /// canonicalizer a second time, on their own output, and a `correct∘correct`
+    /// turn is not a turn any switch is asking for. The pair travels down
+    /// instead: `LocalBrainChain` conforms to `PreparedTranscriptInterpreting`,
+    /// so the outer chain hands it the pair rather than a string.
     static func deferredEncoderPreference(encoder: IntentEncoderInterpreter?,
                                           fallback: CommandInterpreter)
     -> CommandInterpreter {

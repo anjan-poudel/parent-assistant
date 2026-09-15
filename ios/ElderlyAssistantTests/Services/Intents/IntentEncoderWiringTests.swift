@@ -457,50 +457,89 @@ final class IntentEncoderWiringTests: XCTestCase {
                       "and turning one off leaves the other where it was")
     }
 
-    /// What the card's disabled rows SAY, tested as far as it can be without
-    /// a view harness: the two rows carry
-    /// `.disabled(!coordinator.intentEncoderEnabled)` (`encoderCard`, the
-    /// same treatment the cascade row gets), because both layers act on the
-    /// ENCODER's input and nothing else consumes them.
+    /// [CORRECTION-ANYBRAIN] The two rows are NOT gated on the encoder switch
+    /// any more, and this is the behavioural half of that statement: with the
+    /// enable gate closed the slot falls through to the picker brain
+    /// (`mode: .pickerBrain`), and a stored layer switch still rewrites what
+    /// that brain reads.
     ///
-    /// The behavioural half of that statement is pinned here: while the
-    /// encoder switch is off, the interpreter that resolves either policy
-    /// (`IntentEncoderInterpreter` → `IntentInputCanonicalization.prepare`)
-    /// is not even constructed, so a stored ON cannot reach a turn the
-    /// encoder is not answering — and the stored choices are left intact for
-    /// the moment the tester switches the encoder back on.
-    func testTheLayerSwitchesCannotOutrunTheEncoderSwitch() throws {
-        let name = "intent-encoder-layers-gated-\(UUID().uuidString)"
-        let suite = try XCTUnwrap(UserDefaults(suiteName: name))
-        defer { suite.removePersistentDomain(forName: name) }
+    /// It replaces the pre-relocation test that pinned the OPPOSITE — that a
+    /// stored layer switch could not reach a turn the encoder was not
+    /// answering. That was true while the composition lived inside
+    /// `IntentEncoderInterpreter` and is false by design now: the layers act
+    /// at the slot's input, whichever brain serves it. What still cannot
+    /// happen is the reverse — neither row can conjure the encoder into the
+    /// slot (`preferredLocalBrain` / `gatedEncoder` are untouched).
+    func testTheLayerSwitchesActWithTheEncoderOff() {
+        let picker = StubCommandInterpreter(
+            result: makeCommand(action: .query, reply: "picker"))
+        let seam = RecordingInputSeam(rewrite: { "\($0) भोलि" })
+        let slot = IntentEncoderWiring.localBrainSlot(
+            mode: .pickerBrain,          // the enable switch is off
+            encoder: nil,
+            encoderFallback: picker,
+            pickerBrain: picker,
+            inputSeam: seam.seam)
 
-        let prefs = IntentEncoderPreferences(defaults: suite)
-        prefs.setCorrectorEnabled(true)
-        prefs.setCanonicalizerEnabled(true)
-        XCTAssertTrue(prefs.isCorrectorEnabled)
-        XCTAssertTrue(prefs.isCanonicalizerEnabled)
+        XCTAssertEqual(interpret(slot, "मौसम कस्तो छ")?.reply, "picker")
+        XCTAssertEqual(picker.lastTranscript, "मौसम कस्तो छ भोलि",
+                       "with the encoder off, the prepared text reaches the "
+                       + "PICKER brain — which is what makes a corrector-only "
+                       + "or canonicalizer-only A/B against it possible")
+        XCTAssertEqual(seam.callCount, 1, "one turn, one run of the layers")
+        XCTAssertEqual(seam.pairs.last?.safetyNetInput, "मौसम कस्तो छ",
+                       "and the safety half is still the sanitised transcript")
+    }
 
-        // The encoder switch is untouched: OFF, so the serving gate is closed
-        // and the coordinator's `installLocalBrainSlot` resolves nothing —
-        // neither layer can switch the encoder on, which is the row's point.
-        XCTAssertFalse(prefs.isEnabled)
-        var resolutions = 0
-        let offered = IntentEncoderWiring.gatedEncoder(
-            isEnabled: IntentEncoderWiring.isServingEnabled(isCompiledIn: true,
-                                                            isToggleOn: prefs.isEnabled)) {
-            resolutions += 1
-            return nil   // stand-in for the lazy `intentEncoderInterpreter`
-        }
-        XCTAssertNil(offered)
-        XCTAssertEqual(resolutions, 0,
-                       "with the encoder off there is no interpreter to consume "
-                       + "either layer, whatever the two rows say")
+    /// The double-apply guard through the SHIPPED slot builder: one turn runs
+    /// the seam ONCE, and the encoder's tokenizer is handed the pair's
+    /// prepared text — never a re-derivation of it, which is what a second
+    /// preparation of the pair's `original` would produce.
+    ///
+    /// `secondRuns` is the direct detector: it counts the times a seam was
+    /// handed text that had already been through it, so a future wiring that
+    /// attached the slot's seam to the nested chain as well would show up here
+    /// as a number rather than as a subtle rewrite of an already-rewritten
+    /// transcript.
+    func testTheSlotRunsTheSeamOnceAndTheEncoderReadsThePairsText() throws {
+        let store = try makeStore()
+        try installArtifact(store: store)
+        let tokenizer = StubIntentEncoderTokenizer()
+        let spy = IntentEncoderRunnerSpy()
+        let model = StubIntentEncoderModel()
+        let manifest = IntentEncoderManifest.t033Spike
+        model.logits = IntentEncoderLogits(
+            intentLogits: manifest.intents.map { $0 == "set_reminder" ? 6 : -6 },
+            slotLogits: [[-6, -6, -6, 6, 6]])
+        spy.make = { model }
+        let encoder = makeEncoder(store: store, tokenizer: tokenizer, spy: spy)
+        let fallback = StubCommandInterpreter(result: makeCommand(action: .query))
+        let picker = StubCommandInterpreter(
+            result: makeCommand(action: .query, reply: "picker"))
+        let seam = RecordingInputSeam(rewrite: { "\($0) भोलि" })
+        let slot = IntentEncoderWiring.localBrainSlot(mode: .standaloneEncoder,
+                                                      encoder: encoder,
+                                                      encoderFallback: fallback,
+                                                      pickerBrain: picker,
+                                                      inputSeam: seam.seam)
 
-        // …and the encoder switch does not clear them, so the card re-enables
-        // the rows with the tester's matrix still in place.
-        prefs.setEnabled(true)
-        XCTAssertTrue(prefs.isCorrectorEnabled)
-        XCTAssertTrue(prefs.isCanonicalizerEnabled)
+        XCTAssertEqual(interpret(slot, "भोलि")?.action, .setReminder)
+
+        let pair = try XCTUnwrap(seam.pairs.last)
+        XCTAssertEqual(seam.callCount, 1,
+                       "the slot owns the seam and runs it once per turn — the "
+                       + "nested chain in the preferred slot owns none")
+        XCTAssertEqual(seam.secondRuns, 0,
+                       "no seam was handed text it had already prepared: no "
+                       + "correct∘correct on the shipped path")
+        XCTAssertEqual(tokenizer.lastSanitisedTranscript, pair.modelInput,
+                       "the encoder's tokenizer ran on the pair's prepared text")
+        XCTAssertNotEqual(tokenizer.lastSanitisedTranscript,
+                          InputSanitiser.sanitise("भोलि", level: .quarantine),
+                          "…and never on a re-derivation of the pair's original, "
+                          + "which is what a second prepare() would have produced")
+        XCTAssertEqual(picker.callCount, 0,
+                       "the picker brain is not consulted while the encoder serves")
     }
 
     /// The shipped slot builder: `.standaloneEncoder` keeps the encoder's
@@ -699,11 +738,20 @@ final class IntentEncoderWiringTests: XCTestCase {
         let standIn = StubCommandInterpreter(result: makeCommand(action: .query))
         let encoder = makeEncoder(store: store, spy: spy)
         let coordinator = StubCoordinator()
+        // [CORRECTION-ANYBRAIN] The slot's seam is attached AND armed with a
+        // rewrite that would destroy the keyword it is checked for: if the
+        // router's safety decision ever read the prepared text, this turn
+        // would stop being an emergency. The layers rewrite what a MODEL
+        // reads; the net reads the transcript the router was handed.
+        let seam = RecordingInputSeam(rewrite: {
+            $0.replacingOccurrences(of: "मद्दत", with: "सहयोग")
+        })
         let router = CommandRouter(coordinator: coordinator,
                                    observabilityBus: bus,
                                    speaker: nil,
                                    interpreter: LocalBrainChain(preferred: encoder,
-                                                                standIn: standIn))
+                                                                standIn: standIn,
+                                                                inputSeam: seam.seam))
 
         let result = router.route(transcript: "मद्दत गर्नुहोस्")
 
@@ -711,6 +759,9 @@ final class IntentEncoderWiringTests: XCTestCase {
         XCTAssertTrue(bus.contains("command_emergency_keyword"))
         XCTAssertEqual(spy.urls.count, 0, "no weights are even loaded")
         XCTAssertEqual(standIn.callCount, 0)
+        XCTAssertEqual(seam.callCount, 0,
+                       "a safety-classified turn never reaches the slot's seam: "
+                       + "the keywords are checked upstream, on the original")
     }
 
     func testExplicitMedicationAckNeverConsultsTheEncoder() throws {

@@ -83,6 +83,78 @@ final class StubCommandInterpreter: CommandInterpreter {
     }
 }
 
+/// [CORRECTION-ANYBRAIN] A `LocalBrainChain.InputSeam` with a record of what
+/// it was run on: how many times, on which text, and the pair it produced.
+///
+/// Its default rewrite is the identity, so a test that wants "the seam ran and
+/// changed nothing" (the shipped default's shape) and a test that wants "a
+/// layer rewrote the text" differ by one argument. The rewrite is deliberately
+/// visible in the pair (`canonical`), and `secondRuns` counts the times the
+/// seam was handed text that had ALREADY been through it — the `correct∘
+/// correct` a mis-wired nested chain would produce.
+final class RecordingInputSeam {
+    private(set) var callCount = 0
+    private(set) var inputs: [String] = []
+    private(set) var pairs: [IntentTranscriptPair] = []
+    private(set) var secondRuns = 0
+    private let rewrite: (String) -> String
+    private let marker: String
+
+    init(rewrite: @escaping (String) -> String = { $0 },
+         marker: String = " भोलि") {
+        self.rewrite = rewrite
+        self.marker = marker
+    }
+
+    var seam: LocalBrainChain.InputSeam {
+        LocalBrainChain.InputSeam { [self] text in
+            callCount += 1
+            if text.contains(marker) { secondRuns += 1 }
+            inputs.append(text)
+            let pair = IntentTranscriptPair(original: text,
+                                            canonical: rewrite(text),
+                                            tableRevision: "test-seam/v1")
+            pairs.append(pair)
+            return pair
+        }
+    }
+}
+
+/// [CORRECTION-ANYBRAIN] A local brain with the ENCODER's shape — a
+/// `PreparedTranscriptInterpreting` consumer — and no model behind it.
+///
+/// It records which entry point it was reached through, because that IS the
+/// property under test at the slot's input: a brain that consumes the
+/// prepared pair must be handed the pair (`interpret(preparedInput:)`), never
+/// the plain string, while every other brain reads the pair's prepared text
+/// through `interpret(transcript:)`. A spy that recorded only "I was called"
+/// could not tell the two apart.
+final class PreparedBrainSpy: CommandInterpreter, PreparedTranscriptInterpreting {
+    var result: InterpretedCommand?
+    private(set) var pairs: [IntentTranscriptPair] = []
+    private(set) var transcripts: [String] = []
+
+    init(result: InterpretedCommand? = makeCommand(action: .query, confidence: 0.9)) {
+        self.result = result
+    }
+
+    var isAvailable: Bool { true }
+
+    func interpret(transcript: String,
+                   context: InterpreterContext,
+                   completion: @escaping (InterpretedCommand?) -> Void) {
+        transcripts.append(transcript)
+        DispatchQueue.main.async { completion(self.result) }
+    }
+
+    func interpret(preparedInput pair: IntentTranscriptPair,
+                   context: InterpreterContext,
+                   completion: @escaping (InterpretedCommand?) -> Void) {
+        pairs.append(pair)
+        DispatchQueue.main.async { completion(self.result) }
+    }
+}
+
 /// Minimal `ObservabilityBus` sink — events are asserted on nowhere, but
 /// the components require one.
 final class NullObservabilityBus: ObservabilityBus {

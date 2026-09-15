@@ -913,13 +913,18 @@ enum CanonicalSafetyFreeze {
     //
     // That rule ships anyway, and the reason is the composition, not a
     // loophole: the router never sees canonical text (D-1/§4.6 —
-    // `safetyNetInput` and `pickerBrainInput` are the original), so a clause
-    // set computed over the canonical form is not a routing input at all. The
-    // invariant is kept because it is the authoring gate for the day someone
-    // changes that composition, and the exception is PINNED AS A FAILING CASE
-    // in the tests (`testLosslessnessTracksTheKeywordLayerNotJustTheNet`) so it
-    // cannot be forgotten: if canonical text ever reaches the router, that test
-    // is the one that already knows why it must not.
+    // `safetyNetInput` is the original, and it is the safety net, the
+    // emergency path and the med-ack path that read it), so a clause set
+    // computed over the canonical form is not a routing input at all. The
+    // canonical form reaches a MODEL — the encoder's tokenizer, or the picker
+    // brain's prompt ([CORRECTION-ANYBRAIN]: the layers act at the local
+    // slot's input whichever brain answers) — and never a keyword decision.
+    // The invariant is kept because it is the authoring gate for the day
+    // someone changes that composition, and the exception is PINNED AS A
+    // FAILING CASE in the tests
+    // (`testLosslessnessTracksTheKeywordLayerNotJustTheNet`) so it cannot be
+    // forgotten: if canonical text ever reaches the router, that test is the
+    // one that already knows why it must not.
 
     /// `CommandRouter.swift:1482-1486`, matched by `containsPhrase`.
     static let sensitiveCallPhrases: [String] = [
@@ -1682,16 +1687,25 @@ struct IntentTranscriptPair: Equatable, Sendable {
     /// suppress, rewrite or delay what the net sees.
     var safetyNetInput: String { original }
 
-    /// What the *picker brain* reads on a cascade escalation: the original
-    /// sanitised transcript, not the canonical one (§4.6, evidence row E-17
-    /// "HOLDS BY DESIGN"). The picker is a general-purpose LLM with no
-    /// canonical-form training, so a variant table is evidence about *this*
-    /// encoder's inputs, not about Qwen's; feeding it canonicalized text is an
-    /// unmeasured intervention on the one rung that currently works, and it
-    /// would make the §6 latency/quality comparison a comparison of two
-    /// changes instead of one. The canonical form rides alongside in
-    /// `canonical`, should a later task want that A/B.
-    var pickerBrainInput: String { original }
+    /// What the *picker brain* reads: the prepared text — the corrected,
+    /// canonicalized transcript (`modelInput`), the same string the encoder is
+    /// handed.
+    ///
+    /// [CORRECTION-ANYBRAIN] This SUPERSEDES the former §4.6 / evidence-row
+    /// E-17 rule (`pickerBrainInput == original`, "HOLDS BY DESIGN"). E-17
+    /// protected a measurement: while the canonicalizer's only job was to
+    /// feed the encoder, canonicalizing the picker's prompt was an unmeasured
+    /// intervention on the rung that already worked. The layers are now
+    /// switches on the LOCAL SLOT's input (`LocalBrainChain.InputSeam`), and
+    /// the point of those switches is to be measurable against EITHER local
+    /// brain — "corrector only against the 1.7B" is a configuration the card
+    /// offers, and it cannot exist if the picker's input ignores both layers.
+    ///
+    /// What is unchanged is the safety half: the keyword safety net, the
+    /// emergency path and the medication-ack path read `safetyNetInput` — the
+    /// original — and `CommandRouter`, the router's band policy and every
+    /// confirmation flow stay upstream of the slot.
+    var pickerBrainInput: String { canonical }
 
     /// True when nothing was rewritten, so `modelInput == original`.
     ///
@@ -1814,8 +1828,14 @@ struct IntentTranscriptPair: Equatable, Sendable {
 }
 
 /// The composition seam between the sanitised transcript and the intent models
-/// (§4.6). Constructed and available; inert until a later wiring task flips it
-/// on.
+/// (§4.6).
+///
+/// [CORRECTION-ANYBRAIN] CALLED BY THE LOCAL SLOT (`LocalBrainChain.InputSeam`
+/// — see `IntentEncoderWiring.localSlotInputSeam`), once per turn, so the two
+/// layer switches are not tied to any one brain: the pair feeds the encoder's
+/// tokenizer and the picker brain's prompt alike, and the original stays with
+/// the safety net. The policies are resolved from the stored switches on every
+/// call, so a flip in Settings acts on the next turn.
 enum IntentInputCanonicalization {
 
     /// Computes the pair for one turn.
@@ -1830,14 +1850,16 @@ enum IntentInputCanonicalization {
     /// behaviour differs from before this file existed.
     ///
     /// [TG-12] ORDER (§4.6, addendum §3.1): CORRECT, then CANONICALIZE, then
-    /// the encoder. The corrector sees the sanitised transcript and nothing
-    /// else; the canonicalizer sees the corrector's output; `modelInput` is the
-    /// result of both. The two layers share this one seam and the same
-    /// compile gate, and a correction can never reach anything but the intent
-    /// model: `original` — what the keyword safety net, the emergency path and
-    /// the medication-acknowledgement path read — is still the sanitised
+    /// the intent model. The corrector sees the sanitised transcript and
+    /// nothing else; the canonicalizer sees the corrector's output;
+    /// `modelInput` is the result of both. The two layers share this one seam
+    /// and the same compile gate, and a correction can never reach anything
+    /// but the local brain — [CORRECTION-ANYBRAIN] whichever brain serves the
+    /// local slot reads it, and the seam is run ONCE, by the slot itself
+    /// (`LocalBrainChain.InputSeam`): `original` is still the sanitised
     /// transcript, untouched by either layer, and `safetyNetInput` still hands
-    /// it over.
+    /// it over to the keyword safety net, the emergency path and the
+    /// medication-acknowledgement path.
     ///
     /// The corrector's policy is resolved HERE, from the lexicon that will
     /// actually be read, rather than taken as a defaulted argument evaluated
