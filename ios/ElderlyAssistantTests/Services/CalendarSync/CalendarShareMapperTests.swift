@@ -101,10 +101,11 @@ final class CalendarShareMapperTests: XCTestCase {
                        zone: String = "UTC",
                        recurrence: EventRecurrence? = nil,
                        attendees: [String] = ["maa@example.com"],
-                       kind: EventNotifyKind = .routineReminder) -> CalendarTwinDraft {
+                       kind: EventNotifyKind = .routineReminder,
+                       location: String? = nil) -> CalendarTwinDraft {
         CalendarTwinDraft(title: title, startDate: start, durationMinutes: duration,
                           timeZoneIdentifier: zone, recurrence: recurrence,
-                          attendeeEmails: attendees, kind: kind)
+                          attendeeEmails: attendees, kind: kind, location: location)
     }
 
     // MARK: - Key grammar
@@ -373,6 +374,81 @@ final class CalendarShareMapperTests: XCTestCase {
         XCTAssertEqual(twin?.attendeeEmails, ["maa@example.com"])
         XCTAssertEqual(twin?.kind, .calendarEvent)
         XCTAssertEqual(twin?.timeZoneIdentifier, "Asia/Kathmandu")
+    }
+
+    // MARK: - Location (rich-events task, 2026-09-17)
+
+    /// The address the elder typed is what the family reads on the
+    /// invitation, so it rides the draft verbatim — trimmed, and nil for
+    /// a field that is empty or was emptied.
+    func testCalendarEventTwinCarriesTheAddress() {
+        let start = utcDate(2026, 9, 16, 14, 0)
+        let mother = contact(email: "maa@example.com", emergency: true)
+
+        let twin = CalendarShareMapper.calendarEventDraft(
+            title: "Doctor", startDate: start, durationMinutes: 45,
+            contacts: [mother], notifySettings: settings(), timeZone: kathmandu,
+            location: "  Tilganga, Kathmandu  ")
+
+        XCTAssertEqual(twin?.location, "Tilganga, Kathmandu")
+    }
+
+    func testACalendarEventTwinWithoutAnAddressCarriesNone() {
+        let start = utcDate(2026, 9, 16, 14, 0)
+        let mother = contact(email: "maa@example.com", emergency: true)
+        func twin(location: String?) -> CalendarTwinDraft? {
+            CalendarShareMapper.calendarEventDraft(
+                title: "Doctor", startDate: start, durationMinutes: 45,
+                contacts: [mother], notifySettings: settings(), timeZone: kathmandu,
+                location: location)
+        }
+
+        XCTAssertNil(twin(location: nil)?.location)
+        XCTAssertNil(twin(location: "")?.location,
+                       "EventKit happily stores an empty location string — "
+                       + "no empty location may reach Google")
+        XCTAssertNil(twin(location: "   \n ")?.location,
+                       "whitespace-only is an emptied field, not an address")
+        XCTAssertEqual(CalendarShareMapper.normalizedLocation("  a  "), "a")
+        XCTAssertNil(CalendarShareMapper.normalizedLocation(nil))
+    }
+
+    /// The medication and routine drafts never carry one: their sources
+    /// have no address field at all.
+    func testMedicationAndRoutineTwinsHaveNoLocation() {
+        let mother = contact(email: "maa@example.com", emergency: true)
+        let medicationTwin = CalendarShareMapper.medicationDrafts(
+            entry: medication(hours: [8]), contacts: [mother],
+            notifySettings: settings(), now: now, timeZone: utc).first
+        let routineTwin = CalendarShareMapper.routineDrafts(
+            entry: routine(hours: [11]), contacts: [mother],
+            notifySettings: settings(), now: now, locale: testLocale,
+            timeZone: utc).first
+
+        XCTAssertEqual(medicationTwin?.location, nil)
+        XCTAssertEqual(routineTwin?.location, nil)
+    }
+
+    /// The address IS content the family sees, so a changed one has to
+    /// re-write the twin — and the two "no address" spellings must hash
+    /// the same, or a nil→"" round trip would edit the family's calendar
+    /// for nothing.
+    func testFingerprintChangesWithTheAddress() {
+        let start = utcDate(2026, 9, 16, 10, 0)
+        let none = draft(start: start, recurrence: .daily, location: nil)
+        let blank = draft(start: start, recurrence: .daily, location: "")
+        let patan = draft(start: start, recurrence: .daily, location: "Patan")
+        let boudha = draft(start: start, recurrence: .daily, location: "Boudha")
+
+        XCTAssertEqual(CalendarShareMapper.fingerprint(of: none),
+                       CalendarShareMapper.fingerprint(of: blank),
+                       "absent and empty are the same address")
+        XCTAssertNotEqual(CalendarShareMapper.fingerprint(of: none),
+                          CalendarShareMapper.fingerprint(of: patan),
+                          "an added address is a change the family must see")
+        XCTAssertNotEqual(CalendarShareMapper.fingerprint(of: patan),
+                          CalendarShareMapper.fingerprint(of: boudha),
+                          "a corrected address is a change too")
     }
 
     // MARK: - Fingerprint

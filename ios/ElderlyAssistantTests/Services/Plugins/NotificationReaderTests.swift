@@ -234,11 +234,17 @@ enum TestNotificationFactory {
         return raw
     }
 
+    /// `userInfo` (rich-events task, 2026-09-17): the deep-link handlers
+    /// read their payload — an event id, say — out of the content, so a
+    /// response built without one could not exercise them. Defaults to
+    /// empty, which is what every pre-existing call site means.
     static func response(
         category: String,
-        actionIdentifier: String
+        actionIdentifier: String,
+        userInfo: [String: String] = [:]
     ) -> UNNotificationResponse {
-        let notification = notification(category: category, title: "T", body: "B")
+        let notification = notification(category: category, title: "T", body: "B",
+                                        userInfo: userInfo)
         let raw = class_createInstance(UNNotificationResponse.self, 0)! as Any as! UNNotificationResponse
         raw.setValue(notification, forKey: "notification")
         raw.setValue(actionIdentifier, forKey: "actionIdentifier")

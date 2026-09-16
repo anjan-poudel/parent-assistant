@@ -409,6 +409,22 @@ final class ExternalCalendarService: ObservableObject {
         return fire > now ? fire : nil
     }
 
+    /// What the banner for `item` should offer, if anything (rich-events
+    /// task, 2026-09-17; design §4).
+    ///
+    /// Two facts, both required, and both already established upstream:
+    /// the item must be a real `EKEvent` (a Reminders-app item has no
+    /// detail screen to open and no address row), and it must HAVE an
+    /// address — "No address → plain reminder, no action". A whitespace-only
+    /// location counts as none, via the same `hasAddress` rule the detail
+    /// screen's Go button applies.
+    static func action(for item: ExternalReminder) -> ExternalReminderAction? {
+        guard item.source == .event,
+              item.hasAddress,
+              let eventIdentifier = item.nativeEventIdentifier else { return nil }
+        return ExternalReminderAction(eventIdentifier: eventIdentifier)
+    }
+
     static func mapEvents(_ scanned: [ScannedEvent], now: Date) -> [ExternalReminder] {
         scanned.compactMap { event in
             // A declined invitation is not a commitment.
@@ -430,7 +446,9 @@ final class ExternalCalendarService: ObservableObject {
                 startDate: event.startDate,
                 isAllDay: event.isAllDay,
                 hasOwnAlarm: event.hasAlarms,
-                calendarName: event.calendarName
+                calendarName: event.calendarName,
+                nativeEventIdentifier: event.nativeIdentifier,
+                location: event.location
             )
         }
     }
@@ -451,7 +469,12 @@ final class ExternalCalendarService: ObservableObject {
                 startDate: dueDate,
                 isAllDay: reminder.isAllDay,
                 hasOwnAlarm: reminder.hasAlarms,
-                calendarName: reminder.calendarName
+                calendarName: reminder.calendarName,
+                // A Reminders-app item has no EKEvent behind it and no
+                // location row — both stay nil, which is exactly what
+                // "nothing to open" means downstream.
+                nativeEventIdentifier: nil,
+                location: nil
             )
         }
     }
@@ -531,7 +554,8 @@ final class ExternalCalendarService: ObservableObject {
         for (item, fire) in candidates.prefix(Self.maxArmedNotifications) {
             let identifier = ExternalNotificationIdentity.identifier(for: item.id)
             alarmScheduler.scheduleExternalReminder(identifier: identifier, title: title,
-                                                    body: item.title, at: fire)
+                                                    body: item.title, at: fire,
+                                                    action: Self.action(for: item))
             armedIdentifiers.insert(identifier)
             armed += 1
         }

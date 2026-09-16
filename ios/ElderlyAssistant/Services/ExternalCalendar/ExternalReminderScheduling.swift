@@ -22,6 +22,20 @@ enum ExternalNotificationIdentity {
     }
 }
 
+/// What a fired reminder's banner should let the elder DO, when there is
+/// anything to do (rich-events task, 2026-09-17; design §4).
+///
+/// Its absence is the whole "no address → plain reminder, no action" rule:
+/// a nil action means no category is set, which means the banner carries
+/// no buttons at all — the shape every imported calendar item has always
+/// had. Presence is created by `ExternalCalendarService.publishAndArm`
+/// from exactly two facts (the item is an event, and it has an address),
+/// so no caller can offer a destination that does not exist.
+struct ExternalReminderAction: Equatable {
+    /// The native `EKEvent.eventIdentifier` the Open action deep-links to.
+    let eventIdentifier: String
+}
+
 /// The alarm-scheduling surface `ExternalCalendarService` arms against —
 /// the `RoutineAlarmScheduling` analogue for imported native items.
 ///
@@ -34,9 +48,25 @@ protocol ExternalAlarmScheduling {
     /// Schedules (or, same identifier, replaces) one reminder
     /// notification. Title/body arrive fully localised — the service
     /// resolves catalog strings, the scheduler stays dumb.
+    ///
+    /// `action` is the event deep link, or nil for a plain banner
+    /// (rich-events task, 2026-09-17). It is an optional parameter with a
+    /// nil default so the existing arming sites — and every test double —
+    /// keep their current meaning: no action, no category, unchanged.
     func scheduleExternalReminder(identifier: String, title: String,
-                                  body: String, at fireDate: Date)
+                                  body: String, at fireDate: Date,
+                                  action: ExternalReminderAction?)
     func cancelExternalReminders(identifiers: [String])
+}
+
+extension ExternalAlarmScheduling {
+    /// The no-action arming call — what every pre-rich-events caller
+    /// means, so none of them had to change.
+    func scheduleExternalReminder(identifier: String, title: String,
+                                 body: String, at fireDate: Date) {
+        scheduleExternalReminder(identifier: identifier, title: title,
+                                 body: body, at: fireDate, action: nil)
+    }
 }
 
 /// iOS implementation over UNUserNotificationCenter — same shape as
@@ -46,7 +76,8 @@ final class UNExternalReminderScheduler: ExternalAlarmScheduling {
     private let center = UNUserNotificationCenter.current()
 
     func scheduleExternalReminder(identifier: String, title: String,
-                                  body: String, at fireDate: Date) {
+                                  body: String, at fireDate: Date,
+                                  action: ExternalReminderAction?) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -55,6 +86,16 @@ final class UNExternalReminderScheduler: ExternalAlarmScheduling {
             "external_id": identifier,
             "type": "external_reminder"
         ]
+        // The event with somewhere to go gets the category — which is the
+        // same act as giving the banner its Open button, because the
+        // category IS the button (see `NotificationCategories.event`).
+        // The id rides in `userInfo` under the same condition, so
+        // "there is a deep link" and "there is an action" cannot drift.
+        if let action {
+            content.categoryIdentifier = NotificationCategories.eventReminder
+            content.userInfo[NotificationCategories.eventIdentifierKey] =
+                action.eventIdentifier
+        }
         let components = Calendar.current.dateComponents(
             [.year, .month, .day, .hour, .minute, .second],
             from: fireDate

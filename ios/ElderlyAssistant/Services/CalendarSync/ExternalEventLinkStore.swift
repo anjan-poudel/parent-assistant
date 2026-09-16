@@ -1,10 +1,45 @@
 import Foundation
 
+// MARK: - Mirror kind (rich-events task, 2026-09-17)
+
+/// Which app-side mirror a link key or a native notes token belongs to.
+///
+/// The two-way mirror started with routines and now also covers
+/// medication doses (design §3), and the two share ONE link store and
+/// ONE token grammar. They must never be able to read each other's
+/// events, and both id spaces are UUIDs — so identity has to be
+/// explicit rather than inferred from which lookup happens to succeed.
+///
+/// `.routine` keeps the historical `entry` prefix and emits no `kind=`
+/// line: every link in the field and every mirror event already written
+/// into a family's calendar stays byte-identical, and a token that
+/// predates this enum parses back as a routine — which is what it is.
+enum MirrorKind: String {
+    case routine
+    case medication
+
+    /// The leading component of a link key.
+    var keyPrefix: String {
+        switch self {
+        case .routine: return "entry"
+        case .medication: return "med"
+        }
+    }
+
+    init?(keyPrefix: String) {
+        switch keyPrefix {
+        case "entry": self = .routine
+        case "med": self = .medication
+        default: return nil
+        }
+    }
+}
+
 // MARK: - External event link store (calendar-driven task, 2026-09-07)
 
-/// Persistent map from an app-side mirrored routine slot to its native
-/// `eventIdentifier` — the join key two-way reconciliation uses to
-/// recognise WHICH native event mirrors WHICH app slot.
+/// Persistent map from an app-side mirrored routine/medication slot to
+/// its native `eventIdentifier` — the join key two-way reconciliation
+/// uses to recognise WHICH native event mirrors WHICH app slot.
 ///
 /// Storage is UserDefaults, NOT the encrypted store: native event
 /// identifiers are opaque handles, not personal content (the house
@@ -22,22 +57,32 @@ final class ExternalEventLinkStore {
     static let linksDefaultsKey = "externalEventLinks.byAppKey"
     static let sahayakCalendarDefaultsKey = "externalEventLinks.sahayakCalendarIdentifier"
 
-    /// App-side link key for one routine slot — `entry:<uuid>:<slot>`.
-    /// Slots are indexed by position in `RoutineEntry.scheduleTimes`
+    /// App-side link key for one slot of a mirror —
+    /// `<prefix>:<uuid>:<slot>`, i.e. `entry:<uuid>:<slot>` for routines
+    /// (unchanged since the calendar-driven task) and `med:<uuid>:<slot>`
+    /// for medications.
+    /// Slots are indexed by position in the entry's `scheduleTimes`
     /// and compact after a drop, so keys are rebuilt whenever the
     /// schedule changes (the mirror rebuild prunes to the desired set).
+    static func appKey(kind: MirrorKind, entryId: UUID, slot: Int) -> String {
+        "\(kind.keyPrefix):\(entryId.uuidString):\(slot)"
+    }
+
+    /// The routine form, kept for the call sites (and tests) that only
+    /// ever meant routines.
     static func appKey(entryId: UUID, slot: Int) -> String {
-        "entry:\(entryId.uuidString):\(slot)"
+        appKey(kind: .routine, entryId: entryId, slot: slot)
     }
 
     /// Splits an app key back into its parts; nil for anything that is
     /// not one of ours.
-    static func appKeyParts(_ appKey: String) -> (entryId: UUID, slot: Int)? {
+    static func appKeyParts(_ appKey: String)
+        -> (kind: MirrorKind, entryId: UUID, slot: Int)? {
         let parts = appKey.split(separator: ":").map(String.init)
-        guard parts.count == 3, parts[0] == "entry",
+        guard parts.count == 3, let kind = MirrorKind(keyPrefix: parts[0]),
               let entryId = UUID(uuidString: parts[1]),
               let slot = Int(parts[2]), slot >= 0 else { return nil }
-        return (entryId, slot)
+        return (kind, entryId, slot)
     }
 
     private let defaults: UserDefaults
@@ -85,8 +130,8 @@ final class ExternalEventLinkStore {
         map = next
     }
 
-    func removeLinks(for entryId: UUID) {
-        let prefix = "entry:\(entryId.uuidString):"
+    func removeLinks(for entryId: UUID, kind: MirrorKind = .routine) {
+        let prefix = "\(kind.keyPrefix):\(entryId.uuidString):"
         var next = map
         next = next.filter { !$0.key.hasPrefix(prefix) }
         map = next
@@ -103,6 +148,16 @@ final class ExternalEventLinkStore {
         for key in stale { next.removeValue(forKey: key) }
         map = next
         return stale.count
+    }
+
+    /// Drops every link of one kind, leaving the others alone — used
+    /// when a wipe removes that kind's native events wholesale, so the
+    /// links do not survive their events (rich-events task, 2026-09-17).
+    func clear(kind: MirrorKind) {
+        let prefix = "\(kind.keyPrefix):"
+        let next = map.filter { !$0.key.hasPrefix(prefix) }
+        guard next.count != map.count else { return }
+        map = next
     }
 
     func clear() {
@@ -123,6 +178,18 @@ final class ExternalEventLinkStore {
 ///     entry=07A6C012-…-…
 ///     slot=0
 ///
+/// …and for a medication dose, one line more:
+///
+///     com.elderlyassistant.mirrored-routine
+///     entry=07A6C012-…-…
+///     slot=0
+///     kind=medication
+///
+/// The `kind=` line is emitted ONLY for non-routine tokens: routine
+/// tokens in the field and in existing tests stay byte-identical, and
+/// an absent line parses back as `.routine` — the only thing a token
+/// without one could ever have been.
+///
 /// Parsing is line-forgiving: a family hand-edit that garbles one line
 /// fails the parse (the event then reads as an unlinked fragment
 /// event — removed at the next two-way rebuild rather than imported),
@@ -131,18 +198,31 @@ enum MirrorLinkToken {
 
     private static let entryPrefix = "entry="
     private static let slotPrefix = "slot="
+    private static let kindPrefix = "kind="
 
-    static func notes(entryId: UUID, slot: Int) -> String {
-        "\(CalendarSyncService.mirrorTag)\n"
-            + "\(entryPrefix)\(entryId.uuidString)\n"
-            + "\(slotPrefix)\(slot)"
+    static func notes(entryId: UUID, slot: Int,
+                      kind: MirrorKind = .routine) -> String {
+        var lines = ["\(CalendarSyncService.mirrorTag)",
+                     "\(entryPrefix)\(entryId.uuidString)",
+                     "\(slotPrefix)\(slot)"]
+        if kind != .routine {
+            lines.append("\(kindPrefix)\(kind.rawValue)")
+        }
+        return lines.joined(separator: "\n")
     }
 
-    /// `(entryId, slot)` when the notes carry a well-formed token.
-    static func parse(_ notes: String?) -> (entryId: UUID, slot: Int)? {
+    /// `(kind, entryId, slot)` when the notes carry a well-formed token.
+    /// An unrecognized `kind=` line fails the parse outright rather than
+    /// falling back to routine: a token whose kind we cannot read must
+    /// not be adopted as a routine mirror, or the routine planner would
+    /// look up a medication's UUID among the routine entries, find
+    /// nothing, and leave an event that the medication planner then
+    /// also refuses — an orphan neither side will clean up.
+    static func parse(_ notes: String?) -> (kind: MirrorKind, entryId: UUID, slot: Int)? {
         guard let notes else { return nil }
         var entryId: UUID?
         var slot: Int?
+        var kind: MirrorKind = .routine
         for line in notes.components(separatedBy: .newlines) {
             if line.hasPrefix(entryPrefix),
                let id = UUID(uuidString: String(line.dropFirst(entryPrefix.count))) {
@@ -151,9 +231,13 @@ enum MirrorLinkToken {
                       let parsed = Int(line.dropFirst(slotPrefix.count)),
                       parsed >= 0 {
                 slot = parsed
+            } else if line.hasPrefix(kindPrefix) {
+                guard let parsed = MirrorKind(rawValue: String(line.dropFirst(kindPrefix.count)))
+                else { return nil }
+                kind = parsed
             }
         }
         guard let entryId, let slot else { return nil }
-        return (entryId, slot)
+        return (kind, entryId, slot)
     }
 }

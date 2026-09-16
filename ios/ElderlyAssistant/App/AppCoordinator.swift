@@ -2434,6 +2434,12 @@ final class AppCoordinator: ObservableObject {
         // medication write path already goes through.
         medicationScheduler.onScheduleChanged = { [weak self] entries in
             self?.calendarShareService.reconcileMedication(entries)
+            // [RICH-EVENTS] (2026-09-17) Same seam, second consumer: the
+            // Sahayak mirror of the dose times (design §3). `syncNow`
+            // reads the medication list back through the provider wired
+            // below rather than taking it here, so there is exactly one
+            // path that decides what the mirror should contain.
+            self?.calendarSync.syncNow(entries: self?.routineScheduler.entries() ?? [])
         }
         // Forward the external calendar service's publishes (Settings
         // status/lead, scan results reaching the Reminders + Calendar
@@ -2707,18 +2713,6 @@ final class AppCoordinator: ObservableObject {
         // when the family already enabled + granted access), then the
         // hourly BGAppRefresh keeps it current while backgrounded.
         Task { await externalCalendar.startIfEnabled() }
-        // Mirror staleness fix: re-mirror at launch when enabled (the
-        // restored status survives relaunches now), so the family's
-        // calendar view of the routine is current from a fresh start.
-        if calendarSync.isEnabled {
-            calendarSync.syncNow(entries: routineScheduler.entries())
-        }
-        // [CALENDAR-SHARE] (2026-09-16) Launch pass for the share layer —
-        // after the medication restore above (it reads the restored
-        // entries) and post-first-frame like everything else here, so no
-        // network work delays the first paint.
-        syncCalendarShare()
-
         // Two-way mirroring (calendar-driven task, 2026-09-07): the
         // coordinator relays native edits — family changes made in the
         // Calendar app on Sahayak mirror events — back into
@@ -2727,15 +2721,46 @@ final class AppCoordinator: ObservableObject {
         // Sahayak calendar id (restored from the link store) is
         // excluded from the read-only import: those events ARE the
         // routine, whose alarms fire in-app already.
+        //
+        // [RICH-EVENTS] (2026-09-17) Wired BEFORE the launch pass below
+        // rather than after it: the pass reads both providers, and one
+        // that ran without the medication one would judge every dose
+        // mirror undesired and prune its link.
         calendarSync.entriesProvider = { [weak self] in
             self?.routineScheduler.entries() ?? []
         }
         calendarSync.onNativeChanges = { [weak self] mutations in
             self?.applyNativeCalendarMutations(mutations)
         }
+        // Medications ride the same mirror (design §3): one recurring
+        // event per dose in the Sahayak calendar, reconciled in both
+        // directions. The provider is the scheduler's own list, so the
+        // mirror can never describe a dose the app would not fire.
+        calendarSync.medicationEntriesProvider = { [weak self] in
+            self?.medicationScheduler.medicationEntries() ?? []
+        }
+        calendarSync.onMedicationNativeChanges = { [weak self] mutations in
+            self?.applyMedicationCalendarMutations(mutations)
+        }
         if let sahayakIdentifier = calendarSync.sahayakCalendarIdentifier {
             externalCalendar.excludedCalendarIdentifiers.insert(sahayakIdentifier)
         }
+
+        // Mirror staleness fix: re-mirror at launch when enabled (the
+        // restored status survives relaunches now), so the family's
+        // calendar view of the routine is current from a fresh start.
+        // [RICH-EVENTS] (2026-09-17) The SEAMS are wired first, a few
+        // lines up, precisely so this first pass already knows about
+        // medications — a pass that cannot see them would judge their
+        // mirror events undesired and would prune their links.
+        if calendarSync.isEnabled {
+            calendarSync.syncNow(entries: routineScheduler.entries())
+        }
+        // [CALENDAR-SHARE] (2026-09-16) Launch pass for the share layer —
+        // after the medication restore above (it reads the restored
+        // entries) and post-first-frame like everything else here, so no
+        // network work delays the first paint.
+        syncCalendarShare()
 
         // Voice pipeline is built lazily here so the CommandRouter can hold a
         // weak ref back to this fully-initialised coordinator.
@@ -2896,10 +2921,29 @@ final class AppCoordinator: ObservableObject {
                 self?.presentMedicationVisualAids(for: entry)
             }
         )
+        // [RICH-EVENTS] The free-form event's own reminder (rich-events
+        // task, 2026-09-17; design §4): an event with a photo presents the
+        // app's event detail at fire time, and the banner's Open action (or
+        // a plain tap) deep-links to the same screen. Claims nothing —
+        // delivery, read-aloud and the caregiver alert are untouched —
+        // and needs no position rule of its own: its category
+        // ("EVENT_REMINDER") is not on the reader's allowlist, so no other
+        // handler can claim a notification before this one sees it. The
+        // lookups run through the coordinator's LAZY service, so wiring
+        // this handler still constructs nothing at launch.
+        let freeFormEventFireHandler = FreeFormEventFireHandler(
+            eventLookup: { [weak self] eventId in
+                self?.freeFormEventService.event(withId: eventId)
+            },
+            onFire: { [weak self] eventId in
+                self?.openEventDetail(eventId: eventId)
+            }
+        )
         let facade = NotificationFacade(handlers: [timerAlarmEngine,
                                                    medicationVisualAidFireHandler,
                                                    notificationReader, caregiverEventHandler,
-                                                   routineVisualAidFireHandler],
+                                                   routineVisualAidFireHandler,
+                                                   freeFormEventFireHandler],
                                          observability: observabilityBus)
         UNUserNotificationCenter.current().delegate = facade
         // [TIMER-ALARM] Foreground driver: evaluates the ringing engine
@@ -7334,6 +7378,31 @@ self.noteTalkContractChanged()
         requestNavigation(to: .defaultHome)
     }
 
+    /// Navigates to a free-form event's address — the detail screen's Go
+    /// button (rich-events task, 2026-09-17; design §4), and the route a
+    /// fired reminder's Open action leads into.
+    ///
+    /// A free-form event has no saved-place id, so — unlike the three
+    /// wrappers above — this one carries the name and address straight
+    /// into the shared executor. That is the whole feature: geocoding at
+    /// TAP time, map-app policy, the in-app fallback and the honest
+    /// spoken lines all stay `launchNavigation`'s, already built and
+    /// already audited, so an event behaves exactly like a saved place.
+    /// Nothing is stored: whatever the family last corrected in their own
+    /// Calendar app is what gets geocoded.
+    func navigateToEvent(_ event: FreeFormEvent) {
+        guard let address = event.address?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !address.isEmpty else {
+            // The Go button is not even drawn without an address, so this
+            // is only reachable by a race — the family cleared the
+            // address while the screen was open. Honest line, no dead end.
+            emitDirections(eventType: "command", outcome: "place_missing")
+            replyHonestly(key: "directions.placeNotFound")
+            return
+        }
+        launchNavigation(name: event.title, address: address)
+    }
+
     /// The core navigation executor — shared by `requestNavigation` and
     /// the ambiguity walk's yes branch. Resolves the target to a concrete
     /// destination, then launches the map surface the current override
@@ -7934,6 +8003,124 @@ self.noteTalkContractChanged()
         appointmentSmsNoteDismissed = true
     }
 
+    // MARK: - Free-form events (rich-events task, 2026-09-17; design §2)
+
+    /// The household's own events — the ones that are neither a routine
+    /// nor a medication ("डाक्टर भेट, मंगलबार ११ बजे").
+    ///
+    /// The app owns no event store for these: a free-form event IS a
+    /// native `EKEvent` in the default calendar (design §1 decision 4),
+    /// so the family's Calendar app, the app's own import, the reminder
+    /// that fires and the Google bridge all see the same event, and a
+    /// family edit is simply an edit. `FreeFormEventService` is the thin
+    /// read/write face over EventKit plus the encrypted side index that
+    /// holds the ONE field the platform cannot (`EventExtrasStore` →
+    /// `EventExtras.photoFilename`).
+    ///
+    /// LAZY like the calendar services around it: constructing it opens
+    /// an `EKEventStore` and reads one encrypted payload, so it belongs
+    /// off the launch path. Nothing here requests permission — the Events
+    /// screens ask through the same EventKit prompt every other calendar
+    /// surface uses, and a denial reads as an empty list, never a crash.
+    private(set) lazy var freeFormEventService = FreeFormEventService(
+        extras: EventExtrasStore(storage: storage),
+        observability: observabilityBus
+    )
+
+    /// The Events leaf's list: the app's own events, soonest first.
+    /// Loaded from the leaf's `.task`, never its `body` — every row is an
+    /// EventKit fetch (see the service's note).
+    func freeFormEvents() -> [FreeFormEvent] {
+        freeFormEventService.upcoming()
+    }
+
+    /// One event for the detail screen, or nil when it is gone (deleted
+    /// here, or by the family in their own Calendar app).
+    func freeFormEvent(id: String) -> FreeFormEvent? {
+        freeFormEventService.event(withId: id)
+    }
+
+    /// The event's photo, or nil when it has none. Read through the
+    /// service, so the screens never touch a file store themselves.
+    func freeFormEventPhoto(forEventId eventId: String) -> UIImage? {
+        freeFormEventService.photo(forEventId: eventId)
+    }
+
+    /// Saves the Events form — creating when `eventId` is nil — and tells
+    /// the Google bridge, answering the native identifier. nil means
+    /// nothing was written, which is the form's cue to stay open with its
+    /// draft rather than claim a save that did not happen.
+    ///
+    /// Create AND edit both go through `eventCreated`, and that is the
+    /// whole edit-reconcile (design §3): the call rebuilds the twin's
+    /// draft from the event's CURRENT values and the service's
+    /// fingerprint diff decides whether anything changed — so an edit
+    /// that alters nothing sends no request, and one that moves the time
+    /// queues exactly one PUT.
+    @discardableResult
+    func saveFreeFormEvent(_ form: FreeFormEventForm,
+                           editing eventId: String? = nil) -> String? {
+        guard let savedId = freeFormEventService.save(form, editing: eventId) else {
+            return nil
+        }
+        // Read back through the service rather than the form: what was
+        // actually written is the honest thing to share (the gateway
+        // normalizes blank notes and address to nil on the way in).
+        if let saved = freeFormEventService.event(withId: savedId) {
+            calendarShareService.eventCreated(localEventId: savedId,
+                                              title: saved.title,
+                                              startDate: saved.startDate,
+                                              durationMinutes: saved.durationMinutes,
+                                              location: saved.address)
+        }
+        return savedId
+    }
+
+    /// Deletes the event natively, then tells the Google bridge — so the
+    /// family's copy does not keep an appointment the elder removed. The
+    /// bridge's tombstone is gated on sharing being ON (`canShare`), so
+    /// no queue row accumulates while the family has not made a decision;
+    /// `cleanupVanishedEvents()` queues the same tombstone on the first
+    /// pass after they switch it on.
+    ///
+    /// Answers whether the native event was actually removed — a false
+    /// still means "gone from this app" (the index row and the photo go
+    /// either way), so the UI treats both as deleted.
+    @discardableResult
+    func deleteFreeFormEvent(eventId: String) -> Bool {
+        let removed = freeFormEventService.delete(eventId: eventId)
+        calendarShareService.eventDeleted(localEventId: eventId)
+        return removed
+    }
+
+    /// A sheet-presents-this request for the Event detail screen, in the
+    /// `pendingPluginPresentation` shape so ContentView stays the only
+    /// place that knows how a screen is put on top.
+    struct EventDetailPresentation: Identifiable, Equatable {
+        let id = UUID()
+        let eventId: String
+    }
+    @Published var pendingEventDetail: EventDetailPresentation?
+
+    /// Opens the detail screen for `eventId` — the reminder notification's
+    /// **Open** action (design §4), and the same screen the Events list
+    /// opens for an edit, so an event never has two faces.
+    ///
+    /// The id is carried through, not a copy of the event: the calendar
+    /// may have changed since the notification was armed, and the detail
+    /// screen re-reads from the service when it appears.
+    func openEventDetail(eventId: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.pendingEventDetail = EventDetailPresentation(eventId: eventId)
+        }
+    }
+
+    /// The detail sheet's close button — clears the request so the sheet
+    /// cannot reappear on the next body pass.
+    func dismissEventDetail() {
+        pendingEventDetail = nil
+    }
+
     // MARK: - Native Calendar mirroring (v2 design §4.1, 2026-09-06)
 
     /// EventKit mirror of the unified routine schedule — the app remains
@@ -8137,6 +8324,27 @@ self.noteTalkContractChanged()
         refreshActiveNotificationCount()
     }
 
+    /// Applies family edits to the dose mirror — the
+    /// `onMedicationNativeChanges` relay (rich-events task, 2026-09-17).
+    /// The scheduler's mutator writes through `loadSchedule`, which
+    /// re-persists the entry, re-arms every dose and fires
+    /// `onScheduleChanged`: the Google twins follow from there, and the
+    /// mirror re-syncs over the new times, so a retime converges in one
+    /// pass instead of two apps disagreeing until the next launch.
+    private func applyMedicationCalendarMutations(
+        _ mutations: [CalendarSyncService.MedicationCalendarMutation]) {
+        for mutation in mutations {
+            switch mutation {
+            case .setScheduleTimes(let entryId, let times):
+                medicationScheduler.setScheduleTimes(times, entryId: entryId)
+            }
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
+        }
+        refreshActiveNotificationCount()
+    }
+
     // MARK: - Read-only external Calendar/Reminders surface (2026-09-07)
 
     /// Settings toggle handler for the native-item import: ON asks for
@@ -8264,6 +8472,14 @@ self.noteTalkContractChanged()
         // deleted natively in the same window is deleted from the family
         // calendar by this pass rather than the next one.
         share.cleanupVanishedEvents()
+        // And the free-form events' CURRENT native state, for the same
+        // window and the same reason: an event retimed by the family in
+        // their own Calendar app is an edit to the one native event this
+        // app reads back, so it belongs in this pass rather than only at
+        // the form's save seam. The key set is the side INDEX (not the
+        // ledger) because the ledger also holds invitations this device
+        // imported, whose twin belongs to the organizer.
+        share.reconcileFreeFormEvents(trackedEventIds: freeFormEventService.trackedEventIds)
         Task {
             await share.flushPending()
             await share.syncInbound()

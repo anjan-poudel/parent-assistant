@@ -446,6 +446,18 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
             "end": ["dateTime": Self.rfc3339String(from: end), "timeZone": zone],
             "attendees": draft.attendeeEmails.map { ["email": $0] }
         ]
+        // The address, verbatim, in Google's own `location` field
+        // (rich-events task, 2026-09-17: design §3 — the family's
+        // invitation shows where the event is).
+        //
+        // Omitted entirely when the draft carries none, rather than sent
+        // as an empty string. Both spellings clear the field (this is a
+        // PUT, and `updateEvent` is a full replace), which is the
+        // correct outcome for "the family removed the address"; omitting
+        // it just avoids asserting an empty value we do not mean.
+        if let location = draft.location, !location.isEmpty {
+            payload["location"] = location
+        }
         if let recurrence = draft.recurrence {
             payload["recurrence"] = CalendarRecurrenceRule.googleRecurrence(recurrence)
         }
