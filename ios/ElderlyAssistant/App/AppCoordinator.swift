@@ -717,6 +717,16 @@ final class AppCoordinator: ObservableObject {
     /// constant-time startup contract forbids).
     private let routineStore: RoutineStore
 
+    /// Reminder photo store (photo-visual-aids task, 2026-09-16) —
+    /// `Application Support/VisualAids/<entryId>/<file>.jpg`. One shared
+    /// instance: the view layer renders from it, the routine scheduler
+    /// reads attachments out of it, and deleting a reminder clears its
+    /// folder through it. Stateless (a directory URL plus JPEG helpers),
+    /// and its `init` performs NO disk IO — a path lookup only, so
+    /// building it here keeps the constant-time boot contract
+    /// (`NoIOInInitTests`). The directory appears on the first save.
+    let visualAidStore = VisualAidStore()
+
     /// The curated "Family and friends" list (spec §4.4.2) — persisted
     /// encrypted, feeds the notifier whenever the list changes.
     let familyContactStore: FamilyContactStore
@@ -1939,7 +1949,11 @@ final class AppCoordinator: ObservableObject {
             // notification path at all; `markDelivered` is where the
             // alert now fires from.
             familyNotifier: familyNotifier,
-            caregiverNotifySettings: caregiverNotifySettings
+            caregiverNotifySettings: caregiverNotifySettings,
+            // [PHOTO-AIDS] Two jobs: arming a notification with the
+            // entry's first photo as a banner attachment, and clearing
+            // the entry's photo folder when the entry is deleted.
+            visualAidStore: visualAidStore
         )
         self.routineScheduler = routineScheduler
         self.routinePlugin = RoutinePlugin(scheduler: routineScheduler)
@@ -2682,7 +2696,21 @@ final class AppCoordinator: ObservableObject {
             },
             observability: observabilityBus
         )
-        let facade = NotificationFacade(handlers: [timerAlarmEngine, notificationReader, caregiverEventHandler],
+        // [PHOTO-AIDS] The reminder's photos at the moment it fires: a
+        // routine notification whose entry carries a visual aid presents
+        // the full-screen elder-facing view. Registered beside the reader
+        // and the caregiver handler and claims nothing, so delivery and
+        // read-aloud are untouched (see the handler's own contract).
+        let routineVisualAidFireHandler = RoutineVisualAidFireHandler(
+            entryLookup: { [weak routineScheduler] entryId in
+                routineScheduler?.entry(for: entryId)
+            },
+            onFire: { [weak self] entry in
+                self?.presentRoutineVisualAids(for: entry)
+            }
+        )
+        let facade = NotificationFacade(handlers: [timerAlarmEngine, notificationReader, caregiverEventHandler,
+                                                   routineVisualAidFireHandler],
                                          observability: observabilityBus)
         UNUserNotificationCenter.current().delegate = facade
         // [TIMER-ALARM] Foreground driver: evaluates the ringing engine
@@ -7197,6 +7225,15 @@ self.noteTalkContractChanged()
 
     // MARK: - Routine reminder surface (v2 pivot Phase 1)
 
+    /// A routine reminder that just fired WITH photos, presented full
+    /// screen for the person the reminder is for (photo-visual-aids task,
+    /// 2026-09-16). Set by `RoutineVisualAidFireHandler` — the app's only
+    /// in-app firing surface for reminders, since routine reminders
+    /// otherwise deliver as text-only notification banners. Nil (the
+    /// normal state) means nothing to present; entries without photos
+    /// never set it, so their behaviour is byte-for-byte unchanged.
+    @Published private(set) var firedRoutineVisualAids: FiredRoutineVisualAids?
+
     /// All configured routine entries (seeded categories + voice-created)
     /// — the Reminders leaf's manage list.
     var routineEntries: [RoutineEntry] { routineScheduler.entries() }
@@ -7218,6 +7255,35 @@ self.noteTalkContractChanged()
         // [BOOT-REVIEW P1-7] Routine mutations land in the same reminder
         // surface the derived count reads.
         refreshActiveNotificationCount()
+    }
+
+    /// Replaces a routine's photos (the photo editor's save path).
+    /// Files are already written by `VisualAidStore` before this is
+    /// called; this persists the model payload and re-arms, so a photo
+    /// edit and a time edit take the same path. Re-arming matters here:
+    /// the fired notification carries the first photo, so a photo added
+    /// to an already-armed reminder only reaches the banner through the
+    /// reschedule.
+    func setRoutineVisualAids(_ entryId: UUID, aids: [VisualAid]) {
+        routineScheduler.setVisualAids(aids, entryId: entryId)
+    }
+
+    /// The presentation is dismissed (Close button, or the cover's own
+    /// swipe) — clearing the item is what actually dismisses it.
+    func dismissFiredRoutineVisualAids() {
+        firedRoutineVisualAids = nil
+    }
+
+    /// `RoutineVisualAidFireHandler`'s presentation sink, on the main
+    /// queue. Reads the title through `activeLocale` at fire time — the
+    /// language the app is in NOW, not the one it was in when the
+    /// notification was armed.
+    private func presentRoutineVisualAids(for entry: RoutineEntry) {
+        firedRoutineVisualAids = FiredRoutineVisualAids(
+            entryId: entry.id,
+            title: entry.displayTitle(locale: activeLocale),
+            aids: entry.visualAids
+        )
     }
 
     /// Today's medication reminders as localized "name — time" lines for

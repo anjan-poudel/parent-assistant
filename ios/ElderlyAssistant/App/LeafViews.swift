@@ -538,6 +538,16 @@ struct RemindersView: View {
     /// Each manage row's subtitle ("Sun, Tue · 9:00 AM"), built with the
     /// rows so no formatter work runs while drawing.
     @State private var routineSummaries: [UUID: String] = [:]
+    /// The routine whose photos are being managed (photo-visual-aids task,
+    /// 2026-09-16) — the photo half of a reminder editor, reached from the
+    /// manage row. Held as the full entry so the sheet renders without a
+    /// store read of its own.
+    @State private var photoEditorEntry: RoutineEntry?
+    /// A today row whose photos the elder tapped. Only rows that actually
+    /// carry photos can set this, so the full-screen viewer never appears
+    /// for a reminder without one — i.e. never for medication (see
+    /// `TodayRow.visualAids`).
+    @State private var viewingAidRow: TodayRow?
 
     /// Everything the cached rows depend on: an in-screen toggle, a voice
     /// turn (a routine can be added by asking), a dose completed
@@ -561,7 +571,7 @@ struct RemindersView: View {
             .map { TodayRow(id: $0.id.uuidString, scheduledAt: $0.scheduledAt,
                             title: coordinator.medicationName(for: $0.medicationEntryId),
                             systemImage: RoutineCategory.medication.systemImage,
-                            isDimmed: false, external: nil) }
+                            isDimmed: false, external: nil, entryId: nil, visualAids: []) }
         let routines = coordinator.todaysRoutineOccurrences.map { occurrence in
             let entry = entriesById[occurrence.entryId]
             return TodayRow(id: occurrence.id.uuidString, scheduledAt: occurrence.scheduledAt,
@@ -569,7 +579,9 @@ struct RemindersView: View {
                                 ?? L10n.str("routine.category.custom", locale: coordinator.activeLocale),
                             systemImage: entry?.category.systemImage
                                 ?? RoutineCategory.custom.systemImage,
-                            isDimmed: occurrence.state != .pending, external: nil)
+                            isDimmed: occurrence.state != .pending, external: nil,
+                            entryId: occurrence.entryId,
+                            visualAids: entry?.visualAids ?? [])
         }
         // Imported native items (2026-09-07): timed ones are always still
         // ahead (already-started events are dropped at scan time), so
@@ -578,7 +590,7 @@ struct RemindersView: View {
         let externals = coordinator.externalRemindersToday.map { item in
             TodayRow(id: item.id, scheduledAt: item.startDate, title: item.title,
                      systemImage: item.source.systemImage, isDimmed: false,
-                     external: item)
+                     external: item, entryId: nil, visualAids: [])
         }
         return (meds + routines + externals).sorted { $0.scheduledAt < $1.scheduledAt }
     }
@@ -615,6 +627,42 @@ struct RemindersView: View {
             )
             todayRows = buildTodayRows()
         }
+        // Manage one routine's photos (photo-visual-aids task,
+        // 2026-09-16). Edits persist as they happen, so the only thing
+        // dismissal has to do is refresh the cached rows.
+        .sheet(item: $photoEditorEntry) { entry in
+            RoutineVisualAidEditorView(
+                entry: entry,
+                store: coordinator.visualAidStore,
+                locale: coordinator.activeLocale,
+                // The editor owns its draft; this only persists. The
+                // captured `entry` is the one the sheet opened with —
+                // its id is all this needs.
+                onSave: { aids in
+                    coordinator.setRoutineVisualAids(entry.id, aids: aids)
+                },
+                onClose: {
+                    photoEditorEntry = nil
+                    entriesVersion += 1
+                }
+            )
+        }
+        // The elder's own view of a row's photos: the same large-image
+        // screen the firing notification presents.
+        .fullScreenCover(item: $viewingAidRow) { row in
+            Group {
+                if let entryId = row.entryId {
+                    ReminderVisualAidScreen(
+                        entryId: entryId,
+                        title: row.title,
+                        aids: row.visualAids,
+                        store: coordinator.visualAidStore,
+                        locale: coordinator.activeLocale,
+                        onClose: { viewingAidRow = nil }
+                    )
+                }
+            }
+        }
     }
 
     private struct TodayRow: Identifiable {
@@ -629,6 +677,17 @@ struct RemindersView: View {
         /// carry the imported native item itself so a tap can open it in
         /// its own app — the read-only bridge's only gesture.
         let external: ExternalReminder?
+        /// The owning routine entry, when this row IS a routine
+        /// occurrence (photo-visual-aids task, 2026-09-16) — nil for
+        /// medication and external rows, which have no visual aids.
+        let entryId: UUID?
+        /// The routine's photos, hoisted here so the row can show a
+        /// thumbnail and open the viewer without touching the store
+        /// while drawing (the same rule the rest of this screen keeps).
+        /// Always empty for medication: medication reminders live in the
+        /// separate, safety-critical `MedicationScheduler`, so this
+        /// feature does not attach photos to them yet.
+        let visualAids: [VisualAid]
     }
 
     private func sectionHeader(key: String) -> some View {
@@ -660,6 +719,17 @@ struct RemindersView: View {
                 }
             }
             Spacer()
+            // A small preview of the reminder's first photo, so the elder
+            // can see the medicine box in the list and knows tapping is
+            // what opens it big (photo-visual-aids task, 2026-09-16).
+            if !row.visualAids.isEmpty {
+                Image(systemName: "photo.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(DesignTokens.accent)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
+                    .accessibilityHidden(true)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity)
@@ -667,13 +737,17 @@ struct RemindersView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
         .contentShape(Rectangle())
         // External rows open their item in the native app (read-only
-        // bridge); medication/routine rows stay non-interactive.
+        // bridge); a routine row WITH photos opens the same large-image
+        // screen the notification presents. Medication/routine rows
+        // without photos stay non-interactive, exactly as before.
         .onTapGesture {
             if let external = row.external {
                 coordinator.openExternalReminder(external)
+            } else if !row.visualAids.isEmpty {
+                viewingAidRow = row
             }
         }
-        .accessibilityAddTraits(row.external != nil ? .isButton : [])
+        .accessibilityAddTraits(row.external != nil || !row.visualAids.isEmpty ? .isButton : [])
     }
 
     /// All-day external items caption "All day"; everything else the
@@ -699,6 +773,21 @@ struct RemindersView: View {
                     .foregroundStyle(DesignTokens.textSecondary)
             }
             Spacer()
+            // Photos live behind this row rather than in the row itself:
+            // the manage list is where the family configures a routine,
+            // and this is the only configuration surface routines have
+            // (photo-visual-aids task, 2026-09-16).
+            Button {
+                photoEditorEntry = entry
+            } label: {
+                Image(systemName: entry.visualAids.isEmpty ? "photo.badge.plus" : "photo.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(DesignTokens.accent)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("visualAid.add"))
             Toggle("", isOn: Binding(
                 get: { entry.isEnabled },
                 set: { enabled in

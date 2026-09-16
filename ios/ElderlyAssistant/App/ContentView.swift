@@ -51,6 +51,20 @@ struct ContentView: View {
             TimerAlarmOverlay(engine: coordinator.timerAlarmEngine,
                               onStop: coordinator.stopTimerAlarm)
         )
+        // [PHOTO-AIDS] (2026-09-16) The fired reminder's photos, full
+        // screen — mounted at the root for the same reason the timer
+        // alarm is: it is the app's only in-app firing surface for
+        // reminders, and it must cover whatever screen the elder is on.
+        // Transparent no-op while nothing has fired (the overwhelming
+        // case — only reminders with photos ever present it).
+        .overlay(
+            RoutineVisualAidOverlay(
+                presentation: coordinator.firedRoutineVisualAids,
+                store: coordinator.visualAidStore,
+                locale: coordinator.activeLocale,
+                onClose: coordinator.dismissFiredRoutineVisualAids
+            )
+        )
         // .plugin intent: a plugin-provided view (e.g. the appliance
         // photo + overlay), presented app-wide.
         .sheet(item: $coordinator.pendingPluginPresentation) { presentation in
