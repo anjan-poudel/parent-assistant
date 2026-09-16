@@ -10179,19 +10179,155 @@
         }
       }
     },
-    "settings.ai.hiddenHint": {
+    "settings.hidden.hint": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Technical settings — long-press the title above"
+            "value": "Press and hold the title above for technical settings"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "प्राविधिक सेटिङहरू — माथिको शीर्षकमा लामो थिच्नुहोस्"
+            "value": "माथिको शीर्षक लामो थिचेर प्राविधिक सेटिङ खोल्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.hidden.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Technical settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "प्राविधिक सेटिङहरू"
+          }
+        }
+      }
+    },
+    "settings.hidden.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Technical settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "प्राविधिक सेटिङहरू"
+          }
+        }
+      }
+    },
+    "settings.hidden.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "These are technical settings. A family member can change them at any time."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यी प्राविधिक सेटिङ हुन्। परिवारको कुनै सदस्यले जुनसुकै बेला बदल्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "settings.tabs.voice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज"
+          }
+        }
+      }
+    },
+    "settings.tabs.family": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Family"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "परिवार"
+          }
+        }
+      }
+    },
+    "settings.tabs.reminders": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reminders"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्झनाहरू"
+          }
+        }
+      }
+    },
+    "settings.tabs.tools": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tools"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "उपकरणहरू"
+          }
+        }
+      }
+    },
+    "settings.tabs.system": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "System"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "प्रणाली"
           }
         }
       }
