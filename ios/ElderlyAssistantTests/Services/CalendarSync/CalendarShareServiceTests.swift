@@ -67,10 +67,12 @@ final class CalendarShareServiceTests: XCTestCase {
     }
 
     private func makeService(signedIn: Bool = true, consented: Bool = true,
-                             configured: Bool = true) -> Rig {
+                             configured: Bool = true,
+                             hasScopes: Bool = true) -> Rig {
         let session = FakeShareSession()
         session.isConfigured = configured
         session.isSignedIn = signedIn
+        session.hasRequiredScopes = hasScopes
         let gateway = FakeShareGateway()
         let eventKit = FakeShareEventKit()
         // A fresh ledger per rig: two services in one test must not share
@@ -216,6 +218,102 @@ final class CalendarShareServiceTests: XCTestCase {
         await drainMain()
         XCTAssertEqual(connected.service.status.connection,
                        .connected(email: "maa@example.com"))
+    }
+
+    /// The status matrix, over the three session facts the card renders
+    /// (2026-09-17).
+    ///
+    /// `signedIn` and `canShare` were the same question until this
+    /// change, and they are not: Google's consent sheet can close with
+    /// the account connected and the Calendar grant withheld, and the
+    /// card has to say THAT rather than "connected", which would tell
+    /// the family their reminders are going out.
+    func testConnectionSeparatesSignedInFromAbleToShare() async {
+        // Signed in, no Calendar/contacts grant: its own state, with the
+        // account still named so the household can see WHICH one it is.
+        let unscoped = makeService(signedIn: true, hasScopes: false)
+        await drainMain()
+        XCTAssertEqual(unscoped.service.status.connection,
+                       .connectedWithoutScopes(email: "maa@example.com"))
+        XCTAssertFalse(unscoped.service.status.isActive,
+                       "consent or not, a token without calendar.events cannot share")
+
+        // The full matrix in one place, so a future flag cannot silently
+        // collapse two of these into one.
+        let consentOff = makeService(signedIn: true, consented: false, hasScopes: false)
+        await drainMain()
+        XCTAssertEqual(consentOff.service.status.connection,
+                       .connectedWithoutScopes(email: "maa@example.com"),
+                       "the missing grant is reported even before the disclosure")
+
+        let scopedAndConsented = makeService(signedIn: true, consented: true, hasScopes: true)
+        await drainMain()
+        XCTAssertTrue(scopedAndConsented.service.status.isActive,
+                      "connected + scoped + consented is the only active state")
+
+        let scopedButNotConsented = makeService(signedIn: true, consented: false, hasScopes: true)
+        await drainMain()
+        XCTAssertEqual(scopedButNotConsented.service.status.connection,
+                       .connected(email: "maa@example.com"))
+        XCTAssertFalse(scopedButNotConsented.service.status.isActive,
+                       "the app's own gate is still a gate")
+    }
+
+    /// A flow that ends with the scope grant declined: the session is
+    /// REAL (the account is not signed out) and nothing is flushed — the
+    /// queue would fail item by item against a token that cannot write.
+    func testSignInWithoutTheScopeGrantLeavesAnHonestInactiveStatus() async {
+        let rig = makeService(signedIn: false, consented: true)
+        rig.session.signInOutcome = .connectedWithoutScopes
+        rig.store.enqueue(queuedCreate(key: slotKey(UUID())))
+        await drainMain()
+
+        let connected = await rig.service.signIn()
+        await drainMain()
+
+        XCTAssertFalse(connected,
+                       "the return value means 'usable session', and this one cannot share")
+        XCTAssertEqual(rig.service.status.connection,
+                       .connectedWithoutScopes(email: "maa@example.com"),
+                       "signed IN and unable to share — not signed out, which would be a different lie")
+        XCTAssertTrue(rig.gateway.callLog.isEmpty,
+                      "nothing is drained into a token with no calendar grant")
+    }
+
+    /// The re-connect from that state works: the SAME entry point, run
+    /// again, ends with the grant and the queue drains.
+    func testReconnectingFromTheUnscopedStateRestoresSharing() async {
+        let rig = makeService(signedIn: true, hasScopes: false)
+        rig.gateway.createResults = ["g-1"]
+        rig.store.enqueue(queuedCreate(key: slotKey(UUID())))
+        await drainMain()
+        XCTAssertEqual(rig.service.status.connection,
+                       .connectedWithoutScopes(email: "maa@example.com"))
+
+        rig.session.signInOutcome = .connected
+        let connected = await rig.service.signIn()
+        await drainMain()
+
+        XCTAssertTrue(connected)
+        XCTAssertEqual(rig.service.status.connection,
+                       .connected(email: "maa@example.com"))
+        XCTAssertEqual(rig.gateway.createdDrafts.count, 1,
+                       "the queue that waited through the missing grant lands once it is given")
+    }
+
+    /// Cancelling the sign-in sheet creates nothing at all — the state
+    /// that was there before the tap is the state after it.
+    func testCancellingSignInLeavesTheSignedOutStateAlone() async {
+        let rig = makeService(signedIn: false, consented: true)
+        rig.session.signInOutcome = .cancelled
+        await drainMain()
+
+        let connected = await rig.service.signIn()
+        await drainMain()
+
+        XCTAssertFalse(connected)
+        XCTAssertEqual(rig.service.status.connection, .signedOut)
+        XCTAssertTrue(rig.gateway.callLog.isEmpty)
     }
 
     // MARK: - Flush: create
@@ -1281,27 +1379,50 @@ private final class FakeShareSession: GoogleAccountSessionProtocol {
     var isConfigured = true
     var isSignedIn = false
     var accountEmail: String? = "maa@example.com"
-    var signInResult = true
+    /// The Calendar/contacts grant (2026-09-17). Default TRUE so every
+    /// existing rig stays a fully-connected household, and set false by
+    /// the tests that drive the "signed in, cannot share" state.
+    var hasRequiredScopes = true
+    /// What the interactive flow reports.
+    var signInOutcome: GoogleSessionOutcome = .connected
     private(set) var signInCalls = 0
     private(set) var createAccountCalls = 0
     private(set) var signOutCalls = 0
     private(set) var accessTokenCalls = 0
 
-    func signIn() async -> Bool {
+    /// Signs the fake in (or not) exactly the way the real session does:
+    /// `.connected` leaves a scoped session, `.connectedWithoutScopes`
+    /// leaves a signed-in one WITHOUT the grant, and the other two leave
+    /// no session at all.
+    func signIn() async -> GoogleSessionOutcome {
         signInCalls += 1
-        isSignedIn = signInResult
-        return signInResult
+        applyFlowOutcome()
+        return signInOutcome
     }
 
-    func createAccount() async -> Bool {
+    func createAccount() async -> GoogleSessionOutcome {
         createAccountCalls += 1
-        isSignedIn = signInResult
-        return signInResult
+        applyFlowOutcome()
+        return signInOutcome
+    }
+
+    private func applyFlowOutcome() {
+        switch signInOutcome {
+        case .connected:
+            isSignedIn = true
+            hasRequiredScopes = true
+        case .connectedWithoutScopes:
+            isSignedIn = true
+            hasRequiredScopes = false
+        case .cancelled, .unavailable:
+            break   // no session was created; whatever was there stays
+        }
     }
 
     func signOut() {
         signOutCalls += 1
         isSignedIn = false
+        hasRequiredScopes = false
         accountEmail = nil
     }
 

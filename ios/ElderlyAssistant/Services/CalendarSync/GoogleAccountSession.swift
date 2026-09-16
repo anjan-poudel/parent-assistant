@@ -17,6 +17,14 @@ import GoogleSignIn
 /// would need Google answers false instead of presenting a button that
 /// cannot work.
 ///
+/// Connecting is TWO sheets, not one (2026-09-17). The sign-in sheet
+/// proves who the elder is; the Calendar/contacts grant is asked for
+/// afterwards with `addScopes`, because that is the only entry point
+/// GoogleSignIn 8.0.0 exposes to the Swift async interface. A flow that
+/// ends after the first sheet leaves a session that can do nothing this
+/// feature needs, which is why `signIn()` reports a four-way outcome
+/// rather than a Bool.
+///
 /// Nothing personal is stored here. The SDK keeps the account and its
 /// tokens in the Keychain; this type adds no storage of its own — in
 /// particular it never mirrors a token into `UserDefaults`, where a
@@ -30,6 +38,26 @@ import GoogleSignIn
 /// description — `localizedDescription` on an OAuth error can carry the
 /// account being signed in, which is exactly what the gate exists to stop.
 final class GoogleAccountSession: GoogleAccountSessionProtocol {
+
+    // MARK: Required scopes
+
+    /// The OAuth scopes this feature cannot work without, in the URL
+    /// spelling Google's own consent screen shows.
+    ///
+    /// `calendar.events` is the narrowest grant that can create, rewrite
+    /// and delete the family's twins — deliberately NOT the full
+    /// `calendar` scope, which would also hand over every calendar the
+    /// account can see. `contacts` is what `People v1` needs to put the
+    /// caregiver in the elder's own address book before inviting them
+    /// (design §4.2 — an invite from an unknown address lands in spam).
+    ///
+    /// `profile`/`email` are not listed: the SDK asks for identity as
+    /// part of its own sign-in flow, and asking twice would show the
+    /// elder a consent screen listing a permission they already gave.
+    static let requiredScopes = [
+        "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/contacts",
+    ]
 
     // MARK: Bundle configuration
 
@@ -89,6 +117,11 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
     /// from exists.
     var presenter: (() -> UIViewController?)?
 
+    /// The SDK's interactive surface, behind the seam declared in
+    /// `CalendarShareSeams` so the outcome matrix — granted, declined,
+    /// cancelled, failed — is a unit test instead of a device session.
+    private let flow: GoogleAuthFlow
+
     private let observabilityBus: ObservabilityBus
 
     /// Whether `GIDConfiguration` has been handed to the SDK in this
@@ -100,6 +133,7 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
 
     init(clientID: String? = GoogleAccountSession.bundledClientID,
          presenter: (() -> UIViewController?)? = GoogleAccountSession.keyWindowPresenter,
+         flow: GoogleAuthFlow = GoogleSignInAuthFlow(),
          observabilityBus: ObservabilityBus = GoogleAccountSession.unwiredBus,
          defaults: UserDefaults = .standard) {
         // Deliberately NIL-safe: no permission prompt, no SDK call and no
@@ -108,6 +142,7 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
         // supported state rather than a failure.
         self.clientID = clientID
         self.presenter = presenter
+        self.flow = flow
         self.observabilityBus = observabilityBus
         // `defaults` is accepted to keep the share layer's construction
         // shape uniform and is deliberately UNUSED: the SDK owns the
@@ -125,17 +160,54 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
 
     var accountEmail: String? { GIDSignIn.sharedInstance.currentUser?.profile?.email }
 
+    /// Whether the connected account holds every scope the share path
+    /// needs, read from the SDK's own record of the grant.
+    ///
+    /// `grantedScopes` is optional in the SDK, and an absent list reads
+    /// as EMPTY rather than as "assume granted": the cost of the
+    /// assumption being wrong is a queue that fails item by item with a
+    /// 401, and the cost of being right about a missing grant is one
+    /// honest line on the Settings card.
+    var hasRequiredScopes: Bool {
+        guard let granted = GIDSignIn.sharedInstance.currentUser?.grantedScopes else {
+            return false
+        }
+        return Self.grantsRequiredScopes(granted)
+    }
+
+    /// Whether a granted-scope list satisfies `requiredScopes`.
+    ///
+    /// The comparison normalizes the `https://www.googleapis.com/auth/`
+    /// prefix instead of string-matching one spelling, because the two
+    /// ends of this value do not agree on one: the consent request is
+    /// written in the URL form Google's screen displays, while the SDK's
+    /// own scope helper (`GIDScopes`) stores and compares the SHORT form
+    /// (`email`, `profile`), and Google's token endpoint has returned
+    /// both spellings over the SDK's lifetime. An exact match against
+    /// either form would silently read a granted scope as missing — which
+    /// is the failure mode this whole change exists to remove.
+    static func grantsRequiredScopes(_ granted: [String]) -> Bool {
+        let normalized = Set(granted.map(normalizeScope))
+        return requiredScopes.allSatisfy { normalized.contains(normalizeScope($0)) }
+    }
+
+    private static func normalizeScope(_ scope: String) -> String {
+        let prefix = "https://www.googleapis.com/auth/"
+        return scope.hasPrefix(prefix) ? String(scope.dropFirst(prefix.count)) : scope
+    }
+
     // MARK: - Flows
 
-    /// Presents Google's sign-in flow.
+    /// Presents Google's sign-in flow AND the Calendar/contacts consent
+    /// that must follow it.
     ///
-    /// There is deliberately NO "already signed in → true" shortcut even
-    /// though the contract's return value ("a usable session exists
-    /// afterwards") would allow one: the case the user is actually here
-    /// for is the one where the SDK still reports a user whose token
-    /// Google has revoked, and skipping the flow would leave them with no
-    /// way to re-authorise from this screen.
-    func signIn() async -> Bool {
+    /// There is deliberately NO "already signed in → connected" shortcut
+    /// even though the contract would allow one: the case the user is
+    /// actually here for is the one where the SDK still reports a user
+    /// whose token Google has revoked, or whose grant was never given,
+    /// and skipping the flow would leave them with no way to
+    /// re-authorise from this screen.
+    func signIn() async -> GoogleSessionOutcome {
         await interactiveFlow(event: "calendar_share_session_sign_in")
     }
 
@@ -156,7 +228,7 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
     /// still exists as its own seam because that is what the elder's
     /// screen calls and what a future SDK with a real entry point would
     /// change in exactly one place.
-    func createAccount() async -> Bool {
+    func createAccount() async -> GoogleSessionOutcome {
         await interactiveFlow(event: "calendar_share_session_create_account")
     }
 
@@ -200,10 +272,17 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
 
     // MARK: - Interactive flow
 
-    /// The four ways an interactive flow can end. `signedIn` and
-    /// `cancelled` are user outcomes; the other two are states of the app.
+    /// The five ways an interactive flow can end. `signedIn`,
+    /// `signedInWithoutScopes` and `cancelled` are user outcomes; the
+    /// other two are states of the app.
     private enum FlowOutcome: Equatable {
+        /// Signed in AND holding every scope the share path needs.
         case signedIn
+        /// Signed in, but the Calendar/contacts grant is not there.
+        /// `declined` splits the elder's own choice (they closed the
+        /// consent sheet) from Google's refusal — the same end state,
+        /// two different things to report.
+        case signedInWithoutScopes(declined: Bool)
         /// The elder closed Google's sheet. Not an error, and worth its
         /// own outcome: a run of these is a product signal, not a bug.
         case cancelled
@@ -223,28 +302,40 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
     /// STARTED on the main actor, and the SDK's async form resumes where
     /// the answer is known — so there is no callback to bridge and no
     /// continuation to reason about.
-    private func interactiveFlow(event: String) async -> Bool {
+    private func interactiveFlow(event: String) async -> GoogleSessionOutcome {
         guard let clientID else {
             emit("\(event)_failed", outcome: "failure", errorCode: "not_configured")
-            return false
+            return .unavailable
         }
         // Read before the hop, so the main-actor work never reaches back
         // into `self` for state that can change while the sheet is open.
         let presenter = self.presenter
-        let outcome = await Self.runFlow(clientID: clientID, presenter: presenter)
+        let flow = self.flow
+        let outcome = await Self.runFlow(clientID: clientID,
+                                         presenter: presenter,
+                                         flow: flow)
         switch outcome {
         case .signedIn:
             emit(event, outcome: "success")
-            return true
+            return .connected
+        case .signedInWithoutScopes(let declined):
+            // Its own event type rather than a failed sign-in: the
+            // session EXISTS. A card that reported this as a failure
+            // would send the family looking for a problem with the
+            // account instead of tapping the consent again.
+            emit("\(event)_scopes_missing",
+                 outcome: declined ? "cancelled" : "failure",
+                 errorCode: declined ? nil : "scopes_not_granted")
+            return .connectedWithoutScopes
         case .cancelled:
             emit("\(event)_cancelled", outcome: "cancelled")
-            return false
+            return .cancelled
         case .noPresenter:
             emit("\(event)_failed", outcome: "failure", errorCode: "no_presenter")
-            return false
+            return .unavailable
         case .failed(let code):
             emit("\(event)_failed", outcome: "failure", errorCode: code)
-            return false
+            return .unavailable
         }
     }
 
@@ -253,8 +344,18 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
     /// `signIn(withPresenting:)`'s async form is the SAME entry point the
     /// completion-handler form calls — the SDK derives it — so this is
     /// Google's flow, not a re-implementation of it.
+    ///
+    /// The scope request is a SECOND sheet on purpose. GoogleSignIn 8.0.0
+    /// offers `additionalScopes` only on a `signInWithPresentingViewController:`
+    /// overload the Swift async interface does not expose (there is one
+    /// async `signIn(withPresenting:)`, and it asks for identity alone),
+    /// so the only supported path to a Calendar grant is `addScopes` on
+    /// the user it returns. Asking at sign-in time was the bug this
+    /// method exists to fix: the token came back without
+    /// `calendar.events`, and every Calendar call answered 401.
     @MainActor private static func runFlow(clientID: String,
-                                           presenter: (() -> UIViewController?)?) async -> FlowOutcome {
+                                           presenter: (() -> UIViewController?)?,
+                                           flow: GoogleAuthFlow) async -> FlowOutcome {
         // Configure (or re-hand the config to) the SDK before the first
         // presentation. `GIDConfiguration` is the client id and nothing
         // else: this app has no home server to name as a `serverClientID`,
@@ -263,16 +364,53 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
         configureSDK(clientID: clientID)
         guard let controller = presenter?() else { return .noPresenter }
         do {
-            // The result is discarded on purpose: `GIDSignInResult.user` is
-            // NON-OPTIONAL in the async interface (verified against 8.0.0 —
+            // The result is reduced to its granted scopes: `GIDSignInResult.user`
+            // is NON-OPTIONAL in the async interface (verified against 8.0.0 —
             // the Swift importer turns the completion form's `_Nullable`
             // result into a thrown error instead), so returning without
-            // throwing IS a signed-in user. There is no "no error, no user"
-            // state left to branch on.
-            _ = try await GIDSignIn.sharedInstance.signIn(withPresenting: controller)
-            return .signedIn
+            // throwing IS a signed-in user, and the only open question is
+            // what it was allowed to do.
+            let granted = try await flow.signIn(presenting: controller)
+            if grantsRequiredScopes(granted) { return .signedIn }
+            return await requestScopes(flow: flow, controller: controller)
         } catch {
             return outcome(for: error)
+        }
+    }
+
+    /// The consent sheet, and the three ways it can land.
+    @MainActor private static func requestScopes(flow: GoogleAuthFlow,
+                                                 controller: UIViewController) async -> FlowOutcome {
+        do {
+            let granted = try await flow.addScopes(requiredScopes, presenting: controller)
+            // Granted list still short after a SUCCESSFUL call: Google
+            // accepted the request and did not add the grant (a
+            // workspace admin restriction is the usual reason). Nothing
+            // the elder can re-tap fixes that, so it is reported as a
+            // refusal rather than as a decline.
+            return grantsRequiredScopes(granted) ? .signedIn
+                                                 : .signedInWithoutScopes(declined: false)
+        } catch {
+            let code = (error as NSError).code
+            // The SDK's "these scopes are already granted" — thrown when
+            // its own `grantedScopes` record has not caught up with the
+            // auth state. That is the SUCCESS case arriving through the
+            // error channel, and reporting it as a refusal would leave a
+            // fully-authorized household staring at a warning.
+            if code == GIDSignInError.scopesAlreadyGranted.rawValue {
+                return .signedIn
+            }
+            // Closing the consent sheet is a DECISION, not a failure:
+            // the elder is signed in and chose not to hand over their
+            // calendar. Same end state as a refusal, different outcome
+            // to report.
+            if code == GIDSignInError.canceled.rawValue {
+                return .signedInWithoutScopes(declined: true)
+            }
+            // Anything else is the SDK failing around a real session, so
+            // the session is kept and reported honestly rather than
+            // discarding a working sign-in over a scope-sheet error.
+            return .signedInWithoutScopes(declined: false)
         }
     }
 
@@ -321,6 +459,45 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
             errorCode: errorCode,
             metadata: [:]
         ))
+    }
+}
+
+// MARK: - The SDK's interactive surface
+
+/// `GIDSignIn` as a `GoogleAuthFlow` — Google's own entry points, with
+/// each result reduced to the granted-scope list this app acts on.
+///
+/// Everything here is a translation and nothing else: no policy, no
+/// retries, no interpretation of which scopes matter. The session owns
+/// those decisions, which is what keeps the declined-grant path a unit
+/// test.
+///
+/// `grantedScopes` is `_Nullable` in the SDK's header, and an absent
+/// list is returned as EMPTY rather than as "assume granted": the cost of
+/// the assumption being wrong is a queue that fails item by item with a
+/// 401, and the cost of being right about a missing grant is one honest
+/// line on the Settings card.
+final class GoogleSignInAuthFlow: GoogleAuthFlow {
+
+    func signIn(presenting controller: UIViewController) async throws -> [String] {
+        let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: controller)
+        return result.user.grantedScopes ?? []
+    }
+
+    func addScopes(_ scopes: [String],
+                   presenting controller: UIViewController) async throws -> [String] {
+        guard let user = GIDSignIn.sharedInstance.currentUser else {
+            // Reachable only if the account vanished between the sign-in
+            // sheet and the consent sheet — a sign-out from another
+            // surface. Reported in the SDK's own vocabulary for "there is
+            // no authenticated user", so the session classifies it as a
+            // failed flow rather than as an elder declining a sheet they
+            // were never shown.
+            throw NSError(domain: kGIDSignInErrorDomain,
+                          code: GIDSignInError.hasNoAuthInKeychain.rawValue)
+        }
+        let result = try await user.addScopes(scopes, presenting: controller)
+        return result.user.grantedScopes ?? []
     }
 }
 

@@ -40,6 +40,7 @@
 		0F80CDFCE29298C50148328D /* VoicePipelineReadiness.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF16708573EFF0ED1E80EC2 /* VoicePipelineReadiness.swift */; };
 		0FA93A213F311EA549C821C6 /* FeedLanguageSorter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42A170EB33621E742BD2C2BF /* FeedLanguageSorter.swift */; };
 		0FC766991BD9A0254F9879CE /* GeminiClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C49429A6D0922ACF3ED8872C /* GeminiClientTests.swift */; };
+		10346E2DD308CC740232B5F8 /* CalendarShareSettingsSeamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2627CAEAB86588DE8701C8A4 /* CalendarShareSettingsSeamTests.swift */; };
 		1053D099D25570A1AA356933 /* AppIcons.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 17293525E4065C56C776628C /* AppIcons.xcassets */; };
 		131CEF7228370D168FC31C9F /* ApplianceHelperView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAC3AD46468610B5F17EA5F3 /* ApplianceHelperView.swift */; };
 		13AC1C44FEF5DF867792BC6A /* MedicalAppointmentParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489494A7B9DC30CA378A3B17 /* MedicalAppointmentParser.swift */; };
@@ -74,6 +75,7 @@
 		2539F4972135D236441D55B9 /* ViewCaches.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75747630F6D45352363F7E84 /* ViewCaches.swift */; };
 		2546F508392D79E45374D367 /* AlarmTimersServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7938856DC662726CF322AEE2 /* AlarmTimersServiceTests.swift */; };
 		2699280145ED23377D4253F6 /* ApplianceStepCardPlannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F27EA807992A7107AF0C50C /* ApplianceStepCardPlannerTests.swift */; };
+		271ED07E09037B21D5EEE30D /* GoogleAccountSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3B341A004AA71AC8146CDC /* GoogleAccountSessionTests.swift */; };
 		27AB8E1CA3BBFC1C0F9E7009 /* LlamaCommandInterpreter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 227923B3238044CF61D063F1 /* LlamaCommandInterpreter.swift */; };
 		27AD3F718B1DE606B9E1976A /* SearchToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E09716EEA3D4F9CB9CCF279 /* SearchToolTests.swift */; };
 		27F1ADCCB2C8A0CFF0C3736A /* NumberWords in Resources */ = {isa = PBXBuildFile; fileRef = 97FCBEC54E900A1F06A9C9D2 /* NumberWords */; };
@@ -678,6 +680,7 @@
 		22577ED90A48390A73B44C47 /* MedicationVisualAidPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationVisualAidPresentationTests.swift; sourceTree = "<group>"; };
 		227923B3238044CF61D063F1 /* LlamaCommandInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaCommandInterpreter.swift; sourceTree = "<group>"; };
 		23564CD4C6A81A44380352B5 /* MFCCSpeakerEmbedder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MFCCSpeakerEmbedder.swift; sourceTree = "<group>"; };
+		2627CAEAB86588DE8701C8A4 /* CalendarShareSettingsSeamTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarShareSettingsSeamTests.swift; sourceTree = "<group>"; };
 		2635340C10BBF8F75E445C53 /* XlmrUnigramTokenizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XlmrUnigramTokenizerTests.swift; sourceTree = "<group>"; };
 		269C71573D21DF9EAFB68405 /* TithiCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TithiCalculatorTests.swift; sourceTree = "<group>"; };
 		26BCEDA5523CAA502571199D /* WakeWordConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeWordConfigTests.swift; sourceTree = "<group>"; };
@@ -1007,6 +1010,7 @@
 		B9C936AC5BE83B61A6B44320 /* SilenceEndpointTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SilenceEndpointTests.swift; sourceTree = "<group>"; };
 		BA3F4A21863A3F5B7854DA47 /* CommandRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRouter.swift; sourceTree = "<group>"; };
 		BC0CE650071C8E619B755C1C /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		BC3B341A004AA71AC8146CDC /* GoogleAccountSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleAccountSessionTests.swift; sourceTree = "<group>"; };
 		BCECE50E094CF4B91A393824 /* IntentEncoderSchema.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentEncoderSchema.swift; sourceTree = "<group>"; };
 		BD408D01D8A120C902E41AC9 /* EncryptedFileStorage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EncryptedFileStorage.swift; sourceTree = "<group>"; };
 		BD9F44C9D6D594D6315E50EE /* StreamingCaptionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingCaptionTests.swift; sourceTree = "<group>"; };
@@ -1607,6 +1611,7 @@
 		6656FBC4CA0EA9BA0EC908E9 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				2627CAEAB86588DE8701C8A4 /* CalendarShareSettingsSeamTests.swift */,
 				5F77AAE8D39CC0556C033AF7 /* ChatHistoryStoreTests.swift */,
 				00ABD1B5F8C75588285FC5EC /* DesignTokensTests.swift */,
 				E33F5F28A61EB5B535E69FF6 /* DirectionsScreenListTests.swift */,
@@ -1982,6 +1987,7 @@
 				16CD0A9C3136FF1981DFF10B /* CalendarShareMapperTests.swift */,
 				ACFBDF5F2CDB2194A0125B95 /* CalendarShareServiceTests.swift */,
 				D3219AF741C48CEC61208CA0 /* CalendarSyncServiceTests.swift */,
+				BC3B341A004AA71AC8146CDC /* GoogleAccountSessionTests.swift */,
 				3FFA14A84826D9687B94394A /* GoogleCalendarGatewayTests.swift */,
 				C44EB5747E660A2A7E93B92B /* LocalGoogleEventMappingStoreTests.swift */,
 				066757B2CBB523275AD8CE07 /* VoiceCalendarEventWriterTests.swift */,
@@ -2747,6 +2753,7 @@
 				57352E6B7BC403C2DB4BEDA6 /* CalculatorToolTests.swift in Sources */,
 				6CB952A2C32CD046DD8FDAFB /* CalendarShareMapperTests.swift in Sources */,
 				56A16F53FF9FDF1EB315D1BA /* CalendarShareServiceTests.swift in Sources */,
+				10346E2DD308CC740232B5F8 /* CalendarShareSettingsSeamTests.swift in Sources */,
 				C2E96A87DFF35557D8E4E41A /* CalendarSyncServiceTests.swift in Sources */,
 				99A22F7C4DAE5CDF9E66063A /* CallChannelResolutionTests.swift in Sources */,
 				A3F93701994B8D36E72EB24B /* CallLinksTests.swift in Sources */,
@@ -2810,6 +2817,7 @@
 				4AFABF7658B11789605CCCA1 /* GeminiSpeechRecognizerTests.swift in Sources */,
 				4D35DCD2E6B0CED4FA39B9A3 /* GoldenCorpus.swift in Sources */,
 				793688206E4EA4FAD936B6EC /* GoldenCorpusTests.swift in Sources */,
+				271ED07E09037B21D5EEE30D /* GoogleAccountSessionTests.swift in Sources */,
 				DD7CA69E2D33C6A3DEEFF1EC /* GoogleCalendarGatewayTests.swift in Sources */,
 				EE315CDFC9C22D92690442DA /* GuidePluginDispatchTests.swift in Sources */,
 				4B1186A99DD1B243EAD5F19D /* HistoryTimeFormatTests.swift in Sources */,

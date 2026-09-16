@@ -17030,23 +17030,6 @@
         }
       }
     },
-    "calendarShare.connectedAs": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Connected as %@"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "जोडिएको खाता: %@"
-          }
-        }
-      }
-    },
     "calendarShare.syncNow": {
       "extractionState": "manual",
       "localizations": {
@@ -18301,6 +18284,125 @@
           "stringUnit": {
             "state": "translated",
             "value": "खोल्नुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.banner.signedIn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signed in to Google"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगलमा साइन इन गरिएको छ"
+          }
+        }
+      }
+    },
+    "calendarShare.step.account": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Step 1 of 2 — Connect the Google account"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "चरण १/२ — गुगल खाता जोड्नुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.step.consent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Step 2 of 2 — Agree to share your reminders"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "चरण २/२ — आफ्ना सम्झनाहरू साझा गर्न सहमत हुनुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.scopesMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your Google account is connected, but Sahayak has not been given permission to use your Google Calendar yet. Nothing is being shared."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको गुगल खाता जोडिएको छ, तर सहायकलाई तपाईंको गुगल क्यालेन्डर प्रयोग गर्ने अनुमति अझै दिइएको छैन। केही पनि साझा भइरहेको छैन।"
+          }
+        }
+      }
+    },
+    "calendarShare.scopesMissing.howTo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tap below, then allow Calendar and Contacts when Google asks. You can stop sharing at any time."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तल थिच्नुहोस्, अनि गुगलले सोध्दा क्यालेन्डर र सम्पर्कहरूको अनुमति दिनुहोस्। तपाईं जुनसुकै बेला साझा गर्न रोक्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "calendarShare.scopesMissing.reconnect": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow Google Calendar access"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल क्यालेन्डरको पहुँच दिनुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.error.reconnect": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect the account again"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खाता फेरि जोड्नुहोस्"
           }
         }
       }
