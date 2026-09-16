@@ -381,6 +381,13 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// it exists to test around.
     var generateOverride: ((String, String) async throws -> String)?
 
+    /// [MODEL-LIFECYCLE] The residency owner for the brain slot. The brain
+    /// is the model that made the 6 GB devices die: at ~3.4 GB live for a
+    /// 4B it is over the class budget on its own, and until now the only
+    /// way to get its memory back was for the user to pick a different
+    /// model in Settings.
+    private let lifecycle: ModelLifecycleManager
+
     /// Cached LLM handle. Held as `Any?` so this file compiles without
     /// the LLM package present. Casts to `LLM.LLM` inside `#if canImport`.
     private var llmInstance: Any?
@@ -401,7 +408,8 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
          config: Config = .default,
          pluginRegistry: PluginRegistry? = nil,
          timingRecorder: TurnTimingRecorder? = nil,
-         traceRecorder: PipelineTraceRecorder? = nil) {
+         traceRecorder: PipelineTraceRecorder? = nil,
+         lifecycle: ModelLifecycleManager = .shared) {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
         self.preferredBaseId = preferredBaseId
@@ -409,6 +417,7 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         self.pluginRegistry = pluginRegistry
         self.timingRecorder = timingRecorder
         self.traceRecorder = traceRecorder
+        self.lifecycle = lifecycle
     }
 
     /// The base model this interpreter currently loads (read-only outside;
@@ -429,6 +438,29 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         preferredBaseId = id
         llmInstance = nil
         activeLoRA = nil
+        // [MODEL-LIFECYCLE] The swap IS an unload; the account has to be
+        // settled or the manager keeps budgeting the old brain's ~3 GB.
+        lifecycle.didUnload(.brain, owner: self)
+    }
+
+    /// [MODEL-LIFECYCLE] Drops the llama.cpp handle so its memory can go to
+    /// another model. Invoked by `ModelLifecycleManager` as the brain
+    /// slot's release path, and public so a caller can do it deliberately.
+    ///
+    /// The reference drop is synchronous, but the free behind it is not:
+    /// `LLM` owns an `LLMCore`, `LLMCore` is an actor, and `llama_free` /
+    /// `llama_model_free` run on that actor's executor when its last
+    /// reference goes. The ledger stays optimistic about that, which is
+    /// safe in the direction that matters — the manager re-reads the probe
+    /// at the next load, so a late free can only make the next gate more
+    /// permissive, never less.
+    ///
+    /// A generation in flight is NOT interrupted (that stays the caller's
+    /// job via the existing timeout + `llm.stop()`): dropping the handle
+    /// under a live generation would pull the context out from under it.
+    func unloadModel() {
+        llmInstance = nil
+        lifecycle.didUnload(.brain, owner: self)
     }
 
     // MARK: - LoRA skeleton
@@ -768,10 +800,16 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     private enum LLMLoadFailure: Error {
         case modelPathMissing
         case modelLoadFailed
+        /// [MODEL-LIFECYCLE] The residency budget refused the load: the
+        /// brain's non-pageable bytes exceed the app's remaining headroom.
+        /// A distinct reason so the dashboard can tell "we declined to
+        /// OOM" from "the GGUF is broken".
+        case insufficientHeadroom
         var reason: String {
             switch self {
             case .modelPathMissing: return "model_path_missing"
             case .modelLoadFailed: return "model_load_failed"
+            case .insufficientHeadroom: return "insufficient_headroom"
             }
         }
     }
@@ -788,6 +826,29 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         guard let modelURL = modelStore.path(for: preferredBaseId) else {
             emit("model_path_missing", outcome: "failure")
             return .failure(.modelPathMissing)
+        }
+        // [MODEL-LIFECYCLE] The gate, at the single construction site.
+        // Reached from the warm seam AND the first inference (whichever
+        // runs first), both on `inferenceQueue` — so an eviction this
+        // triggers fires the OTHER slots' release paths off the main
+        // thread, which is why every registered release is documented
+        // queue-agnostic.
+        //
+        // This is the load the whole mechanism exists for: a 4B brain at
+        // ~3.4 GB live is over the 6 GB class budget on its own, and
+        // before this gate it could be constructed on top of a resident
+        // 2 GB ANE STT — the exact pairing that killed the devices.
+        lifecycle.register(
+            slot: .brain,
+            modelID: preferredBaseId,
+            owner: self
+        ) { [weak self] in
+            self?.unloadModel()
+        }
+        if case .denied(let reason) =
+            lifecycle.prepareLoad(of: .brain, modelID: preferredBaseId) {
+            emit("model_load_denied:" + reason.rawValue, outcome: "failure")
+            return .failure(.insufficientHeadroom)
         }
         // 1024-token context (default 2048): our prompts are ~150
         // tokens + 128 output, and the smaller n_batch halves
@@ -834,6 +895,7 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             return .failure(.modelLoadFailed)
         }
         llmInstance = created
+        lifecycle.didLoad(.brain, owner: self)
         emit("model_loaded", outcome: "success")
         return .success(created)
     }

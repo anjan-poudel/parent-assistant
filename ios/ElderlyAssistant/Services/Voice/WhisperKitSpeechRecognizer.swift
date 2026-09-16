@@ -138,12 +138,44 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     /// state reads).
     var isModelLoaded: Bool { kitInstance != nil }
 
+    /// [MODEL-LIFECYCLE] The process-wide residency owner. Every ANE
+    /// construction goes through `prepareLoad` — the manager decides
+    /// whether the brain (or anything else heavy) has to leave first, and
+    /// how much headroom is actually left. Injected only so tests can hand
+    /// in a manager with a scripted probe.
+    private let lifecycle: ModelLifecycleManager
+
     init(observabilityBus: ObservabilityBus,
          modelStore: ModelStore? = nil,
-         preferredModelID: ModelID = ModelCatalog.whisperKitNepaliMedium) {
+         preferredModelID: ModelID = ModelCatalog.whisperKitNepaliMedium,
+         lifecycle: ModelLifecycleManager = .shared) {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
         self.preferredModelID = preferredModelID
+        self.lifecycle = lifecycle
+    }
+
+    /// [MODEL-LIFECYCLE] (Re)declare the STT slot against the artifact this
+    /// recognizer is about to load, and hand the manager the release path
+    /// that undoes it.
+    ///
+    /// Deliberately NOT done in `init`: the coordinator constructs BOTH
+    /// recognizers, and `.speechToText` is one slot — whichever recognizer
+    /// is about to actually load must be the one that owns it. Declaring it
+    /// at the load site means the slot can never describe an engine that
+    /// is not the one running.
+    ///
+    /// `[weak self]` is load-bearing: the manager retains this closure, and
+    /// a strong capture would keep every recognizer ever constructed alive
+    /// for the process lifetime.
+    private func registerWithLifecycle() {
+        lifecycle.register(
+            slot: .speechToText,
+            modelID: preferredModelID,
+            owner: self
+        ) { [weak self] in
+            self?.releaseModel()
+        }
     }
 
     // MARK: - Model preference (UI selection)  [STT-SWITCHER]
@@ -184,6 +216,11 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
               Self.isWhisperKitArtifact(id),
               id != preferredModelID else { return }
         preferredModelID = id
+        // [MODEL-LIFECYCLE] Re-declare the slot against the new artifact:
+        // the ane footprint of a q8 medium and a full medium differ by
+        // ~1 GB, and the budget must move with the pick rather than keep
+        // budgeting the old model's bytes.
+        registerWithLifecycle()
         // `released_model` states whether a resident kit was present when
         // the pick landed (the release itself is asynchronous) — the
         // content-free signal a dashboard needs to tell a cold switch
@@ -375,6 +412,20 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     func releaseModel() {
         kitInstance = nil
         loadedDescriptor = nil
+        // [MODEL-LIFECYCLE] The manager's ledger is a *view*: it records
+        // what it admitted. A release that ran outside `evict` (the
+        // post-turn policy, a preference change) has to say so, or the
+        // manager keeps budgeting for bytes that are already back.
+        lifecycle.didUnload(.speechToText, owner: self)
+    }
+
+    /// [MODEL-LIFECYCLE] A load the residency budget refused. Carried
+    /// inside `RecognitionError.recognitionFailed` so every existing
+    /// failure path (pipeline watchdog, fallback selection, the cloud
+    /// engine) behaves exactly as it does for any other load failure —
+    /// the lifecycle layer adds no new failure taxonomy to the pipeline.
+    private struct LifecycleDenied: Error {
+        let reason: LoadDenialReason
     }
 
     // MARK: - Inference (guarded)
@@ -506,11 +557,28 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     /// caches it, and reports the load.
     private func createKit(descriptor: String,
                            config: WhisperKitConfig) async throws -> WhisperKit {
+        // [MODEL-LIFECYCLE] The gate, at the ONE real construction site.
+        // `createKit` is reached from both entry points (`warm` and
+        // `runInference`) and behind the in-flight dedupe, so gating here
+        // means no path can build an ANE instance the manager did not
+        // approve of — including the post-turn re-warm, which previously
+        // re-loaded 2 GB on a raw probe reading with no idea that the
+        // brain had grown in the meantime.
+        registerWithLifecycle()
+        if case .denied(let reason) = lifecycle.prepareLoad(
+            of: .speechToText, modelID: preferredModelID) {
+            // Honest, content-free refusal: the pipeline's existing
+            // failure handling takes it from here (whisper.cpp or the
+            // cloud engine may still serve the turn).
+            emit("model_load_denied", errorCode: reason.rawValue)
+            throw RecognitionError.recognitionFailed(LifecycleDenied(reason: reason))
+        }
         let loadStart = CFAbsoluteTimeGetCurrent()
         let created = try await WhisperKit(config)
         let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
         kitInstance = created
         loadedDescriptor = descriptor
+        lifecycle.didLoad(.speechToText, owner: self)
         emit("model_loaded", errorCode: nil)
         // [TURN-TIMING] Model ready — the load ms rides as a point entry
         // when this load happened inside a live turn.
@@ -539,6 +607,11 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
             guard let self else { return }
             do {
                 let kit = try await self.loadKit(descriptor: descriptor, config: config)
+                // [MODEL-LIFECYCLE] A transcription is a real use: idle
+                // eviction must measure idleness from here, not from the
+                // moment the weights were admitted (a long conversation
+                // must never have its STT pulled between turns).
+                self.lifecycle.noteUse(of: .speechToText)
 
                 let start = CFAbsoluteTimeGetCurrent()
                 print("[whisperkit_stt] transcribing samples=\(audio.count)")

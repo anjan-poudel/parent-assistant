@@ -194,12 +194,20 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         #endif
     }
 
+    /// [MODEL-LIFECYCLE] Residency owner. whisper.cpp is the OTHER engine
+    /// that can back the `.speechToText` slot, and it is the expensive one
+    /// to co-reside: the fresh context per attempt is pageable, but the
+    /// wedged-context leak is not (see `ModelLifecycleInventory`).
+    private let lifecycle: ModelLifecycleManager
+
     init(modelStore: ModelStore,
          observabilityBus: ObservabilityBus,
-         config: Config = .default) {
+         config: Config = .default,
+         lifecycle: ModelLifecycleManager = .shared) {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
         self.config = config
+        self.lifecycle = lifecycle
     }
 
     // MARK: - Model preference (UI selection)
@@ -264,6 +272,11 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         consecutiveTimeouts = 0
         inFlightWhisper = nil
         stateLock.unlock()
+        // [MODEL-LIFECYCLE] Deliberately outside the state lock: the
+        // manager takes its own lock, and the doc comment above forbids
+        // this method from blocking on anything a wedged attempt might
+        // hold. `didUnload` is a single dictionary write.
+        lifecycle.didUnload(.speechToText, owner: self)
     }
 
     // MARK: - LoRA hot-swap (skeleton)
@@ -727,8 +740,32 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         } else if biasPlan.state == .disabledByUser {
             reportBiasDisabledOnce()
         }
+        // 3b. [MODEL-LIFECYCLE] The residency gate, at the one place a
+        //     whisper.cpp context is built. This engine reloads per
+        //     attempt, so the gate runs per attempt — which is exactly
+        //     what the design wants: the budget is re-read from
+        //     `os_proc_available_memory` at every load, so a context is
+        //     never built on top of a brain that grew since the last turn.
+        lifecycle.register(
+            slot: .speechToText,
+            modelID: modelId,
+            owner: self
+        ) { [weak self] in
+            self?.releaseModel()
+        }
+        if case .denied(let reason) =
+            lifecycle.prepareLoad(of: .speechToText, modelID: modelId) {
+            emit("model_load_denied", errorCode: reason.rawValue)
+            settleAttempt(attemptID, with: .failure(.recognitionFailed(
+                NSError(domain: "WhisperSTT", code: -4,
+                        userInfo: [NSLocalizedDescriptionKey:
+                            "not enough memory headroom to load this model right now"])
+            )), timedOut: false)
+            return
+        }
         let loadStart = CFAbsoluteTimeGetCurrent()
         let whisper = Whisper(fromFileURL: modelURL, withParams: params)
+        lifecycle.didLoad(.speechToText, owner: self)
         let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
         // [TURN-TIMING] Model ready — the load ms rides as a point entry
         // when this load happened inside a live turn.

@@ -1489,6 +1489,9 @@ final class AppCoordinator: ObservableObject {
     /// Level-2 memory-warning observer for the encoder (nil unless the
     /// internal-testing gate is on).
     private var intentEncoderMemoryObserver: NSObjectProtocol?
+    /// [MODEL-LIFECYCLE] Level-2 observer for the residency ledger (STT +
+    /// brain eviction). Installed in every build.
+    private var modelLifecycleObserver: NSObjectProtocol?
 
     /// True once the encoder has actually been OFFERED the slot, i.e. the
     /// lazy instance exists. A/B means a tester can switch the encoder on
@@ -1540,6 +1543,11 @@ final class AppCoordinator: ObservableObject {
         }
         if let offeredEncoder {
             intentEncoderOffered = true
+            // [MODEL-LIFECYCLE] The encoder now exists, so its bytes are
+            // real: give the residency ledger a row for them. Placed here
+            // (not in `start()`) so a launch that never builds the encoder
+            // never declares it.
+            registerEncoderSlotIfNeeded()
             offeredEncoder.requestReadiness()
         }
         // "Can it serve now?" — decides the selection event, unchanged
@@ -2659,6 +2667,10 @@ final class AppCoordinator: ObservableObject {
         // [T-037-a] Encoder memory-pressure lifecycle (no-op unless the
         // internal-testing INTENT_ENCODER gate is compiled in).
         observeIntentEncoderMemoryPressure()
+        // [MODEL-LIFECYCLE] The residency ledger: light-slot registration,
+        // the level-2 observer that evicts heavy models, and the idle
+        // sweep. Installed post-first-frame like every other observer.
+        startModelLifecycle()
 
         // Restore and re-arm any outstanding medication reminders
         medicationScheduler.scheduleAll()
@@ -7747,6 +7759,76 @@ self.noteTalkContractChanged()
     private func handleIntentEncoderMemoryPressureIfEnabled() {
         guard IntentEncoderFeature.isEnabled, intentEncoderOffered else { return }
         intentEncoderInterpreter.handleMemoryPressure()
+    }
+
+    // MARK: - Model lifecycle ([MODEL-LIFECYCLE])
+
+    /// Level-2 observer for the residency ledger.
+    ///
+    /// Installed unconditionally, unlike the encoder's gate-scoped observer
+    /// below: the models it evicts (STT, the brain) are in EVERY build, so
+    /// a build without the internal-testing encoder gate still needs the
+    /// OOM protection. Two observers on the same notification is fine —
+    /// the encoder's handler releases only the encoder, and the manager
+    /// leaves light slots alone, so neither can undo the other.
+    private func observeModelLifecycleMemoryPressure() {
+        guard modelLifecycleObserver == nil else { return }
+        modelLifecycleObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil, queue: .main
+        ) { _ in
+            ModelLifecycleManager.shared.handleMemoryPressure()
+        }
+    }
+
+    /// Registers the slots the coordinator itself owns and starts the idle
+    /// sweep. The heavy slots (STT, brain) register themselves at their own
+    /// load sites, because a slot must describe the engine that is actually
+    /// about to load.
+    private func startModelLifecycle() {
+        let lifecycle = ModelLifecycleManager.shared
+        observeModelLifecycleMemoryPressure()
+
+        // The encoder slot is NOT registered here. `intentEncoderInterpreter`
+        // is a `lazy var` built only when the encoder gate AND the runtime
+        // toggle both allow it, and touching it here would defeat that gate
+        // by constructing the object in every launch. `installLocalBrainSlot`
+        // registers it at the moment `gatedEncoder` actually resolves it —
+        // see `registerEncoderSlotIfNeeded()`.
+
+        // The corrector is NOT a model — it is a ~2.6 MB JSON lexicon in a
+        // process-wide `static let`. Registered ownerless and un-evictable
+        // so the ledger's total is honest and the next reader does not have
+        // to rediscover that.
+        lifecycle.register(
+            slot: .sttCorrector,
+            modelID: nil,
+            owner: nil,
+            evictable: false
+        ) {}
+
+        lifecycle.startIdleTimer()
+    }
+
+    /// Declares the encoder's ledger row the first time the encoder is
+    /// actually constructed. Idempotent — `register` overwrites the slot's
+    /// footprint and closure, so calling it again on a re-install is
+    /// harmless.
+    ///
+    /// The encoder is LIGHT (≈ 140 MB) and already has a complete
+    /// unload/re-arm contract of its own, so it is registered for the
+    /// ledger's sake but excluded from eviction — its residency is the
+    /// [T-037-a] observer's business, and routing it through the idle sweep
+    /// would trip the pressure flag on a timer.
+    private func registerEncoderSlotIfNeeded() {
+        ModelLifecycleManager.shared.register(
+            slot: .intentEncoder,
+            modelID: ModelCatalog.intentEncoderSpike,
+            owner: intentEncoderInterpreter,
+            evictable: false
+        ) { [weak intentEncoderInterpreter] in
+            intentEncoderInterpreter?.handleMemoryPressure()
+        }
     }
 
     /// Re-arms the encoder after a memory-pressure unload at the start of
