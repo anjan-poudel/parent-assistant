@@ -16,6 +16,13 @@ import UIKit
 ///
 /// Nothing in this file touches `GIDSignIn`: the flow is faked, and the
 /// SDK's numeric codes are spelled as raw values (see `GoogleSignInCode`).
+///
+/// The RESTORE path (2026-09-17) is here for the same reason: it cannot
+/// be reached in the simulator either — a real restore needs a real
+/// Keychain entry written by a real sign-in — and it is the path that
+/// decides whether a connected household reads as connected at launch.
+/// Its four outcomes (restored, restored-unscoped, nothing stored,
+/// failed) are values through the same fake.
 final class GoogleAccountSessionTests: XCTestCase {
 
     // MARK: - Harness
@@ -257,6 +264,130 @@ final class GoogleAccountSessionTests: XCTestCase {
         XCTAssertEqual(sessionEvents(bus, "calendar_share_session_create_account_scopes_missing").count, 1)
     }
 
+    // MARK: - Restore: the launch path (2026-09-17)
+
+    /// The bug this section exists for: a connected household's card
+    /// showed SIGNED OUT on every launch, and events created before the
+    /// elder signed in again were never shared — because nothing brought
+    /// the SDK's Keychain-stored account back into the process. Its
+    /// `currentUser` is nil in a cold process until a restore has run,
+    /// and `isSignedIn` reads exactly that.
+    ///
+    /// No presenter on purpose below: a restore happens at launch,
+    /// before any window exists, and needing one would make it
+    /// impossible.
+    func testRestoreBringsTheStoredSessionBackWithoutPresentingAnything() async {
+        let flow = FakeAuthFlow()
+        flow.hasPreviousSignInResult = true
+        flow.restoreResult = .success(GoogleAccountSession.requiredScopes)
+        let bus = MockObservabilityBus()
+
+        let outcome = await makeSession(presenter: { nil }, flow: flow, bus: bus)
+            .restorePreviousSession()
+
+        XCTAssertEqual(outcome, .connected)
+        XCTAssertEqual(flow.restoreCalls, 1)
+        XCTAssertEqual(flow.signInCalls, 0, "a restore never opens a sign-in sheet")
+        XCTAssertEqual(flow.addScopesCalls, 0,
+                       "and never asks for a grant at launch — Google's consent screen is not a thing to put in front of an elder opening the app")
+        let events = sessionEvents(bus, "calendar_share_session_restore")
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.outcome, "success")
+        XCTAssertNil(events.first?.errorCode)
+    }
+
+    /// A device that never connected, or one the elder signed out of: the
+    /// SDK has nothing stored, so nothing is attempted and nothing is
+    /// reported as wrong. `hasPreviousSignIn` is what makes this a value
+    /// rather than an SDK error — the restore call is not even made.
+    func testRestoreWithNoStoredAccountIsTheOrdinaryFreshState() async {
+        let flow = FakeAuthFlow()
+        flow.hasPreviousSignInResult = false
+        let bus = MockObservabilityBus()
+
+        let outcome = await makeSession(flow: flow, bus: bus).restorePreviousSession()
+
+        XCTAssertEqual(outcome, .unavailable, "nothing was restored, and nothing is claimed")
+        XCTAssertEqual(flow.hasPreviousSignInCalls, 1,
+                       "the SDK's cache is asked first, so 'there is nothing to restore' stays distinguishable from 'the restore failed'")
+        XCTAssertEqual(flow.restoreCalls, 0,
+                       "and the restore itself is not attempted — a fake whose default result is a scoped SUCCESS proves the outcome above came from the guard, not from the flow")
+        let events = sessionEvents(bus, "calendar_share_session_restore_no_previous")
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.outcome, "success", "a fresh install is not a failure")
+        XCTAssertTrue(sessionEvents(bus, "calendar_share_session_restore_failed").isEmpty)
+    }
+
+    /// The honest degradation: the account was there and could not be
+    /// brought back — Google revoked the grant, the Keychain is
+    /// unreadable, the token refresh failed. The app is left exactly
+    /// where a device that never connected sits, which is what the card
+    /// says and what the share queue's gate reads.
+    func testRestoreThatFailsDegradesToSignedOut() async {
+        let flow = FakeAuthFlow()
+        flow.hasPreviousSignInResult = true
+        // The SDK's own code for it: "no valid auth tokens in the
+        // keychain ... returned by restorePreviousSignIn if the user has
+        // not signed in before or if they have since signed out".
+        flow.restoreResult = .failure(GoogleSignInCode.hasNoAuthInKeychain.error)
+        let bus = MockObservabilityBus()
+        let session = makeSession(flow: flow, bus: bus)
+
+        let outcome = await session.restorePreviousSession()
+
+        XCTAssertEqual(outcome, .unavailable)
+        XCTAssertFalse(session.isSignedIn,
+                       "the signed-out state is the honest degradation — a stale 'signed in' would be the silent-skip bug in a new place")
+        let events = sessionEvents(bus, "calendar_share_session_restore_failed")
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.outcome, "failure")
+        XCTAssertEqual(events.first?.errorCode,
+                       "sdk_\(GoogleSignInCode.hasNoAuthInKeychain.rawValue)",
+                       "the SDK's NUMERIC code, never its description (constitution C9)")
+        XCTAssertEqual(events.first?.metadata, [:],
+                       "no free-form metadata channel exists on this component")
+    }
+
+    /// Restored, and unable to share: the account is back but the
+    /// Calendar/contacts grant is not. A real session either way — and
+    /// the missing grant is READ, never asked for, because a consent
+    /// sheet at launch is a demand the elder did not open the app for.
+    func testRestoredSessionWithoutTheGrantIsReportedAsMissingNotSignedOut() async {
+        let flow = FakeAuthFlow()
+        flow.hasPreviousSignInResult = true
+        flow.restoreResult = .success(["email", "profile"])
+        let bus = MockObservabilityBus()
+
+        let outcome = await makeSession(flow: flow, bus: bus).restorePreviousSession()
+
+        XCTAssertEqual(outcome, .connectedWithoutScopes)
+        XCTAssertFalse(outcome.isConnected,
+                       "and nothing may drain the share queue into a token that cannot write")
+        XCTAssertEqual(flow.addScopesCalls, 0)
+        let events = sessionEvents(bus, "calendar_share_session_restore_scopes_missing")
+        XCTAssertEqual(events.count, 1, "its own event type: a restored-but-unscoped account is not a failed restore")
+        XCTAssertEqual(events.first?.outcome, "failure")
+        XCTAssertEqual(events.first?.errorCode, "scopes_not_granted")
+    }
+
+    /// No OAuth client in the bundle: the state the app ships in today.
+    /// The SDK cannot even be configured, so there is nothing to ask it
+    /// and nothing to claim.
+    func testRestoreIsNeverAttemptedWithoutAnOAuthClient() async {
+        let flow = FakeAuthFlow()
+        flow.hasPreviousSignInResult = true
+        let bus = MockObservabilityBus()
+
+        let outcome = await makeSession(clientID: nil, flow: flow, bus: bus)
+            .restorePreviousSession()
+
+        XCTAssertEqual(outcome, .unavailable)
+        XCTAssertEqual(flow.hasPreviousSignInCalls, 0)
+        XCTAssertEqual(flow.restoreCalls, 0)
+        let events = sessionEvents(bus, "calendar_share_session_restore_failed")
+        XCTAssertEqual(events.first?.errorCode, "not_configured")
+    }
+
     // MARK: - Scope reading
 
     /// The pure half of `hasRequiredScopes`: which granted lists count as
@@ -310,9 +441,17 @@ private final class FakeAuthFlow: GoogleAuthFlow {
 
     var signInResult: Result<[String], Error> = .success([])
     var addScopesResult: Result<[String], Error> = .success([])
+    /// Whether the SDK claims to hold an account from a previous launch.
+    /// False by default: the launch path's ordinary state for a device
+    /// that has never connected, and the state a test must opt OUT of to
+    /// reach the restore at all.
+    var hasPreviousSignInResult = false
+    var restoreResult: Result<[String], Error> = .success([])
 
     private(set) var signInCalls = 0
     private(set) var addScopesCalls = 0
+    private(set) var hasPreviousSignInCalls = 0
+    private(set) var restoreCalls = 0
     /// Every scope list asked for, in call order — the assertion that the
     /// consent request carries the calendar grant.
     private(set) var requestedScopes: [[String]] = []
@@ -320,6 +459,16 @@ private final class FakeAuthFlow: GoogleAuthFlow {
     func signIn(presenting controller: UIViewController) async throws -> [String] {
         signInCalls += 1
         return try signInResult.get()
+    }
+
+    func hasPreviousSignIn() -> Bool {
+        hasPreviousSignInCalls += 1
+        return hasPreviousSignInResult
+    }
+
+    func restorePreviousSignIn() async throws -> [String] {
+        restoreCalls += 1
+        return try restoreResult.get()
     }
 
     func addScopes(_ scopes: [String],
@@ -336,12 +485,14 @@ private final class FakeAuthFlow: GoogleAuthFlow {
 /// GoogleSignIn import: the test target links the APP, not the package,
 /// and the codes are part of the SDK's public contract (`GIDSignInErrorCode`,
 /// verified against 8.0.0 — `kGIDSignInErrorCodeCanceled` is -5,
+/// `…HasNoAuthInKeychain` is -4,
 /// `…ScopesAlreadyGranted` is -8). `GoogleAccountSession` reads them
 /// through the SDK's own enum, so a renumbering upstream turns these
 /// assertions red rather than silently changing what the elder sees.
 private enum GoogleSignInCode: Int {
     case unknown = -1
     case keychain = -2
+    case hasNoAuthInKeychain = -4
     case canceled = -5
     case scopesAlreadyGranted = -8
 

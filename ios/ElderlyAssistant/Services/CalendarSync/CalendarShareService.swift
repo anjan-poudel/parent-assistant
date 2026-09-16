@@ -299,6 +299,35 @@ final class CalendarShareService: ObservableObject {
         return outcome.isConnected
     }
 
+    /// Brings back the Google account a previous launch connected, then
+    /// republishes the status so the Settings card shows the restored
+    /// "signed in as" state (2026-09-17).
+    ///
+    /// The republish is the point of doing this HERE rather than at the
+    /// call site: `status` is published state the card observes, and the
+    /// restore completes asynchronously — after launch has already
+    /// rendered. A card that read the session directly would be right by
+    /// accident; a card driven by `status` is only right if something
+    /// recomputes it when the restore lands, which is this line.
+    ///
+    /// A restore that brings nothing back changes nothing here: the
+    /// status recomputes to the same `signedOut` (or `notConfigured`)
+    /// it already showed, and the queue stays exactly as it was. That is
+    /// the honest degradation — a failed restore must not look like a
+    /// connection, and it must not look like a fresh problem either.
+    ///
+    /// Flushing on success is what makes the restore worth doing at
+    /// launch rather than only on the next foreground: anything the
+    /// family queued before the process restarted drains now, instead of
+    /// waiting behind a sign-in the elder has no reason to perform again.
+    @discardableResult
+    func restoreSession() async -> Bool {
+        let outcome = await session.restorePreviousSession()
+        refreshStatus()
+        if outcome.isConnected { await flushPending() }
+        return outcome.isConnected
+    }
+
     /// Drops the session and PAUSES sharing. The local calendar, the
     /// local reminders and every local alarm are untouched — signing out
     /// of Google must never make the elder's own reminders stop firing.
