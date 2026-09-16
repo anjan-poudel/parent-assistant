@@ -1959,24 +1959,47 @@ struct CallView: View {
     /// do. The trailing circle is a visual affordance inside that
     /// button, hidden from VoiceOver so the row reads once (label
     /// below).
+    @ViewBuilder
     private func recentActivityRow(_ entry: AppActivityEntry) -> some View {
-        Button {
-            initiateRecentActivity(entry)
-        } label: {
-            HStack(spacing: 12) {
-                IconBadge(systemImage: recentChannelIcon(for: entry.channel),
-                          tint: recentChannelTint(for: entry.channel),
-                          diameter: 40)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(ActivityRowText.name(for: entry, locale: coordinator.activeLocale))
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
-                    Text(recentActivityTimeText(entry))
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
-                        .lineLimit(2)
-                }
-                Spacer(minLength: 8)
+        // [CLOUD-CASCADE] A cloud-cascade row is INFORMATIONAL: nothing
+        // was opened on the user's behalf, so there is no surface to
+        // re-open and no dial affordance to promise — the row renders as
+        // content, exactly like the History leaf's. Every channel row
+        // keeps the whole-row button (the same trust model as every other
+        // dial surface here).
+        if entry.channel == .cloud {
+            recentActivityRowContent(entry, showsDialAffordance: false)
+                .accessibilityLabel(Text(recentActivityRowLabel(entry)))
+        } else {
+            Button {
+                initiateRecentActivity(entry)
+            } label: {
+                recentActivityRowContent(entry, showsDialAffordance: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(recentActivityRowLabel(entry)))
+        }
+    }
+
+    /// The row's visual content, shared by the button and the
+    /// informational (cloud) shape above so the two can never drift.
+    private func recentActivityRowContent(_ entry: AppActivityEntry,
+                                          showsDialAffordance: Bool) -> some View {
+        HStack(spacing: 12) {
+            IconBadge(systemImage: recentChannelIcon(for: entry.channel),
+                      tint: recentChannelTint(for: entry.channel),
+                      diameter: 40)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(ActivityRowText.name(for: entry, locale: coordinator.activeLocale))
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                Text(recentActivityTimeText(entry))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(DesignTokens.textSecondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            if showsDialAffordance {
                 Image(systemName: "phone.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
@@ -1986,13 +2009,11 @@ struct CallView: View {
                     .clipShape(Circle())
                     .accessibilityHidden(true)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text(recentActivityRowLabel(entry)))
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
     /// Screen-reader label of the row above — HistoryView's split: call
@@ -2003,9 +2024,15 @@ struct CallView: View {
     /// what the row is and what its tap does — "Unanswered call, Open
     /// Phone app" for the anonymous row, "Missed call: बुबा, Open Phone
     /// app" when the app placed the call itself — mirror of
-    /// HistoryView.rowAccessibilityLabel; keep in step.
+    /// HistoryView.rowAccessibilityLabel; keep in step. A cloud-cascade
+    /// row ([CLOUD-CASCADE], 2026-09-16) also mirrors the leaf there: it
+    /// is informational and announces only what it is — no action verb,
+    /// because the row has no tap.
     private func recentActivityRowLabel(_ entry: AppActivityEntry) -> String {
         let locale = coordinator.activeLocale
+        if entry.channel == .cloud {
+            return ActivityRowText.name(for: entry, locale: locale)
+        }
         if entry.channel == .unanswered {
             let described = entry.contactName.isEmpty
                 ? L10n.str("history.unanswered", locale: locale)
@@ -2036,8 +2063,9 @@ struct CallView: View {
     /// a phone surface), video.fill for FaceTime video, the WhatsApp
     /// bubble, the Messenger paperplane, message.fill for SMS, and the
     /// missed-call glyph (phone.arrow.down.left) for unanswered rows
-    /// (missed-calls task, 2026-09-07). Keep in step with
-    /// `HistoryView.icon(for:)`.
+    /// (missed-calls task, 2026-09-07), and cloud.fill for a cloud-cascade
+    /// row ([CLOUD-CASCADE], 2026-09-16) — the online brain it records.
+    /// Keep in step with `HistoryView.icon(for:)`.
     private func recentChannelIcon(for channel: AppActivityEntry.Channel) -> String {
         switch channel {
         case .phone, .faceTimeAudio: return "phone.fill"
@@ -2046,15 +2074,19 @@ struct CallView: View {
         case .messenger: return "paperplane.fill"
         case .sms: return "message.fill"
         case .unanswered: return "phone.arrow.down.left"
+        case .cloud: return "cloud.fill"
         }
     }
 
-    /// Badge tint mirror of `HistoryView.tint(for:)` — keep in step.
+    /// Badge tint mirror of `HistoryView.tint(for:)` — keep in step: the
+    /// cloud-cascade row is informational, so it takes the neutral
+    /// category role (`.settings`) rather than a channel's accent.
     private func recentChannelTint(for channel: AppActivityEntry.Channel) -> DesignTokens.BadgeTint {
         switch channel {
         case .phone, .faceTimeVideo, .faceTimeAudio: return .call
         case .whatsapp, .messenger, .sms: return .reminders
         case .unanswered: return .call
+        case .cloud: return .settings
         }
     }
 
@@ -2109,6 +2141,16 @@ struct CallView: View {
             // Recents, one tab away (missed-calls task, 2026-09-07).
             // Mirror of HistoryView's `.unanswered` case; keep in step.
             PhoneAppOpener.openDialer()
+        case .cloud:
+            // [CLOUD-CASCADE] (2026-09-16) Mirror of HistoryView's
+            // `.cloud` case; keep in step. The row is INFORMATIONAL and
+            // `recentActivityRow` renders it without a button — there is
+            // no surface a cloud turn could be re-opened into. Reached
+            // only if a future call site made the row tappable; speaking
+            // the row's own description is the honest answer there,
+            // never a dead tap.
+            coordinator.speak(text: ActivityRowText.name(for: entry,
+                                                         locale: coordinator.activeLocale))
         }
     }
 

@@ -60,6 +60,18 @@ struct CaregiverNotifySettingsView: View {
                 .font(.system(size: DesignTokens.minCaptionPointSize))
                 .foregroundStyle(DesignTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // The second channel these same choices drive (calendar &
+            // family sharing task, 2026-09-16). Load-bearing for trust in
+            // the other direction from the hint above: the toggles now
+            // decide who gets a CALENDAR INVITATION as well as who gets
+            // told when a reminder rings, and an invitation is visible to
+            // the family long after the alert would have been — so the
+            // screen says so instead of leaving it to be discovered.
+            Text("caregiverNotify.shareHint")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -31,6 +31,27 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>2</string>
+	<!-- Calendar & family sharing (2026-09-16). The Google OAuth client
+	     id for this app, and the reversed-client-id URL scheme Google
+	     sign-in returns through. Client registered for
+	     com.elderlyassistant.app in the Google Cloud console; the id is
+	     app identity, not a user credential — users still sign in with
+	     their own account at run time (design §2 decision 3). -->
+	<key>GIDClientID</key>
+	<string>906771099595-cdqhrgvdqqm1um8ml76sqm92llriqhfv.apps.googleusercontent.com</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.elderlyassistant.calendarshare</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.906771099595-cdqhrgvdqqm1um8ml76sqm92llriqhfv</string>
+			</array>
+		</dict>
+	</array>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>App-Prefs</string>

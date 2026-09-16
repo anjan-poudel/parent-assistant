@@ -383,6 +383,37 @@ final class AppCoordinator: ObservableObject {
     }
     private static let cloudProviderKey = "cloudProvider"
 
+    /// [CLOUD-CASCADE] (2026-09-16) The cloud cascade tier's confidence
+    /// threshold — the internal Settings card's ± row, shown as a
+    /// percentage (97 % ↔ 0.97). When the large local brain answers BELOW
+    /// this while an online provider is configured, the turn goes to the
+    /// cloud (with the spoken hold cue first). Persisted through
+    /// `CloudCascadeSettings` (UserDefaults, clamped on read AND write —
+    /// a UI preference, not a secret). didSet persists AND re-arms the
+    /// tier, so a ± press in Settings takes effect on the NEXT utterance
+    /// (the same instant-apply rule `cloudFallbackEnabled` follows).
+    /// Init-time restore assigns the property directly (house pattern —
+    /// didSet does not fire there).
+    @Published var cloudCascadeThreshold: Double {
+        didSet {
+            guard cloudCascadeThreshold != oldValue else { return }
+            CloudCascadeSettings.setThreshold(cloudCascadeThreshold)
+            applyCloudCascadeConfiguration()
+        }
+    }
+
+    /// [CLOUD-CASCADE] The internal card's switch — ON by default (the
+    /// tier's rule is the requested behaviour and it stays inert on its
+    /// own wherever no provider is configured), OFF to hold the ladder
+    /// local-first on purpose. Persisted through `CloudCascadeSettings`.
+    @Published var cloudCascadeEnabled: Bool {
+        didSet {
+            guard cloudCascadeEnabled != oldValue else { return }
+            CloudCascadeSettings.setEnabled(cloudCascadeEnabled)
+            applyCloudCascadeConfiguration()
+        }
+    }
+
     /// The user's favourite apps for the Home quick-access row
     /// (quick-access-apps task, 2026-09-06), in stored order.
     /// `private(set)`: mutation is confined to `addFavoriteApp` /
@@ -2192,6 +2223,15 @@ final class AppCoordinator: ObservableObject {
         self.cloudProvider = UserDefaults.standard.string(forKey: Self.cloudProviderKey)
             .flatMap(CloudProvider.init(rawValue:)) ?? .gemini
 
+        // Restore the persisted cloud-cascade tier settings ([CLOUD-CASCADE],
+        // 2026-09-16 — default threshold 0.97, default ON). These are the
+        // properties' ONLY initial assignments, so their didSets do not fire
+        // here (same rule as `voiceEngineStack` above); the tier itself is
+        // armed by `applyCloudCascadeConfiguration()`, reached from
+        // `applyVoiceEngineStack()` once `start()` has built the pipeline.
+        self.cloudCascadeThreshold = CloudCascadeSettings.threshold()
+        self.cloudCascadeEnabled = CloudCascadeSettings.isEnabled()
+
         // Restore the persisted Voice Processing I/O preset mirror
         // (voice-personalisation P0, slice C — default OFF, the A/B
         // gate). The manager composed above already read the persisted
@@ -2338,6 +2378,22 @@ final class AppCoordinator: ObservableObject {
         // Reminders leaf toggles alike.
         routineScheduler.onScheduleChanged = { [weak self] in
             self?.calendarSync.syncNow(entries: self?.routineScheduler.entries() ?? [])
+            // [CALENDAR-SHARE] (2026-09-16) Same seam, second consumer: the
+            // routine schedule's shared twins. Enqueue-only and cheap when
+            // sharing is off (the service gates before it touches storage),
+            // so no toggle check is needed here — and reading the toggle
+            // here would be one more place to get the gate wrong.
+            if let entries = self?.routineScheduler.entries() {
+                self?.calendarShareService.reconcileRoutines(entries)
+            }
+        }
+        // [CALENDAR-SHARE] (2026-09-16) Medication needed its own seam:
+        // `MedicationScheduler` had no change notification at all, so its
+        // shared twins were added along with one (`onScheduleChanged`,
+        // fired at the end of `loadSchedule`) — the single funnel every
+        // medication write path already goes through.
+        medicationScheduler.onScheduleChanged = { [weak self] entries in
+            self?.calendarShareService.reconcileMedication(entries)
         }
         // Forward the external calendar service's publishes (Settings
         // status/lead, scan results reaching the Reminders + Calendar
@@ -2613,6 +2669,11 @@ final class AppCoordinator: ObservableObject {
         if calendarSync.isEnabled {
             calendarSync.syncNow(entries: routineScheduler.entries())
         }
+        // [CALENDAR-SHARE] (2026-09-16) Launch pass for the share layer —
+        // after the medication restore above (it reads the restored
+        // entries) and post-first-frame like everything else here, so no
+        // network work delays the first paint.
+        syncCalendarShare()
 
         // Two-way mirroring (calendar-driven task, 2026-09-07): the
         // coordinator relays native edits — family changes made in the
@@ -4512,6 +4573,61 @@ self.noteTalkContractChanged()
             // toggle), never from `init`.
             installBundledSTTModelIfNeeded()
         }
+        // [CLOUD-CASCADE] Last: (re-)arm the cascade tier on the fresh
+        // stack. It reads the provider seam + the two persisted settings,
+        // so it belongs to the same "apply the stack" pass as
+        // `cloudEnabled` above — one place decides what the ladder may
+        // reach, and this call can never arm a tier the stack just
+        // declined (it is gated on the same `cloudEnabled`).
+        applyCloudCascadeConfiguration()
+    }
+
+    /// [CLOUD-CASCADE] (2026-09-16) Arms the cloud cascade tier on
+    /// `intentRouter` from the SAME inputs the rest of the app consults:
+    /// the Gemini interpreter the boot built, `GeminiConfigStore.isConfigured`
+    /// (the key) and `GeminiCostGovernor.allowsCall()` (the day's budget) —
+    /// so a Settings promise can never outrun what the tier would do, and
+    /// an unconfigured household gets a nil tier (no cue, no event, no log,
+    /// no activity row: silent, exactly as the ladder behaved before the
+    /// tier existed).
+    ///
+    /// Called from `applyVoiceEngineStack()` (once at startup, and again on
+    /// every stack / opt-in / threshold / switch change). No-ops before
+    /// `start()` has built the pipeline and the interpreter — the same
+    /// tolerance `applyVoiceEngineStack()` itself holds.
+    ///
+    /// The tier is inert unless the cloud is REACHABLE at all
+    /// (`cloudEnabled`, which `applyVoiceEngineStack()` has just decided
+    /// from the stack + the opt-in), so this can never be the one path that
+    /// puts a cloud on the wire behind the household's back (OD-12's
+    /// consent posture is decided there, not here).
+    private func applyCloudCascadeConfiguration() {
+        guard let router = intentRouter, let gemini = geminiCommandInterpreter else {
+            return
+        }
+        let providers = CloudBrainProviders(gemini: CloudBrainRegistration(
+            interpreter: gemini,
+            isConfigured: { [weak self] in self?.geminiConfigStore.isConfigured ?? false },
+            costAllows: { [weak self] in self?.geminiCostGovernor.allowsCall() ?? false }
+        ))
+        // Resolved through the seam — the coordinator never names a cloud
+        // interpreter for a provider id; the registry does (adding a
+        // provider is a case + a registration, not a branch here).
+        guard let endpoint = providers.endpoint(for: cloudProvider) else {
+            router.cloudCascade = nil
+            return
+        }
+        router.cloudCascade = CloudCascadeConfiguration(
+            endpoint: endpoint,
+            threshold: cloudCascadeThreshold,
+            isEnabled: cloudCascadeEnabled,
+            holdCue: { [weak self] in
+                self?.commandRouter?.speakCloudCascadeHoldCue()
+            },
+            onEscalated: { [weak self] escalation in
+                self?.recordCloudCascadeEscalation(escalation)
+            }
+        )
     }
 
     /// [BOOT-REVIEW P1-5] Installs the ONE app-bundled STT model (the
@@ -5061,6 +5177,7 @@ self.noteTalkContractChanged()
                           photo: UIImage? = nil,
                           nickname: String? = nil,
                           address: String? = nil,
+                          email: String? = nil,
                           isEmergencyContact: Bool = false) -> Bool {
         let filename = photo.flatMap { contactPhotoStore.save($0) }
         let contact = FamilyContact(name: name, phone: phone, relationship: relationship,
@@ -5068,6 +5185,7 @@ self.noteTalkContractChanged()
                                     photoFilename: filename,
                                     nickname: nickname,
                                     address: Self.normalizedOptionalText(address),
+                                    email: FamilyContactValidation.normalizedEmail(email),
                                     isEmergencyContact: isEmergencyContact)
         guard familyContactStore.add(contact) else {
             if let filename { contactPhotoStore.delete(named: filename) }
@@ -5110,6 +5228,7 @@ self.noteTalkContractChanged()
                              photo: UIImage? = nil, removingPhoto: Bool = false,
                              nickname: String? = nil,
                              address: String? = nil,
+                             email: String? = nil,
                              isEmergencyContact: Bool = false) -> Bool {
         guard var contact = familyContacts.first(where: { $0.id == id }) else { return false }
         contact.name = name
@@ -5122,6 +5241,11 @@ self.noteTalkContractChanged()
         // stored address (nil), so "remove the address" is an edit, not a
         // separate affordance (directions task, 2026-09-07).
         contact.address = Self.normalizedOptionalText(address)
+        // Same rule for the Google address (calendar & family sharing,
+        // 2026-09-16): blank clears it, and the editor's emergency gate
+        // is what makes a blank impossible while the contact is flagged
+        // — this normalizes, it does not enforce.
+        contact.email = FamilyContactValidation.normalizedEmail(email)
 
         let oldFilename = contact.photoFilename
         var newFilename = oldFilename
@@ -5750,6 +5874,17 @@ self.noteTalkContractChanged()
             guard let self else { return }
             if self.voiceCalendarEventWriter.eventsAccess == .notDetermined {
                 _ = await self.voiceCalendarEventWriter.requestAccess()
+            }
+            // [CALENDAR-SHARE] (2026-09-16) Attached here, not at
+            // construction, to keep the writer lazy (its property doc
+            // explains why) — and re-attached each write, which is
+            // harmless because the closure is the same every time.
+            self.voiceCalendarEventWriter.onEventCreated = { [weak self] creation in
+                self?.calendarShareService.eventCreated(
+                    localEventId: creation.localEventId,
+                    title: creation.title,
+                    startDate: creation.startDate,
+                    durationMinutes: creation.durationMinutes)
             }
             let created = self.voiceCalendarEventWriter.create(
                 title: event.title,
@@ -6441,6 +6576,38 @@ self.noteTalkContractChanged()
     private func recordUnansweredCall(at timestamp: Date) {
         recordActivity(kind: .call, channel: .unanswered,
                        contactName: "", phone: "", timestamp: timestamp)
+    }
+
+    /// [CLOUD-CASCADE] (2026-09-16) Records one turn the cloud cascade tier
+    /// sent to the ONLINE brain — the coordinator half of the tier's
+    /// `onEscalated` seam, run once per escalated turn, right after the
+    /// observability event and BEFORE the cloud call.
+    ///
+    /// Two trails, and neither one carries the utterance (C9 policy):
+    ///  · an activity-log row (`Kind.cloudEscalation` / `Channel.cloud`)
+    ///    with an EMPTY contact and number — the household can see that a
+    ///    turn reached the cloud, and nothing about what was said;
+    ///  · an app log line naming the escalation unmistakably, with the
+    ///    provider id and the two scores only (the same numbers the
+    ///    observability event carries — read this line and the
+    ///    `cloud_cascade_escalated` event side by side to tell a
+    ///    cloud-answered turn from an on-device one).
+    ///
+    /// Main queue by contract (the tier's completion runs there, like every
+    /// other brain in the ladder → `recordActivity`'s rule).
+    private func recordCloudCascadeEscalation(_ escalation: CloudCascadeEscalation) {
+        recordActivity(kind: .cloudEscalation, channel: .cloud, contactName: "")
+        // Numbers and a provider id only — never what the user said or what
+        // the assistant answered (C9 policy; the same rule the
+        // `cloud_cascade_escalated` event holds to). Note the Release-log
+        // privacy gate (tools/check-release-log-safety.sh) rejects any
+        // non-DEBUG print whose statement names the utterance's text, so
+        // this line is deliberately vocabulary-clean.
+        print("[cloud_cascade] LOCAL ANSWER OVERRULED — this turn goes to the ONLINE brain "
+              + "provider=\(escalation.provider) "
+              + "threshold=\(PipelineTraceSummary.score(escalation.threshold)) "
+              + "local_confidence=\(PipelineTraceSummary.score(escalation.localConfidence)) "
+              + "(numbers only — no utterance or reply content)")
     }
 
     /// Refreshes the published window from the store (see
@@ -7310,6 +7477,70 @@ self.noteTalkContractChanged()
     /// was dropped in favor of it).
     private(set) lazy var calendarSync = CalendarSyncService(observabilityBus: observabilityBus)
 
+    // MARK: - Calendar & family sharing (2026-09-16)
+
+    /// The Google Calendar bridge (design §4.1). LAZY like `calendarSync`
+    /// above: constructing it reads a bundle key, an `EKEventStore` and
+    /// three local stores and touches no permission and no network. Its
+    /// first real work is `syncCalendarShare()` in
+    /// `composePostFirstFrame` — post-first-frame, so nothing here delays
+    /// the first paint.
+    ///
+    /// A missing OAuth client id is NOT a construction failure. The
+    /// session reports `isConfigured == false`, the service reports
+    /// `.notConfigured`, and the Settings card says so in words — which
+    /// is the state the app ships in until the family provides a client
+    /// (design §0). Graceful degradation here is the difference between
+    /// "sharing is not set up" and a crash on launch.
+    ///
+    /// No `objectWillChange` forward is installed for it, unlike the
+    /// eager nested services above: the Settings card observes the
+    /// service directly (`@ObservedObject`), and no coordinator state is
+    /// derived from it, so a forward would only invalidate every
+    /// coordinator observer for nothing — and installing one would force
+    /// this lazy service to exist at boot.
+    private(set) lazy var calendarShareService = CalendarShareService(
+        session: calendarShareSession,
+        gateway: calendarShareGateway,
+        store: LocalGoogleEventMappingStore(storage: storage),
+        consent: CalendarShareConsent(),
+        notifySettings: caregiverNotifySettings,
+        observabilityBus: observabilityBus,
+        contactsProvider: { [weak self] in self?.familyContacts ?? [] }
+    )
+
+    /// The Google account session — separate from the service so sign-out
+    /// is one call on one object, and so the presenter (a UI concern the
+    /// service must not know about) lives with the composition root that
+    /// can actually reach the window.
+    private(set) lazy var calendarShareSession: GoogleAccountSession = {
+        let session = GoogleAccountSession(observabilityBus: observabilityBus)
+        // Resolved at PRESENT time, never captured: the window scene does
+        // not exist when the composition root runs, and a controller
+        // captured then would be a detached one.
+        session.presenter = { [weak self] in self?.topPresentingViewController() }
+        return session
+    }()
+
+    /// The Calendar v3 / People v1 REST client over the session above.
+    private(set) lazy var calendarShareGateway = GoogleCalendarGateway(
+        session: calendarShareSession,
+        observabilityBus: observabilityBus
+    )
+
+    /// The topmost view controller Google's sign-in sheet presents from.
+    /// Walks past anything already presented so the sheet never lands
+    /// under an open modal. Returns nil before the scene exists, which
+    /// the session reports as a failed sign-in rather than a crash.
+    private func topPresentingViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        guard let window = scene?.windows.first(where: \.isKeyWindow) ?? scene?.windows.first,
+              var top = window.rootViewController else { return nil }
+        while let presented = top.presentedViewController { top = presented }
+        return top
+    }
+
     /// Read-only native Calendar/Reminders integration (2026-09-07): the
     /// REVERSE direction of `calendarSync` — native events/reminders
     /// import as in-app reminders with notifications, and rows open the
@@ -7523,10 +7754,51 @@ self.noteTalkContractChanged()
             // fire ran, and any refresh racing the task above is
             // superseded by the task's post-fire read.
             refreshTodayBriefing()
+            // [CALENDAR-SHARE] (2026-09-16) Same activation, the share
+            // layer's pass: reconcile both schedules, drain the queue,
+            // pull invitations the family sent. Runs here rather than on
+            // its own timer because a foreground return is the only
+            // moment the elder's device is reliably online.
+            syncCalendarShare()
         case .background:
             externalCalendar.submitBackgroundRefresh()
         default:
             break
+        }
+    }
+
+    // MARK: - Calendar & family sharing (2026-09-16)
+
+    /// The share layer's launch/foreground pass.
+    ///
+    /// The reconciling is here, not only on the schedulers' change
+    /// seams, for one reason: those seams fire on CHANGES, so a schedule
+    /// that already existed before the family connected Google would
+    /// never be shared at all. Reconcile is fingerprint-diffed and
+    /// enqueue is the only thing that can produce work, so an unchanged
+    /// schedule costs a few local reads and zero requests — which is
+    /// what makes it safe to run on every activation.
+    func syncCalendarShare() {
+        let share = calendarShareService
+        share.locale = activeLocale
+        // Idempotent assignment: the closure is the same every pass, and
+        // setting it here (rather than at construction) is what keeps
+        // the service lazy until the first pass.
+        share.onLocalEventImported = { [weak self] in
+            // An accepted invitation now sits in the native calendar;
+            // the existing import is what turns it into an armed
+            // reminder that fires and alerts a caregiver.
+            Task { await self?.externalCalendar.rescan() }
+        }
+        share.reconcileMedication(medicationScheduler.medicationEntries())
+        share.reconcileRoutines(routineScheduler.entries())
+        // Swept BEFORE the flush, so a twin whose local event the elder
+        // deleted natively in the same window is deleted from the family
+        // calendar by this pass rather than the next one.
+        share.cleanupVanishedEvents()
+        Task {
+            await share.flushPending()
+            await share.syncInbound()
         }
     }
 
@@ -7985,6 +8257,18 @@ self.noteTalkContractChanged()
             }
             Task {
                 await self.externalCalendar.rescan()
+                // [CALENDAR-SHARE] (2026-09-16) The share layer's INTERVAL
+                // pass (design §2.5: "foreground + interval"). It rides
+                // this handler rather than a task identifier of its own:
+                // the identifier set is fixed in Info.plist, the cadence
+                // wanted is exactly this one, and this handler is already
+                // awake with the app free to use the network.
+                //
+                // The hop is not cosmetic — the handler fires on a
+                // background queue and the share service is main-confined
+                // (it reads schedulers and settings and, on an import,
+                // kicks the rescan that touches the UI's published state).
+                await MainActor.run { self.syncCalendarShare() }
                 task.setTaskCompleted(success: true)
             }
         }

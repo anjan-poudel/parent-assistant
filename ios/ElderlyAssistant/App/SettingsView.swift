@@ -16,7 +16,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case appearance, language, calling, places, family, meds, manuals, calendar, caregiverNotifications, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, voicePersonalization, webSearch, youtube, feeds, quickApps, privacy, intentLog, toolLog
+        case appearance, language, calling, places, family, meds, manuals, calendar, caregiverNotifications, calendarSharing, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, voicePersonalization, webSearch, youtube, feeds, quickApps, privacy, intentLog, toolLog
 
         var id: String {
             switch self {
@@ -29,6 +29,7 @@ struct SettingsView: View {
             case .manuals: return "manuals"
             case .calendar: return "calendar"
             case .caregiverNotifications: return "caregiverNotifications"
+            case .calendarSharing: return "calendarSharing"
             case .alarms: return "alarms"
             case .geminiAI: return "geminiAI"
             case .voiceEngine: return "voiceEngine"
@@ -166,6 +167,13 @@ struct SettingsView: View {
                         // go with.
                         sectionRow(.caregiverNotifications, icon: "bell.badge.fill",
                                    titleKey: "settings.notifyCaregivers.title")
+                        // Google Calendar sharing (calendar & family
+                        // sharing task, 2026-09-16): the bridge that puts
+                        // the same reminders on the family's own calendar
+                        // — the second channel for the family the row
+                        // above notifies, so it sits directly beneath it.
+                        sectionRow(.calendarSharing, icon: "calendar.badge.plus",
+                                   titleKey: "settings.calendarSharing")
                         // Voice-set alarms + in-app countdown timers
                         // (alarms-timers task, 2026-09-07). See the leaf's
                         // honesty caption — iOS alarms ring through the
@@ -218,6 +226,12 @@ struct SettingsView: View {
             // read.
             case .caregiverNotifications:
                 CaregiverNotifySettingsView(settings: coordinator.caregiverNotifySettings)
+            // Calendar sharing (calendar & family sharing task,
+            // 2026-09-16) — the service is the coordinator's OWN, so the
+            // card renders the exact status the share path writes.
+            case .calendarSharing:
+                CalendarShareSettingsView(service: coordinator.calendarShareService,
+                                          locale: locale)
             case .alarms: AlarmsTimersSettingsView()
             case .geminiAI: GeminiAPISettingsView()
             case .voiceEngine: VoiceEngineSettingsView()
@@ -1750,6 +1764,13 @@ private struct FamilyContactWizardSheet: View {
     // free-form text; blank saves as nil (no address = not a navigation
     // target).
     @State private var address = ""
+    // The address the family's calendar invitation goes to (calendar &
+    // family sharing task, 2026-09-16) — blank saves as nil, which means
+    // "no invite". Optional for an ordinary contact; MANDATORY while the
+    // emergency flag is on, because the invite policy makes an emergency
+    // contact an attendee of every shared event. `FamilyContactValidation`
+    // owns that rule — see `emailIssue`.
+    @State private var email = ""
     // Whether the "Emergency contact" toggle is on (family-emergency
     // task, 2026-09-07) — flagged contacts are whom the Emergency
     // button dials first. Optional like the photo: an add starts off,
@@ -1824,10 +1845,31 @@ private struct FamilyContactWizardSheet: View {
     }
 
     /// The save contract — the same mandatory trio the whole flow
-    /// enforces: a name, a number, and a relationship. Save on the last
-    /// step is dead without all three.
+    /// enforces: a name, a number, and a relationship, plus the email
+    /// rule for an emergency contact (calendar & family sharing task,
+    /// 2026-09-16). Save on the last step is dead without all of them.
     private var canSave: Bool {
-        hasNameAndPhone && relationshipOption != nil
+        hasNameAndPhone && relationshipOption != nil && emailIssue == nil
+    }
+
+    /// Why the email draft blocks the save, or nil when it does not.
+    /// Read from `FamilyContactValidation` rather than re-checked here,
+    /// so the button's state and the caption under the field can never
+    /// disagree — the same single-source rule every other gate on this
+    /// screen follows. Always nil while the draft is not an emergency
+    /// contact: the field is optional then.
+    private var emailIssue: FamilyContactValidation.Issue? {
+        FamilyContactValidation.issue(email: email,
+                                      isEmergencyContact: isEmergencyContact)
+    }
+
+    /// The blocking issue's caption key. One arm per `Issue`, so a new
+    /// rule cannot be added without a line to show for it.
+    private func emailIssueKey(_ issue: FamilyContactValidation.Issue) -> String {
+        switch issue {
+        case .emailRequired: return "family.contact.emailRequired"
+        case .emailInvalid: return "family.contact.emailInvalid"
+        }
     }
 
     var body: some View {
@@ -2500,6 +2542,37 @@ private struct FamilyContactWizardSheet: View {
                 .font(.system(size: DesignTokens.minCaptionPointSize))
                 .foregroundStyle(DesignTokens.textSecondary)
                 .padding(.horizontal, 4)
+            // Email (calendar & family sharing task, 2026-09-16): where
+            // the family's calendar invitation goes. Optional for an
+            // ordinary contact, required while the emergency flag is on —
+            // the hint and the blocking line below both read the one rule
+            // in `FamilyContactValidation`, never a second check here.
+            Text(L10n.str("family.contact.email", locale: coordinator.activeLocale))
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .foregroundStyle(DesignTokens.textSecondary)
+            TextField("", text: $email)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .padding(14)
+                .frame(minHeight: 56)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .keyboardType(.emailAddress)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if let issue = emailIssue {
+                Text(L10n.str(emailIssueKey(issue), locale: coordinator.activeLocale))
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.stateError)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if isEmergencyContact {
+                Text(L10n.str("family.contact.emailHintEmergency",
+                              locale: coordinator.activeLocale))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(DesignTokens.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -2567,6 +2640,10 @@ private struct FamilyContactWizardSheet: View {
         messengerHandle = contact.messengerHandle ?? ""
         nickname = contact.nickname ?? ""
         address = contact.address ?? ""
+        // The stored invitation address, so re-opening the editor shows
+        // what the family will actually be invited at (calendar & family
+        // sharing task, 2026-09-16).
+        email = contact.email ?? ""
         // The stored flag shows in the step-2 toggle (family-emergency
         // task, 2026-09-07) — an edit opens with it pre-set.
         isEmergencyContact = contact.isEmergencyContact
@@ -2618,6 +2695,12 @@ private struct FamilyContactWizardSheet: View {
         // Blank address saves as nil — no address = not a navigation
         // target (directions task, 2026-09-07).
         let homeAddress = trimmedOrNil(address)
+        // Blank email saves as nil too — no address = no calendar
+        // invitation, never an empty string the invite policy would then
+        // have to special-case (calendar & family sharing task,
+        // 2026-09-16). Normalization is the validator's, not a second
+        // trim here.
+        let contactEmail = FamilyContactValidation.normalizedEmail(email)
         // The stored relationship is the chosen option's label in the
         // active locale — the display word the picker showed, which is
         // what the free-text field before it used to store.
@@ -2630,13 +2713,14 @@ private struct FamilyContactWizardSheet: View {
                 id: contact.id, name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
                 photo: pickedPhoto, removingPhoto: removingStoredPhoto,
-                nickname: nick, address: homeAddress,
+                nickname: nick, address: homeAddress, email: contactEmail,
                 isEmergencyContact: isEmergencyContact)
         } else {
             succeeded = coordinator.addFamilyContact(
                 name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
                 photo: pickedPhoto, nickname: nick, address: homeAddress,
+                email: contactEmail,
                 isEmergencyContact: isEmergencyContact)
         }
         if succeeded { dismiss() }
@@ -3375,6 +3459,15 @@ struct AIModelsSettingsView: View {
                     encoderCard
                 }
 
+                // [CLOUD-CASCADE] (2026-09-16) The cloud cascade tier's
+                // card, on the SAME hidden internal screen as the encoder
+                // switches — the tier is not encoder-specific (it acts on
+                // whatever the local slot answered), so it renders in
+                // every build and is not gated on the encoder switch.
+                // Nothing to enable for a household: the tier is inert on
+                // its own wherever no cloud provider is configured.
+                cloudCascadeCard
+
                 // TTS / VAD / KWS management — deliberately left as it
                 // was by the STT/brain split (the voice rows this screen
                 // has always managed).
@@ -3718,6 +3811,102 @@ struct AIModelsSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// [CLOUD-CASCADE] (2026-09-16) The cloud cascade tier's card, on the
+    /// hidden internal-testing screen beside the encoder switches.
+    ///
+    /// Two rows, one writer each:
+    ///  · the SWITCH — `AppCoordinator.cloudCascadeEnabled` (**default
+    ///    ON**: the tier's rule is the requested behaviour, and it stays
+    ///    inert by itself wherever no cloud provider is configured);
+    ///  · the THRESHOLD — `AppCoordinator.cloudCascadeThreshold`, **default
+    ///    97 %**, stepped in whole percent. Two big tap targets rather
+    ///    than a slider, the volume control's pattern: a drag is the wrong
+    ///    gesture here, and every step is a discrete, readable number.
+    ///
+    /// The copy carries the gates so the card can never promise more than
+    /// the chain does: the tier is inert while no cloud provider is
+    /// configured (a household that never added a key never meets it), the
+    /// keyword safety net still runs before any brain, and a spoken hold
+    /// cue — not a silent wait — precedes the cloud call.
+    private var cloudCascadeCard: some View {
+        let percent = CloudCascadeSettings.percent(coordinator.cloudCascadeThreshold)
+        let minimumPercent = CloudCascadeSettings.percent(CloudCascadeSettings.minimumThreshold)
+        let maximumPercent = CloudCascadeSettings.percent(CloudCascadeSettings.maximumThreshold)
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("settings.cloudCascade.title")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundStyle(DesignTokens.textPrimary)
+            Toggle(isOn: Binding(
+                get: { coordinator.cloudCascadeEnabled },
+                set: { coordinator.cloudCascadeEnabled = $0 }
+            )) {
+                Text("settings.cloudCascade.toggleLabel")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            Text("settings.cloudCascade.toggleNote")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 16) {
+                cascadeThresholdStepButton(steps: -1, systemImage: "minus",
+                                           labelKey: "settings.cloudCascade.decrease",
+                                           enabled: percent > minimumPercent)
+                Spacer(minLength: 8)
+                Text(verbatim: "\(percent)%")
+                    .font(.system(size: DesignTokens.titlePointSize, weight: .bold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .frame(minWidth: 128)
+                    .accessibilityLabel(Text("settings.cloudCascade.thresholdLabel"))
+                    .accessibilityValue(Text(verbatim: "\(percent)%"))
+                Spacer(minLength: 8)
+                cascadeThresholdStepButton(steps: +1, systemImage: "plus",
+                                           labelKey: "settings.cloudCascade.increase",
+                                           enabled: percent < maximumPercent)
+            }
+
+            Text("settings.cloudCascade.thresholdNote")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// One threshold step button; disabled at the ends of the range (no
+    /// dead press, and the dimmed state shows where the range ends). The
+    /// write goes through the coordinator, whose didSet persists the
+    /// clamped value AND re-resolves the router's tier — so a step acts on
+    /// the next turn, not the next launch.
+    private func cascadeThresholdStepButton(steps: Int, systemImage: String,
+                                            labelKey: LocalizedStringKey,
+                                            enabled: Bool) -> some View {
+        Button {
+            let next = CloudCascadeSettings.stepped(coordinator.cloudCascadeThreshold,
+                                                    bySteps: steps)
+            guard next != coordinator.cloudCascadeThreshold else { return }
+            coordinator.cloudCascadeThreshold = next
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 26, weight: .bold))
+                .foregroundStyle(enabled ? DesignTokens.textPrimary
+                                         : DesignTokens.textSecondary)
+                .frame(minWidth: DesignTokens.minTapTargetSize + 24,
+                       minHeight: DesignTokens.minTapTargetSize + 24)
+                .background(DesignTokens.background)
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(Text(labelKey))
     }
 
     /// The encoder artifact's install state, resolved through the same
