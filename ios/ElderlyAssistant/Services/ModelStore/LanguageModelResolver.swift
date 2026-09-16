@@ -39,15 +39,31 @@ enum LanguageModelResolver {
     ///   - `current` unchanged when it is language-compatible — INCLUDING
     ///     `[]`-tagged (multilingual) models and a `nil` (automatic)
     ///     preference, which is never touched;
+    ///   - the new language's REMEMBERED pick (`remembered`, see below)
+    ///     when the current model is tagged for other languages only and
+    ///     that memory still names a live, compatible, same-kind entry;
     ///   - the per-kind default for the new language
-    ///     (`ModelCatalog.defaultEntry(kind:language:)`) when the current
-    ///     model is tagged for other languages only;
+    ///     (`ModelCatalog.defaultEntry(kind:language:)`) otherwise;
     ///   - `current` unchanged when the catalog has no entry for that kind
     ///     at all — the resolver never clears a preference.
     ///
-    /// `catalog` is the list `current` is looked up in (injectable for
-    /// tests); the default itself always comes from the CURATED lists, so
-    /// a hidden/superseded entry can never be auto-selected.
+    /// `remembered` is the per-language record of the household's OWN picks
+    /// (`ModelPreferenceMemory.rememberedSTT/Brain()`, keyed by ISO 639-1
+    /// code) and mirrors the voice resolver's remembered step exactly: when
+    /// the new language has a remembered model that still resolves to a
+    /// usable catalog entry of the SAME KIND, it wins over the default map —
+    /// so an en→ne→en round trip restores the household's chosen engine
+    /// instead of flattening it to the ne default. A remembered entry that
+    /// no longer fits (retired id, another kind's model, wrong language) is
+    /// ignored — the default map answers — but is never deleted from storage.
+    ///
+    /// `catalog` is the list `current` (and the remembered pick) is looked
+    /// up in (injectable for tests); the default itself always comes from
+    /// the CURATED lists, so a hidden/superseded entry can never be
+    /// auto-selected. A remembered pick is the user's own, so — like the
+    /// voice memory — it only has to be a live entry of the right kind, not
+    /// a curated one: decluttering a list must never cost a household the
+    /// engine it is already running.
     ///
     /// Deliberate scope note: a `nil` preference means "Automatic", which
     /// resolves through the recognizer/interpreter's own cached-model
@@ -56,6 +72,7 @@ enum LanguageModelResolver {
     /// larger change; see the task report.)
     static func resolvedPreference(current: ModelID?,
                                    language: String,
+                                   remembered: [String: ModelID] = [:],
                                    catalog: [ModelCatalogEntry] = ModelCatalog.all) -> ModelID? {
         guard let current,
               let entry = catalog.first(where: { $0.id == current }) else {
@@ -65,6 +82,12 @@ enum LanguageModelResolver {
         }
         guard !isLanguageCompatible(entry, language: language) else {
             return current
+        }
+        if let preferred = remembered[language.lowercased()],
+           let preferredEntry = catalog.first(where: { $0.id == preferred }),
+           preferredEntry.kind == entry.kind,
+           isLanguageCompatible(preferredEntry, language: language) {
+            return preferred
         }
         return ModelCatalog.defaultEntry(kind: entry.kind, language: language)?.id ?? current
     }

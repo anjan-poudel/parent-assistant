@@ -83,10 +83,20 @@ final class ModelCatalogSTTNamingTests: XCTestCase {
     /// The declutter rule (2026-09-12): the list is CURATED and in
     /// preference order — v6 first (best accuracy), then the ANE fast
     /// path, then the bundled default, then the fallbacks.
+    ///
+    /// Updated 2026-09-16 (per-language defaults PR): the v6 ANE leads,
+    /// because it is both the best-measured accuracy on the fast path AND
+    /// the ne auto-switch target (`ModelCatalog.languageDefaultPicks`) —
+    /// the picker's first row is deliberately the model a language switch
+    /// lands on. `whisperKitNepaliMedium` (the v3 ANE) is listed: 02b2596
+    /// re-offered it on user request, because the v6 **q6** quant mangled
+    /// short medication phrases; the v6 entry now ships the **q8** rebuild,
+    /// so v6 keeps the lead.
     func testAvailableSTTEntriesIsTheCuratedListInPreferenceOrder() {
         XCTAssertEqual(ModelCatalog.availableSTTEntries.map(\.id),
-                       [ModelCatalog.whisperMediumV6,
-                        ModelCatalog.whisperKitMediumV6,
+                       [ModelCatalog.whisperKitMediumV6,
+                        ModelCatalog.whisperMediumV6,
+                        ModelCatalog.whisperKitNepaliMedium,
                         ModelCatalog.whisperMediumV5,
                         ModelCatalog.whisperKitMediumV5,
                         ModelCatalog.whisperKitNepali,
@@ -104,8 +114,7 @@ final class ModelCatalogSTTNamingTests: XCTestCase {
     /// can still see and delete it.
     func testSupersededSTTEnginesAreNotOfferedButStayDeletable() {
         let offered = Set(ModelCatalog.availableSTTEntries.map(\.id))
-        let hidden = [ModelCatalog.whisperKitNepaliMedium,   // superseded by v6 ANE
-                      ModelCatalog.whisperLargeV3Nepali,     // CPU-only Large
+        let hidden = [ModelCatalog.whisperLargeV3Nepali,     // CPU-only Large
                       ModelCatalog.whisperLargeV3NepaliV2,   // CPU-only, never beat its base
                       ModelCatalog.whisperFinetunedNepali,   // q5_0 of the q8 small
                       ModelCatalog.whisperSmallNepali]       // mid-training distill
@@ -116,6 +125,11 @@ final class ModelCatalogSTTNamingTests: XCTestCase {
                             "\(id.rawValue) must stay in `all` so a cached "
                             + "device can still delete it")
         }
+        // The v3 ANE is offered again (02b2596, user-requested) — it is not
+        // a hidden entry. Pinned so a future declutter has to be deliberate.
+        XCTAssertTrue(offered.contains(ModelCatalog.whisperKitNepaliMedium),
+                      "the v3 ANE was re-offered for the q6-mangling window; "
+                      + "hiding it again is a product decision, not a cleanup")
         XCTAssertEqual(offered.count + hidden.count, allSTTEntries.count,
                        "curated + hidden must account for every STT entry — "
                        + "a new engine has to be classified deliberately")

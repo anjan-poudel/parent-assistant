@@ -132,6 +132,14 @@ final class AppCoordinator: ObservableObject {
     /// memory is written only by the Settings picker (`remember`), never
     /// by this automatic switch.
     ///
+    /// [MODEL-MEMORY 2026-09-16] The STT and brain re-picks now prefer the
+    /// language's remembered pick the same way (`ModelPreferenceMemory`,
+    /// PR 1 of the settings/models reorg): before this, the single stored
+    /// STT/brain preference was flattened to the per-language default on
+    /// every switch, so a ne→en→ne round trip destroyed an explicit engine
+    /// choice. That memory too is written ONLY by the Settings pickers —
+    /// this switch reads it, never writes it.
+    ///
     /// Note this deliberately does NOT run at launch: the init-time
     /// restore assigns the preferences directly (house pattern), and a
     /// launch-time reconciliation — a language stored in a previous
@@ -140,12 +148,16 @@ final class AppCoordinator: ObservableObject {
     private func syncModelPreferencesToLanguage() {
         let language = appLanguage.rawValue
         if let resolved = LanguageModelResolver.resolvedPreference(
-            current: sttModelPreference, language: language),
+            current: sttModelPreference,
+            language: language,
+            remembered: ModelPreferenceMemory.rememberedSTT()),
            resolved != sttModelPreference {
             sttModelPreference = resolved
         }
         if let resolved = LanguageModelResolver.resolvedPreference(
-            current: brainModelPreference, language: language),
+            current: brainModelPreference,
+            language: language,
+            remembered: ModelPreferenceMemory.rememberedBrain()),
            resolved != brainModelPreference {
             brainModelPreference = resolved
         }
@@ -1694,9 +1706,13 @@ final class AppCoordinator: ObservableObject {
     /// selectability (2026-09-06) the Settings "AI मोडेल" screen offers
     /// every `ModelCatalog.availableBrainEntries` model; the LIVE
     /// choice is `resolvedBrainModelID`.
-    // The Qwen 1.7B intent fine-tune (v12, seed 42) is the default
-    // brain — the legacy LLaMA 1B is hidden from the picker now.
-    static let defaultBrainModelID = ModelCatalog.intentQwen4BS43
+    // [DEFAULT-BRAIN 2026-09-16] The gate-passing slot-canonical Qwen 4B
+    // (v16) is the default brain — the same model the curated brain list
+    // leads with and the per-language ne pick names, so the value no longer
+    // straddles a superseded entry (`intentQwen4BS43`, kept in the catalog
+    // for devices that cached it). The pre-Qwen LLaMA 1B this comment used
+    // to describe is hidden from the picker.
+    static let defaultBrainModelID = ModelCatalog.intentQwen4BSlotCanon
 
     /// The brain model the interpreter actually uses: the stored
     /// preference when it names a real catalog entry, else the default.
