@@ -1,0 +1,1191 @@
+import XCTest
+@testable import ElderlyAssistant
+
+/// `CalendarShareService`: the two gates, the reconcile diff, the flush
+/// queue and the inbound pull — every rule driven through the protocol
+/// seams with no network, no OAuth client and no EventKit permission.
+///
+/// Two things shape the suite:
+///  - the service publishes status and commits its ledger from
+///    `DispatchQueue.main.async` hops, so assertions after an action go
+///    through `drainMain()` (see the helper at the bottom);
+///  - a reconcile auto-flushes on a detached `Task` with no completion
+///    handle, so tests that must observe the END of that pass poll with
+///    `waitUntil`. Where a rule does not need the auto-flush, the queue
+///    is seeded directly and `flushPending()` is awaited — which is
+///    deterministic.
+final class CalendarShareServiceTests: XCTestCase {
+
+    // MARK: - Pinned clock
+
+    /// A fixed instant, so the drafts the mapper builds are the same on
+    /// every run. The service's own date math is calendar-injected one
+    /// level down (`CalendarShareMapper`), which is where it is tested
+    /// against a pinned UTC calendar.
+    private let pinnedNow = Date(timeIntervalSince1970: 1_789_000_000)
+
+    private var fakeNow: Date = Date(timeIntervalSince1970: 1_789_000_000)
+
+    // MARK: - Harness
+
+    private var suiteName = ""
+    /// `CalendarShareConsent`, `LocalGoogleEventMappingStore.lastSyncAt`
+    /// and the inbound sync token all persist in `UserDefaults`; an
+    /// isolated throwaway suite keeps a flipped gate from leaking into
+    /// the next test (or into the process-wide standard defaults).
+    private var defaults: UserDefaults = .standard
+    private var notifySettings: CaregiverNotifySettings!
+    /// Read at reconcile time, never captured — the family edits contacts
+    /// in Settings and the next pass must see the edit.
+    private var testContacts: [FamilyContact] = []
+
+    override func setUp() {
+        super.setUp()
+        suiteName = "calendarShare.service.tests.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName) ?? .standard
+        defaults.removePersistentDomain(forName: suiteName)
+        notifySettings = CaregiverNotifySettings.isolated()
+        fakeNow = pinnedNow
+        testContacts = [FamilyContact(name: "आमा", phone: "9812345678",
+                                      relationship: "आमा",
+                                      email: "maa@example.com",
+                                      isEmergencyContact: true)]
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suiteName)
+        super.tearDown()
+    }
+
+    private struct Rig {
+        let service: CalendarShareService
+        let session: FakeShareSession
+        let gateway: FakeShareGateway
+        let eventKit: FakeShareEventKit
+        let store: LocalGoogleEventMappingStore
+        let bus: MockObservabilityBus
+    }
+
+    private func makeService(signedIn: Bool = true, consented: Bool = true,
+                             configured: Bool = true) -> Rig {
+        let session = FakeShareSession()
+        session.isConfigured = configured
+        session.isSignedIn = signedIn
+        let gateway = FakeShareGateway()
+        let eventKit = FakeShareEventKit()
+        // A fresh ledger per rig: two services in one test must not share
+        // a mapping store, or the "signed out" half would see the
+        // "consented" half's work.
+        let store = LocalGoogleEventMappingStore(storage: MockEncryptedLocalStorage(),
+                                                 defaults: defaults)
+        let consent = CalendarShareConsent(defaults: defaults)
+        consent.isAccepted = consented
+        let bus = MockObservabilityBus()
+        let service = CalendarShareService(
+            session: session, gateway: gateway, store: store, consent: consent,
+            notifySettings: notifySettings, observabilityBus: bus, eventKit: eventKit,
+            contactsProvider: { [weak self] in self?.testContacts ?? [] },
+            defaults: defaults,
+            now: { [weak self] in self?.fakeNow ?? Date() })
+        return Rig(service: service, session: session, gateway: gateway,
+                   eventKit: eventKit, store: store, bus: bus)
+    }
+
+    // MARK: - Builders
+
+    private func medicationEntry(name: String = "Amlodipine",
+                                 hour: Int = 10, minute: Int = 0) -> MedicationEntry {
+        MedicationEntry(
+            id: UUID(), userProfileId: UUID(), medicationName: name,
+            doseDescription: "One tablet",
+            scheduleTimes: [DateComponents(hour: hour, minute: minute)],
+            frequency: .daily, ackWindowMinutes: 5, maxRefireCount: 5,
+            escalationWindowMinutes: 60, doubleDoseWindowHours: 4,
+            photoVerificationEnabled: false, confirmationDescription: nil)
+    }
+
+    private func slotKey(_ entryId: UUID, slot: Int = 0) -> String {
+        CalendarShareKey.slot(kind: .medicationReminder, entryId: entryId, slot: slot)
+    }
+
+    /// One queued mutation, in the shape `reconcile` would have written
+    /// it. Seeding the queue directly keeps the flush rules below free of
+    /// the reconcile's detached auto-flush.
+    private func queuedCreate(key: String, title: String = "Amlodipine",
+                              googleEventID: String? = nil,
+                              attendees: [String] = ["maa@example.com"])
+        -> PendingShareOperation {
+        PendingShareOperation.upsert(
+            key: key,
+            draft: CalendarTwinDraft(
+                title: title,
+                startDate: fakeNow.addingTimeInterval(3600),
+                durationMinutes: 30,
+                timeZoneIdentifier: "Asia/Kathmandu",
+                recurrence: .daily,
+                attendeeEmails: attendees,
+                kind: .medicationReminder),
+            googleEventID: googleEventID)
+    }
+
+    private func incomingEvent(id: String, needsResponse: Bool = true,
+                               title: String = "Doctor") -> GoogleIncomingEvent {
+        GoogleIncomingEvent(eventId: id, title: title,
+                            startDate: fakeNow.addingTimeInterval(86_400),
+                            endDate: fakeNow.addingTimeInterval(86_400 + 3600),
+                            organizerEmail: "son@example.com",
+                            needsResponse: needsResponse)
+    }
+
+    // MARK: - Gate: signed in AND consented, or nothing happens
+
+    func testReconcileWhileSignedOutQueuesNothingAndCallsNothing() async {
+        let rig = makeService(signedIn: false, consented: true)
+
+        rig.service.reconcileMedication([medicationEntry()])
+        await drainMain()
+
+        XCTAssertEqual(rig.store.pendingCount, 0,
+                       "a signed-out app accumulates NO queue — the pending count must mean \"waiting on Google\", never \"waiting on a decision\"")
+        XCTAssertTrue(rig.store.knownKeys.isEmpty)
+        XCTAssertTrue(rig.gateway.callLog.isEmpty,
+                      "not even the family calendar is opened")
+
+        await rig.service.flushPending()
+        await drainMain()
+        XCTAssertTrue(rig.gateway.callLog.isEmpty,
+                      "and flushing that empty queue calls nothing either")
+    }
+
+    func testReconcileWithConsentWithdrawnQueuesNothingAndCallsNothing() async {
+        let rig = makeService(signedIn: true, consented: false)
+
+        rig.service.reconcileMedication([medicationEntry()])
+        await drainMain()
+
+        XCTAssertEqual(rig.store.pendingCount, 0,
+                       "revoked consent pauses sharing — the local schedule is untouched")
+        XCTAssertTrue(rig.gateway.callLog.isEmpty)
+    }
+
+    func testReconcileWithBothGatesOpenQueuesAndFlushes() async {
+        let rig = makeService()
+        rig.gateway.createResults = ["g-1"]
+        let entry = medicationEntry()
+
+        rig.service.reconcileMedication([entry])
+        await waitUntil("the reconcile's auto-flush to create the twin") {
+            rig.gateway.createdDrafts.count == 1
+        }
+        await drainMain()
+
+        XCTAssertEqual(rig.gateway.createdDrafts.map(\.title), ["Amlodipine"])
+        XCTAssertEqual(rig.store.googleEventID(for: slotKey(entry.id)), "g-1",
+                       "the twin's Google id is recorded against the slot's share key")
+    }
+
+    // MARK: - Consent and connection status
+
+    func testAcceptAndRevokeConsentFlipTheStatusFlag() async {
+        let rig = makeService(signedIn: false, consented: false)
+        await drainMain()
+        XCTAssertFalse(rig.service.status.isConsented)
+
+        rig.service.acceptConsent()
+        await drainMain()
+        XCTAssertTrue(rig.service.status.isConsented)
+        XCTAssertEqual(rig.service.status.connection, .signedOut,
+                       "accepting the disclosure signs nobody in — the two gates stay independent")
+
+        rig.service.revokeConsent()
+        await drainMain()
+        XCTAssertFalse(rig.service.status.isConsented)
+    }
+
+    func testConnectionMirrorsTheSessionHonestly() async {
+        let unconfigured = makeService(signedIn: false, configured: false)
+        await drainMain()
+        XCTAssertEqual(unconfigured.service.status.connection, .notConfigured,
+                       "no OAuth client id in the bundle — the card explains instead of offering a button that cannot work")
+
+        let signedOut = makeService(signedIn: false, configured: true)
+        await drainMain()
+        XCTAssertEqual(signedOut.service.status.connection, .signedOut)
+
+        let connected = makeService(signedIn: true, configured: true)
+        await drainMain()
+        XCTAssertEqual(connected.service.status.connection,
+                       .connected(email: "maa@example.com"))
+    }
+
+    // MARK: - Flush: create
+
+    func testSuccessfulCreateRecordsTheGoogleIDAndTheDraftFingerprint() async {
+        let rig = makeService()
+        rig.gateway.createResults = ["g-1"]
+        let key = slotKey(UUID())
+        rig.store.enqueue(queuedCreate(key: key))
+
+        await rig.service.flushPending()
+        await drainMain()
+
+        XCTAssertEqual(rig.gateway.ensuredContactEmails, ["maa@example.com"],
+                       "the People entry is ensured before the invite so it does not land in spam")
+        XCTAssertEqual(rig.gateway.createdDrafts.count, 1)
+        XCTAssertEqual(rig.store.googleEventID(for: key), "g-1")
+        guard let sent = rig.gateway.createdDrafts.first else {
+            return XCTFail("no draft reached the gateway to fingerprint")
+        }
+        XCTAssertEqual(rig.store.fingerprint(for: key),
+                       CalendarShareMapper.fingerprint(of: sent),
+                       "the fingerprint describes the payload that was actually sent")
+        XCTAssertNotNil(rig.store.lastSyncAt,
+                        "a clean pass timestamps the ledger for the status card")
+    }
+
+    /// Design §2.2 bullet 4: the People contact the invite rides on is
+    /// created from the FAMILY CONTACT's own details, not from the address
+    /// alone — the name so the caregiver's contact list reads like a
+    /// person, the phone so the entry is usable in an emergency.
+    func testTheContactWriteCarriesTheNameAndPhoneBehindTheAddress() async {
+        let rig = makeService()
+        rig.gateway.createResults = ["g-1"]
+        rig.store.enqueue(queuedCreate(key: slotKey(UUID())))
+
+        await rig.service.flushPending()
+        await drainMain()
+
+        guard let contact = rig.gateway.ensuredContacts.first else {
+            return XCTFail("no contact write reached the gateway")
+        }
+        XCTAssertEqual(contact.email, "maa@example.com")
+        XCTAssertEqual(contact.name, "आमा", "the family's own spelling travels with the invite")
+        XCTAssertEqual(contact.phone, "9812345678",
+                       "a contact created as a bare address is a dead end in an emergency")
+    }
+
+    /// The service passes the family's stored details through UNTOUCHED —
+    /// including an empty phone. Deciding that an empty string is not a
+    /// phone number is the gateway's job, and it is asserted there
+    /// (`testEnsureContactOmitsThePhoneFieldWhenThereIsNone`); what this
+    /// test pins is that the service does not invent, trim or filter a
+    /// field on the way, so the two layers cannot disagree about what the
+    /// family typed.
+    func testTheContactWritePassesTheStoredDetailsThroughUntouched() async {
+        let rig = makeService()
+        testContacts = [FamilyContact(name: "छोरा", phone: "",
+                                      relationship: "छोरा",
+                                      email: "chhora@example.com",
+                                      isEmergencyContact: true)]
+        rig.gateway.createResults = ["g-1"]
+        rig.store.enqueue(queuedCreate(key: slotKey(UUID()),
+                                       attendees: ["chhora@example.com"]))
+
+        await rig.service.flushPending()
+        await drainMain()
+
+        XCTAssertEqual(rig.gateway.ensuredContacts.first?.email, "chhora@example.com")
+        XCTAssertEqual(rig.gateway.ensuredContacts.first?.name, "छोरा")
+        XCTAssertEqual(rig.gateway.ensuredContacts.first?.phone, "")
+    }
+
+    // MARK: - Flush: failure handling and ordering
+
+    func testFailedCreateKeepsTheOperationQueuedAndStopsThePass() async {
+        let rig = makeService()
+        rig.gateway.createResults = []          // every create answers nil
+        rig.store.enqueue(queuedCreate(key: slotKey(UUID(), slot: 0)))
+        rig.store.enqueue(queuedCreate(key: slotKey(UUID(), slot: 1)))
+
+        await rig.service.flushPending()
+        await drainMain()
+
+        XCTAssertEqual(rig.gateway.createdDrafts.count, 1,
+                       "the pass STOPS at the first failure — whatever caused it applies to every operation behind it")
+        XCTAssertEqual(rig.store.pendingCount, 2, "nothing is dropped on a failure")
+        XCTAssertEqual(rig.store.pending.map(\.attempts).sorted(), [0, 1],
+                       "exactly the failed operation records an attempt, persisted so a crash loop cannot reset the backoff")
+        XCTAssertNil(rig.store.lastSyncAt, "a failed pass does not claim a clean sync")
+    }
+
+    func testUnauthorizedGatewayPausesThePassWithoutRetrying() async {
+        let rig = makeService()
+        rig.gateway.errorClassAfterFailure = .unauthorized
+        let firstKey = slotKey(UUID(), slot: 0)
+        let secondKey = slotKey(UUID(), slot: 1)
+        rig.store.enqueue(queuedCreate(key: firstKey))
+        rig.store.enqueue(queuedCreate(key: secondKey))
+
+        await rig.service.flushPending()
+        await drainMain()
+
+        XCTAssertEqual(rig.gateway.createdDrafts.count, 1,
+                       "a revoked token must not be hammered — the pass stops at the first refusal instead of working through the queue")
+        XCTAssertEqual(rig.store.pendingCount, 2, "the family's pending work is kept")
+        XCTAssertEqual(rig.store.pending.map(\.attempts), [0, 0],
+                       "a paused pass is not a failed attempt — there is nothing for a backoff to do")
+        XCTAssertEqual(rig.service.status.lastError, .unauthorized,
+                       "the card says what is wrong with the connection")
+
+        let paused = rig.bus.emittedEvents.filter { $0.eventType == "calendar_share_flush_paused" }
+        XCTAssertEqual(paused.count, 1)
+        XCTAssertEqual(paused.first?.outcome, "failure")
+        XCTAssertEqual(paused.first?.metadata["reason"], "unauthorized")
+
+        // And the pause must not be STICKY: reconnecting has to resume.
+        // The class comes from the failure that just happened, never from
+        // a remembered error, so a fresh token cannot sit behind a stale
+        // `.unauthorized` that nothing clears.
+        rig.gateway.errorClassAfterFailure = nil
+        // A fresh family-calendar lookup too: the canned answers are
+        // consumed in call order, so a second pass without one would fail
+        // at the CALENDAR (and look like the pause was sticky).
+        rig.gateway.ensureFamilyCalendarResults = ["family-cal"]
+        rig.gateway.createResults = ["g-1", "g-2"]
+        await rig.service.flushPending()
+        await drainMain()
+
+        XCTAssertEqual(rig.store.pendingCount, 0,
+                       "the reconnected account drains exactly the work the pause held back")
+        XCTAssertEqual(rig.store.googleEventID(for: firstKey), "g-1")
+        XCTAssertEqual(rig.store.googleEventID(for: secondKey), "g-2")
+    }
+
+    // MARK: - Flush: delete and update
+
+    func testDeleteWithNoKnownTwinIsDroppedWithoutADeleteCall() async {
+        let rig = makeService()
+        let key = CalendarShareKey.oneOff(kind: .calendarEvent, eventIdentifier: "evt-1")
+        rig.store.enqueue(.tombstone(key: key, kind: .calendarEvent,
+                                     googleEventID: nil, title: "Doctor"))
+
+        await rig.service.flushPending()
+        await drainMain()
+
+        XCTAssertTrue(rig.gateway.deletedIDs.isEmpty,
+                      "there is no twin id to address — nothing to delete")
+        XCTAssertEqual(rig.gateway.callLog, ["ensureFamilyCalendar"],
+                       "the pass opens the family calendar and then makes no mutation call at all")
+        XCTAssertEqual(rig.store.pendingCount, 0,
+                       "the tombstone is dropped — keeping it would pin the pending count up forever")
+    }
+
+    /// A twin someone deleted on Google's side, whose tombstone we now
+    /// owe: the goal state is ALREADY reached, so the tombstone has to
+    /// drain. Retrying it would leave a queue entry that can never
+    /// succeed, and `pendingCount` would never come back to zero.
+    func testDeleteThatFindsTheTwinAlreadyGoneDrainsTheTombstone() async {
+        let rig = makeService()
+        let key = slotKey(UUID())
+        rig.store.setGoogleEventID("g-old", for: key)
+        rig.store.enqueue(.tombstone(key: key, kind: .medicationReminder,
+                                     googleEventID: "g-old", title: "Amlodipine"))
+        rig.gateway.errorClassAfterFailure = .notFound
+        rig.gateway.deleteResults = [false]
+
+        await rig.service.flushPending()
+        await drainMain()
+
+        XCTAssertEqual(rig.gateway.deletedIDs, ["g-old"])
+        XCTAssertEqual(rig.store.pendingCount, 0, "already gone is the goal state, not a failure")
+        XCTAssertNil(rig.store.googleEventID(for: key),
+                     "the mapping goes with it — nothing is out there to update")
+        XCTAssertNotNil(rig.store.lastSyncAt, "the pass did reach the goal state, so it is a clean pass")
+    }
+
+    /// The other half of the same rule: a delete that failed for a reason
+    /// that is NOT "it is gone" must be retried, not dropped — the twin
+    /// is still out there and the family would keep seeing an event the
+    /// elder removed.
+    func testDeleteThatFailsTransientlyStaysQueued() async {
+        let rig = makeService()
+        let key = slotKey(UUID())
+        rig.store.setGoogleEventID("g-old", for: key)
+        rig.store.enqueue(.tombstone(key: key, kind: .medicationReminder,
+                                     googleEventID: "g-old", title: "Amlodipine"))
+        rig.gateway.errorClassAfterFailure = .server(503)
+        rig.gateway.deleteResults = [false]
+
+        await rig.service.flushPending()
+        await drainMain()
+
+        XCTAssertEqual(rig.store.pendingCount, 1, "the twin is still out there — the tombstone is kept")
+        XCTAssertEqual(rig.store.pending.map(\.attempts), [1])
+        XCTAssertEqual(rig.store.googleEventID(for: key), "g-old",
+                       "the mapping is kept too, so the retry has an id to address")
+    }
+
+    func testUpdateWhoseTwinIsGoneIsRecreatedUnderTheSameKey() async {
+        let rig = makeService()
+        let key = slotKey(UUID())
+        rig.store.setGoogleEventID("g-old", for: key)
+        rig.store.enqueue(queuedCreate(key: key, googleEventID: "g-old"))
+        rig.gateway.errorClassAfterFailure = .notFound
+        rig.gateway.updateResults = [false]
+        rig.gateway.createResults = ["g-new"]
+
+        await rig.service.flushPending()
+        await drainMain()
+
+        XCTAssertEqual(rig.gateway.updatedCalls.map { $0.id }, ["g-old"])
+        XCTAssertEqual(rig.gateway.createdDrafts.count, 1,
+                       "the local item is the source of truth — a twin someone deleted on Google's side is re-created")
+        XCTAssertEqual(rig.store.googleEventID(for: key), "g-new",
+                       "the same key now points at the new twin, so the family sees one event, not two")
+    }
+
+    func testUpdateThatFailsTransientlyRetriesRatherThanDuplicatingTheTwin() async {
+        let rig = makeService()
+        let key = slotKey(UUID())
+        rig.store.setGoogleEventID("g-old", for: key)
+        rig.store.enqueue(queuedCreate(key: key, googleEventID: "g-old"))
+        rig.gateway.errorClassAfterFailure = .server(503)
+        rig.gateway.updateResults = [false]
+
+        await rig.service.flushPending()
+        await drainMain()
+
+        XCTAssertTrue(rig.gateway.createdDrafts.isEmpty,
+                      "re-creating after a transient error would leave the family with two copies of the same dose")
+        XCTAssertEqual(rig.store.googleEventID(for: key), "g-old")
+        XCTAssertEqual(rig.store.pending.map(\.attempts), [1])
+    }
+
+    // MARK: - Backoff
+
+    /// Design §2.5: the queue is retried, not hammered. A foreground
+    /// return (or an interval wake) while an operation is still backing
+    /// off makes NO request at all — not even the family-calendar lookup.
+    func testAnOperationStillBackingOffDefersTheWholePass() async {
+        let rig = makeService()
+        let key = slotKey(UUID())
+        // One recorded failure, just now: due in 30 seconds.
+        rig.store.enqueue(queuedCreate(key: key).retried(at: fakeNow))
+        rig.gateway.createResults = ["g-1"]
+
+        await rig.service.flushPending()
+        await drainMain()
+
+        XCTAssertTrue(rig.gateway.callLog.isEmpty,
+                      "the delay IS the retry — a pass that fires while it runs is the flood the backoff exists to prevent")
+        XCTAssertEqual(rig.store.pending.map(\.attempts), [1],
+                       "a deferred pass is not a failed attempt: it records nothing")
+        XCTAssertEqual(rig.store.pendingCount, 1, "nothing is dropped")
+        XCTAssertNil(rig.store.lastSyncAt, "nothing was synced")
+        let deferred = rig.bus.emittedEvents.filter { $0.eventType == "calendar_share_flush_deferred" }
+        XCTAssertEqual(deferred.count, 1)
+        XCTAssertEqual(deferred.first?.metadata["waiting"], "1",
+                       "the count of what is waiting is the only thing the line carries")
+        XCTAssertNil(rig.service.status.lastError,
+                     "waiting out a backoff is not an error for the family to see")
+    }
+
+    func testTheDeferredOperationIsAttemptedOnceTheBackoffHasElapsed() async {
+        let rig = makeService()
+        let key = slotKey(UUID())
+        rig.store.enqueue(queuedCreate(key: key).retried(at: fakeNow))
+        rig.gateway.createResults = ["g-1"]
+        await rig.service.flushPending()
+        await drainMain()
+        XCTAssertEqual(rig.store.pendingCount, 1, "still backing off")
+
+        fakeNow = fakeNow.addingTimeInterval(31)
+        await rig.service.flushPending()
+        await drainMain()
+
+        XCTAssertEqual(rig.gateway.createdDrafts.count, 1,
+                       "the operation is retried on the next pass after the delay")
+        XCTAssertEqual(rig.store.googleEventID(for: key), "g-1")
+        XCTAssertNil(rig.store.pending.first, "and drains cleanly")
+        XCTAssertNotNil(rig.store.lastSyncAt)
+    }
+
+    /// A never-tried operation is never delayed: the common case is a
+    /// fresh change from the schedulers, and holding THAT back would make
+    /// the family wait 30 seconds for every edit.
+    func testAFreshOperationIsNotDelayedByAnotherKeySBackoff() async {
+        let rig = makeService()
+        let stale = slotKey(UUID())
+        let fresh = slotKey(UUID())
+        rig.store.enqueue(queuedCreate(key: stale).retried(at: fakeNow))
+        rig.store.enqueue(queuedCreate(key: fresh))
+        rig.gateway.createResults = ["g-1"]
+
+        await rig.service.flushPending()
+        await drainMain()
+
+        XCTAssertEqual(rig.gateway.createdDrafts.count, 1)
+        XCTAssertEqual(rig.store.googleEventID(for: fresh), "g-1")
+        XCTAssertEqual(rig.store.pendingCount, 1, "only the backing-off operation is left")
+        XCTAssertEqual(rig.store.pending.first?.key, stale)
+    }
+
+    // MARK: - Stale-twin sweep
+
+    /// Design §2.5. The elder deletes a shared appointment in the Calendar
+    /// app; the twin on the family's calendar is now invisible locally and
+    /// permanent remotely — the family keeps a doctor's visit that is not
+    /// happening. The sweep is what turns that into a tombstone.
+    func testSweepDeletesTheTwinOfAnOutboundEventThatVanishedLocally() async {
+        let rig = makeService()
+        let key = CalendarShareKey.oneOff(kind: .calendarEvent,
+                                         eventIdentifier: "evt-1")
+        rig.store.markOutbound(key)
+        rig.store.setGoogleEventID("g-twin", for: key)
+        rig.eventKit.vanishedIdentifiers = ["evt-1"]
+        rig.gateway.deleteResults = [true]
+
+        rig.service.cleanupVanishedEvents()
+        await drainMain()
+        // The sweep's own flush is detached (like the reconcile's), so the
+        // end of the pass is observed rather than awaited.
+        await waitUntil("the swept twin is deleted") { rig.store.pendingCount == 0 }
+
+        XCTAssertEqual(rig.eventKit.existenceChecks, ["evt-1"])
+        XCTAssertEqual(rig.gateway.deletedIDs, ["g-twin"],
+                      "the family stops seeing an appointment the elder already removed")
+        XCTAssertNil(rig.store.googleEventID(for: key))
+        XCTAssertFalse(rig.store.isOutbound(key),
+                       "the mark goes with the twin, so the next sweep does not queue the same deletion again")
+        let swept = rig.bus.emittedEvents.filter { $0.eventType == "calendar_share_swept" }
+        XCTAssertEqual(swept.count, 1)
+        XCTAssertEqual(swept.first?.metadata["vanished"], "1")
+    }
+
+    /// The rule that makes the sweep safe. An IMPORTED invitation's twin
+    /// is the organizer's own event — deleting it on the elder's behalf
+    /// would take it off the family's calendar too, and the sweep would
+    /// have no way of knowing whose appointment it just removed.
+    func testSweepLeavesAnImportedInvitationAlone() async {
+        let rig = makeService()
+        let key = CalendarShareKey.oneOff(kind: .calendarEvent,
+                                         eventIdentifier: "evt-invited")
+        rig.store.setGoogleEventID("g-organizer", for: key)
+        rig.eventKit.vanishedIdentifiers = ["evt-invited"]
+        rig.gateway.deleteResults = [true]
+
+        rig.service.cleanupVanishedEvents()
+        await drainMain()
+
+        XCTAssertTrue(rig.eventKit.existenceChecks.isEmpty,
+                      "not ours to delete — not even asked about")
+        XCTAssertTrue(rig.gateway.deletedIDs.isEmpty)
+        XCTAssertEqual(rig.store.googleEventID(for: key), "g-organizer")
+        XCTAssertTrue(rig.store.pending.isEmpty, "no tombstone is queued")
+    }
+
+    func testSweepLeavesAnEventThatIsStillOnThePhoneAlone() async {
+        let rig = makeService()
+        let key = CalendarShareKey.oneOff(kind: .calendarEvent,
+                                         eventIdentifier: "evt-2")
+        rig.store.markOutbound(key)
+        rig.store.setGoogleEventID("g-twin", for: key)
+        // `vanishedIdentifiers` stays empty: the local event is still there.
+
+        rig.service.cleanupVanishedEvents()
+        await drainMain()
+
+        XCTAssertEqual(rig.eventKit.existenceChecks, ["evt-2"])
+        XCTAssertTrue(rig.gateway.deletedIDs.isEmpty)
+        XCTAssertTrue(rig.store.isOutbound(key), "the mark stays while the event does")
+        XCTAssertTrue(rig.store.pending.isEmpty)
+    }
+
+    /// A key with no twin id has nothing out there to delete, and a key
+    /// the one-off grammar cannot read (a slot key, however it got marked)
+    /// names no local event to check.
+    func testSweepIgnoresKeysWithNoTwinAndKeysThatAreNotOneOffs() async {
+        let rig = makeService()
+        let noTwin = CalendarShareKey.oneOff(kind: .calendarEvent,
+                                            eventIdentifier: "evt-3")
+        let slot = slotKey(UUID())
+        rig.store.markOutbound(noTwin)
+        rig.store.markOutbound(slot)
+        rig.store.setGoogleEventID("g-slot", for: slot)
+        rig.eventKit.vanishedIdentifiers = ["evt-3"]
+
+        rig.service.cleanupVanishedEvents()
+        await drainMain()
+
+        XCTAssertTrue(rig.eventKit.existenceChecks.isEmpty)
+        XCTAssertTrue(rig.gateway.deletedIDs.isEmpty)
+        XCTAssertTrue(rig.store.outboundKeys.contains(noTwin),
+                      "nothing was swept, so nothing is unmarked")
+    }
+
+    /// Write-only access cannot READ events at all — every lookup would
+    /// answer "gone" and the sweep would delete everything it knows
+    /// about. A permission the app does not have is not an answer.
+    func testSweepDoesNothingWithoutFullCalendarAccess() async {
+        let rig = makeService()
+        rig.eventKit.access = .writeOnly
+        let key = CalendarShareKey.oneOff(kind: .calendarEvent,
+                                         eventIdentifier: "evt-4")
+        rig.store.markOutbound(key)
+        rig.store.setGoogleEventID("g-twin", for: key)
+        rig.eventKit.vanishedIdentifiers = ["evt-4"]
+
+        rig.service.cleanupVanishedEvents()
+        await drainMain()
+
+        XCTAssertTrue(rig.eventKit.existenceChecks.isEmpty)
+        XCTAssertTrue(rig.gateway.deletedIDs.isEmpty)
+        XCTAssertTrue(rig.store.isOutbound(key),
+                      "nothing was swept, so the mark is kept for the pass that CAN see")
+        let skipped = rig.bus.emittedEvents.filter { $0.eventType == "calendar_share_sweep_skipped" }
+        XCTAssertEqual(skipped.count, 1)
+        XCTAssertEqual(skipped.first?.metadata["reason"], "no_calendar_access")
+    }
+
+    /// Sharing paused (signed out or consent withdrawn) means no Google
+    /// traffic at all — the sweep is not an exception.
+    func testSweepDoesNothingWhileSharingIsPaused() async {
+        let rig = makeService(signedIn: false)
+        let key = CalendarShareKey.oneOff(kind: .calendarEvent,
+                                         eventIdentifier: "evt-5")
+        rig.store.markOutbound(key)
+        rig.store.setGoogleEventID("g-twin", for: key)
+        rig.eventKit.vanishedIdentifiers = ["evt-5"]
+
+        rig.service.cleanupVanishedEvents()
+        await drainMain()
+
+        XCTAssertTrue(rig.eventKit.existenceChecks.isEmpty)
+        XCTAssertTrue(rig.gateway.deletedIDs.isEmpty)
+        XCTAssertTrue(rig.store.pending.isEmpty)
+        XCTAssertTrue(rig.store.isOutbound(key))
+    }
+
+    // MARK: - The no-change rule
+
+    /// **The fingerprint's whole purpose.** Without it the only options
+    /// are "re-write every twin on every pass" (a PUT per event per
+    /// launch, forever) or "never re-write", which silently drops the
+    /// edit that matters.
+    func testReconcilingTheSameEntriesTwiceEnqueuesWorkOnlyTheFirstTime() async {
+        let rig = makeService()
+        rig.gateway.createResults = ["g-1"]
+        let entry = medicationEntry()
+        let key = slotKey(entry.id)
+
+        rig.service.reconcileMedication([entry])
+        await waitUntil("the first pass to create the twin and record its fingerprint") {
+            rig.store.fingerprint(for: key) != nil
+        }
+        await drainMain()
+
+        let callsAfterFirstPass = rig.gateway.callLog
+        XCTAssertEqual(callsAfterFirstPass.filter { $0.hasPrefix("createEvent") }.count, 1)
+
+        // The same entries again — nothing about them changed.
+        rig.service.reconcileMedication([entry])
+        await drainMain()
+
+        XCTAssertEqual(rig.gateway.callLog, callsAfterFirstPass,
+                       "a second pass over unchanged content must send nothing")
+    }
+
+    // MARK: - eventCreated
+
+    func testEventCreatedQueuesAOneOffTwinKeyedByTheNativeEventID() async {
+        let rig = makeService()
+
+        rig.service.eventCreated(localEventId: "evt-1", title: "Doctor",
+                                 startDate: fakeNow, durationMinutes: 45)
+        await drainMain()
+
+        let key = CalendarShareKey.oneOff(kind: .calendarEvent, eventIdentifier: "evt-1")
+        XCTAssertEqual(rig.store.pending.map(\.key), [key],
+                       "the EventKit identifier is the join key — re-finding the event by title and time would be a guess two same-named events break")
+        XCTAssertEqual(rig.store.pending.first?.action, .create)
+        XCTAssertEqual(rig.store.pending.first?.durationMinutes, 45)
+        XCTAssertEqual(rig.store.pending.first?.attendeeEmails, ["maa@example.com"])
+    }
+
+    func testEventCreatedWithNobodyEligibleEnqueuesNothing() async {
+        let rig = makeService()
+        testContacts = []
+
+        rig.service.eventCreated(localEventId: "evt-1", title: "Doctor",
+                                 startDate: fakeNow, durationMinutes: 45)
+        await drainMain()
+
+        XCTAssertEqual(rig.store.pendingCount, 0)
+        XCTAssertTrue(rig.store.knownKeys.isEmpty)
+        XCTAssertTrue(rig.gateway.callLog.isEmpty,
+                      "no draft means no queue and no call — the no-op lives in the mapper")
+
+        // A contact with no address is equally ineligible, even the
+        // emergency one the editor refuses to save without an address.
+        let second = makeService()
+        testContacts = [FamilyContact(name: "राम", phone: "9812345678",
+                                             relationship: "छोरा",
+                                             isEmergencyContact: true)]
+        second.service.eventCreated(localEventId: "evt-2", title: "Doctor",
+                                    startDate: fakeNow, durationMinutes: 45)
+        await drainMain()
+        XCTAssertEqual(second.store.pendingCount, 0)
+        XCTAssertTrue(second.gateway.callLog.isEmpty)
+    }
+
+    // MARK: - Sign out
+
+    func testSignOutClearsTheLedgerAndSaysSo() async {
+        let rig = makeService()
+        let key = slotKey(UUID())
+        rig.store.setGoogleEventID("g-1", for: key)
+        rig.store.setFingerprint("fp-1", for: key)
+        rig.store.enqueue(queuedCreate(key: key))
+        rig.store.lastSyncAt = fakeNow
+
+        rig.service.signOut()
+        await drainMain()
+
+        XCTAssertEqual(rig.session.signOutCalls, 1)
+        XCTAssertTrue(rig.store.isEmpty,
+                      "the map and queue are the WORKING state of a share that can no longer happen")
+        XCTAssertTrue(rig.store.fingerprints.isEmpty,
+                      "the fingerprints describe content as the PREVIOUS account saw it")
+        XCTAssertNil(rig.store.lastSyncAt)
+        XCTAssertEqual(rig.service.status.connection, .signedOut)
+
+        let emitted = rig.bus.emittedEvents.filter { $0.eventType == "calendar_share_signed_out" }
+        XCTAssertEqual(emitted.count, 1)
+        XCTAssertEqual(emitted.first?.outcome, "success")
+    }
+
+    // MARK: - Inbound
+
+    func testAlreadyImportedGoogleEventIsNotImportedTwice() async {
+        let rig = makeService()
+        let twinKey = CalendarShareKey.oneOff(kind: .calendarEvent,
+                                              eventIdentifier: "evt-7")
+        rig.store.setGoogleEventID("g-1", for: twinKey)
+        rig.gateway.incomingPages = [GoogleIncomingPage(events: [incomingEvent(id: "g-1")],
+                                                       nextSyncToken: "tok-1")]
+
+        await rig.service.syncInbound()
+        await drainMain()
+
+        XCTAssertTrue(rig.gateway.acceptedEventIDs.isEmpty,
+                      "an event already mirrored locally must not be accepted and imported a second time")
+        XCTAssertTrue(rig.eventKit.created.isEmpty)
+    }
+
+    func testIncomingEventThatNeedsNoResponseIsIgnored() async {
+        let rig = makeService()
+        rig.gateway.incomingPages = [GoogleIncomingPage(
+            events: [incomingEvent(id: "g-2", needsResponse: false)],
+            nextSyncToken: "tok-1")]
+
+        await rig.service.syncInbound()
+        await drainMain()
+
+        XCTAssertEqual(rig.gateway.listedSyncTokens.count, 1)
+        XCTAssertTrue(rig.gateway.acceptedEventIDs.isEmpty,
+                      "only an event whose elder attendee says needsAction is acted on")
+        XCTAssertTrue(rig.eventKit.created.isEmpty)
+
+        // The continuation token is persisted even when nothing was
+        // imported — otherwise every poll rescans the same window.
+        rig.gateway.incomingPages = [GoogleIncomingPage(events: [], nextSyncToken: "tok-2")]
+        await rig.service.syncInbound()
+        await drainMain()
+        XCTAssertEqual(rig.gateway.listedSyncTokens.count, 2)
+        guard rig.gateway.listedSyncTokens.count == 2 else { return }
+        XCTAssertNil(rig.gateway.listedSyncTokens[0])
+        XCTAssertEqual(rig.gateway.listedSyncTokens[1], "tok-1",
+                       "the next poll asks for the incremental page")
+    }
+
+    func testDeniedCalendarAccessMakesNoInboundCallAtAll() async {
+        for blocked in [CalendarAccess.denied, .restricted, .notDetermined] {
+            let rig = makeService()
+            rig.eventKit.access = blocked
+            rig.gateway.incomingPages = [GoogleIncomingPage(events: [incomingEvent(id: "g-2")],
+                                                            nextSyncToken: "tok-1")]
+
+            await rig.service.syncInbound()
+            await drainMain()
+
+            XCTAssertTrue(rig.gateway.listedSyncTokens.isEmpty,
+                          "without calendar access there is nowhere to put an accepted invitation — the pass does not even list")
+            XCTAssertTrue(rig.eventKit.created.isEmpty)
+
+            let skipped = rig.bus.emittedEvents.filter {
+                $0.eventType == "calendar_share_inbound_skipped"
+            }
+            XCTAssertEqual(skipped.first?.outcome, "failure")
+            XCTAssertEqual(skipped.first?.metadata["reason"], "no_calendar_access")
+        }
+    }
+
+    func testOnLocalEventImportedFiresWhenSomethingWasImported() async {
+        let rig = makeService()
+        var importCallbacks = 0
+        rig.service.onLocalEventImported = { importCallbacks += 1 }
+        rig.gateway.incomingPages = [GoogleIncomingPage(events: [incomingEvent(id: "g-2")],
+                                                       nextSyncToken: "tok-1")]
+
+        await rig.service.syncInbound()
+        await drainMain()
+
+        XCTAssertEqual(rig.gateway.acceptedEventIDs, ["g-2"])
+        XCTAssertEqual(rig.eventKit.created.count, 1)
+        guard let written = rig.eventKit.created.first else {
+            return XCTFail("the accepted invitation must be written into the local calendar")
+        }
+        XCTAssertNil(written.calendarIdentifier,
+                     "the accepted invitation goes into the DEFAULT calendar so the existing import arms and fires it")
+        XCTAssertEqual(importCallbacks, 1,
+                       "the coordinator's cue to run the existing import now rather than at the next scan")
+        XCTAssertNotNil(rig.store.lastSyncAt)
+        XCTAssertEqual(
+            rig.store.googleEventID(for: CalendarShareKey.oneOff(
+                kind: .calendarEvent, eventIdentifier: "evt-1")),
+            "g-2",
+            "the pairing is remembered so a later deletion of the local event can still tombstone the twin")
+    }
+
+    func testOnLocalEventImportedDoesNotFireWhenNothingWasImported() async {
+        let rig = makeService()
+        var fired = false
+        rig.service.onLocalEventImported = { fired = true }
+        rig.gateway.incomingPages = [GoogleIncomingPage(
+            events: [incomingEvent(id: "g-3", needsResponse: false)],
+            nextSyncToken: nil)]
+
+        await rig.service.syncInbound()
+        await drainMain()
+
+        XCTAssertFalse(fired)
+    }
+
+    // MARK: - Observability
+
+    func testFlushedEventCarriesTheOutcomeAndCountsOnly() async {
+        let rig = makeService()
+        rig.gateway.createResults = ["g-1"]
+        let key = slotKey(UUID())
+        rig.store.enqueue(queuedCreate(key: key))
+
+        await rig.service.flushPending()
+        await drainMain()
+
+        let success = rig.bus.emittedEvents.filter { $0.eventType == "calendar_share_flushed" }
+        XCTAssertEqual(success.count, 1)
+        XCTAssertEqual(success.first?.component, "calendar_share")
+        XCTAssertEqual(success.first?.outcome, "success")
+        XCTAssertEqual(success.first?.metadata["applied"], "1")
+
+        let failing = makeService()
+        failing.gateway.createResults = []
+        failing.store.enqueue(queuedCreate(key: slotKey(UUID())))
+        await failing.service.flushPending()
+        await drainMain()
+
+        let failure = failing.bus.emittedEvents.filter {
+            $0.eventType == "calendar_share_flushed"
+        }
+        XCTAssertEqual(failure.count, 1)
+        XCTAssertEqual(failure.first?.outcome, "failure")
+        XCTAssertEqual(failure.first?.metadata["applied"], "0")
+    }
+
+    /// The privacy rule, asserted generically over EVERY event the
+    /// service emits: counts and classes only, never a title, never an
+    /// address (constitution Privacy / the release-log gate).
+    func testNoEmittedFieldEverCarriesATitleOrAnAddress() async {
+        let rig = makeService()
+        let title = "Amlodipine"
+        let address = "maa@example.com"
+        rig.gateway.createResults = ["g-1"]
+        let entry = medicationEntry(name: title)
+        let key = slotKey(entry.id)
+
+        rig.service.acceptConsent()
+        rig.service.reconcileMedication([entry])
+        await waitUntil("the reconcile's flush to commit") {
+            rig.store.fingerprint(for: key) != nil
+        }
+        rig.gateway.incomingPages = [GoogleIncomingPage(
+            events: [incomingEvent(id: "g-2", title: title)], nextSyncToken: "tok-1")]
+        await rig.service.syncInbound()
+        await drainMain()
+
+        // Force the refusal on the CALL itself (the family calendar is
+        // opened again first, so the pass really reaches the mutation),
+        // which is the honest way into the pause path — see the pause
+        // test above.
+        rig.gateway.ensureFamilyCalendarResults = ["family-cal"]
+        rig.gateway.createResults = []
+        rig.gateway.errorClassAfterFailure = .unauthorized
+        rig.store.enqueue(queuedCreate(key: key, title: title))
+        await rig.service.flushPending()
+        await drainMain()
+
+        rig.service.revokeConsent()
+        rig.service.signOut()
+        await drainMain()
+
+        XCTAssertFalse(rig.bus.emittedEvents.isEmpty,
+                       "the sequence must actually emit for the scan to be worth anything")
+        let types = Set(rig.bus.emittedEvents.map(\.eventType))
+        for expected in ["calendar_share_consent_accepted",
+                         "calendar_share_consent_revoked",
+                         "calendar_share_signed_out",
+                         "calendar_share_reconciled",
+                         "calendar_share_flushed",
+                         "calendar_share_flush_paused",
+                         "calendar_share_inbound"] {
+            XCTAssertTrue(types.contains(expected), "expected \(expected) to be emitted")
+        }
+
+        for event in rig.bus.emittedEvents {
+            var fields = [event.eventType, event.outcome, event.errorCode ?? ""]
+            fields += event.metadata.map { "\($0.key)=\($0.value)" }
+            for field in fields {
+                let haystack = field.lowercased()
+                XCTAssertFalse(haystack.contains(title.lowercased()),
+                               "\(event.eventType) leaked the event title in \"\(field)\"")
+                XCTAssertFalse(haystack.contains(address.lowercased()),
+                               "\(event.eventType) leaked a family address in \"\(field)\"")
+            }
+        }
+    }
+
+    // MARK: - Main-queue helpers
+
+    /// Runs the service's pending main-queue hops to completion.
+    ///
+    /// The service publishes status and commits its ledger from
+    /// `DispatchQueue.main.async` hops. This block is enqueued AFTER the
+    /// action returned and the main queue is serial, so by the time it
+    /// runs every hop the action scheduled has run too. Awaiting the
+    /// continuation (rather than blocking) also works when the test body
+    /// itself is on the main thread — the suspension frees the queue.
+    private func drainMain() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+    }
+
+    /// Polls `condition` while draining the main queue.
+    ///
+    /// A reconcile auto-flushes on a detached `Task` with no completion
+    /// handle, so there is nothing to await; polling is the honest way to
+    /// observe the end of that pass.
+    private func waitUntil(_ what: String, timeout: TimeInterval = 5,
+                           file: StaticString = #filePath, line: UInt = #line,
+                           _ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            await drainMain()
+            if condition() { return }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTFail("timed out waiting for \(what)", file: file, line: line)
+    }
+}
+
+// MARK: - Fakes
+
+/// The Google account seam. `isConfigured` is the graceful-degradation
+/// hinge: with no client id the SDK cannot even be initialised, and every
+/// surface has to say so instead of offering a button that cannot work.
+private final class FakeShareSession: GoogleAccountSessionProtocol {
+    var isConfigured = true
+    var isSignedIn = false
+    var accountEmail: String? = "maa@example.com"
+    var signInResult = true
+    private(set) var signInCalls = 0
+    private(set) var createAccountCalls = 0
+    private(set) var signOutCalls = 0
+    private(set) var accessTokenCalls = 0
+
+    func signIn() async -> Bool {
+        signInCalls += 1
+        isSignedIn = signInResult
+        return signInResult
+    }
+
+    func createAccount() async -> Bool {
+        createAccountCalls += 1
+        isSignedIn = signInResult
+        return signInResult
+    }
+
+    func signOut() {
+        signOutCalls += 1
+        isSignedIn = false
+        accountEmail = nil
+    }
+
+    func accessToken() async -> String? {
+        accessTokenCalls += 1
+        return isSignedIn ? "fake-token" : nil
+    }
+}
+
+/// The Google Calendar + People seam. Every method records what it was
+/// asked for, so the "the gateway receives NO calls" rules are asserted
+/// on the RECORDED CALLS rather than on a count.
+private final class FakeShareGateway: GoogleCalendarGatewayProtocol {
+
+    /// Canned answers, consumed in call order. An exhausted list means
+    /// the call FAILS (nil / false) — the retry path.
+    var ensureFamilyCalendarResults: [String?] = ["family-cal"]
+    var createResults: [String] = []
+    var updateResults: [Bool] = []
+    var deleteResults: [Bool] = []
+    var incomingPages: [GoogleIncomingPage] = []
+    var ensureContactResult = true
+    var acceptInvitationResult = true
+
+    /// What `lastErrorClass` reads as after a failed call — the
+    /// service's pause-vs-retry input. Settable so a test can start the
+    /// service in an already-paused state.
+    var lastErrorClass: GoogleShareError?
+    var errorClassAfterFailure: GoogleShareError? = .transport("test")
+
+    private(set) var ensureFamilyCalendarCalls = 0
+    private(set) var createdDrafts: [CalendarTwinDraft] = []
+    private(set) var updatedCalls: [(id: String, draft: CalendarTwinDraft)] = []
+    private(set) var deletedIDs: [String] = []
+    private(set) var ensuredContactEmails: [String] = []
+    /// The full `ensureContact` argument list — the name and phone matter
+    /// as much as the address (design §2.2 bullet 4: a contact created on
+    /// the family's side must arrive with the number the elder can be
+    /// reached on, not as a bare address).
+    private(set) var ensuredContacts: [(email: String, name: String?, phone: String?)] = []
+    private(set) var listedSyncTokens: [String?] = []
+    private(set) var acceptedEventIDs: [String] = []
+
+    /// Every call the service actually made, as readable labels. Grouped
+    /// by call kind (not ordered across kinds) — the point is that a
+    /// stray call of a DIFFERENT kind cannot hide behind a matching
+    /// total.
+    var callLog: [String] {
+        var log = Array(repeating: "ensureFamilyCalendar",
+                        count: ensureFamilyCalendarCalls)
+        log += createdDrafts.map { "createEvent:\($0.title)" }
+        log += updatedCalls.map { "updateEvent:\($0.id)" }
+        log += deletedIDs.map { "deleteEvent:\($0)" }
+        log += ensuredContactEmails.map { "ensureContact:\($0)" }
+        log += listedSyncTokens.map { _ in "listIncoming" }
+        log += acceptedEventIDs.map { "acceptInvitation:\($0)" }
+        return log
+    }
+
+    func ensureFamilyCalendar() async -> String? {
+        ensureFamilyCalendarCalls += 1
+        guard !ensureFamilyCalendarResults.isEmpty else {
+            lastErrorClass = errorClassAfterFailure
+            return nil
+        }
+        let result = ensureFamilyCalendarResults.removeFirst()
+        lastErrorClass = result == nil ? errorClassAfterFailure : nil
+        return result
+    }
+
+    func createEvent(_ draft: CalendarTwinDraft) async -> String? {
+        createdDrafts.append(draft)
+        guard !createResults.isEmpty else {
+            lastErrorClass = errorClassAfterFailure
+            return nil
+        }
+        lastErrorClass = nil
+        return createResults.removeFirst()
+    }
+
+    func updateEvent(id: String, with draft: CalendarTwinDraft) async -> Bool {
+        updatedCalls.append((id, draft))
+        guard !updateResults.isEmpty else {
+            lastErrorClass = errorClassAfterFailure
+            return false
+        }
+        let ok = updateResults.removeFirst()
+        lastErrorClass = ok ? nil : errorClassAfterFailure
+        return ok
+    }
+
+    func deleteEvent(id: String) async -> Bool {
+        deletedIDs.append(id)
+        guard !deleteResults.isEmpty else {
+            lastErrorClass = errorClassAfterFailure
+            return false
+        }
+        let ok = deleteResults.removeFirst()
+        lastErrorClass = ok ? nil : errorClassAfterFailure
+        return ok
+    }
+
+    func ensureContact(email: String, name: String?, phone: String?) async -> Bool {
+        ensuredContactEmails.append(email)
+        ensuredContacts.append((email, name, phone))
+        return ensureContactResult
+    }
+
+    func listIncoming(syncToken: String?) async -> GoogleIncomingPage? {
+        listedSyncTokens.append(syncToken)
+        guard !incomingPages.isEmpty else {
+            lastErrorClass = errorClassAfterFailure
+            return nil
+        }
+        lastErrorClass = nil
+        return incomingPages.removeFirst()
+    }
+
+    func acceptInvitation(eventId: String) async -> Bool {
+        acceptedEventIDs.append(eventId)
+        return acceptInvitationResult
+    }
+}
+
+/// The EventKit seam, used only by the inbound path. Records the drafts
+/// it was asked to write so a test can prove WHERE an accepted
+/// invitation lands.
+private final class FakeShareEventKit: EventKitCalendarGateway {
+    var access: CalendarAccess = .fullAccess
+    private(set) var created: [(draft: CalendarEventDraft,
+                                calendarIdentifier: String?)] = []
+    private(set) var removedIdentifiers: [String] = []
+    private(set) var fragmentRemovalRequests: [String] = []
+    /// The native events a test has deleted "in the Calendar app" — the
+    /// stale-twin sweep's only input. A set rather than an "exists"
+    /// closure so the default (empty) reads as the honest common case:
+    /// nothing has vanished unless a test says so.
+    var vanishedIdentifiers: Set<String> = []
+    private(set) var existenceChecks: [String] = []
+
+    var eventsAccess: CalendarAccess { access }
+
+    func requestFullAccess() async -> Bool { true }
+
+    func ensureSahayakCalendar(knownIdentifier: String?) -> String? { "sahayak-1" }
+
+    func fetchEvents(from start: Date, to end: Date) -> [CalendarEventRecord] { [] }
+
+    func eventExists(identifier: String) -> Bool {
+        existenceChecks.append(identifier)
+        return !vanishedIdentifiers.contains(identifier)
+    }
+
+    func createEvent(_ draft: CalendarEventDraft,
+                     in calendarIdentifier: String?) -> String? {
+        created.append((draft, calendarIdentifier))
+        return "evt-\(created.count)"
+    }
+
+    func updateEvent(identifier: String, with draft: CalendarEventDraft) -> Bool { false }
+
+    func removeEvent(identifier: String) -> Bool {
+        removedIdentifiers.append(identifier)
+        return false
+    }
+
+    func removeEvents(matchingNotesFragment fragment: String) -> Int {
+        fragmentRemovalRequests.append(fragment)
+        return 0
+    }
+}

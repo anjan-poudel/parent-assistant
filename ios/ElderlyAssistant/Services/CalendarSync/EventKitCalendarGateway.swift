@@ -41,7 +41,13 @@ struct CalendarEventRecord: Equatable {
 /// Recurrence shapes the app's mirrors can take — the RoutineEntry
 /// model's daily/weekly pair, in EventKit terms. Weekday numbering is
 /// the app's: 1 = Sunday … 7 = Saturday (matches `EKWeekday`).
-enum EventRecurrence: Equatable {
+///
+/// `Codable` (calendar & family sharing, 2026-09-16): the persistent
+/// share queue stores a draft's recurrence verbatim, so an operation
+/// enqueued before a relaunch still knows it was a series when it is
+/// flushed. Synthesized conformance — the associated value round-trips
+/// as `{"weekly":{"weekdays":[…]}}` / `{"daily":{}}`.
+enum EventRecurrence: Equatable, Codable {
     case daily
     case weekly(weekdays: [Int])
 }
@@ -116,6 +122,31 @@ protocol EventKitCalendarGateway: AnyObject {
     /// calendars) and returns the count removed — the legacy rebuild's
     /// wipe-by-tag. One commit for the whole batch.
     func removeEvents(matchingNotesFragment fragment: String) -> Int
+
+    /// Whether an event with this identifier is still in the store — the
+    /// stale-twin sweep's only question (`CalendarShareService`), which
+    /// asks it before deleting a twin from the family's calendar.
+    ///
+    /// A gateway that cannot answer says ALIVE: see the extension below.
+    func eventExists(identifier: String) -> Bool
+}
+
+extension EventKitCalendarGateway {
+    /// Fail-SAFE default: `true` ("I cannot tell you it is gone").
+    ///
+    /// The only thing a "gone" verdict can trigger is a DELETE on the
+    /// family's shared calendar — irreversible, and visible to everyone
+    /// the elder shares with. A wrong "gone" therefore costs an event the
+    /// family is relying on; a wrong "alive" costs one stale twin until
+    /// the next sweep. So the answer that cannot do harm is the default,
+    /// and every conformer that genuinely owns an event store (the
+    /// EventKit one, and the fakes that model it) overrides it.
+    ///
+    /// The sweep additionally refuses to run without FULL calendar access
+    /// — write-only access cannot read events at all, so every lookup
+    /// would answer nil and the sweep would delete everything it knows
+    /// about.
+    func eventExists(identifier: String) -> Bool { true }
 }
 
 // MARK: - Production gateway
@@ -128,6 +159,15 @@ final class EKCalendarGateway: EventKitCalendarGateway {
     static let sahayakCalendarTitle = "Sahayak"
 
     private let store = EKEventStore()
+
+    /// A real answer, unlike the protocol's fail-safe default: the store
+    /// either holds the identifier or it does not. `event(withIdentifier:)`
+    /// also returns the recurring-event MASTER for an occurrence's id,
+    /// which is what the sweep wants — a series the elder deleted in the
+    /// Calendar app takes its master with it.
+    func eventExists(identifier: String) -> Bool {
+        store.event(withIdentifier: identifier) != nil
+    }
 
     var eventsAccess: CalendarAccess {
         let status = EKEventStore.authorizationStatus(for: .event)

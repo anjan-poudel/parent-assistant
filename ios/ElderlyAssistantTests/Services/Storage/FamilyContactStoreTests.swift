@@ -119,6 +119,64 @@ final class FamilyContactStoreTests: XCTestCase {
                      "no address typed means nil — the navigation candidate list excludes the contact")
     }
 
+    // MARK: - Email (calendar & family sharing task, 2026-09-16)
+
+    func testEmailRoundTrips() {
+        // The address a Google Calendar invitation is sent to. Like the
+        // handle, the photo, the nickname and the address before it, the
+        // field is stored verbatim and read back — the share mapper is
+        // what decides whether a contact with no address gets an invite.
+        let store = FamilyContactStore(storage: InMemoryEncryptedStorage())
+        let contact = FamilyContact(name: "आमा", phone: "9812345678",
+                                    relationship: "आमा",
+                                    email: "maa@example.com",
+                                    isEmergencyContact: true)
+        XCTAssertTrue(store.add(contact))
+
+        let loaded = store.load()
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded.first?.email, "maa@example.com")
+    }
+
+    func testBlankEmailNormalizesToNilAndStoresNoAddress() {
+        // The editor funnels the typed field through
+        // `FamilyContactValidation.normalizedEmail` before saving, so a
+        // field the user tabbed through and left empty is stored as nil
+        // — never an empty string that every invite check would then have
+        // to special-case as "present but useless".
+        XCTAssertNil(FamilyContactValidation.normalizedEmail("   "))
+        XCTAssertNil(FamilyContactValidation.normalizedEmail("\n\t "))
+
+        let store = FamilyContactStore(storage: InMemoryEncryptedStorage())
+        let contact = FamilyContact(name: "राम", phone: "9812345678",
+                                    relationship: "छोरा",
+                                    email: FamilyContactValidation.normalizedEmail("  "))
+        XCTAssertTrue(store.add(contact))
+
+        XCTAssertNil(store.load().first?.email,
+                     "whitespace normalizes to no address at all")
+    }
+
+    func testLegacyPayloadWithoutEmailDecodesAsNil() {
+        // Same four-field legacy shape as the other backward-decode
+        // tests: a payload written before the email field existed loads
+        // email-less rather than failing the whole store read — the
+        // synthetic fallback contact `AppCoordinator` builds when the
+        // list is empty depends on it.
+        let storage = InMemoryEncryptedStorage()
+        let legacy = LegacyFamilyContact(id: UUID(), name: "राम",
+                                         phone: "9812345678", relationship: "छोरा")
+        guard case .success = storage.write(key: "family.contacts", value: [legacy]) else {
+            return XCTFail("legacy payload write failed")
+        }
+
+        let store = FamilyContactStore(storage: storage)
+        let loaded = store.load()
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertNil(loaded.first?.email,
+                     "a pre-email-field payload decodes email-less — such a contact simply receives no invitation")
+    }
+
     func testLegacyPayloadWithoutOptionalFieldsDecodesAsNil() {
         // Payloads written before the optional fields existed (the
         // unversioned store's only "migration" is each field being
@@ -245,12 +303,13 @@ final class FamilyContactStoreTests: XCTestCase {
 
 /// The pre-optional-fields contact shape — no `messengerHandle` (added
 /// 2026-09-06), no `photoFilename` (added 2026-09-07), no `nickname`
-/// (added 2026-09-07 by the family-wizard task) and no `address` (added
-/// 2026-09-07 by the directions task). It also lacks the
+/// (added 2026-09-07 by the family-wizard task), no `address` (added
+/// 2026-09-07 by the directions task) and no `email` (added 2026-09-16
+/// by the calendar & family sharing task). It also lacks the
 /// `isEmergencyContact` flag (added 2026-09-07 by the family-emergency
 /// task), which — unlike the optionals — decodes as false rather than
 /// nil. Exists to write old-shape payloads into storage for the
-/// backward-decode test; its JSON is byte-compatible with what the old
+/// backward-decode tests; its JSON is byte-compatible with what the old
 /// app version stored.
 private struct LegacyFamilyContact: Codable {
     let id: UUID

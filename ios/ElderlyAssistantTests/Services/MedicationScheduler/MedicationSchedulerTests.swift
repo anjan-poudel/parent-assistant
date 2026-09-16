@@ -168,6 +168,73 @@ final class MedicationSchedulerTests: XCTestCase {
         XCTAssertEqual(scheduler.pendingReminders.count, 2)
     }
 
+    // MARK: - Share observer (calendar & family sharing task, 2026-09-16)
+
+    func testLoadScheduleNotifiesTheShareObserverOnceWithTheStoredEntries() {
+        // The share layer observes every WRITE of the schedule, not every
+        // editor: the Settings editor, the voice `set_reminder` path and
+        // the app's own restore all funnel through `loadSchedule`, so one
+        // closure here covers all of them without any of them having to
+        // remember to tell the share layer.
+        let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+        var observed: [[MedicationEntry]] = []
+        scheduler.onScheduleChanged = { observed.append($0) }
+
+        scheduler.loadSchedule(entries: [entry])
+
+        XCTAssertEqual(observed.count, 1,
+                       "one notification per write — a second would re-queue the same twins")
+        XCTAssertEqual(observed.first?.map(\.id), [entry.id])
+        XCTAssertEqual(observed.first?.first?.medicationName, "Amlodipine")
+        XCTAssertEqual(scheduler.medicationEntries().map(\.id), [entry.id],
+                       "the entry the observer saw is the entry that was stored")
+    }
+
+    func testShareObserverFiresAfterTheLocalRemindersAreArmed() {
+        // "After" is asserted on what the observer can SEE, not on call
+        // order alone: at notification time the schedule and the pending
+        // list are already persisted and the platform alarm is already
+        // armed. The local reminder is the part the elder depends on —
+        // it must never be offered to the share layer half-applied.
+        let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+        let schedulerUnderTest = scheduler!
+        let alarm = mockAlarm!
+        let storage = mockStorage!
+        var storedAtNotification: [MedicationEntry]?
+        var pendingAtNotification: Int?
+        var alarmsAtNotification: Int?
+        var writesAtNotification: Int?
+        scheduler.onScheduleChanged = { entries in
+            storedAtNotification = entries
+            pendingAtNotification = schedulerUnderTest.pendingReminders.count
+            alarmsAtNotification = alarm.scheduledReminders.count
+            writesAtNotification = storage.writeCallCount
+        }
+
+        scheduler.loadSchedule(entries: [entry])
+
+        XCTAssertEqual(storedAtNotification?.map(\.id), [entry.id])
+        XCTAssertEqual(pendingAtNotification, 1,
+                       "the pending reminder exists before the share layer is told")
+        XCTAssertEqual(alarmsAtNotification, 1,
+                       "and it is already armed with the platform alarm")
+        XCTAssertGreaterThanOrEqual(writesAtNotification ?? 0, 2,
+                                    "the entries and the pending list are already persisted")
+    }
+
+    func testLoadScheduleWithNoObserverStillWorks() {
+        // The observer is optional and the scheduler never depends on it
+        // being there — the share feature is an addition to the
+        // medication path, not a prerequisite for it.
+        let entry = makeMedicationEntry(name: "Amlodipine", timeHour: 8, timeMinute: 0)
+
+        scheduler.onScheduleChanged = nil
+        scheduler.loadSchedule(entries: [entry])
+
+        XCTAssertEqual(scheduler.pendingReminders.count, 1)
+        XCTAssertEqual(scheduler.medicationEntries().count, 1)
+    }
+
     // MARK: - Persistence before alarm
 
     func testPersistenceBeforeAlarmOnScheduleAll() {

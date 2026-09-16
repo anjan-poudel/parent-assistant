@@ -113,6 +113,60 @@ final class VoiceCalendarEventWriterTests: XCTestCase {
         XCTAssertEqual(gateway.created.count, 1, "the attempt is still recorded")
     }
 
+    // MARK: - Creation report (calendar & family sharing task, 2026-09-16)
+
+    /// The share layer's Google twin is keyed by the native event
+    /// IDENTIFIER, and `create` answers only "did it land" — so the
+    /// writer reports what landed while it still has it. Re-finding the
+    /// event by title and time after the fact would be a guess that two
+    /// same-named events break.
+    func testSuccessfulCreateReportsTheWrittenEventToTheObserver() {
+        var reports: [CalendarEventCreation] = []
+        writer.onEventCreated = { reports.append($0) }
+
+        let written = writer.create(title: "Doctor appointment", startDate: start,
+                                    durationMinutes: 45)
+
+        XCTAssertTrue(written)
+        XCTAssertEqual(reports.count, 1)
+        XCTAssertEqual(reports.first?.localEventId, "evt-1",
+                       "the identifier EventKit just handed back is the join key")
+        XCTAssertEqual(reports.first?.title, "Doctor appointment")
+        XCTAssertEqual(reports.first?.startDate, start)
+        XCTAssertEqual(reports.first?.durationMinutes, 45)
+        XCTAssertEqual(reports.first?.title, gateway.created.first?.draft.title,
+                       "the report describes the draft that was really written")
+    }
+
+    /// Only on success: the observer is told about an event that EXISTS,
+    /// never about an attempt. Reporting a refused save would invite the
+    /// family to an event nobody can see.
+    func testFailedCreateReportsNothingToTheObserver() {
+        gateway.createResult = false
+        var reports: [CalendarEventCreation] = []
+        writer.onEventCreated = { reports.append($0) }
+
+        let written = writer.create(title: "Doctor", startDate: start, durationMinutes: 30)
+
+        XCTAssertFalse(written)
+        XCTAssertTrue(reports.isEmpty,
+                      "a failed save has no identity to report — and no event to share")
+    }
+
+    /// The observer is absent by default, and a writer without one
+    /// behaves exactly as it did before the share layer existed: the
+    /// voice path is already shipped and must not depend on an observer
+    /// being installed.
+    func testAWriterWithNoObserverStillCreates() {
+        XCTAssertNil(writer.onEventCreated)
+
+        let written = writer.create(title: "Doctor", startDate: start, durationMinutes: 30)
+
+        XCTAssertTrue(written)
+        XCTAssertEqual(gateway.created.count, 1)
+        XCTAssertEqual(gateway.created.first?.draft.title, "Doctor")
+    }
+
     func testEventsAccessMirrorsTheGateway() {
         gateway.access = .denied
         XCTAssertEqual(writer.eventsAccess, .denied)
