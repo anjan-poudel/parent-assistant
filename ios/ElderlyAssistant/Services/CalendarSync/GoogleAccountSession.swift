@@ -25,6 +25,17 @@ import GoogleSignIn
 /// feature needs, which is why `signIn()` reports a four-way outcome
 /// rather than a Bool.
 ///
+/// A connected account is RESTORED at launch (2026-09-17), not merely
+/// read. The SDK keeps the account and its tokens in the Keychain but
+/// holds the live session in memory, and `currentUser` is nil in a cold
+/// process until `restorePreviousSignIn` has run — so `isSignedIn` alone
+/// reported every connected household as signed out on every launch, the
+/// card showed the pre-connect state, and events created before the
+/// elder signed in again were never shared (the queue is gated on
+/// `isSignedIn`). `restorePreviousSession()` is that missing step: no
+/// sheet, no user interaction, one Keychain read plus at most one token
+/// refresh, and an honest "nothing was brought back" when it fails.
+///
 /// Nothing personal is stored here. The SDK keeps the account and its
 /// tokens in the Keychain; this type adds no storage of its own — in
 /// particular it never mirrors a token into `UserDefaults`, where a
@@ -156,6 +167,10 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
 
     var isConfigured: Bool { clientID != nil }
 
+    /// The SDK's IN-MEMORY user. Nil in a process that has not restored
+    /// or signed in yet, whatever the Keychain holds — see
+    /// `restorePreviousSession()`, which is what makes this true at
+    /// launch for an already-connected household.
     var isSignedIn: Bool { GIDSignIn.sharedInstance.currentUser != nil }
 
     var accountEmail: String? { GIDSignIn.sharedInstance.currentUser?.profile?.email }
@@ -232,6 +247,81 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
         await interactiveFlow(event: "calendar_share_session_create_account")
     }
 
+    /// Brings back the account a previous launch connected (2026-09-17).
+    ///
+    /// This is the SDK's own documented app-start entry point: its header
+    /// says not to call `signIn` during launch and to call
+    /// `restorePreviousSignIn` instead. Nothing is presented, no
+    /// presenter is consulted, and it is safe to call before a window
+    /// exists — which is precisely where it is called from.
+    ///
+    /// Idempotent and cheap when a session is already in memory: a signed
+    /// in device answers `connected`/`connectedWithoutScopes` from the
+    /// live user without touching the Keychain again. That is what lets
+    /// the call sit on the foreground path as well as the launch path —
+    /// a restore that failed at launch (offline, Google unreachable for
+    /// the token refresh) is simply retried on the next activation
+    /// instead of leaving the household signed out for the whole process.
+    ///
+    /// The scope grant is READ, never requested: a restored account that
+    /// is missing `calendar.events`/`contacts` is reported honestly as
+    /// `connectedWithoutScopes` and no sheet is shown. Asking at launch
+    /// would put Google's consent screen in front of an elder who
+    /// opened the app to check the time.
+    func restorePreviousSession() async -> GoogleSessionOutcome {
+        guard let clientID else {
+            // Same degradation as the interactive flows: with no OAuth
+            // client the SDK cannot be configured, so there is nothing
+            // to restore and nothing is claimed. No event beyond the
+            // failure is emitted, because nothing was attempted.
+            emit("calendar_share_session_restore_failed", outcome: "failure",
+                 errorCode: "not_configured")
+            return .unavailable
+        }
+        if isSignedIn {
+            // Already live in this process — a foreground re-entry, or a
+            // restore that landed earlier. Re-running it would re-read
+            // the Keychain for an answer already held, and reporting a
+            // skip as a restore would inflate the event the launch path
+            // is read for.
+            emit("calendar_share_session_restore_skipped", outcome: "success")
+            return hasRequiredScopes ? .connected : .connectedWithoutScopes
+        }
+        // Read before the hop, like `interactiveFlow`: the SDK object is
+        // the seam, and it must not be re-read from inside the awaited
+        // call.
+        let flow = self.flow
+        let outcome = await Self.runRestore(clientID: clientID, flow: flow)
+        switch outcome {
+        case .restored:
+            emit("calendar_share_session_restore", outcome: "success")
+            return .connected
+        case .restoredWithoutScopes:
+            // Restored, and unable to share. Its own event rather than a
+            // failure, exactly as on the interactive path: the session
+            // is REAL, and what is missing is a grant the family can
+            // give from Settings.
+            emit("calendar_share_session_restore_scopes_missing",
+                 outcome: "failure", errorCode: "scopes_not_granted")
+            return .connectedWithoutScopes
+        case .noPreviousSession:
+            // A fresh install, or an elder who signed out — the ordinary
+            // state of a device that never connected, and NOT a failure.
+            // The card's `signedOut` is the truth here.
+            emit("calendar_share_session_restore_no_previous", outcome: "success")
+            return .unavailable
+        case .failed(let code):
+            // A revoked grant, a Keychain failure, a dead network on the
+            // refresh. The session is left exactly as it is — absent —
+            // which is the honest degradation: `isSignedIn` stays false,
+            // the card says signed out, and the next launch or
+            // activation tries again.
+            emit("calendar_share_session_restore_failed", outcome: "failure",
+                 errorCode: code)
+            return .unavailable
+        }
+    }
+
     /// Drops the session. Synchronous, and safe off the main actor: the
     /// SDK clears its Keychain entry and does no UI work here, so there is
     /// nothing to hop for — and the protocol is synchronous, so a hop
@@ -270,7 +360,7 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
         return token
     }
 
-    // MARK: - Interactive flow
+    // MARK: - Flow internals
 
     /// The five ways an interactive flow can end. `signedIn`,
     /// `signedInWithoutScopes` and `cancelled` are user outcomes; the
@@ -336,6 +426,58 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
         case .failed(let code):
             emit("\(event)_failed", outcome: "failure", errorCode: code)
             return .unavailable
+        }
+    }
+
+    /// How a RESTORE ended.
+    ///
+    /// Its own type rather than a reuse of `FlowOutcome`, and the two
+    /// share no interesting case: a restore is never cancelled (it shows
+    /// no sheet), never lacks a presenter (it takes none), and cannot
+    /// come back "signed in" with nothing to say about it — while an
+    /// interactive flow can never end in "there was nobody to sign in".
+    /// One shared enum would mean writing two branches that can never run
+    /// and hoping no reader takes them for live paths.
+    private enum RestoreOutcome: Equatable {
+        /// A session is back AND holds every scope the share path needs.
+        case restored
+        /// A session is back, without the Calendar/contacts grant. Not
+        /// asked for again here — see `restorePreviousSession`.
+        case restoredWithoutScopes
+        /// The SDK held no account to restore.
+        case noPreviousSession
+        /// The SDK failed. Carries its NUMERIC code only, never the
+        /// error's description (constitution C9).
+        case failed(String)
+    }
+
+    /// One restore, on the main actor, as a value.
+    ///
+    /// The configuration step is the SAME one the interactive flow runs,
+    /// and it has to happen first: `GIDConfiguration` carries the OAuth
+    /// client id, and a restore that needs to refresh an expired token
+    /// with no configuration to refresh against would fail for a reason
+    /// that has nothing to do with the household's account.
+    ///
+    /// `hasPreviousSignIn` is asked BEFORE the restore so "nothing stored
+    /// to restore" is a value the caller can report as the ordinary state
+    /// it is, rather than as an SDK error the family should worry about.
+    /// The SDK's own header documents the same split.
+    @MainActor private static func runRestore(clientID: String,
+                                              flow: GoogleAuthFlow) async -> RestoreOutcome {
+        configureSDK(clientID: clientID)
+        guard flow.hasPreviousSignIn() else { return .noPreviousSession }
+        do {
+            let granted = try await flow.restorePreviousSignIn()
+            return grantsRequiredScopes(granted) ? .restored
+                                                 : .restoredWithoutScopes
+        } catch {
+            // Every failure lands here — a revoked grant
+            // (`hasNoAuthInKeychain`), a Keychain error, a cancelled
+            // refresh, a dead network. They are told apart by the numeric
+            // code in observability and are the SAME state to the app: no
+            // session, honestly reported.
+            return .failed("sdk_\((error as NSError).code)")
         }
     }
 
@@ -482,6 +624,26 @@ final class GoogleSignInAuthFlow: GoogleAuthFlow {
     func signIn(presenting controller: UIViewController) async throws -> [String] {
         let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: controller)
         return result.user.grantedScopes ?? []
+    }
+
+    /// The SDK's Keychain cache, asked synchronously (there is nothing to
+    /// await: no network, no UI, no callback — the header declares this
+    /// as a plain `BOOL`).
+    func hasPreviousSignIn() -> Bool {
+        GIDSignIn.sharedInstance.hasPreviousSignIn()
+    }
+
+    /// The async form of `restorePreviousSignInWithCompletion:`, taken
+    /// from the SAME Objective-C entry point: the completion's nullable
+    /// `user` becomes the thrown error case, so a returned user is a real
+    /// session and the only open question is what it was allowed to do.
+    ///
+    /// Configure-only-when-needed is deliberate, and inside the SDK's
+    /// contract: restoring an account whose token is still valid does no
+    /// network work at all.
+    func restorePreviousSignIn() async throws -> [String] {
+        let user = try await GIDSignIn.sharedInstance.restorePreviousSignIn()
+        return user.grantedScopes ?? []
     }
 
     func addScopes(_ scopes: [String],

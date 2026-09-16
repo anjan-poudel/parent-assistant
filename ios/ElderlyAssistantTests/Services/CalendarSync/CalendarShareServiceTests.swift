@@ -316,6 +316,100 @@ final class CalendarShareServiceTests: XCTestCase {
         XCTAssertTrue(rig.gateway.callLog.isEmpty)
     }
 
+    // MARK: - Launch restore (2026-09-17)
+
+    /// The bug the whole restore path exists for, end to end through the
+    /// service: at cold launch the session reads SIGNED OUT (the SDK's
+    /// user lives in memory, not in the Keychain), the card shows the
+    /// pre-connect state, and anything queued before the elder last quit
+    /// is gated behind a sign-in they have no reason to perform again.
+    ///
+    /// Both halves are asserted together because they are one story: the
+    /// STATUS has to come back (the card), and the QUEUE has to drain
+    /// (the family's events).
+    func testRestoreRepublishesTheStatusAndDrainsTheQueueThatWaitedForIt() async {
+        let rig = makeService(signedIn: false, consented: true)
+        rig.gateway.createResults = ["g-1"]
+        rig.store.enqueue(queuedCreate(key: slotKey(UUID())))
+        await drainMain()
+        XCTAssertEqual(rig.service.status.connection, .signedOut,
+                       "the cold-launch state: stored account, unread session")
+
+        rig.session.restoreOutcome = .connected
+        let restored = await rig.service.restoreSession()
+        await drainMain()
+
+        XCTAssertTrue(restored)
+        XCTAssertEqual(rig.session.restoreCalls, 1)
+        XCTAssertEqual(rig.service.status.connection,
+                       .connected(email: "maa@example.com"),
+                       "the card shows the restored 'signed in as' account without the elder signing in again")
+        XCTAssertEqual(rig.gateway.createdDrafts.count, 1,
+                       "and the work that waited for the session lands at launch")
+        XCTAssertEqual(rig.store.pendingCount, 0)
+    }
+
+    /// Restored WITHOUT the Calendar/contacts grant: a real session that
+    /// cannot share. Same honest state the interactive path produces, and
+    /// nothing is drained into a token that would 401 item by item.
+    func testRestoreWithoutTheGrantLeavesTheUnscopedStateAndDrainsNothing() async {
+        let rig = makeService(signedIn: false, consented: true)
+        rig.store.enqueue(queuedCreate(key: slotKey(UUID())))
+        await drainMain()
+
+        rig.session.restoreOutcome = .connectedWithoutScopes
+        let restored = await rig.service.restoreSession()
+        await drainMain()
+
+        XCTAssertFalse(restored,
+                       "the return value means 'can share', and this account cannot")
+        XCTAssertEqual(rig.service.status.connection,
+                       .connectedWithoutScopes(email: "maa@example.com"))
+        XCTAssertTrue(rig.gateway.callLog.isEmpty,
+                      "nothing is drained into a token with no calendar grant")
+        XCTAssertEqual(rig.store.pendingCount, 1,
+                       "and nothing is lost by waiting — the queue is exactly as it was")
+    }
+
+    /// A restore that brings nothing back — no stored account, a revoked
+    /// grant, a Keychain the SDK cannot read. It degrades to the state a
+    /// device that never connected sits in, which is what the card says:
+    /// no session, no error line, and the family's queued work intact
+    /// for the next attempt.
+    func testAFailedRestoreLeavesTheSignedOutStateExactlyAsItWas() async {
+        let rig = makeService(signedIn: false, consented: true, configured: true)
+        rig.store.enqueue(queuedCreate(key: slotKey(UUID())))
+        rig.session.restoreOutcome = .unavailable
+        await drainMain()
+
+        let restored = await rig.service.restoreSession()
+        await drainMain()
+
+        XCTAssertFalse(restored)
+        XCTAssertEqual(rig.session.restoreCalls, 1, "the restore was attempted, not skipped")
+        XCTAssertEqual(rig.service.status.connection, .signedOut,
+                       "a restore that did not arrive is the signed-out state, not a new error state")
+        XCTAssertNil(rig.service.status.lastError,
+                     "nothing was attempted against Google, so there is no share failure to report")
+        XCTAssertTrue(rig.gateway.callLog.isEmpty)
+        XCTAssertEqual(rig.store.pendingCount, 1,
+                       "a failed restore must not eat the family's pending work")
+    }
+
+    /// No OAuth client in the bundle: the restore has nothing to work
+    /// with, and the card keeps saying so rather than flickering to a
+    /// state it cannot be in.
+    func testRestoreIsInertWithoutAnOAuthClient() async {
+        let rig = makeService(signedIn: false, consented: true, configured: false)
+        await drainMain()
+
+        let restored = await rig.service.restoreSession()
+        await drainMain()
+
+        XCTAssertFalse(restored)
+        XCTAssertEqual(rig.service.status.connection, .notConfigured)
+    }
+
     // MARK: - Flush: create
 
     func testSuccessfulCreateRecordsTheGoogleIDAndTheDraftFingerprint() async {
@@ -1385,9 +1479,14 @@ private final class FakeShareSession: GoogleAccountSessionProtocol {
     var hasRequiredScopes = true
     /// What the interactive flow reports.
     var signInOutcome: GoogleSessionOutcome = .connected
+    /// What the launch restore reports. Default `.unavailable`: the
+    /// ordinary state of a fake with no stored session, so a rig that
+    /// never mentions restore keeps behaving exactly as before.
+    var restoreOutcome: GoogleSessionOutcome = .unavailable
     private(set) var signInCalls = 0
     private(set) var createAccountCalls = 0
     private(set) var signOutCalls = 0
+    private(set) var restoreCalls = 0
     private(set) var accessTokenCalls = 0
 
     /// Signs the fake in (or not) exactly the way the real session does:
@@ -1396,18 +1495,28 @@ private final class FakeShareSession: GoogleAccountSessionProtocol {
     /// no session at all.
     func signIn() async -> GoogleSessionOutcome {
         signInCalls += 1
-        applyFlowOutcome()
+        apply(signInOutcome)
         return signInOutcome
     }
 
     func createAccount() async -> GoogleSessionOutcome {
         createAccountCalls += 1
-        applyFlowOutcome()
+        apply(signInOutcome)
         return signInOutcome
     }
 
-    private func applyFlowOutcome() {
-        switch signInOutcome {
+    /// The launch path, with the same outcome semantics as the
+    /// interactive ones: a restore that comes back `.unavailable` leaves
+    /// the fake signed out, which is the state the service has to render
+    /// honestly.
+    func restorePreviousSession() async -> GoogleSessionOutcome {
+        restoreCalls += 1
+        apply(restoreOutcome)
+        return restoreOutcome
+    }
+
+    private func apply(_ outcome: GoogleSessionOutcome) {
+        switch outcome {
         case .connected:
             isSignedIn = true
             hasRequiredScopes = true

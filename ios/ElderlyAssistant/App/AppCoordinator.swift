@@ -8454,6 +8454,17 @@ self.noteTalkContractChanged()
     /// enqueue is the only thing that can produce work, so an unchanged
     /// schedule costs a few local reads and zero requests — which is
     /// what makes it safe to run on every activation.
+    ///
+    /// [GOOGLE-RESTORE] (2026-09-17) The SDK's stored session is restored
+    /// FIRST, and the pass is SEQUENCED behind it rather than raced with
+    /// it. Every gate in the pass reads `session.isSignedIn`, which is
+    /// nil in a cold process until a restore has run — so a pass that
+    /// went first would judge a connected household signed out,
+    /// reconcile nothing and drain nothing, and the family's already
+    /// queued events would wait for the next activation (the
+    /// silent-skip this change exists to remove). The restore is
+    /// idempotent, so the cost of this on every activation is one
+    /// in-memory check.
     func syncCalendarShare() {
         let share = calendarShareService
         share.locale = activeLocale
@@ -8466,6 +8477,24 @@ self.noteTalkContractChanged()
             // reminder that fires and alerts a caregiver.
             Task { await self?.externalCalendar.rescan() }
         }
+        Task { [weak self] in
+            // Nothing may present from here: a restore takes no
+            // presenter and shows no sheet, which is what makes it safe
+            // at launch — before the window the sign-in flow needs
+            // exists.
+            await share.restoreSession()
+            await MainActor.run { self?.runCalendarSharePass() }
+        }
+    }
+
+    /// The reconcile/flush half of `syncCalendarShare()`, run once the
+    /// session restore has landed.
+    ///
+    /// Main-confined: it reads the coordinator's published schedules and
+    /// the free-form event index, both of which are only ever mutated on
+    /// the main queue.
+    private func runCalendarSharePass() {
+        let share = calendarShareService
         share.reconcileMedication(medicationScheduler.medicationEntries())
         share.reconcileRoutines(routineScheduler.entries())
         // Swept BEFORE the flush, so a twin whose local event the elder

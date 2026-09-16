@@ -628,6 +628,9 @@ private final class FakeSession: GoogleAccountSessionProtocol {
 
     func signIn() async -> GoogleSessionOutcome { isSignedIn ? .connected : .cancelled }
     func createAccount() async -> GoogleSessionOutcome { isSignedIn ? .connected : .cancelled }
+    /// The launch restore is not this file's subject — the gateway only
+    /// ever asks for a token — so it answers the honest "nothing restored".
+    func restorePreviousSession() async -> GoogleSessionOutcome { .unavailable }
     func signOut() { isSignedIn = false }
     func accessToken() async -> String? { token }
 }

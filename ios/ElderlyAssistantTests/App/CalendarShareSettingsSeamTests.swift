@@ -264,6 +264,11 @@ private final class FakeCancellingSession: GoogleAccountSessionProtocol {
     }
 
     func createAccount() async -> GoogleSessionOutcome { .cancelled }
+    /// The launch restore is not what this file drives — it is covered
+    /// where the outcome matrix lives (`GoogleAccountSessionTests`) and
+    /// where the status is republished (`CalendarShareServiceTests`).
+    /// Here it answers the honest "nothing restored".
+    func restorePreviousSession() async -> GoogleSessionOutcome { .unavailable }
     func signOut() {}
     func accessToken() async -> String? { nil }
 }
