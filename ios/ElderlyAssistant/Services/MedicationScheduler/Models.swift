@@ -111,6 +111,35 @@ struct MedicationEntry: Codable, Identifiable {
                                                                forKey: .confirmationDescription)
         visualAids = try container.decodeIfPresent([VisualAid].self, forKey: .visualAids) ?? []
     }
+
+    /// The same medication with a different set of dose times — the
+    /// copy-with a calendar-driven edit needs (rich-events task,
+    /// 2026-09-17). Every field but `scheduleTimes` is preserved
+    /// verbatim, which is the whole point: a family retiming a dose in
+    /// the Calendar app must not reset the ack window, the refire count
+    /// or the escalation window the caregiver configured, and must not
+    /// touch the visual aids they attached.
+    ///
+    /// A method on the model rather than a memberwise rebuild at the
+    /// call site: the entry has thirteen fields and the compiler cannot
+    /// notice a dropped one when the initializer has defaults.
+    func withScheduleTimes(_ times: [DateComponents]) -> MedicationEntry {
+        MedicationEntry(
+            id: id,
+            userProfileId: userProfileId,
+            medicationName: medicationName,
+            doseDescription: doseDescription,
+            scheduleTimes: times,
+            frequency: frequency,
+            ackWindowMinutes: ackWindowMinutes,
+            maxRefireCount: maxRefireCount,
+            escalationWindowMinutes: escalationWindowMinutes,
+            doubleDoseWindowHours: doubleDoseWindowHours,
+            photoVerificationEnabled: photoVerificationEnabled,
+            confirmationDescription: confirmationDescription,
+            visualAids: visualAids
+        )
+    }
 }
 
 // MARK: - Scheduled Reminder (runtime, persisted before OS alarm)

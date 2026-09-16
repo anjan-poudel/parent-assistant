@@ -26,7 +26,8 @@ final class ExternalReminderMappingTests: XCTestCase {
                            hasAlarms: Bool = false,
                            notes: String? = nil,
                            calendarIdentifier: String? = nil,
-                           title: String = "Doctor visit") -> ScannedEvent {
+                           title: String = "Doctor visit",
+                           location: String? = nil) -> ScannedEvent {
         ScannedEvent(
             nativeIdentifier: id,
             title: title,
@@ -36,7 +37,8 @@ final class ExternalReminderMappingTests: XCTestCase {
             isDeclined: declined,
             hasAlarms: hasAlarms,
             calendarIdentifier: calendarIdentifier,
-            calendarName: "Family"
+            calendarName: "Family",
+            location: location
         )
     }
 
@@ -161,6 +163,77 @@ final class ExternalReminderMappingTests: XCTestCase {
             [completed, dateless, pastDue, dueNow], now: now)
         XCTAssertTrue(mapped.isEmpty,
                       "completed / dateless / already-due reminders are not reminders of anything still ahead")
+    }
+
+    // MARK: - Deep-link gating (rich-events task, 2026-09-17)
+
+    /// `action(for:)` decides whether an armed reminder gets an Open
+    /// button at all (design §4). It is the ONLY place that decision is
+    /// made — `UNExternalReminderScheduler` sets the category and the
+    /// event id together when an action exists — so "there is a button"
+    /// and "there is a destination" cannot drift apart.
+    func testAnEventWithAnAddressGetsADeepLinkToItself() {
+        let item = makeReminder(from: makeEvent(location: "Tilganga, Kathmandu"))
+        let action = ExternalCalendarService.action(for: item)
+        XCTAssertEqual(action, ExternalReminderAction(eventIdentifier: "evt-1"),
+                       "the id is the NATIVE event identifier — the same id the "
+                       + "side index and the detail screen key on")
+    }
+
+    func testAnEventWithoutAnAddressGetsNoAction() {
+        XCTAssertNil(ExternalCalendarService.action(for: makeReminder(from: makeEvent())))
+        XCTAssertNil(ExternalCalendarService.action(
+            for: makeReminder(from: makeEvent(location: "   "))),
+            "a whitespace-only location is no location — nowhere to go, no button")
+    }
+
+    /// Imported REMINDERS have no event behind them (their native id is
+    /// nil by construction), and a location alone must never be enough:
+    /// the deep link points at an event detail screen.
+    func testAReminderSourceNeverGetsAnActionEvenWithALocation() {
+        let item = ExternalReminder(
+            id: "rmd-key", source: .reminder, title: "Call the doctor",
+            notes: nil, startDate: date(hour: 12), isAllDay: false,
+            hasOwnAlarm: false, calendarName: "Home List",
+            nativeEventIdentifier: nil, location: "Kathmandu")
+        XCTAssertNil(ExternalCalendarService.action(for: item))
+    }
+
+    /// An event that somehow reached the mapping without a native id —
+    /// nothing to deep-link to, so no button.
+    func testAnEventWithNoNativeIdentifierGetsNoAction() {
+        let item = ExternalReminder(
+            id: "key", source: .event, title: "Doctor visit", notes: nil,
+            startDate: date(hour: 12), isAllDay: false, hasOwnAlarm: false,
+            calendarName: "Family", nativeEventIdentifier: nil,
+            location: "Kathmandu")
+        XCTAssertNil(ExternalCalendarService.action(for: item))
+    }
+
+    /// The mapping carries the address and the native id through from the
+    /// scan — the two fields the gate above reads.
+    func testMapEventsCarriesLocationAndNativeIdentifierThrough() {
+        let item = makeReminder(from: makeEvent(location: "Patan Durbar Square"))
+        XCTAssertEqual(item.location, "Patan Durbar Square")
+        XCTAssertEqual(item.nativeEventIdentifier, "evt-1")
+        XCTAssertTrue(item.hasAddress)
+    }
+
+    /// The mapping carries `EKEvent.location` through verbatim (the
+    /// scanner neither invents nor trims it); the "is that an address?"
+    /// question is answered in ONE place — `hasAddress` — so the Go
+    /// button, the Open action and the Google twin's location row can
+    /// never disagree about a whitespace-only value.
+    func testABlankLocationIsCarriedButReadsAsNoAddress() {
+        let item = makeReminder(from: makeEvent(location: "   "))
+        XCTAssertEqual(item.location, "   ",
+                       "verbatim: the mapping is a pass-through, not a normalizer")
+        XCTAssertFalse(item.hasAddress)
+        XCTAssertNil(ExternalCalendarService.action(for: item))
+    }
+
+    private func makeReminder(from event: ScannedEvent) -> ExternalReminder {
+        ExternalCalendarService.mapEvents([event], now: now).first!
     }
 
     // MARK: - Notification identity namespace

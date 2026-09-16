@@ -342,17 +342,24 @@ final class CalendarShareService: ObservableObject {
 
     // MARK: - Reconcile: calendar events
 
-    /// A one-off event was created locally (voice or import). Shares it,
-    /// when the policy says anyone wants it.
+    /// A one-off event was created locally (voice, import, or the Events
+    /// form). Shares it, when the policy says anyone wants it.
+    ///
+    /// `location` is the address the elder typed (rich-events task,
+    /// 2026-09-17): it rides into the twin's Google `location` row, which
+    /// is what makes the family's invitation open in their own maps.
+    /// Defaulted to nil so the voice-created path, which has no address
+    /// field, is unchanged.
     func eventCreated(localEventId: String, title: String, startDate: Date,
-                      durationMinutes: Int) {
+                      durationMinutes: Int, location: String? = nil) {
         onMain { [weak self] in
             guard let self, self.canShare else { return }
             let key = CalendarShareKey.oneOff(kind: .calendarEvent,
                                              eventIdentifier: localEventId)
             guard let draft = CalendarShareMapper.calendarEventDraft(
                 title: title, startDate: startDate, durationMinutes: durationMinutes,
-                contacts: self.contactsProvider(), notifySettings: self.notifySettings
+                contacts: self.contactsProvider(), notifySettings: self.notifySettings,
+                location: location
             ) else {
                 // Nobody is eligible — including the case where the only
                 // candidate has no email. Nothing is queued, and no twin is
@@ -417,17 +424,90 @@ final class CalendarShareService: ObservableObject {
         }
     }
 
+    /// Carries the free-form events' CURRENT native state over to their
+    /// twins (rich-events task, 2026-09-17; design §3: "edits/deletes via
+    /// a foreground reconcile of side-index-tracked events").
+    ///
+    /// A free-form event is native by construction, so the Calendar app's
+    /// copy — which the elder, the family and the Events form all edit —
+    /// is the source of truth, and this pass is the bridge to Google. It
+    /// reads each tracked event, builds the draft its current title /
+    /// start / duration / address imply, and lets the ordinary reconcile
+    /// diff decide: a changed fingerprint re-queues the twin, and an
+    /// event that no longer exists queues its tombstone. Nothing here
+    /// decides WHAT changed — the fingerprint (`CalendarShareMapper`)
+    /// already does, over exactly the fields the gateway sends.
+    ///
+    /// `trackedEventIds` is the side index's key set, and it is the
+    /// SNAPSHOT of the diff rather than every `calendarEvent:` key in the
+    /// ledger. That distinction is load-bearing: the ledger also holds
+    /// invitations this device IMPORTED (`importLocally`), where "the
+    /// twin" is the organizer's own event — treating those as gone would
+    /// delete the family's event from their own calendar. Only the ids the
+    /// caller says are the app's own are ever considered.
+    ///
+    /// Full calendar access is required, and for the same reason the
+    /// sweep requires it: without read permission every lookup answers
+    /// nil, which this pass would read as "every event is gone" and answer
+    /// with a mass delete.
+    func reconcileFreeFormEvents(trackedEventIds: Set<String>) {
+        onMain { [weak self] in
+            guard let self, self.canShare else { return }
+            guard self.eventKit.eventsAccess == .fullAccess else {
+                self.emit("calendar_share_events_skipped", outcome: "failure",
+                          metadata: ["reason": "no_calendar_access"])
+                return
+            }
+            let contacts = self.contactsProvider()
+            var desired: [String: CalendarTwinDraft] = [:]
+            var snapshot: Set<String> = []
+            for eventId in trackedEventIds {
+                let key = CalendarShareKey.oneOff(kind: .calendarEvent,
+                                                  eventIdentifier: eventId)
+                snapshot.insert(key)
+                guard let record = self.eventKit.fetchEvent(identifier: eventId),
+                      !record.isCanceled,
+                      let draft = CalendarShareMapper.calendarEventDraft(
+                        title: record.title,
+                        startDate: record.startDate,
+                        durationMinutes: record.durationMinutes,
+                        contacts: contacts,
+                        notifySettings: self.notifySettings,
+                        location: record.location
+                      )
+                else {
+                    // Either gone (the tombstone below is the honest
+                    // answer) or momentarily unshareable because nobody
+                    // is eligible right now — in which case the diff
+                    // withdraws the twin, which is the same thing the
+                    // policy says for the other kinds.
+                    continue
+                }
+                desired[key] = draft
+            }
+            self.reconcile(kind: .calendarEvent, desired: desired,
+                           ownedKeyPrefix: nil, knownKeySnapshot: snapshot)
+        }
+    }
+
     /// A one-off event was deleted locally — queue its tombstone.
     ///
-    /// No caller today: the app itself never deletes a calendar event, so
-    /// the only way one disappears is the elder deleting it in the
-    /// Calendar app — which is `cleanupVanishedEvents()`'s case, and it
-    /// goes through this same tombstone. Kept as the seam's other half so
-    /// the pair stays symmetric and an in-app delete (should one ever
-    /// exist) has the honest place to report itself.
+    /// Now has a caller (rich-events task, 2026-09-17): the Events form's
+    /// delete, the first in-app calendar-event deletion the app has ever
+    /// had. The pair with `eventCreated` is what keeps the family's copy
+    /// honest — an appointment the elder removed locally must not stay on
+    /// the shared calendar.
+    ///
+    /// Gated on `canShare` exactly like `eventCreated`, and for the same
+    /// reason: with sharing off, a queued tombstone would be a row waiting
+    /// on a decision the family has not made, and the Settings card's
+    /// pending count must never mean that. Nothing is lost by it — an
+    /// event deleted while signed out leaves its key in the ledger, and
+    /// `cleanupVanishedEvents()` queues this same tombstone on the first
+    /// pass after sharing is switched on.
     func eventDeleted(localEventId: String) {
         onMain { [weak self] in
-            guard let self else { return }
+            guard let self, self.canShare else { return }
             let key = CalendarShareKey.oneOff(kind: .calendarEvent,
                                              eventIdentifier: localEventId)
             self.enqueueTombstone(key: key, kind: .calendarEvent)
@@ -449,11 +529,19 @@ final class CalendarShareService: ObservableObject {
     /// the twins whose CONTENT changed, queue tombstones for what
     /// vanished — and nothing at all for the twins that are already
     /// right, which is the common case on every launch.
+    ///
+    /// `knownKeySnapshot` overrides "last-known" for the callers whose
+    /// knowledge is NARROWER than the ledger. Medication and routine
+    /// passes leave it nil (every key of their kind is theirs to judge);
+    /// the free-form reconcile passes the tracked key set, because the
+    /// ledger also holds imported invitations that it must not delete —
+    /// see `reconcileFreeFormEvents`.
     private func reconcile(kind: EventNotifyKind, desired: [String: CalendarTwinDraft],
-                           ownedKeyPrefix: String?) {
+                           ownedKeyPrefix: String?,
+                           knownKeySnapshot: Set<String>? = nil) {
         guard canShare else { refreshStatus(); return }
         let prefix = ownedKeyPrefix ?? "\(kind.rawValue):"
-        let known = store.knownKeys.filter { $0.hasPrefix(prefix) }
+        let known = knownKeySnapshot ?? Set(store.knownKeys.filter { $0.hasPrefix(prefix) })
         let plan = CalendarShareMapper.plan(currentKeys: Array(desired.keys),
                                             snapshotKeys: known)
 
@@ -778,7 +866,8 @@ final class CalendarShareService: ObservableObject {
         }
     }
 
-    private func draft(from operation: PendingShareOperation) -> CalendarTwinDraft? {        guard let title = operation.title,
+    private func draft(from operation: PendingShareOperation) -> CalendarTwinDraft? {
+        guard let title = operation.title,
               let start = operation.startDate,
               let duration = operation.durationMinutes,
               let zone = operation.timeZoneIdentifier else { return nil }
@@ -786,7 +875,14 @@ final class CalendarShareService: ObservableObject {
             title: title, startDate: start, durationMinutes: duration,
             timeZoneIdentifier: zone, recurrence: operation.recurrence,
             attendeeEmails: operation.attendeeEmails ?? [],
-            kind: operation.kind)
+            kind: operation.kind,
+            // Carried through, not dropped: the flush pass records the
+            // fingerprint of what it just WROTE, and the reconcile
+            // compares that against the fingerprint of the current
+            // draft. A field that survives one reconstruction but not
+            // the other makes every item look permanently changed — one
+            // PUT per pass, forever (rich-events task, 2026-09-17).
+            location: operation.location)
     }
 
     // MARK: - Inbound

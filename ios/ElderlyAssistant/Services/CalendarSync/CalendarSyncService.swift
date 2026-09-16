@@ -85,6 +85,30 @@ final class CalendarSyncService: NSObject {
         case disableEntry(entryId: UUID)
     }
 
+    /// A family edit to the medication mirror, expressed as an app-side
+    /// change (rich-events task, 2026-09-17; design §3 "meds mirror
+    /// into Sahayak with family-edit reconciliation").
+    ///
+    /// Deliberately ONE whole-list case per entry rather than the
+    /// routine shape's per-slot drop/retime pairs. `MedicationScheduler`
+    /// has a single edit funnel — `loadSchedule`, which re-persists and
+    /// re-arms every dose — so the planner can simply state the entry's
+    /// END STATE and the applier has nothing to sequence: no index
+    /// arithmetic across an array that compacts as it changes, and no
+    /// two mutations racing for the same entry. The routine planner
+    /// needs the finer grain because `RoutineScheduler` exposes slot
+    /// mutators AND because a routine entry can be disabled wholesale;
+    /// neither is true of a medication, which has no `isEnabled` at all.
+    enum MedicationCalendarMutation: Equatable {
+        /// The medication's `scheduleTimes` become exactly this list —
+        /// a family retime, a family delete, or both. An empty list is
+        /// a real outcome, not an error: it means every one of the
+        /// entry's mirrors was deleted in the Calendar app, and the
+        /// entry keeps existing (the family's medication record is
+        /// never destroyed by a calendar edit) with no doses armed.
+        case setScheduleTimes(entryId: UUID, times: [DateComponents])
+    }
+
     /// An app-side change to the native mirror, planned against the
     /// current records — executed against the gateway, then the link
     /// store is updated/pruned to match.
@@ -109,6 +133,14 @@ final class CalendarSyncService: NSObject {
     /// the routine store.
     var entriesProvider: (() -> [RoutineEntry])?
 
+    /// Current medication entries, provided by the coordinator the same
+    /// way and for the same reason (rich-events task, 2026-09-17).
+    /// Optional with no default closure: a harness that never wires it
+    /// mirrors no medications, which is exactly the pre-rich-events
+    /// behavior and keeps every existing `CalendarSyncServiceTests` case
+    /// unchanged.
+    var medicationEntriesProvider: (() -> [MedicationEntry])?
+
     /// Locale for the mirror-event titles written into the family's
     /// shared calendar ("Morning walk (व्यायाम)"). Was hardcoded to a
     /// bare `Locale(identifier: "ne")` at the composition sites
@@ -121,6 +153,15 @@ final class CalendarSyncService: NSObject {
     /// through `RoutineScheduler` (whose mutators re-sync the mirror in
     /// turn — the planners then see equal shapes and stop).
     var onNativeChanges: (([RoutineCalendarMutation]) -> Void)?
+
+    /// The same, for medications — applied through
+    /// `MedicationScheduler.setScheduleTimes`, which writes via
+    /// `loadSchedule` (re-persist + re-arm every dose) and re-syncs the
+    /// mirror in turn. A separate closure rather than one generic
+    /// "mutation" callback because the two land on different schedulers
+    /// with different mutators; the coordinator already routes them
+    /// differently for the Google share layer.
+    var onMedicationNativeChanges: (([MedicationCalendarMutation]) -> Void)?
 
     /// The dedicated two-way calendar's identifier, when known (found/
     /// created at first two-way sync, remembered in the link store).
@@ -326,13 +367,31 @@ final class CalendarSyncService: NSObject {
         guard isEnabled, twoWayEnabled, status == .enabled,
               gateway.eventsAccess == .fullAccess else { return }
         let records = fetchMirrorWindowRecords()
+        let links = linkStore.snapshot
+
         let mutations = Self.planNativeMutations(entries: entries,
                                                  records: records,
-                                                 links: linkStore.snapshot)
-        guard !mutations.isEmpty else { return }
-        emit("calendar_sync_native_changes", outcome: "success",
-             metadata: ["mutations": "\(mutations.count)"])
-        onNativeChanges?(mutations)
+                                                 links: links)
+        if !mutations.isEmpty {
+            emit("calendar_sync_native_changes", outcome: "success",
+                 metadata: ["mutations": "\(mutations.count)"])
+            onNativeChanges?(mutations)
+        }
+
+        // Medications are a separate plan over the SAME fetched records —
+        // one EventKit read serves both, and each kind's planner ignores
+        // the other's tokens, so neither can act on an event it does not
+        // own.
+        let medicationMutations = Self.planMedicationMutations(
+            medications: medicationEntriesProvider?() ?? [],
+            records: records,
+            links: links)
+        if !medicationMutations.isEmpty {
+            emit("calendar_sync_native_changes", outcome: "success",
+                 metadata: ["mutations": "\(medicationMutations.count)",
+                            "kind": EventNotifyKind.medicationReminder.rawValue])
+            onMedicationNativeChanges?(medicationMutations)
+        }
     }
 
     // MARK: - Planners (pure — unit-tested)
@@ -368,7 +427,15 @@ final class CalendarSyncService: NSObject {
         var liveSlotsByEntry: [UUID: Set<Int>] = [:]
 
         for record in records where !record.isCanceled {
+            // `token.kind == .routine` is load-bearing, not decorative:
+            // routine and medication entry ids are separate UUID spaces,
+            // and without the filter a medication mirror would be looked
+            // up among the routine entries. It would find nothing TODAY
+            // — and silently start retiming a routine if the two spaces
+            // ever collided, which is exactly the class of accident the
+            // explicit kind exists to make impossible.
             guard let token = MirrorLinkToken.parse(record.notes),
+                  token.kind == .routine,
                   let entry = entriesById[token.entryId],
                   entry.isEnabled,
                   token.slot >= 0, token.slot < entry.scheduleTimes.count,
@@ -404,7 +471,8 @@ final class CalendarSyncService: NSObject {
 
         var linkKeysByEntry: [UUID: [String]] = [:]
         for key in links.keys {
-            guard let parts = ExternalEventLinkStore.appKeyParts(key) else { continue }
+            guard let parts = ExternalEventLinkStore.appKeyParts(key),
+                  parts.kind == .routine else { continue }
             linkKeysByEntry[parts.entryId, default: []].append(key)
         }
         for (entryId, keys) in linkKeysByEntry {
@@ -444,8 +512,13 @@ final class CalendarSyncService: NSObject {
     ) -> [CalendarMirrorOperation] {
         var recordByAppKey: [String: CalendarEventRecord] = [:]
         for record in records where !record.isCanceled {
-            guard let token = MirrorLinkToken.parse(record.notes) else { continue }
-            let appKey = ExternalEventLinkStore.appKey(entryId: token.entryId,
+            // Routines only — a medication token documents a dose, and
+            // this planner must not be able to remove or rewrite it (see
+            // the kind note in `planNativeMutations`).
+            guard let token = MirrorLinkToken.parse(record.notes),
+                  token.kind == .routine else { continue }
+            let appKey = ExternalEventLinkStore.appKey(kind: .routine,
+                                                       entryId: token.entryId,
                                                        slot: token.slot)
             if recordByAppKey[appKey] == nil { recordByAppKey[appKey] = record }
         }
@@ -504,6 +577,205 @@ final class CalendarSyncService: NSObject {
             operations.append(.remove(eventIdentifier: record.eventIdentifier))
         }
         return operations
+    }
+
+    // MARK: - Medication planners (rich-events task, 2026-09-17)
+
+    /// Native edits to apply back to a medication, planned from the
+    /// fetched records and the link store's proof of what we mirrored.
+    /// The same rules as routines (design §3: "same safety rules"),
+    /// stated for a model that has fewer moving parts:
+    ///
+    /// 1. A live medication record whose time-of-day differs from its
+    ///    app slot → the family retimed the dose; the record wins.
+    /// 2. A linked slot whose native event is GONE → drop that time.
+    ///    Never resurrected: the dropped time is gone from the entry, so
+    ///    no later mirror rebuild desires it and none is recreated.
+    /// 3. A record the app cannot express — all-day, or a recurrence
+    ///    other than daily — is family-owned and left alone ENTIRELY,
+    ///    in both directions. The medication model has no recurrence at
+    ///    all (`MedicationScheduler` fires every `scheduleTime` every
+    ///    day and never reads `frequency`), so a "weekly" dose is not
+    ///    something the app can honor; overwriting the family's edit
+    ///    would be a fight, and adopting it would be a lie.
+    ///
+    /// There is no `disableEntry` analogue, and that is not an omission:
+    /// a routine's whole native presence vanishing disables the entry
+    /// because `RoutineEntry.isEnabled` exists. A medication has no such
+    /// flag, and inventing one would let a calendar deletion destroy the
+    /// family's medication record. Dropping every time instead is the
+    /// honest, non-destructive reading of "the doses were deleted in the
+    /// Calendar app" — the record survives, nothing is armed, and the
+    /// family can add a time back in Settings.
+    static func planMedicationMutations(
+        medications: [MedicationEntry],
+        records: [CalendarEventRecord],
+        links: [String: String],
+        calendar: Calendar = .current
+    ) -> [MedicationCalendarMutation] {
+        let medicationsById = Dictionary(medications.map { ($0.id, $0) },
+                                         uniquingKeysWith: { first, _ in first })
+
+        var liveSlotsByEntry: [UUID: Set<Int>] = [:]
+        var editedTimeByEntry: [UUID: [Int: (hour: Int, minute: Int)]] = [:]
+        for record in records where !record.isCanceled {
+            guard let token = MirrorLinkToken.parse(record.notes),
+                  token.kind == .medication, token.slot >= 0 else { continue }
+            // Inserted BEFORE the shape guard, exactly as the routine
+            // planner does: a family-owned record still proves its slot
+            // exists, so the app must not also read it as "deleted".
+            liveSlotsByEntry[token.entryId, default: []].insert(token.slot)
+            guard medicationShapeIsWritable(record),
+                  let recordTime = timeOfDay(of: record, calendar: calendar) else { continue }
+            // First record per slot wins — a duplicated mirror must not
+            // override the one the family actually edited, and the two
+            // are indistinguishable from here.
+            if editedTimeByEntry[token.entryId]?[token.slot] == nil {
+                editedTimeByEntry[token.entryId, default: [:]][token.slot] = recordTime
+            }
+        }
+
+        var linkedSlotsByEntry: [UUID: Set<Int>] = [:]
+        for key in links.keys {
+            guard let parts = ExternalEventLinkStore.appKeyParts(key),
+                  parts.kind == .medication else { continue }
+            linkedSlotsByEntry[parts.entryId, default: []].insert(parts.slot)
+        }
+
+        var mutations: [MedicationCalendarMutation] = []
+        for (entryId, linkedSlots) in linkedSlotsByEntry {
+            // An entry that no longer exists has nothing to mutate; the
+            // mirror sides are cleaned up by the forward planner.
+            guard let medication = medicationsById[entryId] else { continue }
+            let liveSlots = liveSlotsByEntry[entryId] ?? []
+            let editedTimes = editedTimeByEntry[entryId] ?? [:]
+
+            var nextTimes: [DateComponents] = []
+            var changed = false
+            for (slot, time) in medication.scheduleTimes.enumerated() {
+                guard linkedSlots.contains(slot) else {
+                    // Never mirrored (or its link was pruned) — the app's
+                    // own time, untouched.
+                    nextTimes.append(time)
+                    continue
+                }
+                guard liveSlots.contains(slot) else {
+                    changed = true  // rule 2: the family deleted it.
+                    continue
+                }
+                guard let hour = time.hour, let minute = time.minute else {
+                    nextTimes.append(time)
+                    continue
+                }
+                if let edited = editedTimes[slot], edited != (hour, minute) {
+                    changed = true  // rule 1: the family retimed it.
+                    nextTimes.append(DateComponents(hour: edited.hour,
+                                                    minute: edited.minute))
+                } else {
+                    nextTimes.append(time)
+                }
+            }
+            if changed {
+                mutations.append(.setScheduleTimes(entryId: entryId, times: nextTimes))
+            }
+        }
+        return mutations
+    }
+
+    /// App-side medication mirror writes, planned from the current
+    /// entries and records: one recurring daily event per schedule time
+    /// in the Sahayak calendar — create what is missing, update what the
+    /// family retimed, remove token events that are no longer desired,
+    /// and sweep fragment-only leftovers exactly as the routine planner
+    /// does.
+    ///
+    /// The title is the bare `medicationName`, NOT the routine mirror's
+    /// "<name> (<category>)" label: medications have no category, and
+    /// the bare name is what the Google twin already shows
+    /// (`CalendarShareMapper.medicationDrafts`), so the family reads the
+    /// same label on both calendars instead of two names for one dose.
+    static func planMedicationMirrorOperations(
+        medications: [MedicationEntry],
+        records: [CalendarEventRecord],
+        now: Date,
+        calendar: Calendar = .current
+    ) -> [CalendarMirrorOperation] {
+        var recordByAppKey: [String: CalendarEventRecord] = [:]
+        for record in records where !record.isCanceled {
+            guard let token = MirrorLinkToken.parse(record.notes),
+                  token.kind == .medication else { continue }
+            let appKey = ExternalEventLinkStore.appKey(kind: .medication,
+                                                       entryId: token.entryId,
+                                                       slot: token.slot)
+            if recordByAppKey[appKey] == nil { recordByAppKey[appKey] = record }
+        }
+
+        var operations: [CalendarMirrorOperation] = []
+        var desiredKeys = Set<String>()
+        for medication in medications {
+            for (slot, time) in medication.scheduleTimes.enumerated() {
+                guard let hour = time.hour, let minute = time.minute,
+                      let startDate = nextStart(after: now, hour: hour,
+                                                minute: minute, weekdays: nil,
+                                                calendar: calendar) else { continue }
+                let appKey = ExternalEventLinkStore.appKey(kind: .medication,
+                                                           entryId: medication.id,
+                                                           slot: slot)
+                desiredKeys.insert(appKey)
+                let draft = CalendarEventDraft(
+                    title: medication.medicationName,
+                    notes: MirrorLinkToken.notes(entryId: medication.id, slot: slot,
+                                                 kind: .medication),
+                    startDate: startDate,
+                    recurrence: .daily
+                )
+                guard let record = recordByAppKey[appKey] else {
+                    operations.append(.create(appKey: appKey, draft: draft))
+                    continue
+                }
+                // Rule 3: shapes the medication model cannot express are
+                // the family's, and are written over by neither side.
+                guard medicationShapeIsWritable(record) else { continue }
+                let recordTime = timeOfDay(of: record, calendar: calendar)
+                let timeMatches = recordTime.map { $0 == (hour, minute) } ?? false
+                let recurrenceMatches = recurrence(record.recurrence, equals: .daily)
+                if !timeMatches || !recurrenceMatches {
+                    operations.append(.update(eventIdentifier: record.eventIdentifier,
+                                              draft: draft))
+                }
+            }
+        }
+
+        for (appKey, record) in recordByAppKey where !desiredKeys.contains(appKey) {
+            operations.append(.remove(eventIdentifier: record.eventIdentifier))
+        }
+        return operations
+    }
+
+    /// A medication mirror record the app can read AND write back without
+    /// destroying a family-made shape. Not all-day, and either daily or
+    /// carrying no rule at all — see rule 3 in `planMedicationMutations`
+    /// for why anything else is family-owned.
+    static func medicationShapeIsWritable(_ record: CalendarEventRecord) -> Bool {
+        guard !record.isAllDay else { return false }
+        switch record.recurrence {
+        case nil, .daily: return true
+        case .weekly: return false
+        }
+    }
+
+    /// The link keys a set of medications desires — the prune set for a
+    /// two-way rebuild (union'd with the routines').
+    static func medicationDesiredKeys(for medications: [MedicationEntry]) -> Set<String> {
+        var keys = Set<String>()
+        for medication in medications {
+            for slot in medication.scheduleTimes.indices {
+                keys.insert(ExternalEventLinkStore.appKey(kind: .medication,
+                                                          entryId: medication.id,
+                                                          slot: slot))
+            }
+        }
+        return keys
     }
 
     /// The recurrence a mirror draft for `entry` should carry: weekly
@@ -596,18 +868,49 @@ final class CalendarSyncService: NSObject {
             emit("calendar_sync_sahayak_unavailable", outcome: "failure")
             return
         }
+        // A nil provider means this service is a ROUTINES-ONLY mirror
+        // (the shape every pre-rich-events harness and test constructs).
+        // That is why it is an `if let` and not `?? []`: an empty
+        // medication list is a real state that must prune the dose
+        // links, while an unwired provider must leave them exactly as it
+        // found them.
+        let medications = medicationEntriesProvider?()
+        let instant = now()
         let records = fetchMirrorWindowRecords()
+        // Routines and medications are planned and applied as ONE batch:
+        // they share the Sahayak calendar, the record window and the
+        // link store, and the prune below is a single sweep — two
+        // separate passes would each prune the other kind's keys away.
         let operations = Self.planMirrorOperations(entries: entries,
                                                    records: records,
-                                                   now: now(),
+                                                   now: instant,
                                                    locale: locale)
+            + Self.planMedicationMirrorOperations(medications: medications ?? [],
+                                                  records: records,
+                                                  now: instant)
+        var desired = desiredKeys(for: entries)
+        var managedKinds: Set<MirrorKind> = [.routine]
+        if let medications {
+            desired.formUnion(Self.medicationDesiredKeys(for: medications))
+            managedKinds.insert(.medication)
+        }
         applyMirrorOperations(operations,
-                              desiredKeys: desiredKeys(for: entries),
+                              desiredKeys: desired,
+                              managedKinds: managedKinds,
                               sahayakIdentifier: sahayakIdentifier)
     }
 
     private func rebuildLegacyMirror(entries: [RoutineEntry]) {
         let removed = gateway.removeEvents(matchingNotesFragment: Self.mirrorTag)
+        // That wipe is not routine-specific — it matches the notes
+        // fragment in EVERY calendar, so it takes the Sahayak medication
+        // mirrors with it (medications are mirrored in two-way mode
+        // only). Their links describe events that no longer exist, and a
+        // stale link is read as "the family deleted this dose": left in
+        // place, flipping two-way back on would drop every medication
+        // time before the rebuild could re-create a single mirror. The
+        // links go with the events; the re-enable re-creates both.
+        linkStore.clear(kind: .medication)
         var added = 0
         for entry in entries where entry.isEnabled {
             // Category comes from the entry itself (the reminders-v2
@@ -637,8 +940,17 @@ final class CalendarSyncService: NSObject {
                         "added": "\(added)"])
     }
 
+    /// `managedKinds` is the set of mirror kinds this pass had complete
+    /// knowledge of. A link of any OTHER kind is preserved untouched,
+    /// however stale it looks: the pass that would have known whether it
+    /// is still desired did not run, and pruning it would strand the
+    /// native event it points at — a still-correct mirror in the family's
+    /// calendar with nothing in the app that remembers putting it there
+    /// (so no later pass could ever reconcile a family edit to it, or
+    /// clean it up).
     private func applyMirrorOperations(_ operations: [CalendarMirrorOperation],
                                        desiredKeys: Set<String>,
+                                       managedKinds: Set<MirrorKind>,
                                        sahayakIdentifier: String) {
         var created = 0
         var updated = 0
@@ -660,10 +972,31 @@ final class CalendarSyncService: NSObject {
                 }
             }
         }
-        linkStore.prune(keeping: desiredKeys)
+        linkStore.prune(keeping: Self.keysToKeep(desired: desiredKeys,
+                                                 managedKinds: managedKinds,
+                                                 current: linkStore.snapshot.keys))
         emit("calendar_sync_rebuilt", outcome: "success",
              metadata: ["mode": "two_way", "removed": "\(removed)",
                         "created": "\(created)", "updated": "\(updated)"])
+    }
+
+    /// The link keys a rebuild pass may keep: the desired set, PLUS every
+    /// key whose kind this pass did not manage (see
+    /// `applyMirrorOperations`), MINUS anything unparseable — a key no
+    /// part of this grammar wrote is not a link and should not outlive
+    /// the pass that noticed.
+    ///
+    /// Static and pure so the preservation rule is unit-tested directly
+    /// rather than only through a gateway fake.
+    static func keysToKeep(desired: Set<String>,
+                           managedKinds: Set<MirrorKind>,
+                           current: some Sequence<String>) -> Set<String> {
+        var keep = desired
+        for key in current where !desired.contains(key) {
+            guard let parts = ExternalEventLinkStore.appKeyParts(key) else { continue }
+            if !managedKinds.contains(parts.kind) { keep.insert(key) }
+        }
+        return keep
     }
 
     private func desiredKeys(for entries: [RoutineEntry]) -> Set<String> {

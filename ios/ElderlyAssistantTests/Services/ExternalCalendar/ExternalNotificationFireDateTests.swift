@@ -19,7 +19,8 @@ final class ExternalNotificationFireDateTests: XCTestCase {
     }
 
     private func item(start: Date, isAllDay: Bool = false,
-                      hasOwnAlarm: Bool = false) -> ExternalReminder {
+                      hasOwnAlarm: Bool = false,
+                      location: String? = nil) -> ExternalReminder {
         ExternalReminder(
             id: "id",
             source: .event,
@@ -28,7 +29,9 @@ final class ExternalNotificationFireDateTests: XCTestCase {
             startDate: start,
             isAllDay: isAllDay,
             hasOwnAlarm: hasOwnAlarm,
-            calendarName: "c"
+            calendarName: "c",
+            nativeEventIdentifier: "native-1",
+            location: location
         )
     }
 

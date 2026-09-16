@@ -46,6 +46,14 @@ struct PendingShareOperation: Codable, Equatable {
     let timeZoneIdentifier: String?
     let recurrence: EventRecurrence?
     let attendeeEmails: [String]?
+    /// The event's address, verbatim (rich-events task, 2026-09-17) —
+    /// carried inline like every other draft field so a queued operation
+    /// is replayable on its own, even after the local event it came from
+    /// was edited or deleted. Optional with a synthesized
+    /// `decodeIfPresent`, so a queue persisted before this field existed
+    /// still decodes (as nil, which writes no location) rather than
+    /// wedging the whole pending queue behind a `keyNotFound`.
+    let location: String?
     /// Attempts so far — the service's backoff input, persisted so a
     /// crash loop cannot reset the backoff to zero and hammer Google.
     var attempts: Int
@@ -67,6 +75,7 @@ struct PendingShareOperation: Codable, Equatable {
          timeZoneIdentifier: String? = nil,
          recurrence: EventRecurrence? = nil,
          attendeeEmails: [String]? = nil,
+         location: String? = nil,
          attempts: Int = 0,
          lastAttemptAt: Date? = nil) {
         self.key = key
@@ -79,6 +88,7 @@ struct PendingShareOperation: Codable, Equatable {
         self.timeZoneIdentifier = timeZoneIdentifier
         self.recurrence = recurrence
         self.attendeeEmails = attendeeEmails
+        self.location = location
         self.attempts = attempts
         self.lastAttemptAt = lastAttemptAt
     }
@@ -97,7 +107,8 @@ struct PendingShareOperation: Codable, Equatable {
             durationMinutes: draft.durationMinutes,
             timeZoneIdentifier: draft.timeZoneIdentifier,
             recurrence: draft.recurrence,
-            attendeeEmails: draft.attendeeEmails
+            attendeeEmails: draft.attendeeEmails,
+            location: draft.location
         )
     }
 

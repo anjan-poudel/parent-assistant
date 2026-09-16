@@ -129,6 +129,35 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         return true
     }
 
+    /// Replaces one entry's dose times — the family retimed or deleted
+    /// its mirror events in the Calendar app (calendar-driven
+    /// reconciliation, rich-events task 2026-09-17).
+    ///
+    /// Goes through `loadSchedule` DELIBERATELY, unlike
+    /// `setVisualAids`: an edit to WHEN a dose fires must clear the old
+    /// pending reminders and arm new ones, or the elder keeps being
+    /// prompted at the time the family just moved. `loadSchedule` does
+    /// exactly that — it drops every pending reminder and its escalation
+    /// engine, re-creates them from the new times, and re-arms the
+    /// platform alarms.
+    ///
+    /// The cost is that an in-flight acknowledgement is lost with the
+    /// old schedule, and that is the right trade: the times under it
+    /// changed. The alternative — keeping a reminder for a time that no
+    /// longer exists — would fire a dose the family removed.
+    ///
+    /// Returns false when the entry is unknown (deleted in Settings
+    /// since the plan was made) or when the write fails.
+    @discardableResult
+    func setScheduleTimes(_ times: [DateComponents], entryId: UUID) -> Bool {
+        guard let entry = entries[entryId] else { return false }
+        var next = medicationEntries()
+        guard let index = next.firstIndex(where: { $0.id == entryId }) else { return false }
+        next[index] = entry.withScheduleTimes(times)
+        loadSchedule(entries: next)
+        return true
+    }
+
     init(
         storage: EncryptedLocalStorage,
         alarmScheduler: PlatformAlarmScheduler,

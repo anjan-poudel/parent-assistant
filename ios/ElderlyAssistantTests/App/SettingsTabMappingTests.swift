@@ -29,7 +29,7 @@ final class SettingsTabMappingTests: XCTestCase {
         XCTAssertEqual(Section.family.rows,
                        [.family, .caregiverNotifications, .calling])
         XCTAssertEqual(Section.reminders.rows,
-                       [.meds, .alarms, .calendar, .calendarSharing])
+                       [.meds, .alarms, .events, .calendar, .calendarSharing])
         XCTAssertEqual(Section.tools.rows,
                        [.quickApps, .youtube, .feeds, .manuals, .places])
         XCTAssertEqual(Section.system.rows,
@@ -47,7 +47,7 @@ final class SettingsTabMappingTests: XCTestCase {
         XCTAssertEqual(Set(flattened).count, flattened.count,
                        "a row is listed on two tabs: "
                        + duplicates(in: flattened).map(\.rawValue).joined(separator: ", "))
-        XCTAssertEqual(flattened.count, 18, "the hub's visible row count changed")
+        XCTAssertEqual(flattened.count, 19, "the hub's visible row count changed")
     }
 
     func testTheVisibleAndHiddenHalvesPartitionEveryDestination() {
