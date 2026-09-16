@@ -33,15 +33,12 @@
 	<string>2</string>
 	<!-- Calendar & family sharing (2026-09-16). The Google OAuth client
 	     id for this app, and the reversed-client-id URL scheme Google
-	     sign-in returns through. BOTH ARE INTENTIONALLY EMPTY until a
-	     client is registered for this bundle id in the Google Cloud
-	     console: an empty value is what makes the app report the honest
-	     "not configured" state (GoogleAccountSession.isConfigured) in
-	     Settings instead of offering a sign-in button that cannot work.
-	     To enable sharing: paste the client id here, and its
-	     com.googleusercontent.apps.… reversal into CFBundleURLTypes. -->
+	     sign-in returns through. Client registered for
+	     com.elderlyassistant.app in the Google Cloud console; the id is
+	     app identity, not a user credential — users still sign in with
+	     their own account at run time (design §2 decision 3). -->
 	<key>GIDClientID</key>
-	<string></string>
+	<string>906771099595-cdqhrgvdqqm1um8ml76sqm92llriqhfv.apps.googleusercontent.com</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -51,7 +48,7 @@
 			<string>com.elderlyassistant.calendarshare</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
-				<string>com.googleusercontent.apps.REPLACE_WITH_REVERSED_CLIENT_ID</string>
+				<string>com.googleusercontent.apps.906771099595-cdqhrgvdqqm1um8ml76sqm92llriqhfv</string>
 			</array>
 		</dict>
 	</array>
