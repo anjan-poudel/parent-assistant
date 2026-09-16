@@ -383,6 +383,37 @@ final class AppCoordinator: ObservableObject {
     }
     private static let cloudProviderKey = "cloudProvider"
 
+    /// [CLOUD-CASCADE] (2026-09-16) The cloud cascade tier's confidence
+    /// threshold — the internal Settings card's ± row, shown as a
+    /// percentage (97 % ↔ 0.97). When the large local brain answers BELOW
+    /// this while an online provider is configured, the turn goes to the
+    /// cloud (with the spoken hold cue first). Persisted through
+    /// `CloudCascadeSettings` (UserDefaults, clamped on read AND write —
+    /// a UI preference, not a secret). didSet persists AND re-arms the
+    /// tier, so a ± press in Settings takes effect on the NEXT utterance
+    /// (the same instant-apply rule `cloudFallbackEnabled` follows).
+    /// Init-time restore assigns the property directly (house pattern —
+    /// didSet does not fire there).
+    @Published var cloudCascadeThreshold: Double {
+        didSet {
+            guard cloudCascadeThreshold != oldValue else { return }
+            CloudCascadeSettings.setThreshold(cloudCascadeThreshold)
+            applyCloudCascadeConfiguration()
+        }
+    }
+
+    /// [CLOUD-CASCADE] The internal card's switch — ON by default (the
+    /// tier's rule is the requested behaviour and it stays inert on its
+    /// own wherever no provider is configured), OFF to hold the ladder
+    /// local-first on purpose. Persisted through `CloudCascadeSettings`.
+    @Published var cloudCascadeEnabled: Bool {
+        didSet {
+            guard cloudCascadeEnabled != oldValue else { return }
+            CloudCascadeSettings.setEnabled(cloudCascadeEnabled)
+            applyCloudCascadeConfiguration()
+        }
+    }
+
     /// The user's favourite apps for the Home quick-access row
     /// (quick-access-apps task, 2026-09-06), in stored order.
     /// `private(set)`: mutation is confined to `addFavoriteApp` /
@@ -2134,6 +2165,15 @@ final class AppCoordinator: ObservableObject {
         self.cloudFallbackEnabled = UserDefaults.standard.bool(forKey: Self.cloudFallbackKey)
         self.cloudProvider = UserDefaults.standard.string(forKey: Self.cloudProviderKey)
             .flatMap(CloudProvider.init(rawValue:)) ?? .gemini
+
+        // Restore the persisted cloud-cascade tier settings ([CLOUD-CASCADE],
+        // 2026-09-16 — default threshold 0.97, default ON). These are the
+        // properties' ONLY initial assignments, so their didSets do not fire
+        // here (same rule as `voiceEngineStack` above); the tier itself is
+        // armed by `applyCloudCascadeConfiguration()`, reached from
+        // `applyVoiceEngineStack()` once `start()` has built the pipeline.
+        self.cloudCascadeThreshold = CloudCascadeSettings.threshold()
+        self.cloudCascadeEnabled = CloudCascadeSettings.isEnabled()
 
         // Restore the persisted Voice Processing I/O preset mirror
         // (voice-personalisation P0, slice C — default OFF, the A/B
@@ -4400,6 +4440,61 @@ self.noteTalkContractChanged()
             // toggle), never from `init`.
             installBundledSTTModelIfNeeded()
         }
+        // [CLOUD-CASCADE] Last: (re-)arm the cascade tier on the fresh
+        // stack. It reads the provider seam + the two persisted settings,
+        // so it belongs to the same "apply the stack" pass as
+        // `cloudEnabled` above — one place decides what the ladder may
+        // reach, and this call can never arm a tier the stack just
+        // declined (it is gated on the same `cloudEnabled`).
+        applyCloudCascadeConfiguration()
+    }
+
+    /// [CLOUD-CASCADE] (2026-09-16) Arms the cloud cascade tier on
+    /// `intentRouter` from the SAME inputs the rest of the app consults:
+    /// the Gemini interpreter the boot built, `GeminiConfigStore.isConfigured`
+    /// (the key) and `GeminiCostGovernor.allowsCall()` (the day's budget) —
+    /// so a Settings promise can never outrun what the tier would do, and
+    /// an unconfigured household gets a nil tier (no cue, no event, no log,
+    /// no activity row: silent, exactly as the ladder behaved before the
+    /// tier existed).
+    ///
+    /// Called from `applyVoiceEngineStack()` (once at startup, and again on
+    /// every stack / opt-in / threshold / switch change). No-ops before
+    /// `start()` has built the pipeline and the interpreter — the same
+    /// tolerance `applyVoiceEngineStack()` itself holds.
+    ///
+    /// The tier is inert unless the cloud is REACHABLE at all
+    /// (`cloudEnabled`, which `applyVoiceEngineStack()` has just decided
+    /// from the stack + the opt-in), so this can never be the one path that
+    /// puts a cloud on the wire behind the household's back (OD-12's
+    /// consent posture is decided there, not here).
+    private func applyCloudCascadeConfiguration() {
+        guard let router = intentRouter, let gemini = geminiCommandInterpreter else {
+            return
+        }
+        let providers = CloudBrainProviders(gemini: CloudBrainRegistration(
+            interpreter: gemini,
+            isConfigured: { [weak self] in self?.geminiConfigStore.isConfigured ?? false },
+            costAllows: { [weak self] in self?.geminiCostGovernor.allowsCall() ?? false }
+        ))
+        // Resolved through the seam — the coordinator never names a cloud
+        // interpreter for a provider id; the registry does (adding a
+        // provider is a case + a registration, not a branch here).
+        guard let endpoint = providers.endpoint(for: cloudProvider) else {
+            router.cloudCascade = nil
+            return
+        }
+        router.cloudCascade = CloudCascadeConfiguration(
+            endpoint: endpoint,
+            threshold: cloudCascadeThreshold,
+            isEnabled: cloudCascadeEnabled,
+            holdCue: { [weak self] in
+                self?.commandRouter?.speakCloudCascadeHoldCue()
+            },
+            onEscalated: { [weak self] escalation in
+                self?.recordCloudCascadeEscalation(escalation)
+            }
+        )
     }
 
     /// [BOOT-REVIEW P1-5] Installs the ONE app-bundled STT model (the
@@ -6120,6 +6215,38 @@ self.noteTalkContractChanged()
     private func recordUnansweredCall(at timestamp: Date) {
         recordActivity(kind: .call, channel: .unanswered,
                        contactName: "", phone: "", timestamp: timestamp)
+    }
+
+    /// [CLOUD-CASCADE] (2026-09-16) Records one turn the cloud cascade tier
+    /// sent to the ONLINE brain — the coordinator half of the tier's
+    /// `onEscalated` seam, run once per escalated turn, right after the
+    /// observability event and BEFORE the cloud call.
+    ///
+    /// Two trails, and neither one carries the utterance (C9 policy):
+    ///  · an activity-log row (`Kind.cloudEscalation` / `Channel.cloud`)
+    ///    with an EMPTY contact and number — the household can see that a
+    ///    turn reached the cloud, and nothing about what was said;
+    ///  · an app log line naming the escalation unmistakably, with the
+    ///    provider id and the two scores only (the same numbers the
+    ///    observability event carries — read this line and the
+    ///    `cloud_cascade_escalated` event side by side to tell a
+    ///    cloud-answered turn from an on-device one).
+    ///
+    /// Main queue by contract (the tier's completion runs there, like every
+    /// other brain in the ladder → `recordActivity`'s rule).
+    private func recordCloudCascadeEscalation(_ escalation: CloudCascadeEscalation) {
+        recordActivity(kind: .cloudEscalation, channel: .cloud, contactName: "")
+        // Numbers and a provider id only — never what the user said or what
+        // the assistant answered (C9 policy; the same rule the
+        // `cloud_cascade_escalated` event holds to). Note the Release-log
+        // privacy gate (tools/check-release-log-safety.sh) rejects any
+        // non-DEBUG print whose statement names the utterance's text, so
+        // this line is deliberately vocabulary-clean.
+        print("[cloud_cascade] LOCAL ANSWER OVERRULED — this turn goes to the ONLINE brain "
+              + "provider=\(escalation.provider) "
+              + "threshold=\(PipelineTraceSummary.score(escalation.threshold)) "
+              + "local_confidence=\(PipelineTraceSummary.score(escalation.localConfidence)) "
+              + "(numbers only — no utterance or reply content)")
     }
 
     /// Refreshes the published window from the store (see

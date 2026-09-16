@@ -3336,6 +3336,15 @@ struct AIModelsSettingsView: View {
                     encoderCard
                 }
 
+                // [CLOUD-CASCADE] (2026-09-16) The cloud cascade tier's
+                // card, on the SAME hidden internal screen as the encoder
+                // switches — the tier is not encoder-specific (it acts on
+                // whatever the local slot answered), so it renders in
+                // every build and is not gated on the encoder switch.
+                // Nothing to enable for a household: the tier is inert on
+                // its own wherever no cloud provider is configured.
+                cloudCascadeCard
+
                 // TTS / VAD / KWS management — deliberately left as it
                 // was by the STT/brain split (the voice rows this screen
                 // has always managed).
@@ -3679,6 +3688,102 @@ struct AIModelsSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// [CLOUD-CASCADE] (2026-09-16) The cloud cascade tier's card, on the
+    /// hidden internal-testing screen beside the encoder switches.
+    ///
+    /// Two rows, one writer each:
+    ///  · the SWITCH — `AppCoordinator.cloudCascadeEnabled` (**default
+    ///    ON**: the tier's rule is the requested behaviour, and it stays
+    ///    inert by itself wherever no cloud provider is configured);
+    ///  · the THRESHOLD — `AppCoordinator.cloudCascadeThreshold`, **default
+    ///    97 %**, stepped in whole percent. Two big tap targets rather
+    ///    than a slider, the volume control's pattern: a drag is the wrong
+    ///    gesture here, and every step is a discrete, readable number.
+    ///
+    /// The copy carries the gates so the card can never promise more than
+    /// the chain does: the tier is inert while no cloud provider is
+    /// configured (a household that never added a key never meets it), the
+    /// keyword safety net still runs before any brain, and a spoken hold
+    /// cue — not a silent wait — precedes the cloud call.
+    private var cloudCascadeCard: some View {
+        let percent = CloudCascadeSettings.percent(coordinator.cloudCascadeThreshold)
+        let minimumPercent = CloudCascadeSettings.percent(CloudCascadeSettings.minimumThreshold)
+        let maximumPercent = CloudCascadeSettings.percent(CloudCascadeSettings.maximumThreshold)
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("settings.cloudCascade.title")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundStyle(DesignTokens.textPrimary)
+            Toggle(isOn: Binding(
+                get: { coordinator.cloudCascadeEnabled },
+                set: { coordinator.cloudCascadeEnabled = $0 }
+            )) {
+                Text("settings.cloudCascade.toggleLabel")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            Text("settings.cloudCascade.toggleNote")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 16) {
+                cascadeThresholdStepButton(steps: -1, systemImage: "minus",
+                                           labelKey: "settings.cloudCascade.decrease",
+                                           enabled: percent > minimumPercent)
+                Spacer(minLength: 8)
+                Text(verbatim: "\(percent)%")
+                    .font(.system(size: DesignTokens.titlePointSize, weight: .bold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .frame(minWidth: 128)
+                    .accessibilityLabel(Text("settings.cloudCascade.thresholdLabel"))
+                    .accessibilityValue(Text(verbatim: "\(percent)%"))
+                Spacer(minLength: 8)
+                cascadeThresholdStepButton(steps: +1, systemImage: "plus",
+                                           labelKey: "settings.cloudCascade.increase",
+                                           enabled: percent < maximumPercent)
+            }
+
+            Text("settings.cloudCascade.thresholdNote")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// One threshold step button; disabled at the ends of the range (no
+    /// dead press, and the dimmed state shows where the range ends). The
+    /// write goes through the coordinator, whose didSet persists the
+    /// clamped value AND re-resolves the router's tier — so a step acts on
+    /// the next turn, not the next launch.
+    private func cascadeThresholdStepButton(steps: Int, systemImage: String,
+                                            labelKey: LocalizedStringKey,
+                                            enabled: Bool) -> some View {
+        Button {
+            let next = CloudCascadeSettings.stepped(coordinator.cloudCascadeThreshold,
+                                                    bySteps: steps)
+            guard next != coordinator.cloudCascadeThreshold else { return }
+            coordinator.cloudCascadeThreshold = next
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 26, weight: .bold))
+                .foregroundStyle(enabled ? DesignTokens.textPrimary
+                                         : DesignTokens.textSecondary)
+                .frame(minWidth: DesignTokens.minTapTargetSize + 24,
+                       minHeight: DesignTokens.minTapTargetSize + 24)
+                .background(DesignTokens.background)
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(Text(labelKey))
     }
 
     /// The encoder artifact's install state, resolved through the same

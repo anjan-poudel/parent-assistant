@@ -19,6 +19,12 @@ import SwiftUI
 /// masks the caller's identity AND number — so its tap opens the Phone
 /// app instead (empty `tel://`), where the call genuinely lives in
 /// Recents, one tab away.
+///
+/// ONE row is not an action: the cloud-cascade row ([CLOUD-CASCADE],
+/// 2026-09-16) records that a turn was sent to the online brain, so the
+/// leaf renders it as plain content — no button, no dial circle, no
+/// action verb in its VoiceOver label. Everything else on this leaf
+/// re-opens its recorded channel.
 struct HistoryView: View {
     @EnvironmentObject private var coordinator: AppCoordinator
 
@@ -42,13 +48,24 @@ struct HistoryView: View {
     private var activityRows: some View {
         VStack(spacing: 12) {
             ForEach(coordinator.recentActivity) { entry in
-                Button {
-                    initiate(entry)
-                } label: {
+                // A cloud-cascade row ([CLOUD-CASCADE], 2026-09-16) is
+                // INFORMATIONAL: the turn went to the online brain instead
+                // of to a channel, so nothing was opened on the user's
+                // behalf and there is no surface to re-open. It renders as
+                // plain content — never a button, never a dead tap — while
+                // every channel row keeps the whole-row tap.
+                if entry.channel == .cloud {
                     rowContent(entry)
+                        .accessibilityLabel(Text(rowAccessibilityLabel(entry)))
+                } else {
+                    Button {
+                        initiate(entry)
+                    } label: {
+                        rowContent(entry)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(rowAccessibilityLabel(entry)))
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(Text(rowAccessibilityLabel(entry)))
             }
         }
     }
@@ -105,7 +122,9 @@ struct HistoryView: View {
     /// (missed-calls task, 2026-09-07) wear the missed-call glyph —
     /// phone.arrow.down.left, the incoming-call-that-ended symbol — and
     /// never a name or number (the badge plus the "Unanswered call" name
-    /// line are the whole identity the row has).
+    /// line are the whole identity the row has). A cloud-cascade row
+    /// ([CLOUD-CASCADE], 2026-09-16) wears cloud.fill — the online brain
+    /// it records, not a channel app.
     private func icon(for channel: AppActivityEntry.Channel) -> String {
         switch channel {
         case .phone, .faceTimeAudio: return "phone.fill"
@@ -114,21 +133,26 @@ struct HistoryView: View {
         case .messenger: return "paperplane.fill"
         case .sms: return "message.fill"
         case .unanswered: return "phone.arrow.down.left"
+        case .cloud: return "cloud.fill"
         }
     }
 
-    /// Every row is a re-openable ACTION, so every row wears the
-    /// brand/action role (badge-tint consolidation 2026-09-10 — `.call`
-    /// and `.reminders` resolve to the same accent now). A call row and
-    /// a message row are told apart by their glyph (phone.fill vs the
-    /// chat bubbles) and their caption, not by hue; only the urgency of
-    /// an unanswered call gets its own visual weight, and that lives in
-    /// the row's dialer circle.
+    /// Every channel row is a re-openable ACTION, so every channel row
+    /// wears the brand/action role (badge-tint consolidation 2026-09-10 —
+    /// `.call` and `.reminders` resolve to the same accent now). A call
+    /// row and a message row are told apart by their glyph (phone.fill vs
+    /// the chat bubbles) and their caption, not by hue; only the urgency
+    /// of an unanswered call gets its own visual weight, and that lives in
+    /// the row's dialer circle. A cloud-cascade row ([CLOUD-CASCADE],
+    /// 2026-09-16) is not an action at all and takes the neutral category
+    /// role (`.settings`) — the same quiet weight Settings wears, so the
+    /// informational row never reads as a tap target.
     private func tint(for channel: AppActivityEntry.Channel) -> DesignTokens.BadgeTint {
         switch channel {
         case .phone, .faceTimeVideo, .faceTimeAudio: return .call
         case .whatsapp, .messenger, .sms: return .reminders
         case .unanswered: return .call
+        case .cloud: return .settings
         }
     }
 
@@ -181,6 +205,17 @@ struct HistoryView: View {
             // (missed-calls task, 2026-09-07). NOT a dead tap: this is
             // the honest resolution of an anonymous row.
             PhoneAppOpener.openDialer()
+        case .cloud:
+            // [CLOUD-CASCADE] (2026-09-16) A cloud row is INFORMATIONAL by
+            // construction — `activityRows` renders it WITHOUT a button,
+            // because a turn that went to the online brain opened no
+            // surface the user could be returned to. This case is
+            // unreachable from the UI; it exists so the switch stays
+            // exhaustive, and it speaks the row's own description rather
+            // than doing nothing, so a future call site that made the row
+            // tappable would produce an honest line, never a dead tap.
+            coordinator.speak(text: ActivityRowText.name(for: entry,
+                                                         locale: coordinator.activeLocale))
         }
     }
 
@@ -202,9 +237,15 @@ struct HistoryView: View {
     /// "Missed call: बुबा, Open Phone app" when the app placed the call
     /// itself — because no name exists to fold into a "call back" phrase
     /// for the anonymous case, and the attributed case must not hide that
-    /// the call was missed.
+    /// the call was missed. A cloud-cascade row ([CLOUD-CASCADE],
+    /// 2026-09-16) is informational: it announces what it is (the plain
+    /// name line, "Sent to the online brain") and carries NO action verb,
+    /// because the row has no tap.
     private func rowAccessibilityLabel(_ entry: AppActivityEntry) -> String {
         let locale = coordinator.activeLocale
+        if entry.channel == .cloud {
+            return ActivityRowText.name(for: entry, locale: locale)
+        }
         if entry.channel == .unanswered {
             let described = entry.contactName.isEmpty
                 ? L10n.str("history.unanswered", locale: locale)
@@ -268,7 +309,16 @@ enum ActivityRowText {
     /// the app could honestly fill (it placed the call — see
     /// `OpenedCallAttributor`), and it shows that contact exactly like
     /// every other row.
+    ///
+    /// A cloud-cascade row ([CLOUD-CASCADE], 2026-09-16) has no contact
+    /// at all — the online brain is not a person — so it shows the
+    /// localized "Sent to the online brain" label
+    /// (`history.cloudEscalation`), exactly like the anonymous
+    /// unanswered row shows its own.
     static func name(for entry: AppActivityEntry, locale: Locale) -> String {
+        if entry.channel == .cloud {
+            return L10n.str("history.cloudEscalation", locale: locale)
+        }
         if entry.channel == .unanswered, entry.contactName.isEmpty {
             return L10n.str("history.unanswered", locale: locale)
         }
@@ -284,6 +334,11 @@ enum ActivityRowText {
     /// ("Unanswered call"): the name line says what the row IS, the
     /// caption's label says which kind of call event it was, and the two
     /// differ for attributed rows, whose name line is a real contact.
+    ///
+    /// A cloud-cascade row ([CLOUD-CASCADE], 2026-09-16) reads
+    /// "Online brain · Today" (`history.channel.cloud`): its channel is
+    /// the destination of the turn, not a kind of call or message, so it
+    /// is labelled from the channel like the missed row is.
     static func caption(for entry: AppActivityEntry,
                         now: Date,
                         calendar: Calendar = .current,
@@ -292,6 +347,9 @@ enum ActivityRowText {
                                                    now: now,
                                                    calendar: calendar,
                                                    locale: locale)
+        if entry.channel == .cloud {
+            return "\(L10n.str("history.channel.cloud", locale: locale)) · \(time)"
+        }
         if entry.channel == .unanswered {
             return "\(L10n.str("history.missedCall", locale: locale)) · \(time)"
         }

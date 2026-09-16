@@ -43,6 +43,18 @@ import Foundation
 /// that IS the rephrase-as-question); band + tier-`free` action → nil
 /// (fall through). Full speak-as-question for free actions lands with the
 /// fine-tuned local model, whose calibrated abstention makes it safe.
+///
+/// [CLOUD-CASCADE] (2026-09-16) A CONFIGURABLE CLOUD CASCADE tier on top
+/// of layer 4: when the large local brain's answer comes back BELOW the
+/// configured threshold (default 0.97, the internal card) and a cloud
+/// provider is configured + within budget, the turn is overruled and
+/// routed to the online brain through the SAME layer-5 plumbing an
+/// abstention uses (`escalateToCloud` — one cloud path, never a fork).
+/// `cloudCascade` nil (the default, and every pre-cascade construction
+/// site) leaves every branch below byte-identical. The tier is inert —
+/// no cue, no event, no log — wherever no provider is configured, and it
+/// sits downstream of `CommandRouter`'s keyword safety net like every
+/// other interpretation decision.
 final class IntentRouter: CommandInterpreter {
 
     struct Config {
@@ -94,6 +106,18 @@ final class IntentRouter: CommandInterpreter {
     /// honestly.
     var geminiKeyConfigured: (() -> Bool)?
     var geminiCostAllows: (() -> Bool)?
+
+    /// [CLOUD-CASCADE] (2026-09-16) The cloud cascade tier: the provider
+    /// seam (`CloudBrainEndpoint` — resolved from `AppCoordinator.cloudProvider`
+    /// through `CloudBrainProviders`), the configurable threshold, and the
+    /// two side effects of a firing turn (the spoken hold cue and the
+    /// coordinator's activity/app-log trail).
+    ///
+    /// Nil (the default, and every test that wires no tier) is "no tier" —
+    /// the ladder below is byte-identical to the pre-cascade behaviour, so
+    /// nothing about the encoder→picker cascade or the cloud escalation
+    /// changes for a configuration that does not arm this.
+    var cloudCascade: CloudCascadeConfiguration?
 
     var isAvailable: Bool {
         // The cache always works, so the router is "available" whenever
@@ -184,8 +208,12 @@ final class IntentRouter: CommandInterpreter {
 
         // Legacy ladder (layers 4–5) — local first, cloud escalation
         // only when the stack allows cloud and a cloud brain exists.
+        // [CLOUD-CASCADE] `escalationBrain` is the provider seam's
+        // interpreter when a tier is wired, else the raw `cloudBrain`
+        // slot — the same object in the shipped wiring, so this stays
+        // byte-identical for every pre-cascade construction site.
         interpretLocalLadder(transcript: transcript, context: context,
-                             canEscalate: cloudEnabled && cloudBrain?.isAvailable == true,
+                             canEscalate: cloudEnabled && escalationBrain?.isAvailable == true,
                              completion: completion)
     }
 
@@ -213,6 +241,23 @@ final class IntentRouter: CommandInterpreter {
             // the rephrase question (spec §4 decision #6).
             local.interpret(transcript: transcript, context: context) { [weak self] command in
                 guard let self else { completion(nil); return }
+                // [CLOUD-CASCADE] The tier, checked BEFORE the band policy:
+                // a sub-threshold local answer is not this turn's answer
+                // while a configured online brain can take it. Ordered
+                // ahead of the accept band on purpose — the whole point of
+                // a 97 % threshold is that an ACCEPTED-but-unsure local
+                // answer (0.70…0.97) still goes online. `canEscalate` is
+                // the stack's own cloud consent, so a cloud-declining
+                // configuration never reaches the tier at all.
+                if let command, let cascade = self.cloudCascade, canEscalate,
+                   cascade.escalates(localConfidence: command.confidence) {
+                    self.escalateViaCloudCascade(cascade,
+                                                 localCommand: command,
+                                                 transcript: transcript,
+                                                 context: context,
+                                                 completion: completion)
+                    return
+                }
                 if let command, let accepted = self.bandChecked(command, source: "local",
                                                                 final: !canEscalate) {
                     completion(accepted)
@@ -416,10 +461,20 @@ final class IntentRouter: CommandInterpreter {
         return command
     }
 
+    /// [CLOUD-CASCADE] The cloud brain an escalation reaches: the provider
+    /// seam's interpreter when a tier is wired, else the raw `cloudBrain`
+    /// slot. The two are the SAME object in the shipped wiring — the seam
+    /// exists so the tier reads readiness from the provider, not so the
+    /// ladder gains a second cloud. With no tier wired this is exactly the
+    /// pre-cascade `cloudBrain`.
+    private var escalationBrain: CommandInterpreter? {
+        cloudCascade?.endpoint.interpreter ?? cloudBrain
+    }
+
     private func escalateToCloud(transcript: String,
                                  context: InterpreterContext,
                                  completion: @escaping (InterpretedCommand?) -> Void) {
-        guard cloudEnabled, let cloud = cloudBrain, cloud.isAvailable else {
+        guard cloudEnabled, let cloud = escalationBrain, cloud.isAvailable else {
             DispatchQueue.main.async { completion(nil) }
             return
         }
@@ -427,6 +482,75 @@ final class IntentRouter: CommandInterpreter {
             guard let self else { completion(nil); return }
             completion(command.flatMap { self.bandChecked($0, source: "cloud", final: true) })
         }
+    }
+
+    // MARK: - Cloud cascade tier ([CLOUD-CASCADE])
+
+    /// Routes a sub-threshold local answer to the online brain — the
+    /// tier's ONE path, reached only from the local ladder above.
+    ///
+    /// Order is the contract, and each step happens exactly once per
+    /// escalated turn:
+    ///  1. the spoken hold cue — BEFORE the cloud call, so the user learns
+    ///     why the wait just got longer while the request is still in
+    ///     flight (the cue is the tier's only user-visible act);
+    ///  2. the `cloud_cascade_escalated` observability event — threshold,
+    ///     local confidence and provider id, no content (C9);
+    ///  3. the coordinator's trail (`onEscalated`: the activity-log row and
+    ///     the app log line);
+    ///  4. the cloud call — the SAME `escalateToCloud` an abstention uses,
+    ///     with its own band policy and its own 25 s HTTP bound.
+    ///
+    /// A cloud that returns nothing usable leaves the LOCAL answer
+    /// standing, band-checked as the final layer — so a cascade turn can
+    /// never be WORSE than the same turn without the tier (the rule the
+    /// encoder cascade's "no escalation target" branch holds too), and a
+    /// household never hears an apology where a usable local answer
+    /// existed.
+    ///
+    /// Main queue by contract: every brain in the ladder completes on main
+    /// (`LocalBrainChain`, the interpreters), and this runs inside that
+    /// completion.
+    private func escalateViaCloudCascade(_ cascade: CloudCascadeConfiguration,
+                                         localCommand: InterpretedCommand,
+                                         transcript: String,
+                                         context: InterpreterContext,
+                                         completion: @escaping (InterpretedCommand?) -> Void) {
+        let escalation = CloudCascadeEscalation(provider: cascade.endpoint.provider.rawValue,
+                                                threshold: cascade.threshold,
+                                                localConfidence: localCommand.confidence)
+        cascade.holdCue?()
+        emitCloudCascadeEscalated(escalation)
+        cascade.onEscalated?(escalation)
+        escalateToCloud(transcript: transcript, context: context) { [weak self] command in
+            guard let self else { completion(nil); return }
+            guard let command else {
+                completion(self.bandChecked(localCommand, source: "local", final: true))
+                return
+            }
+            completion(command)
+        }
+    }
+
+    /// [CLOUD-CASCADE] `cloud_cascade_escalated` on `voice_routing`: the
+    /// large local brain answered below the configured threshold and the
+    /// ONLINE brain takes the turn. The threshold, the local confidence
+    /// and the provider id — never transcript or reply content (C9
+    /// policy), and never the API key. Pair it with the cue the user
+    /// heard to tell "sent to the cloud" from "answered on device".
+    private func emitCloudCascadeEscalated(_ escalation: CloudCascadeEscalation) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "voice_routing",
+            eventType: "cloud_cascade_escalated",
+            durationMs: nil,
+            outcome: "escalated",
+            errorCode: nil,
+            metadata: [
+                "provider": escalation.provider,
+                "threshold": PipelineTraceSummary.score(escalation.threshold),
+                "confidence": PipelineTraceSummary.score(escalation.localConfidence)
+            ]
+        ))
     }
 
     // MARK: - Cache write (called post-confirmation by the coordinator)
