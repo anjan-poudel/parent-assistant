@@ -461,11 +461,17 @@ file is ever written, including no temporary file: the payload is encoded and ha
 implementation, which performs its own atomic protected write.
 
 **Key.** `normalizedText|targetLanguageCode` — exactly the addendum §13.2 key, with the same
-normalization as C03. Stored entries carry the key, the translation, an LRU timestamp and nothing
-else. **Deliberately absent**: any image, bounding box, scene timestamp, camera or device
-identifier, or location (NFR-LCT-008 scenario 2). `lastAccessedAt` is cache-internal bookkeeping
-required by the LRU policy, not scene metadata — this is called out explicitly because the
-requirement enumerates what may be stored.
+normalization as C03. Stored entries carry the key, the translation, the LRU ordering field and
+nothing else. **Deliberately absent**: any image, bounding box, scene timestamp, camera or device
+identifier, or location (NFR-LCT-008 scenario 2).
+
+The LRU ordering field is a **monotone counter** (`lastAccessSequence`), not a wall-clock timestamp
+and not the earlier draft's `lastAccessedAt` (AM-6). A touch happens on lookup — that is, while the
+text is on camera — so a timestamp written there would record, coarsely, when that text was last in
+front of the camera: scene-derived metadata of exactly the kind NFR-LCT-008 scenario 2 forbids, and
+one that survives into the next session. A counter preserves LRU ordering exactly (monotone
+increments give the same comparisons) and stores nothing derived from the scene. The counter is
+restored above the payload's maximum on load, so ordering stays total across sessions.
 
 **Eviction.** `cacheGeneralEntryLimit` (default **200**) bounds the persisted layer by LRU. Tier-0 /
 dictionary-resident entries are **non-evicting by policy**, not by size: the eviction predicate asks
@@ -514,8 +520,17 @@ shape, and the `isNepali(locale)` gate. Two consequences the implementer must re
 
 The localizer's `dictionary` static is Layer A of `LabelTranslationCache`. Live translation gains one
 new **caller-side** resolver at the appliance helper's label presentation seam, with the localizer's
-result taking precedence whenever the localizer produces a translation, so every label the helper
-renders today renders identically. See R8 for the one behavioural delta this introduces.
+result taking precedence whenever the localizer produces a translation, so **every label the helper
+translates today renders identically** — the claim is about the labels the localizer actually
+translates (a known, curated label), not about every label the helper displays. A label the localizer
+*passes through* is not covered by that sentence: if the live path has already persisted a
+translation for it, the seam now renders that translation instead of the printed English. That is the
+one behavioural delta, it is recorded in R8, and it is pinned by
+`ApplianceHelperLabelSeamTests.testR8CaseTwoACachePopulatedLabelRendersTheCachedTranslation` (whose
+sibling cases `testR8CaseOneADictionaryKnownLabelRendersExactlyAsBeforeTheSeam` and
+`testR8CaseThreeTheLocalizerWinsOverTheCacheWhenBothWouldAnswer` pin the unchanged case and the
+precedence). Nothing else about the helper changes: no cloud tier, no consent gate, no cost latch,
+no overlay behaviour — shared dictionary and shared storage, not shared translation policy.
 
 ### C07 — `SceneTextSanitiser`
 
@@ -815,7 +830,7 @@ excluded from backups). There is no plaintext at rest, including no temporary fi
 
 | Key | Payload | Written by | Notes |
 |---|---|---|---|
-| `plugin.live_translate.cache.v1` | `Persisted { schemaVersion: Int, entries: [Entry] }` where `Entry { key, translation, lastAccessedAt }` and `key = "<normalizedText>|<targetLanguageCode>"` | tier-2 completion path; LRU/upkeep | Whole-payload single-key write (protocol has no enumeration). Contains no image, box, scene timestamp, identifier or location. Unreadable payload ⇒ discard and rebuild. |
+| `plugin.live_translate.cache.v1` | `Persisted { schemaVersion: Int, entries: [Entry] }` where `Entry { key, translation, lastAccessSequence }` (monotone counter, AM-6 — no timestamps) and `key = "<normalizedText>|<targetLanguageCode>"` | tier-2 completion path; LRU/upkeep | Whole-payload single-key write (protocol has no enumeration). Contains no image, box, scene timestamp, identifier or location. Unreadable payload ⇒ discard and rebuild. |
 | `plugin.live_translate.consent.v1` | `ConsentRecord { granted, recordedAt, disclosureVersion }` | consent prompt / revocation | Absent, corrupt or unreadable ⇒ **deny** (fail closed). Deleted on revocation. |
 | `livetranslate.alwaysShowOriginal` | `Bool` | settings toggle | `UserDefaults`; a UI preference containing no user content. |
 
@@ -1334,7 +1349,7 @@ here means an automatic re-attempt by the feature, not a user action.
 | 6 | `LabelTranslationCache.lookup(_:)` | payload unreadable; storage unavailable | **Yes** and self-healing: an unreadable payload is discarded, the store rebuilds from the dictionary layer, and the lookup resolves as a miss. Nothing user-visible | C05 |
 | 7 | `LabelTranslationCache.store(_:)` | write rejected; storage unavailable | **Yes**, implicit: the next resolution of the same key tries again. The translation is rendered regardless | C05 |
 | 8 | `LiveTranslateConsentGate.currentDecision()` | record unreadable / absent / denied | **Yes** for re-read (the next request re-reads), but the decision is `deny` every time until a record exists. No automatic re-prompt in a loop: the prompt is shown at most once per session until the user answers | C09 |
-| 9 | `LiveTranslateConsentGate.record(_:)` / `.revoke()` | write failed | **Yes** — the caller re-prompts (record) or reports the failure (revoke). A failed revoke leaves the record intact, which is the safe direction: the gate is still gated | C09 |
+| 9 | `LiveTranslateConsentGate.record(_:)` / `.revoke()` | write failed | **Yes** — the caller re-prompts (record) or reports the failure (revoke). A failed revoke must deny in memory, verify the delete by read-back, surface the failure, and never let a relaunch silently re-grant (SD-1/AM-4 semantics; the earlier "record intact is the safe direction" claim was proved wrong in review) | C09 |
 | 10 | `CloudTranslationTier.resolve(_:)` → provider not configured | `.providerNotConfigured` | **No** (configuration action required). Regions degrade; the feature keeps working | C08 |
 | 11 | … → consent not recorded / denied | `.consentNotRecorded` / `.consentDenied` | **No** automatic retry. The prompt is the retry, and it is user-driven | C08/C09 |
 | 12 | … → cost budget exhausted | `.costBudgetExhausted` | **No** — session-latched, fail closed, no alternative request shape | C15 |
@@ -1443,6 +1458,12 @@ directly testable without a device, a camera, or a network.
 - In-flight dedupe: the same string observed twice before a reply produces one request.
 - Revocation mid-scene: zero further requests, indicator absent, feature still usable.
 - Cache round-trip through the encrypted storage implementation, and a relaunch-with-no-network case.
+- Appliance-helper label seam (T-013, FR-LCT-020 / R8) — `ApplianceHelperLabelSeamTests`, three named
+  cases: `testR8CaseOneADictionaryKnownLabelRendersExactlyAsBeforeTheSeam` (every label the localizer
+  translates renders byte-for-byte as shipped), `testR8CaseTwoACachePopulatedLabelRendersTheCachedTranslation`
+  (the one recorded behavioural delta), `testR8CaseThreeTheLocalizerWinsOverTheCacheWhenBothWouldAnswer`
+  (localizer precedence). The same file covers the shared-store hit for the live path, the absence of
+  any cloud/consent dependency in the seam, and the one-store/one-dictionary scan.
 - Vision OCR against fixture images on the simulator, including a dense menu-like page for the
   decluttering path.
 
