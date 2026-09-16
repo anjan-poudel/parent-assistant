@@ -553,42 +553,35 @@ struct MedicalView: View {
 /// Today's reminders from ALL THREE reminder systems — medication doses
 /// (`MedicationScheduler`), routine occurrences (walk, exercise, meals, …
 /// from `RoutineScheduler`), and items imported from the native
-/// Calendar/Reminders apps (`ExternalCalendarService`, read-only bridge)
-/// — plus a manage list where the family enables/disables the seeded
-/// routine categories. Native Calendar events from the days ahead sit
-/// under an "Upcoming events" section (upcoming-events task, 2026-09-07).
-/// Medication management stays on the Medical leaf
-/// (the renamed Meds leaf, medical task 2026-09-07) / Settings editor;
-/// this screen never mutates medication data.
+/// Calendar/Reminders apps (`ExternalCalendarService`, read-only bridge).
+/// Native Calendar events from the days ahead sit under an "Upcoming
+/// events" section (upcoming-events task, 2026-09-07). Medication
+/// management stays on the Medical leaf (the renamed Meds leaf, medical
+/// task 2026-09-07) / Settings editor; this screen never mutates
+/// medication data.
+///
+/// The manage list that used to live here — the family's enable/disable
+/// toggles and per-routine photo management — moved to the Settings hub's
+/// Reminders tab (`RoutineSettingsView`, routine-settings move,
+/// 2026-09-17). This leaf shows the day; Settings configures it.
 struct RemindersView: View {
     @EnvironmentObject var coordinator: AppCoordinator
-    /// Bumped after a toggle so the cached lists re-read fresh data —
-    /// the coordinator exposes reminders as computed vars, not @Published.
-    @State private var entriesVersion = 0
 
     /// DESIGN-REVIEW (P2 — "keep encrypted storage reads out of `body`",
     /// "build row presentation values when source data changes"): every
     /// `coordinator.routineEntries` access is a Keychain read plus a JSON
     /// decode (`RoutineStore.loadEntries` → `EncryptedLocalStorage`), and
-    /// this screen used to make that read TWICE per body evaluation —
-    /// once building `todayRows`, once in the `ForEach` below — plus one
-    /// more for the occurrences. A body evaluation happens on any
-    /// coordinator publish, so merely having this leaf open used to mean
-    /// a steady stream of securityd round-trips.
+    /// this screen used to make that read once per body evaluation just
+    /// building `todayRows`, plus one more for the occurrences. A body
+    /// evaluation happens on any coordinator publish, so merely having
+    /// this leaf open used to mean a steady stream of securityd
+    /// round-trips.
     ///
     /// The roster and the finished rows now live in state, rebuilt by the
     /// `.task` below when the underlying data actually changes; the body
     /// only reads them.
     @State private var routineEntries: [RoutineEntry] = []
     @State private var todayRows: [TodayRow] = []
-    /// Each manage row's subtitle ("Sun, Tue · 9:00 AM"), built with the
-    /// rows so no formatter work runs while drawing.
-    @State private var routineSummaries: [UUID: String] = [:]
-    /// The routine whose photos are being managed (photo-visual-aids task,
-    /// 2026-09-16) — the photo half of a reminder editor, reached from the
-    /// manage row. Held as the full entry so the sheet renders without a
-    /// store read of its own.
-    @State private var photoEditorEntry: RoutineEntry?
     /// A today row whose photos the elder tapped. Only rows that actually
     /// carry photos can set this, so the full-screen viewer never appears
     /// for a reminder without one. Medication dose rows are included
@@ -599,12 +592,12 @@ struct RemindersView: View {
     /// the notification, which is where a dose actually fires.
     @State private var viewingAidRow: TodayRow?
 
-    /// Everything the cached rows depend on: an in-screen toggle, a voice
-    /// turn (a routine can be added by asking), a dose completed
-    /// elsewhere, and the app's language (the rows carry localized
-    /// titles). Counting these is cheap; re-reading the stores is not.
+    /// Everything the cached rows depend on: a voice turn (a routine can
+    /// be added by asking), a dose completed elsewhere, and the app's
+    /// language (the rows carry localized titles). Counting these is
+    /// cheap; re-reading the stores is not.
     private var refreshKey: String {
-        "\(entriesVersion)|\(coordinator.conversationHistory.count)"
+        "\(coordinator.conversationHistory.count)"
             + "|\(coordinator.pendingReminders.count)"
             + "|\(coordinator.activeLocale.identifier)"
     }
@@ -676,44 +669,11 @@ struct RemindersView: View {
                 // Native events from the days ahead (upcoming-events
                 // task, 2026-09-07) — see `upcomingEventsSection`.
                 upcomingEventsSection
-
-                if !routineEntries.isEmpty {
-                    sectionHeader(key: "reminders.routinesSection")
-                    ForEach(routineEntries) { entry in
-                        routineManageRow(entry)
-                    }
-                }
             }
         }
         .task(id: refreshKey) {
-            let roster = coordinator.routineEntries
-            routineEntries = roster
-            routineSummaries = Dictionary(
-                uniqueKeysWithValues: roster.map { ($0.id, scheduleSummary($0)) }
-            )
+            routineEntries = coordinator.routineEntries
             todayRows = buildTodayRows()
-        }
-        // Manage one routine's photos (photo-visual-aids task,
-        // 2026-09-16). Edits persist as they happen, so the only thing
-        // dismissal has to do is refresh the cached rows.
-        .sheet(item: $photoEditorEntry) { entry in
-            ReminderVisualAidEditorView(
-                entryId: entry.id,
-                title: entry.displayTitle(locale: coordinator.activeLocale),
-                aids: entry.visualAids,
-                store: coordinator.visualAidStore,
-                locale: coordinator.activeLocale,
-                // The editor owns its draft; this only persists. The
-                // captured `entry` is the one the sheet opened with —
-                // its id is all this needs.
-                onSave: { aids in
-                    coordinator.setRoutineVisualAids(entry.id, aids: aids)
-                },
-                onClose: {
-                    photoEditorEntry = nil
-                    entriesVersion += 1
-                }
-            )
         }
         // The elder's own view of a row's photos: the same large-image
         // screen the firing notification presents, reading through the
@@ -833,76 +793,6 @@ struct RemindersView: View {
             return L10n.str("externalReminders.allDay", locale: coordinator.activeLocale)
         }
         return row.scheduledAt.formatted(date: .omitted, time: .shortened)
-    }
-
-    private func routineManageRow(_ entry: RoutineEntry) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: entry.category.systemImage)
-                .font(.system(size: 24))
-                .foregroundStyle(DesignTokens.accent)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(entry.displayTitle(locale: coordinator.activeLocale))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Text(routineSummaries[entry.id] ?? "")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
-            }
-            Spacer()
-            // Photos live behind this row rather than in the row itself:
-            // the manage list is where the family configures a routine,
-            // and this is the only configuration surface routines have
-            // (photo-visual-aids task, 2026-09-16).
-            Button {
-                photoEditorEntry = entry
-            } label: {
-                Image(systemName: entry.visualAids.isEmpty ? "photo.badge.plus" : "photo.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.accent)
-                    .frame(minWidth: DesignTokens.minTapTargetSize,
-                           minHeight: DesignTokens.minTapTargetSize)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("visualAid.add"))
-            Toggle("", isOn: Binding(
-                get: { entry.isEnabled },
-                set: { enabled in
-                    coordinator.setRoutineEntryEnabled(entry.id, enabled: enabled)
-                    entriesVersion += 1
-                }
-            ))
-            .labelsHidden()
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-    }
-
-    /// "7:00 AM, 4:00 PM" for daily entries; weekly entries prefix the
-    /// localized weekday names ("Sun, Tue · 9:00 AM").
-    ///
-    /// DESIGN-REVIEW (P2): this ran per routine row, per body evaluation,
-    /// and built a `DateFormatter` on every pass just to read its
-    /// weekday-symbol table — plus a `Date.formatted` per scheduled time.
-    /// Both now come from the locale-keyed cache in `ViewCaches.swift`,
-    /// and the times format in the app's ACTIVE language rather than the
-    /// device locale, matching how the rest of the app renders time.
-    private func scheduleSummary(_ entry: RoutineEntry) -> String {
-        let locale = coordinator.activeLocale
-        let calendar = Calendar.current
-        let timeFormatter = LocaleFormatters.shortTime(locale: locale)
-        let times = entry.scheduleTimes.compactMap { components -> String? in
-            calendar.date(from: components).map { timeFormatter.string(from: $0) }
-        }
-        let timesText = times.joined(separator: ", ")
-        guard entry.frequency == .weekly, !entry.weekdays.isEmpty else { return timesText }
-        let symbols = LocaleFormatters.shortWeekdaySymbols(locale: locale)
-        guard !symbols.isEmpty else { return timesText }
-        let days = entry.weekdays.sorted().compactMap { weekday -> String? in
-            weekday >= 1 && weekday <= symbols.count ? symbols[weekday - 1] : nil
-        }
-        return days.joined(separator: ", ") + " · " + timesText
     }
 
     // MARK: - Upcoming native Calendar events (upcoming-events task, 2026-09-07)
@@ -1109,7 +999,7 @@ struct CallView: View {
     /// Bumped after a chooser pick or a saved Messenger handle so the
     /// per-outcome row-state dictionary re-resolves (the coordinator
     /// stores are plain reads, not @Published — same bump pattern as
-    /// RemindersView's `entriesVersion`).
+    /// RoutineSettingsView's `entriesVersion`).
     @State private var channelStateVersion = 0
     /// The result row the Messenger-handle sheet is editing (nil =
     /// closed). The sheet is item-driven so a swipe-dismiss also clears

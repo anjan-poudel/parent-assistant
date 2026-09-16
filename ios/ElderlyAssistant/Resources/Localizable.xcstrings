@@ -12304,6 +12304,40 @@
         }
       }
     },
+    "settings.routines.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No daily routines yet"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले कुनै दिनचर्या छैन"
+          }
+        }
+      }
+    },
+    "settings.routines.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daily routine"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दिनचर्या"
+          }
+        }
+      }
+    },
     "settings.stt.section": {
       "extractionState": "manual",
       "localizations": {
