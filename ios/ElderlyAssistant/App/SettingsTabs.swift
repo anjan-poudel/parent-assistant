@@ -46,8 +46,10 @@ extension SettingsView {
                 // "Family & friends, caregiver notifications, calling apps".
                 return [.family, .caregiverNotifications, .calling]
             case .reminders:
-                // "Medications, alarms & timers, calendar, calendar sharing".
-                return [.meds, .alarms, .calendar, .calendarSharing]
+                // "Medications, daily routines, alarms & timers, calendar,
+                // calendar sharing". Daily routines moved here from the
+                // Reminders leaf's manage list (2026-09-17).
+                return [.meds, .routines, .alarms, .calendar, .calendarSharing]
             case .tools:
                 // "Quick apps, YouTube, news feeds, manuals, saved places".
                 return [.quickApps, .youtube, .feeds, .manuals, .places]
@@ -58,7 +60,7 @@ extension SettingsView {
         }
     }
 
-    /// Every leaf screen the hub can push. The first 18 are the visible
+    /// Every leaf screen the hub can push. The first 19 are the visible
     /// rows across the five tabs; the last five are the technical
     /// settings the hidden sheet carries (spec §2 decision 2).
     enum SettingsDestination: String, CaseIterable, Identifiable {
@@ -67,7 +69,7 @@ extension SettingsView {
         // Family
         case family, caregiverNotifications, calling
         // Reminders
-        case meds, alarms, calendar, calendarSharing
+        case meds, routines, alarms, calendar, calendarSharing
         // Tools
         case quickApps, youtube, feeds, manuals, places
         // System
@@ -89,6 +91,7 @@ extension SettingsView {
             case .caregiverNotifications: return "settings.notifyCaregivers.title"
             case .calling: return "settings.calling.title"
             case .meds: return "settings.meds.title"
+            case .routines: return "settings.routines.title"
             case .alarms: return "settings.alarms.title"
             case .calendar: return "settings.calendar.title"
             case .calendarSharing: return "settings.calendarSharing"
@@ -118,6 +121,7 @@ extension SettingsView {
             case .caregiverNotifications: return "bell.badge.fill"
             case .calling: return "phone.badge.plus"
             case .meds: return "pills.fill"
+            case .routines: return "repeat.circle.fill"
             case .alarms: return "alarm.fill"
             case .calendar: return "calendar.badge.clock"
             case .calendarSharing: return "calendar.badge.plus"
@@ -343,6 +347,10 @@ struct SettingsDestinationView: View {
         case .places: PlacesSettingsView()
         case .family: FamilyContactsSettingsView()
         case .meds: MedicationScheduleSettingsView()
+        // Daily routines (routine-settings move, 2026-09-17) — the
+        // enable/disable toggles and photo management that used to live
+        // at the bottom of the Reminders leaf.
+        case .routines: RoutineSettingsView()
         case .manuals: DefaultManualsBrowseView()
         // Calendar settings (calendar-settings task, 2026-09-07) — the
         // mirror/two-way/import cards that used to crowd the Medication

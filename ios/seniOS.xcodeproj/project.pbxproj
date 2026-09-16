@@ -343,6 +343,7 @@
 		A9EA19CD07B47DD8DE4183FD /* VoiceBiometricStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F9CB2D914CCA960DB69EEFA /* VoiceBiometricStore.swift */; };
 		AA25E88B05E65329865C2577 /* StreamingCaptionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD9F44C9D6D594D6315E50EE /* StreamingCaptionTests.swift */; };
 		AA62756932C412DFA9021A13 /* IntentPromptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 137B38C1AF355DA90BE25FCC /* IntentPromptTests.swift */; };
+		AAC70431E46B70420F135B3F /* RoutineSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9EC29A6348AE783E4B98AFB /* RoutineSettingsView.swift */; };
 		AACEB7D2B9388CE44405C609 /* CallingSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C17A565DFA8812094915C8AC /* CallingSettingsView.swift */; };
 		AAEAC98045D10769BA087819 /* DialectBiasComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D9604F3CC966A9E549FA807 /* DialectBiasComposer.swift */; };
 		AB953708B661CF95D065EB19 /* VoicePipelineNoiseFilterSeamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AE54E6D163F8A4276A95D35 /* VoicePipelineNoiseFilterSeamTests.swift */; };
@@ -1044,6 +1045,7 @@
 		D6FA9BB313CEDA9FA33F3668 /* VoiceSessionStateMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionStateMachine.swift; sourceTree = "<group>"; };
 		D76F628ABCC9C5E3E82F35F9 /* ExternalReminder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalReminder.swift; sourceTree = "<group>"; };
 		D94018BD4D7E1D72BAA1650C /* SpeakerEmbedder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerEmbedder.swift; sourceTree = "<group>"; };
+		D9EC29A6348AE783E4B98AFB /* RoutineSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineSettingsView.swift; sourceTree = "<group>"; };
 		DB020579D8CA32E27559B584 /* CloudCascade.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudCascade.swift; sourceTree = "<group>"; };
 		DB148F148C7377AD09E06356 /* UpdatesAlarmsComposerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdatesAlarmsComposerTests.swift; sourceTree = "<group>"; };
 		DB8C99DCB2156C33403F2AAB /* UnifiedContactSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnifiedContactSearchTests.swift; sourceTree = "<group>"; };
@@ -1800,6 +1802,7 @@
 				A0D0DDC948A0F8B16BA72B03 /* OnboardingWizardView.swift */,
 				A2C2D8B699384979734A52CC /* QuickAccessAppsView.swift */,
 				EBAE1F1AA52FA1D909EC6A08 /* RedesignComponents.swift */,
+				D9EC29A6348AE783E4B98AFB /* RoutineSettingsView.swift */,
 				EF3878B39CB94F2A699E176C /* SettingsTabs.swift */,
 				ACAF3F4EE4B4C11562224323 /* SettingsView.swift */,
 				7C10F00EBA0FFE62595217FB /* StartupBoot.swift */,
@@ -2589,6 +2592,7 @@
 				22E8E5F88872F1731B3B018C /* RoutineEntry.swift in Sources */,
 				B20B34CF355A53463F2E1563 /* RoutinePlugin.swift in Sources */,
 				2F3800927950C4818734A142 /* RoutineScheduler.swift in Sources */,
+				AAC70431E46B70420F135B3F /* RoutineSettingsView.swift in Sources */,
 				CF4CEBD7E82449D95235BE23 /* RoutineStore.swift in Sources */,
 				2E4628C2BDB9BD725BC42628 /* RoutineVisualAidFireHandler.swift in Sources */,
 				A6803CBCD374BEFA0C7E6DF6 /* SavedPlaceStore.swift in Sources */,

@@ -29,7 +29,7 @@ final class SettingsTabMappingTests: XCTestCase {
         XCTAssertEqual(Section.family.rows,
                        [.family, .caregiverNotifications, .calling])
         XCTAssertEqual(Section.reminders.rows,
-                       [.meds, .alarms, .calendar, .calendarSharing])
+                       [.meds, .routines, .alarms, .calendar, .calendarSharing])
         XCTAssertEqual(Section.tools.rows,
                        [.quickApps, .youtube, .feeds, .manuals, .places])
         XCTAssertEqual(Section.system.rows,
@@ -47,7 +47,7 @@ final class SettingsTabMappingTests: XCTestCase {
         XCTAssertEqual(Set(flattened).count, flattened.count,
                        "a row is listed on two tabs: "
                        + duplicates(in: flattened).map(\.rawValue).joined(separator: ", "))
-        XCTAssertEqual(flattened.count, 18, "the hub's visible row count changed")
+        XCTAssertEqual(flattened.count, 19, "the hub's visible row count changed")
     }
 
     func testTheVisibleAndHiddenHalvesPartitionEveryDestination() {
@@ -94,7 +94,7 @@ final class SettingsTabMappingTests: XCTestCase {
         // buries one of these behind the long-press fails here.
         let visible = Set(Section.allCases.flatMap(\.rows))
         for row: Destination in [.appearance, .language, .privacy, .meds,
-                                 .family, .ttsVoices, .quickApps] {
+                                 .routines, .family, .ttsVoices, .quickApps] {
             XCTAssertTrue(visible.contains(row),
                           "\(row.rawValue) must stay a visible row")
         }
