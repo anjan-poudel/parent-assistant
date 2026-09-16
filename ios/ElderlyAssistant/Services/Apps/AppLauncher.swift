@@ -259,10 +259,37 @@ final class AppLauncher {
         }
     }
 
-    /// Case- and diacritic-insensitive folding used by `search`.
+    /// Case- and diacritic-insensitive folding used by `search` and
+    /// `app(matchingSpoken:)`.
     private static func folded(_ s: String) -> String {
         s.folding(options: [.caseInsensitive, .diacriticInsensitive],
                   locale: Locale(identifier: "en"))
+    }
+
+    /// Catalog resolution for a SPOKEN app name (voice app launcher,
+    /// 2026-09-16): the interpreter's `app` entity is usually a catalog id
+    /// ("whatsapp", "camera"), but a model may echo what the elder
+    /// actually said ("फोटो", "Wi-Fi Settings", "क्यामेरा"), so the match
+    /// tries, in order, the id, an entry's spoken `aliases` (the exact
+    /// words keyword rules use), and the entry's localized display name in
+    /// the active locale and in English.
+    ///
+    /// Matching is EXACT, full-lexeme, case/diacritic-folded — never a
+    /// substring. A phrase ("क्यामेरा खोल", "open the camera") must NOT
+    /// resolve: partial matching is the Devanagari Character-cluster
+    /// regression this catalog's aliases are deliberately immune to, and a
+    /// near-miss guess would launch the wrong app on an elder's phone.
+    /// No match returns nil, and the caller says so honestly.
+    static func app(matchingSpoken raw: String, locale: Locale) -> App? {
+        let needle = folded(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard !needle.isEmpty else { return nil }
+        let english = Locale(identifier: "en")
+        return catalog.first { app in
+            folded(app.id) == needle
+                || app.aliases.contains { folded($0) == needle }
+                || folded(L10n.str(app.nameKey, locale: locale)) == needle
+                || folded(L10n.str(app.nameKey, locale: english)) == needle
+        }
     }
 
     /// Whether the app answers its scheme probe — the honest "is it on
@@ -294,6 +321,22 @@ final class AppLauncher {
     func open(_ app: App) {
         guard let url = app.rootURL else { return }
         opener.open(url)
+    }
+
+    /// Opens the entry's WEB fallback (its universal `https://` link, which
+    /// iOS routes into the app when it is installed and to Safari when it
+    /// is not) through the same opener seam as every other launch URL.
+    ///
+    /// Returns false — opening nothing — when the entry has no fallback
+    /// (only Facebook, Instagram, YouTube and WhatsApp do, per the
+    /// design's v1 catalog): the caller then says the honest "not
+    /// installed" line instead of sending the elder to Safari on a page
+    /// that has nothing to do with what they asked for.
+    @discardableResult
+    func openWebFallback(_ app: App) -> Bool {
+        guard let url = app.webFallback else { return false }
+        opener.open(url)
+        return true
     }
 
     private let opener: CallLinkOpening

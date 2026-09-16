@@ -224,6 +224,33 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// reference).
     var isAwaitingCalendarEventConfirmation: Bool { get }
 
+    /// [APP-LAUNCHER] (2026-09-16) True while a `launcher.open` app launch
+    /// is pended for the elder's yes/no (design D3: confirm-first before
+    /// every external launch). Widens the router's confirmation path
+    /// exactly like `isAwaitingCalendarEventConfirmation`: the yes/no on
+    /// the next transcript goes to `handleConfirmationResponse` (which
+    /// launches or cancels) and the medication-flavored generic yes/no
+    /// speech is skipped — the coordinator speaks "Opening X" or the
+    /// honest cancellation itself, and a plain "yes" is not a dose
+    /// acknowledgement. Requirement-with-extension-default pattern like
+    /// the members above (the router holds the coordinator as a protocol
+    /// reference, so an extension-only member would bind statically and
+    /// AppCoordinator's implementation could never be reached).
+    var isAwaitingAppLaunchConfirmation: Bool { get }
+
+    /// [APP-LAUNCHER] (2026-09-16) The app-launch confirmation seam the
+    /// `app_launcher` plugin calls (and the deterministic keyword stage may
+    /// call once it exists): pends a catalog app for the elder's spoken
+    /// yes/no and RETURNS the line to speak. The coordinator owns the
+    /// pending state, the 45 s window and the execution — the caller only
+    /// speaks what it is handed, exactly like
+    /// `requestCalendarEventConfirmation`. A launch that can only fail is
+    /// never pended: the returned line is then the honest not-installed
+    /// message (or, when the entry has a web fallback, a question that
+    /// discloses the swap). Same requirement-with-extension-default
+    /// pattern as the members above.
+    func requestAppLaunch(appID: String, confidence: Double?) -> String
+
     /// [ALARMS-TIMERS] (2026-09-07) Requests an ALARM at `time` (already
     /// the next future occurrence; only its hour/minute-of-day matters —
     /// the OS alarm is a DAILY-repeating local notification, see
@@ -390,6 +417,17 @@ extension VoiceCommandCoordinating {
     // explicitly implements the member (AppCoordinator, and the
     // scripted mock under test) creates anything.
     func requestCalendarEventConfirmation(title: String, startDate: Date) -> String? { nil }
+    // [APP-LAUNCHER] (2026-09-16) Inert defaults — a conformer that does
+    // not opt in (every mock/double) never pends an app launch, so the
+    // router's confirmation path behaves exactly as it did before this
+    // member, and the plugin's seam answers the honest "not available"
+    // line instead of pretending a launch was pended. Only a coordinator
+    // that explicitly implements the members (AppCoordinator, and the
+    // scripted mock under test) launches anything.
+    var isAwaitingAppLaunchConfirmation: Bool { false }
+    func requestAppLaunch(appID: String, confidence: Double?) -> String {
+        L10n.str("router.pluginUnavailable", locale: activeLocale)
+    }
     // [MORNING-BRIEFING] (2026-09-07) Inert default — a conformer that
     // does not opt in (every mock/double across app and test target)
     // never fires a briefing, so the deterministic ladder stage falls
@@ -432,6 +470,14 @@ final class CommandRouter {
         /// (not a medication acknowledgement), which is why it is its own
         /// case rather than riding `.acknowledgedMedication`.
         case calendarEventConfirmed
+        /// [APP-LAUNCHER] (2026-09-16) A `launcher.open` confirmation was
+        /// answered YES — the coordinator has taken the pended app and
+        /// launched it (or, for the camera entry, switched to the in-app
+        /// capture). Its own case for the same reason
+        /// `.calendarEventConfirmed` has one: the outcome is a launch, not
+        /// a medication acknowledgement, and reporting
+        /// `.acknowledgedMedication` would make the router's result a lie.
+        case appLaunchConfirmed
         case unrecognised(transcript: String)
     }
 
@@ -678,8 +724,14 @@ final class CommandRouter {
             // dose was recorded.
             let isCalendarEventConfirmation =
                 coordinator?.isAwaitingCalendarEventConfirmation == true
+            // [APP-LAUNCHER] (2026-09-16) An app-launch confirmation speaks
+            // its own "Opening X" / honest cancellation too — the generic
+            // catalog yes/no is medication-flavored and would claim a dose
+            // was recorded for a plain "हो" answered to "क्यामेरा खोल्ने हो?".
+            let isAppLaunchConfirmation =
+                coordinator?.isAwaitingAppLaunchConfirmation == true
             let speaksItsOwnYesNo = isCallConfirmation || isNavigationDisambiguation
-                || isCalendarEventConfirmation
+                || isCalendarEventConfirmation || isAppLaunchConfirmation
             if Self.isYesResponse(raw) {
                 coordinator?.handleConfirmationResponse(.yes)
                 emit(eventType: "confirmation_yes", outcome: "success")
@@ -688,6 +740,7 @@ final class CommandRouter {
                 }
                 if isCallConfirmation { return .callConfirmed }
                 if isCalendarEventConfirmation { return .calendarEventConfirmed }
+                if isAppLaunchConfirmation { return .appLaunchConfirmed }
                 return isNavigationDisambiguation ? .navigationRequested : .acknowledgedMedication
             }
             if Self.isNoResponse(raw) {

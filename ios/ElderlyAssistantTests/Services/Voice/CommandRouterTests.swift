@@ -594,6 +594,138 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertEqual(coordinator.confirmationResponses, [.no])
     }
 
+    /// [APP-LAUNCHER] (2026-09-16) The yes/no follow-up to an app-launch
+    /// question must NOT speak the generic medication-flavored text — the
+    /// coordinator speaks "Opening X" (or the honest cancellation) itself,
+    /// and the routing result is its own case so no caller mistakes it for
+    /// a dose ack.
+    func testAppLaunchConfirmationYesDoesNotSpeakGenericMedicationText() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isAwaitingConfirmation = true
+        coordinator.isAwaitingAppLaunchConfirmation = true
+        let speaker = MockSpeaker()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: MockObservabilityBus(),
+                                   speaker: speaker)
+
+        let result = router.route(transcript: "हजुर")
+
+        XCTAssertEqual(result, .appLaunchConfirmed)
+        XCTAssertEqual(coordinator.confirmationResponses, [.yes])
+        XCTAssertTrue(speaker.utterances.isEmpty,
+                      "the coordinator speaks its own launch outcome")
+    }
+
+    /// A no is a no: the router reports no launch outcome, and (with the
+    /// three older confirmation kinds all inert) it never falls through
+    /// to the medication ack either.
+    func testAppLaunchConfirmationNoIsNotAConfirmation() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isAwaitingConfirmation = true
+        coordinator.isAwaitingAppLaunchConfirmation = true
+        let speaker = MockSpeaker()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: MockObservabilityBus(),
+                                   speaker: speaker)
+
+        let result = router.route(transcript: "होइन")
+
+        XCTAssertNotEqual(result, .appLaunchConfirmed)
+        XCTAssertEqual(coordinator.confirmationResponses, [.no])
+        XCTAssertTrue(speaker.utterances.isEmpty,
+                      "the coordinator speaks the cancellation, not the generic no")
+    }
+
+    /// The launcher plugin's whole contract at the router layer: a
+    /// `.plugin` intent for `launcher.open` reaches the plugin, the plugin
+    /// resolves the app entity through the catalog and hands the id to the
+    /// coordinator's launch seam, and the QUESTION the coordinator returns
+    /// is what the elder hears (the plugin composes no line of its own).
+    func testLauncherPluginIntentAsksThroughTheLaunchSeam() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.appLaunchPrompt = "ह्वाट्सएप खोल्ने हो?"
+        var requests: [(appID: String, confidence: Double)] = []
+        let registry = PluginRegistry()
+        registry.register(AppLauncherPlugin { appID, confidence in
+            requests.append((appID, confidence))
+            return coordinator.requestAppLaunch(appID: appID, confidence: confidence)
+        })
+        let store = GeminiConfigStore(storage: GeminiInMemoryStorage())
+        store.save("fake-key")
+        let client = GeminiClient(configStore: store, observabilityBus: MockObservabilityBus(),
+                                  transport: FakeGeminiTransport())
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .plugin, entryId: nil, contact: nil, time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil,
+            pluginAction: "launcher.open", pluginEntities: ["app": "ह्वाट्सएप"],
+            confidence: 0.88, reply: ""
+        )
+        let bus = MockObservabilityBus()
+        let speaker = MockSpeaker()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: speaker, interpreter: interpreter,
+                                   pluginRegistry: registry, geminiClient: client)
+
+        _ = router.route(transcript: "ह्वाट्सएप खोल")
+
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_plugin_dispatched" })
+        let exp = expectation(description: "plugin handled")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp.fulfill() }
+        wait(for: [exp], timeout: 2.0)
+        XCTAssertEqual(coordinator.appLaunchRequests.map(\.appID), ["whatsapp"],
+                       "the Nepali name the elder said resolves to the catalog id")
+        XCTAssertEqual(requests.map(\.confidence), [0.88])
+        // The LLM round trip is acked first (the router's pre-ack), then
+        // the question: the plugin's reply is the LAST thing heard.
+        XCTAssertEqual(speaker.utterances.map(\.text),
+                       [L10n.str("voiceAck.moment1", locale: Locale(identifier: "ne-NP")),
+                        "ह्वाट्सएप खोल्ने हो?"],
+                       "the coordinator's question — not a plugin-composed line")
+        XCTAssertEqual(coordinator.genericReplies, ["ह्वाट्सएप खोल्ने हो?"],
+                       "and it lands on the outcome card like every plugin reply")
+    }
+
+    /// An entity the catalog does not know never reaches the launch seam:
+    /// the elder hears the honest unknown-app line instead of a question
+    /// about an app that cannot be opened.
+    func testLauncherPluginUnknownAppNeverReachesTheLaunchSeam() {
+        let coordinator = MockVoiceCommandCoordinator()
+        var requests: [String] = []
+        let registry = PluginRegistry()
+        registry.register(AppLauncherPlugin { appID, _ in
+            requests.append(appID)
+            return coordinator.requestAppLaunch(appID: appID, confidence: nil)
+        })
+        let store = GeminiConfigStore(storage: GeminiInMemoryStorage())
+        store.save("fake-key")
+        let client = GeminiClient(configStore: store, observabilityBus: MockObservabilityBus(),
+                                  transport: FakeGeminiTransport())
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .plugin, entryId: nil, contact: nil, time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil,
+            pluginAction: "launcher.open", pluginEntities: ["app": "tiktok"],
+            confidence: 0.88, reply: ""
+        )
+        let bus = MockObservabilityBus()
+        let speaker = MockSpeaker()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: speaker, interpreter: interpreter,
+                                   pluginRegistry: registry, geminiClient: client)
+
+        _ = router.route(transcript: "टिकटक खोल")
+
+        let exp = expectation(description: "plugin handled")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp.fulfill() }
+        wait(for: [exp], timeout: 2.0)
+        XCTAssertTrue(requests.isEmpty, "no app, no question, nothing pended")
+        XCTAssertTrue(coordinator.appLaunchRequests.isEmpty)
+        XCTAssertEqual(speaker.utterances.map(\.text),
+                       [L10n.str("voiceAck.moment1", locale: Locale(identifier: "ne-NP")),
+                        L10n.fmt("launcher.unknownApp",
+                                 locale: Locale(identifier: "ne-NP"), "tiktok")],
+                       "the honest unknown-app line, after the LLM round-trip's pre-ack")
+    }
+
     /// suggest_video stays the honest not-yet stub — the video phase owns
     /// its executor, and nothing here may pretend a video was queued.
     func testSuggestVideoStillStubs() {
@@ -812,6 +944,22 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
         return calendarEventPrompt
     }
     var isAwaitingCalendarEventConfirmation = false
+
+    /// [APP-LAUNCHER] (2026-09-16) Voice app launcher — the same additive
+    /// shape as the calendar block above: protocol requirements whose
+    /// extension defaults (false / the generic unavailable line) keep
+    /// every pre-existing router test on its historical path. The stored
+    /// vars script both sides: a prompt makes the coordinator "ask", and
+    /// `isAwaitingAppLaunchConfirmation` stands in for a pended launch
+    /// during the yes/no follow-up.
+    var appLaunchPrompt: String? = "सेटिङ खोल्ने हो?"
+    private(set) var appLaunchRequests: [(appID: String, confidence: Double?)] = []
+    func requestAppLaunch(appID: String, confidence: Double?) -> String {
+        appLaunchRequests.append((appID, confidence))
+        return appLaunchPrompt
+            ?? L10n.str("router.pluginUnavailable", locale: activeLocale)
+    }
+    var isAwaitingAppLaunchConfirmation = false
 
     /// [ALARMS-TIMERS] (2026-09-07) Alarm/timer creation — protocol
     /// requirements with an extension default of .failed; these stored

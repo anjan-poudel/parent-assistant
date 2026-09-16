@@ -448,6 +448,87 @@ final class AppLauncherTests: XCTestCase {
         XCTAssertTrue(opener.opened.isEmpty)
     }
 
+    // MARK: - Spoken resolution (app(matchingSpoken:), 2026-09-16)
+
+    func testMatchingSpokenResolvesIDsAliasesAndDisplayNames() {
+        // id
+        XCTAssertEqual(AppLauncher.app(matchingSpoken: "whatsapp", locale: ne)?.id, "whatsapp")
+        // spoken alias, English and Devanagari
+        XCTAssertEqual(AppLauncher.app(matchingSpoken: "brightness", locale: en)?.id,
+                       "settingsdisplay")
+        XCTAssertEqual(AppLauncher.app(matchingSpoken: "क्यामेरा", locale: ne)?.id, "camera")
+        // the localized display name, in the active locale …
+        XCTAssertEqual(AppLauncher.app(matchingSpoken: "वाइफाइ सेटिङ", locale: ne)?.id,
+                       "settingswifi")
+        // … and the English one, even in a Nepali session
+        XCTAssertEqual(AppLauncher.app(matchingSpoken: "Wi-Fi Settings", locale: ne)?.id,
+                       "settingswifi")
+    }
+
+    func testMatchingSpokenIsCaseAndDiacriticFoldedAndTrims() {
+        XCTAssertEqual(AppLauncher.app(matchingSpoken: "  WhatsApp  ", locale: en)?.id, "whatsapp")
+        XCTAssertEqual(AppLauncher.app(matchingSpoken: "WHATSAPP", locale: en)?.id, "whatsapp")
+        XCTAssertEqual(AppLauncher.app(matchingSpoken: "Zoôm", locale: en)?.id, "zoom",
+                       "diacritic folding is the same net the search box uses")
+        XCTAssertEqual(AppLauncher.app(matchingSpoken: "फोटो", locale: ne)?.id, "photos")
+    }
+
+    /// The regression this resolver exists to avoid (the Devanagari
+    /// substring-grapheme lesson): matching is exact, full-lexeme.
+    /// A phrase that CONTAINS an app name must not resolve to it — the
+    /// wrong app opened on an elder's phone is worse than an honest
+    /// "I don't know that app".
+    func testMatchingSpokenNeverMatchesASubstring() {
+        XCTAssertNil(AppLauncher.app(matchingSpoken: "क्यामेरा खोल", locale: ne),
+                     "a phrase is not an app name")
+        XCTAssertNil(AppLauncher.app(matchingSpoken: "open camera", locale: en))
+        XCTAssertNil(AppLauncher.app(matchingSpoken: "whatsapp को सन्देश", locale: ne))
+        XCTAssertNil(AppLauncher.app(matchingSpoken: "you", locale: en),
+                     "'you' ⊂ 'youtube' but must not launch it")
+        XCTAssertNil(AppLauncher.app(matchingSpoken: "map", locale: en),
+                     "'map' ⊂ 'Maps'/'Google Maps' but is not either name")
+        XCTAssertNil(AppLauncher.app(matchingSpoken: "face", locale: en))
+    }
+
+    func testMatchingSpokenReturnsNilForEmptyAndUnknownInput() {
+        XCTAssertNil(AppLauncher.app(matchingSpoken: "", locale: en))
+        XCTAssertNil(AppLauncher.app(matchingSpoken: "   ", locale: ne))
+        XCTAssertNil(AppLauncher.app(matchingSpoken: "tiktok", locale: en),
+                     "an app outside the catalog is not a launch candidate")
+    }
+
+    func testMatchingSpokenResolvesTheCameraEntryLikeAnyOther() {
+        // The camera has no URL and no alias-bearing scheme, but it is
+        // still a catalog entry a voice launch may name — resolution must
+        // not quietly skip it and leave "क्यामेरा खोल" unanswered.
+        XCTAssertEqual(AppLauncher.app(matchingSpoken: "camera", locale: en)?.id, "camera")
+        XCTAssertEqual(AppLauncher.app(matchingSpoken: "Camera", locale: ne)?.id, "camera")
+    }
+
+    // MARK: - Web fallback (openWebFallback(_:))
+
+    func testOpenWebFallbackOpensTheWebURLThroughTheOpenerSeam() {
+        let opener = FakeCallLinkOpener()
+        let launcher = AppLauncher(opener: opener)
+
+        XCTAssertTrue(launcher.openWebFallback(AppLauncher.app(for: "whatsapp")!))
+        XCTAssertEqual(opener.opened.map(\.absoluteString), ["https://web.whatsapp.com/"])
+        XCTAssertTrue(opener.canOpenChecks.isEmpty,
+                      "the fallback is opened directly — the https probe cannot " +
+                      "distinguish the app from Safari, so it is not consulted")
+    }
+
+    func testOpenWebFallbackRefusesEntriesThatHaveNone() {
+        let opener = FakeCallLinkOpener()
+        let launcher = AppLauncher(opener: opener)
+
+        XCTAssertFalse(launcher.openWebFallback(AppLauncher.app(for: "settings")!))
+        XCTAssertFalse(launcher.openWebFallback(AppLauncher.app(for: "imo")!))
+        XCTAssertTrue(opener.opened.isEmpty,
+                      "no fallback means the honest 'not installed' line, never a " +
+                      "blind Safari launch")
+    }
+
     // MARK: - Info.plist declares every probe scheme (≤ 50 cap)
 
     /// The launcher catalog's schemes, in a stable order, as
