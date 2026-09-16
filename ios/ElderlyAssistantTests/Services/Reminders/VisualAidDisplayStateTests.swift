@@ -49,6 +49,62 @@ final class VisualAidDisplayStateTests: XCTestCase {
         XCTAssertEqual(state.current?.filename, "a.jpg")
     }
 
+    // MARK: - Medication doses (medication-visual-aids, 2026-09-16)
+
+    private func doseEntry(aids: [VisualAid]) -> MedicationEntry {
+        MedicationEntry(
+            id: UUID(),
+            userProfileId: UUID(),
+            medicationName: "Amlodipine",
+            doseDescription: "One tablet",
+            scheduleTimes: [DateComponents(hour: 8, minute: 0)],
+            frequency: .daily,
+            ackWindowMinutes: 5,
+            maxRefireCount: 5,
+            escalationWindowMinutes: 60,
+            doubleDoseWindowHours: 4,
+            photoVerificationEnabled: false,
+            confirmationDescription: nil,
+            visualAids: aids
+        )
+    }
+
+    /// The dose screen is built from the medication model through this
+    /// exact initializer — the paging rules the routine screen uses apply
+    /// unchanged to a dose (same tested type, so the two screens cannot
+    /// drift apart).
+    func testMedicationEntryWithAidsShowsTheFirstOne() {
+        let state = VisualAidDisplayState(medicationEntry: doseEntry(aids: [aid("a.jpg"),
+                                                                            aid("b.jpg")]))
+        XCTAssertEqual(state.count, 2)
+        XCTAssertEqual(state.current?.filename, "a.jpg")
+        XCTAssertTrue(state.hasMultiple, "a two-photo dose gets the page indicator")
+    }
+
+    /// A dose with no photos keeps the pre-feature behaviour: text only,
+    /// no image frame, no indicator — never an empty white box.
+    func testMedicationEntryWithoutAidsProducesAnEmptyState() {
+        let state = VisualAidDisplayState(medicationEntry: doseEntry(aids: []))
+        XCTAssertTrue(state.isEmpty)
+        XCTAssertFalse(state.showsImage)
+        XCTAssertNil(state.current)
+        XCTAssertNil(state.currentCaption)
+        XCTAssertNil(state.indicatorText(locale: Locale(identifier: "en")))
+    }
+
+    /// The caption on a dose photo ("the blue box") is the family's own
+    /// words for the package — it must reach the screen like a routine's.
+    func testMedicationCaptionFollowsTheCurrentPage() {
+        var state = VisualAidDisplayState(
+            medicationEntry: doseEntry(aids: [aid("a.jpg", caption: "the round tablet"),
+                                              aid("b.jpg", caption: "the oblong one")])
+        )
+        XCTAssertEqual(state.currentCaption, "the round tablet")
+        state.advance()
+        XCTAssertEqual(state.currentCaption, "the oblong one")
+        XCTAssertEqual(state.current?.filename, "b.jpg")
+    }
+
     // MARK: - One aid
 
     func testSingleAidShowsImageButNoIndicator() {

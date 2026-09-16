@@ -3075,6 +3075,10 @@ struct MedicationScheduleSettingsView: View {
     @State private var name = ""
     @State private var time = Date()
     @State private var errorKey: String?
+    /// The medication whose photos are being managed (medication-visual-
+    /// aids task, 2026-09-16) — held as the full entry so the sheet renders
+    /// without a store read of its own.
+    @State private var photoEditorEntry: MedicationEntry?
 
     var body: some View {
         LeafScreen(titleKey: "settings.meds.title") {
@@ -3101,6 +3105,26 @@ struct MedicationScheduleSettingsView: View {
                 festivalReminderCard
             }
         }
+        // A medicine's photos, edited by the family (medication-visual-aids
+        // task, 2026-09-16) — the SAME editor the routine reminders use,
+        // with the medication photo store instead of the routine one.
+        // Edits persist as they happen, so dismissal only has to close the
+        // sheet: this leaf reads `coordinator.medicationEntries` in its
+        // body, so the row's glyph and the dose screens pick the change up
+        // on the next draw (the dose screen snapshots at fire/tap time).
+        .sheet(item: $photoEditorEntry) { entry in
+            ReminderVisualAidEditorView(
+                entryId: entry.id,
+                title: entry.medicationName,
+                aids: entry.visualAids,
+                store: coordinator.medicationVisualAidStore,
+                locale: coordinator.activeLocale,
+                onSave: { aids in
+                    coordinator.setMedicationVisualAids(entry.id, aids: aids)
+                },
+                onClose: { photoEditorEntry = nil }
+            )
+        }
     }
 
     private func medRow(_ entry: MedicationEntry) -> some View {
@@ -3114,6 +3138,21 @@ struct MedicationScheduleSettingsView: View {
                     .foregroundStyle(DesignTokens.textSecondary)
             }
             Spacer()
+            // Photos live behind this row, the same place routines put
+            // them (medication-visual-aids task, 2026-09-16): this leaf is
+            // where the family configures a medicine, and the photo is
+            // part of the medicine, not of today's dose.
+            Button {
+                photoEditorEntry = entry
+            } label: {
+                Image(systemName: entry.visualAids.isEmpty ? "photo.badge.plus" : "photo.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(DesignTokens.accent)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("visualAid.add"))
             Button(role: .destructive) {
                 coordinator.removeMedication(id: entry.id)
             } label: {

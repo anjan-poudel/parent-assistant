@@ -6507,7 +6507,24 @@
         }
       }
     },
-    "meds.iTookIt": {
+    "meds.firePrompt": {
+    "extractionState": "manual",
+    "localizations": {
+      "en": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "Time to take your medicine"
+        }
+      },
+      "ne": {
+        "stringUnit": {
+          "state": "translated",
+          "value": "तपाईंको औषधि खाने समय भयो"
+        }
+      }
+    }
+  },
+  "meds.iTookIt": {
       "extractionState": "manual",
       "localizations": {
         "en": {

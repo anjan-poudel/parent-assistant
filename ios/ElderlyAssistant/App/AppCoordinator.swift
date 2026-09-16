@@ -727,6 +727,17 @@ final class AppCoordinator: ObservableObject {
     /// (`NoIOInInitTests`). The directory appears on the first save.
     let visualAidStore = VisualAidStore()
 
+    /// The MEDICATION photo store (medication-visual-aids task,
+    /// 2026-09-16) — the same `VisualAidStore`, built with the medication
+    /// directory prefix so dose photos land at
+    /// `Application Support/VisualAids/med-<entryId>/<file>.jpg` and can
+    /// never resolve into a routine entry's folder. A second INSTANCE, not
+    /// a second implementation: compression, the picker's cap and the
+    /// failure-soft file handling are one code path for both systems.
+    /// Like its sibling, `init` is a path lookup with no disk IO.
+    let medicationVisualAidStore =
+        VisualAidStore(directoryPrefix: VisualAidStore.medicationDirectoryPrefix)
+
     /// The curated "Family and friends" list (spec §4.4.2) — persisted
     /// encrypted, feeds the notifier whenever the list changes.
     let familyContactStore: FamilyContactStore
@@ -1926,7 +1937,14 @@ final class AppCoordinator: ObservableObject {
             alarmScheduler: alarmScheduler,
             observabilityBus: bus,
             familyNotifier: familyNotifier,
-            caregiverNotifySettings: caregiverNotifySettings
+            caregiverNotifySettings: caregiverNotifySettings,
+            // [MED-PHOTO-AIDS] Two jobs, matching the routine scheduler's:
+            // arming a dose notification with the entry's first photo as a
+            // banner attachment (the Lock Screen case), and clearing the
+            // entry's photo folder when the medication is deleted. Built
+            // with the MEDICATION prefix, so dose photos never resolve
+            // into a routine entry's folder.
+            visualAidStore: medicationVisualAidStore
         )
 
         // Routine reminders (v2 pivot Phase 1): the medication path's
@@ -2709,7 +2727,26 @@ final class AppCoordinator: ObservableObject {
                 self?.presentRoutineVisualAids(for: entry)
             }
         )
-        let facade = NotificationFacade(handlers: [timerAlarmEngine, notificationReader, caregiverEventHandler,
+        // [MED-PHOTO-AIDS] The dose's photos at the moment it fires
+        // (medication-visual-aids task, 2026-09-16): a medication
+        // notification whose entry carries a photo presents the
+        // full-screen dose screen. Claims nothing (delivery and read-aloud
+        // unchanged), exactly like its routine sibling — but it MUST be
+        // registered BEFORE `notificationReader`: "MEDICATION_REMINDER" is
+        // the one category the reader allowlists, and the facade stops
+        // consulting handlers at the first claim, so a dose reaching this
+        // handler at all depends on this position in the array.
+        let medicationVisualAidFireHandler = MedicationVisualAidFireHandler(
+            entryLookup: { [weak medicationScheduler] entryId in
+                medicationScheduler?.medicationEntry(for: entryId)
+            },
+            onFire: { [weak self] entry in
+                self?.presentMedicationVisualAids(for: entry)
+            }
+        )
+        let facade = NotificationFacade(handlers: [timerAlarmEngine,
+                                                   medicationVisualAidFireHandler,
+                                                   notificationReader, caregiverEventHandler,
                                                    routineVisualAidFireHandler],
                                          observability: observabilityBus)
         UNUserNotificationCenter.current().delegate = facade
@@ -6777,6 +6814,27 @@ self.noteTalkContractChanged()
             .medicationName ?? ""
     }
 
+    /// One medication entry by id (medication-visual-aids task,
+    /// 2026-09-16) — the Settings photo editor and the Reminders leaf read
+    /// an entry's photos through this. Nil when the entry is gone.
+    func medicationEntry(for entryId: UUID) -> MedicationEntry? {
+        medicationScheduler.medicationEntry(for: entryId)
+    }
+
+    /// A medication entry's photos, snapshotted for presentation — the
+    /// tap-to-view paths (the Meds leaf's dose thumbnail, the Reminders
+    /// leaf's dose rows) share the fired-dose screen's presentation type,
+    /// so all three draw the same screen from the same values. Nil when
+    /// the entry is gone or carries no photos, which is also the answer to
+    /// "is there anything to tap": callers gate the thumbnail on this, not
+    /// on a separate `isEmpty` check that could drift from it.
+    func medicationVisualAidsPresentation(for entryId: UUID)
+        -> MedicationVisualAidsPresentation? {
+        guard let entry = medicationEntry(for: entryId),
+              !entry.visualAids.isEmpty else { return nil }
+        return MedicationVisualAidsPresentation(entry: entry)
+    }
+
     // MARK: - Derived notification count ([BOOT-REVIEW P1-7])
 
     /// The bell badge's derived count — how many notification rows the
@@ -6934,6 +6992,12 @@ self.noteTalkContractChanged()
         entries.removeAll { $0.id == id }
         medicationScheduler.loadSchedule(entries: entries)
         medicationScheduler.scheduleAll()
+        // The dose's photos go WITH the medication (medication-visual-aids
+        // task, 2026-09-16): a picture of a box the household no longer
+        // takes must not outlive the entry, and nothing else can find
+        // those files afterwards. Same rule the routine scheduler applies
+        // when a reminder is removed.
+        medicationVisualAidStore.deleteAll(for: id)
         calendarSync.syncNow(entries: routineScheduler.entries())
         // [BOOT-REVIEW P1-7] Removing an entry can empty today's doses —
         // the row hides itself, so the count must follow.
@@ -7284,6 +7348,65 @@ self.noteTalkContractChanged()
             title: entry.displayTitle(locale: activeLocale),
             aids: entry.visualAids
         )
+    }
+
+    // MARK: - Medication dose surface (medication-visual-aids, 2026-09-16)
+
+    /// A medication reminder that just fired WITH photos, presented full
+    /// screen for the person the dose is for. Set by
+    /// `MedicationVisualAidFireHandler` — nil (the normal state) means
+    /// nothing to present, and entries without photos never set it, so
+    /// their delivery is exactly what it was before this feature.
+    @Published private(set) var firedMedicationVisualAids: MedicationVisualAidsPresentation?
+
+    /// Replaces a medication's photos (the photo editor's save path).
+    /// Files are already written by `VisualAidStore` before this is
+    /// called; this persists the entry payload only — a photo edit is not
+    /// a schedule edit, so no alarm is re-armed and no escalation state is
+    /// touched (see `MedicationScheduler.setVisualAids`; the dose screen
+    /// reads the entry at fire time, so the photo is live either way).
+    func setMedicationVisualAids(_ entryId: UUID, aids: [VisualAid]) {
+        medicationScheduler.setVisualAids(aids, entryId: entryId)
+    }
+
+    /// The presentation is dismissed (Close button, or the cover's own
+    /// swipe) — clearing the item is what actually dismisses it.
+    func dismissFiredMedicationVisualAids() {
+        firedMedicationVisualAids = nil
+    }
+
+    /// The elder tapped "I took it" on the fired-dose screen. Runs the same
+    /// dose path as the Meds leaf row (`confirmMedicationDose`: the FR-D01
+    /// challenge gate first, then the baseline acknowledgement) and clears
+    /// the presentation: when a challenge was issued the Home chips own the
+    /// follow-up, and when the dose was recorded the Home outcome caption
+    /// behind this screen is what the elder should now see.
+    func confirmFiredMedicationDose(entryId: UUID) {
+        confirmMedicationDose(entryId: entryId)
+        firedMedicationVisualAids = nil
+    }
+
+    /// The elder's "I took it" from an elder-facing dose surface — the
+    /// Meds leaf's dose row and the fired-dose screen share this one path,
+    /// so the safety gate cannot drift between them. Returns true when the
+    /// dementia-aware confirmation challenge was issued (the caller's
+    /// surface gets out of the way; the Home chips own the answer).
+    @discardableResult
+    func confirmMedicationDose(entryId: UUID) -> Bool {
+        if startVoiceAckConfirmation(for: entryId) != nil {
+            return true
+        }
+        handleMedicationAcknowledgement(entryId: entryId)
+        speak(key: "router.confirmationYes")
+        return false
+    }
+
+    /// `MedicationVisualAidFireHandler`'s presentation sink, on the main
+    /// queue. Snapshots the name and dose line at FIRE time — the entry
+    /// may be edited (or deleted) while the screen is up, and the dose the
+    /// elder is being shown must be the one that fired.
+    private func presentMedicationVisualAids(for entry: MedicationEntry) {
+        firedMedicationVisualAids = MedicationVisualAidsPresentation(entry: entry)
     }
 
     /// Today's medication reminders as localized "name — time" lines for

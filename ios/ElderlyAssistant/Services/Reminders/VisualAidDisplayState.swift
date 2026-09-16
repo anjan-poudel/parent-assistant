@@ -27,6 +27,17 @@ struct VisualAidDisplayState: Equatable {
         self.init(aids: entry.visualAids)
     }
 
+    /// The medication side of the same screen (medication-visual-aids
+    /// task, 2026-09-16): a dose fires with the box photo large above the
+    /// dose text, and the paging rules are identical — one image at a
+    /// time, an indicator only when there is more than one, a clamped
+    /// index. Keeping the medication case on THIS type is the point: the
+    /// safety-critical dose path gets the same tested paging behaviour
+    /// rather than a second copy of it.
+    init(medicationEntry: MedicationEntry) {
+        self.init(aids: medicationEntry.visualAids)
+    }
+
     // MARK: - Queries
 
     /// Nothing to render — the firing screen falls back to text alone,

@@ -65,6 +65,22 @@ struct ContentView: View {
                 onClose: coordinator.dismissFiredRoutineVisualAids
             )
         )
+        // [MED-PHOTO-AIDS] (2026-09-16) The medication half of the same
+        // idea: a dose whose entry carries photos presents the elder-facing
+        // dose screen (photo large above the name and the dose line, one
+        // "I took it") instead of a bare banner — safety-critical, so it
+        // covers everything, root-mounted like the routine one. Reads the
+        // MEDICATION photo store: dose photos live under their own prefixed
+        // directory, never the routine store's.
+        .overlay(
+            MedicationVisualAidOverlay(
+                presentation: coordinator.firedMedicationVisualAids,
+                store: coordinator.medicationVisualAidStore,
+                locale: coordinator.activeLocale,
+                onAcknowledge: coordinator.confirmFiredMedicationDose,
+                onClose: coordinator.dismissFiredMedicationVisualAids
+            )
+        )
         // .plugin intent: a plugin-provided view (e.g. the appliance
         // photo + overlay), presented app-wide.
         .sheet(item: $coordinator.pendingPluginPresentation) { presentation in
