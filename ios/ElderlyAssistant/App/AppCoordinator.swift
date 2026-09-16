@@ -206,6 +206,11 @@ final class AppCoordinator: ObservableObject {
     /// re-entrancy would queue a second useless copy attempt).
     private var bundledSTTInstallInFlight = false
 
+    /// [STT-RESTORE] Watches `ModelDownloadService` for a landed ANE
+    /// artifact so the restored engine reaches the live pipeline (see
+    /// `observeSTTArtifactCompletion`).
+    private var sttArtifactCompletionCancellable: AnyCancellable?
+
     /// User's STT model pick from the UI. Nil = automatic selection.
     /// Persisted in UserDefaults (a UI preference, not a secret) and
     /// pushed to WhisperSpeechRecognizer so it survives restarts.
@@ -2318,18 +2323,11 @@ final class AppCoordinator: ObservableObject {
         // pushes it to the recognizer and refreshes the label. Unknown
         // IDs (a model removed from the catalog, or a bad stored value)
         // are ignored so a stale preference can't wedge the picker.
-        // Migration: the mid-training distill is superseded by the
-        // stage-4 fine-tune.
+        // Superseded ids migrate forward through `migratedSTTPreference`.
         if let raw = UserDefaults.standard.string(forKey: Self.sttPreferenceKey),
            ModelCatalog.entry(for: ModelID(rawValue: raw)) != nil {
-            let stored = ModelID(rawValue: raw)
-            // Superseded models migrate forward to the current default:
-            // mid-training distill → stage-4 fine-tune → medium fine-tune.
-            self.sttModelPreference =
-                (stored == ModelCatalog.whisperSmallNepali
-                 || stored == ModelCatalog.whisperFinetunedNepali)
-                ? ModelCatalog.whisperMediumFinetunedNepali
-                : stored
+            self.sttModelPreference = Self.migratedSTTPreference(
+                ModelID(rawValue: raw))
         }
 
         // C12: the confirmation challenge expires — clear the pending entry
@@ -3063,6 +3061,10 @@ final class AppCoordinator: ObservableObject {
             .sink { [weak self] _ in
                 self?.trySwapToGemini()
             }
+        // [STT-RESTORE] Companion subscription for the ANE auto-restore:
+        // a landed artifact re-applies the stack (see
+        // `observeSTTArtifactCompletion`).
+        observeSTTArtifactCompletion()
 
         // [STARTUP-PERF] The voice pipeline (which needs the KWS engine
         // the boot builds off-main) is constructed and started in the
@@ -4606,6 +4608,11 @@ self.noteTalkContractChanged()
             // applied from the boot's voice-start callback (or a Settings
             // toggle), never from `init`.
             installBundledSTTModelIfNeeded()
+            // [STT-RESTORE] …and the ANE artifact a fresh container wiped
+            // is restored the same way: a background download of the
+            // language default, so the on-device stack climbs back to the
+            // ANE path without a Settings trip (2026-09-16 device bug).
+            restoreWhisperKitArtifactIfNeeded()
         }
         // [CLOUD-CASCADE] Last: (re-)arm the cascade tier on the fresh
         // stack. It reads the provider seam + the two persisted settings,
@@ -4665,8 +4672,8 @@ self.noteTalkContractChanged()
     }
 
     /// [BOOT-REVIEW P1-5] Installs the ONE app-bundled STT model (the
-    /// default Nepali medium — the only catalog entry with a
-    /// `bundledResourceName`) the first time the on-device stack actually
+    /// Nepali medium ggml — the only catalog entry with a
+    /// `bundledResourceName`) the first time the household's OWN pick
     /// needs it, so a normal launch copies NOTHING. The old boot loop
     /// copied the 586 MB ggml into Application Support on every launch,
     /// gating `.ready` behind a multi-second disk write.
@@ -4674,6 +4681,13 @@ self.noteTalkContractChanged()
     /// Gates, in order:
     ///  - the on-device stack is ACTIVE (a Gemini household never pays
     ///    for a model it will not use),
+    ///  - [CPU-SAFETY 2026-09-16] the bundled medium is the household's
+    ///    EXPLICIT pick (`sttModelPreference`). It is no longer part of
+    ///    the automatic whisper.cpp order — running it on a CPU-only
+    ///    fresh install is the ~1 GB cold load that SIGKILLed the app
+    ///    (2026-09-16) — so copying it for any other reason buys nothing
+    ///    and costs 586 MB. The bundled copy stays the offline-friendly
+    ///    install path for the one household that asks for it.
     ///  - whisper.cpp is what the pure selection table would pick once a
     ///    model IS present (an ANE device with WhisperKit installed runs
     ///    WhisperKit — no copy),
@@ -4689,7 +4703,8 @@ self.noteTalkContractChanged()
     private func installBundledSTTModelIfNeeded() {
         guard voiceEngineStack == .onDevice else { return }
         let bundled = ModelCatalog.whisperMediumFinetunedNepali
-        guard !modelStore.isCached(bundled),
+        guard sttModelPreference == bundled,
+              !modelStore.isCached(bundled),
               !bundledSTTInstallInFlight,
               bundledSTTModelIsTheNextChoice() else { return }
         bundledSTTInstallInFlight = true
@@ -4737,6 +4752,136 @@ self.noteTalkContractChanged()
             return true
         }
         return false
+    }
+
+    // MARK: - Missing ANE artifact (PR 3, 2026-09-16)
+
+    /// [STT-RESTORE] A fresh install (or an app update, which gives the
+    /// app a new container) has no WhisperKit ANE artifact, and the
+    /// artifact is a DOWNLOAD: without this, the on-device stack would
+    /// sink to whisper.cpp — the 2026-09-16 device report, where the
+    /// bundled medium's ~1 GB CPU cold load SIGKILLed the app — and stay
+    /// there until someone walked into Settings. Kicks the standard
+    /// `ModelDownloadService` download at first voice readiness instead.
+    ///
+    /// The decision itself is the pure table
+    /// (`OnDeviceSTTSelection.restoreAction`): simulator, an installed
+    /// artifact, an explicit whisper.cpp pick, an in-flight download and
+    /// a language with no ANE build (`en`) all answer `.none`. Called
+    /// from `applyVoiceEngineStack()` — once at the boot's voice start,
+    /// and again on every stack / language change — so it is deliberately
+    /// cheap and idempotent: the in-flight set comes straight from the
+    /// service's published states, and a completed install short-circuits
+    /// on `isAvailable` before the table is even consulted.
+    private func restoreWhisperKitArtifactIfNeeded() {
+        switch OnDeviceSTTSelection.restoreAction(
+            whisperKitAvailable: whisperKitSpeechRecognizer.isAvailable,
+            preferredModel: sttModelPreference,
+            isSimulator: Self.isSimulator,
+            inFlight: downloadsInFlight,
+            language: appLanguage.rawValue,
+            iOS18OrLater: Self.isIOS18OrLater
+        ) {
+        case .none:
+            break
+        case .download(let id):
+            // [STT-RESTORE] Point the ANE engine at what it is about to
+            // receive BEFORE the bytes move, or the landed artifact would
+            // change nothing: `WhisperKitSpeechRecognizer.isAvailable` and
+            // `loadDescriptor()` resolve `directoryURL(for:
+            // preferredModelID)`, and with no stored pick that pref is the
+            // engine's init default — the v3 medium, NOT PR 1's per-language
+            // default. A restored v6 would land on disk and stay invisible,
+            // leaving the household on the fallback forever. With an
+            // explicit ANE pick the recognizer already holds this id (the
+            // adoption rule), so this call is a no-op; a ggml pick never
+            // reaches this branch (the table answers `.none` for it), so no
+            // engine is ever repointed away from a model it can run. Only
+            // the engine's target moves — `sttModelPreference` stays nil
+            // ("Automatic"), so the picker keeps saying Automatic rather
+            // than claiming a pick the household never made.
+            whisperKitSpeechRecognizer.setPreferredModel(id)
+            observabilityBus.emit(ObservabilityEvent(
+                component: "model_download",
+                eventType: "stt_ane_restore_started",
+                durationMs: nil,
+                outcome: "info",
+                errorCode: nil,
+                metadata: ["state": id.rawValue]
+            ))
+            print("[AppCoordinator] ANE STT artifact missing — restoring \(id.rawValue)")
+            modelDownloadService.start(id)
+        }
+    }
+
+    /// The downloads `ModelDownloadService` currently owns, as the
+    /// restore table's "do not re-kick" set: `queued` → `completed` is an
+    /// attempt that is live or done, while `notStarted` / `failed` /
+    /// `cancelled` is an attempt that is OVER — a transient failure is
+    /// retried on the next stack apply instead of being abandoned for the
+    /// life of the install.
+    private var downloadsInFlight: Set<ModelID> {
+        Self.inFlightModels(from: modelDownloadService.states)
+    }
+
+    /// Pure form of the set above — a static seam so the retry semantics
+    /// are pinned by a test rather than by the comment alone.
+    static func inFlightModels(from states: [ModelID: ModelDownloadState]) -> Set<ModelID> {
+        Set(states.compactMap { entry -> ModelID? in
+            switch entry.value {
+            case .queued, .downloading, .verifying, .completed: return entry.key
+            case .notStarted, .failed, .cancelled: return nil
+            }
+        })
+    }
+
+    /// [STT-RESTORE] Re-applies the stack when an ANE artifact lands, so
+    /// the restore actually reaches the live pipeline: nothing else
+    /// re-applies on a download completion (the Settings screen's own
+    /// `$states` observer only recomputes the caption), so a restored
+    /// artifact used to need a relaunch to take effect. The selection
+    /// table decides whether the completion changes the engine, so a
+    /// download for an unrelated WhisperKit model costs one idempotent
+    /// pass.
+    private func observeSTTArtifactCompletion() {
+        sttArtifactCompletionCancellable = modelDownloadService.$states
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] states in
+                guard let self, self.started else { return }
+                let landed = states.contains {
+                    $0.value == .completed
+                        && WhisperKitSpeechRecognizer.isWhisperKitArtifact($0.key)
+                }
+                guard landed else { return }
+                self.applyVoiceEngineStack()
+            }
+    }
+
+    /// Whether this OS can load the CoreML spec-v9 (palettized) ANE
+    /// builds — the same gate `ModelDownloadService` applies before
+    /// spending ~767 MB on one, so the auto-restore never picks an
+    /// artifact the service would refuse on this device.
+    private static let isIOS18OrLater: Bool = ProcessInfo.processInfo
+        .isOperatingSystemAtLeast(
+            OperatingSystemVersion(majorVersion: 18, minorVersion: 0, patchVersion: 0))
+
+    /// The stored STT pick this build runs, migrating superseded ids
+    /// forward.
+    ///
+    /// [CPU-SAFETY 2026-09-16] The small fine-tunes migrate to their q8_0
+    /// SIBLING (same checkpoint, better quality), never to the medium
+    /// fine-tune they used to map to: the medium is no longer
+    /// auto-runnable on CPU (see
+    /// `OnDeviceSTTSelection.whisperCppAutomaticOrder`), and a migration
+    /// that writes it into `sttModelPreference` would both install the
+    /// 586 MB bundled copy and hand the household a model it never chose.
+    /// A migration stays inside the class the household picked.
+    static func migratedSTTPreference(_ stored: ModelID?) -> ModelID? {
+        if stored == ModelCatalog.whisperSmallNepali
+            || stored == ModelCatalog.whisperFinetunedNepali {
+            return ModelCatalog.whisperFinetunedNepaliQ8
+        }
+        return stored
     }
 
     /// Re-applies the audio-session preset after `voiceProcessingEnabled`
