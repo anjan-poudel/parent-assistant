@@ -1092,10 +1092,14 @@ final class IntentEncoderInterpreterTests: XCTestCase {
         let pair = preparedPair(original: "भोलि सम्झाइदिनु",
                                 canonical: "भोलि सम्झाइदिनुस्")
         // A confident `set_reminder` whose time span is the FIRST word, with
-        // the spike's tag order (B-time is index 3).
+        // the spike's tag order (B-time is index 3) — and ONE row per TOKEN
+        // POSITION, which is the decoder's contract: `wordLevelTagIndices`
+        // abstains (`word_alignment_mismatch`) when the row count and the
+        // tokenization disagree, and the pair's two words are two tokens.
         model.logits = IntentEncoderLogits(
             intentLogits: manifest.intents.map { $0 == "set_reminder" ? 6 : -6 },
-            slotLogits: [[-6, -6, -6, 6, 6]])
+            slotLogits: [[-6, -6, -6, 6, 6],
+                         [-6, -6, -6, -6, -6]])
         spy.make = { model }
 
         let result = interpretPrepared(interpreter, pair)
@@ -1143,7 +1147,10 @@ final class IntentEncoderInterpreterTests: XCTestCase {
                                        preparedPair(original: "", canonical: "")))
         XCTAssertEqual(tokenizer.callCount, 0)
         let abstained = events("encoder_abstained")
-        XCTAssertEqual(abstained.last?.metadata["error_code"],
+        // The code is the event's OWN field (`errorCode:`), never a metadata
+        // key: `emit` fills `metadata` with the artifact identity and fixed
+        // vocabulary extras only, and `LogSanitiser` bounds `event.errorCode`.
+        XCTAssertEqual(abstained.last?.errorCode,
                        IntentEncoderAbstention.emptyAfterSanitise.rawValue)
     }
 
@@ -1415,8 +1422,15 @@ final class IntentEncoderInterpreterTests: XCTestCase {
                        "the interpreter's own gate applied to the decode")
         XCTAssertTrue(decode.outputSummary.contains("set_reminder"),
                       "the card may name the decoded action")
-        XCTAssertTrue(decode.outputSummary.contains("[time="),
-                      "…and its slot surfaces — the on-device posture")
+        // The card's summary is capped (`PipelineTraceSummary.maxLength`, 28
+        // chars) and renders slot types SORTED, so this two-slot decode —
+        // medication before time — truncates inside the first slot's name:
+        // "set_reminder 1.00 [medicatio…". `[time=` is a substring the cap
+        // cannot reach; what the on-device card actually shows is the slot
+        // section opening in sorted order.
+        XCTAssertTrue(decode.outputSummary.contains("[medicatio"),
+                      "…and its slot surfaces — the on-device posture, sorted "
+                      + "and inside the card's cap")
         XCTAssertEqual(fixture.model.predictCount, 1,
                        "instrumentation alters nothing: the graph ran once")
     }

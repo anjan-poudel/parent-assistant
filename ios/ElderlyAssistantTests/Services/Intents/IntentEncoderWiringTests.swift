@@ -508,9 +508,15 @@ final class IntentEncoderWiringTests: XCTestCase {
         let spy = IntentEncoderRunnerSpy()
         let model = StubIntentEncoderModel()
         let manifest = IntentEncoderManifest.t033Spike
+        // ONE slot-logits row per TOKEN POSITION: the decoder's
+        // `wordLevelTagIndices` abstains (`word_alignment_mismatch`) when the
+        // row count and the tokenization disagree, and the seam's rewrite
+        // ("भोलि" -> "भोलि भोलि") is two words, hence two tokens. Word 0 is the
+        // time span — B-time is index 3 in the spike's tag order.
         model.logits = IntentEncoderLogits(
             intentLogits: manifest.intents.map { $0 == "set_reminder" ? 6 : -6 },
-            slotLogits: [[-6, -6, -6, 6, 6]])
+            slotLogits: [[-6, -6, -6, 6, 6],
+                         [-6, -6, -6, -6, -6]])
         spy.make = { model }
         let encoder = makeEncoder(store: store, tokenizer: tokenizer, spy: spy)
         let fallback = StubCommandInterpreter(result: makeCommand(action: .query))

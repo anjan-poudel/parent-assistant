@@ -89,9 +89,15 @@ final class StubCommandInterpreter: CommandInterpreter {
 /// Its default rewrite is the identity, so a test that wants "the seam ran and
 /// changed nothing" (the shipped default's shape) and a test that wants "a
 /// layer rewrote the text" differ by one argument. The rewrite is deliberately
-/// visible in the pair (`canonical`), and `secondRuns` counts the times the
-/// seam was handed text that had ALREADY been through it — the `correct∘
-/// correct` a mis-wired nested chain would produce.
+/// visible in the pair (`canonical`) AND in the pair's `applications`, because
+/// `IntentTranscriptPair.isIdentity` is STRUCTURAL (`applications.isEmpty`):
+/// a pair whose rewritten `canonical` records no application reads as an
+/// identity turn — a shape the production seam cannot produce ("no silent
+/// rewrite path", §4.2/D-5) — and every non-identity consumer (the chain's
+/// text selection, the trace's decision words) would see a turn on which
+/// nothing happened. `secondRuns` counts the times the seam was handed text
+/// that had ALREADY been through it — the `correct∘correct` a mis-wired nested
+/// chain would produce.
 final class RecordingInputSeam {
     private(set) var callCount = 0
     private(set) var inputs: [String] = []
@@ -111,9 +117,27 @@ final class RecordingInputSeam {
             callCount += 1
             if text.contains(marker) { secondRuns += 1 }
             inputs.append(text)
-            let pair = IntentTranscriptPair(original: text,
-                                            canonical: rewrite(text),
-                                            tableRevision: "test-seam/v1")
+            let prepared = rewrite(text)
+            // The rewrite is recorded, so the pair is self-consistent: the
+            // canonical form differs from the original AND the application
+            // that produced it exists, which is exactly the shape
+            // `IntentInputCanonicalization.prepare` returns. A full-string
+            // substitution keeps every decoded span `exact` in the §4.5
+            // mapping (no widening, so no spurious abstention).
+            let scalars = text.unicodeScalars.count
+            let pair = IntentTranscriptPair(
+                original: text,
+                canonical: prepared,
+                applications: prepared == text ? [] : [CanonicalVariantApplication(
+                    ruleID: "test-seam/rewrite",
+                    tableID: "test-seam/v1",
+                    dialect: nil,
+                    kind: .orthographic,
+                    originalRange: 0..<scalars,
+                    canonicalRange: 0..<prepared.unicodeScalars.count,
+                    original: text,
+                    canonical: prepared)],
+                tableRevision: "test-seam/v1")
             pairs.append(pair)
             return pair
         }
