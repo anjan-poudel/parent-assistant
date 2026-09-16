@@ -625,6 +625,23 @@
         }
       }
     },
+    "app.name.camera": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Camera"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्यामेरा"
+          }
+        }
+      }
+    },
     "app.name.chrome": {
       "extractionState": "manual",
       "localizations": {
@@ -710,6 +727,23 @@
         }
       }
     },
+    "app.name.health": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Health"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "स्वास्थ्य"
+          }
+        }
+      }
+    },
     "app.name.imo": {
       "extractionState": "manual",
       "localizations": {
@@ -740,6 +774,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "इन्स्टाग्राम"
+          }
+        }
+      }
+    },
+    "app.name.magnifier": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Magnifier"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्याग्निफायर"
           }
         }
       }
@@ -829,6 +880,108 @@
         }
       }
     },
+    "app.name.photos": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photos"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो"
+          }
+        }
+      }
+    },
+    "app.name.settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सेटिङ"
+          }
+        }
+      }
+    },
+    "app.name.settingsaccessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accessibility Settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पहुँचयोग्यता सेटिङ"
+          }
+        }
+      }
+    },
+    "app.name.settingsbluetooth": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bluetooth Settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ब्लुटुथ सेटिङ"
+          }
+        }
+      }
+    },
+    "app.name.settingsdisplay": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Display Settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "डिस्प्ले सेटिङ"
+          }
+        }
+      }
+    },
+    "app.name.settingswifi": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wi-Fi Settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "वाइफाइ सेटिङ"
+          }
+        }
+      }
+    },
     "app.name.telegram": {
       "extractionState": "manual",
       "localizations": {
@@ -859,6 +1012,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "भाइबर"
+          }
+        }
+      }
+    },
+    "app.name.weather": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weather"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मौसम"
           }
         }
       }
