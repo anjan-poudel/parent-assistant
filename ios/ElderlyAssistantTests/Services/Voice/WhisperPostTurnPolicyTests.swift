@@ -52,9 +52,9 @@ final class WhisperPostTurnPolicyTests: XCTestCase {
             "a reload would endanger the app — stay released, the next turn pays the load")
     }
 
-    func testTTLIsSixtySeconds() {
-        XCTAssertEqual(WhisperPostTurnPolicy.ttlSeconds, 60.0,
-                       "the TTL pins at 60 s — back-to-back turns inside a minute skip the reload")
+    func testTTLIsThreeMinutes() {
+        XCTAssertEqual(WhisperPostTurnPolicy.ttlSeconds, 180.0,
+                       "the TTL pins at 180 s — a slow elderly answer after the reply still lands inside the hold")
     }
 
     // MARK: - Transcript action ([LAT-EVIDENCE])
@@ -251,7 +251,7 @@ final class WhisperPostTurnPolicyTests: XCTestCase {
         hold.arm(ttl: WhisperPostTurnPolicy.ttlSeconds) { self.fired += 1 }
 
         // A back-to-back transcript at t+50 s re-arms: the new expiry is
-        // t+110 s, not the original t+60 s.
+        // t+230 s, not the original t+180 s.
         tick(50)
         hold.arm(ttl: WhisperPostTurnPolicy.ttlSeconds) { self.fired += 1 }
         XCTAssertEqual(hold.holdsUntil,
