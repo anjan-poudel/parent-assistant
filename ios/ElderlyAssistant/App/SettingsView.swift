@@ -3499,18 +3499,29 @@ struct AIModelsSettingsView: View {
     }
 
     /// Picker selection: sets the persisted preference (existing
-    /// `sttModelPreference` flow) AND — when the chosen engine is not
-    /// installed yet — starts its download through the existing
-    /// `ModelDownloadService` so a fresh pick works immediately. Rows
-    /// below surface progress; once the install completes the picker
-    /// label sheds its "not downloaded" suffix and the recognizer
-    /// resolves the preference (it loads whatever model is cached).
+    /// `sttModelPreference` flow), records the pick as the household's own
+    /// for the current app language (`ModelPreferenceMemory` — the same
+    /// seam `ResponseVoiceSelection.remember` provides for the reply
+    /// voice), AND — when the chosen engine is not installed yet — starts
+    /// its download through the existing `ModelDownloadService` so a fresh
+    /// pick works immediately. Rows below surface progress; once the
+    /// install completes the picker label sheds its "not downloaded"
+    /// suffix and the recognizer resolves the preference (it loads
+    /// whatever model is cached).
+    ///
+    /// This is the ONLY writer of that memory: the automatic app-language
+    /// switch reads it (so an en→ne→en round trip returns here) and must
+    /// never write it. The "Automatic" row (nil) is not a memory either —
+    /// `rememberSTT` takes a real id, and nil leaves whatever was
+    /// remembered for the language in place.
     private var sttSelection: Binding<ModelID?> {
         Binding(
             get: { coordinator.sttModelPreference },
             set: { newValue in
                 coordinator.sttModelPreference = newValue
                 if let newValue {
+                    ModelPreferenceMemory.rememberSTT(
+                        newValue, for: coordinator.appLanguage.rawValue)
                     startDownloadIfNeeded(newValue)
                 }
             }
@@ -3521,11 +3532,20 @@ struct AIModelsSettingsView: View {
     /// coordinator's didSet already starts the chosen model's download
     /// when it isn't cached (the same fresh-pick contract as the STT
     /// picker), so this binding stays a thin passthrough — no second
-    /// download kick here.
+    /// download kick here. It DOES record the pick per app language
+    /// (`ModelPreferenceMemory.rememberBrain`), the STT binding's contract
+    /// exactly: the language switch restores the household's own brain
+    /// instead of flattening it to the per-language default.
     private var brainSelection: Binding<ModelID?> {
         Binding(
             get: { coordinator.brainModelPreference },
-            set: { coordinator.brainModelPreference = $0 }
+            set: { newValue in
+                coordinator.brainModelPreference = newValue
+                if let newValue {
+                    ModelPreferenceMemory.rememberBrain(
+                        newValue, for: coordinator.appLanguage.rawValue)
+                }
+            }
         )
     }
 
