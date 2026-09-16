@@ -131,6 +131,12 @@ The following decisions could not be determined from the provided brief. They mu
     - **Credential handling:** the provider key travels in a header, never in a URL, and never reaches logs (B2/T-050 is the binding precedent).
     - **Review:** consent/disclosure copy and the engine-selection UX are to be reviewed before the first App Store submission, and this exception re-reviewed with Open Decision 11 by 2026-10-13.
 
+13. ~~**Cloud text-translation exception (live camera translation).**~~ **RECORDED AS AN EXCEPTION WITH CONSENT AMENDMENT (2026-09-16). Owner: Anjan Poudel (project owner).** The live camera translation feature (`docs/superpowers/specs/2026-09-16-live-camera-translation-design.md` §7) resolves text the on-device dictionary cannot translate through a tier-2 cloud call to Gemini. Sending user content to a cloud provider sits against Architecture Constraint 1, so it is recorded here as a deliberate, bounded exception in the Open Decision 12 shape rather than left as a silent divergence. It is strictly less invasive than the existing appliance-helper photo path, which already sends photos to Gemini and is disclosed in `Info.plist`:
+    - **Scope:** OCR'd text strings ONLY (never images, never photos) may be sent to Gemini for translation into the user's active language, when the on-device dictionary cannot resolve them AND the user has consented. Bounded per-session by the existing `GeminiCostGovernor`. No health data, contacts, profile content, or camera imagery.
+    - **Consent and disclosure:** explicit user consent at first cloud use with plain-language disclosure; a visible indicator while the cloud tier is active; revocable at any time — revoking degrades the feature to offline mode (dictionary + cached translations), never blocks it. `Info.plist` `NSCameraUsageDescription` must disclose the live-translation use and the text-to-cloud fallback.
+    - **Credential handling:** same discipline as Open Decision 12 — the provider key travels in a header, never in a URL, and never reaches logs (B2/T-050 is the binding precedent). OCR text is untrusted prompt input and is sanitised with the `InputSanitiser` discipline before it enters the prompt.
+    - **Review:** consent/disclosure copy and the engine-selection UX are to be reviewed before the first App Store submission; this exception is re-reviewed with Open Decisions 11 and 12 by 2026-10-13.
+
 ## Agent Principles
 
 Binding for all agents in this workflow. Enforced via `standards/SddAgentPrinciples.md`.

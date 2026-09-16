@@ -144,7 +144,7 @@ Follows `ApplianceHelperPlugin` (registry, `handle` entry, session state, presen
 
 ## 7. Privacy & constitution impact
 
-**Requires a recorded exception amendment before tier 2 ships** (owner action, mirroring Open Decision 12's shape):
+**Recorded as a constitution exception amendment: Open Decision 13 (recorded 2026-09-16).** The tier-2 cloud text path ships under a recorded exception amendment in the project constitution's Open Decisions, mirroring Open Decision 12's shape (Owner: Anjan Poudel). The consent/disclosure copy review before the first App Store submission remains outstanding — see §10 open decision 3.
 
 - Scope: OCR'd *text only* (never images) may be sent to Gemini for translation, when the dictionary cannot resolve it and the user has consented. No photos, no health/contacts/profile data.
 - Consent: explicit at first cloud need, plain-language disclosure, visible indicator while active, revocable (revert to dictionary-only = feature degrades to offline mode, never blocks).
@@ -178,7 +178,7 @@ All timeouts configurable parameters (constitution design-agent rules); no silen
 
 1. **OCR throttle rate** (addendum OD-11, still open): ~4 fps nominal; needs a device spike on mid-range hardware before commitment.
 2. **In-place replacement default**: owner approved smart mix; the "always show original text" toggle ships with it. Confirm default = smart mix at first device demo.
-3. **Consent copy + exception amendment wording**: draft alongside OD-12's review cycle (2026-10-13 window).
+3. **Consent copy** (exception amendment wording is settled): the amendment is **recorded as Open Decision 13 (2026-09-16)**; what remains is drafting and reviewing the consent/disclosure copy alongside OD-12's review cycle (2026-10-13 window).
 4. **Tier-1 timing (D2)**: v1.1 candidate; revisit addendum §13.5 non-goal, then model conversion (server pipeline, CoreML export) is its own SDD task.
 5. **Menu-mode declutter thresholds** (§4.3 numbers): validated on device; may become per-scene settings.
 6. **"Phrase card" reverse mode** (user language → scene language) for abroad use: out of v1 scope, natural v1.x extension reusing the pipeline.

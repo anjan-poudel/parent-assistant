@@ -54,12 +54,14 @@ without having translated.
    with nothing. This mirrors the project's Open Decision 12 (B7) exception for the cloud voice
    stack, which is the binding precedent for shape and wording.
 
-3. **The exception amendment is a release gate.** The text-only cloud translation tier requires a
-   *recorded* constitution exception amendment (owner action: Anjan Poudel), in the Open
-   Decision 12 shape and appended to the project constitution's Open Decisions. Until it is
-   recorded, the cloud tier must not ship: `final-sign-off` must verify the amendment exists, and
-   the default configuration must not reach tier 2 without recorded consent. This constraint comes
-   from the feature brief verbatim — it is a blocking gate, not a report.
+3. **The exception amendment is a release gate — and it is recorded.** The text-only cloud
+   translation tier ships under a *recorded* constitution exception amendment: **Open Decision 13
+   "Cloud text-translation exception (live camera translation)", recorded 2026-09-16** (Owner:
+   Anjan Poudel), in the Open Decision 12 shape and appended to the project constitution's Open
+   Decisions. `final-sign-off` must verify that this recorded amendment exists and that the
+   consent/disclosure copy has been reviewed, and the default configuration must not reach tier 2
+   without recorded consent. This remains a blocking gate, not a report — recording the amendment
+   satisfies the amendment half of it; the consent-copy half is still open (see Open Decision 3).
 
 4. **OCR text is untrusted input.** Scene text is attacker-influenceable (a malicious label or
    menu is an injection vector into the cloud prompt). It is sanitised and bounded on the way into
@@ -130,7 +132,7 @@ translation cache does not exist yet — it is new work for this feature.
 | Security design | `security-design-review` | `SECURITY-GO` with STRIDE for the new camera + egress surface |
 | Implementation | `implement` | Paired review, confidence ≥ 0.85, ≤ 5 rework iterations |
 | Security test | `security-test` | `SECURITY-GO`: consent enforcement, text-only egress, log surface clean |
-| Owner sign-off | `final-sign-off` | **T2 human gate**: exception amendment recorded, consent copy reviewed, purpose string updated, log-safety gate passing |
+| Owner sign-off | `final-sign-off` | **T2 human gate**: exception amendment recorded (Open Decision 13, 2026-09-16), consent copy reviewed, purpose string updated, log-safety gate passing |
 
 ## Open Decisions
 
@@ -143,9 +145,10 @@ owner-visible resolution point.
 2. **In-place replacement default.** Owner approved smart mix (D1) with the "always show original
    text" toggle shipping alongside. Confirm the default at the first device demo.
    Resolve at: first device demo.
-3. **Consent copy and exception amendment wording.** Draft alongside the Open Decision 12 review
-   cycle (its time box expires 2026-10-13). Owner: Anjan Poudel.
-   Resolve at: before `final-sign-off`.
+3. **Consent copy (exception amendment wording is settled).** The exception amendment is
+   **recorded as Open Decision 13, 2026-09-16**; what remains is drafting and reviewing the
+   consent/disclosure copy for tier 2. Draft alongside the Open Decision 12 review cycle (its time
+   box expires 2026-10-13). Owner: Anjan Poudel. Resolve at: before `final-sign-off`.
 4. **Tier-1 (on-device NMT) timing.** v1.1 candidate (NLLB-200 distilled 600M). Requires
    revisiting addendum §13.5's non-goal before any model work; the CoreML conversion is its own
    SDD task. Resolve at: v1.1 planning — **not** in this workflow.
