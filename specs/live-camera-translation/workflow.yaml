@@ -41,7 +41,8 @@
 # 6. Added final-sign-off with risk_tier T2 (senior human approval) and hil.
 #    Reason: it is the gate where two owner actions are verified before the
 #    feature is shippable — (a) the recorded constitution exception amendment
-#    for the text-only cloud translation tier (Open Decision 12 shape), and
+#    for the text-only cloud translation tier (Open Decision 13, recorded
+#    2026-09-16), and
 #    (b) the consent/disclosure copy + NSCameraUsageDescription review.
 #    Constraint from the brief: the cloud tier must NOT ship before the
 #    amendment is recorded.
@@ -140,9 +141,9 @@ tasks:
     use: final-sign-off
     depends_on: [security-test]
     # T2 human gate. Release gates verified here:
-    # 1. The recorded constitution exception amendment for the text-only Gemini
-    #    translation tier exists (owner action; Open Decision 12 shape).
-    #    Until it is recorded, the cloud tier must not ship.
+    # 1. The recorded exception amendment exists: Open Decision 13 in the
+    #    project constitution (recorded 2026-09-16). The cloud tier must not
+    #    ship without it — verified here.
     # 2. Consent/disclosure copy and NSCameraUsageDescription are reviewed and
     #    updated (camera purpose string currently does not mention live
     #    translation or the conditional cloud text send).

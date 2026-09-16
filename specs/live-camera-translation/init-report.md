@@ -36,10 +36,10 @@ header comment.
 
 ## Before Starting — Owner Actions
 
-1. **The cloud translation tier needs a recorded exception amendment** (project constitution,
-   Open Decisions, Open Decision 12 shape) before the feature is shippable. The constraint is
-   enforced by the `final-sign-off` gate; draft the wording in the OD-12 review window
-   (2026-10-13).
+1. ~~The cloud translation tier needs a recorded exception amendment~~ **DONE — recorded as
+   Open Decision 13 (2026-09-16)** before the feature is shippable. The `final-sign-off` gate
+   still verifies the amendment exists and that the consent/disclosure copy review happened
+   (OD-12 review window, 2026-10-13).
 2. **State layout note:** this project still uses the legacy flat `.ai-sdd/state/` layout, so a
    feature session shares `.ai-sdd/state/workflow-state.json` with the completed project
    workflow. If the feature workflow will be run from this project (rather than a throwaway

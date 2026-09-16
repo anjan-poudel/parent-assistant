@@ -40,7 +40,7 @@ Required integrations:
 
 The following constraints are non-negotiable. They must be enforced in all design and implementation decisions.
 
-1. All AI inference on-device only. No cloud LLM API calls. User voice, conversations, health data, and personal profiles must never leave the device for AI processing. Network access is permitted only for third-party integrations (Calendar API, WhatsApp, YouTube, Facebook) and encrypted remote configuration push. **Recorded exception:** the cloud voice stack (Open Decision 12) is a consent-gated exception covering voice transcription only. It is not hypothetical and not off-by-default: the shipped engine stack falls back to the cloud engine (`?? .gemini`, `ios/ElderlyAssistant/App/AppCoordinator.swift:1612-1613`), so this exception is what makes the shipped behaviour conformant, and the consent/disclosure requirements in Open Decision 12 are binding.
+1. All AI inference on-device only. No cloud LLM API calls. User voice, conversations, health data, and personal profiles must never leave the device for AI processing. Network access is permitted only for third-party integrations (Calendar API, WhatsApp, YouTube, Facebook) and encrypted remote configuration push. **Recorded exceptions:** the cloud voice stack (Open Decision 12) is a consent-gated exception covering voice transcription only; the live camera translation tier (Open Decision 13) is a consent-gated exception covering OCR'd text translation only. It is not hypothetical and not off-by-default: the shipped engine stack falls back to the cloud engine (`?? .gemini`, `ios/ElderlyAssistant/App/AppCoordinator.swift:1612-1613`), so this exception is what makes the shipped behaviour conformant, and the consent/disclosure requirements in Open Decision 12 are binding.
 
 2. Remote configuration must be end-to-end encrypted. Family members push config (schedules, contacts, reminders, thresholds) to the parent's phone. The remote config channel must use end-to-end encryption so that no intermediate server can read the configuration payload.
 
@@ -70,7 +70,7 @@ Accessibility:
 - Localisation: all UI strings must be externalised for translation. At minimum, support the primary user's configured language for all TTS (text-to-speech) output.
 
 Privacy:
-- No personal data (voice, health, contacts, conversations) transmitted to cloud for AI processing, except under the recorded cloud voice-stack exception (Open Decision 12), which requires explicit user consent and plain-language disclosure. The shipped default engine stack is the cloud engine, so the consent/disclosure obligation attaches to the default path, not only to an opt-in.
+- No personal data (voice, health, contacts, conversations) transmitted to cloud for AI processing, except under the recorded exceptions (Open Decision 12, voice transcription; Open Decision 13, OCR'd text translation), each of which requires explicit user consent and plain-language disclosure. The shipped default engine stack is the cloud engine, so the consent/disclosure obligation attaches to the default path, not only to an opt-in.
 - Health data accessed via HealthKit/Health Connect must follow platform data minimisation principles — request only the specific data types required.
 - Remote config payloads must be end-to-end encrypted (key held only on the two devices).
 - Logs must not contain PII (names, health values, contacts). Log sanitiser required.
