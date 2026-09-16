@@ -41,6 +41,22 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
     /// strings.
     var locale: Locale = Locale(identifier: "en")
 
+    /// Fired after the schedule changes, with the new entry list
+    /// (calendar & family sharing, 2026-09-16).
+    ///
+    /// Every write path already funnels through `loadSchedule` — the
+    /// Settings editor, the voice `set_reminder` path and the app's own
+    /// restore — so one seam here observes all of them without any of
+    /// them having to remember to tell the share layer. The list is
+    /// passed rather than left for the observer to re-read so the
+    /// observer sees exactly the version that was stored.
+    ///
+    /// Deliberately a plain closure and not a delegate/protocol: the
+    /// only consumer is `CalendarShareService`, failures there must
+    /// never affect the scheduler's own behavior, and a closure the
+    /// coordinator assigns once is the smallest thing that works.
+    var onScheduleChanged: (([MedicationEntry]) -> Void)?
+
     private let storageKeyReminders = "medication.pending_reminders"
     private let storageKeyAdherenceLog = "medication.adherence_log"
     private let storageKeyEntries = "medication.entries"
@@ -146,6 +162,12 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         emit("schedule_loaded", metadata: ["entry_count": "\(newEntries.count)"])
 
         createPendingReminders(for: newEntries, now: Date())
+
+        // Last, and after the local work is fully committed: an observer
+        // must never see a half-applied schedule, and the local
+        // reminders are the part the elder depends on — they are armed
+        // before anything is offered to the share layer.
+        onScheduleChanged?(newEntries)
     }
 
     // MARK: - Schedule All

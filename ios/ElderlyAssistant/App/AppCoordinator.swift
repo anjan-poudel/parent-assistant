@@ -2331,6 +2331,22 @@ final class AppCoordinator: ObservableObject {
         // Reminders leaf toggles alike.
         routineScheduler.onScheduleChanged = { [weak self] in
             self?.calendarSync.syncNow(entries: self?.routineScheduler.entries() ?? [])
+            // [CALENDAR-SHARE] (2026-09-16) Same seam, second consumer: the
+            // routine schedule's shared twins. Enqueue-only and cheap when
+            // sharing is off (the service gates before it touches storage),
+            // so no toggle check is needed here — and reading the toggle
+            // here would be one more place to get the gate wrong.
+            if let entries = self?.routineScheduler.entries() {
+                self?.calendarShareService.reconcileRoutines(entries)
+            }
+        }
+        // [CALENDAR-SHARE] (2026-09-16) Medication needed its own seam:
+        // `MedicationScheduler` had no change notification at all, so its
+        // shared twins were added along with one (`onScheduleChanged`,
+        // fired at the end of `loadSchedule`) — the single funnel every
+        // medication write path already goes through.
+        medicationScheduler.onScheduleChanged = { [weak self] entries in
+            self?.calendarShareService.reconcileMedication(entries)
         }
         // Forward the external calendar service's publishes (Settings
         // status/lead, scan results reaching the Reminders + Calendar
@@ -2606,6 +2622,11 @@ final class AppCoordinator: ObservableObject {
         if calendarSync.isEnabled {
             calendarSync.syncNow(entries: routineScheduler.entries())
         }
+        // [CALENDAR-SHARE] (2026-09-16) Launch pass for the share layer —
+        // after the medication restore above (it reads the restored
+        // entries) and post-first-frame like everything else here, so no
+        // network work delays the first paint.
+        syncCalendarShare()
 
         // Two-way mirroring (calendar-driven task, 2026-09-07): the
         // coordinator relays native edits — family changes made in the
@@ -5109,6 +5130,7 @@ self.noteTalkContractChanged()
                           photo: UIImage? = nil,
                           nickname: String? = nil,
                           address: String? = nil,
+                          email: String? = nil,
                           isEmergencyContact: Bool = false) -> Bool {
         let filename = photo.flatMap { contactPhotoStore.save($0) }
         let contact = FamilyContact(name: name, phone: phone, relationship: relationship,
@@ -5116,6 +5138,7 @@ self.noteTalkContractChanged()
                                     photoFilename: filename,
                                     nickname: nickname,
                                     address: Self.normalizedOptionalText(address),
+                                    email: FamilyContactValidation.normalizedEmail(email),
                                     isEmergencyContact: isEmergencyContact)
         guard familyContactStore.add(contact) else {
             if let filename { contactPhotoStore.delete(named: filename) }
@@ -5158,6 +5181,7 @@ self.noteTalkContractChanged()
                              photo: UIImage? = nil, removingPhoto: Bool = false,
                              nickname: String? = nil,
                              address: String? = nil,
+                             email: String? = nil,
                              isEmergencyContact: Bool = false) -> Bool {
         guard var contact = familyContacts.first(where: { $0.id == id }) else { return false }
         contact.name = name
@@ -5170,6 +5194,11 @@ self.noteTalkContractChanged()
         // stored address (nil), so "remove the address" is an edit, not a
         // separate affordance (directions task, 2026-09-07).
         contact.address = Self.normalizedOptionalText(address)
+        // Same rule for the Google address (calendar & family sharing,
+        // 2026-09-16): blank clears it, and the editor's emergency gate
+        // is what makes a blank impossible while the contact is flagged
+        // — this normalizes, it does not enforce.
+        contact.email = FamilyContactValidation.normalizedEmail(email)
 
         let oldFilename = contact.photoFilename
         var newFilename = oldFilename
@@ -5589,6 +5618,17 @@ self.noteTalkContractChanged()
             guard let self else { return }
             if self.voiceCalendarEventWriter.eventsAccess == .notDetermined {
                 _ = await self.voiceCalendarEventWriter.requestAccess()
+            }
+            // [CALENDAR-SHARE] (2026-09-16) Attached here, not at
+            // construction, to keep the writer lazy (its property doc
+            // explains why) — and re-attached each write, which is
+            // harmless because the closure is the same every time.
+            self.voiceCalendarEventWriter.onEventCreated = { [weak self] creation in
+                self?.calendarShareService.eventCreated(
+                    localEventId: creation.localEventId,
+                    title: creation.title,
+                    startDate: creation.startDate,
+                    durationMinutes: creation.durationMinutes)
             }
             let created = self.voiceCalendarEventWriter.create(
                 title: event.title,
@@ -7181,6 +7221,70 @@ self.noteTalkContractChanged()
     /// was dropped in favor of it).
     private(set) lazy var calendarSync = CalendarSyncService(observabilityBus: observabilityBus)
 
+    // MARK: - Calendar & family sharing (2026-09-16)
+
+    /// The Google Calendar bridge (design §4.1). LAZY like `calendarSync`
+    /// above: constructing it reads a bundle key, an `EKEventStore` and
+    /// three local stores and touches no permission and no network. Its
+    /// first real work is `syncCalendarShare()` in
+    /// `composePostFirstFrame` — post-first-frame, so nothing here delays
+    /// the first paint.
+    ///
+    /// A missing OAuth client id is NOT a construction failure. The
+    /// session reports `isConfigured == false`, the service reports
+    /// `.notConfigured`, and the Settings card says so in words — which
+    /// is the state the app ships in until the family provides a client
+    /// (design §0). Graceful degradation here is the difference between
+    /// "sharing is not set up" and a crash on launch.
+    ///
+    /// No `objectWillChange` forward is installed for it, unlike the
+    /// eager nested services above: the Settings card observes the
+    /// service directly (`@ObservedObject`), and no coordinator state is
+    /// derived from it, so a forward would only invalidate every
+    /// coordinator observer for nothing — and installing one would force
+    /// this lazy service to exist at boot.
+    private(set) lazy var calendarShareService = CalendarShareService(
+        session: calendarShareSession,
+        gateway: calendarShareGateway,
+        store: LocalGoogleEventMappingStore(storage: storage),
+        consent: CalendarShareConsent(),
+        notifySettings: caregiverNotifySettings,
+        observabilityBus: observabilityBus,
+        contactsProvider: { [weak self] in self?.familyContacts ?? [] }
+    )
+
+    /// The Google account session — separate from the service so sign-out
+    /// is one call on one object, and so the presenter (a UI concern the
+    /// service must not know about) lives with the composition root that
+    /// can actually reach the window.
+    private(set) lazy var calendarShareSession: GoogleAccountSession = {
+        let session = GoogleAccountSession(observabilityBus: observabilityBus)
+        // Resolved at PRESENT time, never captured: the window scene does
+        // not exist when the composition root runs, and a controller
+        // captured then would be a detached one.
+        session.presenter = { [weak self] in self?.topPresentingViewController() }
+        return session
+    }()
+
+    /// The Calendar v3 / People v1 REST client over the session above.
+    private(set) lazy var calendarShareGateway = GoogleCalendarGateway(
+        session: calendarShareSession,
+        observabilityBus: observabilityBus
+    )
+
+    /// The topmost view controller Google's sign-in sheet presents from.
+    /// Walks past anything already presented so the sheet never lands
+    /// under an open modal. Returns nil before the scene exists, which
+    /// the session reports as a failed sign-in rather than a crash.
+    private func topPresentingViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        guard let window = scene?.windows.first(where: \.isKeyWindow) ?? scene?.windows.first,
+              var top = window.rootViewController else { return nil }
+        while let presented = top.presentedViewController { top = presented }
+        return top
+    }
+
     /// Read-only native Calendar/Reminders integration (2026-09-07): the
     /// REVERSE direction of `calendarSync` — native events/reminders
     /// import as in-app reminders with notifications, and rows open the
@@ -7394,10 +7498,51 @@ self.noteTalkContractChanged()
             // fire ran, and any refresh racing the task above is
             // superseded by the task's post-fire read.
             refreshTodayBriefing()
+            // [CALENDAR-SHARE] (2026-09-16) Same activation, the share
+            // layer's pass: reconcile both schedules, drain the queue,
+            // pull invitations the family sent. Runs here rather than on
+            // its own timer because a foreground return is the only
+            // moment the elder's device is reliably online.
+            syncCalendarShare()
         case .background:
             externalCalendar.submitBackgroundRefresh()
         default:
             break
+        }
+    }
+
+    // MARK: - Calendar & family sharing (2026-09-16)
+
+    /// The share layer's launch/foreground pass.
+    ///
+    /// The reconciling is here, not only on the schedulers' change
+    /// seams, for one reason: those seams fire on CHANGES, so a schedule
+    /// that already existed before the family connected Google would
+    /// never be shared at all. Reconcile is fingerprint-diffed and
+    /// enqueue is the only thing that can produce work, so an unchanged
+    /// schedule costs a few local reads and zero requests — which is
+    /// what makes it safe to run on every activation.
+    func syncCalendarShare() {
+        let share = calendarShareService
+        share.locale = activeLocale
+        // Idempotent assignment: the closure is the same every pass, and
+        // setting it here (rather than at construction) is what keeps
+        // the service lazy until the first pass.
+        share.onLocalEventImported = { [weak self] in
+            // An accepted invitation now sits in the native calendar;
+            // the existing import is what turns it into an armed
+            // reminder that fires and alerts a caregiver.
+            Task { await self?.externalCalendar.rescan() }
+        }
+        share.reconcileMedication(medicationScheduler.medicationEntries())
+        share.reconcileRoutines(routineScheduler.entries())
+        // Swept BEFORE the flush, so a twin whose local event the elder
+        // deleted natively in the same window is deleted from the family
+        // calendar by this pass rather than the next one.
+        share.cleanupVanishedEvents()
+        Task {
+            await share.flushPending()
+            await share.syncInbound()
         }
     }
 
@@ -7828,6 +7973,18 @@ self.noteTalkContractChanged()
             }
             Task {
                 await self.externalCalendar.rescan()
+                // [CALENDAR-SHARE] (2026-09-16) The share layer's INTERVAL
+                // pass (design §2.5: "foreground + interval"). It rides
+                // this handler rather than a task identifier of its own:
+                // the identifier set is fixed in Info.plist, the cadence
+                // wanted is exactly this one, and this handler is already
+                // awake with the app free to use the network.
+                //
+                // The hop is not cosmetic — the handler fires on a
+                // background queue and the share service is main-confined
+                // (it reads schedulers and settings and, on an import,
+                // kicks the rescan that touches the UI's published state).
+                await MainActor.run { self.syncCalendarShare() }
                 task.setTaskCompleted(success: true)
             }
         }

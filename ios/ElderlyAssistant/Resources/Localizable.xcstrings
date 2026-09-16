@@ -6507,23 +6507,6 @@
         }
       }
     },
-    "meds.firePrompt": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Time to take your medicine"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "तपाईंको औषधि खाने समय भयो"
-          }
-        }
-      }
-    },
     "meds.iTookIt": {
       "extractionState": "manual",
       "localizations": {
@@ -16278,6 +16261,584 @@
           "stringUnit": {
             "state": "translated",
             "value": "अहिलेसम्म कुनै पालोको ट्रेस भएको छैन"
+          }
+        }
+      }
+    },
+    "family.contact.email": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Email address"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "इमेल ठेगाना"
+          }
+        }
+      }
+    },
+    "family.contact.emailRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An emergency contact needs an email address, so the family's calendar can send them the invitation."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आपतकालीन सम्पर्कको इमेल ठेगाना चाहिन्छ — परिवारको क्यालेन्डरबाट निम्ता पठाउन यो चाहिन्छ।"
+          }
+        }
+      }
+    },
+    "family.contact.emailInvalid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This does not look like an email address. Check for a missing @ or dot."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो इमेल ठेगाना जस्तो देखिँदैन। @ वा डट छुटेको छ कि हेर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "family.contact.emailHintEmergency": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Emergency contacts are invited to every shared reminder, so an email address is required here."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आपतकालीन सम्पर्कलाई हरेक साझा सम्झनामा निम्ता जान्छ, त्यसैले यहाँ इमेल ठेगाना अनिवार्य छ।"
+          }
+        }
+      }
+    },
+    "settings.calendarSharing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar sharing"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्यालेन्डर साझा"
+          }
+        }
+      }
+    },
+    "caregiverNotify.shareHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Family members can also be invited to see these events on their own calendar. These switches choose who is invited — but an emergency contact is always invited. Set up in Calendar sharing."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "परिवारका सदस्यहरूलाई यी कार्यक्रम आफ्नै क्यालेन्डरमा देख्न पनि निम्ता दिन सकिन्छ। कसलाई निम्ता जान्छ यी स्विचले तय गर्छन् — तर आपतकालीन सम्पर्कलाई सधैँ निम्ता जान्छ। यो क्यालेन्डर साझा भन्ने ठाउँमा मिलाइन्छ।"
+          }
+        }
+      }
+    },
+    "calendarShare.notConfigured": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar sharing needs a Google sign-in that has not been set up for this app yet. Nothing is being shared. Ask the family member who set up this phone to finish the setup."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्यालेन्डर साझा गर्न गुगल साइन-इन चाहिन्छ, जुन यो एपका लागि अझै मिलाइएको छैन। अहिले केही पनि साझा भइरहेको छैन। यो फोन मिलाउनुभएको परिवारको सदस्यलाई सेटअप पूरा गर्न भन्नुहोस्।"
+          }
+        }
+      }
+    },
+    "calendarShare.signedOut": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google Calendar is not connected yet, so nothing is being shared. Connect the family's Google account to put your reminders on their calendar."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल क्यालेन्डर अझै जोडिएको छैन, त्यसैले केही पनि साझा भइरहेको छैन। तपाईंका सम्झनाहरू परिवारको क्यालेन्डरमा राख्न गुगल खाता जोड्नुहोस्।"
+          }
+        }
+      }
+    },
+    "calendarShare.connect": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect Google Calendar"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल क्यालेन्डर जोड्नुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.createAccount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create a Google account"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल खाता बनाउनुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.working": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Talking to Google…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगलसँग कुरा गर्दैछु…"
+          }
+        }
+      }
+    },
+    "calendarShare.connectedAs": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected as %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जोडिएको खाता: %@"
+          }
+        }
+      }
+    },
+    "calendarShare.syncNow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Share now"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले साझा गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.stopSharing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop sharing"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "साझा गर्न रोक्नुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.stopSharing.confirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop sharing your calendar with the family? Reminders and alarms on this phone keep working either way."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "परिवारसँग क्यालेन्डर साझा गर्न रोक्ने हो? यो फोनका सम्झना र अलार्महरू जसरी पनि चलिरहन्छन्।"
+          }
+        }
+      }
+    },
+    "calendarShare.status.pending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting to share: %d"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "साझा गर्न बाँकी: %d"
+          }
+        }
+      }
+    },
+    "calendarShare.status.synced": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Everything is shared — last updated %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सबै साझा भयो — पछिल्लो अद्यावधिक %@"
+          }
+        }
+      }
+    },
+    "calendarShare.status.waiting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing has been shared yet. A reminder is shared as soon as it is created."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिलेसम्म केही पनि साझा भएको छैन। सम्झना बन्नेबित्तिकै साझा हुन्छ।"
+          }
+        }
+      }
+    },
+    "calendarShare.consent.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Before sharing starts"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "साझा सुरु गर्नुअघि"
+          }
+        }
+      }
+    },
+    "calendarShare.consent.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Event titles, including medicine names, will be sent to your Google Calendar and shared with invited family contacts. They will see what is coming up on your calendar."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कार्यक्रमका पूरा नाम — औषधिका नामसमेत — तपाईंको गुगल क्यालेन्डरमा पठाइन्छन् र निम्ता दिइएका परिवारका सदस्यहरूले देख्न सक्छन्। उनीहरूले तपाईंको क्यालेन्डरमा के आउँदैछ देख्नेछन्।"
+          }
+        }
+      }
+    },
+    "calendarShare.consent.whoCanSee": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Emergency contacts are always invited. Other family members are invited for the kinds of reminders you switch on in Notify caregivers."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आपतकालीन सम्पर्कहरूलाई सधैं निम्ता जान्छ। अरू परिवारलाई परिवारलाई खबर गर्नेमा खोल्नुभएका सम्झनाका प्रकारअनुसार निम्ता जान्छ।"
+          }
+        }
+      }
+    },
+    "calendarShare.consent.revoke": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can stop sharing at any time, and this screen will always tell you what is happening."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईं जहिले पनि साझा गर्न रोक्न सक्नुहुन्छ, र यही स्क्रिनले सधैं के भइरहेको छ भनेर देखाउँछ।"
+          }
+        }
+      }
+    },
+    "calendarShare.consent.accept": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I understand"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मैले बुझें"
+          }
+        }
+      }
+    },
+    "calendarShare.error.notSignedIn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google is not connected, so nothing is being shared."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल जोडिएको छैन, त्यसैले केही पनि साझा भइरहेको छैन।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.notConfigured": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar sharing is not set up for this app, so nothing can be shared."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो एपमा क्यालेन्डर साझा मिलाइएको छैन, त्यसैले केही पनि साझा गर्न सकिँदैन।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.unauthorized": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google has stopped allowing access. Connect the account again to keep sharing."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगलले पहुँच दिन छोडेको छ। साझा जारी राख्न खाता फेरि जोड्नुहोस्।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.rateLimited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google is busy right now. Sharing will try again by itself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल अहिले व्यस्त छ। साझा गर्ने काम आफैं फेरि प्रयास गर्नेछ।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.server": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google had a problem. Sharing will try again by itself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगलमा समस्या आयो। साझा गर्ने काम आफैं फेरि प्रयास गर्नेछ।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.malformedResponse": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google sent back something unexpected, so that share did not go through."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगलबाट अनपेक्षित जवाफ आयो, त्यसैले त्यो साझा हुन सकेन।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.notFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A calendar item this phone was updating is no longer on Google. It will be put back the next time it changes."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनले अद्यावधिक गरिरहेको एउटा क्यालेन्डर घटना गुगलमा अब छैन। अर्को पटक परिवर्तन हुँदा यो फेरि राखिनेछ।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.transport": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not reach Google. Sharing will try again when the phone has internet."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगलसम्म पुग्न सकिएन। फोनमा इन्टरनेट हुँदा साझा गर्ने काम फेरि प्रयास गर्नेछ।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.generic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reminders, alarms and medicine times on this phone keep working either way."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनका सम्झना, अलार्म र औषधिका बेला जसरी पनि चलिरहन्छन्।"
+          }
+        }
+      }
+    },
+    "calendarShare.signOut": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign out of Google"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगलबाट साइन आउट गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "meds.firePrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time to take your medicine"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको औषधि खाने समय भयो"
           }
         }
       }
