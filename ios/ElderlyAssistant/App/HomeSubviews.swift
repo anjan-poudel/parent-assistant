@@ -135,7 +135,13 @@ struct QuickAccessStrip: View {
                 ForEach(apps) { app in
                     tile(app)
                 }
-                NavigationLink(value: LeafDestination.settings) {
+                // The plus tile pushes the Quick apps picker ITSELF
+                // (menu-audit task, 2026-09-17) — it used to land on the
+                // Settings hub's default Voice tab, one wrong tab away
+                // from the picker. Home's stack resolves
+                // `SettingsDestination` the same way the Directions leaf
+                // resolves `.places` locally.
+                NavigationLink(value: SettingsView.SettingsDestination.quickApps) {
                     addTile
                 }
                 .buttonStyle(.plain)
@@ -168,8 +174,9 @@ struct QuickAccessStrip: View {
         .buttonStyle(.plain)
     }
 
-    /// The trailing plus tile → Settings (LeafDestination.settings), where
-    /// the Quick apps picker lives. Same 92pt width as the app tiles so
+    /// The trailing plus tile → the Quick apps picker directly
+    /// (`SettingsDestination.quickApps`), not the Settings hub (which
+    /// defaults to its Voice tab). Same 92pt width as the app tiles so
     /// the row's rhythm stays even.
     private var addTile: some View {
         VStack(spacing: 4) {

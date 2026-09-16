@@ -192,12 +192,11 @@ struct MedicalView: View {
                 smsNoteCard
             }
 
-            // Calendar auto-add toggle (medical task, 2026-09-07):
-            // default ON; the store's calendarWritesEnabled gate mirrors
-            // this and decides whether the MedicalAppointmentCalendarWriting
-            // seam is invoked at all (the calendar-2way task ships the
-            // EventKit writer).
-            calendarToggleCard
+            // The calendar auto-add toggle (medical task, 2026-09-07)
+            // moved to the Settings hub's Medication schedule leaf
+            // (menu-audit task, 2026-09-17) — settings live under
+            // Settings; this leaf shows and edits appointments, it does
+            // not configure them.
 
             pasteRow
 
@@ -273,24 +272,6 @@ struct MedicalView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-    }
-
-    /// Calendar auto-add toggle — mirrors `appointmentsToCalendar` on
-    /// the coordinator, which persists it and re-syncs the store gate.
-    private var calendarToggleCard: some View {
-        Toggle(isOn: Binding(
-            get: { coordinator.appointmentsToCalendar },
-            set: { coordinator.appointmentsToCalendar = $0 }
-        )) {
-            Label("medical.calendarToggle", systemImage: "calendar.badge.plus")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textPrimary)
-        }
-        .tint(DesignTokens.accent)
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
