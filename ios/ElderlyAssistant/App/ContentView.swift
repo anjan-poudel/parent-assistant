@@ -51,6 +51,36 @@ struct ContentView: View {
             TimerAlarmOverlay(engine: coordinator.timerAlarmEngine,
                               onStop: coordinator.stopTimerAlarm)
         )
+        // [PHOTO-AIDS] (2026-09-16) The fired reminder's photos, full
+        // screen — mounted at the root for the same reason the timer
+        // alarm is: it is the app's only in-app firing surface for
+        // reminders, and it must cover whatever screen the elder is on.
+        // Transparent no-op while nothing has fired (the overwhelming
+        // case — only reminders with photos ever present it).
+        .overlay(
+            RoutineVisualAidOverlay(
+                presentation: coordinator.firedRoutineVisualAids,
+                store: coordinator.visualAidStore,
+                locale: coordinator.activeLocale,
+                onClose: coordinator.dismissFiredRoutineVisualAids
+            )
+        )
+        // [MED-PHOTO-AIDS] (2026-09-16) The medication half of the same
+        // idea: a dose whose entry carries photos presents the elder-facing
+        // dose screen (photo large above the name and the dose line, one
+        // "I took it") instead of a bare banner — safety-critical, so it
+        // covers everything, root-mounted like the routine one. Reads the
+        // MEDICATION photo store: dose photos live under their own prefixed
+        // directory, never the routine store's.
+        .overlay(
+            MedicationVisualAidOverlay(
+                presentation: coordinator.firedMedicationVisualAids,
+                store: coordinator.medicationVisualAidStore,
+                locale: coordinator.activeLocale,
+                onAcknowledge: coordinator.confirmFiredMedicationDose,
+                onClose: coordinator.dismissFiredMedicationVisualAids
+            )
+        )
         // .plugin intent: a plugin-provided view (e.g. the appliance
         // photo + overlay), presented app-wide.
         .sheet(item: $coordinator.pendingPluginPresentation) { presentation in

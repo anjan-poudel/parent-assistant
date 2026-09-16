@@ -43,10 +43,15 @@ final class MockAlarmScheduler: PlatformAlarmScheduler {
     var cancelledReminders: Set<UUID> = []
     var ackDeadlineChecks: [UUID: Date] = [:]
     var scheduleCallCount = 0
+    /// The banner photo handed to each arming call (medication-visual-aids
+    /// task, 2026-09-16) — nil for a dose with no photos.
+    var visualAidURLs: [UUID: URL] = [:]
 
-    func scheduleReminder(reminderId: UUID, entryId: UUID, medicationName: String, at scheduledTime: Date) {
+    func scheduleReminder(reminderId: UUID, entryId: UUID, medicationName: String,
+                          visualAidURL: URL?, at scheduledTime: Date) {
         scheduleCallCount += 1
         scheduledReminders[reminderId] = scheduledTime
+        visualAidURLs[reminderId] = visualAidURL
     }
 
     func scheduleAckDeadlineCheck(reminderId: UUID, entryId: UUID, deadline: Date) {

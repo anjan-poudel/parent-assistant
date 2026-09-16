@@ -53,6 +53,96 @@ final class RoutineEntryTests: XCTestCase {
         XCTAssertEqual(decoded.frequency, .daily)
     }
 
+    // MARK: - Visual aids (photo-visual-aids task, 2026-09-16)
+
+    func testEntryDefaultsToNoVisualAids() {
+        let entry = RoutineEntry(category: .walk,
+                                 scheduleTimes: [DateComponents(hour: 17)],
+                                 isEnabled: true)
+        XCTAssertEqual(entry.visualAids, [],
+                       "every existing entry shape carries no photos until one is added")
+    }
+
+    func testCodableRoundTripCarriesVisualAids() throws {
+        let aids = [
+            VisualAid(filename: "a.jpg", caption: "the blue box"),
+            VisualAid(filename: "b.jpg", caption: nil)
+        ]
+        let entry = RoutineEntry(
+            category: .medication,
+            titleOverride: "Metformin",
+            scheduleTimes: [DateComponents(hour: 8)],
+            isEnabled: true,
+            visualAids: aids
+        )
+        let data = try JSONEncoder().encode(entry)
+        let decoded = try JSONDecoder().decode(RoutineEntry.self, from: data)
+
+        XCTAssertEqual(decoded, entry)
+        XCTAssertEqual(decoded.visualAids, aids)
+        XCTAssertEqual(decoded.visualAids[0].caption, "the blue box")
+        XCTAssertNil(decoded.visualAids[1].caption,
+                     "a nil caption must survive as nil, not become \"\"")
+    }
+
+    /// The migration contract: entries persisted BEFORE `visualAids`
+    /// existed must decode with an empty list. Synthesized decoding would
+    /// throw `keyNotFound` here and wipe the user's whole reminder list on
+    /// first launch after the upgrade.
+    func testDecodingLegacyPayloadWithoutVisualAidsYieldsEmpty() throws {
+        let entry = RoutineEntry(
+            category: .meal,
+            titleOverride: "खाना",
+            scheduleTimes: [DateComponents(hour: 13)],
+            frequency: .weekly,
+            weekdays: [1, 3],
+            isEnabled: false
+        )
+        let data = try JSONEncoder().encode(entry)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertNotNil(object.removeValue(forKey: "visualAids"),
+                        "the legacy fixture must actually lack the key")
+
+        let legacy = try JSONSerialization.data(withJSONObject: object)
+        let decoded = try JSONDecoder().decode(RoutineEntry.self, from: legacy)
+
+        XCTAssertEqual(decoded.visualAids, [])
+        XCTAssertEqual(decoded.id, entry.id)
+        XCTAssertEqual(decoded.titleOverride, "खाना")
+        XCTAssertEqual(decoded.frequency, .weekly)
+        XCTAssertEqual(decoded.weekdays, [1, 3])
+        XCTAssertEqual(decoded.isEnabled, false)
+        XCTAssertEqual(decoded.scheduleTimes, entry.scheduleTimes)
+    }
+
+    /// The other half of the migration contract: relaxing the decode for
+    /// `visualAids` must not relax it for anything else — a payload
+    /// missing a required key still fails loudly rather than silently
+    /// producing a defaulted entry.
+    func testDecodingStillRejectsPayloadMissingARequiredKey() throws {
+        let entry = RoutineEntry(category: .walk,
+                                 scheduleTimes: [DateComponents(hour: 17)],
+                                 isEnabled: true)
+        let data = try JSONEncoder().encode(entry)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        object.removeValue(forKey: "scheduleTimes")
+        let broken = try JSONSerialization.data(withJSONObject: object)
+
+        XCTAssertThrowsError(try JSONDecoder().decode(RoutineEntry.self, from: broken))
+    }
+
+    func testVisualAidCodableRoundTripPreservesIdentity() throws {
+        let aid = VisualAid(filename: "box.jpg", caption: nil)
+        let data = try JSONEncoder().encode(aid)
+        let decoded = try JSONDecoder().decode(VisualAid.self, from: data)
+        XCTAssertEqual(decoded, aid)
+        XCTAssertEqual(decoded.id, aid.id, "the id must round-trip — it keys the file on disk")
+    }
+
     // MARK: - Display title
 
     func testDisplayTitlePrefersVerbatimOverride() {

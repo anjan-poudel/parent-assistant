@@ -383,6 +383,37 @@ final class AppCoordinator: ObservableObject {
     }
     private static let cloudProviderKey = "cloudProvider"
 
+    /// [CLOUD-CASCADE] (2026-09-16) The cloud cascade tier's confidence
+    /// threshold — the internal Settings card's ± row, shown as a
+    /// percentage (97 % ↔ 0.97). When the large local brain answers BELOW
+    /// this while an online provider is configured, the turn goes to the
+    /// cloud (with the spoken hold cue first). Persisted through
+    /// `CloudCascadeSettings` (UserDefaults, clamped on read AND write —
+    /// a UI preference, not a secret). didSet persists AND re-arms the
+    /// tier, so a ± press in Settings takes effect on the NEXT utterance
+    /// (the same instant-apply rule `cloudFallbackEnabled` follows).
+    /// Init-time restore assigns the property directly (house pattern —
+    /// didSet does not fire there).
+    @Published var cloudCascadeThreshold: Double {
+        didSet {
+            guard cloudCascadeThreshold != oldValue else { return }
+            CloudCascadeSettings.setThreshold(cloudCascadeThreshold)
+            applyCloudCascadeConfiguration()
+        }
+    }
+
+    /// [CLOUD-CASCADE] The internal card's switch — ON by default (the
+    /// tier's rule is the requested behaviour and it stays inert on its
+    /// own wherever no provider is configured), OFF to hold the ladder
+    /// local-first on purpose. Persisted through `CloudCascadeSettings`.
+    @Published var cloudCascadeEnabled: Bool {
+        didSet {
+            guard cloudCascadeEnabled != oldValue else { return }
+            CloudCascadeSettings.setEnabled(cloudCascadeEnabled)
+            applyCloudCascadeConfiguration()
+        }
+    }
+
     /// The user's favourite apps for the Home quick-access row
     /// (quick-access-apps task, 2026-09-06), in stored order.
     /// `private(set)`: mutation is confined to `addFavoriteApp` /
@@ -716,6 +747,27 @@ final class AppCoordinator: ObservableObject {
     /// used to run in `init` (keychain IO before first paint, which the
     /// constant-time startup contract forbids).
     private let routineStore: RoutineStore
+
+    /// Reminder photo store (photo-visual-aids task, 2026-09-16) —
+    /// `Application Support/VisualAids/<entryId>/<file>.jpg`. One shared
+    /// instance: the view layer renders from it, the routine scheduler
+    /// reads attachments out of it, and deleting a reminder clears its
+    /// folder through it. Stateless (a directory URL plus JPEG helpers),
+    /// and its `init` performs NO disk IO — a path lookup only, so
+    /// building it here keeps the constant-time boot contract
+    /// (`NoIOInInitTests`). The directory appears on the first save.
+    let visualAidStore = VisualAidStore()
+
+    /// The MEDICATION photo store (medication-visual-aids task,
+    /// 2026-09-16) — the same `VisualAidStore`, built with the medication
+    /// directory prefix so dose photos land at
+    /// `Application Support/VisualAids/med-<entryId>/<file>.jpg` and can
+    /// never resolve into a routine entry's folder. A second INSTANCE, not
+    /// a second implementation: compression, the picker's cap and the
+    /// failure-soft file handling are one code path for both systems.
+    /// Like its sibling, `init` is a path lookup with no disk IO.
+    let medicationVisualAidStore =
+        VisualAidStore(directoryPrefix: VisualAidStore.medicationDirectoryPrefix)
 
     /// The curated "Family and friends" list (spec §4.4.2) — persisted
     /// encrypted, feeds the notifier whenever the list changes.
@@ -1916,7 +1968,14 @@ final class AppCoordinator: ObservableObject {
             alarmScheduler: alarmScheduler,
             observabilityBus: bus,
             familyNotifier: familyNotifier,
-            caregiverNotifySettings: caregiverNotifySettings
+            caregiverNotifySettings: caregiverNotifySettings,
+            // [MED-PHOTO-AIDS] Two jobs, matching the routine scheduler's:
+            // arming a dose notification with the entry's first photo as a
+            // banner attachment (the Lock Screen case), and clearing the
+            // entry's photo folder when the medication is deleted. Built
+            // with the MEDICATION prefix, so dose photos never resolve
+            // into a routine entry's folder.
+            visualAidStore: medicationVisualAidStore
         )
 
         // Routine reminders (v2 pivot Phase 1): the medication path's
@@ -1939,7 +1998,11 @@ final class AppCoordinator: ObservableObject {
             // notification path at all; `markDelivered` is where the
             // alert now fires from.
             familyNotifier: familyNotifier,
-            caregiverNotifySettings: caregiverNotifySettings
+            caregiverNotifySettings: caregiverNotifySettings,
+            // [PHOTO-AIDS] Two jobs: arming a notification with the
+            // entry's first photo as a banner attachment, and clearing
+            // the entry's photo folder when the entry is deleted.
+            visualAidStore: visualAidStore
         )
         self.routineScheduler = routineScheduler
         self.routinePlugin = RoutinePlugin(scheduler: routineScheduler)
@@ -2134,6 +2197,15 @@ final class AppCoordinator: ObservableObject {
         self.cloudFallbackEnabled = UserDefaults.standard.bool(forKey: Self.cloudFallbackKey)
         self.cloudProvider = UserDefaults.standard.string(forKey: Self.cloudProviderKey)
             .flatMap(CloudProvider.init(rawValue:)) ?? .gemini
+
+        // Restore the persisted cloud-cascade tier settings ([CLOUD-CASCADE],
+        // 2026-09-16 — default threshold 0.97, default ON). These are the
+        // properties' ONLY initial assignments, so their didSets do not fire
+        // here (same rule as `voiceEngineStack` above); the tier itself is
+        // armed by `applyCloudCascadeConfiguration()`, reached from
+        // `applyVoiceEngineStack()` once `start()` has built the pipeline.
+        self.cloudCascadeThreshold = CloudCascadeSettings.threshold()
+        self.cloudCascadeEnabled = CloudCascadeSettings.isEnabled()
 
         // Restore the persisted Voice Processing I/O preset mirror
         // (voice-personalisation P0, slice C — default OFF, the A/B
@@ -2703,7 +2775,40 @@ final class AppCoordinator: ObservableObject {
             },
             observability: observabilityBus
         )
-        let facade = NotificationFacade(handlers: [timerAlarmEngine, notificationReader, caregiverEventHandler],
+        // [PHOTO-AIDS] The reminder's photos at the moment it fires: a
+        // routine notification whose entry carries a visual aid presents
+        // the full-screen elder-facing view. Registered beside the reader
+        // and the caregiver handler and claims nothing, so delivery and
+        // read-aloud are untouched (see the handler's own contract).
+        let routineVisualAidFireHandler = RoutineVisualAidFireHandler(
+            entryLookup: { [weak routineScheduler] entryId in
+                routineScheduler?.entry(for: entryId)
+            },
+            onFire: { [weak self] entry in
+                self?.presentRoutineVisualAids(for: entry)
+            }
+        )
+        // [MED-PHOTO-AIDS] The dose's photos at the moment it fires
+        // (medication-visual-aids task, 2026-09-16): a medication
+        // notification whose entry carries a photo presents the
+        // full-screen dose screen. Claims nothing (delivery and read-aloud
+        // unchanged), exactly like its routine sibling — but it MUST be
+        // registered BEFORE `notificationReader`: "MEDICATION_REMINDER" is
+        // the one category the reader allowlists, and the facade stops
+        // consulting handlers at the first claim, so a dose reaching this
+        // handler at all depends on this position in the array.
+        let medicationVisualAidFireHandler = MedicationVisualAidFireHandler(
+            entryLookup: { [weak medicationScheduler] entryId in
+                medicationScheduler?.medicationEntry(for: entryId)
+            },
+            onFire: { [weak self] entry in
+                self?.presentMedicationVisualAids(for: entry)
+            }
+        )
+        let facade = NotificationFacade(handlers: [timerAlarmEngine,
+                                                   medicationVisualAidFireHandler,
+                                                   notificationReader, caregiverEventHandler,
+                                                   routineVisualAidFireHandler],
                                          observability: observabilityBus)
         UNUserNotificationCenter.current().delegate = facade
         // [TIMER-ALARM] Foreground driver: evaluates the ringing engine
@@ -4421,6 +4526,61 @@ self.noteTalkContractChanged()
             // toggle), never from `init`.
             installBundledSTTModelIfNeeded()
         }
+        // [CLOUD-CASCADE] Last: (re-)arm the cascade tier on the fresh
+        // stack. It reads the provider seam + the two persisted settings,
+        // so it belongs to the same "apply the stack" pass as
+        // `cloudEnabled` above — one place decides what the ladder may
+        // reach, and this call can never arm a tier the stack just
+        // declined (it is gated on the same `cloudEnabled`).
+        applyCloudCascadeConfiguration()
+    }
+
+    /// [CLOUD-CASCADE] (2026-09-16) Arms the cloud cascade tier on
+    /// `intentRouter` from the SAME inputs the rest of the app consults:
+    /// the Gemini interpreter the boot built, `GeminiConfigStore.isConfigured`
+    /// (the key) and `GeminiCostGovernor.allowsCall()` (the day's budget) —
+    /// so a Settings promise can never outrun what the tier would do, and
+    /// an unconfigured household gets a nil tier (no cue, no event, no log,
+    /// no activity row: silent, exactly as the ladder behaved before the
+    /// tier existed).
+    ///
+    /// Called from `applyVoiceEngineStack()` (once at startup, and again on
+    /// every stack / opt-in / threshold / switch change). No-ops before
+    /// `start()` has built the pipeline and the interpreter — the same
+    /// tolerance `applyVoiceEngineStack()` itself holds.
+    ///
+    /// The tier is inert unless the cloud is REACHABLE at all
+    /// (`cloudEnabled`, which `applyVoiceEngineStack()` has just decided
+    /// from the stack + the opt-in), so this can never be the one path that
+    /// puts a cloud on the wire behind the household's back (OD-12's
+    /// consent posture is decided there, not here).
+    private func applyCloudCascadeConfiguration() {
+        guard let router = intentRouter, let gemini = geminiCommandInterpreter else {
+            return
+        }
+        let providers = CloudBrainProviders(gemini: CloudBrainRegistration(
+            interpreter: gemini,
+            isConfigured: { [weak self] in self?.geminiConfigStore.isConfigured ?? false },
+            costAllows: { [weak self] in self?.geminiCostGovernor.allowsCall() ?? false }
+        ))
+        // Resolved through the seam — the coordinator never names a cloud
+        // interpreter for a provider id; the registry does (adding a
+        // provider is a case + a registration, not a branch here).
+        guard let endpoint = providers.endpoint(for: cloudProvider) else {
+            router.cloudCascade = nil
+            return
+        }
+        router.cloudCascade = CloudCascadeConfiguration(
+            endpoint: endpoint,
+            threshold: cloudCascadeThreshold,
+            isEnabled: cloudCascadeEnabled,
+            holdCue: { [weak self] in
+                self?.commandRouter?.speakCloudCascadeHoldCue()
+            },
+            onEscalated: { [weak self] escalation in
+                self?.recordCloudCascadeEscalation(escalation)
+            }
+        )
     }
 
     /// [BOOT-REVIEW P1-5] Installs the ONE app-bundled STT model (the
@@ -6162,6 +6322,38 @@ self.noteTalkContractChanged()
                        contactName: "", phone: "", timestamp: timestamp)
     }
 
+    /// [CLOUD-CASCADE] (2026-09-16) Records one turn the cloud cascade tier
+    /// sent to the ONLINE brain — the coordinator half of the tier's
+    /// `onEscalated` seam, run once per escalated turn, right after the
+    /// observability event and BEFORE the cloud call.
+    ///
+    /// Two trails, and neither one carries the utterance (C9 policy):
+    ///  · an activity-log row (`Kind.cloudEscalation` / `Channel.cloud`)
+    ///    with an EMPTY contact and number — the household can see that a
+    ///    turn reached the cloud, and nothing about what was said;
+    ///  · an app log line naming the escalation unmistakably, with the
+    ///    provider id and the two scores only (the same numbers the
+    ///    observability event carries — read this line and the
+    ///    `cloud_cascade_escalated` event side by side to tell a
+    ///    cloud-answered turn from an on-device one).
+    ///
+    /// Main queue by contract (the tier's completion runs there, like every
+    /// other brain in the ladder → `recordActivity`'s rule).
+    private func recordCloudCascadeEscalation(_ escalation: CloudCascadeEscalation) {
+        recordActivity(kind: .cloudEscalation, channel: .cloud, contactName: "")
+        // Numbers and a provider id only — never what the user said or what
+        // the assistant answered (C9 policy; the same rule the
+        // `cloud_cascade_escalated` event holds to). Note the Release-log
+        // privacy gate (tools/check-release-log-safety.sh) rejects any
+        // non-DEBUG print whose statement names the utterance's text, so
+        // this line is deliberately vocabulary-clean.
+        print("[cloud_cascade] LOCAL ANSWER OVERRULED — this turn goes to the ONLINE brain "
+              + "provider=\(escalation.provider) "
+              + "threshold=\(PipelineTraceSummary.score(escalation.threshold)) "
+              + "local_confidence=\(PipelineTraceSummary.score(escalation.localConfidence)) "
+              + "(numbers only — no utterance or reply content)")
+    }
+
     /// Refreshes the published window from the store (see
     /// `recentActivity`). Main queue.
     private func refreshRecentActivity() {
@@ -6789,6 +6981,27 @@ self.noteTalkContractChanged()
             .medicationName ?? ""
     }
 
+    /// One medication entry by id (medication-visual-aids task,
+    /// 2026-09-16) — the Settings photo editor and the Reminders leaf read
+    /// an entry's photos through this. Nil when the entry is gone.
+    func medicationEntry(for entryId: UUID) -> MedicationEntry? {
+        medicationScheduler.medicationEntry(for: entryId)
+    }
+
+    /// A medication entry's photos, snapshotted for presentation — the
+    /// tap-to-view paths (the Meds leaf's dose thumbnail, the Reminders
+    /// leaf's dose rows) share the fired-dose screen's presentation type,
+    /// so all three draw the same screen from the same values. Nil when
+    /// the entry is gone or carries no photos, which is also the answer to
+    /// "is there anything to tap": callers gate the thumbnail on this, not
+    /// on a separate `isEmpty` check that could drift from it.
+    func medicationVisualAidsPresentation(for entryId: UUID)
+        -> MedicationVisualAidsPresentation? {
+        guard let entry = medicationEntry(for: entryId),
+              !entry.visualAids.isEmpty else { return nil }
+        return MedicationVisualAidsPresentation(entry: entry)
+    }
+
     // MARK: - Derived notification count ([BOOT-REVIEW P1-7])
 
     /// The bell badge's derived count — how many notification rows the
@@ -6946,6 +7159,12 @@ self.noteTalkContractChanged()
         entries.removeAll { $0.id == id }
         medicationScheduler.loadSchedule(entries: entries)
         medicationScheduler.scheduleAll()
+        // The dose's photos go WITH the medication (medication-visual-aids
+        // task, 2026-09-16): a picture of a box the household no longer
+        // takes must not outlive the entry, and nothing else can find
+        // those files afterwards. Same rule the routine scheduler applies
+        // when a reminder is removed.
+        medicationVisualAidStore.deleteAll(for: id)
         calendarSync.syncNow(entries: routineScheduler.entries())
         // [BOOT-REVIEW P1-7] Removing an entry can empty today's doses —
         // the row hides itself, so the count must follow.
@@ -7342,6 +7561,15 @@ self.noteTalkContractChanged()
 
     // MARK: - Routine reminder surface (v2 pivot Phase 1)
 
+    /// A routine reminder that just fired WITH photos, presented full
+    /// screen for the person the reminder is for (photo-visual-aids task,
+    /// 2026-09-16). Set by `RoutineVisualAidFireHandler` — the app's only
+    /// in-app firing surface for reminders, since routine reminders
+    /// otherwise deliver as text-only notification banners. Nil (the
+    /// normal state) means nothing to present; entries without photos
+    /// never set it, so their behaviour is byte-for-byte unchanged.
+    @Published private(set) var firedRoutineVisualAids: FiredRoutineVisualAids?
+
     /// All configured routine entries (seeded categories + voice-created)
     /// — the Reminders leaf's manage list.
     var routineEntries: [RoutineEntry] { routineScheduler.entries() }
@@ -7363,6 +7591,94 @@ self.noteTalkContractChanged()
         // [BOOT-REVIEW P1-7] Routine mutations land in the same reminder
         // surface the derived count reads.
         refreshActiveNotificationCount()
+    }
+
+    /// Replaces a routine's photos (the photo editor's save path).
+    /// Files are already written by `VisualAidStore` before this is
+    /// called; this persists the model payload and re-arms, so a photo
+    /// edit and a time edit take the same path. Re-arming matters here:
+    /// the fired notification carries the first photo, so a photo added
+    /// to an already-armed reminder only reaches the banner through the
+    /// reschedule.
+    func setRoutineVisualAids(_ entryId: UUID, aids: [VisualAid]) {
+        routineScheduler.setVisualAids(aids, entryId: entryId)
+    }
+
+    /// The presentation is dismissed (Close button, or the cover's own
+    /// swipe) — clearing the item is what actually dismisses it.
+    func dismissFiredRoutineVisualAids() {
+        firedRoutineVisualAids = nil
+    }
+
+    /// `RoutineVisualAidFireHandler`'s presentation sink, on the main
+    /// queue. Reads the title through `activeLocale` at fire time — the
+    /// language the app is in NOW, not the one it was in when the
+    /// notification was armed.
+    private func presentRoutineVisualAids(for entry: RoutineEntry) {
+        firedRoutineVisualAids = FiredRoutineVisualAids(
+            entryId: entry.id,
+            title: entry.displayTitle(locale: activeLocale),
+            aids: entry.visualAids
+        )
+    }
+
+    // MARK: - Medication dose surface (medication-visual-aids, 2026-09-16)
+
+    /// A medication reminder that just fired WITH photos, presented full
+    /// screen for the person the dose is for. Set by
+    /// `MedicationVisualAidFireHandler` — nil (the normal state) means
+    /// nothing to present, and entries without photos never set it, so
+    /// their delivery is exactly what it was before this feature.
+    @Published private(set) var firedMedicationVisualAids: MedicationVisualAidsPresentation?
+
+    /// Replaces a medication's photos (the photo editor's save path).
+    /// Files are already written by `VisualAidStore` before this is
+    /// called; this persists the entry payload only — a photo edit is not
+    /// a schedule edit, so no alarm is re-armed and no escalation state is
+    /// touched (see `MedicationScheduler.setVisualAids`; the dose screen
+    /// reads the entry at fire time, so the photo is live either way).
+    func setMedicationVisualAids(_ entryId: UUID, aids: [VisualAid]) {
+        medicationScheduler.setVisualAids(aids, entryId: entryId)
+    }
+
+    /// The presentation is dismissed (Close button, or the cover's own
+    /// swipe) — clearing the item is what actually dismisses it.
+    func dismissFiredMedicationVisualAids() {
+        firedMedicationVisualAids = nil
+    }
+
+    /// The elder tapped "I took it" on the fired-dose screen. Runs the same
+    /// dose path as the Meds leaf row (`confirmMedicationDose`: the FR-D01
+    /// challenge gate first, then the baseline acknowledgement) and clears
+    /// the presentation: when a challenge was issued the Home chips own the
+    /// follow-up, and when the dose was recorded the Home outcome caption
+    /// behind this screen is what the elder should now see.
+    func confirmFiredMedicationDose(entryId: UUID) {
+        confirmMedicationDose(entryId: entryId)
+        firedMedicationVisualAids = nil
+    }
+
+    /// The elder's "I took it" from an elder-facing dose surface — the
+    /// Meds leaf's dose row and the fired-dose screen share this one path,
+    /// so the safety gate cannot drift between them. Returns true when the
+    /// dementia-aware confirmation challenge was issued (the caller's
+    /// surface gets out of the way; the Home chips own the answer).
+    @discardableResult
+    func confirmMedicationDose(entryId: UUID) -> Bool {
+        if startVoiceAckConfirmation(for: entryId) != nil {
+            return true
+        }
+        handleMedicationAcknowledgement(entryId: entryId)
+        speak(key: "router.confirmationYes")
+        return false
+    }
+
+    /// `MedicationVisualAidFireHandler`'s presentation sink, on the main
+    /// queue. Snapshots the name and dose line at FIRE time — the entry
+    /// may be edited (or deleted) while the screen is up, and the dose the
+    /// elder is being shown must be the one that fired.
+    private func presentMedicationVisualAids(for entry: MedicationEntry) {
+        firedMedicationVisualAids = MedicationVisualAidsPresentation(entry: entry)
     }
 
     /// Today's medication reminders as localized "name — time" lines for

@@ -208,7 +208,13 @@ final class StubCoordinator: VoiceCommandCoordinating {
     func handleConfirmationResponse(_ response: ConfirmationResponse) {}
     func noteSpeakingStarted() {}
     func noteSpeakingEnded() {}
-    func noteAssistantSpoke(_ text: String) {}
+    /// [CLOUD-CASCADE] Records what the router handed the speaker. The
+    /// cue's own speech is asynchronous (the reply lane), but
+    /// `noteAssistantSpoke` is called SYNCHRONOUSLY on the way in — so
+    /// this recorder is the deterministic seam for "the cue was spoken,
+    /// once, and this is its text", without waiting on a lane.
+    private(set) var assistantSpokeTexts: [String] = []
+    func noteAssistantSpoke(_ text: String) { assistantSpokeTexts.append(text) }
     func noteGenericReply(_ text: String) { genericReplies.append(text) }
     func addVoiceReminder(title: String, time: DateComponents) {}
     func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?,

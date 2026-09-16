@@ -2745,6 +2745,33 @@ final class CommandRouter {
         speak(text: text, locale: locale)
     }
 
+    /// [CLOUD-CASCADE] Speaks the cloud cascade's HOLD CUE — the line the
+    /// user hears when the large local brain's answer was below the
+    /// configured threshold and the turn is about to go to the online
+    /// brain ("One moment — this is taking a little longer…" /
+    /// "एक छिन — अलि बढी समय लाग्दैछ…").
+    ///
+    /// Wired to `IntentRouter`'s cascade tier as its `holdCue` seam and
+    /// invoked from inside the router's escalation, BEFORE the cloud call
+    /// is made, so the cue is committed to the reply lane ahead of the
+    /// answer the cloud will produce (the same lane ordering the pre-ack
+    /// relies on). Empty catalog text is a silent no-op — same guard as
+    /// `speakPreAck`/`speak(key:)` — so a locale without the string never
+    /// speaks the raw key.
+    ///
+    /// Deliberately NOT routed through the ack fast lane's cached WAVs:
+    /// that cache holds the rotating "one moment…" pre-acks, and a cue
+    /// whose wording is its own would have to be built into it to belong
+    /// there. Its synthesis cost is paid while the cloud round trip is
+    /// already in flight, so it cannot delay the answer.
+    func speakCloudCascadeHoldCue(locale: Locale? = nil) {
+        let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let text = L10n.str("cloudCascade.holdCue", locale: locale)
+        guard !text.isEmpty else { return }
+        emit(eventType: "cloud_cascade_hold_cue", outcome: "spoken")
+        speak(text: text, locale: locale)
+    }
+
     // MARK: - Notifications (localized, no raw transcripts — C9)
 
     private func postLocalizedNotification(titleKey: String,
