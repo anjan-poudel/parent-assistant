@@ -6508,23 +6508,23 @@
       }
     },
     "meds.firePrompt": {
-    "extractionState": "manual",
-    "localizations": {
-      "en": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "Time to take your medicine"
-        }
-      },
-      "ne": {
-        "stringUnit": {
-          "state": "translated",
-          "value": "तपाईंको औषधि खाने समय भयो"
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time to take your medicine"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको औषधि खाने समय भयो"
+          }
         }
       }
-    }
-  },
-  "meds.iTookIt": {
+    },
+    "meds.iTookIt": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -16380,6 +16380,176 @@
           "stringUnit": {
             "state": "translated",
             "value": "तपाईं बढीमा ३ फोटो थप्न सक्नुहुन्छ"
+          }
+        }
+      }
+    },
+    "cloudCascade.holdCue": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One moment — this is taking a little longer…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "एक छिन — अलि बढी समय लाग्दैछ…"
+          }
+        }
+      }
+    },
+    "settings.cloudCascade.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud cascade"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्लाउड क्यास्केड"
+          }
+        }
+      }
+    },
+    "settings.cloudCascade.toggleLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send unsure local answers to the cloud"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनिश्चित स्थानीय जवाफ क्लाउडमा पठाउने"
+          }
+        }
+      }
+    },
+    "settings.cloudCascade.toggleNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On, an answer the large local brain gives below the confidence shown below goes to the configured cloud provider — after the spoken hold cue; off, the local answer stands. Inert while no cloud provider is configured."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खुला हुँदा, तल देखाइएको विश्वासभन्दा कम भएको स्थानीय जवाफ क्लाउडमा जान्छ — पहिले 'एक छिन' भनिन्छ; बन्द हुँदा स्थानीय जवाफ नै रहन्छ। क्लाउड मिलाइएको नभए यसले केही गर्दैन।"
+          }
+        }
+      }
+    },
+    "settings.cloudCascade.thresholdLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escalate below"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यसभन्दा कम भए पठाउने"
+          }
+        }
+      }
+    },
+    "settings.cloudCascade.thresholdNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The large local brain must be at least this confident to answer on its own."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "स्थानीय दिमागले आफैं जवाफ दिन यति विश्वास चाहिन्छ।"
+          }
+        }
+      }
+    },
+    "history.channel.cloud": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Online brain"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनलाइन दिमाग"
+          }
+        }
+      }
+    },
+    "history.cloudEscalation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sent to the online brain"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनलाइन दिमागमा पठाइयो"
+          }
+        }
+      }
+    },
+    "settings.cloudCascade.increase": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raise the threshold"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "थ्रेसहोल्ड बढाउने"
+          }
+        }
+      }
+    },
+    "settings.cloudCascade.decrease": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lower the threshold"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "थ्रेसहोल्ड घटाउने"
           }
         }
       }

@@ -2,7 +2,9 @@ import Foundation
 
 /// One call or message the ASSISTANT initiated (call-history task,
 /// 2026-09-06) — plus ONE anonymous exception, the unanswered-call event
-/// (missed-calls task, 2026-09-07).
+/// (missed-calls task, 2026-09-07) — plus the cloud cascade's
+/// `cloudEscalation` row (cloud-cascade task, 2026-09-16), which records
+/// that a turn was sent to the online brain rather than to a channel.
 ///
 /// The app logs ONLY what it itself did through the channel vocabulary
 /// below — never the system call log and never other apps' messages (iOS
@@ -31,6 +33,16 @@ struct AppActivityEntry: Codable, Equatable, Identifiable {
         case call
         /// A chat/message surface was opened or a message drafted.
         case message
+        /// [CLOUD-CASCADE] (2026-09-16) The assistant OVERRULED its own
+        /// on-device answer and sent the request to the online brain —
+        /// the cloud cascade tier fired (the large local brain came back
+        /// below the configured confidence threshold). Not a channel
+        /// open: nothing was opened on the user's behalf, and the row
+        /// exists so the household (and the tester) can see that a turn
+        /// reached the cloud. Always paired with `Channel.cloud`, carries
+        /// no contact, no number and no content — the threshold and the
+        /// confidence live in the observability event, never in a row.
+        case cloudEscalation
     }
 
     /// Which surface the assistant opened.
@@ -68,6 +80,14 @@ struct AppActivityEntry: Codable, Equatable, Identifiable {
         /// unconnected event is the outcome of that dial. Nothing else
         /// is ever filled in: an unattributed event stays anonymous.
         case unanswered
+        /// [CLOUD-CASCADE] (2026-09-16) The ONLINE brain — the cloud
+        /// cascade tier's destination. Not a surface the user can be
+        /// re-opened into: no number, no handle, no app. The row is
+        /// informational by design (it is not a button on the History
+        /// leaf), because there is nothing to re-open — the turn's
+        /// transcript and reply are the assistant's business, not a
+        /// channel's.
+        case cloud
     }
 
     let kind: Kind
@@ -102,7 +122,10 @@ struct AppActivityEntry: Codable, Equatable, Identifiable {
 /// (missed-calls task, 2026-09-07), appended by the coordinator when
 /// live-call detection observes a call ending without ever connecting;
 /// anonymous unless the app itself placed the call that went unanswered
-/// (call-tracking task, 2026-09-13).
+/// (call-tracking task, 2026-09-13). The cloud-cascade row (cloud-cascade
+/// task, 2026-09-16) is appended by the coordinator from `IntentRouter`'s
+/// escalation seam — one row per turn the cloud cascade tier sent to the
+/// online brain.
 ///
 /// Append-only in spirit (rows are never edited or deleted by the app),
 /// newest-first on read, capped at `maxEntries` by dropping the OLDEST
