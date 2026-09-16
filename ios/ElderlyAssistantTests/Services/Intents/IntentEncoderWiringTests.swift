@@ -598,6 +598,121 @@ final class IntentEncoderWiringTests: XCTestCase {
                        "the encoder is not in play: the shipped chain shape answers")
     }
 
+    // MARK: [PIPELINE-TRACE] the shipped seam carries the recorder
+
+    /// The SHIPPED seam factory — `IntentEncoderWiring.localSlotInputSeam(
+    /// traceRecorder:)`, the exact expression `AppCoordinator` installs at
+    /// the local slot — must hand the turn's recorder to the two
+    /// pre-intent layer spans. A recorder dropped at that ONE call site is
+    /// nearly invisible on a device: the card and the console still show
+    /// both rows, because `finishTurn` backfills every stage — but with the
+    /// chain's `seam_not_run` word instead of the layers' own, and with no
+    /// input/output columns. This test therefore distinguishes the two
+    /// words, and drives the shipped factory rather than a copy of its
+    /// body (the fixture-driven composition tests live beside
+    /// `IntentInputCanonicalization.prepare`).
+    func testTheShippedSlotSeamHandsBothPreIntentRowsToTheRecorder() throws {
+        let transcript = "मौसम कस्तो छ"
+        let sanitised = InputSanitiser.sanitise(transcript, level: .quarantine)
+
+        let recorder = PipelineTraceRecorder()
+        recorder.beginTurn()
+        let seam = IntentEncoderWiring.localSlotInputSeam(traceRecorder: recorder)
+        let pair = seam.prepare(sanitised)
+        let traced = recorder.finishTurn()
+
+        XCTAssertEqual(traced.rows.map(\.stage), PipelineTraceStage.allCases,
+                       "one row per stage, in the trace's canonical order")
+
+        let corrector = try XCTUnwrap(traced.rows.first { $0.stage == .corrector })
+        let canonicalizer = try XCTUnwrap(
+            traced.rows.first { $0.stage == .canonicalizer })
+
+        // The discriminating pair of assertions: a dropped recorder leaves
+        // the BACKFILL word on these rows, so the seam's own word is what
+        // proves the recorder travelled — the layer's `disabled` when the
+        // layer is off, a finished span (with its columns filled) when the
+        // tester has switched it on.
+        XCTAssertNotEqual(corrector.decision, PipelineTraceStage.corrector.offReason,
+                          "the corrector row came from the seam, not from "
+                          + "finishTurn's fill")
+        XCTAssertNotEqual(canonicalizer.decision,
+                          PipelineTraceStage.canonicalizer.offReason,
+                          "the canonicalizer row came from the seam too")
+
+        let correction = try XCTUnwrap(pair.correction)
+        if correction.mode == .off {
+            XCTAssertEqual(corrector.decision, "disabled",
+                           "a layer that ran with its switch off is marked with "
+                           + "the layer's own word")
+            XCTAssertFalse(corrector.ran)
+        } else {
+            XCTAssertTrue(corrector.ran)
+            XCTAssertEqual(corrector.inputSummary,
+                           PipelineTraceSummary.text(sanitised),
+                           "the row's input column is what the layer read")
+            XCTAssertEqual(corrector.outputSummary,
+                           PipelineTraceSummary.text(correction.corrected),
+                           "…and its output column is what it produced")
+        }
+
+        if DialectCanonicalizer.Policy.runtime().enabled {
+            XCTAssertTrue(canonicalizer.ran)
+            XCTAssertEqual(canonicalizer.inputSummary,
+                           PipelineTraceSummary.text(correction.corrected),
+                           "the canonicalizer reads the corrector's output")
+            XCTAssertEqual(canonicalizer.outputSummary,
+                           PipelineTraceSummary.text(pair.canonical))
+        } else {
+            XCTAssertEqual(canonicalizer.decision, "disabled")
+            XCTAssertFalse(canonicalizer.ran)
+        }
+    }
+
+    /// The Debug console half of the same wiring: a traced turn renders one
+    /// greppable `[pipeline-trace] <stage> …` line per stage, both
+    /// pre-intent rows included — the lines an operator reads off
+    /// `device-install.sh --console`. The split between the Debug and
+    /// Release shapes is pinned on the pure renderer in
+    /// `VoiceTurnTimingSeamTests`; what this adds is that a REAL recorder
+    /// turn (not a hand-built trace) produces them.
+    func testTheTracedSeamRendersTheDebugConsoleLinesTheUserGrepsFor() throws {
+        let recorder = PipelineTraceRecorder()
+        recorder.beginTurn()
+        _ = IntentEncoderWiring.localSlotInputSeam(traceRecorder: recorder)
+            .prepare(InputSanitiser.sanitise("मौसम कस्तो छ", level: .quarantine))
+        let trace = recorder.finishTurn()
+
+        let lines = trace.consoleLines(includeSummaries: true)
+        XCTAssertEqual(lines.count, PipelineTraceStage.allCases.count)
+        XCTAssertTrue(lines.allSatisfy { $0.hasPrefix(PipelineTrace.consolePrefix) },
+                      "every row is greppable in a captured device console")
+        XCTAssertTrue(lines.contains {
+            $0.hasPrefix("\(PipelineTrace.consolePrefix) corrector ")
+        }, "the corrector row prints on a Debug turn")
+        XCTAssertTrue(lines.contains {
+            $0.hasPrefix("\(PipelineTrace.consolePrefix) canonicalizer ")
+        }, "and so does the canonicalizer's")
+    }
+
+    /// The recorder is instrumentation, and this is the invariant that says
+    /// so: the seam produces the identical pair with and without it. A
+    /// traced turn can therefore never behave differently from an
+    /// untraced one — which is also what lets the two shipped modes
+    /// (recorder present / absent at compile time) share one code path.
+    func testTheRecorderDoesNotChangeThePreparedPair() throws {
+        let sanitised = InputSanitiser.sanitise("भोलि घाम लाग्नेछ",
+                                                level: .quarantine)
+        let recorder = PipelineTraceRecorder()
+        recorder.beginTurn()
+        let traced = IntentEncoderWiring.localSlotInputSeam(traceRecorder: recorder)
+            .prepare(sanitised)
+        let plain = IntentEncoderWiring.localSlotInputSeam().prepare(sanitised)
+
+        XCTAssertEqual(traced, plain,
+                       "the recorder rides the seam; it does not move it")
+    }
+
     // MARK: LocalBrainChain semantics
 
     func testChainUsesTheEncoderWhenAvailable() throws {
