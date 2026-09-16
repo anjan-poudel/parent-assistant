@@ -104,6 +104,10 @@ struct MedicalView: View {
     /// Honest no-parse caption under the paste button; cleared on the
     /// next paste attempt.
     @State private var showPasteFailed = false
+    /// A dose row's photos, open full screen (medication-visual-aids task,
+    /// 2026-09-16). Snapshot taken at TAP time: the viewer shows the dose
+    /// line the row showed, even if the entry is edited while it is up.
+    @State private var viewingDoseAids: MedicationVisualAidsPresentation?
 
     private var todaysReminders: [ScheduledReminder] {
         coordinator.pendingReminders
@@ -139,6 +143,28 @@ struct MedicalView: View {
                    role: .cancel) {}
         } message: {
             Text(pasteAlertMessage)
+        }
+        // The dose photos, full screen — the SAME screen a dose fires into
+        // (photo large above the name and the dose line, one "I took it"),
+        // so a dose looks identical whether it was opened from a
+        // notification or tapped in this list. Acknowledge runs the one
+        // shared path and closes the screen either way: a challenge hands
+        // the UI to the Home chips, a recorded dose leaves the Home
+        // outcome caption behind it.
+        .fullScreenCover(item: $viewingDoseAids) { dose in
+            MedicationDoseFireScreen(
+                medicationName: dose.medicationName,
+                doseDescription: dose.doseDescription,
+                aids: dose.aids,
+                entryId: dose.entryId,
+                store: coordinator.medicationVisualAidStore,
+                locale: coordinator.activeLocale,
+                onAcknowledge: {
+                    coordinator.confirmMedicationDose(entryId: dose.entryId)
+                    viewingDoseAids = nil
+                },
+                onClose: { viewingDoseAids = nil }
+            )
         }
     }
 
@@ -458,7 +484,13 @@ struct MedicalView: View {
     // MARK: - Today's doses (spec §4.3)
 
     private func doseRow(_ reminder: ScheduledReminder) -> some View {
-        HStack(spacing: 12) {
+        // The dose's photos, if the family attached any. Read (not shown)
+        // while the row draws: a thumbnail here would mean reading image
+        // files from `body`, which this screen must never do — the
+        // full-screen viewer loads them in its own `.task`, exactly like
+        // the routine reminder's screen.
+        let aids = coordinator.medicationVisualAidsPresentation(for: reminder.medicationEntryId)
+        return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(coordinator.medicationName(for: reminder.medicationEntryId))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
@@ -468,6 +500,19 @@ struct MedicalView: View {
                     .foregroundStyle(DesignTokens.textSecondary)
             }
             Spacer()
+            if let aids {
+                Button {
+                    viewingDoseAids = aids
+                } label: {
+                    Image(systemName: "photo.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(DesignTokens.accent)
+                        .frame(minWidth: DesignTokens.minTapTargetSize,
+                               minHeight: DesignTokens.minTapTargetSize)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("visualAid.title"))
+            }
             Button {
                 takeDose(reminder)
             } label: {
@@ -490,14 +535,15 @@ struct MedicalView: View {
 
     /// Baseline ack or challenge → Home for the yes/no chips. The
     /// confirmation answer is handled by the chips/voice on Home.
+    ///
+    /// The gate itself lives on the coordinator (`confirmMedicationDose`)
+    /// because the fired-dose screen runs the same path — the two
+    /// elder-facing dose surfaces must not be able to disagree about when
+    /// a challenge is required.
     private func takeDose(_ reminder: ScheduledReminder) {
-        let entryId = reminder.medicationEntryId
-        if coordinator.startVoiceAckConfirmation(for: entryId) != nil {
+        if coordinator.confirmMedicationDose(entryId: reminder.medicationEntryId) {
             // Challenge issued — chips now own the UI on Home.
             dismiss()
-        } else {
-            coordinator.handleMedicationAcknowledgement(entryId: entryId)
-            coordinator.speak(key: "router.confirmationYes")
         }
     }
 }
@@ -545,8 +591,12 @@ struct RemindersView: View {
     @State private var photoEditorEntry: RoutineEntry?
     /// A today row whose photos the elder tapped. Only rows that actually
     /// carry photos can set this, so the full-screen viewer never appears
-    /// for a reminder without one — i.e. never for medication (see
-    /// `TodayRow.visualAids`).
+    /// for a reminder without one. Medication dose rows are included
+    /// (medication-visual-aids task, 2026-09-16) — but note what they open:
+    /// the VIEWING screen, not the dose screen's "I took it". This leaf
+    /// shows the day and never mutates medication data (see the type's
+    /// doc comment); acknowledging a dose belongs to the Meds leaf and to
+    /// the notification, which is where a dose actually fires.
     @State private var viewingAidRow: TodayRow?
 
     /// Everything the cached rows depend on: an in-screen toggle, a voice
@@ -568,10 +618,24 @@ struct RemindersView: View {
         )
         let meds = coordinator.pendingReminders
             .filter { Calendar.current.isDateInToday($0.scheduledAt) }
-            .map { TodayRow(id: $0.id.uuidString, scheduledAt: $0.scheduledAt,
-                            title: coordinator.medicationName(for: $0.medicationEntryId),
-                            systemImage: RoutineCategory.medication.systemImage,
-                            isDimmed: false, external: nil, entryId: nil, visualAids: []) }
+            .map { reminder -> TodayRow in
+                // A dose row carries the medication's photos (medication-
+                // visual-aids task, 2026-09-16) — the same affordance as a
+                // routine row, but through the MEDICATION store: dose photos
+                // live under their own prefixed directory, never the routine
+                // store's (see `VisualAidStore.medicationDirectoryPrefix`).
+                let aids = coordinator
+                    .medicationVisualAidsPresentation(for: reminder.medicationEntryId)?
+                    .aids ?? []
+                return TodayRow(id: reminder.id.uuidString,
+                                scheduledAt: reminder.scheduledAt,
+                                title: coordinator.medicationName(for: reminder.medicationEntryId),
+                                systemImage: RoutineCategory.medication.systemImage,
+                                isDimmed: false, external: nil,
+                                entryId: reminder.medicationEntryId,
+                                visualAids: aids,
+                                aidStore: coordinator.medicationVisualAidStore)
+            }
         let routines = coordinator.todaysRoutineOccurrences.map { occurrence in
             let entry = entriesById[occurrence.entryId]
             return TodayRow(id: occurrence.id.uuidString, scheduledAt: occurrence.scheduledAt,
@@ -581,7 +645,8 @@ struct RemindersView: View {
                                 ?? RoutineCategory.custom.systemImage,
                             isDimmed: occurrence.state != .pending, external: nil,
                             entryId: occurrence.entryId,
-                            visualAids: entry?.visualAids ?? [])
+                            visualAids: entry?.visualAids ?? [],
+                            aidStore: coordinator.visualAidStore)
         }
         // Imported native items (2026-09-07): timed ones are always still
         // ahead (already-started events are dropped at scan time), so
@@ -590,7 +655,8 @@ struct RemindersView: View {
         let externals = coordinator.externalRemindersToday.map { item in
             TodayRow(id: item.id, scheduledAt: item.startDate, title: item.title,
                      systemImage: item.source.systemImage, isDimmed: false,
-                     external: item, entryId: nil, visualAids: [])
+                     external: item, entryId: nil, visualAids: [],
+                     aidStore: coordinator.visualAidStore)
         }
         return (meds + routines + externals).sorted { $0.scheduledAt < $1.scheduledAt }
     }
@@ -631,8 +697,10 @@ struct RemindersView: View {
         // 2026-09-16). Edits persist as they happen, so the only thing
         // dismissal has to do is refresh the cached rows.
         .sheet(item: $photoEditorEntry) { entry in
-            RoutineVisualAidEditorView(
-                entry: entry,
+            ReminderVisualAidEditorView(
+                entryId: entry.id,
+                title: entry.displayTitle(locale: coordinator.activeLocale),
+                aids: entry.visualAids,
                 store: coordinator.visualAidStore,
                 locale: coordinator.activeLocale,
                 // The editor owns its draft; this only persists. The
@@ -648,7 +716,8 @@ struct RemindersView: View {
             )
         }
         // The elder's own view of a row's photos: the same large-image
-        // screen the firing notification presents.
+        // screen the firing notification presents, reading through the
+        // store the row was built with (routine or medication).
         .fullScreenCover(item: $viewingAidRow) { row in
             Group {
                 if let entryId = row.entryId {
@@ -656,7 +725,7 @@ struct RemindersView: View {
                         entryId: entryId,
                         title: row.title,
                         aids: row.visualAids,
-                        store: coordinator.visualAidStore,
+                        store: row.aidStore,
                         locale: coordinator.activeLocale,
                         onClose: { viewingAidRow = nil }
                     )
@@ -677,17 +746,22 @@ struct RemindersView: View {
         /// carry the imported native item itself so a tap can open it in
         /// its own app — the read-only bridge's only gesture.
         let external: ExternalReminder?
-        /// The owning routine entry, when this row IS a routine
-        /// occurrence (photo-visual-aids task, 2026-09-16) — nil for
-        /// medication and external rows, which have no visual aids.
+        /// The owning entry, when this row carries visual aids: a routine
+        /// occurrence's `RoutineEntry.id` or a dose's
+        /// `ScheduledReminder.medicationEntryId` (medication-visual-aids
+        /// task, 2026-09-16) — nil for external rows, which have none.
         let entryId: UUID?
-        /// The routine's photos, hoisted here so the row can show a
+        /// The entry's photos, hoisted here so the row can show a
         /// thumbnail and open the viewer without touching the store
         /// while drawing (the same rule the rest of this screen keeps).
-        /// Always empty for medication: medication reminders live in the
-        /// separate, safety-critical `MedicationScheduler`, so this
-        /// feature does not attach photos to them yet.
+        /// Empty for external rows, and for any reminder whose family
+        /// never attached a photo.
         let visualAids: [VisualAid]
+        /// WHO owns those photos. The two reminder systems keep separate
+        /// stores (routine ids vs the medication store's prefixed
+        /// directory), so the row carries its store rather than assuming
+        /// one — the viewer reads through whichever the row was built with.
+        let aidStore: VisualAidStore
     }
 
     private func sectionHeader(key: String) -> some View {
@@ -719,9 +793,11 @@ struct RemindersView: View {
                 }
             }
             Spacer()
-            // A small preview of the reminder's first photo, so the elder
-            // can see the medicine box in the list and knows tapping is
-            // what opens it big (photo-visual-aids task, 2026-09-16).
+            // A photo glyph rather than a thumbnail, so the elder knows the
+            // reminder has a picture and that tapping is what opens it big
+            // (photo-visual-aids task, 2026-09-16). Not a thumbnail on
+            // purpose: drawing one would mean reading image files while the
+            // body runs, which this screen never does.
             if !row.visualAids.isEmpty {
                 Image(systemName: "photo.fill")
                     .font(.system(size: 22))
@@ -737,8 +813,8 @@ struct RemindersView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
         .contentShape(Rectangle())
         // External rows open their item in the native app (read-only
-        // bridge); a routine row WITH photos opens the same large-image
-        // screen the notification presents. Medication/routine rows
+        // bridge); a row WITH photos — routine OR medication dose — opens
+        // the same large-image screen the notification presents. Rows
         // without photos stay non-interactive, exactly as before.
         .onTapGesture {
             if let external = row.external {

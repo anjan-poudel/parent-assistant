@@ -98,16 +98,30 @@ struct VisualAidPhotoPicker: UIViewControllerRepresentable {
 /// Modelled on `TimerAlarmScreen` — the app's one existing full-screen
 /// elder-facing surface — including the top-left chevron escape path, so
 /// the gesture is the same on every non-Home screen.
-struct ReminderVisualAidScreen: View {
+///
+/// Both reminder systems use this one screen (medication-visual-aids task,
+/// 2026-09-16): a routine reminder passes only its title, while a medication
+/// DOSE passes the dose line and the "I took it" action through `footer` —
+/// the photo pager, its disk loading, the caption, the page indicator and
+/// the escape chevron are shared rather than copied, so a fix to any of
+/// them fixes both the walk reminder and the medicine reminder.
+struct ReminderVisualAidScreen<Footer: View>: View {
     let entryId: UUID
     let title: String
     let aids: [VisualAid]
-    /// The app's shared photo store (`AppCoordinator.visualAidStore`).
+    /// The photo store that owns this entry's aids: the shared routine
+    /// store (`AppCoordinator.visualAidStore`) for a routine reminder, the
+    /// medication store for a dose. The caller picks — the screen only
+    /// reads through it.
     let store: VisualAidStore
     /// The display language for the page indicator; the app language, not
     /// the device locale — same rule as every other string in the app.
     let locale: Locale
     let onClose: () -> Void
+    /// Extra content below the reminder's own text (the caption and page
+    /// indicator come first). `EmptyView` for a routine reminder; the dose
+    /// line + acknowledge action on the medication firing screen.
+    @ViewBuilder let footer: Footer
 
     @State private var display: VisualAidDisplayState
     /// Loaded ONCE in `.task`, never in `body`: this screen must not touch
@@ -115,13 +129,15 @@ struct ReminderVisualAidScreen: View {
     @State private var images: [UUID: UIImage] = [:]
 
     init(entryId: UUID, title: String, aids: [VisualAid],
-         store: VisualAidStore, locale: Locale, onClose: @escaping () -> Void) {
+         store: VisualAidStore, locale: Locale, onClose: @escaping () -> Void,
+         @ViewBuilder footer: () -> Footer) {
         self.entryId = entryId
         self.title = title
         self.aids = aids
         self.store = store
         self.locale = locale
         self.onClose = onClose
+        self.footer = footer()
         _display = State(initialValue: VisualAidDisplayState(aids: aids))
     }
 
@@ -185,6 +201,11 @@ struct ReminderVisualAidScreen: View {
                             .foregroundStyle(DesignTokens.textSecondary)
                             .accessibilityLabel(Text(indicator))
                     }
+
+                    // The caller's own content — nothing at all for a
+                    // routine reminder, the dose line and the elder's
+                    // acknowledge action for a medication dose.
+                    footer
                 }
                 .padding(.bottom, 24)
             }
@@ -231,6 +252,16 @@ struct ReminderVisualAidScreen: View {
     }
 }
 
+extension ReminderVisualAidScreen where Footer == EmptyView {
+    /// The routine case: photos, title, caption, indicator, close. Keeps
+    /// every existing call site (and the pre-medication behaviour) intact.
+    init(entryId: UUID, title: String, aids: [VisualAid],
+         store: VisualAidStore, locale: Locale, onClose: @escaping () -> Void) {
+        self.init(entryId: entryId, title: title, aids: aids, store: store,
+                  locale: locale, onClose: onClose, footer: { EmptyView() })
+    }
+}
+
 /// What the app is presenting right now because a reminder fired with
 /// photos attached. `Identifiable` so it can drive a `fullScreenCover(item:)`.
 struct FiredRoutineVisualAids: Identifiable, Equatable {
@@ -274,17 +305,28 @@ struct RoutineVisualAidOverlay: View {
 /// Manage the photos on one reminder: a row of thumbnails (tap to view
 /// full screen), a caption per photo, and "Add photo".
 ///
-/// Presented from the Reminders leaf's routine rows. This is the surface
-/// the brief called the "reminder add/edit screen" — routines have no
-/// SwiftUI editor today (they are seeded, voice-created or calendar-synced),
-/// so this sheet is the photo half of one, reached from the only
-/// interactive routine UI that exists.
+/// Reached from the Reminders leaf's routine rows and from the Settings
+/// medication schedule's rows (medication-visual-aids task, 2026-09-16) —
+/// both reminder systems have the same surface, not two. The caller passes
+/// the entry id, the title to display, the current aids, the store that
+/// owns them and the save path the edits persist through.
 ///
-/// Edits persist IMMEDIATELY through `coordinator.setRoutineVisualAids`
-/// (same behaviour as the enable toggle): there is no draft state to lose
-/// if the sheet is swiped away.
-struct RoutineVisualAidEditorView: View {
-    let entry: RoutineEntry
+/// For routines this is the surface the brief called the "reminder
+/// add/edit screen" — routines have no SwiftUI editor today (they are
+/// seeded, voice-created or calendar-synced), so this sheet is the photo
+/// half of one. For medication it hangs off the schedule editor's rows,
+/// the surface where a medication entry is edited.
+///
+/// Edits persist IMMEDIATELY through the caller's save path (`...VisualAids`)
+/// — same behaviour as the routine enable toggle: there is no draft state
+/// to lose if the sheet is swiped away.
+struct ReminderVisualAidEditorView: View {
+    /// The ENTRY this reminder's photos belong to. The caller's store is
+    /// keyed by it, and it is all the sheet needs to render and save.
+    let entryId: UUID
+    /// What the sheet is titled: a routine's display title, or a
+    /// medication's name.
+    let title: String
     let store: VisualAidStore
     let locale: Locale
     let onSave: ([VisualAid]) -> Void
@@ -296,16 +338,18 @@ struct RoutineVisualAidEditorView: View {
     @State private var isPickingPhotos = false
     @State private var fullScreenAid: VisualAid?
 
-    init(entry: RoutineEntry, store: VisualAidStore, locale: Locale,
-         onSave: @escaping ([VisualAid]) -> Void, onClose: @escaping () -> Void) {
-        self.entry = entry
+    init(entryId: UUID, title: String, aids: [VisualAid], store: VisualAidStore,
+         locale: Locale, onSave: @escaping ([VisualAid]) -> Void,
+         onClose: @escaping () -> Void) {
+        self.entryId = entryId
+        self.title = title
         self.store = store
         self.locale = locale
         self.onSave = onSave
         self.onClose = onClose
-        _aids = State(initialValue: entry.visualAids)
+        _aids = State(initialValue: aids)
         _captionDrafts = State(initialValue: Dictionary(
-            uniqueKeysWithValues: entry.visualAids.map { ($0.id, $0.caption ?? "") }
+            uniqueKeysWithValues: aids.map { ($0.id, $0.caption ?? "") }
         ))
     }
 
@@ -330,7 +374,7 @@ struct RoutineVisualAidEditorView: View {
                 .padding(20)
             }
             .background(DesignTokens.background)
-            .navigationTitle(Text(entry.displayTitle(locale: locale)))
+            .navigationTitle(Text(title))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -344,7 +388,7 @@ struct RoutineVisualAidEditorView: View {
                 }
             }
         }
-        .task(id: entry.id) { loadImages() }
+        .task(id: entryId) { loadImages() }
         .sheet(isPresented: $isPickingPhotos) {
             VisualAidPhotoPicker(selectionLimit: remainingSlots) { picked in
                 add(picked)
@@ -352,8 +396,8 @@ struct RoutineVisualAidEditorView: View {
         }
         .fullScreenCover(item: $fullScreenAid) { aid in
             ReminderVisualAidScreen(
-                entryId: entry.id,
-                title: entry.displayTitle(locale: locale),
+                entryId: entryId,
+                title: title,
                 // The viewer pages through what is on the reminder NOW,
                 // including an aid just added in this sheet.
                 aids: aids,
@@ -439,7 +483,7 @@ struct RoutineVisualAidEditorView: View {
     private func add(_ picked: [UIImage]) {
         var updated = aids
         for image in picked where updated.count < VisualAidStore.maxPerEntry {
-            if let aid = store.save(image, for: entry.id) {
+            if let aid = store.save(image, for: entryId) {
                 updated.append(aid)
                 captionDrafts[aid.id] = ""
             }
@@ -449,7 +493,7 @@ struct RoutineVisualAidEditorView: View {
     }
 
     private func remove(_ aid: VisualAid) {
-        store.delete(aid, for: entry.id)
+        store.delete(aid, for: entryId)
         let updated = aids.filter { $0.id != aid.id }
         captionDrafts[aid.id] = nil
         images[aid.id] = nil
@@ -476,7 +520,7 @@ struct RoutineVisualAidEditorView: View {
     private func loadImages() {
         var loaded: [UUID: UIImage] = [:]
         for aid in aids {
-            if let image = store.load(aid, for: entry.id) {
+            if let image = store.load(aid, for: entryId) {
                 loaded[aid.id] = image
             }
         }

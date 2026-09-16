@@ -3,10 +3,19 @@ import Foundation
 // MARK: - Platform Alarm Scheduler Protocol
 
 protocol PlatformAlarmScheduler {
+    /// Arms one dose reminder.
+    ///
+    /// `visualAidURL` is the photo to show in the notification itself
+    /// (medication-visual-aids task, 2026-09-16) — the medication analogue
+    /// of `RoutineAlarmScheduling.scheduleReminder(visualAidURL:)`. It comes
+    /// in as a FILE URL (the caller resolves the entry's first photo through
+    /// `VisualAidStore.existingFileURL`) and is nil for the overwhelming
+    /// case of a medicine with no photos, which arms exactly as before.
     func scheduleReminder(
         reminderId: UUID,
         entryId: UUID,
         medicationName: String,
+        visualAidURL: URL?,
         at scheduledTime: Date
     )
 
@@ -75,6 +84,7 @@ final class UNNotificationScheduler: PlatformAlarmScheduler {
         reminderId: UUID,
         entryId: UUID,
         medicationName: String,
+        visualAidURL: URL?,
         at scheduledTime: Date
     ) {
         let content = UNMutableNotificationContent()
@@ -87,6 +97,18 @@ final class UNNotificationScheduler: PlatformAlarmScheduler {
             "entry_id": entryId.uuidString,
             "type": "medication_reminder"
         ]
+        // The medicine's photo in the banner (medication-visual-aids task,
+        // 2026-09-16) — the Lock Screen case, where the elder never sees the
+        // in-app dose screen at all. Best-effort by construction: a nil or
+        // unreadable photo simply arms a text-only dose, exactly as before
+        // the feature. The ACKNOWLEDGE_MEDICATION action, the category and
+        // the identifier are untouched — this changes what the banner LOOKS
+        // like, never what it does.
+        if let visualAidURL,
+           let attachment = Self.visualAidAttachment(from: visualAidURL,
+                                                     reminderId: reminderId) {
+            content.attachments = [attachment]
+        }
 
         let components = Calendar.current.dateComponents(
             [.year, .month, .day, .hour, .minute, .second],
@@ -104,6 +126,44 @@ final class UNNotificationScheduler: PlatformAlarmScheduler {
             if let error = error {
                 print("[UNNotificationScheduler] Failed to schedule: \(ErrorCodeMapper.code(for: error))")
             }
+        }
+    }
+
+    /// Builds the banner image from a THROWAWAY COPY of the stored photo.
+    ///
+    /// The copy is not an optimisation, it is the whole point:
+    /// `UNNotificationAttachment` **moves** the file it is handed into the
+    /// system's attachment store. Handing it the app's only copy would
+    /// delete the medicine's photo as a side effect of arming its
+    /// notification — and arming re-runs on every launch and every re-fire,
+    /// so the photo would vanish the first time. One copy per REMINDER (a
+    /// twice-daily entry has two independent doses), overwritten on each
+    /// re-arm, so nothing accumulates. Same rule, same reason as
+    /// `UNRoutineNotificationScheduler.visualAidAttachment`.
+    ///
+    /// Returns nil (leaving the dose armed, text-only) when the copy cannot
+    /// be made or the system rejects the image.
+    private static func visualAidAttachment(from sourceURL: URL,
+                                            reminderId: UUID) -> UNNotificationAttachment? {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("VisualAidAttachments", isDirectory: true)
+        let copyURL = directory.appendingPathComponent("med-" + reminderId.uuidString + ".jpg")
+        do {
+            try FileManager.default.createDirectory(at: directory,
+                                                    withIntermediateDirectories: true)
+            // A previous arm normally leaves nothing behind (the system took
+            // the copy), but a failed attachment may have.
+            try? FileManager.default.removeItem(at: copyURL)
+            try FileManager.default.copyItem(at: sourceURL, to: copyURL)
+        } catch {
+            return nil
+        }
+        do {
+            return try UNNotificationAttachment(identifier: "medication_visual_aid",
+                                                url: copyURL)
+        } catch {
+            try? FileManager.default.removeItem(at: copyURL)
+            return nil
         }
     }
 

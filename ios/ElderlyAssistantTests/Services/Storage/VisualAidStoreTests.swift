@@ -290,4 +290,87 @@ final class VisualAidStoreTests: XCTestCase {
         XCTAssertEqual(VisualAidStore.maxDimension, 1600)
         XCTAssertEqual(VisualAidStore.jpegQuality, 0.8, accuracy: 0.0001)
     }
+
+    // MARK: - Two id spaces, one store type (medication-visual-aids)
+
+    private func makeMedicationStore() -> VisualAidStore {
+        VisualAidStore(rootDirectory: tmpRoot,
+                       directoryPrefix: VisualAidStore.medicationDirectoryPrefix)
+    }
+
+    /// The reason the medication store is a SECOND instance with a
+    /// directory prefix rather than a second class: routine entries and
+    /// medication entries are separate id spaces, and a photo must never be
+    /// resolvable across them. The same UUID in both spaces — the worst
+    /// case, and the one a shared store would silently merge — lands in two
+    /// different folders.
+    func testTheSameEntryIdInBothSpacesLandsInDifferentDirectories() throws {
+        let routines = makeStore()
+        let medications = makeMedicationStore()
+        let id = UUID()
+
+        let routineAid = try XCTUnwrap(routines.save(makeImage(width: 20, height: 20), for: id))
+        let doseAid = try XCTUnwrap(medications.save(makeImage(width: 20, height: 20), for: id))
+
+        XCTAssertNotEqual(routineAid.filename, doseAid.filename, "each save writes its own file")
+        let routineDirectory = tmpRoot.appendingPathComponent(id.uuidString, isDirectory: true)
+        let medicationDirectory = tmpRoot
+            .appendingPathComponent(VisualAidStore.medicationDirectoryPrefix + id.uuidString,
+                                    isDirectory: true)
+        XCTAssertNotEqual(routineDirectory, medicationDirectory)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: routineDirectory.appendingPathComponent(routineAid.filename).path
+        ), "the routine store keeps the bare-id folder it always had")
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: medicationDirectory.appendingPathComponent(doseAid.filename).path
+        ), "the medication store nests under its prefix")
+    }
+
+    /// Both directions of the cross-read: neither store resolves the
+    /// other's file for the same entry id.
+    func testNeitherStoreResolvesTheOthersFile() throws {
+        let routines = makeStore()
+        let medications = makeMedicationStore()
+        let id = UUID()
+        let routineAid = try XCTUnwrap(routines.save(makeImage(width: 20, height: 20), for: id))
+        let doseAid = try XCTUnwrap(medications.save(makeImage(width: 20, height: 20), for: id))
+
+        XCTAssertNil(medications.load(routineAid, for: id),
+                     "a routine photo must never appear on a dose screen")
+        XCTAssertNil(routines.load(doseAid, for: id),
+                     "and a dose photo must never appear on a routine screen")
+        XCTAssertNotNil(routines.load(routineAid, for: id))
+        XCTAssertNotNil(medications.load(doseAid, for: id))
+    }
+
+    /// Deleting a medication's photos (the medicine was removed) must not
+    /// take a routine's photos with it, even when the two ids collide.
+    func testDeleteAllInTheMedicationStoreLeavesTheRoutineEntryAlone() throws {
+        let routines = makeStore()
+        let medications = makeMedicationStore()
+        let id = UUID()
+        let routineAid = try XCTUnwrap(routines.save(makeImage(width: 20, height: 20), for: id))
+        let doseAid = try XCTUnwrap(medications.save(makeImage(width: 20, height: 20), for: id))
+
+        medications.deleteAll(for: id)
+
+        XCTAssertNil(medications.load(doseAid, for: id), "the dose's own photos are gone")
+        XCTAssertNotNil(routines.load(routineAid, for: id),
+                        "deleteAll is scoped to its own id space")
+    }
+
+    /// The prefixed name is a plain path component like the bare id — the
+    /// traversal guard must see it as one.
+    func testMedicationPathsStayInsideTheStoreRoot() throws {
+        let medications = makeMedicationStore()
+        let id = UUID()
+        let aid = try XCTUnwrap(medications.save(makeImage(width: 20, height: 20), for: id))
+
+        let url = try XCTUnwrap(medications.existingFileURL(aid, for: id))
+        XCTAssertTrue(url.path.hasPrefix(tmpRoot.path),
+                      "\(url.path) must stay under \(tmpRoot.path)")
+        XCTAssertTrue(url.deletingLastPathComponent().lastPathComponent
+            .hasPrefix(VisualAidStore.medicationDirectoryPrefix))
+        XCTAssertNil(medications.existingFileURL(VisualAid(filename: "../escape.jpg"), for: id))
+    }
 }

@@ -11,6 +11,15 @@ import UIKit
 /// names only — never a path, never the bytes — exactly the split
 /// `ContactPhotoStore` / `FamilyContact.photoFilename` uses.
 ///
+/// MEDICATION entries use a second instance of this same store with a
+/// `directoryPrefix` (medication-visual-aids task, 2026-09-16): the dose
+/// photos land at `Application Support/VisualAids/med-<entryId>/<file>.jpg`.
+/// The routine and medication models are separate id spaces (a routine
+/// entry can never BE a medication entry), so the prefix is belt and
+/// braces — but it is cheap, it makes the on-disk family of a folder
+/// readable at a glance, and it means no future id-sharing mistake can
+/// ever make a routine's photo resolve as a dose's.
+///
 /// Deliberately NOT Photos and NOT the Keychain:
 ///
 ///  - **Not Photos** — a reminder's photo is app data, not the user's
@@ -48,8 +57,19 @@ final class VisualAidStore {
     /// three is "which of these boxes", not an album).
     static let maxPerEntry = 3
 
+    /// Per-entry directory prefix for MEDICATION entries (medication-
+    /// visual-aids task, 2026-09-16) — `Application Support/VisualAids/`
+    /// `med-<entryId>/`. A code constant, never user data: the medication
+    /// `VisualAidStore` is built with it, the routine one with the empty
+    /// default, so the two families of entry id can never resolve to the
+    /// same folder even if an id were somehow reused.
+    static let medicationDirectoryPrefix = "med-"
+
     private let fileManager: FileManager
     private let rootDirectory: URL
+    /// Prepended to every entry's directory name. Empty for routines (the
+    /// original layout, unchanged); `medicationDirectoryPrefix` for doses.
+    private let directoryPrefix: String
 
     /// Resolves the root path and NOTHING else: init performs no disk IO
     /// (the constant-time boot contract `NoIOInInitTests` guards — the
@@ -59,8 +79,11 @@ final class VisualAidStore {
     /// `withIntermediateDirectories`, which creates the root on the way.
     /// Resolving with `create: false` is a pure path lookup — no
     /// directory is made, and the directory need not exist yet.
-    init(fileManager: FileManager = .default, rootDirectory: URL? = nil) {
+    init(fileManager: FileManager = .default,
+         rootDirectory: URL? = nil,
+         directoryPrefix: String = "") {
         self.fileManager = fileManager
+        self.directoryPrefix = directoryPrefix
         if let rootDirectory {
             self.rootDirectory = rootDirectory
         } else if let base = try? fileManager.url(
@@ -186,15 +209,23 @@ final class VisualAidStore {
     }
 
     private func directoryURL(for entryId: UUID) -> URL {
-        rootDirectory.appendingPathComponent(entryId.uuidString, isDirectory: true)
+        rootDirectory.appendingPathComponent(directoryName(for: entryId),
+                                             isDirectory: true)
     }
 
-    /// The entry directory, or nil when the id is empty (never from
-    /// `UUID`, but a defensive guard keeps a malformed value from
-    /// resolving to the store root and taking every other entry's photos
-    /// with it on `deleteAll`).
+    /// The per-entry directory name: the store's prefix plus the bare
+    /// uuid — `med-<uuid>` for medication entries, plain `<uuid>` for
+    /// routines.
+    private func directoryName(for entryId: UUID) -> String {
+        directoryPrefix + entryId.uuidString
+    }
+
+    /// The entry directory, or nil when the id (or the prefix) is not a
+    /// plain path component (never from `UUID` or a code constant, but a
+    /// defensive guard keeps a malformed value from resolving to the store
+    /// root and taking every other entry's photos with it on `deleteAll`).
     private func safeDirectoryURL(for entryId: UUID) -> URL? {
-        let name = entryId.uuidString
+        let name = directoryName(for: entryId)
         guard !name.isEmpty, name != ".", name != "..",
               !name.contains("/"), !name.contains("\\") else { return nil }
         return directoryURL(for: entryId)
