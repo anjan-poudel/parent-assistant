@@ -30,8 +30,16 @@ final class PhotosLibraryPhotoSaver: PhotoSaving {
     /// exact bytes handed to the library.
     private let encodeJPEG: (UIImage) -> Data?
 
-    /// The authorization round trip, injected so tests can script every
-    /// status without a device that has already been asked.
+    /// The current add-only authorization, READ ONLY, with no prompt. Used
+    /// by the pre-flight (when the status is already decided) and by the
+    /// save itself, which must never ask (see `savePhoto`). Injected so
+    /// tests can script every status without a device.
+    private let photoAuthorizationStatus: () -> PHAuthorizationStatus
+
+    /// The authorization round trip (the prompt), injected so tests can
+    /// script every status without a device that has already been asked.
+    /// [APP-LAUNCHER F7] Called from `prepareToSave` ONLY — never from the
+    /// post-shutter path.
     private let requestAuthorization: (@escaping (PHAuthorizationStatus) -> Void) -> Void
 
     /// Builds the change block that creates the asset — the ONLY place an
@@ -48,6 +56,12 @@ final class PhotosLibraryPhotoSaver: PhotoSaving {
 
     init(compressionQuality: CGFloat = 0.9,
          encodeJPEG: ((UIImage) -> Data?)? = nil,
+         photoAuthorizationStatus: @escaping () -> PHAuthorizationStatus = {
+             // `.addOnly` — iOS 14+, and the app's deployment floor is 16,
+             // so there is no older branch to keep. Read-only: this call
+             // never prompts.
+             PHPhotoLibrary.authorizationStatus(for: .addOnly)
+         },
          requestAuthorization: @escaping (@escaping (PHAuthorizationStatus) -> Void) -> Void
             = { completion in
                 // `.addOnly` — iOS 14+, and the app's deployment floor is
@@ -68,9 +82,36 @@ final class PhotosLibraryPhotoSaver: PhotoSaving {
         self.compressionQuality = compressionQuality
         self.encodeJPEG = encodeJPEG
             ?? { $0.jpegData(compressionQuality: compressionQuality) }
+        self.photoAuthorizationStatus = photoAuthorizationStatus
         self.requestAuthorization = requestAuthorization
         self.makeAssetCreationBlock = makeAssetCreationBlock
         self.performChanges = performChanges
+    }
+
+    /// [APP-LAUNCHER F7] Resolves the add-only permission BEFORE the
+    /// camera opens: an already-decided status is read, and a
+    /// `.notDetermined` one is asked about NOW — the moment the elder
+    /// asked for the camera, which is the same "the request IS the
+    /// consent" moment the camera prompt is asked in. A refusal here stops
+    /// the flow before the picker is presented, so the elder is told they
+    /// need to allow photo access INSTEAD of taking a photo that would
+    /// have been thrown away.
+    func prepareToSave(completion: @escaping (Bool) -> Void) {
+        switch photoAuthorizationStatus() {
+        case .authorized, .limited:
+            completion(true)
+        case .notDetermined:
+            requestAuthorization { status in
+                completion(status == .authorized || status == .limited)
+            }
+        case .denied, .restricted:
+            completion(false)
+        @unknown default:
+            // A status this build does not know: refusing to guess keeps
+            // the outcome honest (nothing is captured that cannot be
+            // stored).
+            completion(false)
+        }
     }
 
     func savePhoto(_ image: UIImage, completion: @escaping (Bool) -> Void) {
@@ -79,24 +120,25 @@ final class PhotosLibraryPhotoSaver: PhotoSaving {
             // all — say so rather than writing an empty asset.
             return completion(false)
         }
-        requestAuthorization { [weak self] status in
-            guard let self else { return }
-            guard status == .authorized || status == .limited else {
-                // Refused (or restricted): nothing is written and nothing
-                // is asked of the library — the flow speaks the honest
-                // failure. (A refusal is normally answered BEFORE the
-                // camera opens, by `PhotoCameraPresenter.availability`;
-                // this is the rare refusal between the shot and the save.)
-                return completion(false)
-            }
-            self.performChanges(self.makeAssetCreationBlock(data)) { success, _ in
-                // The error itself is deliberately not surfaced: the elder
-                // gets the honest spoken verdict either way, and the
-                // reason (disk full, library locked) is not something they
-                // can act on from here. `success` IS the truth of the
-                // write, which is what the flow reports.
-                completion(success)
-            }
+        // [APP-LAUNCHER F7] A READ, never a request. The permission
+        // conversation already happened in `prepareToSave` (before the
+        // camera), so this path can only ever confirm what was decided:
+        // prompting here would be asking permission for a photo the elder
+        // has already taken — the moment at which a "no" can only throw
+        // the photo away. A status that is still undecided (a caller that
+        // skipped the pre-flight) reports the honest failure instead of
+        // writing without consent.
+        let status = photoAuthorizationStatus()
+        guard status == .authorized || status == .limited else {
+            return completion(false)
+        }
+        performChanges(makeAssetCreationBlock(data)) { success, _ in
+            // The error itself is deliberately not surfaced: the elder
+            // gets the honest spoken verdict either way, and the reason
+            // (disk full, library locked) is not something they can act on
+            // from here. `success` IS the truth of the write, which is
+            // what the flow reports.
+            completion(success)
         }
     }
 }

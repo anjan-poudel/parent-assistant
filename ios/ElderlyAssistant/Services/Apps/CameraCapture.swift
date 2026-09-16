@@ -68,9 +68,26 @@ protocol CameraCapturePresenting: AnyObject {
 /// `PhotosLibraryPhotoSaver` (`PHPhotoLibrary` add-only); tests supply a
 /// double that reports saved / not-saved on demand.
 protocol PhotoSaving: AnyObject {
+    /// [APP-LAUNCHER F7] Resolves the add-only authorization BEFORE the
+    /// camera is presented. `completion(true)` means a save can be
+    /// attempted later; `completion(false)` means it cannot — and an elder
+    /// who is about to press a shutter must be told that BEFORE the shot,
+    /// not after it.
+    ///
+    /// This is the whole point of the split: the permission prompt (and
+    /// the refusal it can end in) belongs in front of the camera, while
+    /// there is still nothing to lose. Doing it after the shutter meant a
+    /// first-time refusal threw the photo away.
+    func prepareToSave(completion: @escaping (Bool) -> Void)
+
     /// Saves `image` to the user's photo library — ADD-ONLY, never read.
     /// `completion(true)` only when the asset was really created;
     /// `completion(false)` is reported to the elder, never swallowed.
+    ///
+    /// MUST NOT prompt: by the time this is called the elder has already
+    /// taken the photo, and a permission sheet over the just-dismissed
+    /// camera is both a worse moment to ask and impossible to attach an
+    /// outcome to (`prepareToSave` is that conversation).
     func savePhoto(_ image: UIImage, completion: @escaping (Bool) -> Void)
 }
 
@@ -126,31 +143,75 @@ final class CameraCaptureFlow {
         self.deliver = deliver
     }
 
-    /// Begins the capture. Safe to call once per flow instance (each
-    /// launch builds a new one).
+    /// True from the moment a session begins until its outcome (or its
+    /// save) has been reported. [APP-LAUNCHER F5] The flow is built ONCE
+    /// and lives for the app's lifetime (`AppCoordinator.cameraCapture`),
+    /// so without this a second "क्यामेरा खोल" while the camera was still
+    /// up stacked a second picker over the first and overwrote the
+    /// presenter's single completion slot — after which the elder's shot
+    /// reported into a nil slot and the photo was silently lost.
+    private var isRunning = false
+
+    /// Begins the capture. One session at a time: a second `start()` while
+    /// a session is in flight is answered with the honest "cannot right
+    /// now" line and changes nothing about the session already running.
     func start() {
+        guard !isRunning else {
+            // Deliberately NOT `handle(.unavailable(...))`: that would end
+            // the running session's state. This is a report about the
+            // second request only.
+            deliver { [weak self] in
+                self?.reportUnavailable(.cannotPresent)
+            }
+            return
+        }
+        isRunning = true
         switch presenter.availability {
         case .available:
-            presenter.presentCamera { [weak self] outcome in
+            // [APP-LAUNCHER F7] The save permission is resolved HERE —
+            // before the picker is presented, while the only thing a
+            // refusal costs is a sentence. A refusal never reaches the
+            // shutter, so there is no photo to discard.
+            saver.prepareToSave { [weak self] granted in
                 guard let self else { return }
-                self.deliver { self.handle(outcome) }
+                self.deliver {
+                    guard self.isRunning else { return }
+                    if granted {
+                        self.presentCamera()
+                    } else {
+                        self.reportSavePermissionDenied()
+                    }
+                }
             }
         case .noCamera, .permissionDenied, .cannotPresent:
             // Never present a sheet that cannot appear: the honest
             // guidance is the whole answer, and it is the same line the
             // coordinator speaks when no presenter is wired at all.
-            handle(.unavailable(presenter.availability))
+            //
+            // [APP-LAUNCHER F15] Routed through `deliver` like every other
+            // outcome. Every channel below (speech, the outcome card, the
+            // bus) is main-confined, and this branch used to call them
+            // synchronously on whatever queue `start()` arrived on — a
+            // caller off main spoke off main, which is exactly the
+            // isolation the injected hop exists to keep.
+            let reason = presenter.availability
+            deliver { [weak self] in
+                self?.handle(.unavailable(reason))
+            }
+        }
+    }
+
+    private func presentCamera() {
+        presenter.presentCamera { [weak self] outcome in
+            guard let self else { return }
+            self.deliver { self.handle(outcome) }
         }
     }
 
     private func handle(_ outcome: CameraCaptureOutcome) {
         switch outcome {
         case .unavailable(let reason):
-            let key = Self.unavailableKey(for: reason)
-            let text = L10n.str(key, locale: locale())
-            channels.announce("exclamationmark.triangle.fill", text)
-            channels.speak(text)
-            channels.emit("camera_capture_unavailable", Self.outcomeName(for: reason))
+            reportUnavailable(reason)
         case .cancelled:
             // The elder answered a spoken confirmation a moment ago and
             // then closed the camera: a one-word acknowledgement, so the
@@ -158,12 +219,39 @@ final class CameraCaptureFlow {
             // saved and nothing is claimed.
             channels.speak(L10n.str("apps.camera.cancelled", locale: locale()))
             channels.emit("camera_capture_cancelled", "cancelled")
+            isRunning = false
         case .captured(let image):
             saver.savePhoto(image) { [weak self] saved in
                 guard let self else { return }
                 self.deliver { self.finishSave(saved: saved) }
             }
         }
+    }
+
+    /// The camera could not be shown, for a reason the elder can act on.
+    /// Ends the session (nothing more will be reported for it).
+    private func reportUnavailable(_ reason: CameraAvailability) {
+        let key = Self.unavailableKey(for: reason)
+        let text = L10n.str(key, locale: locale())
+        channels.announce("exclamationmark.triangle.fill", text)
+        channels.speak(text)
+        channels.emit("camera_capture_unavailable", Self.outcomeName(for: reason))
+        isRunning = false
+    }
+
+    /// [APP-LAUNCHER F7] The photo-library permission was refused (or is
+    /// restricted), so a capture could not be saved even if it were taken.
+    /// Said BEFORE the camera, in its own words: this is a different
+    /// problem from a refused camera permission, and it has a different
+    /// fix (`apps.camera.savePermissionDenied` points at Photos, not at
+    /// Camera). Nothing is presented, nothing is captured, and no photo is
+    /// ever discarded after the fact.
+    private func reportSavePermissionDenied() {
+        let text = L10n.str("apps.camera.savePermissionDenied", locale: locale())
+        channels.announce("exclamationmark.triangle.fill", text)
+        channels.speak(text)
+        channels.emit("camera_capture_unavailable", "savePermissionDenied")
+        isRunning = false
     }
 
     /// Why the camera cannot be presented, in the elder's words: a device
@@ -198,5 +286,7 @@ final class CameraCaptureFlow {
         channels.announce(saved ? "checkmark.circle.fill" : "exclamationmark.triangle.fill", text)
         channels.speak(text)
         channels.emit("camera_capture_finished", saved ? "photoSaved" : "saveFailed")
+        // The session is over: the next "क्यामेरा खोल" gets a fresh one.
+        isRunning = false
     }
 }

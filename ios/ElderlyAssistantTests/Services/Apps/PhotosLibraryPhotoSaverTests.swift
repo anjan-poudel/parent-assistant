@@ -15,7 +15,12 @@ final class PhotosLibraryPhotoSaverTests: XCTestCase {
     /// verdict, and the bytes that would have been stored.
     private final class Harness {
         var status: PHAuthorizationStatus = .authorized
+        /// What the PROMPT resolves to (and leaves `status` as, like the
+        /// real API does).
+        var grantedStatus: PHAuthorizationStatus = .authorized
         private(set) var authorizationRequests = 0
+        /// [F7] Status READS — the non-prompting path the save itself uses.
+        private(set) var statusReads = 0
         private(set) var performCount = 0
         private(set) var changeRan = false
         private(set) var savedData: Data?
@@ -31,8 +36,13 @@ final class PhotosLibraryPhotoSaverTests: XCTestCase {
         func makeSaver() -> PhotosLibraryPhotoSaver {
             PhotosLibraryPhotoSaver(
                 encodeJPEG: useRealEncoder ? nil : { [weak self] _ in self?.encoded },
+                photoAuthorizationStatus: { [weak self] in
+                    self?.statusReads += 1
+                    return self?.status ?? .denied
+                },
                 requestAuthorization: { [weak self] completion in
                     self?.authorizationRequests += 1
+                    self?.status = self?.grantedStatus ?? .denied
                     completion(self?.status ?? .denied)
                 },
                 makeAssetCreationBlock: { [weak self] data in
@@ -115,7 +125,13 @@ final class PhotosLibraryPhotoSaverTests: XCTestCase {
         harness.status = .denied
 
         XCTAssertFalse(save(harness.makeSaver()))
-        XCTAssertEqual(harness.authorizationRequests, 1)
+        // [F7] A READ, not a prompt: the permission conversation belongs in
+        // `prepareToSave`, before the camera. Asking here would be asking
+        // about a photo the elder has already taken — the one moment a "no"
+        // can only discard it.
+        XCTAssertEqual(harness.authorizationRequests, 0,
+                       "the post-shutter path must never prompt")
+        XCTAssertEqual(harness.statusReads, 1)
         XCTAssertEqual(harness.performCount, 0,
                        "a refusal must not even ask the library for a change")
         XCTAssertFalse(harness.changeRan)
@@ -147,6 +163,73 @@ final class PhotosLibraryPhotoSaverTests: XCTestCase {
 
         XCTAssertTrue(save(harness.makeSaver()))
         XCTAssertTrue(harness.changeRan)
+    }
+
+    // MARK: - Pre-flight (F7) — the permission is resolved BEFORE the camera
+
+    /// The pre-flight exists so that a first-time refusal costs a sentence
+    /// instead of a photo. An undecided status is asked about HERE, at the
+    /// moment the elder asked for the camera.
+    func testPreflightOnAnUndecidedStatusAsksAndReportsTheGrant() {
+        let harness = Harness()
+        harness.status = .notDetermined
+        harness.grantedStatus = .authorized
+        var granted: Bool?
+
+        harness.makeSaver().prepareToSave { granted = $0 }
+
+        XCTAssertEqual(harness.authorizationRequests, 1,
+                       "the undecided case is the one the prompt is for")
+        XCTAssertEqual(granted, true, "and a grant means a photo can be stored")
+    }
+
+    /// …and a refusal at that prompt is reported as "cannot save", so the
+    /// flow never presents the camera.
+    func testPreflightReportsARefusalAtThePrompt() {
+        let harness = Harness()
+        harness.status = .notDetermined
+        harness.grantedStatus = .denied
+        var granted: Bool?
+
+        harness.makeSaver().prepareToSave { granted = $0 }
+
+        XCTAssertEqual(harness.authorizationRequests, 1)
+        XCTAssertEqual(granted, false)
+    }
+
+    /// Every already-decided status is answered by a READ — the pre-flight
+    /// never re-prompts someone who has already answered, and never
+    /// re-prompts after a refusal (iOS would not show it again anyway).
+    func testPreflightNeverPromptsForADecidedStatus() {
+        for (status, expected) in [(PHAuthorizationStatus.authorized, true),
+                                   (.limited, true),
+                                   (.denied, false),
+                                   (.restricted, false)] {
+            let harness = Harness()
+            harness.status = status
+            var granted: Bool?
+
+            harness.makeSaver().prepareToSave { granted = $0 }
+
+            XCTAssertEqual(granted, expected, "\(status) must answer \(expected)")
+            XCTAssertEqual(harness.authorizationRequests, 0,
+                           "\(status) is already decided — no prompt")
+        }
+    }
+
+    /// [F7] The defect itself: a status that is STILL undecided at save
+    /// time (a caller that skipped the pre-flight) reports the honest
+    /// failure instead of prompting after the shutter — the prompt that
+    /// used to be able to throw the just-taken photo away.
+    func testSaveNeverPromptsEvenWhenTheStatusIsUndecided() {
+        let harness = Harness()
+        harness.status = .notDetermined
+        harness.grantedStatus = .authorized
+
+        XCTAssertFalse(save(harness.makeSaver()))
+        XCTAssertEqual(harness.authorizationRequests, 0,
+                       "no permission sheet after the shutter")
+        XCTAssertEqual(harness.performCount, 0, "and nothing is written without consent")
     }
 
     // MARK: - No bytes to store

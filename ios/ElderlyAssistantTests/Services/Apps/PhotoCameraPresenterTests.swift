@@ -31,6 +31,15 @@ final class PhotoCameraPresenterTests: XCTestCase {
             get { recordedCaptureMode ?? super.cameraCaptureMode }
             set { recordedCaptureMode = newValue }
         }
+
+        /// [F4] How many times the presenter asked for the sheet to come
+        /// down. `super` is deliberately NOT called: there is no
+        /// presentation to tear down on a camera-less simulator, and the
+        /// property under test is that the presenter ASKS at all.
+        private(set) var dismissCount = 0
+        override func dismiss(animated flag: Bool, completion: (() -> Void)?) {
+            dismissCount += 1
+        }
     }
 
     /// Every system the presenter touches, scripted.
@@ -250,6 +259,86 @@ final class PhotoCameraPresenterTests: XCTestCase {
         presenter.imagePickerControllerDidCancel(harness.picker)
 
         XCTAssertEqual(harness.outcomes, [.cancelled])
+    }
+
+    /// [F4] Cancelling dismisses the picker — the same thing the capture
+    /// path does, and the thing this callback used to assume UIKit would do
+    /// for it.
+    ///
+    /// It does not: `dismiss(animated:)` is the presenter's job in this
+    /// flow, so the sheet stayed on screen over the app while the flow had
+    /// already reported the cancel and gone back to idle — an elder left
+    /// staring at a dead camera.
+    func testCancellingThePickerDismissesTheSheet() {
+        let harness = Harness()
+        let presenter = harness.makePresenter()
+        harness.start(presenter)
+
+        presenter.imagePickerControllerDidCancel(harness.picker)
+
+        XCTAssertEqual(harness.picker.dismissCount, 1,
+                       "a cancel must take the camera down with it")
+        XCTAssertEqual(harness.outcomes, [.cancelled])
+    }
+
+    /// The capture half of the same contract, pinned alongside it so the
+    /// two callbacks can never drift apart again.
+    func testPickingAPhotoDismissesTheSheet() {
+        let harness = Harness()
+        let presenter = harness.makePresenter()
+        harness.start(presenter)
+
+        presenter.imagePickerController(harness.picker,
+                                        didFinishPickingMediaWithInfo: [.originalImage: testImage])
+
+        XCTAssertEqual(harness.picker.dismissCount, 1)
+    }
+
+    /// [F5] A second session request while one is live is answered
+    /// immediately and honestly, instead of overwriting the running
+    /// session's completion.
+    ///
+    /// Overwriting it is exactly how a photo goes missing: the first
+    /// session's completion is dropped, and when its picker's delegate
+    /// callback arrives it finds a nil slot and reports nothing — the elder
+    /// pressed the shutter and heard silence.
+    func testASecondRequestWhileOneSessionIsLiveIsRefusedAndLeavesTheFirstIntact() {
+        let harness = Harness()
+        let presenter = harness.makePresenter()
+        harness.start(presenter)
+        XCTAssertEqual(harness.presented.count, 1)
+
+        var second: CameraCaptureOutcome?
+        presenter.presentCamera { second = $0 }
+
+        XCTAssertEqual(second, .unavailable(.cannotPresent),
+                       "the second request is told it cannot be served right now")
+        XCTAssertEqual(harness.presented.count, 1, "no second picker is stacked")
+
+        presenter.imagePickerController(harness.picker,
+                                        didFinishPickingMediaWithInfo: [.originalImage: testImage])
+
+        XCTAssertEqual(harness.outcomes.count, 1,
+                       "the first session still owns the completion")
+        guard case .captured = harness.outcomes.first else {
+            return XCTFail("expected the first session's capture, got \(harness.outcomes)")
+        }
+    }
+
+    /// …and a fresh session is accepted the moment the previous one ends:
+    /// the refusal above is about concurrency, not about a one-shot
+    /// presenter.
+    func testASessionCanStartAgainOnceThePreviousOneEnded() {
+        let harness = Harness()
+        let presenter = harness.makePresenter()
+        harness.start(presenter)
+        presenter.imagePickerController(harness.picker,
+                                        didFinishPickingMediaWithInfo: [.originalImage: testImage])
+
+        harness.start(presenter)
+
+        XCTAssertEqual(harness.presented.count, 2, "the next launch gets its own session")
+        XCTAssertEqual(harness.outcomes.count, 1, "and the finished one reports nothing more")
     }
 
     /// A media dictionary with no image (a media type a `.photo` capture

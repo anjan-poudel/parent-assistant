@@ -112,6 +112,17 @@ final class PhotoCameraPresenter: NSObject, CameraCapturePresenting {
             }
             return
         }
+        // [APP-LAUNCHER F5] One session per presenter. Overwriting the
+        // slot is how a photo goes missing: the first session's completion
+        // is dropped on the floor, and when its picker's delegate callback
+        // arrives it finds `completion == nil` and reports nothing at all —
+        // the elder pressed the shutter and heard silence. A second
+        // request while one is live is answered immediately and honestly
+        // instead, and the running session is left untouched.
+        guard self.completion == nil else {
+            completion(.unavailable(.cannotPresent))
+            return
+        }
         self.completion = completion
         if cameraAuthorization() == .notDetermined {
             requestCameraAccess { [weak self] granted in
@@ -192,8 +203,15 @@ extension PhotoCameraPresenter: UIImagePickerControllerDelegate, UINavigationCon
     }
 
     func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
-        // Dismissal is the picker's own job on cancel; the flow speaks the
-        // gentle acknowledgement, this layer only reports.
+        // [APP-LAUNCHER F4] Dismiss here too — this callback used to trust
+        // that "the picker dismisses itself on cancel", and it does not:
+        // `dismiss(animated:)` is the PRESENTER's job in this flow, and the
+        // capture path has always done it. Without it the camera stayed on
+        // screen over the app while the flow had already reported the
+        // cancel and moved on — a dead sheet the elder could only stare at.
+        picker.dismiss(animated: true)
+        // The flow speaks the gentle acknowledgement; this layer only
+        // reports.
         finish(.cancelled)
     }
 }

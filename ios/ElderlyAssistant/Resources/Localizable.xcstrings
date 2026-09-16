@@ -17522,6 +17522,23 @@
           }
         }
       }
+    },
+    "apps.camera.savePermissionDenied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't save photos yet. Please allow adding to your photos in Settings. I haven't taken a photo."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म अझै फोटो सुरक्षित गर्न सक्दिनँ। कृपया सेटिङमा फोटोमा थप्ने अनुमति दिनुहोस्। मैले फोटो खिचेको छैन।"
+          }
+        }
+      }
     }
   },
   "version": "1.0"
