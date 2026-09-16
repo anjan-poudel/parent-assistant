@@ -2,50 +2,34 @@ import SwiftUI
 import UIKit
 import PhotosUI
 
-/// Settings hub (spec §4.4): one card per section — Appearance (skinnable
-/// app background, 2026-09-07), Language & region, Gemini AI, Voice
-/// engine, Voice activation, TTS voices, Quick apps, Family & friends,
-/// Medication schedule, AI मोडेल, Privacy & about.
+/// Settings hub (spec §4.4) — tabbed reorg 2026-09-16: five tabs of cards
+/// (Voice, Family, Reminders, Tools, System) instead of one 23-row scroll,
+/// plus the long-press door to the technical settings. The tab table, the
+/// leaf routing and the hidden sheet live in `SettingsTabs.swift`.
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    /// Redesign spec §3.3: AI Models is buried behind a long-press on the
-    /// title, not a normal row — there's no caregiver app yet for someone
-    /// to manage STT/LLM downloads through, so the capability has to stay
-    /// reachable, just not one plain tap away from an elderly user's
-    /// normal navigation.
-    @State private var showHiddenAIModels = false
+    @EnvironmentObject private var coordinator: AppCoordinator
+    /// [BOOT-REVIEW, design item] Observed so the diagnostics card below
+    /// re-renders when a capability fails or (via recovery) comes back.
+    @EnvironmentObject private var boot: StartupBoot
+    @Environment(\.locale) private var locale
 
-    enum SettingsSection: Identifiable {
-        case appearance, language, calling, places, family, meds, manuals, calendar, caregiverNotifications, calendarSharing, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, voicePersonalization, webSearch, youtube, feeds, quickApps, privacy, intentLog, toolLog
+    @State private var selectedTab: SettingsSection = .voice
 
-        var id: String {
-            switch self {
-            case .appearance: return "appearance"
-            case .language: return "language"
-            case .calling: return "calling"
-            case .places: return "places"
-            case .family: return "family"
-            case .meds: return "meds"
-            case .manuals: return "manuals"
-            case .calendar: return "calendar"
-            case .caregiverNotifications: return "caregiverNotifications"
-            case .calendarSharing: return "calendarSharing"
-            case .alarms: return "alarms"
-            case .geminiAI: return "geminiAI"
-            case .voiceEngine: return "voiceEngine"
-            case .wakeWord: return "wakeWord"
-            case .ttsVoices: return "ttsVoices"
-            case .voicePersonalization: return "voicePersonalization"
-            case .webSearch: return "webSearch"
-            case .youtube: return "youtube"
-            case .feeds: return "feeds"
-            case .quickApps: return "quickApps"
-            case .privacy: return "privacy"
-            case .intentLog: return "intentLog"
-            case .toolLog: return "toolLog"
-            }
-        }
-    }
+    /// Redesign spec §3.3 + 2026-09-16 reorg §3: the technical settings
+    /// (Gemini/cloud AI, the voice engine stack, web search, the two review
+    /// logs, the model screen) are NOT rows on any tab — there's no
+    /// caregiver app yet for someone to manage STT/LLM downloads through,
+    /// so the capability has to stay reachable, just not one plain tap away
+    /// from an elderly user's normal navigation.
+    @State private var showHiddenSheet = false
+    /// Spec §3 decision 2: the sheet's ellipsis affordance appears only
+    /// after the household has opened the sheet once, so the first meeting
+    /// is the hint caption, not an unexplained button.
+    @AppStorage(HiddenSettingsSheetUsage.defaultsKey) private var hiddenSheetUsed = false
+
+    /// Long-press duration on the title (spec §3: "e.g., 0.8s").
+    static let hiddenSheetLongPressDuration: TimeInterval = 0.8
 
     var body: some View {
         ZStack {
@@ -69,197 +53,129 @@ struct SettingsView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
 
-                Text("settings.title")
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
-                    .padding(.bottom, 16)
-                    .onLongPressGesture(minimumDuration: 1.5) {
-                        showHiddenAIModels = true
+                titleBlock
+
+                // [BOOT-REVIEW, design item] Capability diagnostics live
+                // HERE, not in a transient capsule: every failed boot
+                // capability is named, its affected control named, and
+                // exactly one recovery action offered — routed through the
+                // same seam the coordinator installed. It sits ABOVE the
+                // tab bar, not inside a tab: a failed capability concerns
+                // the whole app and must not wait for the household to
+                // guess which tab hid the notice (it is empty — and takes
+                // no space — while every capability is healthy).
+                degradationDiagnosticsSection
+
+                SettingsTabBar(selection: $selectedTab)
+
+                TabView(selection: $selectedTab) {
+                    ForEach(SettingsSection.allCases) { tab in
+                        tabPage(tab)
+                            .tag(tab)
                     }
-                ScrollView {
-                    VStack(spacing: 12) {
-                        // [BOOT-REVIEW, design item] Capability
-                        // diagnostics live HERE, not in a transient
-                        // capsule: every failed boot capability is named,
-                        // its affected control named, and exactly one
-                        // recovery action offered — routed through the
-                        // same seam the coordinator installed.
-                        degradationDiagnosticsSection
-                        // [ENCODER-RUNTIME-TOGGLE] Visible door to the
-                        // internal AI screen: a single tap opens the same
-                        // hidden sheet the title long-press opens, so the
-                        // A/B card needs no gesture hunt. Gated by the same
-                        // IntentEncoderFeature.isEnabled, which
-                        // [ENCODER-ALWAYS-ON] is now part of this target's
-                        // DEFAULT compilation conditions — the door is
-                        // present in every build, and what keeps the
-                        // encoder out of service is the toggle inside
-                        // (default OFF), not the absence of the UI.
-                        if IntentEncoderFeature.isEnabled {
-                            Button {
-                                showHiddenAIModels = true
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "brain.head.profile")
-                                        .foregroundStyle(DesignTokens.textPrimary)
-                                    Text("settings.encoder.title")
-                                        .foregroundStyle(DesignTokens.textPrimary)
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                                        .foregroundStyle(DesignTokens.textSecondary)
-                                }
-                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                                .frame(minHeight: DesignTokens.minTapTargetSize)
-                                .padding(.horizontal, 20)
-                            }
-                        }
-                        // Skinnable app background (2026-09-07) — warm
-                        // presets today; a photo-picker background is a
-                        // noted future option.
-                        sectionRow(.appearance, icon: "paintpalette.fill", titleKey: "settings.appearance.title")
-                        sectionRow(.language, icon: "globe", titleKey: "settings.language.title")
-                        // Default app for ADDRESS-BOOK call buttons
-                        // (Phone-tab redesign, 2026-09-07).
-                        sectionRow(.calling, icon: "phone.badge.plus", titleKey: "settings.calling.title")
-                        // Saved places + the map voice navigation opens
-                        // (directions task, 2026-09-07).
-                        sectionRow(.places, icon: "mappin.and.ellipse", titleKey: "settings.places.title")
-                        geminiSectionRow
-                        voiceEngineSectionRow
-                        wakeWordSectionRow
-                        ttsVoicesSectionRow
-                        // Voice personalization ([VOICE-SETTINGS], 2026-09-08)
-                        // — noise filter, accent biasing, and the voice
-                        // fingerprint (enroll / status / remove).
-                        sectionRow(.voicePersonalization, icon: "waveform",
-                                   titleKey: "voiceSettings.title")
-                        // [LOCAL-TOOLS] (2026-09-07) Web search — Google CSE
-                        // credentials for the on-device stack's search tool.
-                        sectionRow(.webSearch, icon: "magnifyingglass.circle.fill",
-                                   titleKey: "searchSettings.title")
-                        // [YOUTUBE] (2026-09-08) YouTube — the optional Data
-                        // API key behind "play X on youtube" (without it the
-                        // voice command opens YouTube search directly).
-                        sectionRow(.youtube, icon: "play.rectangle.fill",
-                                   titleKey: "youtubeSettings.title")
-                        sectionRow(.feeds, icon: "rectangle.stack.fill", titleKey: "settings.feeds.title")
-                        sectionRow(.quickApps, icon: "square.grid.2x2.fill", titleKey: "settings.quickApps.title")
-                        sectionRow(.family, icon: "person.2.fill", titleKey: "settings.family.title")
-                        sectionRow(.meds, icon: "pills.fill", titleKey: "settings.meds.title")
-                        // Bundled default manuals (2026-09-07) — camera-
-                        // free, Gemini-free "how do I use this" guides.
-                        sectionRow(.manuals, icon: "book.closed.fill",
-                                   titleKey: "settings.manuals.title")
-                        // Native calendar bridge (calendar-settings task,
-                        // 2026-09-07): the mirror/two-way/import cards left
-                        // the meds leaf — this row is their hub entry.
-                        sectionRow(.calendar, icon: "calendar.badge.clock",
-                                   titleKey: "settings.calendar.title")
-                        // Family event alerts (caregiver
-                        // event-notifications task, 2026-09-13): the
-                        // per-event-type "tell my family" switches —
-                        // opt-in, default OFF, and deliberately placed
-                        // right below the calendar row they most often
-                        // go with.
-                        sectionRow(.caregiverNotifications, icon: "bell.badge.fill",
-                                   titleKey: "settings.notifyCaregivers.title")
-                        // Google Calendar sharing (calendar & family
-                        // sharing task, 2026-09-16): the bridge that puts
-                        // the same reminders on the family's own calendar
-                        // — the second channel for the family the row
-                        // above notifies, so it sits directly beneath it.
-                        sectionRow(.calendarSharing, icon: "calendar.badge.plus",
-                                   titleKey: "settings.calendarSharing")
-                        // Voice-set alarms + in-app countdown timers
-                        // (alarms-timers task, 2026-09-07). See the leaf's
-                        // honesty caption — iOS alarms ring through the
-                        // app's own notifications, not the Clock app.
-                        sectionRow(.alarms, icon: "alarm.fill", titleKey: "settings.alarms.title")
-                        sectionRow(.privacy, icon: "lock.shield.fill", titleKey: "settings.privacy.title")
-                        sectionRow(.intentLog, icon: "checklist", titleKey: "settings.intentLog.title")
-                        // [TOOL-DEBUG-LOG] (2026-09-07) Tool requests —
-                        // the family-facing debug window over every live
-                        // weather/web-search request the on-device stack
-                        // made (see LocalToolLogStore).
-                        sectionRow(.toolLog, icon: "text.magnifyingglass",
-                                   titleKey: "settings.toolLog.title")
-                        Text("settings.ai.hiddenHint")
-                            // DESIGN-REVIEW: the one 14pt label left in
-                            // the app — a status caption, so it takes
-                            // the 18pt caption token (constitution
-                            // ≥18pt body floor) instead of its own size.
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary.opacity(0.8))
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 8)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 32)
                 }
+                .tabViewStyle(.page(indexDisplayMode: .never))
             }
         }
         .toolbar(.hidden, for: .navigationBar)
         // Value-based navigation (iOS 16 pattern) — see HomeView: the
         // isPresented + derived-binding form is fragile on iOS 16.
-        .navigationDestination(for: SettingsSection.self) { section in
-            switch section {
-            case .appearance: AppearanceSettingsView()
-            case .language: LanguageSettingsView()
-            case .calling: CallingSettingsView()
-            case .places: PlacesSettingsView()
-            case .family: FamilyContactsSettingsView()
-            case .meds: MedicationScheduleSettingsView()
-            case .manuals: DefaultManualsBrowseView()
-            // Calendar settings (calendar-settings task, 2026-09-07) —
-            // the mirror/two-way/import cards that used to crowd the
-            // Medication schedule leaf.
-            case .calendar: CalendarSettingsView()
-            // Family event alerts (caregiver event-notifications task,
-            // 2026-09-13) — the settings instance is the coordinator's
-            // OWN, so the toggles write the exact object the fire sites
-            // read.
-            case .caregiverNotifications:
-                CaregiverNotifySettingsView(settings: coordinator.caregiverNotifySettings)
-            // Calendar sharing (calendar & family sharing task,
-            // 2026-09-16) — the service is the coordinator's OWN, so the
-            // card renders the exact status the share path writes.
-            case .calendarSharing:
-                CalendarShareSettingsView(service: coordinator.calendarShareService,
-                                          locale: locale)
-            case .alarms: AlarmsTimersSettingsView()
-            case .geminiAI: GeminiAPISettingsView()
-            case .voiceEngine: VoiceEngineSettingsView()
-            case .wakeWord: WakeWordSettingsView()
-            case .ttsVoices: TTSVoicesSettingsView()
-            case .voicePersonalization: VoicePersonalizationSettingsView(coordinator: coordinator)
-            case .webSearch: SearchSettingsView()
-            case .youtube: YouTubeSettingsView()
-            case .feeds: FeedsSettingsView()
-            case .quickApps: QuickAccessAppsView()
-            case .privacy: PrivacySettingsView()
-            case .intentLog: IntentLogReviewView()
-            case .toolLog: ToolLogReviewView()
-            }
+        .navigationDestination(for: SettingsDestination.self) { destination in
+            SettingsDestinationView(destination: destination)
         }
-        .sheet(isPresented: $showHiddenAIModels) {
-            NavigationStack { AIModelsSettingsView() }
+        .sheet(isPresented: $showHiddenSheet) {
+            HiddenSettingsSheet()
         }
     }
 
-    /// Visible, not buried — unlike the legacy on-device AI Models screen,
-    /// this is load-bearing infrastructure in v2 (no key = no assistant),
-    /// so it stays a normal, prominent row with a live status indicator.
-    @EnvironmentObject private var coordinator: AppCoordinator
-    /// [BOOT-REVIEW, design item] Observed so the diagnostics card below
-    /// re-renders when a capability fails or (via recovery) comes back.
-    @EnvironmentObject private var boot: StartupBoot
-    @Environment(\.locale) private var locale
+    // MARK: - Title (and the two doors to the hidden sheet)
+
+    /// The title keeps the long-press the spec names (0.8 s) and adds the
+    /// accessibility alternative it asks for: once the sheet has been
+    /// opened, a small ellipsis button sits next to the title, so a
+    /// VoiceOver user — or anyone who cannot hold a gesture — has a plain
+    /// target. Until that first open, the caption underneath says the
+    /// gesture exists at all.
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Text("settings.title")
+                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onLongPressGesture(minimumDuration: Self.hiddenSheetLongPressDuration) {
+                        openHiddenSheet()
+                    }
+                if hiddenSheetUsed {
+                    Button(action: openHiddenSheet) {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(DesignTokens.textPrimary)
+                            .frame(minWidth: DesignTokens.minTapTargetSize,
+                                   minHeight: DesignTokens.minTapTargetSize)
+                            .background(DesignTokens.card)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("settings.hidden.open"))
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+
+            if !hiddenSheetUsed {
+                Text("settings.hidden.hint")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(DesignTokens.textSecondary.opacity(0.8))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 20)
+            }
+        }
+        .padding(.bottom, 8)
+    }
+
+    /// One tab's page. The rows come from the tab table in
+    /// `SettingsTabs.swift` in table order — the view never decides what
+    /// belongs where.
+    @ViewBuilder
+    private func tabPage(_ tab: SettingsSection) -> some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                ForEach(tab.rows) { destination in
+                    SettingsSectionRow(destination: destination)
+                }
+                // [ENCODER-RUNTIME-TOGGLE] Visible door to the internal AI
+                // screen: a single tap opens the same hidden sheet the title
+                // long-press opens, so the A/B card needs no gesture hunt.
+                // Gated by the same IntentEncoderFeature.isEnabled, which
+                // [ENCODER-ALWAYS-ON] is now part of this target's DEFAULT
+                // compilation conditions — the door is present in every
+                // build, and what keeps the encoder out of service is the
+                // toggle inside (default OFF), not the absence of the UI.
+                // It rides the System tab: an app-plumbing door, not a
+                // household control.
+                if tab == .system, IntentEncoderFeature.isEnabled {
+                    Button(action: openHiddenSheet) {
+                        SettingsRowChrome(icon: "brain.head.profile",
+                                          titleKey: "settings.encoder.title")
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 4)
+            .padding(.bottom, 32)
+        }
+    }
+
+    /// Both doors land here: the first open is what makes the ellipsis
+    /// affordance (and the absence of the hint) permanent.
+    private func openHiddenSheet() {
+        HiddenSettingsSheetUsage.markUsed()
+        hiddenSheetUsed = true
+        showHiddenSheet = true
+    }
 
     /// [BOOT-REVIEW, design item] Capability-specific diagnostics — the
     /// review moves detailed failure information OUT of the transient
@@ -311,197 +227,12 @@ struct SettingsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
                 }
             }
+            .padding(.horizontal, 20)
             .padding(.bottom, 4)
         }
     }
-
-    private var geminiSectionRow: some View {
-        NavigationLink(value: SettingsSection.geminiAI) {
-            HStack(spacing: 14) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 26))
-                    .foregroundStyle(DesignTokens.accent)
-                    .frame(width: 40)
-                Text("settings.gemini.title")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Spacer()
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(coordinator.geminiConfigStore.isConfigured ? DesignTokens.accent : DesignTokens.stateError)
-                        .frame(width: 8, height: 8)
-                    Text(coordinator.geminiConfigStore.isConfigured
-                         ? "settings.gemini.statusConnected"
-                         : "settings.gemini.statusMissing")
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.textSecondary)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// On-device vs Gemini A/B toggle. Visible (not buried) like the
-    /// Gemini row above it — this is the control that actually decides
-    /// which of the two live, since flipping it doesn't require a
-    /// restart (see `AppCoordinator.applyVoiceEngineStack`).
-    private var voiceEngineSectionRow: some View {
-        NavigationLink(value: SettingsSection.voiceEngine) {
-            HStack(spacing: 14) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 26))
-                    .foregroundStyle(DesignTokens.accent)
-                    .frame(width: 40)
-                Text("settings.voiceEngine.title")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Spacer()
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(DesignTokens.accent)
-                        .frame(width: 8, height: 8)
-                    Text(coordinator.voiceEngineStack == .gemini
-                         ? "settings.voiceEngine.statusGemini"
-                         : "settings.voiceEngine.statusOnDevice")
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.textSecondary)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
-        }
-        .buttonStyle(.plain)
-    }
-
-
-    /// Voice activation — "ये कान्छी" wake phrase (open item #4). The dot
-    /// color + label come from the same `wakeWordStatus` derivation the
-    /// destination screen shows, so the row can never disagree with the
-    /// screen (unit-tested logic in `WakeWordStatusResolver`).
-    private var wakeWordSectionRow: some View {
-        let status = coordinator.wakeWordStatus
-        return NavigationLink(value: SettingsSection.wakeWord) {
-            HStack(spacing: 14) {
-                Image(systemName: "dot.radiowaves.left.and.right")
-                    .font(.system(size: 26))
-                    .foregroundStyle(DesignTokens.accent)
-                    .frame(width: 40)
-                Text("wakeWord.title")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Spacer()
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(status.presentationColor)
-                        .frame(width: 8, height: 8)
-                    Text(status.shortTitleKey)
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.textSecondary)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// On-device TTS voices (Piper VITS via sherpa-onnx). Status surfaces
-    /// the 2026-09-06 failure mode — a build without the bundled voice
-    /// files silently fell back to no speech for Nepali.
-    private var ttsVoicesSectionRow: some View {
-        NavigationLink(value: SettingsSection.ttsVoices) {
-            HStack(spacing: 14) {
-                Image(systemName: "speaker.waveform.2.fill")
-                    .font(.system(size: 26))
-                    .foregroundStyle(DesignTokens.accent)
-                    .frame(width: 40)
-                Text("settings.voices.title")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Spacer()
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(ttsVoiceSummary.ok ? DesignTokens.accent : DesignTokens.stateError)
-                        .frame(width: 8, height: 8)
-                    Text(ttsVoiceSummary.key)
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.textSecondary)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Green when every catalog voice can speak (installed, or bundled
-    /// and installable on first use); red the moment any voice is truly
-    /// missing from the build.
-    private var ttsVoiceSummary: (ok: Bool, key: LocalizedStringKey) {
-        let entries = ModelCatalog.entries(kind: .tts)
-        let allOK = entries.allSatisfy {
-            TTSVoicesSettingsView.status(for: $0, modelStore: coordinator.modelStore) != .missing
-        }
-        let anyInstalled = entries.contains {
-            TTSVoicesSettingsView.status(for: $0, modelStore: coordinator.modelStore) == .installed
-        }
-        if !allOK { return (false, "settings.voices.statusMissing") }
-        return (true, anyInstalled
-                ? "settings.voices.statusInstalled"
-                : "settings.voices.statusBundled")
-    }
-
-    private func sectionRow(_ section: SettingsSection, icon: String,
-                            titleKey: String) -> some View {
-        NavigationLink(value: section) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 26))
-                    .foregroundStyle(DesignTokens.accent)
-                    .frame(width: 40)
-                Text(LocalizedStringKey(titleKey))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
-        }
-        .buttonStyle(.plain)
-    }
 }
+
 
 // MARK: - 1. Language & region (spec §4.4.1)
 
