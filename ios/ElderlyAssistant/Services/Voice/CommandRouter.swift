@@ -224,6 +224,33 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// reference).
     var isAwaitingCalendarEventConfirmation: Bool { get }
 
+    /// [APP-LAUNCHER] (2026-09-16) True while a `launcher.open` app launch
+    /// is pended for the elder's yes/no (design D3: confirm-first before
+    /// every external launch). Widens the router's confirmation path
+    /// exactly like `isAwaitingCalendarEventConfirmation`: the yes/no on
+    /// the next transcript goes to `handleConfirmationResponse` (which
+    /// launches or cancels) and the medication-flavored generic yes/no
+    /// speech is skipped — the coordinator speaks "Opening X" or the
+    /// honest cancellation itself, and a plain "yes" is not a dose
+    /// acknowledgement. Requirement-with-extension-default pattern like
+    /// the members above (the router holds the coordinator as a protocol
+    /// reference, so an extension-only member would bind statically and
+    /// AppCoordinator's implementation could never be reached).
+    var isAwaitingAppLaunchConfirmation: Bool { get }
+
+    /// [APP-LAUNCHER] (2026-09-16) The app-launch confirmation seam the
+    /// `app_launcher` plugin calls (and the deterministic keyword stage may
+    /// call once it exists): pends a catalog app for the elder's spoken
+    /// yes/no and RETURNS the line to speak. The coordinator owns the
+    /// pending state, the 45 s window and the execution — the caller only
+    /// speaks what it is handed, exactly like
+    /// `requestCalendarEventConfirmation`. A launch that can only fail is
+    /// never pended: the returned line is then the honest not-installed
+    /// message (or, when the entry has a web fallback, a question that
+    /// discloses the swap). Same requirement-with-extension-default
+    /// pattern as the members above.
+    func requestAppLaunch(appID: String, confidence: Double?) -> String
+
     /// [ALARMS-TIMERS] (2026-09-07) Requests an ALARM at `time` (already
     /// the next future occurrence; only its hour/minute-of-day matters —
     /// the OS alarm is a DAILY-repeating local notification, see
@@ -390,6 +417,17 @@ extension VoiceCommandCoordinating {
     // explicitly implements the member (AppCoordinator, and the
     // scripted mock under test) creates anything.
     func requestCalendarEventConfirmation(title: String, startDate: Date) -> String? { nil }
+    // [APP-LAUNCHER] (2026-09-16) Inert defaults — a conformer that does
+    // not opt in (every mock/double) never pends an app launch, so the
+    // router's confirmation path behaves exactly as it did before this
+    // member, and the plugin's seam answers the honest "not available"
+    // line instead of pretending a launch was pended. Only a coordinator
+    // that explicitly implements the members (AppCoordinator, and the
+    // scripted mock under test) launches anything.
+    var isAwaitingAppLaunchConfirmation: Bool { false }
+    func requestAppLaunch(appID: String, confidence: Double?) -> String {
+        L10n.str("router.pluginUnavailable", locale: activeLocale)
+    }
     // [MORNING-BRIEFING] (2026-09-07) Inert default — a conformer that
     // does not opt in (every mock/double across app and test target)
     // never fires a briefing, so the deterministic ladder stage falls
@@ -432,6 +470,14 @@ final class CommandRouter {
         /// (not a medication acknowledgement), which is why it is its own
         /// case rather than riding `.acknowledgedMedication`.
         case calendarEventConfirmed
+        /// [APP-LAUNCHER] (2026-09-16) A `launcher.open` confirmation was
+        /// answered YES — the coordinator has taken the pended app and
+        /// launched it (or, for the camera entry, switched to the in-app
+        /// capture). Its own case for the same reason
+        /// `.calendarEventConfirmed` has one: the outcome is a launch, not
+        /// a medication acknowledgement, and reporting
+        /// `.acknowledgedMedication` would make the router's result a lie.
+        case appLaunchConfirmed
         case unrecognised(transcript: String)
     }
 
@@ -678,8 +724,30 @@ final class CommandRouter {
             // dose was recorded.
             let isCalendarEventConfirmation =
                 coordinator?.isAwaitingCalendarEventConfirmation == true
+            // [APP-LAUNCHER] (2026-09-16) An app-launch confirmation speaks
+            // its own "Opening X" / honest cancellation too — the generic
+            // catalog yes/no is medication-flavored and would claim a dose
+            // was recorded for a plain "हो" answered to "क्यामेरा खोल्ने हो?".
+            let isAppLaunchConfirmation =
+                coordinator?.isAwaitingAppLaunchConfirmation == true
             let speaksItsOwnYesNo = isCallConfirmation || isNavigationDisambiguation
-                || isCalendarEventConfirmation
+                || isCalendarEventConfirmation || isAppLaunchConfirmation
+            // [APP-LAUNCHER F3] A dose acknowledgement is never a yes/no
+            // answer to an app-launch question. The safety net that owns
+            // this vocabulary runs BELOW this block, so without this the
+            // launch window turned "औषधि खाएँ" into an ambiguous answer to
+            // "क्यामेरा खोल्ने हो?" — and the dose went unrecorded, while
+            // the comment on the safety net still promised it "runs first,
+            // always". Only the launch branch is scoped this way: the
+            // call/navigation/calendar prompts have no such collision, and
+            // "होइन" must keep cancelling the launch question (a denial is
+            // not an acknowledgement — `isExplicitMedicationAcknowledgement`
+            // excludes it).
+            if isAppLaunchConfirmation, Self.isExplicitMedicationAcknowledgement(raw) {
+                emit(eventType: "confirmation_medication_ack", outcome: "success")
+                handleMedicationAcknowledgement()
+                return .acknowledgedMedication
+            }
             if Self.isYesResponse(raw) {
                 coordinator?.handleConfirmationResponse(.yes)
                 emit(eventType: "confirmation_yes", outcome: "success")
@@ -688,6 +756,7 @@ final class CommandRouter {
                 }
                 if isCallConfirmation { return .callConfirmed }
                 if isCalendarEventConfirmation { return .calendarEventConfirmed }
+                if isAppLaunchConfirmation { return .appLaunchConfirmed }
                 return isNavigationDisambiguation ? .navigationRequested : .acknowledgedMedication
             }
             if Self.isNoResponse(raw) {
@@ -960,8 +1029,9 @@ final class CommandRouter {
         // enumerated verb families, marker adjacency). When they all
         // declined, resolve intent from keyword CO-OCCURRENCE instead —
         // the small `KeywordIntentRule` table of SAFE domains only
-        // (news digest, YouTube play): every required keyword group must
-        // co-occur anywhere in the utterance, no grammar validation.
+        // (news digest, YouTube play, a named app launch): every
+        // required keyword group must co-occur anywhere in the
+        // utterance, no grammar validation.
         //
         // Placement: AFTER every strict deterministic stage (safety net
         // + confirmation flow + contact search + directions +
@@ -977,9 +1047,12 @@ final class CommandRouter {
         // stage's: news hands off to the reader exactly like the strict
         // stage (ack first, the reader owns every line), YouTube still
         // requires a survivable non-marker query from `YouTubeRoute`'s
-        // extraction and fires the same honest play/search path. Every
-        // relaxed claim is observable: `intent_keyword_match` (domain,
-        // matched keys — fixed rule vocabulary, never user text).
+        // extraction and fires the same honest play/search path, and an
+        // app launch hands its catalog id to the SAME coordinator seam
+        // the `launcher.open` plugin calls (the coordinator owns the
+        // confirmation question and the launch). Every relaxed claim is
+        // observable: `intent_keyword_match` (domain, matched keys —
+        // fixed rule vocabulary, never user text).
         if let relaxed = KeywordIntentRule.match(transcript: preText) {
             switch relaxed.domain {
             case .news:
@@ -994,6 +1067,38 @@ final class CommandRouter {
                 guard let query = YouTubeRoute.extractQuery(from: preText) else { break }
                 emitIntentKeywordMatch(relaxed)
                 fireYouTubePlay(query: query)
+                return .unrecognised(transcript: raw)
+            case .appLaunch:
+                // [APP-LAUNCHER] (2026-09-16) The launcher's voice fast
+                // path ("क्यामेरा खोल", "open WhatsApp", "फोटो खिच्न") —
+                // the highest-frequency launches without the encoder
+                // round-trip. The rule already resolved the utterance to
+                // a CATALOG id, which is the `app` entity the
+                // `launcher.open` plugin hands to `requestAppLaunch`:
+                // this stage calls that same seam, so the one launch
+                // executor, the pending state, the 45 s window and the
+                // confirmation question (design D3) are byte-for-byte the
+                // plugin path's — and a deterministic stage stays free of
+                // the plugin-dispatch machinery (registry + cloud client
+                // + an async hop) it would otherwise need.
+                //
+                // The returned line is the coordinator's: the
+                // confirmation question when the launch can still
+                // succeed, or the honest not-installed line when it
+                // cannot (nothing is pended in that case). The keyword
+                // path never inspects or recomposes it — exactly like
+                // the news/YouTube hand-offs above, where the
+                // coordinator/DOMAIN owners keep every spoken line.
+                guard let appID = relaxed.appID else { break }
+                emitIntentKeywordMatch(relaxed)
+                if let line = coordinator?.requestAppLaunch(appID: appID, confidence: nil) {
+                    // Carded like the plugin path's reply (see
+                    // `handlePluginCommand` above), so the question the
+                    // elder answers stays visible whichever path
+                    // resolved it.
+                    coordinator?.noteGenericReply(line)
+                    speak(text: line)
+                }
                 return .unrecognised(transcript: raw)
             }
         }
@@ -1484,6 +1589,56 @@ final class CommandRouter {
         "फोन", "कल", "भिडियो कल", "म्यासेन्जर", "व्हाट्सएप", "वाट्सएप"
     ]
 
+    /// Explicit refusal vocabulary — "not yet", "I didn't take it", "औषधि
+    /// खाएको छैन". Guarded BEFORE the ack list everywhere it is used, because
+    /// refusal words contain ack words as substrings ("नखाए" ⊃ "खाए",
+    /// "भएन" ⊃ "भयो").
+    static let medicationDenialPhrases = [
+        "i didn't", "i did not", "not yet", "haven't", "havent",
+        "औषधि खाएको छैन", "औषधी खाएको छैन", "खाएको छैन",
+        "नखाए", "नखाएको", "लिएको छैन", "भएन", "छैन"
+    ]
+
+    /// The POSITIVE half of the medication-ack vocabulary: "I took my
+    /// medication" and its Nepali spellings, as phrases and as the single
+    /// tokens that carry the meaning on their own.
+    static let medicationAckPhrases = [
+        "i took", "i've taken", "ive taken", "took my medication",
+        "took my medicine", "taken my medication", "taken my medicine",
+        "yes i took it",
+        "औषधि खाएँ", "औषधि खाए", "औषधी खाएँ", "औषधी खाए",
+        "दवाई खाएँ", "दवाई खाए", "दबाइ खाएँ", "दबाइ खाए",
+        "औषधि लिएको छु", "औषधी लिएको छु", "दवाई लिएको छु",
+        "लिइसकेँ", "लिइसकें", "खाइसकेँ", "खाइसकें"
+    ]
+    static let medicationAckTokens = ["done", "taken", "took", "ate",
+                                      "खाएँ", "खाए", "भयो"]
+
+    /// [APP-LAUNCHER F3] Is this transcript an EXPLICIT dose
+    /// acknowledgement?
+    ///
+    /// Extracted from `routeSafetyNet` because the safety net is not the
+    /// only path that has to recognise it. While a confirmation window is
+    /// open the follow-up block above intercepts every utterance as a
+    /// yes/no — including an app-launch question, which made "औषधि खाएँ"
+    /// parse as an ambiguous answer to "क्यामेरा खोल्ने हो?" and the dose
+    /// go unrecorded. A dose acknowledgement is never a yes/no answer to
+    /// another question, so the follow-up path asks this first.
+    ///
+    /// Denials are excluded here too: the guard order lives with the
+    /// vocabulary instead of at one call site, so no caller can wire the
+    /// list up without it.
+    static func isExplicitMedicationAcknowledgement(_ raw: String) -> Bool {
+        let text = raw
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if medicationDenialPhrases.contains(where: { containsPhrase($0, in: text) }) {
+            return false
+        }
+        return medicationAckPhrases.contains(where: { containsPhrase($0, in: text) })
+            || medicationAckTokens.contains(where: { containsToken($0, in: text) })
+    }
+
     /// The safety-critical slice of the keyword layer, runnable on its
     /// own AHEAD of the LLM (spec §4 ladder: keyword net first, always).
     /// Returns nil when nothing safety-shaped matched, so the caller can
@@ -1503,32 +1658,14 @@ final class CommandRouter {
         }
 
         // Guard first: explicit negations must never fall through to the
-        // ack list, because refusal words contain ack words as substrings
-        // ("नखाए" ⊃ "खाए", "भएन" ⊃ "भयो").
-        let denialPhrases = [
-            "i didn't", "i did not", "not yet", "haven't", "havent",
-            "औषधि खाएको छैन", "औषधी खाएको छैन", "खाएको छैन",
-            "नखाए", "नखाएको", "लिएको छैन", "भएन", "छैन"
-        ]
-        if denialPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
+        // ack list (see `medicationDenialPhrases`).
+        if Self.medicationDenialPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
             emit(eventType: "command_ack_denied_keyword", outcome: "info")
             speak(key: "router.ackDenied")
             return .unrecognised(transcript: raw)
         }
 
-        let ackPhrases = [
-            "i took", "i've taken", "ive taken", "took my medication",
-            "took my medicine", "taken my medication", "taken my medicine",
-            "yes i took it",
-            "औषधि खाएँ", "औषधि खाए", "औषधी खाएँ", "औषधी खाए",
-            "दवाई खाएँ", "दवाई खाए", "दबाइ खाएँ", "दबाइ खाए",
-            "औषधि लिएको छु", "औषधी लिएको छु", "दवाई लिएको छु",
-            "लिइसकेँ", "लिइसकें", "खाइसकेँ", "खाइसकें"
-        ]
-        let ackTokens = ["done", "taken", "took", "ate",
-                         "खाएँ", "खाए", "भयो"]
-        if ackPhrases.contains(where: { Self.containsPhrase($0, in: text) })
-            || ackTokens.contains(where: { Self.containsToken($0, in: text) }) {
+        if Self.isExplicitMedicationAcknowledgement(raw) {
             handleMedicationAcknowledgement()
             return .acknowledgedMedication
         }

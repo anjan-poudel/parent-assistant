@@ -17,6 +17,18 @@ final class CommandRouterKeywordIntentTests: XCTestCase {
         var activeLocale: Locale { Locale(identifier: "ne-NP") }
         var newsFireCount = 0
         var briefingFireCount = 0
+        /// [APP-LAUNCHER] The launch seam the relaxed app-launch rules
+        /// call — recorded exactly like the plugin path's closure does
+        /// (see `CommandRouterTests.testLauncherPluginIntentAsksThroughTheLaunchSeam`),
+        /// so the two paths' calls are comparable.
+        var appLaunchRequests: [(appID: String, confidence: Double?)] = []
+        var appLaunchLine = "के खोल्ने हो?"
+        var genericReplies: [String] = []
+
+        func requestAppLaunch(appID: String, confidence: Double?) -> String {
+            appLaunchRequests.append((appID, confidence))
+            return appLaunchLine
+        }
 
         func recordTranscript(_ text: String) {}
         func oldestPendingReminderEntryId() -> UUID? { nil }
@@ -26,7 +38,7 @@ final class CommandRouterKeywordIntentTests: XCTestCase {
         func noteSpeakingStarted() {}
         func noteSpeakingEnded() {}
         func noteAssistantSpoke(_ text: String) {}
-        func noteGenericReply(_ text: String) {}
+        func noteGenericReply(_ text: String) { genericReplies.append(text) }
         func addVoiceReminder(title: String, time: DateComponents) {}
         func requestCallConfirmation(contactQuery: String?, callType: String?,
                                      requestedApp: String?,
@@ -169,6 +181,123 @@ final class CommandRouterKeywordIntentTests: XCTestCase {
                       "strict matches stay strict — no relaxed event")
     }
 
+    // MARK: - App launch: the fast path hands the catalog id to the
+    // launch seam the plugin calls
+
+    func testRelaxedAppLaunchAsksThroughTheLaunchSeam() {
+        let coordinator = MockCoordinator()
+        coordinator.appLaunchLine = "क्यामेरा खोल्ने हो?"
+        let (router, bus) = makeRouter(coordinator)
+        let utterance = "क्यामेरा खोल"
+
+        let result = router.route(transcript: utterance)
+
+        XCTAssertEqual(coordinator.appLaunchRequests.map(\.appID), ["camera"],
+                       "the Nepali word the elder said resolves to the catalog id")
+        XCTAssertEqual(coordinator.appLaunchRequests.map(\.confidence), [nil],
+                       "a keyword match carries no model confidence")
+        XCTAssertEqual(result, .unrecognised(transcript: utterance),
+                       "the launch stage hands off and ends the turn — the coordinator speaks")
+        let events = keywordMatchEvents(bus)
+        XCTAssertEqual(events.count, 1, "a relaxed claim must be observable exactly once")
+        XCTAssertEqual(events.first?.metadata["domain"], "appLaunch")
+        XCTAssertEqual(events.first?.metadata["matched_keys"], "क्यामेरा,खोल")
+    }
+
+    func testEnglishLaunchPhraseResolvesToTheCatalogID() {
+        let coordinator = MockCoordinator()
+        coordinator.appLaunchLine = "Open WhatsApp?"
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "open whatsapp")
+
+        XCTAssertEqual(coordinator.appLaunchRequests.map(\.appID), ["whatsapp"])
+    }
+
+    /// [F8] The apps whose ONLY route is the deterministic table — the
+    /// on-device grammar cannot emit the plugin action, so before these
+    /// rules "म्याग्निफायर खोल" ended the turn with nothing. The stage
+    /// hands the catalog id to the SAME launch seam the plugin calls, so
+    /// they get the confirmation question, the pending state and the one
+    /// launch executor for free.
+    func testTheOnDeviceGapAppsReachTheLaunchSeam() {
+        for (utterance, appID) in [("म्याग्निफायर खोल", "magnifier"),
+                                   ("magnifier khol", "magnifier"),
+                                   ("स्वास्थ्य खोल", "health"),
+                                   ("open health", "health"),
+                                   ("इन्स्टाग्राम खोल", "instagram"),
+                                   ("open instagram", "instagram"),
+                                   ("पात्रो खोल", "calendar"),
+                                   ("open calendar", "calendar")] {
+            let coordinator = MockCoordinator()
+            let (router, bus) = makeRouter(coordinator)
+
+            _ = router.route(transcript: utterance)
+
+            XCTAssertEqual(coordinator.appLaunchRequests.map(\.appID), [appID],
+                           "\(utterance) must reach the launch seam as \(appID)")
+            XCTAssertEqual(keywordMatchEvents(bus).first?.metadata["domain"], "appLaunch")
+        }
+    }
+
+    func testCapturePhraseResolvesToTheCameraNotPhotos() {
+        let coordinator = MockCoordinator()
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "फोटो खिच्न")
+
+        XCTAssertEqual(coordinator.appLaunchRequests.map(\.appID), ["camera"],
+                       "फोटो खिच्न shoots a photo — the camera entry, never Photos")
+    }
+
+    /// The coordinator's line is what the elder hears — the question
+    /// when the launch can still succeed, the honest not-installed line
+    /// when it cannot. The keyword stage never recomposes it, and cards
+    /// it exactly like the plugin path's reply (so the question stays
+    /// visible whichever path resolved the utterance).
+    func testTheLaunchSeamsLineIsWhatIsCarded() {
+        let coordinator = MockCoordinator()
+        coordinator.appLaunchLine = "ह्वाट्सएप खोल्ने हो?"
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "whatsapp खोल")
+
+        XCTAssertEqual(coordinator.appLaunchRequests.map(\.appID), ["whatsapp"])
+        XCTAssertEqual(coordinator.genericReplies, ["ह्वाट्सएप खोल्ने हो?"],
+                       "the coordinator's own line is what lands on the card — the stage composes none of its own")
+    }
+
+    /// A bare weather word stays the topic table's QUESTION — the
+    /// launcher rules require an open verb, so "मौसम" alone must never
+    /// turn a weather question into an app launch.
+    func testBareWeatherWordIsNotALaunch() {
+        let coordinator = MockCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "मौसम")
+
+        XCTAssertTrue(coordinator.appLaunchRequests.isEmpty,
+                      "a bare मौसम is a weather question, never a launch")
+        XCTAssertTrue(keywordMatchEvents(bus).isEmpty)
+        XCTAssertTrue(bus.emitted.contains {
+            $0.eventType == "topic_pre_answer" && $0.metadata["topic"] == "weather"
+        }, "the topic table owns it, exactly as before")
+    }
+
+    /// The whole lexeme or nothing: a fused/longer word never resolves
+    /// through a shorter app word, and the utterance falls through to
+    /// the interpreter ladder untouched (the Devanagari
+    /// Character-cluster regression).
+    func testFusedAppWordNeverLaunches() {
+        let coordinator = MockCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "क्यामेरामा खोल")
+
+        XCTAssertTrue(coordinator.appLaunchRequests.isEmpty)
+        XCTAssertTrue(keywordMatchEvents(bus).isEmpty)
+    }
+
     // MARK: - Safety pins: strict stages always win over the relaxed table
 
     func testEmergencyWinsOverRelaxedKeywordSets() {
@@ -184,6 +313,40 @@ final class CommandRouterKeywordIntentTests: XCTestCase {
         XCTAssertTrue(bus.emitted.contains { $0.eventType == "command_emergency_keyword" })
         XCTAssertTrue(keywordMatchEvents(bus).isEmpty,
                       "the safety net claims the utterance before the relaxed table is consulted")
+    }
+
+    func testEmergencyWinsOverRelaxedLauncherKeywords() {
+        let coordinator = MockCoordinator()
+        let (router, bus) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "help me open whatsapp")
+
+        XCTAssertEqual(result, .emergencyTriggered)
+        XCTAssertTrue(coordinator.appLaunchRequests.isEmpty,
+                      "the safety net claims the utterance before the relaxed table is consulted")
+        XCTAssertTrue(keywordMatchEvents(bus).isEmpty)
+    }
+
+    func testMedicationAckWinsOverRelaxedLauncherKeywords() {
+        let coordinator = MockCoordinator()
+        let (router, _) = makeRouter(coordinator)
+
+        let result = router.route(transcript: "मैले औषधि खाएँ, क्यामेरा खोल")
+
+        XCTAssertEqual(result, .acknowledgedMedication)
+        XCTAssertTrue(coordinator.appLaunchRequests.isEmpty,
+                      "the med-ack safety net runs before the relaxed table, always")
+    }
+
+    func testConfirmationFlowWinsOverRelaxedLauncherKeywords() {
+        let coordinator = MockCoordinator()
+        coordinator.isAwaitingConfirmation = true
+        let (router, _) = makeRouter(coordinator)
+
+        _ = router.route(transcript: "क्यामेरा खोल")
+
+        XCTAssertTrue(coordinator.appLaunchRequests.isEmpty,
+                      "an outstanding confirmation owns the next transcript, whatever keywords it carries")
     }
 
     func testMedicationAckWinsOverRelaxedNewsKeywords() {

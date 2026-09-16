@@ -54,6 +54,9 @@
 	</array>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
+		<string>App-Prefs</string>
+		<string>app-prefs</string>
+		<string>apple-magnifier</string>
 		<string>calshow</string>
 		<string>comgooglemaps</string>
 		<string>facetime</string>
@@ -66,11 +69,14 @@
 		<string>instagram</string>
 		<string>maps</string>
 		<string>message</string>
+		<string>photos-redirect</string>
 		<string>sms</string>
+		<string>x-apple-health</string>
 		<string>x-apple-reminderkit</string>
 		<string>tel</string>
 		<string>tg</string>
 		<string>viber</string>
+		<string>weather</string>
 		<string>whatsapp</string>
 		<string>youtube</string>
 		<string>zoomus</string>
@@ -90,7 +96,9 @@
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Reminders you keep in the Reminders app can be read so they appear here with a reminder. Nothing is ever written to them. The app works fully even if you say no.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>The camera is used to verify medication intake, and to photograph appliances, remotes, or screens when you ask for help using them. Appliance photos are sent to the assistant's cloud service so it can guide you.</string>
+	<string>The camera is used to verify medication intake, to photograph appliances, remotes, or screens when you ask for help using them, and to take an ordinary photo when you ask for one — that photo is then saved to your photo library. Appliance photos are sent to the assistant's cloud service so it can guide you.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Photos you take with the assistant are saved to your photo library so you can keep them. The assistant can only ADD photos — it never looks at or changes the photos you already have. The app works fully even if you say no.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Searching from the phone screen can call anyone in your phone book — including people added by WhatsApp, Messenger and other apps. The app works fully even if you say no.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

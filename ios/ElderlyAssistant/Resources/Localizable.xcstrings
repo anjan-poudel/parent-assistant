@@ -625,6 +625,23 @@
         }
       }
     },
+    "app.name.camera": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Camera"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्यामेरा"
+          }
+        }
+      }
+    },
     "app.name.chrome": {
       "extractionState": "manual",
       "localizations": {
@@ -710,6 +727,23 @@
         }
       }
     },
+    "app.name.health": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Health"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "स्वास्थ्य"
+          }
+        }
+      }
+    },
     "app.name.imo": {
       "extractionState": "manual",
       "localizations": {
@@ -740,6 +774,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "इन्स्टाग्राम"
+          }
+        }
+      }
+    },
+    "app.name.magnifier": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Magnifier"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म्याग्निफायर"
           }
         }
       }
@@ -829,6 +880,108 @@
         }
       }
     },
+    "app.name.photos": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photos"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो"
+          }
+        }
+      }
+    },
+    "app.name.settings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सेटिङ"
+          }
+        }
+      }
+    },
+    "app.name.settingsaccessibility": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Accessibility Settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पहुँचयोग्यता सेटिङ"
+          }
+        }
+      }
+    },
+    "app.name.settingsbluetooth": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bluetooth Settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ब्लुटुथ सेटिङ"
+          }
+        }
+      }
+    },
+    "app.name.settingsdisplay": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Display Settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "डिस्प्ले सेटिङ"
+          }
+        }
+      }
+    },
+    "app.name.settingswifi": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wi-Fi Settings"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "वाइफाइ सेटिङ"
+          }
+        }
+      }
+    },
     "app.name.telegram": {
       "extractionState": "manual",
       "localizations": {
@@ -859,6 +1012,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "भाइबर"
+          }
+        }
+      }
+    },
+    "app.name.weather": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Weather"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मौसम"
           }
         }
       }
@@ -1420,6 +1590,244 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ खोल्दैछु।"
+          }
+        }
+      }
+    },
+    "apps.announce.openingWeb": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Opening %@ on the web."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ वेबमा खोल्दैछु।"
+          }
+        }
+      }
+    },
+    "apps.camera.cannotPresent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sorry, I can't open the camera right now. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस्, म अहिले क्यामेरा खोल्न सक्दिनँ। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "apps.camera.cancelled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Okay, I didn't take a photo."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हुन्छ, फोटो खिचिनँ।"
+          }
+        }
+      }
+    },
+    "apps.camera.permissionDenied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I don't have permission to use the camera. Please allow camera access in Settings."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मलाई क्यामेरा प्रयोग गर्ने अनुमति छैन। कृपया सेटिङमा क्यामेराको अनुमति दिनुहोस्।"
+          }
+        }
+      }
+    },
+    "apps.camera.photoSaved": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photo saved."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो सुरक्षित भयो।"
+          }
+        }
+      }
+    },
+    "apps.camera.saveFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sorry, I couldn't save the photo."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस्, फोटो सुरक्षित गर्न सकिनँ।"
+          }
+        }
+      }
+    },
+    "apps.camera.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This device has no camera I can open."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो यन्त्रमा खोल्न सकिने क्यामेरा छैन।"
+          }
+        }
+      }
+    },
+    "launcher.cancelled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Okay, I won't open it."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हुन्छ, खोल्दिनँ।"
+          }
+        }
+      }
+    },
+    "launcher.confirmOpen": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Should I open %@?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ खोल्ने हो?"
+          }
+        }
+      }
+    },
+    "launcher.confirmOpenWeb": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ is not installed. Should I open it on the web instead?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ स्थापित छैन। सट्टामा वेबमा खोल्ने हो?"
+          }
+        }
+      }
+    },
+    "launcher.noApp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Which app should I open?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कुन एप खोलूँ?"
+          }
+        }
+      }
+    },
+    "launcher.timeout": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time is up. I won't open it."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "समय सकियो, खोल्दिनँ।"
+          }
+        }
+      }
+    },
+    "launcher.unknownApp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I don't know an app called %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ भन्ने एप मलाई थाहा छैन।"
+          }
+        }
+      }
+    },
+    "plugin.appLauncher.name": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apps"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "एपहरू"
           }
         }
       }
@@ -17111,6 +17519,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "थ्रेसहोल्ड घटाउने"
+          }
+        }
+      }
+    },
+    "apps.camera.savePermissionDenied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't save photos yet. Please allow adding to your photos in Settings. I haven't taken a photo."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म अझै फोटो सुरक्षित गर्न सक्दिनँ। कृपया सेटिङमा फोटोमा थप्ने अनुमति दिनुहोस्। मैले फोटो खिचेको छैन।"
+          }
+        }
+      }
+    },
+    "apps.announce.openingSettings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't open that screen. Opening Settings."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यो स्क्रिन खोल्न सक्दिनँ। सेटिङ खोल्दैछु।"
+          }
+        }
+      }
+    },
+    "launcher.confirmOpenSettings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't open that exact screen. Should I open Settings instead?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यो ठ्याक्कै स्क्रिन खोल्न सक्दिनँ। सट्टामा सेटिङ खोल्ने हो?"
           }
         }
       }

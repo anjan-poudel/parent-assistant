@@ -1810,6 +1810,31 @@ final class AppCoordinator: ObservableObject {
         // router's deterministic YouTube stage — same `YouTubeTool`
         // behavior (shared config store + transport + opener seams).
         registry.register(YouTubePlugin(configStore: youtubeConfigStore))
+        // [APP-LAUNCHER] (2026-09-16) "क्यामेरा खोल" / "open WhatsApp":
+        // the plugin resolves the entity against the catalog and asks this
+        // coordinator to pend the launch — the confirmation machinery, the
+        // 45 s window and the open all live here, where the call and
+        // calendar-event confirmations already do (wired weak so the
+        // registry never keeps the coordinator alive).
+        //
+        // The hop is part of the seam's contract: the router dispatches
+        // plugins inside a `Task`, so `handle` — and this closure — can run
+        // off the main thread, while the pending launch, its @Published
+        // state and the session's confirmation window are all
+        // main-confined (every other `request…Confirmation` here is called
+        // synchronously from `route`, i.e. already on main). The line must
+        // come back synchronously, so this is a sync hop rather than an
+        // async one; `isMainThread` keeps it deadlock-free if the dispatch
+        // context ever changes.
+        registry.register(AppLauncherPlugin { [weak self] appID, confidence in
+            let requestOnMain = { [weak self] () -> String in
+                self?.requestAppLaunch(appID: appID, confidence: confidence)
+                    ?? L10n.str("router.pluginUnavailable",
+                                locale: self?.activeLocale ?? Locale(identifier: "ne-NP"))
+            }
+            return Thread.isMainThread ? requestOnMain()
+                                       : DispatchQueue.main.sync(execute: requestOnMain)
+        })
         return registry
     }
 
@@ -2304,9 +2329,49 @@ final class AppCoordinator: ObservableObject {
                 self.recordConfirmationTimeout()
                 self.pendingConfirmationEntryId = nil
                 self.pendingRephrase = nil
-                self.speak(key: "router.confirmationTimeout")
+                // [APP-LAUNCHER] (2026-09-16) An unanswered launch question
+                // is DISMISSED, never launched late (design §Error
+                // handling: "Confirmation timeout → auto-dismiss; never
+                // launch"). Clearing the pending launch here is what makes
+                // that true — a later "यो" would otherwise still find it
+                // pended once the session had returned to idle — and the
+                // timeout line says plainly that nothing was opened
+                // (the medication-flavored "I'll remind you again" would be
+                // a promise about an app launch that nobody keeps).
+                let pendedLaunchID = self.pendingAppLaunch?.appID
+                self.pendingAppLaunch = nil
+                // [APP-LAUNCHER F13] A launch question that expired is a
+                // terminal outcome like every other one, so it gets the
+                // same two treatments the tap paths get: an observability
+                // event (`launch_timeout`) and a card that says what
+                // happened. Before this, the timeout spoke a line and left
+                // the question card — "Should I open Camera?" — sitting on
+                // screen as if it were still pending, with no record on the
+                // bus that the question had ever been asked. The card is
+                // replaced rather than cleared because the elder must still
+                // be able to see WHAT was not opened after the speech has
+                // faded.
+                if let appID = pendedLaunchID {
+                    self.emitAppLaunch(eventType: Self.LaunchTimeout.eventType,
+                                       outcome: Self.LaunchTimeout.outcome(appID: appID))
+                    self.setOutcome(icon: Self.LaunchTimeout.icon,
+                                    text: L10n.str(Self.LaunchTimeout.speechKey,
+                                                   locale: self.activeLocale))
+                }
+                self.speak(key: pendedLaunchID != nil ? Self.LaunchTimeout.speechKey
+                                                      : "router.confirmationTimeout")
             }
         }
+
+        // [APP-LAUNCHER] (2026-09-16) The camera capture flow (T4): the
+        // system picker + the add-only photo write, plus the channel
+        // closures that put the flow's words on the same three surfaces
+        // every other reply uses (speech, the outcome card, the
+        // observability bus). Built here — the cost is three object
+        // allocations and no I/O — so the flow is ready before the first
+        // "क्यामेरा खोल"; the presenter resolves its host at presentation
+        // time, not now.
+        cameraCapture = makeCameraCaptureFlow()
 
         // All stored properties are initialised — push the restored
         // language into services that build user-facing strings.
@@ -5404,38 +5469,454 @@ self.noteTalkContractChanged()
         favoriteAppIDs.removeAll { $0 == app.id }
     }
 
-    /// Launches a quick-access app from the Home row / picker, with the
-    /// dual-channel honesty every open path holds: probe FIRST, and when
-    /// the app is gone (deleted after the row appeared) say so out loud
-    /// and show it on the outcome card — never a silent dead tap. One
+    /// Launches a quick-access app — the Home row / picker tile tap AND
+    /// the confirmed voice launch (`launcher.open`) share this ONE
+    /// executor, so the two paths can never drift apart in what they
+    /// probe, say, or claim.
+    ///
+    /// Dual-channel honesty as before: probe FIRST, and when the app is
+    /// gone (deleted after the row appeared) say so out loud and show it
+    /// on the outcome card — never a silent dead tap. An absent app that
+    /// HAS a web fallback (Facebook, Instagram, YouTube, WhatsApp — the
+    /// four the design gives one) opens its website and discloses the
+    /// swap; an absent app without one hears the honest not-installed
+    /// line rather than being sent to Safari on an unrelated page. One
     /// `app_launcher` event per attempt; the outcome names which surface
-    /// appeared (`<id>:opened`) or why nothing did (`<id>:notInstalled`).
+    /// appeared (`<id>:opened`, `<id>:openedWebFallback`) or why nothing
+    /// did (`<id>:notInstalled`, `<id>:cameraUnavailable`).
+    ///
+    /// The camera entry never reaches the URL branch: it has no URL
+    /// (`AppLauncher.Kind.camera`) and is answered by the in-app capture
+    /// flow, which is why a `.camera` tile is no longer a tap that
+    /// announces "Opening Camera" over a screen that never appears.
     func performAppLaunch(_ app: AppLauncher.App) {
-        let locale = activeLocale
-        let name = L10n.str(app.nameKey, locale: locale)
-        guard isAppInstalled(app) else {
-            let text = L10n.fmt("apps.announce.notInstalled", locale: locale, name)
-            setOutcome(icon: "exclamationmark.triangle.fill", text: text)
-            speak(text: text)
-            emitAppLaunch(outcome: "\(app.id):notInstalled")
-            return
+        // [APP-LAUNCHER F6] A tap IS an answer. Resolving the outstanding
+        // question first is what keeps the tile from racing the 45 s
+        // window it pends: the question is cleared (and its window closed)
+        // before the app opens, so the elder can never hear "Time is up, I
+        // won't open it" over an app they are already looking at.
+        resolveLaunchQuestion(openedBy: app.id)
+        switch app.kind {
+        case .camera:
+            presentCameraCapture(app)
+        case .url:
+            launchURLApp(app)
         }
-        appLauncher.open(app)
-        let text = L10n.fmt("apps.announce.opened", locale: locale, name)
-        setOutcome(icon: app.systemImage, text: text)
-        speak(text: text)
-        emitAppLaunch(outcome: "\(app.id):opened")
     }
 
-    private func emitAppLaunch(outcome: String) {
+    /// The `.url` half of the executor: probe, open, and speak the surface
+    /// that actually appeared.
+    private func launchURLApp(_ app: AppLauncher.App) {
+        let locale = activeLocale
+        let name = L10n.str(app.nameKey, locale: locale)
+        // [F9] The probe, the web fallback and the Settings fallback are
+        // resolved in ONE place (`AppLauncher.launchPlan`) so the tile, the
+        // voice request and this executor can never decide differently
+        // about what a launch opens.
+        switch appLauncher.launchPlan(for: app) {
+        case .app:
+            appLauncher.open(app)
+            let text = L10n.fmt("apps.announce.opened", locale: locale, name)
+            setOutcome(icon: app.systemImage, text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):opened")
+        case .webFallback:
+            // The web fallback is a REAL surface (Safari, or the app's own
+            // universal link when it turns out to be installed after all),
+            // disclosed out loud — never a silent substitution.
+            guard appLauncher.openWebFallback(app) else {
+                return announceNotInstalled(app, name: name, locale: locale)
+            }
+            let text = L10n.fmt("apps.announce.openingWeb", locale: locale, name)
+            setOutcome(icon: app.systemImage, text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):openedWebFallback")
+        case .settingsFallback:
+            // [F9] The pane's private App-Prefs URL did not answer; the
+            // public Settings deep link always does. Same disclosure rule
+            // as the web fallback — the elder is told which surface
+            // actually appeared, and the outcome names it too.
+            guard appLauncher.openSettingsFallback() else {
+                return announceNotInstalled(app, name: name, locale: locale)
+            }
+            let text = L10n.str("apps.announce.openingSettings", locale: locale)
+            setOutcome(icon: app.systemImage, text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):openedSettingsFallback")
+        case .unavailable:
+            announceNotInstalled(app, name: name, locale: locale)
+        case .camera:
+            // `performAppLaunch` routes `.camera` before it reaches this
+            // executor (see its `switch`); a caller that reaches it anyway
+            // lands on the honest capture path rather than a silent no-op.
+            presentCameraCapture(app)
+        }
+    }
+
+    /// The honest absent-app line, spoken and carded (the same surface
+    /// every other failed launch uses) — shared by the three plans that
+    /// can end with nothing opened.
+    private func announceNotInstalled(_ app: AppLauncher.App, name: String,
+                                      locale: Locale) {
+        let text = L10n.fmt("apps.announce.notInstalled", locale: locale, name)
+        setOutcome(icon: "exclamationmark.triangle.fill", text: text)
+        speak(text: text)
+        emitAppLaunch(outcome: "\(app.id):notInstalled")
+    }
+
+    /// The camera half of the executor (launcher plan T4 owns the system
+    /// picker behind this seam). Everything the capture flow says — the
+    /// saved / save-failed / no-camera / permission-denied lines — is
+    /// spoken by the flow through these channels, so the coordinator adds
+    /// no claim of its own: an unset seam means no presenter is installed
+    /// and the honest answer is that nothing can be captured here, never
+    /// an "Opening Camera" over a screen that does not appear.
+    private func presentCameraCapture(_ app: AppLauncher.App) {
+        guard let cameraCapture else {
+            let text = L10n.str("apps.camera.unavailable", locale: activeLocale)
+            setOutcome(icon: "exclamationmark.triangle.fill", text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):cameraUnavailable")
+            return
+        }
+        cameraCapture.start()
+    }
+
+    /// The camera-capture seam: presenter + photo writer + the flow that
+    /// speaks the outcome. A stored, assignable property so a test can put
+    /// a scripted flow in its place; production value is built once in
+    /// `init` (see `makeCameraCaptureFlow`). Nil would mean no presenter is
+    /// installed: see `presentCameraCapture`.
+    var cameraCapture: CameraCaptureFlow?
+
+    /// Builds the production capture flow (T4): the system picker
+    /// (`PhotoCameraPresenter`) and the add-only library write
+    /// (`PhotosLibraryPhotoSaver`) behind the two injectable seams, with
+    /// this coordinator's own speech / outcome-card / bus channels.
+    ///
+    /// Deliberately cheap and I/O-free: constructing it resolves no window
+    /// and asks no permission (the presenter probes both at presentation
+    /// time), so it is safe in `init` before the UI exists.
+    private func makeCameraCaptureFlow() -> CameraCaptureFlow {
+        CameraCaptureFlow(
+            presenter: PhotoCameraPresenter(),
+            saver: PhotosLibraryPhotoSaver(),
+            locale: { [weak self] in
+                self?.activeLocale ?? Locale(identifier: "ne-NP")
+            },
+            channels: CameraCaptureFlow.Channels(
+                speak: { [weak self] text in
+                    self?.speak(text: text)
+                },
+                announce: { [weak self] icon, text in
+                    self?.setOutcome(icon: icon, text: text)
+                },
+                emit: { [weak self] eventType, outcome in
+                    self?.emitAppLaunch(eventType: eventType, outcome: outcome)
+                }
+            )
+        )
+    }
+
+    private func emitAppLaunch(eventType: String = "launch", outcome: String) {
         observabilityBus.emit(ObservabilityEvent(
             component: "app_launcher",
-            eventType: "launch",
+            eventType: eventType,
             durationMs: nil,
             outcome: outcome,
             errorCode: nil,
             metadata: [:]  // catalog app id only — no contact identifiers (C9)
         ))
+    }
+
+    // MARK: - Voice app launcher (launcher.open plugin, 2026-09-16)
+    //
+    // The confirmation half of the voice launch (design D3: confirm-first
+    // before EVERY external launch). It reuses the router's existing
+    // confirmation-follow-up machinery rather than adding a parallel one:
+    // `requestAppLaunch` pends a launch and returns the question,
+    // `isAwaitingAppLaunchConfirmation` widens `CommandRouter.route`'s
+    // yes/no path, `handleConfirmationResponse` executes or cancels, and
+    // the session's existing 45 s window auto-dismisses (below, in
+    // `voiceSession.onConfirmationTimeout`) — the same four seams the
+    // call / calendar-event / navigation confirmations ride.
+
+    /// [APP-LAUNCHER F1] Who owns the elder's NEXT yes/no when a launch
+    /// question and a medication dose-challenge are both outstanding.
+    ///
+    /// The two flows share one confirmation window
+    /// (`VoiceSessionState.awaitingConfirmation`) and one router yes/no
+    /// parse, so exactly one of them may own the answer. The medication
+    /// challenge wins, always. It is the dementia-aware FR-D01
+    /// double-dose gate (spec §3.3), and the whole point of the window is
+    /// that a "हो" lands in `medicationScheduler.acknowledgeWithConfirmation`
+    /// where the double-dose check can see it; a launch, by contrast, can
+    /// simply be asked again. The failure mode this prevents is the
+    /// dangerous one: a dose question answered yes while the launch block
+    /// returns early means the dose is never recorded and the elder is
+    /// told (by the launch's own line) that something was opened.
+    ///
+    /// Pure policy so the rule is testable without an AppCoordinator —
+    /// the same shape as the other extracted helper types in this file.
+    enum ConfirmationArbitration {
+        enum Owner: Equatable {
+            case appLaunch
+            case medication
+            case none
+        }
+
+        static func owner(pendingAppLaunch: String?,
+                          hasMedicationChallenge: Bool) -> Owner {
+            if hasMedicationChallenge { return .medication }
+            return pendingAppLaunch == nil ? .none : .appLaunch
+        }
+
+        /// [APP-LAUNCHER F6] What a launch performed by a TAP means for the
+        /// question still pended. The same app is the question being
+        /// answered yes (`.confirmed`); a different app is that question
+        /// being superseded, which is the unanswered verdict the flywheel
+        /// already understands (`.superseded` → recorded as a timeout).
+        enum TileResolution: Equatable {
+            case confirmed
+            case superseded
+        }
+
+        static func tileResolution(pending: String, opened: String) -> TileResolution {
+            pending == opened ? .confirmed : .superseded
+        }
+    }
+
+    /// [APP-LAUNCHER F13] The launch question's expiry, named in one place.
+    ///
+    /// A launch question that runs out its 45 s is a terminal outcome like
+    /// the yes and the no, so it gets the same three treatments they get:
+    /// a spoken line, a card that says what happened, and one
+    /// `app_launcher` event. It used to get only the first — the question
+    /// card ("Should I open Camera?") stayed on screen as if still
+    /// pending, and the bus carried no record that a question had been
+    /// asked and dropped. The constants live together so the handler, the
+    /// event and the test can never drift apart.
+    enum LaunchTimeout {
+        static let eventType = "launch_timeout"
+        static let icon = "clock.badge.exclamationmark"
+        static let speechKey = "launcher.timeout"
+        static func outcome(appID: String) -> String { "\(appID):timeout" }
+    }
+
+    /// A launch pended for the elder's spoken yes/no. Mirrors
+    /// `PendingCallAction`: the pending state, the flywheel identity and
+    /// the question→verdict clock all live together, so a verdict can
+    /// never be recorded against a launch that was never asked about.
+    struct PendingAppLaunch {
+        let appID: String
+        /// The interpreted command's confidence, when the launch came from
+        /// the model (nil for the keyword/plugin seams that don't carry
+        /// one) — the flywheel's accept-band input.
+        let confidence: Double?
+        /// [INTENTLOG-CAPTURE] When the confirmation question was asked —
+        /// the flywheel's latency start (question → verdict).
+        let requestedAt: Date = Date()
+
+        /// [APP-LAUNCHER F10] Which routing stage asked the question — the
+        /// flywheel's PATH label, and the reason this is derived here
+        /// rather than defaulted at the recording site.
+        ///
+        /// `IntentLogStore.Capture`'s path defaults to "model", which is
+        /// right for everything the interpreter or a plugin produced but
+        /// WRONG for the deterministic keyword fast path: a
+        /// `KeywordIntentRule` hit never saw a model, and labelling it
+        /// "model" teaches the accept-band statistics that the model
+        /// proposed launches it never saw. That stage is exactly the one
+        /// that carries no confidence (`CommandRouter` passes
+        /// `confidence: nil` from its `.appLaunch` stage; every
+        /// interpreter/plugin command has one by construction), so nil IS
+        /// the keyword signature.
+        var capturePath: String { confidence == nil ? "keyword" : "model" }
+
+        /// This launch's flywheel identity. The slot is the catalog app id
+        /// — a public catalog key, never user content (C9).
+        var capture: IntentLogStore.Capture {
+            IntentLogStore.Capture(action: "launcher.open",
+                                   slots: ["app": appID],
+                                   confidence: confidence,
+                                   requestedAt: requestedAt)
+        }
+    }
+
+    @Published private(set) var pendingAppLaunch: PendingAppLaunch?
+
+    /// Router-side twin of `pendingAppLaunch != nil` — the router skips its
+    /// generic medication-flavored yes/no speech while a launch is pended
+    /// (see `VoiceCommandCoordinating.isAwaitingAppLaunchConfirmation`)
+    /// and reports `.appLaunchConfirmed` for the yes.
+    ///
+    /// [APP-LAUNCHER F1] …but never while a dose challenge is pended: the
+    /// launch does not own that answer (see `ConfirmationArbitration`), so
+    /// the router must not treat the utterance as a launch confirmation
+    /// NOR suppress the medication line.
+    var isAwaitingAppLaunchConfirmation: Bool {
+        ConfirmationArbitration.owner(
+            pendingAppLaunch: pendingAppLaunch?.appID,
+            hasMedicationChallenge: pendingConfirmationEntryId != nil) == .appLaunch
+    }
+
+    /// Pends a catalog app for the elder's spoken yes/no and returns the
+    /// line to speak — the `app_launcher` plugin's single seam (voice) and
+    /// the API a deterministic keyword stage can call the same way.
+    ///
+    /// Two refusals to ASK, both deliberate (the call path's
+    /// messenger-no-handle gate, same rationale): a launch that can only
+    /// fail must never be turned into a yes/no question. An app that is not
+    /// installed AND has no web fallback is answered with the honest
+    /// not-installed line, nothing pended. An app that is not installed but
+    /// HAS a web fallback IS asked about — the launch can still succeed
+    /// (Safari) — with the swap disclosed in the question itself, so the
+    /// "yes" the elder gives is a yes to what actually happens.
+    ///
+    /// The camera entry is always asked about: it needs no installed app
+    /// (the capture is in-process), and whether the DEVICE can capture is
+    /// answered after the yes, where the failure is.
+    func requestAppLaunch(appID: String, confidence: Double?) -> String {
+        let locale = activeLocale
+        guard let app = AppLauncher.app(for: appID) else {
+            // No catalog entry: nothing to ask about, and the caller speaks
+            // this honest line instead (the plugin's own unknown-app case
+            // is caught before it gets here — this is the same line, from
+            // the layer that knows the catalog).
+            emitAppLaunch(eventType: "launch_request", outcome: "unknownApp")
+            return L10n.fmt("launcher.unknownApp", locale: locale, appID)
+        }
+        let name = L10n.str(app.nameKey, locale: locale)
+        // [F9] Same single resolution the executor uses: what this launch
+        // can actually open decides which question is asked — or whether
+        // one is asked at all.
+        switch appLauncher.launchPlan(for: app) {
+        case .app, .camera:
+            pendAppLaunch(appID: app.id, confidence: confidence)
+            emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):pending")
+            return L10n.fmt("launcher.confirmOpen", locale: locale, name)
+        case .webFallback:
+            pendAppLaunch(appID: app.id, confidence: confidence)
+            emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):webFallbackPending")
+            return L10n.fmt("launcher.confirmOpenWeb", locale: locale, name)
+        case .settingsFallback:
+            // [F9] A pane whose private App-Prefs URL did not answer is
+            // still launchable — the public Settings deep link opens the
+            // Settings app. The swap is disclosed in the question itself,
+            // so the elder's "yes" is a yes to what actually happens (the
+            // same contract as the web-fallback question above). The line
+            // names no pane: for the Settings ROOT entry the fallback is
+            // the same screen, and "I can't open that exact screen" is
+            // true in every case.
+            pendAppLaunch(appID: app.id, confidence: confidence)
+            emitAppLaunch(eventType: "launch_request",
+                          outcome: "\(app.id):settingsFallbackPending")
+            return L10n.str("launcher.confirmOpenSettings", locale: locale)
+        case .unavailable:
+            // A launch that can only fail is never turned into a yes/no
+            // question: the honest not-installed line, nothing pended.
+            emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):notInstalled")
+            return L10n.fmt("apps.announce.notInstalled", locale: locale, name)
+        }
+    }
+
+    /// Pends the launch and arms the session's existing confirmation
+    /// window (the 45 s budget in `VoiceSessionStateMachine`) — nothing is
+    /// opened until the elder says yes.
+    ///
+    /// [APP-LAUNCHER F14] The window is opened in the SAME breath as the
+    /// pend (`openConfirmationWindow`), not by a bare `transition(to:)`
+    /// that could no-op: a launch question may arrive while the session
+    /// sits in a state the transition table does not let reach
+    /// `.awaitingConfirmation` directly (`.error` after a pipeline
+    /// failure, `.stopped` before the pipeline is primed), and a pend with
+    /// no window is a pend with no timer and no clearer — the question
+    /// would sit on screen forever, answered only by chance.
+    private func pendAppLaunch(appID: String, confidence: Double?) {
+        pendingAppLaunch = PendingAppLaunch(appID: appID, confidence: confidence)
+        openConfirmationWindow()
+    }
+
+    /// [APP-LAUNCHER F14] Guarantees the confirmation window is open —
+    /// the session machine bridges through `.idle` when the current state
+    /// cannot reach `.awaitingConfirmation` directly, and the machine
+    /// reports whether it got there. Main-queue confinement is preserved
+    /// by the same hop the callers used before; when the caller is already
+    /// on main (the usual case — the router and the tile both are) the
+    /// window opens synchronously, so there is no instant in which the
+    /// caller has pended work but no timer exists for it.
+    private func openConfirmationWindow() {
+        if Thread.isMainThread {
+            voiceSession.openConfirmationWindow()
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.voiceSession.openConfirmationWindow()
+            }
+        }
+    }
+
+    /// [APP-LAUNCHER F6] A launch performed OUTSIDE the spoken yes/no —
+    /// the Home quick-access tile, or the executor reached from any other
+    /// tap — resolves the launch question that is still on screen.
+    ///
+    /// Without this the question stayed pended over a live camera with
+    /// its 45 s window still armed: the elder tapped the tile, the app
+    /// opened, and 45 seconds later the assistant announced "Time is up, I
+    /// won't open it" over the app they were looking at. The tile IS an
+    /// answer, and it is a CONFIRMED one when it names the same app (the
+    /// question was "should I open X?" and X is what opened); a tile for a
+    /// DIFFERENT app supersedes the question the same way a new question
+    /// does, and is recorded as the unanswered verdict it is.
+    ///
+    /// The window is closed with the pend (when no other flow is riding on
+    /// it) so the timer cannot fire at all: `VoiceSessionStateMachine` only
+    /// reports an expiry for a window that is still open, so a closed one
+    /// stays silent even if its callback was already in flight.
+    private func resolveLaunchQuestion(openedBy appID: String) {
+        guard let launch = pendingAppLaunch else { return }
+        pendingAppLaunch = nil
+        switch ConfirmationArbitration.tileResolution(pending: launch.appID,
+                                                      opened: appID) {
+        case .confirmed:
+            appendCapture(launch.capture, .confirmed, path: launch.capturePath)
+            emitAppLaunch(eventType: "launch_confirmed",
+                          outcome: "\(launch.appID):confirmedByTile")
+        case .superseded:
+            appendCapture(launch.capture, .timeout, path: launch.capturePath)
+            emitAppLaunch(eventType: "launch_superseded",
+                          outcome: "\(launch.appID):supersededByTile")
+        }
+        // Close the window only when nothing else pended is riding on it —
+        // closing it under a medication challenge would leave that pend
+        // with no timer (the F14 failure mode in mirror image).
+        if !isAwaitingConfirmation, voiceSession.state == .awaitingConfirmation {
+            voiceSession.transition(to: .idle)
+        }
+    }
+
+    /// Confirmed: resolve the pended id through the catalog and hand it to
+    /// the SAME executor the Home tile uses. A catalog id that no longer
+    /// resolves (catalog changed between the question and the yes) speaks
+    /// the honest unknown-app line rather than opening a guess.
+    private func executePendingAppLaunch(_ launch: PendingAppLaunch) {
+        guard let app = AppLauncher.app(for: launch.appID) else {
+            // The catalog changed between the question and the yes: say so
+            // honestly, and record NOTHING — a confirmed verdict that
+            // could not be executed teaches the flywheel nothing (the same
+            // rule the calendar write and the call path hold for a failed
+            // open).
+            replyHonestly(key: "launcher.noApp")
+            return
+        }
+        performAppLaunch(app)
+        // Recorded on the launch, exactly like the call path's confirmed
+        // execution: by construction every pended launch was launchable
+        // when it was asked about (installed, or carrying a web fallback,
+        // or the in-process camera), so the elder's yes is the verdict the
+        // executor acts on. A device that refuses the CAMERA after the yes
+        // is a separate, honestly-reported outcome (its own
+        // `camera_capture_*` event) — the interpretation was still right.
+        appendCapture(launch.capture, .confirmed, path: launch.capturePath)
     }
 
     // MARK: - Phone-leaf contact-list launches (contact-leaf-launch task,
@@ -7735,11 +8216,31 @@ self.noteTalkContractChanged()
         guard let prompt = medicationScheduler.startConfirmationChallenge(for: entryId) else {
             return nil
         }
+        // [APP-LAUNCHER F1] The dose challenge takes the window — and the
+        // question it displaces is dropped BEFORE the challenge is armed,
+        // so the two can never be pended at once (the invariant
+        // `ConfirmationArbitration.owner` encodes).
+        dropLaunchSupersededByMedicationChallenge()
         DispatchQueue.main.async { [weak self] in
             self?.pendingConfirmationEntryId = entryId
-            self?.voiceSession.transition(to: .awaitingConfirmation)
+            self?.openConfirmationWindow()
         }
         return prompt
+    }
+
+    /// [APP-LAUNCHER F1] Drops a pended launch because a dose challenge is
+    /// taking the confirmation window. The launch is recorded as the
+    /// unanswered verdict it now is (`timeout` — the question expired
+    /// without an answer) and announced on the bus; nothing is opened. The
+    /// alternative — leaving it pended — is the bug this fixes: the next
+    /// "हो" would then be spent on the launch, and the FR-D03 double-dose
+    /// gate would never run on a dose the elder had just been asked about.
+    private func dropLaunchSupersededByMedicationChallenge() {
+        guard let launch = pendingAppLaunch else { return }
+        pendingAppLaunch = nil
+        appendCapture(launch.capture, .timeout, path: launch.capturePath)
+        emitAppLaunch(eventType: "launch_superseded",
+                      outcome: "\(launch.appID):supersededByMedicationChallenge")
     }
 
     // MARK: - [INTENTLOG-CAPTURE] Flywheel capture (T-054 precursor)
@@ -7767,6 +8268,8 @@ self.noteTalkContractChanged()
             appendCapture(action.capture, .timeout)
         } else if let event = pendingCalendarEvent {
             appendCapture(event.capture, .timeout)
+        } else if let launch = pendingAppLaunch {
+            appendCapture(launch.capture, .timeout)
         }
     }
 
@@ -7853,7 +8356,44 @@ self.noteTalkContractChanged()
             }
             return
         }
+        // App-launch confirmations (voice app launcher, 2026-09-16): the
+        // same additive shape as the call and calendar-event blocks above
+        // — checked and returned early, so the medication path below stays
+        // untouched for every confirmation EXCEPT a simultaneous dose
+        // challenge, which outranks the launch (F1). A YES hands the pended app to the shared launch
+        // executor (which speaks the surface that actually appeared); a NO
+        // speaks the honest cancellation, because an elder who answers
+        // "होइन" must hear that they were heard. Nothing is opened on a no.
+        //
+        // [APP-LAUNCHER F1] ONLY when the launch owns this answer. A
+        // medication dose-challenge that is pended at the same time takes
+        // precedence (`ConfirmationArbitration`), so the block falls
+        // through to the medication path below — which is where the FR-D03
+        // double-dose check lives. This early return used to swallow it:
+        // the launch was answered, the launch was opened, and the dose the
+        // elder had just confirmed was never recorded.
+        let confirmationOwner = ConfirmationArbitration.owner(
+            pendingAppLaunch: pendingAppLaunch?.appID,
+            hasMedicationChallenge: pendingConfirmationEntryId != nil)
+        if confirmationOwner == .appLaunch, let launch = pendingAppLaunch {
+            pendingAppLaunch = nil
+            if case .yes = response {
+                emitAppLaunch(eventType: "launch_confirmed", outcome: "\(launch.appID):confirmed")
+                executePendingAppLaunch(launch)
+            } else {
+                // [INTENTLOG-CAPTURE] Same negative-half capture as the
+                // call path above — a declined launch is flywheel signal.
+                appendCapture(launch.capture, .denied, path: launch.capturePath)
+                emitAppLaunch(eventType: "launch_cancelled", outcome: "\(launch.appID):cancelled")
+                speak(text: L10n.str("launcher.cancelled", locale: activeLocale))
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.voiceSession.transition(to: .idle)
+            }
+            return
+        }
         guard let entryId = pendingConfirmationEntryId else { return }
+
         _ = medicationScheduler.acknowledgeWithConfirmation(
             entryId: entryId,
             at: Date(),
@@ -7885,6 +8425,7 @@ self.noteTalkContractChanged()
         pendingConfirmationEntryId != nil || pendingCallAction != nil || pendingRephrase != nil
             || pendingCalendarEvent != nil
             || !pendingNavigationWalk.isEmpty
+            || pendingAppLaunch != nil
     }
 
     /// Used by `CommandRouter` to identify what "I took my medication" refers
