@@ -672,10 +672,9 @@ final class CommandRouterTests: XCTestCase {
         coordinator.pendingReminderId = reminderId
         coordinator.isAwaitingConfirmation = true
         coordinator.isAwaitingAppLaunchConfirmation = true
-        let speaker = MockSpeaker()
         let router = CommandRouter(coordinator: coordinator,
                                    observabilityBus: MockObservabilityBus(),
-                                   speaker: speaker)
+                                   speaker: MockSpeaker())
 
         let result = router.route(transcript: "औषधि खाएँ")
 
@@ -684,7 +683,16 @@ final class CommandRouterTests: XCTestCase {
                        "the FR-D01 challenge is issued for the dose")
         XCTAssertTrue(coordinator.confirmationResponses.isEmpty,
                       "the utterance is not a yes/no answer to the launch question")
-        XCTAssertEqual(speaker.utterances.map(\.text), [coordinator.confirmationPrompt ?? ""],
+        // The spoken assertion reads `assistantSpoken`, NOT
+        // `speaker.utterances`: `speak(text:)` commits the line through
+        // `noteAssistantSpoke` synchronously but hands it to the speaker
+        // inside a Task, so `utterances` is recorded asynchronously (the
+        // mock's own doc, and the 2026-09-16 18:29 full-target run where
+        // this assertion lost the race and saw an empty list) — the
+        // synchronous record is the line the router actually committed to
+        // speech. Exactly ONE line: the dose challenge, never the launch
+        // question.
+        XCTAssertEqual(coordinator.assistantSpoken, [coordinator.confirmationPrompt ?? ""],
                        "the dose challenge is what the elder hears")
     }
 
