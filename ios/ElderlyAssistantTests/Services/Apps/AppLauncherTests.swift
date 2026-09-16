@@ -591,6 +591,109 @@ final class AppLauncherTests: XCTestCase {
         XCTAssertLessThanOrEqual(declared.count, 50,
                                  "iOS hard-caps query schemes at 50 — headroom must stay")
     }
+
+    // MARK: - Confirmation arbitration (voice app launcher code-review F1,
+    // F2, F6, F10)
+    //
+    // The launcher shares the ONE confirmation window with the medication
+    // challenge, so these are pure-policy tests of the rules that decide
+    // who owns an answer, what a tap means, what a chip may say, and which
+    // flywheel path a launch came from. They are the executable form of the
+    // decisions `AppCoordinator.handleConfirmationResponse`,
+    // `AppCoordinator.performAppLaunch`, `ConfirmationChips` and
+    // `PendingAppLaunch.capturePath` make.
+
+    /// [F1] A pended launch NEVER owns the next yes/no while a dose
+    /// challenge is pended: the medication block in
+    /// `handleConfirmationResponse` (FR-D03 double-dose check) has to
+    /// receive the answer, so the launch block must not return early.
+    func testMedicationChallengeOwnsTheAnswerWhenBothArePended() {
+        XCTAssertEqual(
+            AppCoordinator.ConfirmationArbitration.owner(pendingAppLaunch: "camera",
+                                                         hasMedicationChallenge: true),
+            .medication)
+        XCTAssertEqual(
+            AppCoordinator.ConfirmationArbitration.owner(pendingAppLaunch: "camera",
+                                                         hasMedicationChallenge: false),
+            .appLaunch)
+        XCTAssertEqual(
+            AppCoordinator.ConfirmationArbitration.owner(pendingAppLaunch: nil,
+                                                         hasMedicationChallenge: true),
+            .medication)
+        XCTAssertEqual(
+            AppCoordinator.ConfirmationArbitration.owner(pendingAppLaunch: nil,
+                                                         hasMedicationChallenge: false),
+            .none)
+    }
+
+    /// [F6] A tap that opens the app the question named IS the yes; a tap
+    /// for a different app supersedes the question (recorded as the
+    /// unanswered verdict, never as a confirmation).
+    func testTileResolutionOfAPendedLaunchQuestion() {
+        XCTAssertEqual(AppCoordinator.ConfirmationArbitration.tileResolution(
+            pending: "camera", opened: "camera"), .confirmed)
+        XCTAssertEqual(AppCoordinator.ConfirmationArbitration.tileResolution(
+            pending: "camera", opened: "photos"), .superseded)
+    }
+
+    /// [F10] The flywheel's path label. A launch pended WITHOUT a
+    /// confidence came from the deterministic keyword fast path — no model
+    /// saw it — so it must not be recorded as "model". A launch with a
+    /// confidence came from the interpreter/plugin path.
+    func testLaunchCapturePathNamesTheKeywordStage() {
+        XCTAssertEqual(AppCoordinator.PendingAppLaunch(appID: "camera",
+                                                       confidence: nil).capturePath,
+                       "keyword")
+        XCTAssertEqual(AppCoordinator.PendingAppLaunch(appID: "camera",
+                                                       confidence: 0.88).capturePath,
+                       "model")
+    }
+
+    /// [F10] …and the path is actually threaded into the record: the
+    /// capture's verdict row carries the path the recorder was given.
+    func testLaunchCaptureRecordsTheKeywordPath() {
+        let launch = AppCoordinator.PendingAppLaunch(appID: "photos", confidence: nil)
+        let record = launch.capture.record(.confirmed, path: launch.capturePath)
+        XCTAssertEqual(record.path, "keyword")
+        XCTAssertEqual(record.action, "launcher.open")
+        XCTAssertEqual(record.slots?["app"], "photos")
+    }
+
+    /// [F13] A launch question that expired names itself: one observable
+    /// event carrying the catalog id (never user content, C9) and a card
+    /// that says what did not happen. The bare spoken line it used to be
+    /// left the question card on screen and the bus empty.
+    func testLaunchTimeoutIsObservableAndNamed() {
+        XCTAssertEqual(AppCoordinator.LaunchTimeout.eventType, "launch_timeout")
+        XCTAssertEqual(AppCoordinator.LaunchTimeout.outcome(appID: "camera"),
+                       "camera:timeout")
+        XCTAssertFalse(AppCoordinator.LaunchTimeout.icon.isEmpty)
+        for locale in [en, Locale(identifier: "ne-NP")] {
+            let text = L10n.str(AppCoordinator.LaunchTimeout.speechKey, locale: locale)
+            XCTAssertFalse(text.isEmpty, "\(locale) has no timeout line")
+            XCTAssertNotEqual(text, AppCoordinator.LaunchTimeout.speechKey,
+                              "\(locale) is missing the timeout translation")
+        }
+    }
+
+    /// [F2] The chip's generic follow-up line ("Okay, marked as taken") is
+    /// medication-flavored, so every flow that speaks its own outcome must
+    /// be exempt — an app launch above all: a chip-yes on "क्यामेरा खोल्ने
+    /// हो?" was announcing a recorded dose while the camera opened.
+    func testConfirmationChipStaysSilentForEverySelfSpeakingFlow() {
+        XCTAssertFalse(ConfirmationChipSpeech.speaksGenericYesNo(
+            .init(isAppLaunch: true)))
+        XCTAssertFalse(ConfirmationChipSpeech.speaksGenericYesNo(
+            .init(isCall: true)))
+        XCTAssertFalse(ConfirmationChipSpeech.speaksGenericYesNo(
+            .init(isNavigationDisambiguation: true)))
+        XCTAssertFalse(ConfirmationChipSpeech.speaksGenericYesNo(
+            .init(isCalendarEvent: true)))
+        XCTAssertFalse(ConfirmationChipSpeech.speaksGenericYesNo(
+            .init(isCall: true, isAppLaunch: true)))
+        XCTAssertTrue(ConfirmationChipSpeech.speaksGenericYesNo(.init()),
+                      "the medication challenge is the flow that still needs the line")
+    }
 }
 
 /// Scripted `CallLinkOpening` — answers per-scheme so a test can fake some

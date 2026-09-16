@@ -2338,10 +2338,28 @@ final class AppCoordinator: ObservableObject {
                 // timeout line says plainly that nothing was opened
                 // (the medication-flavored "I'll remind you again" would be
                 // a promise about an app launch that nobody keeps).
-                let hadPendingLaunch = self.pendingAppLaunch != nil
+                let pendedLaunchID = self.pendingAppLaunch?.appID
                 self.pendingAppLaunch = nil
-                self.speak(key: hadPendingLaunch ? "launcher.timeout"
-                                                 : "router.confirmationTimeout")
+                // [APP-LAUNCHER F13] A launch question that expired is a
+                // terminal outcome like every other one, so it gets the
+                // same two treatments the tap paths get: an observability
+                // event (`launch_timeout`) and a card that says what
+                // happened. Before this, the timeout spoke a line and left
+                // the question card — "Should I open Camera?" — sitting on
+                // screen as if it were still pending, with no record on the
+                // bus that the question had ever been asked. The card is
+                // replaced rather than cleared because the elder must still
+                // be able to see WHAT was not opened after the speech has
+                // faded.
+                if let appID = pendedLaunchID {
+                    self.emitAppLaunch(eventType: Self.LaunchTimeout.eventType,
+                                       outcome: Self.LaunchTimeout.outcome(appID: appID))
+                    self.setOutcome(icon: Self.LaunchTimeout.icon,
+                                    text: L10n.str(Self.LaunchTimeout.speechKey,
+                                                   locale: self.activeLocale))
+                }
+                self.speak(key: pendedLaunchID != nil ? Self.LaunchTimeout.speechKey
+                                                      : "router.confirmationTimeout")
             }
         }
 
@@ -5472,6 +5490,12 @@ self.noteTalkContractChanged()
     /// flow, which is why a `.camera` tile is no longer a tap that
     /// announces "Opening Camera" over a screen that never appears.
     func performAppLaunch(_ app: AppLauncher.App) {
+        // [APP-LAUNCHER F6] A tap IS an answer. Resolving the outstanding
+        // question first is what keeps the tile from racing the 45 s
+        // window it pends: the question is cleared (and its window closed)
+        // before the app opens, so the elder can never hear "Time is up, I
+        // won't open it" over an app they are already looking at.
+        resolveLaunchQuestion(openedBy: app.id)
         switch app.kind {
         case .camera:
             presentCameraCapture(app)
@@ -5586,6 +5610,68 @@ self.noteTalkContractChanged()
     // `voiceSession.onConfirmationTimeout`) — the same four seams the
     // call / calendar-event / navigation confirmations ride.
 
+    /// [APP-LAUNCHER F1] Who owns the elder's NEXT yes/no when a launch
+    /// question and a medication dose-challenge are both outstanding.
+    ///
+    /// The two flows share one confirmation window
+    /// (`VoiceSessionState.awaitingConfirmation`) and one router yes/no
+    /// parse, so exactly one of them may own the answer. The medication
+    /// challenge wins, always. It is the dementia-aware FR-D01
+    /// double-dose gate (spec §3.3), and the whole point of the window is
+    /// that a "हो" lands in `medicationScheduler.acknowledgeWithConfirmation`
+    /// where the double-dose check can see it; a launch, by contrast, can
+    /// simply be asked again. The failure mode this prevents is the
+    /// dangerous one: a dose question answered yes while the launch block
+    /// returns early means the dose is never recorded and the elder is
+    /// told (by the launch's own line) that something was opened.
+    ///
+    /// Pure policy so the rule is testable without an AppCoordinator —
+    /// the same shape as the other extracted helper types in this file.
+    enum ConfirmationArbitration {
+        enum Owner: Equatable {
+            case appLaunch
+            case medication
+            case none
+        }
+
+        static func owner(pendingAppLaunch: String?,
+                          hasMedicationChallenge: Bool) -> Owner {
+            if hasMedicationChallenge { return .medication }
+            return pendingAppLaunch == nil ? .none : .appLaunch
+        }
+
+        /// [APP-LAUNCHER F6] What a launch performed by a TAP means for the
+        /// question still pended. The same app is the question being
+        /// answered yes (`.confirmed`); a different app is that question
+        /// being superseded, which is the unanswered verdict the flywheel
+        /// already understands (`.superseded` → recorded as a timeout).
+        enum TileResolution: Equatable {
+            case confirmed
+            case superseded
+        }
+
+        static func tileResolution(pending: String, opened: String) -> TileResolution {
+            pending == opened ? .confirmed : .superseded
+        }
+    }
+
+    /// [APP-LAUNCHER F13] The launch question's expiry, named in one place.
+    ///
+    /// A launch question that runs out its 45 s is a terminal outcome like
+    /// the yes and the no, so it gets the same three treatments they get:
+    /// a spoken line, a card that says what happened, and one
+    /// `app_launcher` event. It used to get only the first — the question
+    /// card ("Should I open Camera?") stayed on screen as if still
+    /// pending, and the bus carried no record that a question had been
+    /// asked and dropped. The constants live together so the handler, the
+    /// event and the test can never drift apart.
+    enum LaunchTimeout {
+        static let eventType = "launch_timeout"
+        static let icon = "clock.badge.exclamationmark"
+        static let speechKey = "launcher.timeout"
+        static func outcome(appID: String) -> String { "\(appID):timeout" }
+    }
+
     /// A launch pended for the elder's spoken yes/no. Mirrors
     /// `PendingCallAction`: the pending state, the flywheel identity and
     /// the question→verdict clock all live together, so a verdict can
@@ -5599,6 +5685,22 @@ self.noteTalkContractChanged()
         /// [INTENTLOG-CAPTURE] When the confirmation question was asked —
         /// the flywheel's latency start (question → verdict).
         let requestedAt: Date = Date()
+
+        /// [APP-LAUNCHER F10] Which routing stage asked the question — the
+        /// flywheel's PATH label, and the reason this is derived here
+        /// rather than defaulted at the recording site.
+        ///
+        /// `IntentLogStore.Capture`'s path defaults to "model", which is
+        /// right for everything the interpreter or a plugin produced but
+        /// WRONG for the deterministic keyword fast path: a
+        /// `KeywordIntentRule` hit never saw a model, and labelling it
+        /// "model" teaches the accept-band statistics that the model
+        /// proposed launches it never saw. That stage is exactly the one
+        /// that carries no confidence (`CommandRouter` passes
+        /// `confidence: nil` from its `.appLaunch` stage; every
+        /// interpreter/plugin command has one by construction), so nil IS
+        /// the keyword signature.
+        var capturePath: String { confidence == nil ? "keyword" : "model" }
 
         /// This launch's flywheel identity. The slot is the catalog app id
         /// — a public catalog key, never user content (C9).
@@ -5616,7 +5718,16 @@ self.noteTalkContractChanged()
     /// generic medication-flavored yes/no speech while a launch is pended
     /// (see `VoiceCommandCoordinating.isAwaitingAppLaunchConfirmation`)
     /// and reports `.appLaunchConfirmed` for the yes.
-    var isAwaitingAppLaunchConfirmation: Bool { pendingAppLaunch != nil }
+    ///
+    /// [APP-LAUNCHER F1] …but never while a dose challenge is pended: the
+    /// launch does not own that answer (see `ConfirmationArbitration`), so
+    /// the router must not treat the utterance as a launch confirmation
+    /// NOR suppress the medication line.
+    var isAwaitingAppLaunchConfirmation: Bool {
+        ConfirmationArbitration.owner(
+            pendingAppLaunch: pendingAppLaunch?.appID,
+            hasMedicationChallenge: pendingConfirmationEntryId != nil) == .appLaunch
+    }
 
     /// Pends a catalog app for the elder's spoken yes/no and returns the
     /// line to speak — the `app_launcher` plugin's single seam (voice) and
@@ -5662,10 +5773,74 @@ self.noteTalkContractChanged()
     /// Pends the launch and arms the session's existing confirmation
     /// window (the 45 s budget in `VoiceSessionStateMachine`) — nothing is
     /// opened until the elder says yes.
+    ///
+    /// [APP-LAUNCHER F14] The window is opened in the SAME breath as the
+    /// pend (`openConfirmationWindow`), not by a bare `transition(to:)`
+    /// that could no-op: a launch question may arrive while the session
+    /// sits in a state the transition table does not let reach
+    /// `.awaitingConfirmation` directly (`.error` after a pipeline
+    /// failure, `.stopped` before the pipeline is primed), and a pend with
+    /// no window is a pend with no timer and no clearer — the question
+    /// would sit on screen forever, answered only by chance.
     private func pendAppLaunch(appID: String, confidence: Double?) {
         pendingAppLaunch = PendingAppLaunch(appID: appID, confidence: confidence)
-        DispatchQueue.main.async { [weak self] in
-            self?.voiceSession.transition(to: .awaitingConfirmation)
+        openConfirmationWindow()
+    }
+
+    /// [APP-LAUNCHER F14] Guarantees the confirmation window is open —
+    /// the session machine bridges through `.idle` when the current state
+    /// cannot reach `.awaitingConfirmation` directly, and the machine
+    /// reports whether it got there. Main-queue confinement is preserved
+    /// by the same hop the callers used before; when the caller is already
+    /// on main (the usual case — the router and the tile both are) the
+    /// window opens synchronously, so there is no instant in which the
+    /// caller has pended work but no timer exists for it.
+    private func openConfirmationWindow() {
+        if Thread.isMainThread {
+            voiceSession.openConfirmationWindow()
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.voiceSession.openConfirmationWindow()
+            }
+        }
+    }
+
+    /// [APP-LAUNCHER F6] A launch performed OUTSIDE the spoken yes/no —
+    /// the Home quick-access tile, or the executor reached from any other
+    /// tap — resolves the launch question that is still on screen.
+    ///
+    /// Without this the question stayed pended over a live camera with
+    /// its 45 s window still armed: the elder tapped the tile, the app
+    /// opened, and 45 seconds later the assistant announced "Time is up, I
+    /// won't open it" over the app they were looking at. The tile IS an
+    /// answer, and it is a CONFIRMED one when it names the same app (the
+    /// question was "should I open X?" and X is what opened); a tile for a
+    /// DIFFERENT app supersedes the question the same way a new question
+    /// does, and is recorded as the unanswered verdict it is.
+    ///
+    /// The window is closed with the pend (when no other flow is riding on
+    /// it) so the timer cannot fire at all: `VoiceSessionStateMachine` only
+    /// reports an expiry for a window that is still open, so a closed one
+    /// stays silent even if its callback was already in flight.
+    private func resolveLaunchQuestion(openedBy appID: String) {
+        guard let launch = pendingAppLaunch else { return }
+        pendingAppLaunch = nil
+        switch ConfirmationArbitration.tileResolution(pending: launch.appID,
+                                                      opened: appID) {
+        case .confirmed:
+            appendCapture(launch.capture, .confirmed, path: launch.capturePath)
+            emitAppLaunch(eventType: "launch_confirmed",
+                          outcome: "\(launch.appID):confirmedByTile")
+        case .superseded:
+            appendCapture(launch.capture, .timeout, path: launch.capturePath)
+            emitAppLaunch(eventType: "launch_superseded",
+                          outcome: "\(launch.appID):supersededByTile")
+        }
+        // Close the window only when nothing else pended is riding on it —
+        // closing it under a medication challenge would leave that pend
+        // with no timer (the F14 failure mode in mirror image).
+        if !isAwaitingConfirmation, voiceSession.state == .awaitingConfirmation {
+            voiceSession.transition(to: .idle)
         }
     }
 
@@ -5691,7 +5866,7 @@ self.noteTalkContractChanged()
         // executor acts on. A device that refuses the CAMERA after the yes
         // is a separate, honestly-reported outcome (its own
         // `camera_capture_*` event) — the interpretation was still right.
-        appendCapture(launch.capture, .confirmed)
+        appendCapture(launch.capture, .confirmed, path: launch.capturePath)
     }
 
     // MARK: - Phone-leaf contact-list launches (contact-leaf-launch task,
@@ -7991,11 +8166,31 @@ self.noteTalkContractChanged()
         guard let prompt = medicationScheduler.startConfirmationChallenge(for: entryId) else {
             return nil
         }
+        // [APP-LAUNCHER F1] The dose challenge takes the window — and the
+        // question it displaces is dropped BEFORE the challenge is armed,
+        // so the two can never be pended at once (the invariant
+        // `ConfirmationArbitration.owner` encodes).
+        dropLaunchSupersededByMedicationChallenge()
         DispatchQueue.main.async { [weak self] in
             self?.pendingConfirmationEntryId = entryId
-            self?.voiceSession.transition(to: .awaitingConfirmation)
+            self?.openConfirmationWindow()
         }
         return prompt
+    }
+
+    /// [APP-LAUNCHER F1] Drops a pended launch because a dose challenge is
+    /// taking the confirmation window. The launch is recorded as the
+    /// unanswered verdict it now is (`timeout` — the question expired
+    /// without an answer) and announced on the bus; nothing is opened. The
+    /// alternative — leaving it pended — is the bug this fixes: the next
+    /// "हो" would then be spent on the launch, and the FR-D03 double-dose
+    /// gate would never run on a dose the elder had just been asked about.
+    private func dropLaunchSupersededByMedicationChallenge() {
+        guard let launch = pendingAppLaunch else { return }
+        pendingAppLaunch = nil
+        appendCapture(launch.capture, .timeout, path: launch.capturePath)
+        emitAppLaunch(eventType: "launch_superseded",
+                      outcome: "\(launch.appID):supersededByMedicationChallenge")
     }
 
     // MARK: - [INTENTLOG-CAPTURE] Flywheel capture (T-054 precursor)
@@ -8114,11 +8309,23 @@ self.noteTalkContractChanged()
         // App-launch confirmations (voice app launcher, 2026-09-16): the
         // same additive shape as the call and calendar-event blocks above
         // — checked and returned early, so the medication path below stays
-        // untouched. A YES hands the pended app to the shared launch
+        // untouched for every confirmation EXCEPT a simultaneous dose
+        // challenge, which outranks the launch (F1). A YES hands the pended app to the shared launch
         // executor (which speaks the surface that actually appeared); a NO
         // speaks the honest cancellation, because an elder who answers
         // "होइन" must hear that they were heard. Nothing is opened on a no.
-        if let launch = pendingAppLaunch {
+        //
+        // [APP-LAUNCHER F1] ONLY when the launch owns this answer. A
+        // medication dose-challenge that is pended at the same time takes
+        // precedence (`ConfirmationArbitration`), so the block falls
+        // through to the medication path below — which is where the FR-D03
+        // double-dose check lives. This early return used to swallow it:
+        // the launch was answered, the launch was opened, and the dose the
+        // elder had just confirmed was never recorded.
+        let confirmationOwner = ConfirmationArbitration.owner(
+            pendingAppLaunch: pendingAppLaunch?.appID,
+            hasMedicationChallenge: pendingConfirmationEntryId != nil)
+        if confirmationOwner == .appLaunch, let launch = pendingAppLaunch {
             pendingAppLaunch = nil
             if case .yes = response {
                 emitAppLaunch(eventType: "launch_confirmed", outcome: "\(launch.appID):confirmed")
@@ -8126,7 +8333,7 @@ self.noteTalkContractChanged()
             } else {
                 // [INTENTLOG-CAPTURE] Same negative-half capture as the
                 // call path above — a declined launch is flywheel signal.
-                appendCapture(launch.capture, .denied)
+                appendCapture(launch.capture, .denied, path: launch.capturePath)
                 emitAppLaunch(eventType: "launch_cancelled", outcome: "\(launch.appID):cancelled")
                 speak(text: L10n.str("launcher.cancelled", locale: activeLocale))
             }

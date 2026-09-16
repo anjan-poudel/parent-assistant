@@ -732,6 +732,22 @@ final class CommandRouter {
                 coordinator?.isAwaitingAppLaunchConfirmation == true
             let speaksItsOwnYesNo = isCallConfirmation || isNavigationDisambiguation
                 || isCalendarEventConfirmation || isAppLaunchConfirmation
+            // [APP-LAUNCHER F3] A dose acknowledgement is never a yes/no
+            // answer to an app-launch question. The safety net that owns
+            // this vocabulary runs BELOW this block, so without this the
+            // launch window turned "औषधि खाएँ" into an ambiguous answer to
+            // "क्यामेरा खोल्ने हो?" — and the dose went unrecorded, while
+            // the comment on the safety net still promised it "runs first,
+            // always". Only the launch branch is scoped this way: the
+            // call/navigation/calendar prompts have no such collision, and
+            // "होइन" must keep cancelling the launch question (a denial is
+            // not an acknowledgement — `isExplicitMedicationAcknowledgement`
+            // excludes it).
+            if isAppLaunchConfirmation, Self.isExplicitMedicationAcknowledgement(raw) {
+                emit(eventType: "confirmation_medication_ack", outcome: "success")
+                handleMedicationAcknowledgement()
+                return .acknowledgedMedication
+            }
             if Self.isYesResponse(raw) {
                 coordinator?.handleConfirmationResponse(.yes)
                 emit(eventType: "confirmation_yes", outcome: "success")
@@ -1573,6 +1589,56 @@ final class CommandRouter {
         "फोन", "कल", "भिडियो कल", "म्यासेन्जर", "व्हाट्सएप", "वाट्सएप"
     ]
 
+    /// Explicit refusal vocabulary — "not yet", "I didn't take it", "औषधि
+    /// खाएको छैन". Guarded BEFORE the ack list everywhere it is used, because
+    /// refusal words contain ack words as substrings ("नखाए" ⊃ "खाए",
+    /// "भएन" ⊃ "भयो").
+    static let medicationDenialPhrases = [
+        "i didn't", "i did not", "not yet", "haven't", "havent",
+        "औषधि खाएको छैन", "औषधी खाएको छैन", "खाएको छैन",
+        "नखाए", "नखाएको", "लिएको छैन", "भएन", "छैन"
+    ]
+
+    /// The POSITIVE half of the medication-ack vocabulary: "I took my
+    /// medication" and its Nepali spellings, as phrases and as the single
+    /// tokens that carry the meaning on their own.
+    static let medicationAckPhrases = [
+        "i took", "i've taken", "ive taken", "took my medication",
+        "took my medicine", "taken my medication", "taken my medicine",
+        "yes i took it",
+        "औषधि खाएँ", "औषधि खाए", "औषधी खाएँ", "औषधी खाए",
+        "दवाई खाएँ", "दवाई खाए", "दबाइ खाएँ", "दबाइ खाए",
+        "औषधि लिएको छु", "औषधी लिएको छु", "दवाई लिएको छु",
+        "लिइसकेँ", "लिइसकें", "खाइसकेँ", "खाइसकें"
+    ]
+    static let medicationAckTokens = ["done", "taken", "took", "ate",
+                                      "खाएँ", "खाए", "भयो"]
+
+    /// [APP-LAUNCHER F3] Is this transcript an EXPLICIT dose
+    /// acknowledgement?
+    ///
+    /// Extracted from `routeSafetyNet` because the safety net is not the
+    /// only path that has to recognise it. While a confirmation window is
+    /// open the follow-up block above intercepts every utterance as a
+    /// yes/no — including an app-launch question, which made "औषधि खाएँ"
+    /// parse as an ambiguous answer to "क्यामेरा खोल्ने हो?" and the dose
+    /// go unrecorded. A dose acknowledgement is never a yes/no answer to
+    /// another question, so the follow-up path asks this first.
+    ///
+    /// Denials are excluded here too: the guard order lives with the
+    /// vocabulary instead of at one call site, so no caller can wire the
+    /// list up without it.
+    static func isExplicitMedicationAcknowledgement(_ raw: String) -> Bool {
+        let text = raw
+            .lowercased()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if medicationDenialPhrases.contains(where: { containsPhrase($0, in: text) }) {
+            return false
+        }
+        return medicationAckPhrases.contains(where: { containsPhrase($0, in: text) })
+            || medicationAckTokens.contains(where: { containsToken($0, in: text) })
+    }
+
     /// The safety-critical slice of the keyword layer, runnable on its
     /// own AHEAD of the LLM (spec §4 ladder: keyword net first, always).
     /// Returns nil when nothing safety-shaped matched, so the caller can
@@ -1592,32 +1658,14 @@ final class CommandRouter {
         }
 
         // Guard first: explicit negations must never fall through to the
-        // ack list, because refusal words contain ack words as substrings
-        // ("नखाए" ⊃ "खाए", "भएन" ⊃ "भयो").
-        let denialPhrases = [
-            "i didn't", "i did not", "not yet", "haven't", "havent",
-            "औषधि खाएको छैन", "औषधी खाएको छैन", "खाएको छैन",
-            "नखाए", "नखाएको", "लिएको छैन", "भएन", "छैन"
-        ]
-        if denialPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
+        // ack list (see `medicationDenialPhrases`).
+        if Self.medicationDenialPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
             emit(eventType: "command_ack_denied_keyword", outcome: "info")
             speak(key: "router.ackDenied")
             return .unrecognised(transcript: raw)
         }
 
-        let ackPhrases = [
-            "i took", "i've taken", "ive taken", "took my medication",
-            "took my medicine", "taken my medication", "taken my medicine",
-            "yes i took it",
-            "औषधि खाएँ", "औषधि खाए", "औषधी खाएँ", "औषधी खाए",
-            "दवाई खाएँ", "दवाई खाए", "दबाइ खाएँ", "दबाइ खाए",
-            "औषधि लिएको छु", "औषधी लिएको छु", "दवाई लिएको छु",
-            "लिइसकेँ", "लिइसकें", "खाइसकेँ", "खाइसकें"
-        ]
-        let ackTokens = ["done", "taken", "took", "ate",
-                         "खाएँ", "खाए", "भयो"]
-        if ackPhrases.contains(where: { Self.containsPhrase($0, in: text) })
-            || ackTokens.contains(where: { Self.containsToken($0, in: text) }) {
+        if Self.isExplicitMedicationAcknowledgement(raw) {
             handleMedicationAcknowledgement()
             return .acknowledgedMedication
         }

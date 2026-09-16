@@ -22,6 +22,28 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertEqual(coordinator.recordedTranscripts, ["मैले औषधि खाएँ"])
     }
 
+    // MARK: - Medication vocabulary (extracted for [APP-LAUNCHER F3])
+
+    /// The acknowledgement vocabulary keeps its guard order after the
+    /// extraction: a denial is never an acknowledgement, in either
+    /// direction of the substring traps ("नखाए" ⊃ "खाए", "भएन" ⊃ "भयो",
+    /// "i didn't take it" ⊃ "i took").
+    func testExplicitMedicationAcknowledgementExcludesEveryDenial() {
+        for denial in ["मैले औषधि खाएको छैन", "नखाए", "औषधि भएन",
+                       "i didn't take it", "i did not take my medication",
+                       "not yet"] {
+            XCTAssertFalse(CommandRouter.isExplicitMedicationAcknowledgement(denial),
+                           "\(denial) is a denial, not an acknowledgement")
+        }
+        for ack in ["मैले औषधि खाएँ", "औषधि खाए", "i took my medication",
+                    "taken my medicine", "खाइसकेँ"] {
+            XCTAssertTrue(CommandRouter.isExplicitMedicationAcknowledgement(ack),
+                          "\(ack) is an acknowledgement")
+        }
+        XCTAssertFalse(CommandRouter.isExplicitMedicationAcknowledgement("हो"))
+        XCTAssertFalse(CommandRouter.isExplicitMedicationAcknowledgement("होइन"))
+    }
+
     // MARK: - Emergency (deterministic keyword net — see CommandRouter.emergencyPhrases)
 
     /// Regression for a real bug found via live testing against the Gemini
@@ -632,6 +654,59 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertEqual(coordinator.confirmationResponses, [.no])
         XCTAssertTrue(speaker.utterances.isEmpty,
                       "the coordinator speaks the cancellation, not the generic no")
+    }
+
+    /// [APP-LAUNCHER F3] A dose acknowledgement is never an answer to an
+    /// app-launch question.
+    ///
+    /// The confirmation-follow-up block intercepts EVERY utterance while a
+    /// window is open, so "औषधि खाएँ" said over "क्यामेरा खोल्ने हो?" was
+    /// parsed as an ambiguous yes/no — the launch question went unanswered,
+    /// the dose was never recorded, and `routeSafetyNet` (whose comment
+    /// promises it "runs first, always") never ran, because the follow-up
+    /// block sits above it. The elder said they took their medication and
+    /// nothing happened.
+    func testMedicationAcknowledgementDuringAnAppLaunchQuestionStillRecordsTheDose() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let reminderId = UUID()
+        coordinator.pendingReminderId = reminderId
+        coordinator.isAwaitingConfirmation = true
+        coordinator.isAwaitingAppLaunchConfirmation = true
+        let speaker = MockSpeaker()
+        let router = CommandRouter(coordinator: coordinator,
+                                   observabilityBus: MockObservabilityBus(),
+                                   speaker: speaker)
+
+        let result = router.route(transcript: "औषधि खाएँ")
+
+        XCTAssertEqual(result, .acknowledgedMedication)
+        XCTAssertEqual(coordinator.confirmationChallengeEntryIds, [reminderId],
+                       "the FR-D01 challenge is issued for the dose")
+        XCTAssertTrue(coordinator.confirmationResponses.isEmpty,
+                      "the utterance is not a yes/no answer to the launch question")
+        XCTAssertEqual(speaker.utterances.map(\.text), [coordinator.confirmationPrompt ?? ""],
+                       "the dose challenge is what the elder hears")
+    }
+
+    /// The launch question keeps its ordinary yes/no handling: the F3
+    /// exemption is for the acknowledgement vocabulary ONLY, so a plain
+    /// "हो" still confirms the launch and still reaches
+    /// `handleConfirmationResponse(.yes)`.
+    func testPlainYesDuringAnAppLaunchQuestionIsStillTheLaunchAnswer() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.pendingReminderId = UUID()
+        coordinator.isAwaitingConfirmation = true
+        coordinator.isAwaitingAppLaunchConfirmation = true
+        let router = CommandRouter(coordinator: coordinator,
+                                   observabilityBus: MockObservabilityBus(),
+                                   speaker: MockSpeaker())
+
+        let result = router.route(transcript: "हो")
+
+        XCTAssertEqual(result, .appLaunchConfirmed)
+        XCTAssertEqual(coordinator.confirmationResponses, [.yes])
+        XCTAssertTrue(coordinator.confirmationChallengeEntryIds.isEmpty,
+                      "no dose challenge is invented out of a launch yes")
     }
 
     /// The launcher plugin's whole contract at the router layer: a

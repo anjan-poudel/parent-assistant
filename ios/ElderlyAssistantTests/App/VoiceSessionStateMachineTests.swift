@@ -90,6 +90,82 @@ final class VoiceSessionStateMachineTests: XCTestCase {
         wait(for: [lateCheck], timeout: 3.0)
     }
 
+    // MARK: - Confirmation window (voice app launcher F6, F14)
+
+    /// [F14] `openConfirmationWindow()` opens the window from states the
+    /// transition table cannot reach `.awaitingConfirmation` from directly.
+    ///
+    /// A launch question can arrive while the session sits in `.error`
+    /// (the pipeline just failed) or `.stopped` (before the pipeline is
+    /// primed). The old bare `transition(to: .awaitingConfirmation)` could
+    /// only no-op there — assert in debug, silently do nothing in release —
+    /// leaving the pended question with no timer and no clearer. The
+    /// bridge through `.idle` keeps every edge legal and the timer real.
+    @MainActor
+    func testOpenConfirmationWindowBridgesFromErrorAndStopped() {
+        for start in [VoiceSessionState.error, .stopped] {
+            let machine = VoiceSessionStateMachine(
+                config: .init(confirmationTimeoutSeconds: 1))
+            let timeoutExpectation = expectation(description: "window armed from \(start)")
+            machine.onConfirmationTimeout = { timeoutExpectation.fulfill() }
+            machine.transition(to: start)
+            XCTAssertEqual(machine.state, start)
+
+            XCTAssertTrue(machine.openConfirmationWindow())
+            XCTAssertEqual(machine.state, .awaitingConfirmation,
+                           "the window is open, not merely attempted")
+            wait(for: [timeoutExpectation], timeout: 3.0)
+            XCTAssertEqual(machine.state, .idle)
+        }
+    }
+
+    /// [F14] The window is idempotent: a flow that pends while the window
+    /// is already open keeps the ORIGINAL budget (no re-arm, no second
+    /// timer racing the first).
+    @MainActor
+    func testOpenConfirmationWindowIsIdempotent() {
+        let machine = VoiceSessionStateMachine(
+            config: .init(confirmationTimeoutSeconds: 1))
+        var timeouts = 0
+        machine.onConfirmationTimeout = { timeouts += 1 }
+        machine.transition(to: .idle)
+        XCTAssertTrue(machine.openConfirmationWindow())
+        XCTAssertTrue(machine.openConfirmationWindow())
+        XCTAssertEqual(machine.state, .awaitingConfirmation)
+
+        let settled = expectation(description: "exactly one expiry")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            XCTAssertEqual(timeouts, 1, "re-opening must not arm a second timer")
+            settled.fulfill()
+        }
+        wait(for: [settled], timeout: 3.0)
+    }
+
+    /// [F6] A window that was CLOSED before its deadline never reports an
+    /// expiry — even though the callback may already be queued on main.
+    ///
+    /// This is what keeps a tap-resolved launch question silent: the elder
+    /// tapped the app's tile instead of answering, the pend was cleared and
+    /// the window closed, and the queued expiry must not announce "Time is
+    /// up, I won't open it" over the app that had just opened.
+    @MainActor
+    func testExpiryIsNotReportedForAWindowClosedEarly() {
+        let machine = VoiceSessionStateMachine(
+            config: .init(confirmationTimeoutSeconds: 1))
+        var timedOut = false
+        machine.onConfirmationTimeout = { timedOut = true }
+        machine.transition(to: .idle)
+        XCTAssertTrue(machine.openConfirmationWindow())
+        machine.transition(to: .idle)   // resolved by another route
+
+        let lateCheck = expectation(description: "no expiry for a closed window")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            XCTAssertFalse(timedOut, "a closed window must not report an expiry")
+            lateCheck.fulfill()
+        }
+        wait(for: [lateCheck], timeout: 3.0)
+    }
+
     // MARK: - Talk-crash regression anchors (TALK-CRASH-FIX, 2026-09-07)
 
     /// The DEBUG assertion crashes behind "the app crashes when I tap the
