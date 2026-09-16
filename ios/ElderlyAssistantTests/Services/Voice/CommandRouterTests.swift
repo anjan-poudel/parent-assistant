@@ -665,7 +665,13 @@ final class CommandRouterTests: XCTestCase {
                                    speaker: speaker, interpreter: interpreter,
                                    pluginRegistry: registry, geminiClient: client)
 
-        _ = router.route(transcript: "ह्वाट्सएप खोल")
+        // A BARE app name on purpose: "ह्वाट्सएप खोल" (app word ∧ open
+        // verb) is claimed by the deterministic keyword fast path
+        // (`KeywordIntentRule` app-launch rule, T5 of the 2026-09-16
+        // launcher plan) before any interpreter runs — this test owns
+        // the PLUGIN path, so it routes the shape the fast path
+        // deliberately declines.
+        _ = router.route(transcript: "ह्वाट्सएप")
 
         XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_plugin_dispatched" })
         let exp = expectation(description: "plugin handled")

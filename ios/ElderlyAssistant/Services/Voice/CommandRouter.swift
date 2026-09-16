@@ -1013,8 +1013,9 @@ final class CommandRouter {
         // enumerated verb families, marker adjacency). When they all
         // declined, resolve intent from keyword CO-OCCURRENCE instead —
         // the small `KeywordIntentRule` table of SAFE domains only
-        // (news digest, YouTube play): every required keyword group must
-        // co-occur anywhere in the utterance, no grammar validation.
+        // (news digest, YouTube play, a named app launch): every
+        // required keyword group must co-occur anywhere in the
+        // utterance, no grammar validation.
         //
         // Placement: AFTER every strict deterministic stage (safety net
         // + confirmation flow + contact search + directions +
@@ -1030,9 +1031,12 @@ final class CommandRouter {
         // stage's: news hands off to the reader exactly like the strict
         // stage (ack first, the reader owns every line), YouTube still
         // requires a survivable non-marker query from `YouTubeRoute`'s
-        // extraction and fires the same honest play/search path. Every
-        // relaxed claim is observable: `intent_keyword_match` (domain,
-        // matched keys — fixed rule vocabulary, never user text).
+        // extraction and fires the same honest play/search path, and an
+        // app launch hands its catalog id to the SAME coordinator seam
+        // the `launcher.open` plugin calls (the coordinator owns the
+        // confirmation question and the launch). Every relaxed claim is
+        // observable: `intent_keyword_match` (domain, matched keys —
+        // fixed rule vocabulary, never user text).
         if let relaxed = KeywordIntentRule.match(transcript: preText) {
             switch relaxed.domain {
             case .news:
@@ -1047,6 +1051,38 @@ final class CommandRouter {
                 guard let query = YouTubeRoute.extractQuery(from: preText) else { break }
                 emitIntentKeywordMatch(relaxed)
                 fireYouTubePlay(query: query)
+                return .unrecognised(transcript: raw)
+            case .appLaunch:
+                // [APP-LAUNCHER] (2026-09-16) The launcher's voice fast
+                // path ("क्यामेरा खोल", "open WhatsApp", "फोटो खिच्न") —
+                // the highest-frequency launches without the encoder
+                // round-trip. The rule already resolved the utterance to
+                // a CATALOG id, which is the `app` entity the
+                // `launcher.open` plugin hands to `requestAppLaunch`:
+                // this stage calls that same seam, so the one launch
+                // executor, the pending state, the 45 s window and the
+                // confirmation question (design D3) are byte-for-byte the
+                // plugin path's — and a deterministic stage stays free of
+                // the plugin-dispatch machinery (registry + cloud client
+                // + an async hop) it would otherwise need.
+                //
+                // The returned line is the coordinator's: the
+                // confirmation question when the launch can still
+                // succeed, or the honest not-installed line when it
+                // cannot (nothing is pended in that case). The keyword
+                // path never inspects or recomposes it — exactly like
+                // the news/YouTube hand-offs above, where the
+                // coordinator/DOMAIN owners keep every spoken line.
+                guard let appID = relaxed.appID else { break }
+                emitIntentKeywordMatch(relaxed)
+                if let line = coordinator?.requestAppLaunch(appID: appID, confidence: nil) {
+                    // Carded like the plugin path's reply (see
+                    // `handlePluginCommand` above), so the question the
+                    // elder answers stays visible whichever path
+                    // resolved it.
+                    coordinator?.noteGenericReply(line)
+                    speak(text: line)
+                }
                 return .unrecognised(transcript: raw)
             }
         }
