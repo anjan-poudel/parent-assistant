@@ -46,8 +46,20 @@ struct CalendarShareStatus: Equatable {
         case notConfigured
         /// Configured, but nobody has connected an account yet.
         case signedOut
-        /// Connected.
+        /// Connected, and holding every scope the share path needs.
         case connected(email: String?)
+        /// SIGNED IN but without the Calendar/contacts grant — the elder
+        /// declined the consent sheet, revoked the grant at Google, or
+        /// the account was connected by a build that asked for identity
+        /// alone (2026-09-17).
+        ///
+        /// Its own case rather than a flag on `connected`, because the
+        /// two need different SCREENS, not a different sentence: this
+        /// one can only offer the re-connect, while `connected` offers
+        /// the disclosure. And folding it into `signedOut` would be a
+        /// lie of a different kind — the app would be telling the elder
+        /// they had no account when they can see it in Settings.
+        case connectedWithoutScopes(email: String?)
     }
 
     var connection: Connection = .signedOut
@@ -60,9 +72,15 @@ struct CalendarShareStatus: Equatable {
     /// The most recent failure class, for the honest status line.
     var lastError: GoogleShareError?
 
-    /// Whether sharing is actually acting: connected AND consented.
-    /// Pending work with this false is exactly the state the card has to
-    /// surface ("3 events waiting to share" + why they are waiting).
+    /// Whether sharing is actually acting: connected, SCOPED and
+    /// consented. Pending work with this false is exactly the state the
+    /// card has to surface ("3 events waiting to share" + why they are
+    /// waiting).
+    ///
+    /// `connectedWithoutScopes` is not active however loudly consent was
+    /// given: the token cannot write to Calendar, so calling that state
+    /// "sharing" would be exactly the silent stub the constitution
+    /// forbids.
     var isActive: Bool {
         if case .connected = connection, isConsented, lastError == nil { return true }
         return false
@@ -213,7 +231,12 @@ final class CalendarShareService: ObservableObject {
         if !session.isConfigured {
             next.connection = .notConfigured
         } else if session.isSignedIn {
-            next.connection = .connected(email: session.accountEmail)
+            // Signed in is not the same as able to share: the account
+            // can lack the Calendar/contacts grant, and the card has to
+            // say which of the two it is holding (2026-09-17).
+            next.connection = session.hasRequiredScopes
+                ? .connected(email: session.accountEmail)
+                : .connectedWithoutScopes(email: session.accountEmail)
         } else {
             next.connection = .signedOut
         }
@@ -248,25 +271,32 @@ final class CalendarShareService: ObservableObject {
 
     // MARK: - Account
 
-    /// Presents Google sign-in. Returns whether a usable session exists
-    /// afterwards; on success the pending queue is flushed immediately
-    /// (anything the family queued while signed out lands now).
+    /// Presents Google sign-in. Returns whether a fully-connected session
+    /// exists afterwards; on success the pending queue is flushed
+    /// immediately (anything the family queued while signed out lands
+    /// now).
+    ///
+    /// A sign-in that ends WITHOUT the Calendar/contacts grant returns
+    /// false and flushes nothing: the queue would fail item by item with
+    /// a 401, and the next pass (this card's "try again", or the
+    /// foreground flush) would repeat it. The status tells the card
+    /// which of the two "false" states the household is in.
     @discardableResult
     func signIn() async -> Bool {
-        let ok = await session.signIn()
+        let outcome = await session.signIn()
         refreshStatus()
-        if ok { await flushPending() }
-        return ok
+        if outcome.isConnected { await flushPending() }
+        return outcome.isConnected
     }
 
     /// Presents Google's account-creation flow, then signs in — for the
     /// household that has no Google account at all (design §2 decision 3).
     @discardableResult
     func createAccount() async -> Bool {
-        let ok = await session.createAccount()
+        let outcome = await session.createAccount()
         refreshStatus()
-        if ok { await flushPending() }
-        return ok
+        if outcome.isConnected { await flushPending() }
+        return outcome.isConnected
     }
 
     /// Drops the session and PAUSES sharing. The local calendar, the

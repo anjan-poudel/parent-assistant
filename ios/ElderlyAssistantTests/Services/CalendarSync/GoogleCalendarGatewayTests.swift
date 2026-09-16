@@ -620,10 +620,14 @@ private final class FakeSession: GoogleAccountSessionProtocol {
     var isConfigured = true
     var isSignedIn = false
     var accountEmail: String?
+    /// The gateway's job is the REST call, not the grant: this fake is
+    /// always scoped, and the scope STATE is exercised where it is
+    /// decided (`GoogleAccountSessionTests`, `CalendarShareServiceTests`).
+    var hasRequiredScopes = true
     var token: String? = "fake-access-token"
 
-    func signIn() async -> Bool { isSignedIn }
-    func createAccount() async -> Bool { isSignedIn }
+    func signIn() async -> GoogleSessionOutcome { isSignedIn ? .connected : .cancelled }
+    func createAccount() async -> GoogleSessionOutcome { isSignedIn ? .connected : .cancelled }
     func signOut() { isSignedIn = false }
     func accessToken() async -> String? { token }
 }

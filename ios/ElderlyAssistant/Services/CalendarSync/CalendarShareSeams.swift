@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 // MARK: - Calendar share seams (calendar & family sharing, 2026-09-16)
 //
@@ -100,6 +101,125 @@ enum GoogleShareError: Error, Equatable {
     }
 }
 
+// MARK: - Failure class → Settings wording
+
+extension GoogleShareError {
+
+    /// The string-catalog key for this failure class, resolved in the app
+    /// language by the Settings card.
+    ///
+    /// It lives HERE, beside the enum, rather than as a private switch in
+    /// the view, for the reason every catalog lookup in this app does:
+    /// an exhaustive switch over the enum is a compile error the moment a
+    /// failure class is added, while a `default:` in a view is a silent
+    /// English-less card. The associated values of `server` and
+    /// `transport` are deliberately dropped — a status code and a
+    /// `URLError` class label are diagnostics, not sentences for an
+    /// elder, and the release log-surface rule treats them as the same
+    /// kind of raw upstream value that must not reach a surface.
+    var settingsMessageKey: String {
+        switch self {
+        case .notSignedIn: return "calendarShare.error.notSignedIn"
+        case .notConfigured: return "calendarShare.error.notConfigured"
+        case .unauthorized: return "calendarShare.error.unauthorized"
+        case .rateLimited: return "calendarShare.error.rateLimited"
+        case .server: return "calendarShare.error.server"
+        case .notFound: return "calendarShare.error.notFound"
+        case .malformedResponse: return "calendarShare.error.malformedResponse"
+        case .transport: return "calendarShare.error.transport"
+        }
+    }
+
+    /// Whether the family can DO something about this failure from the
+    /// Settings card — and the one action that helps: connect the account
+    /// again.
+    ///
+    /// `unauthorized` is the case this exists for: 401/403 means the
+    /// token was revoked or the Calendar/contacts grant was never given,
+    /// and the ONLY recovery is the OAuth flow. A card that explains the
+    /// failure without offering that tap leaves the household with a
+    /// dead end. `notSignedIn` is the same dead end with a different
+    /// cause, so it gets the same tap.
+    ///
+    /// Everything else is either ours to retry (rate limited, 5xx,
+    /// transport), already satisfied (`notFound`), or a state no tap on
+    /// this card can change (`notConfigured`, `malformedResponse`).
+    var isActionableFromSettings: Bool {
+        switch self {
+        case .unauthorized, .notSignedIn: return true
+        case .notConfigured, .rateLimited, .server, .notFound,
+             .malformedResponse, .transport:
+            return false
+        }
+    }
+}
+
+// MARK: - Interactive auth flow
+
+/// The GoogleSignIn SDK's interactive entry points, reduced to the ONE
+/// fact this app acts on: the scopes the account holds when the sheet
+/// closes.
+///
+/// A protocol rather than calls straight into `GIDSignIn.sharedInstance`
+/// because the branch that matters most cannot be reached any other way.
+/// An interactive OAuth flow needs an OAuth client, a real Google
+/// account and a human tapping Google's sheet, so "the elder signed in
+/// and then DECLINED the calendar grant" — the exact state this feature
+/// shipped a bug in — would be a device-only path that no test could
+/// pin. Behind this seam it is a one-line fake.
+///
+/// Presentation is passed in rather than resolved here: the presenter is
+/// a UI concern the session already owns, and a seam that looked up a
+/// window itself could not be driven from a test at all.
+protocol GoogleAuthFlow: AnyObject {
+    /// Presents Google's sign-in sheet. Returns the scopes the account
+    /// holds afterwards. Throws whatever the SDK threw — the session
+    /// maps the code, and never the description (constitution C9).
+    func signIn(presenting controller: UIViewController) async throws -> [String]
+
+    /// Presents Google's scope-consent sheet on the current user for
+    /// `scopes`, returning the scopes held afterwards.
+    ///
+    /// The scopes are passed IN rather than read from a constant here so
+    /// the session stays the one place that decides what this feature
+    /// needs.
+    func addScopes(_ scopes: [String],
+                   presenting controller: UIViewController) async throws -> [String]
+}
+
+// MARK: - Interactive flow outcome
+
+/// How one interactive Google flow ended, as a value.
+///
+/// A `Bool` is not enough, and the case it cannot express is the whole
+/// reason this type exists: the scope sheet can close with the elder
+/// SIGNED IN and having declined the calendar/contacts grant. "Signed in"
+/// and "can share" are different facts, and a card that folds them into
+/// one tells the family their reminders are going out when nothing can
+/// reach Google at all.
+enum GoogleSessionOutcome: Equatable {
+    /// Connected AND holding every scope the share path needs. The only
+    /// outcome that unblocks the queue.
+    case connected
+    /// Signed in, but Google did not grant the calendar/contacts scopes —
+    /// declined on the consent sheet, or refused for the account. The
+    /// session is real and survives; the share path cannot use it, and
+    /// the card says exactly that.
+    case connectedWithoutScopes
+    /// The elder closed Google's sheet. Not an error, and not a session:
+    /// a run of these is a product signal, not a bug.
+    case cancelled
+    /// No client id, no presenter, or the SDK failed. The flow did not
+    /// happen — `isConfigured` and observability tell those three apart;
+    /// the CALLER's next move is the same for all of them (render the
+    /// honest status).
+    case unavailable
+
+    /// Whether a usable, fully-scoped session exists afterwards. The one
+    /// question the service's queue asks before it drains anything.
+    var isConnected: Bool { self == .connected }
+}
+
 // MARK: - Account session
 
 /// The Google account the family connected once, on-device (design
@@ -121,17 +241,30 @@ protocol GoogleAccountSessionProtocol: AnyObject {
     /// logged.
     var accountEmail: String? { get }
 
-    /// Presents Google's sign-in flow. Returns true when a usable
-    /// session exists afterwards — including the case where one already
-    /// did. False covers "user cancelled", "not configured" and
-    /// "flow failed" alike: the CALLER's next move is the same in all
-    /// three (show the honest status), and `isConfigured` distinguishes
-    /// them for the caption.
-    func signIn() async -> Bool
+    /// Whether the connected account holds EVERY scope the share path
+    /// needs (`calendar.events` + `contacts`).
+    ///
+    /// Separate from `isSignedIn` because the two are genuinely
+    /// different states on a device: an account can be signed in and
+    /// still have no Calendar/contacts grant — the elder declined the
+    /// consent sheet, the grant was revoked at Google, or the account
+    /// was connected by a build that asked for identity alone. Sharing
+    /// is impossible in all three, so the card must be able to say so.
+    /// False when nobody is signed in, which is why callers read it
+    /// only after `isSignedIn`.
+    var hasRequiredScopes: Bool { get }
+
+    /// Presents Google's sign-in flow, then asks for the share scopes.
+    ///
+    /// Returns the OUTCOME rather than a Bool: "cancelled", "failed",
+    /// "signed in but without Calendar access" and "fully connected" are
+    /// four different things to put on an elder's screen, and only the
+    /// last one may start the queue.
+    func signIn() async -> GoogleSessionOutcome
 
     /// Presents Google's account-CREATION flow (design §2 decision 3:
     /// the elder may not have a Google account at all), then signs in.
-    func createAccount() async -> Bool
+    func createAccount() async -> GoogleSessionOutcome
 
     /// Drops the session. Tokens are cleared from the Keychain; the
     /// share queue is NOT touched here (the service owns that decision).
