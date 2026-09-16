@@ -27,6 +27,12 @@ enum CameraAvailability: Equatable {
     case noCamera
     /// Camera access was refused or restricted for this app.
     case permissionDenied
+    /// There IS a camera and the permission is in order, but there is no
+    /// view controller to present the picker from (no key window yet, or
+    /// the app is between scenes). T4's presenter reports it; it is kept
+    /// distinct from `noCamera` because the guidance differs — the elder
+    /// should try again, not conclude their phone has no camera.
+    case cannotPresent
 }
 
 /// What one camera session produced. Every path out of the camera is one
@@ -129,7 +135,7 @@ final class CameraCaptureFlow {
                 guard let self else { return }
                 self.deliver { self.handle(outcome) }
             }
-        case .noCamera, .permissionDenied:
+        case .noCamera, .permissionDenied, .cannotPresent:
             // Never present a sheet that cannot appear: the honest
             // guidance is the whole answer, and it is the same line the
             // coordinator speaks when no presenter is wired at all.
@@ -140,14 +146,11 @@ final class CameraCaptureFlow {
     private func handle(_ outcome: CameraCaptureOutcome) {
         switch outcome {
         case .unavailable(let reason):
-            let key = reason == .permissionDenied
-                ? "apps.camera.permissionDenied"
-                : "apps.camera.unavailable"
+            let key = Self.unavailableKey(for: reason)
             let text = L10n.str(key, locale: locale())
             channels.announce("exclamationmark.triangle.fill", text)
             channels.speak(text)
-            channels.emit("camera_capture_unavailable",
-                          reason == .permissionDenied ? "permissionDenied" : "noCamera")
+            channels.emit("camera_capture_unavailable", Self.outcomeName(for: reason))
         case .cancelled:
             // The elder answered a spoken confirmation a moment ago and
             // then closed the camera: a one-word acknowledgement, so the
@@ -160,6 +163,29 @@ final class CameraCaptureFlow {
                 guard let self else { return }
                 self.deliver { self.finishSave(saved: saved) }
             }
+        }
+    }
+
+    /// Why the camera cannot be presented, in the elder's words: a device
+    /// with no camera, a refused permission and a camera that cannot be
+    /// shown right now are three different problems with three different
+    /// things to do about them. Collapsing them would send someone to
+    /// Settings over a phone that has no camera at all.
+    private static func unavailableKey(for reason: CameraAvailability) -> String {
+        switch reason {
+        case .permissionDenied: return "apps.camera.permissionDenied"
+        case .cannotPresent: return "apps.camera.cannotPresent"
+        case .available, .noCamera: return "apps.camera.unavailable"
+        }
+    }
+
+    /// The observability outcome name for the same reason (metadata-free,
+    /// C9 — the reason is a device/permission fact, never user content).
+    private static func outcomeName(for reason: CameraAvailability) -> String {
+        switch reason {
+        case .permissionDenied: return "permissionDenied"
+        case .cannotPresent: return "cannotPresent"
+        case .available, .noCamera: return "noCamera"
         }
     }
 

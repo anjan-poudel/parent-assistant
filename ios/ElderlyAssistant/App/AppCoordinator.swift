@@ -2305,6 +2305,16 @@ final class AppCoordinator: ObservableObject {
             }
         }
 
+        // [APP-LAUNCHER] (2026-09-16) The camera capture flow (T4): the
+        // system picker + the add-only photo write, plus the channel
+        // closures that put the flow's words on the same three surfaces
+        // every other reply uses (speech, the outcome card, the
+        // observability bus). Built here — the cost is three object
+        // allocations and no I/O — so the flow is ready before the first
+        // "क्यामेरा खोल"; the presenter resolves its host at presentation
+        // time, not now.
+        cameraCapture = makeCameraCaptureFlow()
+
         // All stored properties are initialised — push the restored
         // language into services that build user-facing strings.
         syncServiceLocales()
@@ -5394,10 +5404,40 @@ self.noteTalkContractChanged()
     }
 
     /// The camera-capture seam: presenter + photo writer + the flow that
-    /// speaks the outcome. Injected (not constructed here) so the UIKit
-    /// picker stays out of this class — the same reason `callLinks` and
-    /// `appLauncher` are seams. Nil by default: see `presentCameraCapture`.
+    /// speaks the outcome. A stored, assignable property so a test can put
+    /// a scripted flow in its place; production value is built once in
+    /// `init` (see `makeCameraCaptureFlow`). Nil would mean no presenter is
+    /// installed: see `presentCameraCapture`.
     var cameraCapture: CameraCaptureFlow?
+
+    /// Builds the production capture flow (T4): the system picker
+    /// (`PhotoCameraPresenter`) and the add-only library write
+    /// (`PhotosLibraryPhotoSaver`) behind the two injectable seams, with
+    /// this coordinator's own speech / outcome-card / bus channels.
+    ///
+    /// Deliberately cheap and I/O-free: constructing it resolves no window
+    /// and asks no permission (the presenter probes both at presentation
+    /// time), so it is safe in `init` before the UI exists.
+    private func makeCameraCaptureFlow() -> CameraCaptureFlow {
+        CameraCaptureFlow(
+            presenter: PhotoCameraPresenter(),
+            saver: PhotosLibraryPhotoSaver(),
+            locale: { [weak self] in
+                self?.activeLocale ?? Locale(identifier: "ne-NP")
+            },
+            channels: CameraCaptureFlow.Channels(
+                speak: { [weak self] text in
+                    self?.speak(text: text)
+                },
+                announce: { [weak self] icon, text in
+                    self?.setOutcome(icon: icon, text: text)
+                },
+                emit: { [weak self] eventType, outcome in
+                    self?.emitAppLaunch(eventType: eventType, outcome: outcome)
+                }
+            )
+        )
+    }
 
     private func emitAppLaunch(eventType: String = "launch", outcome: String) {
         observabilityBus.emit(ObservabilityEvent(

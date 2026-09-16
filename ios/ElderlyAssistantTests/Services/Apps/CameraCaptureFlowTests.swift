@@ -189,12 +189,30 @@ final class CameraCaptureFlowTests: XCTestCase {
                           L10n.str("apps.camera.unavailable", locale: en))
     }
 
+    /// A camera that exists and is permitted but has no window to be
+    /// presented from is a THIRD problem: the elder should try again, and
+    /// neither "no camera on this phone" nor "go to Settings" is true.
+    func testACameraWithNothingToPresentFromGetsItsOwnLine() {
+        let presenter = FakePresenter(availability: .cannotPresent)
+        let recorder = Recorder()
+
+        makeFlow(presenter: presenter, saver: FakeSaver(), recorder: recorder).start()
+
+        XCTAssertEqual(presenter.presentCount, 0)
+        XCTAssertEqual(recorder.spoken, [L10n.str("apps.camera.cannotPresent", locale: ne)])
+        XCTAssertEqual(recorder.emitted.map(\.outcome), ["cannotPresent"])
+        XCTAssertNotEqual(L10n.str("apps.camera.cannotPresent", locale: ne),
+                          L10n.str("apps.camera.unavailable", locale: ne))
+        XCTAssertNotEqual(L10n.str("apps.camera.cannotPresent", locale: ne),
+                          L10n.str("apps.camera.permissionDenied", locale: ne))
+    }
+
     /// Every line this flow can speak resolves in both locales — a
     /// missing translation would surface to the elder as a raw key.
     func testEveryCameraLineResolvesInBothLocales() {
         let keys = ["apps.camera.photoSaved", "apps.camera.saveFailed",
                     "apps.camera.cancelled", "apps.camera.unavailable",
-                    "apps.camera.permissionDenied"]
+                    "apps.camera.permissionDenied", "apps.camera.cannotPresent"]
         for key in keys {
             for locale in [en, ne] {
                 let value = L10n.str(key, locale: locale)

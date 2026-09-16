@@ -1611,6 +1611,23 @@
         }
       }
     },
+    "apps.camera.cannotPresent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sorry, I can't open the camera right now. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस्, म अहिले क्यामेरा खोल्न सक्दिनँ। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
     "apps.camera.cancelled": {
       "extractionState": "manual",
       "localizations": {
