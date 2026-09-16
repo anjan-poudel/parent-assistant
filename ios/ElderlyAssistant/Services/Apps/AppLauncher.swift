@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// Catalog + launch seam for the Quick Access Apps feature (Home quick-
 /// access row + Settings picker, 2026-09-06). iOS cannot enumerate
@@ -35,6 +36,35 @@ final class AppLauncher {
     /// here.
     enum Kind: Equatable {
         case url
+        case camera
+    }
+
+    /// What a launch of a catalog entry will ACTUALLY open on this phone —
+    /// the probe, the fallback and the honest refusal resolved in one
+    /// place, so the two launch call sites (the voice request and the tile
+    /// executor) can never disagree about what a tap or a yes does.
+    ///
+    /// [APP-LAUNCHER F9] `.settingsFallback` exists because the Settings
+    /// entries ride the PRIVATE `App-Prefs` scheme: when Apple's probe does
+    /// not answer (the pane ids are undocumented and shift between
+    /// releases), the entry must still launch something real rather than
+    /// claim "not installed" about an app that ships with iOS. The public
+    /// `UIApplication.openSettingsURLString` — already the seam four other
+    /// screens in this app use — opens the Settings root, and the caller
+    /// says so out loud (the pane is best-effort; the Settings app is the
+    /// fallback, disclosed, never a silent substitution).
+    enum LaunchPlan: Equatable {
+        /// The entry's own URL answered the probe and will be opened.
+        case app
+        /// The app is absent but carries a `webFallback` (Facebook,
+        /// Instagram, YouTube, WhatsApp, …).
+        case webFallback
+        /// A Settings entry whose `App-Prefs` pane did not answer: the
+        /// public Settings root opens instead.
+        case settingsFallback
+        /// Nothing can be opened — say so honestly, open nothing.
+        case unavailable
+        /// The in-app camera picker (`Kind.camera`).
         case camera
     }
 
@@ -117,6 +147,21 @@ final class AppLauncher {
             }
             return URL(string: "\(scheme)://")
         }
+
+        /// [APP-LAUNCHER F9] Whether this entry is a deep link into the
+        /// SYSTEM Settings app (the root or one of its panes) rather than a
+        /// third-party app of its own. The distinction decides what a
+        /// failed probe means: a pane whose private `App-Prefs` URL did not
+        /// answer is still launchable through the public
+        /// `UIApplication.openSettingsURLString`, while an absent
+        /// third-party app is not (see `LaunchPlan.settingsFallback`).
+        ///
+        /// Derived from the scheme rather than stored: the `App-Prefs`
+        /// scheme IS the pane marker, and a per-entry flag could drift
+        /// from it.
+        var isSettingsSurface: Bool {
+            scheme?.lowercased() == "app-prefs"
+        }
     }
 
     /// The curated catalog, in display order: Apple built-ins first, then
@@ -128,7 +173,12 @@ final class AppLauncher {
         App(id: "messages", nameKey: "app.name.messages", systemImage: "message.fill", scheme: "sms"),
         App(id: "facetime", nameKey: "app.name.facetime", systemImage: "video.fill", scheme: "facetime"),
         App(id: "mail", nameKey: "app.name.mail", systemImage: "envelope.fill", scheme: "message"),
-        App(id: "calendar", nameKey: "app.name.calendar", systemImage: "calendar", scheme: "calshow"),
+        // [APP-LAUNCHER F8] The calendar's spoken aliases — the same
+        // vocabulary the keyword fast path reads (`KeywordIntentRule`'s
+        // `appWords`), so "पात्रो खोल" / "calendar khol" launches it on
+        // both stacks.
+        App(id: "calendar", nameKey: "app.name.calendar", systemImage: "calendar", scheme: "calshow",
+            aliases: ["calendar", "पात्रो"]),
         App(id: "maps", nameKey: "app.name.maps", systemImage: "map.fill", scheme: "maps"),
         // Voice app-launcher additions (2026-09-16) — the launches an
         // elder asks for by name. The camera is the one entry with NO
@@ -166,9 +216,14 @@ final class AppLauncher {
             systemImage: "accessibility", scheme: "App-Prefs",
             urlOverride: "App-Prefs:root=ACCESSIBILITY",
             aliases: ["accessibility", "पहुँचयोग्यता"]),
+        // [APP-LAUNCHER F12] `mausam` (the romanized मौसम) lives HERE, not
+        // only in the keyword table: the two paths must accept one
+        // vocabulary, and the model path resolves through these aliases —
+        // a keyword-only spelling was reachable on the fast path and
+        // rejected by the interpreter's `app` entity.
         App(id: "weather", nameKey: "app.name.weather", systemImage: "cloud.sun.fill",
             scheme: "weather",
-            aliases: ["weather", "मौसम"]),
+            aliases: ["weather", "मौसम", "mausam"]),
         App(id: "magnifier", nameKey: "app.name.magnifier", systemImage: "magnifyingglass",
             scheme: "apple-magnifier",
             aliases: ["magnifier", "म्याग्निफायर"]),
@@ -183,7 +238,11 @@ final class AppLauncher {
         // The four third-party apps the spec gives a "web" fallback carry
         // it here; a launch offers it only when the probe says the app is
         // absent.
-        App(id: "whatsapp", nameKey: "app.name.whatsapp", systemImage: "phone.arrow.down.left.fill", scheme: "whatsapp", imageName: "appIcon.whatsapp", webFallback: URL(string: "https://web.whatsapp.com/"), aliases: ["whatsapp", "ह्वाट्सएप"]),
+        // [APP-LAUNCHER F12] All three Devanagari spellings Whisper
+        // produces for "WhatsApp" are catalog aliases — the keyword table
+        // used to carry व्हाट्सएप/वाट्सएप privately, so a model that echoed
+        // one of them got "I don't know an app called …".
+        App(id: "whatsapp", nameKey: "app.name.whatsapp", systemImage: "phone.arrow.down.left.fill", scheme: "whatsapp", imageName: "appIcon.whatsapp", webFallback: URL(string: "https://web.whatsapp.com/"), aliases: ["whatsapp", "ह्वाट्सएप", "व्हाट्सएप", "वाट्सएप"]),
         App(id: "messenger", nameKey: "app.name.messenger", systemImage: "bolt.fill", scheme: "fb-messenger", imageName: "appIcon.messenger"),
         App(id: "facebook", nameKey: "app.name.facebook", systemImage: "person.2.fill", scheme: "fb", imageName: "appIcon.facebook", webFallback: URL(string: "https://www.facebook.com/"), aliases: ["facebook", "फेसबुक"]),
         App(id: "instagram", nameKey: "app.name.instagram", systemImage: "camera.fill", scheme: "instagram", imageName: "appIcon.instagram", webFallback: URL(string: "https://www.instagram.com/"), aliases: ["instagram", "इन्स्टाग्राम"]),
@@ -302,13 +361,54 @@ final class AppLauncher {
     /// DEVICE actually has a usable camera (simulator, camera-less
     /// hardware) or the permission was refused is answered honestly at
     /// capture time, where the failure is, not here.
+    ///
+    /// [APP-LAUNCHER F9] A Settings entry is present even when its private
+    /// `App-Prefs` pane does not answer: `launchPlan` opens the public
+    /// Settings root instead, so reporting "not installed" here would hide
+    /// every Settings row on a phone where Apple closed that door — the
+    /// app IS on the phone, only the pane deep link is not.
+    ///
+    /// `.webFallback` stays "not installed" on purpose: an absent WhatsApp
+    /// is absent, and this probe is what the picker's "Installed" caption
+    /// and its add gate read. The launch executor still offers the website
+    /// (disclosed) from `launchPlan`; the two questions — "is it here?" and
+    /// "can a launch show something real?" — are deliberately different.
     func isInstalled(_ app: App) -> Bool {
-        guard let url = app.rootURL else { return app.kind == .camera }
-        return opener.canOpenURL(url)
+        switch launchPlan(for: app) {
+        case .app, .camera, .settingsFallback:
+            return true
+        case .webFallback, .unavailable:
+            return false
+        }
+    }
+
+    /// [APP-LAUNCHER F9] Resolves what a launch of `app` will actually
+    /// open, by probing the entry's own URL — the ONE place the probe, the
+    /// web fallback and the Settings fallback are weighed together.
+    ///
+    /// Precedence, and why:
+    ///  1. the entry's own URL, when the probe answers (the only case in
+    ///     which the elder gets the app they asked for);
+    ///  2. for a SETTINGS entry, the public Settings root — the pane ids
+    ///     are private API and may not answer at all, but the Settings app
+    ///     ships with iOS, so the launch is always possible;
+    ///  3. the entry's web fallback, when it has one;
+    ///  4. otherwise `.unavailable`: nothing is opened and the caller says
+    ///     so honestly.
+    ///
+    /// `canOpenURL` is called exactly once per resolution, and the caller
+    /// opens the plan it was handed — never a second, differently-probed
+    /// decision.
+    func launchPlan(for app: App) -> LaunchPlan {
+        if app.kind == .camera { return .camera }
+        guard let url = app.rootURL else { return .unavailable }
+        if opener.canOpenURL(url) { return .app }
+        if app.isSettingsSurface { return settingsFallbackURL() == nil ? .unavailable : .settingsFallback }
+        return app.webFallback == nil ? .unavailable : .webFallback
     }
 
     /// Opens the app's launch URL. Deliberately dumb — the caller probes
-    /// `isInstalled` first and speaks honestly when the app is absent
+    /// `launchPlan` first and speaks honestly when the app is absent
     /// (never a silent dead tap), exactly like the openers in
     /// `CallLinks`.
     ///
@@ -339,9 +439,37 @@ final class AppLauncher {
         return true
     }
 
+    /// [APP-LAUNCHER F9] Opens the PUBLIC Settings deep link
+    /// (`UIApplication.openSettingsURLString`) through the same opener
+    /// seam — the fallback for a Settings entry whose private `App-Prefs`
+    /// pane did not answer. Returns false (opening nothing) when no
+    /// fallback URL exists, so the caller can say the honest
+    /// not-installed line instead of announcing a screen that never
+    /// appears.
+    ///
+    /// The URL is injected so a test can script the App-Prefs probe
+    /// without a device — and so the private-scheme dependency stays
+    /// visible in one place (spec: the launcher degrades to documented
+    /// API, never to a silent dead tap).
+    @discardableResult
+    func openSettingsFallback() -> Bool {
+        guard let url = settingsFallbackURL() else { return false }
+        opener.open(url)
+        return true
+    }
+
     private let opener: CallLinkOpening
 
-    init(opener: CallLinkOpening = SystemCallLinkOpener()) {
+    /// The public Settings deep link, read lazily (see
+    /// `openSettingsFallback`). `UIApplication.openSettingsURLString` is a
+    /// constant string, so touching it needs no running application.
+    private let settingsFallbackURL: () -> URL?
+
+    init(opener: CallLinkOpening = SystemCallLinkOpener(),
+         settingsFallbackURL: @escaping () -> URL? = {
+             URL(string: UIApplication.openSettingsURLString)
+         }) {
         self.opener = opener
+        self.settingsFallbackURL = settingsFallbackURL
     }
 }

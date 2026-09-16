@@ -9,7 +9,12 @@ import XCTest
 /// scheme-only root URLs with the tel:/sms: slashes-less exception and the
 /// Settings panes' full `App-Prefs:root=…` form, cap 8), the pure
 /// restore/validation and search rules, and — through a scripted opener —
-/// that installed-probes and opens use exactly the launch URL. Also pins
+/// that installed-probes and opens use exactly the launch URL. The
+/// `launchPlan` section pins what a launch actually opens when the probe
+/// fails (the public Settings fallback for the App-Prefs panes, the web
+/// fallback, or the honest refusal), and the vocabulary section pins that
+/// every catalog id and alias resolves — the one vocabulary the keyword
+/// rules and the `launcher.open` prompt both read. Also pins
 /// the Info.plist contract that every catalog scheme is declared in
 /// `LSApplicationQueriesSchemes` (the honest `canOpenURL` answer depends
 /// on it) with headroom under the 50-scheme cap — checked both against
@@ -590,6 +595,188 @@ final class AppLauncherTests: XCTestCase {
         }
         XCTAssertLessThanOrEqual(declared.count, 50,
                                  "iOS hard-caps query schemes at 50 — headroom must stay")
+    }
+
+    // MARK: - Settings fallback (voice app launcher code-review F9)
+    //
+    // The Settings entries ride the PRIVATE `App-Prefs` scheme, and the
+    // pane ids behind it are undocumented — Apple may not answer the probe
+    // at all, and a launch that then claimed "not installed" would hide an
+    // app that ships with iOS (and read to review as private-API-only).
+    // `launchPlan` is the one place the probe, the web fallback and the
+    // public-settings fallback are weighed together.
+
+    private let settingsEntryIDs = ["settings", "settingswifi", "settingsbluetooth",
+                                    "settingsdisplay", "settingsaccessibility"]
+
+    /// [F9] The defect: a pane whose `App-Prefs` probe fails was reported
+    /// "not installed". The fix falls back to the public
+    /// `UIApplication.openSettingsURLString` deep link.
+    func testASettingsEntryFallsBackToThePublicSettingsDeepLink() {
+        let opener = FakeCallLinkOpener()          // nothing answers the probe
+        let publicSettings = URL(string: "app-settings:")!
+        let launcher = AppLauncher(opener: opener,
+                                   settingsFallbackURL: { publicSettings })
+        let pane = AppLauncher.app(for: "settingswifi")!
+
+        XCTAssertEqual(launcher.launchPlan(for: pane), .settingsFallback,
+                       "an unanswered pane probe resolves to the Settings root")
+        XCTAssertTrue(launcher.isInstalled(pane),
+                      "Settings is on every iPhone — a failed PANE probe must not " +
+                      "hide the Settings row")
+        XCTAssertTrue(pane.isSettingsSurface)
+        XCTAssertTrue(launcher.openSettingsFallback())
+        XCTAssertEqual(opener.opened.map(\.absoluteString), ["app-settings:"],
+                       "the public deep link is what opens — never the private pane URL")
+    }
+
+    /// The probe keeps its job: every Settings entry still opens its OWN
+    /// pane when the App-Prefs URL answers. The fallback is a consequence
+    /// of a failed probe, never a replacement for the probe.
+    func testEverySettingsEntryStillOpensItsOwnPaneWhenTheProbeAnswers() {
+        let opener = FakeCallLinkOpener(installed: ["App-Prefs": true])
+        let launcher = AppLauncher(opener: opener,
+                                   settingsFallbackURL: { URL(string: "app-settings:") })
+
+        for id in settingsEntryIDs {
+            let app = AppLauncher.app(for: id)!
+            XCTAssertTrue(app.isSettingsSurface, "\(id) is a Settings surface")
+            XCTAssertEqual(launcher.launchPlan(for: app), .app,
+                           "\(id) must open its own App-Prefs pane when the probe answers")
+        }
+        XCTAssertEqual(opener.canOpenChecks.map(\.absoluteString),
+                       settingsEntryIDs.map { AppLauncher.app(for: $0)!.rootURL!.absoluteString },
+                       "each pane is probed by its own URL — no shared shortcut")
+        XCTAssertTrue(opener.opened.isEmpty, "planning opens nothing by itself")
+    }
+
+    /// A pane that cannot answer AND has no fallback URL at all is
+    /// honestly unavailable: nothing is announced that will not appear.
+    func testASettingsEntryWithoutAFallbackURLIsHonestlyUnavailable() {
+        let opener = FakeCallLinkOpener()
+        let launcher = AppLauncher(opener: opener, settingsFallbackURL: { nil })
+        let pane = AppLauncher.app(for: "settingsaccessibility")!
+
+        XCTAssertEqual(launcher.launchPlan(for: pane), .unavailable)
+        XCTAssertFalse(launcher.isInstalled(pane))
+        XCTAssertFalse(launcher.openSettingsFallback())
+        XCTAssertTrue(opener.opened.isEmpty)
+    }
+
+    /// The fallback is for SETTINGS surfaces only. An absent third-party
+    /// app must never be answered with the Settings app — that would hand
+    /// the elder a screen with nothing to do with what they asked for.
+    func testTheSettingsFallbackNeverStandsInForAMissingThirdPartyApp() {
+        let opener = FakeCallLinkOpener()
+        let launcher = AppLauncher(opener: opener,
+                                   settingsFallbackURL: { URL(string: "app-settings:") })
+
+        let whatsapp = AppLauncher.app(for: "whatsapp")!
+        let imo = AppLauncher.app(for: "imo")!
+        XCTAssertFalse(whatsapp.isSettingsSurface)
+        XCTAssertEqual(launcher.launchPlan(for: whatsapp), .webFallback,
+                       "an absent app with a website goes to the web, never to Settings")
+        XCTAssertEqual(launcher.launchPlan(for: imo), .unavailable,
+                       "and one without a fallback is honestly unavailable")
+        XCTAssertFalse(launcher.isInstalled(whatsapp),
+                       "an absent app is absent: a website fallback must not make the " +
+                       "picker's 'Installed' caption true")
+        XCTAssertEqual(launcher.launchPlan(for: AppLauncher.app(for: "camera")!),
+                       .camera, "the camera plan is the in-app picker, probe-free")
+    }
+
+    /// The two lines the Settings fallback adds — the question the elder
+    /// answers and the announcement they hear — resolve in both locales
+    /// and never reuse another outcome's wording (a borrowed "Opening
+    /// Wi-Fi Settings." would claim the pane opened when it did not).
+    func testSettingsFallbackLinesAreDistinctAndTranslated() {
+        for locale in [en, ne] {
+            let question = L10n.str("launcher.confirmOpenSettings", locale: locale)
+            let announcement = L10n.str("apps.announce.openingSettings", locale: locale)
+            XCTAssertFalse(question.isEmpty)
+            XCTAssertFalse(announcement.isEmpty)
+            XCTAssertNotEqual(question, "launcher.confirmOpenSettings",
+                              "\(locale) is missing the fallback question")
+            XCTAssertNotEqual(announcement, "apps.announce.openingSettings",
+                              "\(locale) is missing the fallback announcement")
+            XCTAssertNotEqual(question, L10n.str("launcher.confirmOpen", locale: locale))
+            XCTAssertNotEqual(question, L10n.str("launcher.confirmOpenWeb", locale: locale))
+            XCTAssertNotEqual(announcement, L10n.str("apps.announce.opened", locale: locale))
+            XCTAssertNotEqual(announcement,
+                              L10n.str("apps.announce.notInstalled", locale: locale))
+            XCTAssertNotEqual(announcement,
+                              L10n.str("apps.announce.openingWeb", locale: locale))
+        }
+    }
+
+    // MARK: - One vocabulary, both paths (voice app launcher code-review
+    // F11, F12)
+
+    /// [F12] A keyword-only spelling is a defect by construction: the fast
+    /// path fires on words the interpreter then rejects. The romanized
+    /// `mausam` and the two extra WhatsApp spellings Whisper produces are
+    /// catalog aliases now, so `app(matchingSpoken:)` — the model path's
+    /// resolver — accepts exactly what the keyword rules match.
+    func testKeywordOnlySpellingsArePartOfTheCatalogVocabulary() {
+        let weather = AppLauncher.app(for: "weather")!
+        let whatsapp = AppLauncher.app(for: "whatsapp")!
+        XCTAssertTrue(weather.aliases.contains("mausam"))
+        for spelling in ["व्हाट्सएप", "वाट्सएप"] {
+            XCTAssertTrue(whatsapp.aliases.contains(spelling),
+                          "\(spelling) is a spelling an elder says — the model path " +
+                          "must accept it too")
+        }
+        for (spelling, expected) in [("mausam", "weather"),
+                                     ("व्हाट्सएप", "whatsapp"),
+                                     ("वाट्सएप", "whatsapp"),
+                                     ("ह्वाट्सएप", "whatsapp")] {
+            XCTAssertEqual(AppLauncher.app(matchingSpoken: spelling, locale: ne)?.id,
+                           expected,
+                           "\(spelling) reached the fast path but not the resolver")
+        }
+    }
+
+    /// [F8, F11] The whole catalog is the vocabulary: every id and every
+    /// spoken alias of every entry resolves back to that entry. This is
+    /// the property the plugin's prompt depends on — anything it offers
+    /// the model must be matchable, and anything the keyword rules read
+    /// must resolve through the model path.
+    func testEveryCatalogIDAndAliasResolvesToItsOwnEntry() {
+        for app in AppLauncher.catalog {
+            for token in [app.id] + app.aliases {
+                XCTAssertEqual(AppLauncher.app(matchingSpoken: token, locale: ne)?.id,
+                               app.id,
+                               "\"\(token)\" is offered to the model and must resolve " +
+                               "to \(app.id)")
+                XCTAssertEqual(AppLauncher.app(matchingSpoken: token, locale: en)?.id,
+                               app.id,
+                               "\"\(token)\" must resolve in an English session too")
+            }
+        }
+    }
+
+    /// [F8] The four entries the deterministic rules now cover carry the
+    /// aliases those rules read (`KeywordIntentRule`'s `appWords`): an
+    /// entry with no alias makes its rule silent, so the coverage would
+    /// vanish without a compile error.
+    func testTheNewlyCoveredEntriesCarryTheAliasesTheirRulesRead() {
+        let expected: [String: [String]] = [
+            "magnifier": ["magnifier", "म्याग्निफायर"],
+            "health": ["health", "स्वास्थ्य"],
+            "instagram": ["instagram", "इन्स्टाग्राम"],
+            "calendar": ["calendar", "पात्रो"]
+        ]
+        for (id, aliases) in expected {
+            guard let app = AppLauncher.app(for: id) else {
+                XCTFail("catalog entry missing for \(id)")
+                continue
+            }
+            for alias in aliases {
+                XCTAssertTrue(app.aliases.contains(alias),
+                              "\(id) must carry \"\(alias)\" — its keyword rule reads the " +
+                              "catalog aliases and nothing else")
+            }
+        }
     }
 
     // MARK: - Confirmation arbitration (voice app launcher code-review F1,

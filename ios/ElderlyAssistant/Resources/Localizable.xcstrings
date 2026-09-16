@@ -17539,6 +17539,40 @@
           }
         }
       }
+    },
+    "apps.announce.openingSettings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't open that screen. Opening Settings."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यो स्क्रिन खोल्न सक्दिनँ। सेटिङ खोल्दैछु।"
+          }
+        }
+      }
+    },
+    "launcher.confirmOpenSettings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't open that exact screen. Should I open Settings instead?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यो ठ्याक्कै स्क्रिन खोल्न सक्दिनँ। सट्टामा सेटिङ खोल्ने हो?"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

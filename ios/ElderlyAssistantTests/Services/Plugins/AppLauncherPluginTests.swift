@@ -74,6 +74,16 @@ final class AppLauncherPluginTests: XCTestCase {
                       "the fragment must name the entity key the plugin reads")
     }
 
+    /// The vocabulary's tokens — the prompt's own list, parsed the way the
+    /// model is expected to read it: comma-separated, each a quoted value.
+    private var vocabularyTokens: [String] {
+        AppLauncherPlugin.spokenVocabulary
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "\"")) }
+            .filter { !$0.isEmpty }
+    }
+
     func testPromptVocabularyNamesEveryCatalogAppAndNoPhantom() {
         let vocabulary = AppLauncherPlugin.spokenVocabulary
         for app in AppLauncher.catalog {
@@ -81,20 +91,66 @@ final class AppLauncherPluginTests: XCTestCase {
                           "\(app.id) must be offered to the model — a catalog entry the " +
                           "prompt never names can never be launched by voice")
         }
-        // Every id-shaped token in the vocabulary must be a real catalog
-        // id: a typo here would send the LLM to an entity that can only
-        // fail (the same catalog↔prompt consistency the plist test pins
-        // for schemes).
+        // Every token in the vocabulary must be a real catalog id or a
+        // real alias: a typo here would send the LLM to an entity that can
+        // only fail (the same catalog↔prompt consistency the plist test
+        // pins for schemes).
         let catalogIDs = Set(AppLauncher.catalog.map(\.id))
-        for token in AppLauncherPlugin.spokenVocabulary
-            .replacingOccurrences(of: "(", with: ", ")
-            .replacingOccurrences(of: ")", with: ", ")
-            .split(separator: ",")
-            .map({ $0.trimmingCharacters(in: .whitespaces) })
-            .filter({ !$0.isEmpty }) {
+        for token in vocabularyTokens {
             XCTAssertTrue(catalogIDs.contains(token) || AppLauncher.catalog.contains(where: {
                 $0.aliases.contains(token)
             }), "\(token) is neither a catalog id nor a catalog alias")
+        }
+    }
+
+    /// [F11] The defect this pins: the vocabulary handed the model
+    /// `settingsdisplay (display, brightness)` — a human-facing display
+    /// form, not one of the two values the resolver accepts — and
+    /// `prefix(2)` hid every alias after the second. A model that echoed
+    /// any of it produced an entity that resolved to nothing and the elder
+    /// heard "I don't know an app called …".
+    func testPromptVocabularyOffersStandaloneTokensAndNeverTruncates() {
+        let tokens = Set(vocabularyTokens)
+
+        // No display forms: no parentheses, no list punctuation inside a
+        // token, one token per value.
+        for token in tokens {
+            XCTAssertFalse(token.contains("(") || token.contains(")"),
+                           "\"\(token)\" is a display form, not a value the resolver accepts")
+            XCTAssertFalse(token.contains(" "),
+                           "\"\(token)\" is not a single app word")
+        }
+
+        // Every alias of every entry is offered — not just the first two.
+        for app in AppLauncher.catalog {
+            XCTAssertTrue(tokens.contains(app.id), "\(app.id) is missing from the prompt")
+            for alias in app.aliases {
+                XCTAssertTrue(tokens.contains(alias),
+                              "\"\(alias)\" resolves for \(app.id) but was never shown " +
+                              "to the model")
+            }
+        }
+
+        // The words the elders actually say, present as their own tokens.
+        for token in ["फोटो", "वाइफाइ", "डिस्प्ले"] {
+            XCTAssertTrue(tokens.contains(token), "\"\(token)\" must stand alone")
+        }
+    }
+
+    /// [F11] …and a model ECHO of any listed token resolves: the prompt's
+    /// whole contract is that what it offers can be handed back verbatim.
+    func testAModelEchoOfAnyListedTokenResolvesToItsApp() async {
+        for app in AppLauncher.catalog {
+            for token in [app.id] + app.aliases {
+                let spy = LaunchSpy()
+                let plugin = makePlugin(spy)
+
+                _ = await handle(plugin, locale: ne, entities: ["app": token])
+
+                XCTAssertEqual(spy.requests.map(\.appID), [app.id],
+                               "the prompt offered \"\(token)\" — echoing it must launch " +
+                               "\(app.id), not fail")
+            }
         }
     }
 

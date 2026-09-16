@@ -100,17 +100,35 @@ final class AppLauncherPlugin: AssistantPlugin {
 
     func presentationView(for result: PluginResult) -> AnyView? { nil }
 
-    /// The catalog IDs a launch may name, with the first words an elder
-    /// says for each — composed from `AppLauncher.catalog` so a new entry
-    /// can never be launchable without the model being told about it. The
-    /// catalog is the single source of truth on both sides of the
+    /// The catalog IDs and spoken aliases a launch may name, each as its
+    /// OWN quoted token — composed from `AppLauncher.catalog` so a new
+    /// entry can never be launchable without the model being told about
+    /// it. The catalog is the single source of truth on both sides of the
     /// contract; this is only its prompt-shaped view.
+    ///
+    /// [APP-LAUNCHER F11] One token per value, and why:
+    ///
+    ///  - `"whatsapp", "ह्वाट्सएप"` — every id and every alias stands
+    ///    alone, quoted, so the model is asked to echo a single VALUE. The
+    ///    old `id (alias1, alias2)` display form was a human-facing label:
+    ///    the "vocabulary" for `settingsdisplay` read as
+    ///    `settingsdisplay (display, brightness)`, which is neither a
+    ///    catalog id nor an alias — an entity copied out of it resolved to
+    ///    nothing, and the elder heard "I don't know an app called …".
+    ///  - NO truncation: every alias is offered, not just the first two.
+    ///    `AppLauncher.app(matchingSpoken:)` accepts all of them, so
+    ///    hiding the third one only made the model guess at a word it was
+    ///    never shown (व्हाट्सएप / वाट्सएप are exactly that kind of
+    ///    Whisper-produced spelling).
+    ///
+    /// Aliases are single-token words (see `App.aliases`), so a quoted
+    /// token is exactly what the resolver's exact, full-lexeme match
+    /// accepts.
     static var spokenVocabulary: String {
-        AppLauncher.catalog.map { app in
-            guard !app.aliases.isEmpty else { return app.id }
-            return "\(app.id) (\(app.aliases.prefix(2).joined(separator: ", ")))"
-        }
-        .joined(separator: ", ")
+        AppLauncher.catalog
+            .flatMap { app in [app.id] + app.aliases }
+            .map { "\"\($0)\"" }
+            .joined(separator: ", ")
     }
 
     private static func event(_ type: String, outcome: String) -> ObservabilityEvent {

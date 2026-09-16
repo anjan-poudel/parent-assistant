@@ -5509,28 +5509,59 @@ self.noteTalkContractChanged()
     private func launchURLApp(_ app: AppLauncher.App) {
         let locale = activeLocale
         let name = L10n.str(app.nameKey, locale: locale)
-        guard isAppInstalled(app) else {
+        // [F9] The probe, the web fallback and the Settings fallback are
+        // resolved in ONE place (`AppLauncher.launchPlan`) so the tile, the
+        // voice request and this executor can never decide differently
+        // about what a launch opens.
+        switch appLauncher.launchPlan(for: app) {
+        case .app:
+            appLauncher.open(app)
+            let text = L10n.fmt("apps.announce.opened", locale: locale, name)
+            setOutcome(icon: app.systemImage, text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):opened")
+        case .webFallback:
             // The web fallback is a REAL surface (Safari, or the app's own
             // universal link when it turns out to be installed after all),
             // disclosed out loud — never a silent substitution.
-            if appLauncher.openWebFallback(app) {
-                let text = L10n.fmt("apps.announce.openingWeb", locale: locale, name)
-                setOutcome(icon: app.systemImage, text: text)
-                speak(text: text)
-                emitAppLaunch(outcome: "\(app.id):openedWebFallback")
-                return
+            guard appLauncher.openWebFallback(app) else {
+                return announceNotInstalled(app, name: name, locale: locale)
             }
-            let text = L10n.fmt("apps.announce.notInstalled", locale: locale, name)
-            setOutcome(icon: "exclamationmark.triangle.fill", text: text)
+            let text = L10n.fmt("apps.announce.openingWeb", locale: locale, name)
+            setOutcome(icon: app.systemImage, text: text)
             speak(text: text)
-            emitAppLaunch(outcome: "\(app.id):notInstalled")
-            return
+            emitAppLaunch(outcome: "\(app.id):openedWebFallback")
+        case .settingsFallback:
+            // [F9] The pane's private App-Prefs URL did not answer; the
+            // public Settings deep link always does. Same disclosure rule
+            // as the web fallback — the elder is told which surface
+            // actually appeared, and the outcome names it too.
+            guard appLauncher.openSettingsFallback() else {
+                return announceNotInstalled(app, name: name, locale: locale)
+            }
+            let text = L10n.str("apps.announce.openingSettings", locale: locale)
+            setOutcome(icon: app.systemImage, text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):openedSettingsFallback")
+        case .unavailable:
+            announceNotInstalled(app, name: name, locale: locale)
+        case .camera:
+            // `performAppLaunch` routes `.camera` before it reaches this
+            // executor (see its `switch`); a caller that reaches it anyway
+            // lands on the honest capture path rather than a silent no-op.
+            presentCameraCapture(app)
         }
-        appLauncher.open(app)
-        let text = L10n.fmt("apps.announce.opened", locale: locale, name)
-        setOutcome(icon: app.systemImage, text: text)
+    }
+
+    /// The honest absent-app line, spoken and carded (the same surface
+    /// every other failed launch uses) — shared by the three plans that
+    /// can end with nothing opened.
+    private func announceNotInstalled(_ app: AppLauncher.App, name: String,
+                                      locale: Locale) {
+        let text = L10n.fmt("apps.announce.notInstalled", locale: locale, name)
+        setOutcome(icon: "exclamationmark.triangle.fill", text: text)
         speak(text: text)
-        emitAppLaunch(outcome: "\(app.id):opened")
+        emitAppLaunch(outcome: "\(app.id):notInstalled")
     }
 
     /// The camera half of the executor (launcher plan T4 owns the system
@@ -5756,18 +5787,37 @@ self.noteTalkContractChanged()
             return L10n.fmt("launcher.unknownApp", locale: locale, appID)
         }
         let name = L10n.str(app.nameKey, locale: locale)
-        if app.kind == .url, !isAppInstalled(app) {
-            guard app.webFallback != nil else {
-                emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):notInstalled")
-                return L10n.fmt("apps.announce.notInstalled", locale: locale, name)
-            }
+        // [F9] Same single resolution the executor uses: what this launch
+        // can actually open decides which question is asked — or whether
+        // one is asked at all.
+        switch appLauncher.launchPlan(for: app) {
+        case .app, .camera:
+            pendAppLaunch(appID: app.id, confidence: confidence)
+            emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):pending")
+            return L10n.fmt("launcher.confirmOpen", locale: locale, name)
+        case .webFallback:
             pendAppLaunch(appID: app.id, confidence: confidence)
             emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):webFallbackPending")
             return L10n.fmt("launcher.confirmOpenWeb", locale: locale, name)
+        case .settingsFallback:
+            // [F9] A pane whose private App-Prefs URL did not answer is
+            // still launchable — the public Settings deep link opens the
+            // Settings app. The swap is disclosed in the question itself,
+            // so the elder's "yes" is a yes to what actually happens (the
+            // same contract as the web-fallback question above). The line
+            // names no pane: for the Settings ROOT entry the fallback is
+            // the same screen, and "I can't open that exact screen" is
+            // true in every case.
+            pendAppLaunch(appID: app.id, confidence: confidence)
+            emitAppLaunch(eventType: "launch_request",
+                          outcome: "\(app.id):settingsFallbackPending")
+            return L10n.str("launcher.confirmOpenSettings", locale: locale)
+        case .unavailable:
+            // A launch that can only fail is never turned into a yes/no
+            // question: the honest not-installed line, nothing pended.
+            emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):notInstalled")
+            return L10n.fmt("apps.announce.notInstalled", locale: locale, name)
         }
-        pendAppLaunch(appID: app.id, confidence: confidence)
-        emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):pending")
-        return L10n.fmt("launcher.confirmOpen", locale: locale, name)
     }
 
     /// Pends the launch and arms the session's existing confirmation

@@ -205,6 +205,21 @@ enum KeywordIntentRule {
         ]),
         Rule(domain: .appLaunch, appID: "facebook", variants: [
             [facebookWords, openVerbFamily]
+        ]),
+        // [APP-LAUNCHER F8] Appended AFTER every existing rule, so the
+        // added coverage cannot reorder what already fired: an utterance
+        // naming two apps still resolves through the earlier rule.
+        Rule(domain: .appLaunch, appID: "magnifier", variants: [
+            [magnifierWords, openVerbFamily]
+        ]),
+        Rule(domain: .appLaunch, appID: "health", variants: [
+            [healthWords, openVerbFamily]
+        ]),
+        Rule(domain: .appLaunch, appID: "instagram", variants: [
+            [instagramWords, openVerbFamily]
+        ]),
+        Rule(domain: .appLaunch, appID: "calendar", variants: [
+            [calendarWords, openVerbFamily]
         ])
     ]
 
@@ -286,10 +301,19 @@ enum KeywordIntentRule {
     // MARK: - App-launch groups ([APP-LAUNCHER] 2026-09-16)
 
     /// The words an elder says for a catalog app: the catalog's own
-    /// spoken `aliases` — the SAME vocabulary the `launcher.open`
-    /// plugin's prompt exposes, so the fast path and the model path
-    /// hear one set of words — plus any extra phrasings the keyword
-    /// surface adds.
+    /// spoken `aliases` and NOTHING ELSE — the same vocabulary the
+    /// `launcher.open` plugin's prompt exposes, so the fast path and the
+    /// model path hear one set of words.
+    ///
+    /// [APP-LAUNCHER F12] That "and nothing else" is the fix: the
+    /// keyword table used to add private `extra:` spellings (romanized
+    /// `mausam`, the व्हाट्सएप / वाट्सएप WhatsApp forms), so the fast path
+    /// fired on words the interpreter then rejected — the elder said
+    /// "व्हाट्सएप खोल", the on-device path launched it, and the same
+    /// utterance through the model path answered "I don't know an app
+    /// called व्हाट्सएप". Every spelling now lives in the catalog
+    /// (`AppLauncher.App.aliases`), which is the single vocabulary both
+    /// paths read.
     ///
     /// `.token` throughout: an app word matches WHOLE or not at all
     /// (never a substring — the Devanagari Character-cluster
@@ -297,23 +321,29 @@ enum KeywordIntentRule {
     /// single-token words. A catalog id that no longer resolves yields
     /// an EMPTY group, and an empty group can never satisfy a variant:
     /// the rule goes quiet rather than guessing an app.
-    private static func appWords(_ appID: String, extra: [String] = []) -> Group {
-        let aliases = AppLauncher.app(for: appID)?.aliases ?? []
-        return (aliases + extra).map { .token($0) }
+    private static func appWords(_ appID: String) -> Group {
+        (AppLauncher.app(for: appID)?.aliases ?? []).map { .token($0) }
     }
 
     private static let cameraWords = appWords("camera")
     private static let photoWords = appWords("photos")
     private static let settingsWords = appWords("settings")
-    /// "mausam" is the romanized मौसम (the romanized forms the news
-    /// words keep above); the Devanagari alias ships in the catalog.
-    /// The weather rule still requires an open verb — a bare "मौसम" (or
-    /// "weather") stays the topic table's weather QUESTION.
-    private static let weatherWords = appWords("weather", extra: ["mausam"])
-    /// The other Devanagari spellings Whisper produces for "WhatsApp";
-    /// the catalog carries "ह्वाट्सएप".
-    private static let whatsappWords = appWords("whatsapp",
-                                              extra: ["व्हाट्सएप", "वाट्सएप"])
+    /// The weather rule still requires an open verb — a bare "मौसम",
+    /// "mausam" or "weather" stays the topic table's weather QUESTION.
+    private static let weatherWords = appWords("weather")
+    private static let whatsappWords = appWords("whatsapp")
+    /// [APP-LAUNCHER F8] The entries the ON-DEVICE stack could not reach.
+    /// Its grammar has no "plugin" action, so the model/plugin path
+    /// (`launcher.open` via the interpreter) does not exist there and
+    /// these four apps were voice-unreachable on the device that ships
+    /// with the app — reachable only in a cloud session. A deterministic
+    /// rule is the whole fix: no encoder, no grammar and no prompt change,
+    /// and the on-device ladder runs this table like any other stage.
+    /// Their words are catalog aliases like every other rule's.
+    private static let magnifierWords = appWords("magnifier")
+    private static let healthWords = appWords("health")
+    private static let instagramWords = appWords("instagram")
+    private static let calendarWords = appWords("calendar")
     /// The YouTube APP word — deliberately separate from
     /// `youtubeKeywords` above: that group is substring-matched for the
     /// postposition-fused "युट्युबमा" of a PLAY request, while a launch

@@ -182,8 +182,14 @@ final class KeywordIntentRuleTests: XCTestCase {
         // words the plugin's prompt exposes. Every alias of every
         // launchable catalog app must fire, so the fast path can never
         // be narrower than the vocabulary the elder is told about.
+        //
+        // The list is the KEYWORD-COVERED set; the entries outside it
+        // (phone, maps, messenger, gmail, zoom, the Settings panes, …)
+        // are reachable through the model path only — see
+        // docs/voice-launcher-phrases.md §4.
         for appID in ["camera", "photos", "settings", "weather",
-                      "whatsapp", "youtube", "facebook"] {
+                      "whatsapp", "youtube", "facebook",
+                      "magnifier", "health", "instagram", "calendar"] {
             guard let app = AppLauncher.app(for: appID) else {
                 XCTFail("catalog entry missing for \(appID)")
                 continue
@@ -192,7 +198,53 @@ final class KeywordIntentRuleTests: XCTestCase {
             for alias in app.aliases {
                 XCTAssertEqual(KeywordIntentRule.match(transcript: "\(alias) खोल")?.appID, appID,
                                "\"\(alias) खोल\" must launch \(appID)")
+                XCTAssertEqual(KeywordIntentRule.match(transcript: "open \(alias)")?.appID, appID,
+                               "\"open \(alias)\" must launch \(appID) too")
             }
+        }
+    }
+
+    /// [F8] The four apps the on-device stack could not reach. Its grammar
+    /// cannot emit the plugin action, so without a deterministic rule
+    /// "म्याग्निफायर खोल" was answered by nothing at all on the device the
+    /// app ships on. The fix is table-only — no encoder, no grammar and no
+    /// prompt change.
+    func testAppLaunchRulesCoverTheOnDeviceGapApps() {
+        let utterances: [(String, String)] = [
+            ("magnifier खोल", "magnifier"),
+            ("म्याग्निफायर खोल", "magnifier"),
+            ("हजुर, म्याग्निफायर खोल्नुहोस् न", "magnifier"),
+            ("open the magnifier", "magnifier"),
+            ("health खोल", "health"),
+            ("स्वास्थ्य खोल्नुहोस्", "health"),
+            ("open my health app", "health"),
+            ("instagram खोल", "instagram"),
+            ("इन्स्टाग्राम खोल", "instagram"),
+            ("open instagram please", "instagram"),
+            ("calendar खोल", "calendar"),
+            ("पात्रो खोल", "calendar"),
+            ("open the calendar", "calendar")
+        ]
+        for (utterance, appID) in utterances {
+            XCTAssertEqual(KeywordIntentRule.match(transcript: utterance)?.appID, appID,
+                           "\(utterance) must launch \(appID) on EVERY stack — the " +
+                           "on-device grammar cannot reach the plugin path")
+        }
+    }
+
+    /// [F12] The spellings that used to live only in the keyword table.
+    /// The catalog owns them now, so the model path resolves the same
+    /// words; these pins keep the fast path firing on them.
+    func testTheFormerKeywordOnlySpellingsStillFire() {
+        for (utterance, spelling, appID) in [("mausam खोल", "mausam", "weather"),
+                                             ("mausam kholnus", "mausam", "weather"),
+                                             ("व्हाट्सएप खोल्नुहोस्", "व्हाट्सएप", "whatsapp"),
+                                             ("वाट्सएप खोल", "वाट्सएप", "whatsapp")] {
+            XCTAssertEqual(KeywordIntentRule.match(transcript: utterance)?.appID, appID,
+                           "\(utterance) must keep launching \(appID)")
+            XCTAssertTrue(AppLauncher.app(for: appID)!.aliases.contains(spelling),
+                          "\(spelling) must be a CATALOG alias, not keyword-only — the " +
+                          "model path reads the catalog and would reject it")
         }
     }
 
@@ -205,6 +257,8 @@ final class KeywordIntentRuleTests: XCTestCase {
                           "settings", "सेटिङ", "weather", "मौसम", "mausam",
                           "whatsapp", "ह्वाट्सएप", "youtube", "युट्युब",
                           "facebook", "फेसबुक",
+                          "magnifier", "म्याग्निफायर", "health", "स्वास्थ्य",
+                          "instagram", "इन्स्टाग्राम", "calendar", "पात्रो",
                           "आजको मौसम कस्तो छ?", "is it raining today"] {
             XCTAssertNil(KeywordIntentRule.match(transcript: utterance),
                          "\(utterance) has no launcher verb — the required set must stay intact")

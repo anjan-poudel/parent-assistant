@@ -214,6 +214,32 @@ final class CommandRouterKeywordIntentTests: XCTestCase {
         XCTAssertEqual(coordinator.appLaunchRequests.map(\.appID), ["whatsapp"])
     }
 
+    /// [F8] The apps whose ONLY route is the deterministic table — the
+    /// on-device grammar cannot emit the plugin action, so before these
+    /// rules "म्याग्निफायर खोल" ended the turn with nothing. The stage
+    /// hands the catalog id to the SAME launch seam the plugin calls, so
+    /// they get the confirmation question, the pending state and the one
+    /// launch executor for free.
+    func testTheOnDeviceGapAppsReachTheLaunchSeam() {
+        for (utterance, appID) in [("म्याग्निफायर खोल", "magnifier"),
+                                   ("magnifier khol", "magnifier"),
+                                   ("स्वास्थ्य खोल", "health"),
+                                   ("open health", "health"),
+                                   ("इन्स्टाग्राम खोल", "instagram"),
+                                   ("open instagram", "instagram"),
+                                   ("पात्रो खोल", "calendar"),
+                                   ("open calendar", "calendar")] {
+            let coordinator = MockCoordinator()
+            let (router, bus) = makeRouter(coordinator)
+
+            _ = router.route(transcript: utterance)
+
+            XCTAssertEqual(coordinator.appLaunchRequests.map(\.appID), [appID],
+                           "\(utterance) must reach the launch seam as \(appID)")
+            XCTAssertEqual(keywordMatchEvents(bus).first?.metadata["domain"], "appLaunch")
+        }
+    }
+
     func testCapturePhraseResolvesToTheCameraNotPhotos() {
         let coordinator = MockCoordinator()
         let (router, _) = makeRouter(coordinator)
