@@ -658,7 +658,39 @@ public actor LLMCore {
         return contextTokens.count
     }
     
+    /// Grammar-constrained generation — the vendored entry point the app's
+    /// interpreters used before `generateConstrained` existed. Kept as a
+    /// thin wrapper (`.legacy` premature-end-token policy, output only) so
+    /// `respond(to:as:)` and any other historical caller is byte-identical.
     public func generateWithConstraints(from input: String, jsonSchema: String, thinking: ThinkingMode = .suppressed) throws -> String {
+        try generateConstrained(from: input,
+                                jsonSchema: jsonSchema,
+                                thinking: thinking,
+                                prematureEndTokenPolicy: .legacy).output
+    }
+
+    /// Grammar-constrained generation that REPORTS how it ended.
+    ///
+    /// [CASCADE-RUNTIME] (2026-09-16) Why this exists: the loop used to exit
+    /// the `maxTokenCount` bound NORMALLY, so a JSON cut off mid-value was
+    /// returned as if it were a complete answer, and nothing downstream
+    /// could tell "the model finished" from "the context ran out". The
+    /// device failure this fixed: `{"action": "call", "entryId": null,
+    /// "contact` → `Unexpected end of file`, twice, then a failure.
+    /// The result now carries the termination, so the caller can size its
+    /// budget from evidence and classify an incomplete JSON honestly.
+    ///
+    /// `prematureEndTokenPolicy` covers the OTHER way a JSON can end early:
+    /// an end-of-sequence / end-of-turn token sampled while the value is
+    /// still open. llama.cpp's grammar sampler masks such tokens unless the
+    /// grammar can complete — `.completeJSON` is the second line of defence
+    /// for the model/GGUF combinations where it does not (the `.raw`-framed
+    /// fine-tunes are exactly that class: they were trained to emit the
+    /// family's EOS right after the label).
+    public func generateConstrained(from input: String,
+                                    jsonSchema: String,
+                                    thinking: ThinkingMode = .suppressed,
+                                    prematureEndTokenPolicy: PrematureEndTokenPolicy = .legacy) throws -> ConstrainedGeneration {
         debugLastGeneratedTokens = []
         let generation = beginGeneration()
         guard prepareContext(for: input) else { throw LLMError.contextCreationFailed }
@@ -673,9 +705,38 @@ public actor LLMCore {
         defer { llama_sampler_free(constrainedSampler) }
 
         var output = ""
+        var termination: GenerationTermination = .tokenBudget
+        var skippedEndTokens = 0
         while !isInterrupted(generation) && shouldContinuePredicting && currentTokenCount < Int32(maxTokenCount) {
             let token = llama_sampler_sample(constrainedSampler, context, batch.n_tokens - 1)
-            if token == endToken || token == endOfTurnToken { break }
+            if token == endToken || token == endOfTurnToken {
+                // An end token while the value is still open is a PREMATURE
+                // stop, not an answer. `.completeJSON` skips it: the token
+                // is advanced through the context (so the sampler is not
+                // asked the identical question again — sampling is greedy
+                // with a fixed seed, it would repeat), its text is never
+                // emitted (`.legacy` never emitted it either), and the
+                // repeat penalty discourages the next one. Bounded by
+                // `Self.maxSkippedEndTokens` so a model that insists cannot
+                // spin: after that many skips the partial output is
+                // returned with `.endToken` and the caller classifies it.
+                if prematureEndTokenPolicy == .completeJSON,
+                   !Self.isCompleteJSONValue(output),
+                   skippedEndTokens < Self.maxSkippedEndTokens {
+                    skippedEndTokens += 1
+                    clearBatch()
+                    addToBatch(token: token, pos: currentTokenCount)
+                    guard llama_decode(context, batch) == 0 else {
+                        shouldContinuePredicting = false
+                        throw LLMError.decodingFailed
+                    }
+                    contextTokens.append(token)
+                    currentTokenCount += 1
+                    continue
+                }
+                termination = .endToken
+                break
+            }
 
             clearBatch()
             addToBatch(token: token, pos: currentTokenCount)
@@ -689,7 +750,42 @@ public actor LLMCore {
             output += decode(token)
             debugLastGeneratedTokens.append(token)
         }
-        return output.trimmingCharacters(in: .whitespacesAndNewlines)
+        if isInterrupted(generation) { termination = .interrupted }
+        return ConstrainedGeneration(output: output.trimmingCharacters(in: .whitespacesAndNewlines),
+                                     termination: termination,
+                                     skippedEndTokens: skippedEndTokens)
+    }
+
+    /// End tokens a single generation may skip before the premature-stop
+    /// guard gives up and returns the partial output.
+    static let maxSkippedEndTokens = 8
+
+    /// Cheap syntactic completeness test for a JSON value: leading `{`/`[`
+    /// with every bracket closed outside string literals. Deliberately not
+    /// a decoder — this runs once per sampled end token, and the grammar
+    /// already guarantees the CONTENT is valid; all this needs to answer is
+    /// "is the value still open?".
+    public static func isCompleteJSONValue(_ raw: String) -> Bool {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let first = text.first, first == "{" || first == "[" else { return false }
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for character in text {
+            if inString {
+                if escaped { escaped = false }
+                else if character == "\\" { escaped = true }
+                else if character == "\"" { inString = false }
+                continue
+            }
+            switch character {
+            case "\"": inString = true
+            case "{", "[": depth += 1
+            case "}", "]": depth -= 1
+            default: break
+            }
+        }
+        return depth == 0 && !inString
     }
 
     private func makeConstrainedSampler(grammar: String) -> UnsafeMutablePointer<llama_sampler>? {
@@ -714,6 +810,40 @@ public enum LLMError: Error {
     case decodeFailed
     case embeddingsFailed
     case chatTemplateFailed(String)
+}
+
+/// Why a grammar-constrained generation stopped ([CASCADE-RUNTIME]).
+public enum GenerationTermination: String, Sendable {
+    /// The sampler emitted the model's end-of-sequence or end-of-turn
+    /// token — the model declared itself finished.
+    case endToken
+    /// The `maxTokenCount` context bound was reached. The output may be cut
+    /// mid-value: this is the budget-exhaustion class, and it used to be
+    /// indistinguishable from `.endToken` (the loop simply fell out).
+    case tokenBudget
+    /// The generation was interrupted (explicit `stop()` / timeout).
+    case interrupted
+}
+
+/// How a grammar-constrained generation treats an end-of-sequence /
+/// end-of-turn token that arrives while the value is still open
+/// ([CASCADE-RUNTIME]).
+public enum PrematureEndTokenPolicy: Sendable {
+    /// The historical behaviour: an end token ends the generation, whatever
+    /// has been emitted so far. `respond(to:as:)` keeps this untouched.
+    case legacy
+    /// An end token ends the generation only when the accumulated output is
+    /// already a complete JSON value; otherwise it is skipped, bounded by
+    /// `LLMCore.maxSkippedEndTokens`. The app's JSON interpreters use this.
+    case completeJSON
+}
+
+/// A grammar-constrained generation's output plus how it ended.
+public struct ConstrainedGeneration: Sendable {
+    public let output: String
+    public let termination: GenerationTermination
+    /// End tokens skipped because they arrived mid-value (0 under `.legacy`).
+    public let skippedEndTokens: Int
 }
 
 struct RenderedPrompt: Decodable {
@@ -1052,9 +1182,13 @@ open class LLM: ObservableObject {
         self.repeatPenalty = repeatPenalty
         self.repetitionLookback = repetitionLookback
         
-        #if DEBUG
-        print("GNERATING WITH SEEED: \(seed)")
-        #endif
+        // [CASCADE-RUNTIME] (2026-09-16) The `print("GNERATING WITH SEEED:
+        // \(seed)")` debug line lived here (Debug builds only, but the
+        // device install is a Debug build, so it printed on every load).
+        // Removed: the seed is already an explicit, documented constant
+        // (`OnDeviceSampling.fixedSeed`), the observability bus carries the
+        // load event, and a console line per model load is noise the
+        // release-log gate exists to keep out of this file.
         var modelParams = llama_model_default_params()
         #if targetEnvironment(simulator)
         modelParams.n_gpu_layers = 0
@@ -1456,11 +1590,22 @@ open class LLM: ObservableObject {
             postprocess(rawOutput)
             return output
         } catch {
+            // [CASCADE-RUNTIME] (2026-09-16) This block renders the MODEL'S
+            // RAW OUTPUT, its bytes and a raw error object. Compiled into
+            // Release it put utterance-derived model output and decoder
+            // errors on the device console (`JSON Decoding failed: … Raw
+            // output: '{"action": …'`, the device-log line this worktree
+            // chased) — the class `tools/check-release-log-safety.py`
+            // guards. Guarded, not deleted: the diagnostics are still what
+            // a Debug run wants. The gate scans this file too, so the
+            // guard cannot be dropped silently.
+            #if DEBUG
             print("JSON Decoding failed:")
             print("Raw output: '\(rawOutput)'")
             print("JSON data: '\(String(data: jsonData, encoding: .utf8) ?? "nil")'")
             print("Error: \(error)")
             print("Schema: \(T.jsonSchema)")
+            #endif
             throw StructuredOutputError.decodingFailed
         }
     }

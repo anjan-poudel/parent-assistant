@@ -20,6 +20,16 @@ content that must never reach a Release log sink:
   2. a raw error object / its description — the two on-device STT engine
      files only (`ENGINE_FILES`); other subsystems' raw-error prints are
      tracked separately and deliberately out of this gate's scope.
+  3. content-bearing values or a raw error object in the VENDORED LLM
+     runtime (`VENDOR_ROOT`) — the sampling seed, the prompt, the raw
+     model output, a path/URL, or an error object. The `GNERATING WITH
+     SEEED` print (removed 2026-09-16, [CASCADE-RUNTIME]) lived in that
+     file and reached a Debug device console, and the same file's
+     `JSON Decoding failed: … Raw output: '…'` block printed model output
+     from a Release build: v2 of this gate scanned only
+     ios/ElderlyAssistant and never saw either. Rule 3 is judged on the
+     interpolated expressions and bare arguments only — a print's literal
+     text is not content.
 
 What counts as a print: `print(`, `debugPrint(`, `NSLog(`, `os_log(`,
 `fputs(`. A statement is accumulated across lines until its parentheses
@@ -62,6 +72,21 @@ ENGINE_FILES = [
     "ElderlyAssistant/Services/Voice/WhisperSpeechRecognizer.swift",
     "ElderlyAssistant/Services/Voice/WhisperKitSpeechRecognizer.swift",
 ]
+
+# The vendored on-device LLM runtime (rule 3). Both interpreters generate
+# through it, it is checked into this repo, and a print there compiles into
+# the shipped binary exactly like one under ElderlyAssistant — so it is
+# scanned, with the content rule the two app rules cannot express.
+VENDOR_ROOT = os.path.join(PROJECT_DIR, "vendor", "LLM.swift", "Sources")
+
+# Identifiers whose VALUE is content or a secret: the sampling seed (the
+# removed `GNERATING WITH SEEED` defect), the prompt, the model's raw
+# output and its bytes, conversation history, and file locations. Judged on
+# interpolated expressions and bare arguments, never on literal text.
+VENDOR_CONTENT_RE = re.compile(
+    r"(?<![A-Za-z0-9_])(?:rawOutput|output|jsonData|prompt|processedPrompt"
+    r"|history|seed|path|fileURL|url)(?![A-Za-z0-9_])",
+    re.IGNORECASE)
 
 CALL_RE = re.compile(r"(?<![A-Za-z0-9_])(print|debugPrint|NSLog|os_log|fputs)\s*\(")
 IF_DEBUG_RE = re.compile(r"^#if\s+DEBUG\s*$")
@@ -162,6 +187,24 @@ def interpolation_bodies(text: str):
         yield text[match.end():i]
 
 
+def vendor_content_offence(statement: str):
+    """Return a reason when a VENDORED print renders content or a raw error.
+
+    Rule 3: judged on what the statement RENDERS — the interpolated
+    expressions and the bare arguments — so a literal diagnostic ("JSON
+    Decoding failed:") is not itself an offence.
+    """
+    for body in interpolation_bodies(statement):
+        if VENDOR_CONTENT_RE.search(body):
+            return ("content-bearing value (model output / prompt / seed / path) "
+                    "in a print")
+    for match in re.finditer(r"[(:,]\s*([A-Za-z_][A-Za-z0-9_]*)\s*[,)]", statement):
+        if VENDOR_CONTENT_RE.fullmatch(match.group(1)):
+            return ("content-bearing value (model output / prompt / seed / path) "
+                    "in a print")
+    return error_object_offence(statement)
+
+
 def error_object_offence(statement: str):
     """Return a reason string when a Release-compiled print renders a raw error."""
     if STRINGIFY_RE.search(statement):
@@ -195,7 +238,7 @@ def error_object_offence(statement: str):
     return None
 
 
-def scan(path: str, engine: bool):
+def scan(path: str, engine: bool, vendor: bool = False):
     """Yield (line, message) offences for one Swift file."""
     with open(path, encoding="utf-8") as handle:
         lines = handle.read().split("\n")
@@ -249,22 +292,22 @@ def scan(path: str, engine: bool):
                 balance = paren_balance(code[opener.start():])
                 pending = [index + 1, code, in_debug, balance]
                 if balance <= 0:
-                    offences.extend(_judge(path, pending, engine, tainted, lines))
+                    offences.extend(_judge(path, pending, engine, tainted, lines, vendor))
                     pending = None
         else:
             pending[1] += " " + code
             pending[3] += paren_balance(code)
             if pending[3] <= 0:
-                offences.extend(_judge(path, pending, engine, tainted, lines))
+                offences.extend(_judge(path, pending, engine, tainted, lines, vendor))
                 pending = None
         index += 1
 
     if pending is not None:  # unbalanced (multi-line string / macro) — judge what we saw
-        offences.extend(_judge(path, pending, engine, tainted, lines))
+        offences.extend(_judge(path, pending, engine, tainted, lines, vendor))
     return offences
 
 
-def _judge(path, pending, engine, tainted, lines):
+def _judge(path, pending, engine, tainted, lines, vendor):
     line_no, statement, in_debug, _balance = pending
     if in_debug:
         return []
@@ -277,6 +320,11 @@ def _judge(path, pending, engine, tainted, lines):
                          lines[line_no - 1].strip() if line_no - 1 < len(lines) else ""))
     if engine:
         reason = error_object_offence(text)
+        if reason:
+            offences.append((line_no, reason + " outside #if DEBUG",
+                             lines[line_no - 1].strip() if line_no - 1 < len(lines) else ""))
+    if vendor:
+        reason = vendor_content_offence(text)
         if reason:
             offences.append((line_no, reason + " outside #if DEBUG",
                              lines[line_no - 1].strip() if line_no - 1 < len(lines) else ""))
@@ -299,6 +347,22 @@ def main() -> int:
                 continue
             path = os.path.join(root, name)
             violations.extend(scan(path, os.path.normpath(path) in engine_set))
+
+    # Rule 3: the vendored on-device runtime ships inside the app binary, so
+    # it is judged by the same Debug guard. A missing root is a violation —
+    # the gate must not go green by having nothing to check.
+    if not os.path.isdir(VENDOR_ROOT):
+        print(f"  ✗ guarded vendored runtime is missing: "
+              f"{os.path.relpath(VENDOR_ROOT, PROJECT_DIR)}")
+        print("    update tools/check-release-log-safety.py deliberately")
+        violations.append((os.path.relpath(VENDOR_ROOT, PROJECT_DIR), 0,
+                           "guarded vendored runtime is missing", ""))
+    else:
+        for root, _dirs, files in os.walk(VENDOR_ROOT):
+            for name in sorted(files):
+                if not name.endswith(".swift"):
+                    continue
+                violations.extend(scan(os.path.join(root, name), False, vendor=True))
 
     if violations:
         for relative, line, message, source in violations:

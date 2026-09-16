@@ -553,4 +553,139 @@ final class LlamaCommandInterpreterTests: XCTestCase {
             XCTAssertEqual(row?.decisionText, "off(picker_unavailable)")
         }
     }
+
+    // MARK: - [CASCADE-RUNTIME] generation budget
+
+    /// The device failure this pins: the interpreters shipped a FIXED
+    /// 1024-token context, and in this runtime that number covers the
+    /// prompt AND the answer. With the measured 696-token template plus an
+    /// utterance, the answer had ~260 tokens — less than the schema's own
+    /// upper bound, so a full JSON could not fit and the sampler returned
+    /// `{"action": "call", "entryId": null, "contact` as if it were done.
+    func testTheFixed1024ContextCouldNotFitTheSchemaBound() {
+        for schema in [LlamaGrammar.commandJSONSchema, LocalIntentInterpreter.intentSchema] {
+            let ceiling = OnDeviceGenerationBudget.promptCeilingTokens(
+                framingTokens: OnDeviceGenerationBudget.rawFramingTokens)
+            let bound = OnDeviceGenerationBudget.schemaUpperBoundTokens(for: schema)
+            XCTAssertLessThan(1024 - ceiling, bound,
+                              "the old 1024-token context left less room than a "
+                              + "schema-complete JSON needs — this is the defect")
+        }
+    }
+
+    /// The fix's contract: the budget a turn allocates leaves room for the
+    /// prompt ceiling PLUS a schema-complete JSON of the maximum size the
+    /// design caps allow, with the safety margin on top.
+    func testASchemaCompleteJSONOfMaximumSizeFitsTheContextBudget() {
+        for schema in [LlamaGrammar.commandJSONSchema, LocalIntentInterpreter.intentSchema] {
+            let budget = OnDeviceGenerationBudget.contextTokens(
+                prompt: nil,
+                schema: schema,
+                framingTokens: OnDeviceGenerationBudget.rawFramingTokens)
+            let room = budget - OnDeviceGenerationBudget.promptCeilingTokens(
+                framingTokens: OnDeviceGenerationBudget.rawFramingTokens)
+            let bound = OnDeviceGenerationBudget.schemaUpperBoundTokens(for: schema)
+            XCTAssertGreaterThanOrEqual(
+                room, bound + OnDeviceGenerationBudget.safetyMarginTokens,
+                "the context must reserve the schema's upper bound plus the margin")
+            XCTAssertGreaterThan(budget, 1024,
+                                 "…which cannot be done in the fixed 1024 it replaced")
+            XCTAssertLessThanOrEqual(budget, OnDeviceGenerationBudget.maximumContextTokens)
+        }
+    }
+
+    /// Filling every field of the command schema at its design cap produces
+    /// a JSON no larger than the bound allows (at the same ~3 characters per
+    /// token the caps are expressed in). A field added to the schema grows
+    /// the bound with it — the number is computed, not remembered.
+    func testAMaximumSizeCommandJSONStaysWithinTheBound() {
+        let string48 = String(repeating: "क", count: 48 * 2)   // free text, ~2 chars/token
+        let slot = String(repeating: "a", count: 16 * 3)       // a slot string
+        let maxJSON = """
+        {"intent":"create_calendar_event","response":"\(string48)","confidence":1,\
+        "actionType":"\(slot)","actionUrl":"\(slot)","entryId":"\(slot)","contact":"\(slot)",\
+        "time":"\(slot)","medication":"\(slot)","message":"\(string48)","callType":"\(slot)",\
+        "requestedApp":"\(slot)","topic":"\(slot)","steps":["\(slot)","\(slot)","\(slot)"],\
+        "pluginAction":"\(slot)","pluginEntities":{"a":"\(slot)"}}
+        """
+        let bound = OnDeviceGenerationBudget.schemaUpperBoundTokens(
+            for: LlamaGrammar.commandJSONSchema)
+        XCTAssertLessThanOrEqual(maxJSON.count, bound * 3,
+                                 "the bound must cover a JSON that fills every field")
+    }
+
+    func testSchemaScanReadsEveryTopLevelFieldWithTheRightKind() {
+        let fields = OnDeviceGenerationBudget.schemaFields(in: LlamaGrammar.commandJSONSchema)
+        XCTAssertEqual(fields.count, 16, "the command schema's top-level properties")
+        XCTAssertEqual(fields.map(\.name).first, "intent",
+                       "declaration order is the order the converter emits keys in")
+        func kind(_ name: String) -> OnDeviceGenerationBudget.SchemaField.Kind? {
+            fields.first { $0.name == name }?.kind
+        }
+        XCTAssertEqual(kind("intent"),
+                       .enumeration(longestLiteral: "create_calendar_event".count))
+        XCTAssertEqual(kind("confidence"), .number)
+        XCTAssertEqual(kind("steps"), .collection)
+        XCTAssertEqual(kind("pluginEntities"), .collection)
+        XCTAssertEqual(kind("response"), .string, "free text earns the larger cap")
+        XCTAssertEqual(kind("entryId"), .string)
+        XCTAssertEqual(kind("contact"), .string,
+                       "a slot string that the schema also allows to be null")
+    }
+
+    func testTheScanSurvivesASchemaItCannotRead() {
+        XCTAssertTrue(OnDeviceGenerationBudget.schemaFields(in: "{}").isEmpty)
+        XCTAssertGreaterThanOrEqual(
+            OnDeviceGenerationBudget.schemaUpperBoundTokens(for: "{}"), 1,
+            "an unreadable schema reserves SOMETHING rather than nothing")
+    }
+
+    func testGrownContextIsStrictlyLargerAndStaysUnderTheCeiling() {
+        let schema = LlamaGrammar.commandJSONSchema
+        let grown = OnDeviceGenerationBudget.grownContextTokens(1024, schema: schema)
+        XCTAssertGreaterThan(grown, 1024,
+                             "the retry must not repeat the allocation that truncated")
+        XCTAssertGreaterThanOrEqual(grown, 1024 + OnDeviceGenerationBudget.contextQuantum)
+        XCTAssertEqual(OnDeviceGenerationBudget.grownContextTokens(
+                        OnDeviceGenerationBudget.maximumContextTokens, schema: schema),
+                       OnDeviceGenerationBudget.maximumContextTokens,
+                       "the ceiling holds")
+    }
+
+    func testALongerUtteranceRaisesThePromptCeiling() {
+        let floor = OnDeviceGenerationBudget.promptCeilingTokens(
+            framingTokens: OnDeviceGenerationBudget.rawFramingTokens)
+        XCTAssertEqual(floor, OnDeviceGenerationBudget.measuredTemplateTokens
+                       + OnDeviceGenerationBudget.utteranceAllowanceTokens,
+                       "the floor is the measured template plus one utterance")
+        // The floor is 760 tokens, so the utterance has to out-estimate a
+        // measured 696-token template before it can win: ~20 Devanagari
+        // characters per repetition at ~2 characters per token means ~200
+        // repetitions (≈4,000 characters ≈ 1,900 tokens) clears it. A
+        // SHORTER utterance legitimately leaves the ceiling at the floor —
+        // the estimate is a `max`, and this pins both halves.
+        let short = String(repeating: "यो एक लामो वाक्य हो ", count: 40)
+        XCTAssertEqual(
+            OnDeviceGenerationBudget.promptCeilingTokens(
+                prompt: short,
+                framingTokens: OnDeviceGenerationBudget.rawFramingTokens),
+            floor,
+            "an utterance that still fits inside the template's allowance "
+            + "does not raise the ceiling")
+        let long = String(repeating: "यो एक लामो वाक्य हो ", count: 200)
+        XCTAssertGreaterThan(
+            OnDeviceGenerationBudget.promptCeilingTokens(
+                prompt: long,
+                framingTokens: OnDeviceGenerationBudget.rawFramingTokens),
+            floor,
+            "a turn's own prompt estimate wins when it is larger than the floor")
+    }
+
+    func testDevanagariIsEstimatedWiderThanAscii() {
+        let ascii = OnDeviceGenerationBudget.estimatedPromptTokens(String(repeating: "a", count: 400))
+        let devanagari = OnDeviceGenerationBudget.estimatedPromptTokens(String(repeating: "क", count: 400))
+        XCTAssertEqual(ascii, 100)
+        XCTAssertEqual(devanagari, 200,
+                       "4 chars/token badly under-counts Devanagari — the app's prompts")
+    }
 }

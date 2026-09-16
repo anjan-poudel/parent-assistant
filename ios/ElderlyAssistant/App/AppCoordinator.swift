@@ -1593,8 +1593,33 @@ final class AppCoordinator: ObservableObject {
             // [PIPELINE-TRACE] …and the cascade's trace row.
             traceRecorder: pipelineTraceRecorder,
             onEscalated: { [weak self] reason in
+                // [CASCADE-RESIDENCY] THIS closure is the pre-picker seam:
+                // `LocalBrainChain` calls `cascade.onEscalated` BEFORE it
+                // dispatches to the stand-in brain, so releasing the
+                // encoder's weights here happens BEFORE the picker brain's
+                // multi-GB handle is allocated. The encoder's answer for
+                // the turn is already final (the chain escalates only
+                // after its completion), so its weights are pure residency
+                // cost from this point on — and the phone OOMs (signal 9)
+                // with Whisper + encoder + picker brain all resident.
+                self?.releaseEncoderWeightsForCascadeEscalation()
                 self?.emitEncoderEscalatedToPickerBrain(reason)
             })
+    }
+
+    /// [CASCADE-RESIDENCY] The cascade's residency policy, in one place:
+    /// the encoder's CoreML weights go back BEFORE the picker brain's
+    /// handle is allocated (see `onEscalated`'s call site), and the encoder
+    /// stays AVAILABLE — its own `isAvailable`/`runnerForPrediction` reload
+    /// path brings the weights back on the next turn that needs them.
+    ///
+    /// `intentEncoderOffered` is checked FIRST: touching the lazy
+    /// `intentEncoderInterpreter` would CONSTRUCT it on a configuration
+    /// that never offered it (no encoder artifact, the toggle off) — the
+    /// same guard the slot installation uses.
+    private func releaseEncoderWeightsForCascadeEscalation() {
+        guard intentEncoderOffered else { return }
+        intentEncoderInterpreter.unloadForCascadeEscalation()
     }
 
     /// [ENCODER-RUNTIME-CASCADE] The A/B evidence for a cascade turn: the

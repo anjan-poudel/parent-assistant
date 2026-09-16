@@ -824,6 +824,103 @@ final class IntentEncoderInterpreterTests: XCTestCase {
         XCTAssertTrue(spy.urls.isEmpty, "re-arming never loads weights eagerly")
     }
 
+    // MARK: [CASCADE-RESIDENCY] Releasing weights for the picker brain
+
+    /// The device failure this pins (signal 9 during a cascade): on
+    /// escalation the encoder's weights are pure residency cost — its answer
+    /// for the turn is already final — so they are released BEFORE the picker
+    /// brain allocates its own. The release must NOT take the encoder out of
+    /// service: the next turn reloads through the same lazy path the
+    /// memory-pressure reload uses, labelled so a trace can tell them apart.
+    func testCascadeEscalationReleasesTheWeightsAndTheNextTurnReloadsThem() throws {
+        let store = try makeStore()
+        let dest = try installArtifact(store: store)
+        let tokenizer = StubIntentEncoderTokenizer()
+        let spy = IntentEncoderRunnerSpy()
+        let manifest = testManifest()
+        let clean = InputSanitiser.sanitise("भोलि औषधि", level: .quarantine)
+        let tokenization = try XCTUnwrap(tokenizer.tokenize(
+            sanitisedTranscript: clean, maxSequenceLength: 64))
+        let firstModel = StubIntentEncoderModel()
+        firstModel.logits = makeLogits(manifest: manifest, intent: "set_reminder",
+                                       wordTags: ["B-time", "B-medication"],
+                                       tokenization: tokenization)
+        let secondModel = StubIntentEncoderModel()
+        secondModel.logits = firstModel.logits
+        var models = [firstModel, secondModel]
+        spy.make = { models.removeFirst() }
+
+        let interpreter = makeInterpreter(store: store, tokenizer: tokenizer,
+                                          spy: spy, manifest: manifest)
+        XCTAssertNotNil(interpret(interpreter, "भोलि औषधि"))
+        XCTAssertTrue(interpreter.isModelLoaded)
+
+        // The chain escalates: release BEFORE the picker brain is loaded.
+        interpreter.unloadForCascadeEscalation()
+
+        XCTAssertFalse(interpreter.isModelLoaded, "the weights are gone")
+        XCTAssertEqual(firstModel.unloadCount, 1)
+        XCTAssertEqual(events("encoder_model_unloaded").first?.metadata["reason"],
+                       "cascade_escalation")
+        XCTAssertEqual(events("encoder_model_unloaded").first?.metadata["state"], "released")
+        XCTAssertTrue(interpreter.isAvailable,
+                      "a cascade release is a RESIDENCY decision — the encoder must still "
+                      + "be able to serve the next turn (unlike a memory-pressure hold)")
+
+        // The next turn re-arms and reloads a FRESH runner from the store.
+        XCTAssertNotNil(interpret(interpreter, "भोलि औषधि"))
+        XCTAssertEqual(spy.urls, [dest, dest])
+        XCTAssertTrue(interpreter.isModelLoaded)
+        XCTAssertEqual(secondModel.loadCount, 1)
+        XCTAssertEqual(events("encoder_model_loaded").last?.metadata["state"],
+                       "reloaded_after_cascade_escalation",
+                       "the trace can tell WHY the weights had to come back")
+    }
+
+    func testCascadeEscalationWithNothingResidentIsANoOpThatStillReportsItself() throws {
+        let store = try makeStore()
+        _ = try installArtifact(store: store)
+        let spy = IntentEncoderRunnerSpy()
+        let interpreter = makeInterpreter(store: store,
+                                          tokenizer: StubIntentEncoderTokenizer(),
+                                          spy: spy)
+
+        XCTAssertFalse(interpreter.isModelLoaded)
+        interpreter.unloadForCascadeEscalation()
+
+        XCTAssertTrue(spy.urls.isEmpty, "nothing was resident — nothing to load or unload")
+        XCTAssertEqual(events("encoder_model_unloaded").first?.metadata["reason"],
+                       "cascade_escalation")
+        XCTAssertEqual(events("encoder_model_unloaded").first?.metadata["state"],
+                       "not_resident", "the policy is visible in a trace even when it is a no-op")
+        XCTAssertTrue(interpreter.isAvailable)
+    }
+
+    /// The two policies must not be conflated: a memory-pressure unload HOLDS
+    /// the encoder out of service (`isAvailable` false, cleared by
+    /// `rearmAfterMemoryPressure`), a cascade release does not.
+    func testTheCascadeReleaseIsNotAMemoryPressureHold() throws {
+        let store = try makeStore()
+        _ = try installArtifact(store: store)
+        let spy = IntentEncoderRunnerSpy()
+        let interpreter = makeInterpreter(store: store,
+                                          tokenizer: StubIntentEncoderTokenizer(),
+                                          spy: spy)
+
+        interpreter.handleMemoryPressure()
+        XCTAssertFalse(interpreter.isAvailable, "memory pressure takes the encoder out of service")
+        XCTAssertEqual(events("encoder_model_unloaded").first?.metadata["reason"],
+                       "memory_pressure")
+        interpreter.rearmAfterMemoryPressure()
+        XCTAssertTrue(interpreter.isAvailable)
+
+        interpreter.unloadForCascadeEscalation()
+        XCTAssertTrue(interpreter.isAvailable,
+                      "a cascade release never goes through the availability flag")
+        XCTAssertEqual(events("encoder_rearmed").count, 1,
+                       "…so it has nothing to re-arm — the labels are the whole difference")
+    }
+
     // MARK: Observability (C9 / NFR-016)
 
     func testObservabilityCarriesModelIdDurationAndOutcomeOnly() throws {
@@ -995,10 +1092,14 @@ final class IntentEncoderInterpreterTests: XCTestCase {
         let pair = preparedPair(original: "भोलि सम्झाइदिनु",
                                 canonical: "भोलि सम्झाइदिनुस्")
         // A confident `set_reminder` whose time span is the FIRST word, with
-        // the spike's tag order (B-time is index 3).
+        // the spike's tag order (B-time is index 3) — and ONE row per TOKEN
+        // POSITION, which is the decoder's contract: `wordLevelTagIndices`
+        // abstains (`word_alignment_mismatch`) when the row count and the
+        // tokenization disagree, and the pair's two words are two tokens.
         model.logits = IntentEncoderLogits(
             intentLogits: manifest.intents.map { $0 == "set_reminder" ? 6 : -6 },
-            slotLogits: [[-6, -6, -6, 6, 6]])
+            slotLogits: [[-6, -6, -6, 6, 6],
+                         [-6, -6, -6, -6, -6]])
         spy.make = { model }
 
         let result = interpretPrepared(interpreter, pair)
@@ -1046,7 +1147,10 @@ final class IntentEncoderInterpreterTests: XCTestCase {
                                        preparedPair(original: "", canonical: "")))
         XCTAssertEqual(tokenizer.callCount, 0)
         let abstained = events("encoder_abstained")
-        XCTAssertEqual(abstained.last?.metadata["error_code"],
+        // The code is the event's OWN field (`errorCode:`), never a metadata
+        // key: `emit` fills `metadata` with the artifact identity and fixed
+        // vocabulary extras only, and `LogSanitiser` bounds `event.errorCode`.
+        XCTAssertEqual(abstained.last?.errorCode,
                        IntentEncoderAbstention.emptyAfterSanitise.rawValue)
     }
 
@@ -1318,8 +1422,15 @@ final class IntentEncoderInterpreterTests: XCTestCase {
                        "the interpreter's own gate applied to the decode")
         XCTAssertTrue(decode.outputSummary.contains("set_reminder"),
                       "the card may name the decoded action")
-        XCTAssertTrue(decode.outputSummary.contains("[time="),
-                      "…and its slot surfaces — the on-device posture")
+        // The card's summary is capped (`PipelineTraceSummary.maxLength`, 28
+        // chars) and renders slot types SORTED, so this two-slot decode —
+        // medication before time — truncates inside the first slot's name:
+        // "set_reminder 1.00 [medicatio…". `[time=` is a substring the cap
+        // cannot reach; what the on-device card actually shows is the slot
+        // section opening in sorted order.
+        XCTAssertTrue(decode.outputSummary.contains("[medicatio"),
+                      "…and its slot surfaces — the on-device posture, sorted "
+                      + "and inside the card's cap")
         XCTAssertEqual(fixture.model.predictCount, 1,
                        "instrumentation alters nothing: the graph ran once")
     }

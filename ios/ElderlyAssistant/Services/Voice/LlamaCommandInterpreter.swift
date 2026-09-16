@@ -259,14 +259,339 @@ enum LlamaGrammar {
 /// defaults) so a future LLM.swift default bump cannot silently change
 /// on-device behavior.
 enum OnDeviceSampling {
-    /// Fixed seed — dated so the constant is self-explaining in logs
-    /// ("GNERATING WITH SEEED" debug print in LLM.swift).
+    /// Fixed seed — dated so the constant is self-explaining in logs. The
+    /// vendored runtime used to print it on every load ("GNERATING WITH
+    /// SEEED: 20260907"); that debug print is gone ([CASCADE-RUNTIME],
+    /// 2026-09-16), so this constant and the `model_loaded` event are the
+    /// only place the seed is visible now.
     static let fixedSeed: UInt32 = 20_260_907
     static let temperature: Float = 0
     static let topK: Int32 = 40
     static let topP: Float = 0.95
     static let repeatPenalty: Float = 1.2
     static let repetitionLookback: Int32 = 64
+}
+
+/// [CASCADE-RUNTIME] (2026-09-16) How large an on-device generation context
+/// must be for a SCHEMA-COMPLETE JSON to fit behind its prompt.
+///
+/// WHY: the vendored runtime treats `maxTokenCount` as the WHOLE context
+/// (`n_ctx`, and `n_batch` with it) and its generation loop stops once
+/// `n_ctx` tokens have passed THROUGH THE CONTEXT — prompt included. The
+/// real output room is therefore `n_ctx − promptTokens`, and both
+/// interpreters shipped `maxTokenCount: 1024` against prompts 700–1,000
+/// tokens long. Twenty tokens of room is what produced the device failure
+/// this fixes: a JSON cut off after three fields (`{"action": "call",
+/// "entryId": null, "contact`), identically on the retry (greedy sampling
+/// with a fixed seed), then `inference_truncated` → escalation. Nothing in
+/// the runtime said "cut short": the loop exited off the end of its
+/// `while`, so a partial JSON looked like a finished one.
+///
+/// WHAT is sized here: prompt ceiling (measured template + utterance +
+/// this brain's framing, or the turn's own estimate when that is larger)
+/// + the schema's upper bound + a safety margin, rounded up to a quantum
+/// and clamped to [`minimumContextTokens`, `maximumContextTokens`]. The
+/// retry's budget (`grownContextTokens`) is strictly larger, so a retry is
+/// never the same allocation that just truncated.
+///
+/// The memory side is real and deliberate. Context sizing drives `n_batch`,
+/// and with `llama_context_params.embeddings` on, llama.cpp reserves its
+/// output buffer for `n_batch` tokens — the vendored `LLMCore` comment
+/// records a 2048-token context overflowing a 6 GB device inside
+/// `llama_context::output_reserve`. So the ceiling stays at 1536 (half of
+/// that measured-bad allocation) and the encoder's weights are released
+/// before the picker brain allocates its own
+/// (`IntentEncoderInterpreter.unloadForCascadeEscalation`).
+enum OnDeviceGenerationBudget {
+
+    // MARK: - Prompt side
+
+    /// The measured training/inference template — `IntentPrompt`:
+    /// "696 qwen3 / 677 gemma tokens". The utterance and any framing sit on
+    /// top of it.
+    static let measuredTemplateTokens = 696
+
+    /// Room for one spoken utterance after the template.
+    static let utteranceAllowanceTokens = 64
+
+    /// Chat-framing affixes for a `.raw` brain: none (T-046 — the
+    /// fine-tunes were trained on the bare template with no wrapper).
+    static let rawFramingTokens = 0
+    /// Wrapper tokens for the schemes that do affix a chat turn (llama3 /
+    /// qwen3).
+    static let chatFramingTokens = 64
+
+    /// Slack between (prompt ceiling + schema bound) and the context.
+    static let safetyMarginTokens = 64
+
+    // MARK: - Schema side (design caps, per value kind)
+
+    /// A slot string — a name, a time, an app id, a medication.
+    static let slotStringTokens = 16
+    /// Free text the model SPEAKS or sends: `reply` / `response` /
+    /// `message`. One Nepali sentence.
+    static let freeTextValueTokens = 48
+    /// A string array (`steps`) or a string map (`pluginEntities`): three
+    /// entries at the slot cap, plus punctuation.
+    static let collectionValueTokens = 50
+    /// `"key":` plus its separating comma or brace.
+    static let keyOverheadTokens = 4
+    /// A `confidence` number.
+    static let numberValueTokens = 4
+    /// The keys whose values are spoken/sent text and earn the free-text
+    /// cap; every other string field is a slot.
+    static let freeTextFieldNames: Set<String> = ["reply", "response", "message"]
+
+    // MARK: - Context bounds
+
+    static let contextQuantum = 128
+    /// Never allocate less than the shipped 1024-token context.
+    static let minimumContextTokens = 1024
+    /// Half of the 2048-token context the vendored runtime recorded as
+    /// overflowing a 6 GB device with Whisper resident. The single knob to
+    /// turn if a field device reports pressure.
+    static let maximumContextTokens = 1536
+
+    // MARK: - Prompt estimate
+
+    /// The prompt's token count, estimated as the app estimates elsewhere
+    /// (`/4` for ASCII) but counting non-ASCII at 2 bytes per token: these
+    /// prompts carry Devanagari, where 4-chars-per-token badly under-counts.
+    static func estimatedPromptTokens(_ prompt: String) -> Int {
+        var ascii = 0
+        var wide = 0
+        for scalar in prompt.unicodeScalars {
+            if scalar.isASCII { ascii += 1 } else { wide += 1 }
+        }
+        return ascii / 4 + wide / 2
+    }
+
+    /// The room the prompt is allowed: the measured template + utterance +
+    /// this brain's framing, or the turn's own estimate when that is larger.
+    /// `prompt` nil = the floor — what `warm()` sizes its context from.
+    static func promptCeilingTokens(prompt: String? = nil, framingTokens: Int) -> Int {
+        let floor = measuredTemplateTokens + utteranceAllowanceTokens + framingTokens
+        guard let prompt, !prompt.isEmpty else { return floor }
+        return max(floor, estimatedPromptTokens(prompt))
+    }
+
+    /// The framing allowance for a brain's chat scheme. (`ChatFormat` is
+    /// the interpreter's own nested type, hence the qualified spelling —
+    /// the same one `framingTokens(forBrain:)` below uses.)
+    static func framingTokens(for kind: LlamaCommandInterpreter.ChatFormat.Kind) -> Int {
+        kind == .raw ? rawFramingTokens : chatFramingTokens
+    }
+
+    // MARK: - Schema upper bound (computed from the schema text)
+
+    /// One top-level property of a JSON-schema object.
+    struct SchemaField: Equatable {
+        enum Kind: Equatable {
+            /// A string enum; carries its longest literal's length in
+            /// characters (the sampler can emit any one of them).
+            case enumeration(longestLiteral: Int)
+            case number
+            /// A string — a slot, or free text when the key says so.
+            case string
+            /// An array or a map.
+            case collection
+        }
+        let name: String
+        let kind: Kind
+    }
+
+    /// The `properties` of `schema`, in declaration order.
+    ///
+    /// Deliberately a small hand-rolled scan rather than a JSON decoder:
+    /// this runs on the inference path, and anything it cannot classify
+    /// falls back to the SLOT cap (a bounded over-reservation) rather than
+    /// failing. An unparsable schema yields no fields, and
+    /// `schemaUpperBoundTokens` then reserves one free-text value — never
+    /// zero.
+    static func schemaFields(in schema: String) -> [SchemaField] {
+        let characters = Array(schema)
+        guard let bodyStart = propertiesBodyStart(in: characters) else { return [] }
+
+        var keys: [(name: String, literalStart: Int, valueStart: Int)] = []
+        var index = bodyStart
+        var depth = 0
+        while index < characters.count {
+            let character = characters[index]
+            if character == "\"" {
+                var end = index + 1
+                var literal = ""
+                while end < characters.count, characters[end] != "\"" {
+                    if characters[end] == "\\", end + 1 < characters.count {
+                        literal.append(characters[end + 1])
+                        end += 2
+                        continue
+                    }
+                    literal.append(characters[end])
+                    end += 1
+                }
+                let afterLiteral = end + 1
+                if depth == 0,
+                   let colon = firstNonSpace(in: characters, from: afterLiteral),
+                   characters[colon] == ":" {
+                    keys.append((literal, index, colon + 1))
+                }
+                index = afterLiteral
+                continue
+            }
+            if character == "{" || character == "[" {
+                depth += 1
+            } else if character == "}" || character == "]" {
+                depth -= 1
+                if depth < 0 { break }   // the `properties` object closed
+            }
+            index += 1
+        }
+
+        return keys.enumerated().map { offset, key in
+            let end = offset + 1 < keys.count ? keys[offset + 1].literalStart : characters.count
+            let value = String(characters[key.valueStart..<max(key.valueStart, end)])
+            return SchemaField(name: key.name, kind: kind(ofFieldValue: value))
+        }
+    }
+
+    /// The most tokens a schema-complete JSON can need: every top-level
+    /// field present, each at the design cap for its kind, plus its key.
+    static func schemaUpperBoundTokens(for schema: String) -> Int {
+        let fields = schemaFields(in: schema)
+        guard !fields.isEmpty else { return freeTextValueTokens + keyOverheadTokens }
+        var total = 2   // the surrounding braces
+        for field in fields {
+            total += keyOverheadTokens + valueTokens(for: field)
+        }
+        return total
+    }
+
+    static func valueTokens(for field: SchemaField) -> Int {
+        switch field.kind {
+        case .enumeration(let longestLiteral):
+            return max(2, longestLiteral / 3 + 2)   // the quotes + the literal
+        case .number:
+            return numberValueTokens
+        case .string:
+            return freeTextFieldNames.contains(field.name) ? freeTextValueTokens : slotStringTokens
+        case .collection:
+            return collectionValueTokens
+        }
+    }
+
+    static func kind(ofFieldValue value: String) -> SchemaField.Kind {
+        if value.contains("\"enum\"") {
+            return .enumeration(longestLiteral: longestQuotedLiteral(in: value))
+        }
+        if value.contains("\"array\"") || value.contains("\"object\"") {
+            return .collection
+        }
+        if value.contains("\"number\"") || value.contains("\"integer\"") {
+            return .number
+        }
+        return .string
+    }
+
+    /// The longest quoted literal in a fragment — the widest member of an
+    /// enum. Never below 1, so an unparsable list still costs something.
+    static func longestQuotedLiteral(in fragment: String) -> Int {
+        var longest = 0
+        var current: Int?
+        var escaped = false
+        for character in fragment {
+            guard let length = current else {
+                if character == "\"" { current = 0 }
+                continue
+            }
+            if escaped {
+                escaped = false
+                current = length + 1
+            } else if character == "\\" {
+                escaped = true
+                current = length + 1
+            } else if character == "\"" {
+                current = nil
+                longest = max(longest, length)
+            } else {
+                current = length + 1
+            }
+        }
+        return max(longest, 1)
+    }
+
+    // MARK: - Context sizing
+
+    static func roundedUp(_ tokens: Int) -> Int {
+        guard tokens > 0 else { return contextQuantum }
+        return ((tokens + contextQuantum - 1) / contextQuantum) * contextQuantum
+    }
+
+    static func clamped(_ tokens: Int) -> Int {
+        min(maximumContextTokens, max(minimumContextTokens, tokens))
+    }
+
+    /// The context one turn requires. `prompt` nil = the floor, so `warm()`
+    /// and a regular turn size their handle the same way.
+    static func contextTokens(prompt: String? = nil,
+                              schema: String,
+                              framingTokens: Int) -> Int {
+        let required = promptCeilingTokens(prompt: prompt, framingTokens: framingTokens)
+            + schemaUpperBoundTokens(for: schema)
+            + safetyMarginTokens
+        return clamped(roundedUp(required))
+    }
+
+    /// The RETRY's budget: strictly larger than `current`, so the retry is
+    /// never the same allocation that just truncated, and never larger than
+    /// the context ceiling.
+    static func grownContextTokens(_ current: Int, schema: String) -> Int {
+        let grown = max(roundedUp(current + schemaUpperBoundTokens(for: schema)),
+                        current + contextQuantum)
+        return clamped(grown)
+    }
+
+    /// Folds in a brain's framing when it is known by id, ignoring the
+    /// stored preference's absence (the floor framing is the conservative
+    /// one for the schemes that do add affixes).
+    static func framingTokens(forBrain id: ModelID) -> Int {
+        framingTokens(for: LlamaCommandInterpreter.chatFormat(for: id).kind)
+    }
+
+    // MARK: - Scan helpers
+
+    private static func propertiesBodyStart(in characters: [Character]) -> Int? {
+        let needle = Array("\"properties\"")
+        guard characters.count >= needle.count else { return nil }
+        var start = 0
+        while start <= characters.count - needle.count {
+            var offset = 0
+            while offset < needle.count, characters[start + offset] == needle[offset] { offset += 1 }
+            if offset == needle.count,
+               // The KEY is followed by its colon and THEN the object
+               // (`"properties": {`). Skipping only the whitespace compared
+               // the colon against `{`, so every real schema read as
+               // unparsable and the bound silently fell back to a single
+               // free-text value — the schema was sized from a number that
+               // did not depend on the schema at all.
+               let colon = firstNonSpace(in: characters, from: start + needle.count),
+               characters[colon] == ":",
+               let bodyStart = firstNonSpace(in: characters, from: colon + 1),
+               characters[bodyStart] == "{" {
+                return bodyStart + 1
+            }
+            start += 1
+        }
+        return nil
+    }
+
+    private static func firstNonSpace(in characters: [Character], from index: Int) -> Int? {
+        var index = index
+        while index < characters.count {
+            if !characters[index].isWhitespace { return index }
+            index += 1
+        }
+        return nil
+    }
 }
 
 // MARK: - Null impl (compile-safe fallback)
@@ -384,6 +709,11 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// Cached LLM handle. Held as `Any?` so this file compiles without
     /// the LLM package present. Casts to `LLM.LLM` inside `#if canImport`.
     private var llmInstance: Any?
+
+    /// [CASCADE-RUNTIME] The context the cached handle was allocated with
+    /// (`OnDeviceGenerationBudget`). A turn whose budget exceeds it
+    /// re-creates the handle rather than truncating inside it.
+    private var allocatedContextTokens = 0
 
     var isAvailable: Bool {
         if generateOverride != nil { return true }
@@ -781,19 +1111,44 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// seam and the first inference — whichever runs first wins the load
     /// and the other reuses the cached handle. Emits the honest failure
     /// event on each failure shape (the caller maps the reason).
-    private func loadLLMHandle() -> Result<LLM, LLMLoadFailure> {
-        if let existing = llmInstance as? LLM {
+    ///
+    /// [CASCADE-RUNTIME] (2026-09-16) The context is sized from the TURN's
+    /// prompt and the JSON schema's upper bound
+    /// (`OnDeviceGenerationBudget`), not the fixed 1024 it used to be. That
+    /// fixed context is the truncation defect: `respond`-era prompts plus
+    /// the answer shared 1024 tokens, so a long turn left the sampler a
+    /// handful of tokens and returned JSON cut mid-value as though it were
+    /// complete. A prompt that needs a LARGER context than the cached
+    /// handle has re-creates the handle (the old one is released first, so
+    /// growth never doubles residency) and says so in the event metadata.
+    /// `warm()` passes no prompt and gets the floor, so it never grows the
+    /// handle for a turn that has not happened.
+    private func loadLLMHandle(prompt: String? = nil) -> Result<LLM, LLMLoadFailure> {
+        let format = Self.chatFormat(for: preferredBaseId)
+        let requiredContext = OnDeviceGenerationBudget.contextTokens(
+            prompt: prompt,
+            schema: LlamaGrammar.commandJSONSchema,
+            framingTokens: OnDeviceGenerationBudget.framingTokens(for: format.kind))
+        if let existing = llmInstance as? LLM, allocatedContextTokens >= requiredContext {
             return .success(existing)
         }
         guard let modelURL = modelStore.path(for: preferredBaseId) else {
             emit("model_path_missing", outcome: "failure")
             return .failure(.modelPathMissing)
         }
-        // 1024-token context (default 2048): our prompts are ~150
-        // tokens + 128 output, and the smaller n_batch halves
-        // llama.cpp's compute buffers — with Whisper resident,
-        // 2048 overflowed the app's memory ceiling and crashed
-        // `llama_context::output_reserve` on 6 GB devices.
+        if llmInstance != nil {
+            emit("model_context_grown", outcome: "info",
+                 metadata: ["from_tokens": "\(allocatedContextTokens)",
+                            "to_tokens": "\(requiredContext)"])
+            llmInstance = nil
+            allocatedContextTokens = 0
+        }
+        // [CASCADE-RUNTIME] The context budget, not a constant: the prompt
+        // ceiling (measured template + utterance + this brain's framing)
+        // plus the schema-complete JSON's upper bound plus a margin — see
+        // `OnDeviceGenerationBudget` for the numbers and for the memory
+        // reason the ceiling is 1536 rather than the 2048 this call site
+        // crashed 6 GB devices with.
         // [NO-GIBBERISH] (2026-09-07): deterministic sampling — temp 0
         // + the FIXED seed in `OnDeviceSampling` — passed at LLM
         // creation. Before this date the handle was created with
@@ -804,7 +1159,6 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         // behavior here. The template remains per-model (`template`
         // from the brain picker — LLaMA 3.2 and Qwen3 share this
         // call site).
-        let format = Self.chatFormat(for: preferredBaseId)
         // `.raw` note (T-046): the empty affixes make this Template render
         // "system + user" with no wrapper, while `formattedPrompt` — the
         // path the interpreter actually uses — sends the user turn ALONE
@@ -829,12 +1183,14 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                                 temp: OnDeviceSampling.temperature,
                                 repeatPenalty: OnDeviceSampling.repeatPenalty,
                                 repetitionLookback: OnDeviceSampling.repetitionLookback,
-                                maxTokenCount: 1024) else {
+                                maxTokenCount: Int32(requiredContext)) else {
             emit("model_load_failed", outcome: "failure")
             return .failure(.modelLoadFailed)
         }
         llmInstance = created
-        emit("model_loaded", outcome: "success")
+        allocatedContextTokens = requiredContext
+        emit("model_loaded", outcome: "success",
+             metadata: ["context_tokens": "\(requiredContext)"])
         return .success(created)
     }
     #endif
@@ -867,18 +1223,6 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             }
             return
         }
-        #if canImport(LLM)
-        let llm: LLM
-        switch loadLLMHandle() {
-        case .success(let handle):
-            llm = handle
-        case .failure:
-            // The load helper already emitted the honest failure event
-            // (model_path_missing / model_load_failed).
-            completion(nil)
-            return
-        }
-
         // Per-model chat format (2026-09-06): the brain is now
         // selectable, and Qwen3 speaks a different special-token
         // scheme than LLaMA 3.2. `chatFormat(for:)` carries both —
@@ -899,6 +1243,22 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             format: format
         )
 
+        #if canImport(LLM)
+        let llm: LLM
+        // [CASCADE-RUNTIME] The handle is sized from THIS prompt: see
+        // `loadLLMHandle(prompt:)`. The load happens after formatting so a
+        // long utterance can grow the context before the first decode
+        // instead of being cut off inside it.
+        switch loadLLMHandle(prompt: formattedPrompt) {
+        case .success(let handle):
+            llm = handle
+        case .failure:
+            // The load helper already emitted the honest failure event
+            // (model_path_missing / model_load_failed).
+            completion(nil)
+            return
+        }
+
         Task {
             // [NO-GIBBERISH] (2026-09-07) Grammar-constrained generation:
             // `LlamaGrammar.commandJSONSchema` is converted by llama.cpp to
@@ -915,14 +1275,30 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             // runtime reports it honestly instead of an empty "success")
             // and any other runtime error; `.timedOut` is the sleep task
             // winning the race.
-            enum InferenceOutcome { case success(String); case failed; case timedOut }
+            // [CASCADE-RUNTIME] `incomplete` is the honest failure shape the
+            // runtime used to hide: a generation that ended (on the context
+            // bound, or on an end token) with a JSON value still open. Both
+            // are reported as a failure reason so the chain escalates rather
+            // than treating a half-JSON as an abstention.
+            enum InferenceOutcome {
+                case success(String)
+                case failed
+                case incomplete(String)
+                case timedOut
+            }
             await withTaskGroup(of: InferenceOutcome.self) { group in
                 group.addTask {
                     do {
-                        let output = try await llm.core.generateWithConstraints(
+                        let generation = try await llm.core.generateConstrained(
                             from: formattedPrompt,
-                            jsonSchema: LlamaGrammar.commandJSONSchema)
-                        return output.isEmpty ? .failed : .success(output)
+                            jsonSchema: LlamaGrammar.commandJSONSchema,
+                            prematureEndTokenPolicy: .completeJSON)
+                        guard !generation.output.isEmpty else { return .failed }
+                        if generation.termination == .endToken,
+                           !LLMCore.isCompleteJSONValue(generation.output) {
+                            return .incomplete("premature_stop")
+                        }
+                        return .success(generation.output)
                     } catch {
                         return .failed
                     }
@@ -943,6 +1319,17 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                 case .success(let output):
                     emit("inference_done", outcome: "success")
                     completion(output)
+                case .incomplete(let reason):
+                    // [CASCADE-RUNTIME] The model stopped with the JSON
+                    // still open: the sampler skipped its end tokens up to
+                    // the bound and it stopped there anyway. Hand the text
+                    // to the parser as before, but say it failed — a
+                    // half-JSON parsed as "no command" is exactly the
+                    // silent-failure class the escalation exists for.
+                    emit("inference_truncated", outcome: "failure",
+                         metadata: ["reason": reason])
+                    lastInferenceFailureReason = "inference_truncated"
+                    completion(nil)
                 case .failed:
                     // The [QUERY-FIX] bug's exact failure shape
                     // (2026-09-06): when the formatted prompt exceeds
@@ -1134,14 +1521,15 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
 
     /// Emits an event with NO transcript or output content — review C9:
     /// metadata must not carry transcript-derived PII.
-    private func emit(_ eventType: String, outcome: String) {
+    private func emit(_ eventType: String, outcome: String,
+                      metadata: [String: String] = [:]) {
         observabilityBus.emit(ObservabilityEvent(
             component: "llama_interpreter",
             eventType: eventType,
             durationMs: nil,
             outcome: outcome,
             errorCode: nil,
-            metadata: [:]
+            metadata: metadata
         ))
     }
 }
