@@ -3009,7 +3009,11 @@ struct BriefingView: View {
 
 // MARK: - Shared
 
-private func emptyState(key: String) -> some View {
+/// The house "nothing here yet" card. Shared by every leaf that has an
+/// empty list state — internal rather than private to this file so the
+/// Events leaf (`EventsView`) draws the identical card instead of a
+/// look-alike.
+func emptyState(key: String) -> some View {
     Text(LocalizedStringKey(key))
         .font(.system(size: DesignTokens.minBodyPointSize))
         .foregroundStyle(DesignTokens.textSecondary)

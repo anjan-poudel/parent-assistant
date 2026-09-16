@@ -954,6 +954,290 @@ final class CalendarShareServiceTests: XCTestCase {
         }
     }
 
+    // MARK: - Free-form events (rich-events task, 2026-09-17)
+
+    /// A tracked native event — `recordsByIdentifier` is what
+    /// `fetchEvent(identifier:)` answers with, so a test states exactly
+    /// what the event looks like NOW.
+    private func nativeEvent(id: String = "evt-1",
+                             title: String = "Doctor",
+                             start: Date? = nil,
+                             durationMinutes: Int = 30,
+                             location: String? = nil,
+                             isCanceled: Bool = false) -> CalendarEventRecord {
+        CalendarEventRecord(
+            eventIdentifier: id, calendarIdentifier: "home-calendar",
+            title: title, notes: nil, startDate: start ?? fakeNow,
+            isAllDay: false, isCanceled: isCanceled, recurrence: nil,
+            location: location, durationMinutes: durationMinutes)
+    }
+
+    private func freeFormKey(_ eventId: String) -> String {
+        CalendarShareKey.oneOff(kind: .calendarEvent, eventIdentifier: eventId)
+    }
+
+    /// A twin this device already shared: an id AND the fingerprint of
+    /// the content it was shared with. Both are needed before a pass can
+    /// tell "nothing changed" from "the family retimed it".
+    private func seedSharedTwin(_ rig: Rig, eventId: String,
+                                googleEventID: String = "g-1",
+                                sharedEvent: CalendarEventRecord) {
+        let key = freeFormKey(eventId)
+        _ = rig.store.setGoogleEventID(googleEventID, for: key)
+        guard let draft = CalendarShareMapper.calendarEventDraft(
+            title: sharedEvent.title, startDate: sharedEvent.startDate,
+            durationMinutes: sharedEvent.durationMinutes,
+            contacts: testContacts, notifySettings: notifySettings,
+            location: sharedEvent.location) else {
+            return XCTFail("the test's contact must be eligible for a twin to exist")
+        }
+        _ = rig.store.setFingerprint(CalendarShareMapper.fingerprint(of: draft),
+                                     for: key)
+    }
+
+    /// The whole point of the pass (design §3): the elder or the family
+    /// retimes the appointment in the Calendar app, and the family's
+    /// Google copy follows.
+    func testFreeFormReconcileCarriesARetimeToTheTwin() async {
+        let rig = makeService()
+        rig.gateway.updateResults = [true]
+        seedSharedTwin(rig, eventId: "evt-1", sharedEvent: nativeEvent(start: fakeNow))
+        let moved = nativeEvent(title: "Dr Sharma",
+                                start: fakeNow.addingTimeInterval(3600),
+                                durationMinutes: 45)
+        rig.eventKit.recordsByIdentifier["evt-1"] = moved
+
+        rig.service.reconcileFreeFormEvents(trackedEventIds: ["evt-1"])
+        await waitUntil("the retimed twin to reach Google") {
+            rig.gateway.updatedCalls.count == 1
+        }
+
+        XCTAssertEqual(rig.gateway.updatedCalls.first?.id, "g-1",
+                       "the twin is found by the ledger's own id, never by title/time")
+        let draft = rig.gateway.updatedCalls.first?.draft
+        XCTAssertEqual(draft?.title, "Dr Sharma")
+        XCTAssertEqual(draft?.startDate, moved.startDate)
+        XCTAssertEqual(draft?.durationMinutes, 45,
+                       "an edit that shortened the event must reach the family's copy")
+        XCTAssertEqual(rig.store.pendingCount, 0,
+                       "a 404-free update leaves nothing behind in the queue")
+    }
+
+    /// An address added (or corrected) in the Calendar app is content the
+    /// family sees on the invitation, so it has to reach the twin — which
+    /// it only does because the fingerprint covers `location`.
+    func testFreeFormReconcileCarriesAnAddressEditToTheTwin() async {
+        let rig = makeService()
+        rig.gateway.updateResults = [true]
+        seedSharedTwin(rig, eventId: "evt-1", sharedEvent: nativeEvent())
+        let addressed = nativeEvent(location: "  Tilganga, Kathmandu  ")
+        rig.eventKit.recordsByIdentifier["evt-1"] = addressed
+
+        rig.service.reconcileFreeFormEvents(trackedEventIds: ["evt-1"])
+        await waitUntil("the re-addressed twin to reach Google") {
+            rig.gateway.updatedCalls.count == 1
+        }
+
+        XCTAssertEqual(rig.gateway.updatedCalls.first?.draft.location,
+                       "Tilganga, Kathmandu",
+                       "normalized at the mapper, so no blank ever reaches Google")
+    }
+
+    func testFreeFormReconcileIsSilentWhenNothingChanged() async {
+        let rig = makeService()
+        let unchanged = nativeEvent()
+        seedSharedTwin(rig, eventId: "evt-1", sharedEvent: unchanged)
+        rig.eventKit.recordsByIdentifier["evt-1"] = unchanged
+
+        rig.service.reconcileFreeFormEvents(trackedEventIds: ["evt-1"])
+        await drainMain()
+
+        XCTAssertTrue(rig.gateway.callLog.isEmpty,
+                      "a launch over unchanged events must send nothing at all — "
+                      + "the fingerprint is what makes that possible")
+    }
+
+    /// The event is gone (deleted in the Calendar app, or by the Events
+    /// form): the twin must go with it, or the family keeps a doctor's
+    /// appointment that no longer exists.
+    func testFreeFormReconcileTombstonesAVanishedEvent() async {
+        let rig = makeService()
+        rig.gateway.deleteResults = [true]
+        seedSharedTwin(rig, eventId: "evt-1", sharedEvent: nativeEvent())
+        // No record in recordsByIdentifier — it is gone.
+
+        rig.service.reconcileFreeFormEvents(trackedEventIds: ["evt-1"])
+        await waitUntil("the tombstone to reach Google") {
+            rig.gateway.deletedIDs == ["g-1"]
+        }
+        await drainMain()
+
+        XCTAssertNil(rig.store.googleEventID(for: freeFormKey("evt-1")),
+                     "the ledger forgets a twin Google has confirmed gone")
+    }
+
+    func testFreeFormReconcileTombstonesACanceledEvent() async {
+        let rig = makeService()
+        rig.gateway.deleteResults = [true]
+        seedSharedTwin(rig, eventId: "evt-1", sharedEvent: nativeEvent())
+        rig.eventKit.recordsByIdentifier["evt-1"] = nativeEvent(isCanceled: true)
+
+        rig.service.reconcileFreeFormEvents(trackedEventIds: ["evt-1"])
+        await waitUntil("the canceled event's twin to be removed") {
+            rig.gateway.deletedIDs == ["g-1"]
+        }
+    }
+
+    /// The snapshot is the SIDE INDEX, not the ledger: an invitation this
+    /// device imported has a twin too (`importLocally`), but that twin is
+    /// the organizer's own event. Treating every `calendarEvent:` key as
+    /// ours would delete the family's event from their own calendar.
+    func testFreeFormReconcileLeavesImportedTwinsAlone() async {
+        let rig = makeService()
+        rig.gateway.deleteResults = [true, true]
+        let importedKey = freeFormKey("invitation-1")
+        _ = rig.store.setGoogleEventID("g-imported", for: importedKey)
+        // The imported event is not in the side index, so the pass is
+        // never told about it — and there is no record for it either
+        // (an imported invitation the family has already answered).
+        seedSharedTwin(rig, eventId: "evt-ours", googleEventID: "g-ours",
+                       sharedEvent: nativeEvent(id: "evt-ours"))
+
+        rig.service.reconcileFreeFormEvents(trackedEventIds: ["evt-ours"])
+        await waitUntil("our vanished twin to be removed") {
+            rig.gateway.deletedIDs == ["g-ours"]
+        }
+        await drainMain()
+
+        XCTAssertEqual(rig.store.googleEventID(for: importedKey), "g-imported",
+                       "an imported invitation's twin is the organizer's event — "
+                       + "it must survive a pass that is not about it")
+    }
+
+    /// Without read access every lookup answers nil, which this pass
+    /// would read as "every event is gone" and answer with a mass delete.
+    func testFreeFormReconcileRefusesToRunWithoutFullCalendarAccess() async {
+        let rig = makeService()
+        rig.eventKit.access = .writeOnly
+        seedSharedTwin(rig, eventId: "evt-1", sharedEvent: nativeEvent())
+
+        rig.service.reconcileFreeFormEvents(trackedEventIds: ["evt-1"])
+        await drainMain()
+
+        XCTAssertTrue(rig.gateway.callLog.isEmpty, "nothing deleted, nothing written")
+        XCTAssertEqual(rig.store.pendingCount, 0)
+        XCTAssertTrue(rig.bus.emittedEvents.contains {
+            $0.eventType == "calendar_share_events_skipped"
+                && $0.metadata["reason"] == "no_calendar_access"
+        }, "the skip is observable — a silently missing reconcile reads as 'nothing to do'")
+        XCTAssertEqual(rig.store.googleEventID(for: freeFormKey("evt-1")), "g-1",
+                       "the ledger survives untouched for the next pass with access")
+    }
+
+    /// Nobody eligible any more (the family removed the contact, or the
+    /// notify policy changed) means no draft — and the pass then reads
+    /// that exactly as the other kinds do: the twin is WITHDRAWN, not
+    /// left on a calendar whose invitees the policy no longer covers.
+    func testFreeFormReconcileWithdrawsATwinWhenNobodyIsEligible() async {
+        let rig = makeService()
+        rig.gateway.deleteResults = [true]
+        seedSharedTwin(rig, eventId: "evt-1", sharedEvent: nativeEvent())
+        rig.eventKit.recordsByIdentifier["evt-1"] = nativeEvent()
+        testContacts = []
+
+        rig.service.reconcileFreeFormEvents(trackedEventIds: ["evt-1"])
+        await waitUntil("the now-unshareable twin to be withdrawn") {
+            rig.gateway.deletedIDs == ["g-1"]
+        }
+
+        XCTAssertTrue(rig.gateway.updatedCalls.isEmpty,
+                      "nothing is written over it either — the twin goes, it is not "
+                      + "silently re-authored")
+    }
+
+    /// `eventCreated` now carries the address (rich-events task): the
+    /// twin the family receives on the FIRST share must already have it,
+    /// not just after the next reconcile.
+    func testEventCreatedCarriesTheAddressIntoTheQueuedTwin() async {
+        let rig = makeService()
+
+        rig.service.eventCreated(localEventId: "evt-1", title: "Doctor",
+                                 startDate: fakeNow, durationMinutes: 45,
+                                 location: "  Patan Durbar Square  ")
+        await drainMain()
+
+        XCTAssertEqual(rig.store.pending.map(\.key), [freeFormKey("evt-1")])
+        XCTAssertEqual(rig.store.pending.first?.location, "Patan Durbar Square",
+                       "normalized and carried inline so the queued operation is "
+                       + "replayable on its own")
+    }
+
+    func testEventCreatedWithoutAnAddressQueuesNoLocation() async {
+        let rig = makeService()
+
+        rig.service.eventCreated(localEventId: "evt-1", title: "Doctor",
+                                 startDate: fakeNow, durationMinutes: 45,
+                                 location: "   ")
+        await drainMain()
+
+        XCTAssertEqual(rig.store.pendingCount, 1)
+        XCTAssertNil(rig.store.pending.first?.location,
+                     "a blank address is no address — no empty location reaches Google")
+    }
+
+    /// The Events form's delete: the app's first in-app calendar-event
+    /// deletion, and the reason `eventDeleted` finally has a caller.
+    ///
+    /// Unlike the reconcile passes — which flush what they just queued —
+    /// the notification-driven actions only ENQUEUE, exactly as
+    /// `eventCreated` does: the removal waits for the next foreground or
+    /// interval pass, so a delete that happens with no network is
+    /// recorded rather than lost.
+    func testEventDeletedQueuesATombstoneForTheTwin() async {
+        let rig = makeService()
+        rig.gateway.deleteResults = [true]
+        _ = rig.store.setGoogleEventID("g-1", for: freeFormKey("evt-1"))
+
+        rig.service.eventDeleted(localEventId: "evt-1")
+        await drainMain()
+
+        XCTAssertTrue(rig.gateway.callLog.isEmpty,
+                      "nothing reaches Google at delete time — the pass does that")
+        XCTAssertEqual(rig.store.pending.map(\.key), [freeFormKey("evt-1")])
+        XCTAssertEqual(rig.store.pending.first?.action, .delete,
+                       "a tombstone, not an upsert: the local event is gone")
+        XCTAssertEqual(rig.store.pending.first?.googleEventID, "g-1",
+                       "the ledger's id rides along inline, so the pass can delete "
+                       + "the right twin without the event it came from")
+
+        await rig.service.flushPending()
+        await drainMain()
+
+        XCTAssertEqual(rig.gateway.deletedIDs, ["g-1"])
+        XCTAssertNil(rig.store.googleEventID(for: freeFormKey("evt-1")))
+        XCTAssertEqual(rig.store.pendingCount, 0)
+    }
+
+    /// Both gates closed: NOTHING is queued — a tombstone waiting on a
+    /// connection the family never made would make the Settings card's
+    /// pending count mean "waiting on a decision", not "waiting on
+    /// Google". Nothing is lost by it: the ledger keeps the key, and
+    /// `cleanupVanishedEvents()` queues the same tombstone on the first
+    /// pass after sharing is switched on.
+    func testEventDeletedWhileSignedOutQueuesNothing() async {
+        let rig = makeService(signedIn: false)
+        _ = rig.store.setGoogleEventID("g-1", for: freeFormKey("evt-1"))
+
+        rig.service.eventDeleted(localEventId: "evt-1")
+        await drainMain()
+
+        XCTAssertEqual(rig.store.pendingCount, 0)
+        XCTAssertEqual(rig.store.googleEventID(for: freeFormKey("evt-1")), "g-1",
+                       "the ledger remembers the twin, so switching sharing on "
+                       + "still cleans it up")
+        XCTAssertTrue(rig.gateway.callLog.isEmpty)
+    }
+
     // MARK: - Main-queue helpers
 
     /// Runs the service's pending main-queue hops to completion.
@@ -1165,6 +1449,17 @@ private final class FakeShareEventKit: EventKitCalendarGateway {
     func ensureSahayakCalendar(knownIdentifier: String?) -> String? { "sahayak-1" }
 
     func fetchEvents(from start: Date, to end: Date) -> [CalendarEventRecord] { [] }
+
+    /// The free-form share reconcile's by-identifier read (rich-events
+    /// task, 2026-09-17). A dictionary rather than a window fetch, so a
+    /// test can state exactly what one tracked event looks like NOW — the
+    /// retimed / re-addressed / deleted cases — without inventing dates
+    /// that fall inside a scan window.
+    var recordsByIdentifier: [String: CalendarEventRecord] = [:]
+
+    func fetchEvent(identifier: String) -> CalendarEventRecord? {
+        recordsByIdentifier[identifier]
+    }
 
     func eventExists(identifier: String) -> Bool {
         existenceChecks.append(identifier)

@@ -46,10 +46,12 @@ extension SettingsView {
                 // "Family & friends, caregiver notifications, calling apps".
                 return [.family, .caregiverNotifications, .calling]
             case .reminders:
-                // "Medications, daily routines, alarms & timers, calendar,
-                // calendar sharing". Daily routines moved here from the
-                // Reminders leaf's manage list (2026-09-17).
-                return [.meds, .routines, .alarms, .calendar, .calendarSharing]
+                // "Medications, daily routines, alarms & timers, events,
+                // calendar, calendar sharing" — the household's own time
+                // first (the four content rows), then the two mirror
+                // settings.
+                return [.meds, .routines, .alarms, .events, .calendar,
+                        .calendarSharing]
             case .tools:
                 // "Quick apps, YouTube, news feeds, manuals, saved places".
                 return [.quickApps, .youtube, .feeds, .manuals, .places]
@@ -60,7 +62,7 @@ extension SettingsView {
         }
     }
 
-    /// Every leaf screen the hub can push. The first 19 are the visible
+    /// Every leaf screen the hub can push. The first 20 are the visible
     /// rows across the five tabs; the last five are the technical
     /// settings the hidden sheet carries (spec §2 decision 2).
     enum SettingsDestination: String, CaseIterable, Identifiable {
@@ -69,7 +71,7 @@ extension SettingsView {
         // Family
         case family, caregiverNotifications, calling
         // Reminders
-        case meds, routines, alarms, calendar, calendarSharing
+        case meds, routines, alarms, events, calendar, calendarSharing
         // Tools
         case quickApps, youtube, feeds, manuals, places
         // System
@@ -93,6 +95,7 @@ extension SettingsView {
             case .meds: return "settings.meds.title"
             case .routines: return "settings.routines.title"
             case .alarms: return "settings.alarms.title"
+            case .events: return "events.title"
             case .calendar: return "settings.calendar.title"
             case .calendarSharing: return "settings.calendarSharing"
             case .quickApps: return "settings.quickApps.title"
@@ -123,6 +126,7 @@ extension SettingsView {
             case .meds: return "pills.fill"
             case .routines: return "repeat.circle.fill"
             case .alarms: return "alarm.fill"
+            case .events: return "calendar.circle.fill"
             case .calendar: return "calendar.badge.clock"
             case .calendarSharing: return "calendar.badge.plus"
             case .quickApps: return "square.grid.2x2.fill"
@@ -368,6 +372,10 @@ struct SettingsDestinationView: View {
             CalendarShareSettingsView(service: coordinator.calendarShareService,
                                       locale: locale)
         case .alarms: AlarmsTimersSettingsView()
+        // Free-form events (rich-events task, 2026-09-17) — the
+        // household's own appointments, native in the default calendar,
+        // with the app-side photo index behind them.
+        case .events: EventsView()
         case .geminiAI: GeminiAPISettingsView()
         case .voiceEngine: VoiceEngineSettingsView()
         case .wakeWord: WakeWordSettingsView()

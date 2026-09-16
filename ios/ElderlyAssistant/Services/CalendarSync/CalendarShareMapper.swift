@@ -102,6 +102,18 @@ struct CalendarTwinDraft: Equatable {
     /// gateway can tag the Google event (and so logs can name the kind
     /// without naming the event).
     let kind: EventNotifyKind
+    /// The event's address, verbatim (rich-events task, 2026-09-17).
+    /// This is what makes an address the family typed on the elder's
+    /// phone reach the Google invitation's location row (design §3
+    /// "CalendarShareMapper gains the location field"). nil for every
+    /// draft whose source has no address — medication and routine
+    /// drafts always, and free-form events without one.
+    ///
+    /// Trailing and defaulted rather than required: the three existing
+    /// draft builders and their tests construct this positionally, and
+    /// a defaulted member keeps every one of them compiling with the
+    /// same meaning.
+    var location: String? = nil
 }
 
 // MARK: - Mapper
@@ -272,15 +284,23 @@ enum CalendarShareMapper {
 
     // MARK: Calendar event
 
-    /// The twin for a one-off calendar event (voice-created or
-    /// imported). One draft or none — a one-off has nothing to iterate.
+    /// The twin for a one-off calendar event (voice-created, imported, or
+    /// created from the Events form). One draft or none — a one-off has
+    /// nothing to iterate.
+    ///
+    /// `location` is the event's plain address string, passed through
+    /// verbatim (rich-events task, 2026-09-17: design §3, "the Google
+    /// twin inherits it"). Blank normalizes to nil like every other
+    /// optional text field in the app, so an emptied address field
+    /// clears the twin's location rather than writing "   ".
     static func calendarEventDraft(
         title: String,
         startDate: Date,
         durationMinutes: Int,
         contacts: [FamilyContact],
         notifySettings: CaregiverNotifySettings,
-        timeZone: TimeZone = .current
+        timeZone: TimeZone = .current,
+        location: String? = nil
     ) -> CalendarTwinDraft? {
         let attendees = inviteeEmails(contacts: contacts, kind: .calendarEvent,
                                       notifySettings: notifySettings)
@@ -292,8 +312,19 @@ enum CalendarShareMapper {
             timeZoneIdentifier: timeZone.identifier,
             recurrence: nil,
             attendeeEmails: attendees,
-            kind: .calendarEvent
+            kind: .calendarEvent,
+            location: normalizedLocation(location)
         )
+    }
+
+    /// A free-text address field, normalized: blank/whitespace-only
+    /// reads as absent (the house rule for every optional text field),
+    /// so "has an address?" answers `false` for a field the family
+    /// cleared and no empty `location` ever reaches Google.
+    static func normalizedLocation(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     // MARK: Fingerprint
@@ -329,6 +360,15 @@ enum CalendarShareMapper {
             draft.kind.rawValue,
             draft.recurrence.map { CalendarRecurrenceRule.rrule($0) } ?? ""
         ]
+        // The address IS content the family sees on the invitation, so an
+        // address edit has to reach the twin (rich-events task,
+        // 2026-09-17). Appended rather than folded into an existing part
+        // so a payload written before this field existed hashes to a
+        // DIFFERENT value and is re-written ONCE — which is what carries
+        // the new field out to twins created before it existed. The
+        // `loc:` prefix keeps it distinguishable from a title that
+        // happens to read like an address.
+        parts.append("loc:" + (draft.location ?? ""))
         if draft.recurrence == nil {
             parts.append("at:\(Int(draft.startDate.timeIntervalSince1970))")
         } else {
