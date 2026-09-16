@@ -55,6 +55,47 @@ final class ElderlyAssistantUITests: XCTestCase {
         return app
     }
 
+    /// Taps `target` and waits for `expected` to appear, retrying the tap
+    /// while it doesn't. Right after `launchToHome` the screen is still
+    /// settling (boot-spinner collapse, scroll restore), and a tap
+    /// synthesized from a stale accessibility snapshot can land where the
+    /// element was a frame earlier — the retry resolves the element's
+    /// current frame once layout has settled. (2026-09-17: without the
+    /// retry, every settings-navigation test failed on the simulator —
+    /// the first tap landed on pre-settle coordinates.)
+    private func tap(_ target: XCUIElement,
+                     expecting expected: XCUIElement,
+                     within timeout: TimeInterval,
+                     in app: XCUIApplication,
+                     file: StaticString = #filePath,
+                     line: UInt = #line) {
+        guard target.waitForExistence(timeout: 5) else {
+            XCTFail("\(target) never appeared. Hierarchy:\n"
+                    + app.debugDescription, file: file, line: line)
+            return
+        }
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            target.tap()
+            if expected.waitForExistence(timeout: 4) { return }
+        } while Date() < deadline
+        XCTFail("Tapping \(target) never produced \(expected). Hierarchy:\n"
+                + app.debugDescription, file: file, line: line)
+    }
+
+    /// Frame-math visibility — `isHittable` throws "Activation point
+    /// invalid" for fully off-screen elements instead of returning
+    /// false, so the pill-bar scroll uses this.
+    private func isOnScreen(_ element: XCUIElement,
+                            in app: XCUIApplication) -> Bool {
+        guard element.exists else { return false }
+        let frame = element.frame
+        let screen = app.frame
+        return !frame.isEmpty
+            && frame.minX < screen.maxX && frame.maxX > screen.minX
+            && frame.minY < screen.maxY && frame.maxY > screen.minY
+    }
+
     func testHomeShowsNepaliTalkButton() throws {
         let app = launchToHome()
 
@@ -103,17 +144,36 @@ final class ElderlyAssistantUITests: XCTestCase {
         let settings = app.buttons["सेटिङ"]
         XCTAssertTrue(settings.waitForExistence(timeout: 15),
                       "Settings entry should be reachable from Home")
-        settings.tap()
 
-        // Settings screen title. AI Models is intentionally NOT a normal
-        // row here (redesign 2026-09-03 §3.3 — buried behind a long-press
-        // since there's no caregiver app yet to hand it off to).
+        // Settings screen title. The technical settings are intentionally
+        // NOT rows on any tab (redesign 2026-09-03 §3.3 + 2026-09-16 reorg
+        // §3 — buried behind a long-press since there's no caregiver app
+        // yet to hand them off to).
         let title = app.staticTexts["सेटिङ"].firstMatch
-        XCTAssertTrue(title.waitForExistence(timeout: 10),
-                      "Tapping the Settings dock item should push Settings")
+        tap(settings, expecting: title, within: 12, in: app)
         XCTAssertFalse(app.buttons["AI मोडेल"].exists,
                        "AI Models must not be a plain visible row")
-        title.press(forDuration: 1.6)
+
+        // The five tabs are the visible surface (2026-09-16 reorg §3).
+        for tab in ["आवाज", "परिवार", "सम्झनाहरू", "उपकरणहरू", "प्रणाली"] {
+            XCTAssertTrue(app.buttons[tab].firstMatch.waitForExistence(timeout: 10),
+                          "Settings tab \"\(tab)\" should exist")
+        }
+
+        title.press(forDuration: 1.2)
+
+        // ...and the hidden sheet carries the technical rows that left the
+        // tabs, with the model screen behind its own row.
+        let models = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "AI मोडेल")).firstMatch
+        XCTAssertTrue(models.waitForExistence(timeout: 10),
+                      "Long-pressing the Settings title should reveal the technical sheet")
+        for row in ["जेमिनी AI", "आवाज इन्जिन"] {
+            XCTAssertTrue(app.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@", row)).firstMatch.exists,
+                "The technical sheet should carry \"\(row)\"")
+        }
+        models.tap()
 
         // Model management screen: automatic-selection row or empty state.
         let automatic = app.buttons.matching(NSPredicate(
@@ -121,47 +181,78 @@ final class ElderlyAssistantUITests: XCTestCase {
         let downloaded = app.staticTexts["डाउनलोड भएको छैन"].firstMatch
         XCTAssertTrue(automatic.waitForExistence(timeout: 10) ||
                       downloaded.waitForExistence(timeout: 10),
-                      "Long-pressing the Settings title should reveal the model screen")
+                      "The AI models row should push the model screen")
     }
 
-    /// Walks EVERY Settings section row: each tap must push its screen
-    /// (title visible), and back must return. Catches a broken row or a
+    /// Walks EVERY visible Settings row on EVERY tab: each tap must push
+    /// its screen (title visible), and back must return to the same tab.
+    /// Catches a broken row, a row dropped from the tab table, or a
     /// navigation regression in one pass.
     func testEverySettingsSectionNavigates() throws {
         let app = launchToHome()
         let settings = app.buttons["सेटिङ"]
-        XCTAssertTrue(settings.waitForExistence(timeout: 15))
-        settings.tap()
-        XCTAssertTrue(app.staticTexts["सेटिङ"].firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(settings.waitForExistence(timeout: 15),
+                      "Settings entry should be reachable from Home")
+        tap(settings, expecting: app.staticTexts["सेटिङ"].firstMatch,
+            within: 12, in: app)
 
-        let sections: [(row: String, title: String)] = [
-            ("भाषा र क्षेत्र", "भाषा र क्षेत्र"),
-            ("जेमिनी AI", "जेमिनी AI"),
-            ("आवाज इन्जिन", "आवाज इन्जिन"),
-            ("आवाज सक्रियता", "आवाज सक्रियता"),
-            ("आवाजहरू", "आवाजहरू"),
-            ("द्रुत एपहरू", "द्रुत एपहरू"),
-            ("परिवार र साथीहरू", "परिवार र साथीहरू"),
-            ("औषधि तालिका", "औषधि तालिका"),
-            ("गोपनीयता", "गोपनीयता"),
-            ("सहायकको गतिविधि", "सहायकको गतिविधि"),
+        // The five tabs' rows, in table order (2026-09-16 reorg §3).
+        let tabs: [(tab: String, rows: [(row: String, title: String)])] = [
+            ("आवाज", [("आवाज सक्रियता", "आवाज सक्रियता"),
+                      ("आवाज निजीकरण", "आवाज निजीकरण"),
+                      ("आवाजहरू", "आवाजहरू")]),
+            ("परिवार", [("परिवार र साथीहरू", "परिवार र साथीहरू"),
+                        ("परिवारलाई खबर गर्ने", "परिवारलाई खबर गर्ने"),
+                        ("कलिङ", "कलिङ")]),
+            ("सम्झनाहरू", [("औषधि तालिका", "औषधि तालिका"),
+                           ("दिनचर्या", "दिनचर्या"),
+                           ("अलार्म र टाइमर", "अलार्म र टाइमर"),
+                           ("कार्यक्रमहरू", "कार्यक्रमहरू"),
+                           ("पात्रो", "पात्रो"),
+                           ("क्यालेन्डर साझा", "क्यालेन्डर साझा")]),
+            ("उपकरणहरू", [("द्रुत एपहरू", "द्रुत एपहरू"),
+                           ("युट्युब", "युट्युब"),
+                           ("फिड", "फिड"),
+                           ("म्यानुअलहरू", "म्यानुअलहरू"),
+                           ("ठाउँ र नक्सा", "ठाउँ र नक्सा")]),
+            ("प्रणाली", [("रूप", "रूप"),
+                         ("भाषा र क्षेत्र", "भाषा र क्षेत्र"),
+                         ("गोपनीयता", "गोपनीयता")]),
         ]
-        for (row, title) in sections {
-            // Custom status rows compose their label ("जेमिनी AI, सक्रिय"),
-            // so match by containment, not exact equality.
-            let rowButton = app.buttons.matching(NSPredicate(
-                format: "label CONTAINS %@", row)).firstMatch
-            XCTAssertTrue(rowButton.waitForExistence(timeout: 10),
-                          "Settings row \"(\(row))\" should exist")
-            rowButton.tap()
-            let pushed = app.staticTexts[title].firstMatch
-            XCTAssertTrue(pushed.waitForExistence(timeout: 10),
-                          "Tapping \"(\(row))\" should push its screen (title \"(\(title))\")")
-            let back = app.buttons["पछाडि"].firstMatch
-            XCTAssertTrue(back.waitForExistence(timeout: 5))
-            back.tap()
-            XCTAssertTrue(app.staticTexts["सेटिङ"].firstMatch.waitForExistence(timeout: 5),
-                          "Back should return to Settings")
+        for (index, (tab, rows)) in tabs.enumerated() {
+            let tabButton = app.buttons[tab].firstMatch
+            XCTAssertTrue(tabButton.waitForExistence(timeout: 10),
+                          "Settings tab \"\(tab)\" should exist")
+            if !isOnScreen(tabButton, in: app) {
+                // The pill bar scrolls horizontally (five Nepali titles
+                // don't fit one screen). The currently selected tab's
+                // pill is on screen, so drag IT leftward first, then
+                // keep dragging the target pill itself as it slides in.
+                let currentPill = app.buttons[tabs[index - 1].tab].firstMatch
+                if isOnScreen(currentPill, in: app) { currentPill.swipeLeft() }
+                for _ in 0..<4 where !isOnScreen(tabButton, in: app) {
+                    tabButton.swipeLeft()
+                }
+            }
+            XCTAssertTrue(isOnScreen(tabButton, in: app),
+                          "Settings tab \"\(tab)\" should be reachable by scrolling the pill bar")
+            let firstRowButton = app.buttons.matching(NSPredicate(
+                format: "label CONTAINS %@", rows[0].row)).firstMatch
+            tap(tabButton, expecting: firstRowButton, within: 10, in: app)
+            for (row, title) in rows {
+                // Custom status rows compose their label ("आवाजहरू, स्थापित"),
+                // so match by containment, not exact equality.
+                let rowButton = app.buttons.matching(NSPredicate(
+                    format: "label CONTAINS %@", row)).firstMatch
+                XCTAssertTrue(rowButton.waitForExistence(timeout: 10),
+                              "Settings row \"(\(row))\" should exist on tab \"(\(tab))\"")
+                if !rowButton.isHittable { app.swipeUp() }
+                tap(rowButton, expecting: app.staticTexts[title].firstMatch,
+                    within: 10, in: app)
+                tap(app.buttons["पछाडि"].firstMatch,
+                    expecting: app.staticTexts["सेटिङ"].firstMatch,
+                    within: 8, in: app)
+            }
         }
     }
 
@@ -170,13 +261,14 @@ final class ElderlyAssistantUITests: XCTestCase {
         let app = launchToHome()
         let settings = app.buttons["सेटिङ"]
         XCTAssertTrue(settings.waitForExistence(timeout: 15))
-        settings.tap()
+        tap(settings, expecting: app.staticTexts["सेटिङ"].firstMatch,
+            within: 12, in: app)
+        // Quick apps lives on the Tools tab since the 2026-09-16 reorg.
+        let toolsTab = app.buttons["उपकरणहरू"].firstMatch
         let row = app.buttons["द्रुत एपहरू"].firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 10))
-        row.tap()
+        tap(toolsTab, expecting: row, within: 10, in: app)
         let search = app.textFields["एपहरू खोज्नुहोस्"].firstMatch
-        XCTAssertTrue(search.waitForExistence(timeout: 10),
-                      "Quick access picker should show its search field")
+        tap(row, expecting: search, within: 10, in: app)
         search.tap()
         search.typeText("whatsapp")
         XCTAssertTrue(app.staticTexts["WhatsApp"].firstMatch.waitForExistence(timeout: 5)

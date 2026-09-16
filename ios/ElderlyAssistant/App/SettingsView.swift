@@ -2,50 +2,34 @@ import SwiftUI
 import UIKit
 import PhotosUI
 
-/// Settings hub (spec §4.4): one card per section — Appearance (skinnable
-/// app background, 2026-09-07), Language & region, Gemini AI, Voice
-/// engine, Voice activation, TTS voices, Quick apps, Family & friends,
-/// Medication schedule, AI मोडेल, Privacy & about.
+/// Settings hub (spec §4.4) — tabbed reorg 2026-09-16: five tabs of cards
+/// (Voice, Family, Reminders, Tools, System) instead of one 23-row scroll,
+/// plus the long-press door to the technical settings. The tab table, the
+/// leaf routing and the hidden sheet live in `SettingsTabs.swift`.
 struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    /// Redesign spec §3.3: AI Models is buried behind a long-press on the
-    /// title, not a normal row — there's no caregiver app yet for someone
-    /// to manage STT/LLM downloads through, so the capability has to stay
-    /// reachable, just not one plain tap away from an elderly user's
-    /// normal navigation.
-    @State private var showHiddenAIModels = false
+    @EnvironmentObject private var coordinator: AppCoordinator
+    /// [BOOT-REVIEW, design item] Observed so the diagnostics card below
+    /// re-renders when a capability fails or (via recovery) comes back.
+    @EnvironmentObject private var boot: StartupBoot
+    @Environment(\.locale) private var locale
 
-    enum SettingsSection: Identifiable {
-        case appearance, language, calling, places, family, meds, manuals, calendar, caregiverNotifications, alarms, liveTranslate, geminiAI, voiceEngine, wakeWord, ttsVoices, voicePersonalization, webSearch, youtube, feeds, quickApps, privacy, intentLog, toolLog
+    @State private var selectedTab: SettingsSection = .voice
 
-        var id: String {
-            switch self {
-            case .appearance: return "appearance"
-            case .language: return "language"
-            case .calling: return "calling"
-            case .places: return "places"
-            case .family: return "family"
-            case .meds: return "meds"
-            case .manuals: return "manuals"
-            case .calendar: return "calendar"
-            case .caregiverNotifications: return "caregiverNotifications"
-            case .alarms: return "alarms"
-            case .liveTranslate: return "liveTranslate"
-            case .geminiAI: return "geminiAI"
-            case .voiceEngine: return "voiceEngine"
-            case .wakeWord: return "wakeWord"
-            case .ttsVoices: return "ttsVoices"
-            case .voicePersonalization: return "voicePersonalization"
-            case .webSearch: return "webSearch"
-            case .youtube: return "youtube"
-            case .feeds: return "feeds"
-            case .quickApps: return "quickApps"
-            case .privacy: return "privacy"
-            case .intentLog: return "intentLog"
-            case .toolLog: return "toolLog"
-            }
-        }
-    }
+    /// Redesign spec §3.3 + 2026-09-16 reorg §3: the technical settings
+    /// (Gemini/cloud AI, the voice engine stack, web search, the two review
+    /// logs, the model screen) are NOT rows on any tab — there's no
+    /// caregiver app yet for someone to manage STT/LLM downloads through,
+    /// so the capability has to stay reachable, just not one plain tap away
+    /// from an elderly user's normal navigation.
+    @State private var showHiddenSheet = false
+    /// Spec §3 decision 2: the sheet's ellipsis affordance appears only
+    /// after the household has opened the sheet once, so the first meeting
+    /// is the hint caption, not an unexplained button.
+    @AppStorage(HiddenSettingsSheetUsage.defaultsKey) private var hiddenSheetUsed = false
+
+    /// Long-press duration on the title (spec §3: "e.g., 0.8s").
+    static let hiddenSheetLongPressDuration: TimeInterval = 0.8
 
     var body: some View {
         ZStack {
@@ -69,198 +53,129 @@ struct SettingsView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
 
-                Text("settings.title")
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 8)
-                    .padding(.bottom, 16)
-                    .onLongPressGesture(minimumDuration: 1.5) {
-                        showHiddenAIModels = true
+                titleBlock
+
+                // [BOOT-REVIEW, design item] Capability diagnostics live
+                // HERE, not in a transient capsule: every failed boot
+                // capability is named, its affected control named, and
+                // exactly one recovery action offered — routed through the
+                // same seam the coordinator installed. It sits ABOVE the
+                // tab bar, not inside a tab: a failed capability concerns
+                // the whole app and must not wait for the household to
+                // guess which tab hid the notice (it is empty — and takes
+                // no space — while every capability is healthy).
+                degradationDiagnosticsSection
+
+                SettingsTabBar(selection: $selectedTab)
+
+                TabView(selection: $selectedTab) {
+                    ForEach(SettingsSection.allCases) { tab in
+                        tabPage(tab)
+                            .tag(tab)
                     }
-                ScrollView {
-                    VStack(spacing: 12) {
-                        // [BOOT-REVIEW, design item] Capability
-                        // diagnostics live HERE, not in a transient
-                        // capsule: every failed boot capability is named,
-                        // its affected control named, and exactly one
-                        // recovery action offered — routed through the
-                        // same seam the coordinator installed.
-                        degradationDiagnosticsSection
-                        // [ENCODER-RUNTIME-TOGGLE] Visible door to the
-                        // internal AI screen: a single tap opens the same
-                        // hidden sheet the title long-press opens, so the
-                        // A/B card needs no gesture hunt. Gated by the same
-                        // IntentEncoderFeature.isEnabled, which
-                        // [ENCODER-ALWAYS-ON] is now part of this target's
-                        // DEFAULT compilation conditions — the door is
-                        // present in every build, and what keeps the
-                        // encoder out of service is the toggle inside
-                        // (default OFF), not the absence of the UI.
-                        if IntentEncoderFeature.isEnabled {
-                            Button {
-                                showHiddenAIModels = true
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "brain.head.profile")
-                                        .foregroundStyle(DesignTokens.textPrimary)
-                                    Text("settings.encoder.title")
-                                        .foregroundStyle(DesignTokens.textPrimary)
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                                        .foregroundStyle(DesignTokens.textSecondary)
-                                }
-                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                                .frame(minHeight: DesignTokens.minTapTargetSize)
-                                .padding(.horizontal, 20)
-                            }
-                        }
-                        // Skinnable app background (2026-09-07) — warm
-                        // presets today; a photo-picker background is a
-                        // noted future option.
-                        sectionRow(.appearance, icon: "paintpalette.fill", titleKey: "settings.appearance.title")
-                        sectionRow(.language, icon: "globe", titleKey: "settings.language.title")
-                        // Default app for ADDRESS-BOOK call buttons
-                        // (Phone-tab redesign, 2026-09-07).
-                        sectionRow(.calling, icon: "phone.badge.plus", titleKey: "settings.calling.title")
-                        // Saved places + the map voice navigation opens
-                        // (directions task, 2026-09-07).
-                        sectionRow(.places, icon: "mappin.and.ellipse", titleKey: "settings.places.title")
-                        geminiSectionRow
-                        voiceEngineSectionRow
-                        wakeWordSectionRow
-                        ttsVoicesSectionRow
-                        // Voice personalization ([VOICE-SETTINGS], 2026-09-08)
-                        // — noise filter, accent biasing, and the voice
-                        // fingerprint (enroll / status / remove).
-                        sectionRow(.voicePersonalization, icon: "waveform",
-                                   titleKey: "voiceSettings.title")
-                        // [LOCAL-TOOLS] (2026-09-07) Web search — Google CSE
-                        // credentials for the on-device stack's search tool.
-                        sectionRow(.webSearch, icon: "magnifyingglass.circle.fill",
-                                   titleKey: "searchSettings.title")
-                        // [YOUTUBE] (2026-09-08) YouTube — the optional Data
-                        // API key behind "play X on youtube" (without it the
-                        // voice command opens YouTube search directly).
-                        sectionRow(.youtube, icon: "play.rectangle.fill",
-                                   titleKey: "youtubeSettings.title")
-                        sectionRow(.feeds, icon: "rectangle.stack.fill", titleKey: "settings.feeds.title")
-                        sectionRow(.quickApps, icon: "square.grid.2x2.fill", titleKey: "settings.quickApps.title")
-                        sectionRow(.family, icon: "person.2.fill", titleKey: "settings.family.title")
-                        sectionRow(.meds, icon: "pills.fill", titleKey: "settings.meds.title")
-                        // Bundled default manuals (2026-09-07) — camera-
-                        // free, Gemini-free "how do I use this" guides.
-                        sectionRow(.manuals, icon: "book.closed.fill",
-                                   titleKey: "settings.manuals.title")
-                        // Native calendar bridge (calendar-settings task,
-                        // 2026-09-07): the mirror/two-way/import cards left
-                        // the meds leaf — this row is their hub entry.
-                        sectionRow(.calendar, icon: "calendar.badge.clock",
-                                   titleKey: "settings.calendar.title")
-                        // Family event alerts (caregiver
-                        // event-notifications task, 2026-09-13): the
-                        // per-event-type "tell my family" switches —
-                        // opt-in, default OFF, and deliberately placed
-                        // right below the calendar row they most often
-                        // go with.
-                        sectionRow(.caregiverNotifications, icon: "bell.badge.fill",
-                                   titleKey: "settings.notifyCaregivers.title")
-                        // Voice-set alarms + in-app countdown timers
-                        // (alarms-timers task, 2026-09-07). See the leaf's
-                        // honesty caption — iOS alarms ring through the
-                        // app's own notifications, not the Clock app.
-                        sectionRow(.alarms, icon: "alarm.fill", titleKey: "settings.alarms.title")
-                        // [LIVE-TRANSLATE T-015] The live-translation
-                        // consent control: the same prompt and the same
-                        // revocation control the session view shows, so a
-                        // decision can be made — or withdrawn — without the
-                        // camera running (FR-LCT-015). Deliberately its own
-                        // row rather than a sub-page of Privacy: the elder
-                        // changing their mind is the common case.
-                        sectionRow(.liveTranslate, icon: "text.viewfinder",
-                                   titleKey: "settings.livetranslate.title")
-                        sectionRow(.privacy, icon: "lock.shield.fill", titleKey: "settings.privacy.title")
-                        sectionRow(.intentLog, icon: "checklist", titleKey: "settings.intentLog.title")
-                        // [TOOL-DEBUG-LOG] (2026-09-07) Tool requests —
-                        // the family-facing debug window over every live
-                        // weather/web-search request the on-device stack
-                        // made (see LocalToolLogStore).
-                        sectionRow(.toolLog, icon: "text.magnifyingglass",
-                                   titleKey: "settings.toolLog.title")
-                        Text("settings.ai.hiddenHint")
-                            // DESIGN-REVIEW: the one 14pt label left in
-                            // the app — a status caption, so it takes
-                            // the 18pt caption token (constitution
-                            // ≥18pt body floor) instead of its own size.
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary.opacity(0.8))
-                            .multilineTextAlignment(.center)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity)
-                            .padding(.top, 8)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 32)
                 }
+                .tabViewStyle(.page(indexDisplayMode: .never))
             }
         }
         .toolbar(.hidden, for: .navigationBar)
         // Value-based navigation (iOS 16 pattern) — see HomeView: the
         // isPresented + derived-binding form is fragile on iOS 16.
-        .navigationDestination(for: SettingsSection.self) { section in
-            switch section {
-            case .appearance: AppearanceSettingsView()
-            case .language: LanguageSettingsView()
-            case .calling: CallingSettingsView()
-            case .places: PlacesSettingsView()
-            case .family: FamilyContactsSettingsView()
-            case .meds: MedicationScheduleSettingsView()
-            case .manuals: DefaultManualsBrowseView()
-            // Calendar settings (calendar-settings task, 2026-09-07) —
-            // the mirror/two-way/import cards that used to crowd the
-            // Medication schedule leaf.
-            case .calendar: CalendarSettingsView()
-            // Family event alerts (caregiver event-notifications task,
-            // 2026-09-13) — the settings instance is the coordinator's
-            // OWN, so the toggles write the exact object the fire sites
-            // read.
-            case .caregiverNotifications:
-                CaregiverNotifySettingsView(settings: coordinator.caregiverNotifySettings)
-            case .alarms: AlarmsTimersSettingsView()
-            // [LIVE-TRANSLATE T-015] The leaf drives the coordinator's one
-            // consent controller, so its decision is the session view's
-            // decision with no restart and no second record.
-            case .liveTranslate:
-                LiveTranslateConsentSettingsView(controller: coordinator.liveTranslateConsentController())
-            case .geminiAI: GeminiAPISettingsView()
-            case .voiceEngine: VoiceEngineSettingsView()
-            case .wakeWord: WakeWordSettingsView()
-            case .ttsVoices: TTSVoicesSettingsView()
-            case .voicePersonalization: VoicePersonalizationSettingsView(coordinator: coordinator)
-            case .webSearch: SearchSettingsView()
-            case .youtube: YouTubeSettingsView()
-            case .feeds: FeedsSettingsView()
-            case .quickApps: QuickAccessAppsView()
-            case .privacy: PrivacySettingsView()
-            case .intentLog: IntentLogReviewView()
-            case .toolLog: ToolLogReviewView()
-            }
+        .navigationDestination(for: SettingsDestination.self) { destination in
+            SettingsDestinationView(destination: destination)
         }
-        .sheet(isPresented: $showHiddenAIModels) {
-            NavigationStack { AIModelsSettingsView() }
+        .sheet(isPresented: $showHiddenSheet) {
+            HiddenSettingsSheet()
         }
     }
 
-    /// Visible, not buried — unlike the legacy on-device AI Models screen,
-    /// this is load-bearing infrastructure in v2 (no key = no assistant),
-    /// so it stays a normal, prominent row with a live status indicator.
-    @EnvironmentObject private var coordinator: AppCoordinator
-    /// [BOOT-REVIEW, design item] Observed so the diagnostics card below
-    /// re-renders when a capability fails or (via recovery) comes back.
-    @EnvironmentObject private var boot: StartupBoot
-    @Environment(\.locale) private var locale
+    // MARK: - Title (and the two doors to the hidden sheet)
+
+    /// The title keeps the long-press the spec names (0.8 s) and adds the
+    /// accessibility alternative it asks for: once the sheet has been
+    /// opened, a small ellipsis button sits next to the title, so a
+    /// VoiceOver user — or anyone who cannot hold a gesture — has a plain
+    /// target. Until that first open, the caption underneath says the
+    /// gesture exists at all.
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                Text("settings.title")
+                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .onLongPressGesture(minimumDuration: Self.hiddenSheetLongPressDuration) {
+                        openHiddenSheet()
+                    }
+                if hiddenSheetUsed {
+                    Button(action: openHiddenSheet) {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundStyle(DesignTokens.textPrimary)
+                            .frame(minWidth: DesignTokens.minTapTargetSize,
+                                   minHeight: DesignTokens.minTapTargetSize)
+                            .background(DesignTokens.card)
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text("settings.hidden.open"))
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+
+            if !hiddenSheetUsed {
+                Text("settings.hidden.hint")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(DesignTokens.textSecondary.opacity(0.8))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 20)
+            }
+        }
+        .padding(.bottom, 8)
+    }
+
+    /// One tab's page. The rows come from the tab table in
+    /// `SettingsTabs.swift` in table order — the view never decides what
+    /// belongs where.
+    @ViewBuilder
+    private func tabPage(_ tab: SettingsSection) -> some View {
+        ScrollView {
+            VStack(spacing: 12) {
+                ForEach(tab.rows) { destination in
+                    SettingsSectionRow(destination: destination)
+                }
+                // [ENCODER-RUNTIME-TOGGLE] Visible door to the internal AI
+                // screen: a single tap opens the same hidden sheet the title
+                // long-press opens, so the A/B card needs no gesture hunt.
+                // Gated by the same IntentEncoderFeature.isEnabled, which
+                // [ENCODER-ALWAYS-ON] is now part of this target's DEFAULT
+                // compilation conditions — the door is present in every
+                // build, and what keeps the encoder out of service is the
+                // toggle inside (default OFF), not the absence of the UI.
+                // It rides the System tab: an app-plumbing door, not a
+                // household control.
+                if tab == .system, IntentEncoderFeature.isEnabled {
+                    Button(action: openHiddenSheet) {
+                        SettingsRowChrome(icon: "brain.head.profile",
+                                          titleKey: "settings.encoder.title")
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 4)
+            .padding(.bottom, 32)
+        }
+    }
+
+    /// Both doors land here: the first open is what makes the ellipsis
+    /// affordance (and the absence of the hint) permanent.
+    private func openHiddenSheet() {
+        HiddenSettingsSheetUsage.markUsed()
+        hiddenSheetUsed = true
+        showHiddenSheet = true
+    }
 
     /// [BOOT-REVIEW, design item] Capability-specific diagnostics — the
     /// review moves detailed failure information OUT of the transient
@@ -312,197 +227,12 @@ struct SettingsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
                 }
             }
+            .padding(.horizontal, 20)
             .padding(.bottom, 4)
         }
     }
-
-    private var geminiSectionRow: some View {
-        NavigationLink(value: SettingsSection.geminiAI) {
-            HStack(spacing: 14) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 26))
-                    .foregroundStyle(DesignTokens.accent)
-                    .frame(width: 40)
-                Text("settings.gemini.title")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Spacer()
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(coordinator.geminiConfigStore.isConfigured ? DesignTokens.accent : DesignTokens.stateError)
-                        .frame(width: 8, height: 8)
-                    Text(coordinator.geminiConfigStore.isConfigured
-                         ? "settings.gemini.statusConnected"
-                         : "settings.gemini.statusMissing")
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.textSecondary)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// On-device vs Gemini A/B toggle. Visible (not buried) like the
-    /// Gemini row above it — this is the control that actually decides
-    /// which of the two live, since flipping it doesn't require a
-    /// restart (see `AppCoordinator.applyVoiceEngineStack`).
-    private var voiceEngineSectionRow: some View {
-        NavigationLink(value: SettingsSection.voiceEngine) {
-            HStack(spacing: 14) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.system(size: 26))
-                    .foregroundStyle(DesignTokens.accent)
-                    .frame(width: 40)
-                Text("settings.voiceEngine.title")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Spacer()
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(DesignTokens.accent)
-                        .frame(width: 8, height: 8)
-                    Text(coordinator.voiceEngineStack == .gemini
-                         ? "settings.voiceEngine.statusGemini"
-                         : "settings.voiceEngine.statusOnDevice")
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.textSecondary)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
-        }
-        .buttonStyle(.plain)
-    }
-
-
-    /// Voice activation — "ये कान्छी" wake phrase (open item #4). The dot
-    /// color + label come from the same `wakeWordStatus` derivation the
-    /// destination screen shows, so the row can never disagree with the
-    /// screen (unit-tested logic in `WakeWordStatusResolver`).
-    private var wakeWordSectionRow: some View {
-        let status = coordinator.wakeWordStatus
-        return NavigationLink(value: SettingsSection.wakeWord) {
-            HStack(spacing: 14) {
-                Image(systemName: "dot.radiowaves.left.and.right")
-                    .font(.system(size: 26))
-                    .foregroundStyle(DesignTokens.accent)
-                    .frame(width: 40)
-                Text("wakeWord.title")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Spacer()
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(status.presentationColor)
-                        .frame(width: 8, height: 8)
-                    Text(status.shortTitleKey)
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.textSecondary)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// On-device TTS voices (Piper VITS via sherpa-onnx). Status surfaces
-    /// the 2026-09-06 failure mode — a build without the bundled voice
-    /// files silently fell back to no speech for Nepali.
-    private var ttsVoicesSectionRow: some View {
-        NavigationLink(value: SettingsSection.ttsVoices) {
-            HStack(spacing: 14) {
-                Image(systemName: "speaker.waveform.2.fill")
-                    .font(.system(size: 26))
-                    .foregroundStyle(DesignTokens.accent)
-                    .frame(width: 40)
-                Text("settings.voices.title")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Spacer()
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(ttsVoiceSummary.ok ? DesignTokens.accent : DesignTokens.stateError)
-                        .frame(width: 8, height: 8)
-                    Text(ttsVoiceSummary.key)
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.textSecondary)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Green when every catalog voice can speak (installed, or bundled
-    /// and installable on first use); red the moment any voice is truly
-    /// missing from the build.
-    private var ttsVoiceSummary: (ok: Bool, key: LocalizedStringKey) {
-        let entries = ModelCatalog.entries(kind: .tts)
-        let allOK = entries.allSatisfy {
-            TTSVoicesSettingsView.status(for: $0, modelStore: coordinator.modelStore) != .missing
-        }
-        let anyInstalled = entries.contains {
-            TTSVoicesSettingsView.status(for: $0, modelStore: coordinator.modelStore) == .installed
-        }
-        if !allOK { return (false, "settings.voices.statusMissing") }
-        return (true, anyInstalled
-                ? "settings.voices.statusInstalled"
-                : "settings.voices.statusBundled")
-    }
-
-    private func sectionRow(_ section: SettingsSection, icon: String,
-                            titleKey: String) -> some View {
-        NavigationLink(value: section) {
-            HStack(spacing: 14) {
-                Image(systemName: icon)
-                    .font(.system(size: 26))
-                    .foregroundStyle(DesignTokens.accent)
-                    .frame(width: 40)
-                Text(LocalizedStringKey(titleKey))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
-        }
-        .buttonStyle(.plain)
-    }
 }
+
 
 // MARK: - 1. Language & region (spec §4.4.1)
 
@@ -1765,6 +1495,13 @@ private struct FamilyContactWizardSheet: View {
     // free-form text; blank saves as nil (no address = not a navigation
     // target).
     @State private var address = ""
+    // The address the family's calendar invitation goes to (calendar &
+    // family sharing task, 2026-09-16) — blank saves as nil, which means
+    // "no invite". Optional for an ordinary contact; MANDATORY while the
+    // emergency flag is on, because the invite policy makes an emergency
+    // contact an attendee of every shared event. `FamilyContactValidation`
+    // owns that rule — see `emailIssue`.
+    @State private var email = ""
     // Whether the "Emergency contact" toggle is on (family-emergency
     // task, 2026-09-07) — flagged contacts are whom the Emergency
     // button dials first. Optional like the photo: an add starts off,
@@ -1839,10 +1576,31 @@ private struct FamilyContactWizardSheet: View {
     }
 
     /// The save contract — the same mandatory trio the whole flow
-    /// enforces: a name, a number, and a relationship. Save on the last
-    /// step is dead without all three.
+    /// enforces: a name, a number, and a relationship, plus the email
+    /// rule for an emergency contact (calendar & family sharing task,
+    /// 2026-09-16). Save on the last step is dead without all of them.
     private var canSave: Bool {
-        hasNameAndPhone && relationshipOption != nil
+        hasNameAndPhone && relationshipOption != nil && emailIssue == nil
+    }
+
+    /// Why the email draft blocks the save, or nil when it does not.
+    /// Read from `FamilyContactValidation` rather than re-checked here,
+    /// so the button's state and the caption under the field can never
+    /// disagree — the same single-source rule every other gate on this
+    /// screen follows. Always nil while the draft is not an emergency
+    /// contact: the field is optional then.
+    private var emailIssue: FamilyContactValidation.Issue? {
+        FamilyContactValidation.issue(email: email,
+                                      isEmergencyContact: isEmergencyContact)
+    }
+
+    /// The blocking issue's caption key. One arm per `Issue`, so a new
+    /// rule cannot be added without a line to show for it.
+    private func emailIssueKey(_ issue: FamilyContactValidation.Issue) -> String {
+        switch issue {
+        case .emailRequired: return "family.contact.emailRequired"
+        case .emailInvalid: return "family.contact.emailInvalid"
+        }
     }
 
     var body: some View {
@@ -2515,6 +2273,37 @@ private struct FamilyContactWizardSheet: View {
                 .font(.system(size: DesignTokens.minCaptionPointSize))
                 .foregroundStyle(DesignTokens.textSecondary)
                 .padding(.horizontal, 4)
+            // Email (calendar & family sharing task, 2026-09-16): where
+            // the family's calendar invitation goes. Optional for an
+            // ordinary contact, required while the emergency flag is on —
+            // the hint and the blocking line below both read the one rule
+            // in `FamilyContactValidation`, never a second check here.
+            Text(L10n.str("family.contact.email", locale: coordinator.activeLocale))
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .foregroundStyle(DesignTokens.textSecondary)
+            TextField("", text: $email)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .padding(14)
+                .frame(minHeight: 56)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .keyboardType(.emailAddress)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if let issue = emailIssue {
+                Text(L10n.str(emailIssueKey(issue), locale: coordinator.activeLocale))
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.stateError)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if isEmergencyContact {
+                Text(L10n.str("family.contact.emailHintEmergency",
+                              locale: coordinator.activeLocale))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(DesignTokens.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -2582,6 +2371,10 @@ private struct FamilyContactWizardSheet: View {
         messengerHandle = contact.messengerHandle ?? ""
         nickname = contact.nickname ?? ""
         address = contact.address ?? ""
+        // The stored invitation address, so re-opening the editor shows
+        // what the family will actually be invited at (calendar & family
+        // sharing task, 2026-09-16).
+        email = contact.email ?? ""
         // The stored flag shows in the step-2 toggle (family-emergency
         // task, 2026-09-07) — an edit opens with it pre-set.
         isEmergencyContact = contact.isEmergencyContact
@@ -2633,6 +2426,12 @@ private struct FamilyContactWizardSheet: View {
         // Blank address saves as nil — no address = not a navigation
         // target (directions task, 2026-09-07).
         let homeAddress = trimmedOrNil(address)
+        // Blank email saves as nil too — no address = no calendar
+        // invitation, never an empty string the invite policy would then
+        // have to special-case (calendar & family sharing task,
+        // 2026-09-16). Normalization is the validator's, not a second
+        // trim here.
+        let contactEmail = FamilyContactValidation.normalizedEmail(email)
         // The stored relationship is the chosen option's label in the
         // active locale — the display word the picker showed, which is
         // what the free-text field before it used to store.
@@ -2645,13 +2444,14 @@ private struct FamilyContactWizardSheet: View {
                 id: contact.id, name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
                 photo: pickedPhoto, removingPhoto: removingStoredPhoto,
-                nickname: nick, address: homeAddress,
+                nickname: nick, address: homeAddress, email: contactEmail,
                 isEmergencyContact: isEmergencyContact)
         } else {
             succeeded = coordinator.addFamilyContact(
                 name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
                 photo: pickedPhoto, nickname: nick, address: homeAddress,
+                email: contactEmail,
                 isEmergencyContact: isEmergencyContact)
         }
         if succeeded { dismiss() }
@@ -3090,6 +2890,10 @@ struct MedicationScheduleSettingsView: View {
     @State private var name = ""
     @State private var time = Date()
     @State private var errorKey: String?
+    /// The medication whose photos are being managed (medication-visual-
+    /// aids task, 2026-09-16) — held as the full entry so the sheet renders
+    /// without a store read of its own.
+    @State private var photoEditorEntry: MedicationEntry?
 
     var body: some View {
         LeafScreen(titleKey: "settings.meds.title") {
@@ -3116,6 +2920,26 @@ struct MedicationScheduleSettingsView: View {
                 festivalReminderCard
             }
         }
+        // A medicine's photos, edited by the family (medication-visual-aids
+        // task, 2026-09-16) — the SAME editor the routine reminders use,
+        // with the medication photo store instead of the routine one.
+        // Edits persist as they happen, so dismissal only has to close the
+        // sheet: this leaf reads `coordinator.medicationEntries` in its
+        // body, so the row's glyph and the dose screens pick the change up
+        // on the next draw (the dose screen snapshots at fire/tap time).
+        .sheet(item: $photoEditorEntry) { entry in
+            ReminderVisualAidEditorView(
+                entryId: entry.id,
+                title: entry.medicationName,
+                aids: entry.visualAids,
+                store: coordinator.medicationVisualAidStore,
+                locale: coordinator.activeLocale,
+                onSave: { aids in
+                    coordinator.setMedicationVisualAids(entry.id, aids: aids)
+                },
+                onClose: { photoEditorEntry = nil }
+            )
+        }
     }
 
     private func medRow(_ entry: MedicationEntry) -> some View {
@@ -3129,6 +2953,21 @@ struct MedicationScheduleSettingsView: View {
                     .foregroundStyle(DesignTokens.textSecondary)
             }
             Spacer()
+            // Photos live behind this row, the same place routines put
+            // them (medication-visual-aids task, 2026-09-16): this leaf is
+            // where the family configures a medicine, and the photo is
+            // part of the medicine, not of today's dose.
+            Button {
+                photoEditorEntry = entry
+            } label: {
+                Image(systemName: entry.visualAids.isEmpty ? "photo.badge.plus" : "photo.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(DesignTokens.accent)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("visualAid.add"))
             Button(role: .destructive) {
                 coordinator.removeMedication(id: entry.id)
             } label: {
@@ -3351,6 +3190,15 @@ struct AIModelsSettingsView: View {
                     encoderCard
                 }
 
+                // [CLOUD-CASCADE] (2026-09-16) The cloud cascade tier's
+                // card, on the SAME hidden internal screen as the encoder
+                // switches — the tier is not encoder-specific (it acts on
+                // whatever the local slot answered), so it renders in
+                // every build and is not gated on the encoder switch.
+                // Nothing to enable for a household: the tier is inert on
+                // its own wherever no cloud provider is configured.
+                cloudCascadeCard
+
                 // TTS / VAD / KWS management — deliberately left as it
                 // was by the STT/brain split (the voice rows this screen
                 // has always managed).
@@ -3382,18 +3230,29 @@ struct AIModelsSettingsView: View {
     }
 
     /// Picker selection: sets the persisted preference (existing
-    /// `sttModelPreference` flow) AND — when the chosen engine is not
-    /// installed yet — starts its download through the existing
-    /// `ModelDownloadService` so a fresh pick works immediately. Rows
-    /// below surface progress; once the install completes the picker
-    /// label sheds its "not downloaded" suffix and the recognizer
-    /// resolves the preference (it loads whatever model is cached).
+    /// `sttModelPreference` flow), records the pick as the household's own
+    /// for the current app language (`ModelPreferenceMemory` — the same
+    /// seam `ResponseVoiceSelection.remember` provides for the reply
+    /// voice), AND — when the chosen engine is not installed yet — starts
+    /// its download through the existing `ModelDownloadService` so a fresh
+    /// pick works immediately. Rows below surface progress; once the
+    /// install completes the picker label sheds its "not downloaded"
+    /// suffix and the recognizer resolves the preference (it loads
+    /// whatever model is cached).
+    ///
+    /// This is the ONLY writer of that memory: the automatic app-language
+    /// switch reads it (so an en→ne→en round trip returns here) and must
+    /// never write it. The "Automatic" row (nil) is not a memory either —
+    /// `rememberSTT` takes a real id, and nil leaves whatever was
+    /// remembered for the language in place.
     private var sttSelection: Binding<ModelID?> {
         Binding(
             get: { coordinator.sttModelPreference },
             set: { newValue in
                 coordinator.sttModelPreference = newValue
                 if let newValue {
+                    ModelPreferenceMemory.rememberSTT(
+                        newValue, for: coordinator.appLanguage.rawValue)
                     startDownloadIfNeeded(newValue)
                 }
             }
@@ -3404,11 +3263,20 @@ struct AIModelsSettingsView: View {
     /// coordinator's didSet already starts the chosen model's download
     /// when it isn't cached (the same fresh-pick contract as the STT
     /// picker), so this binding stays a thin passthrough — no second
-    /// download kick here.
+    /// download kick here. It DOES record the pick per app language
+    /// (`ModelPreferenceMemory.rememberBrain`), the STT binding's contract
+    /// exactly: the language switch restores the household's own brain
+    /// instead of flattening it to the per-language default.
     private var brainSelection: Binding<ModelID?> {
         Binding(
             get: { coordinator.brainModelPreference },
-            set: { coordinator.brainModelPreference = $0 }
+            set: { newValue in
+                coordinator.brainModelPreference = newValue
+                if let newValue {
+                    ModelPreferenceMemory.rememberBrain(
+                        newValue, for: coordinator.appLanguage.rawValue)
+                }
+            }
         )
     }
 
@@ -3694,6 +3562,102 @@ struct AIModelsSettingsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// [CLOUD-CASCADE] (2026-09-16) The cloud cascade tier's card, on the
+    /// hidden internal-testing screen beside the encoder switches.
+    ///
+    /// Two rows, one writer each:
+    ///  · the SWITCH — `AppCoordinator.cloudCascadeEnabled` (**default
+    ///    ON**: the tier's rule is the requested behaviour, and it stays
+    ///    inert by itself wherever no cloud provider is configured);
+    ///  · the THRESHOLD — `AppCoordinator.cloudCascadeThreshold`, **default
+    ///    97 %**, stepped in whole percent. Two big tap targets rather
+    ///    than a slider, the volume control's pattern: a drag is the wrong
+    ///    gesture here, and every step is a discrete, readable number.
+    ///
+    /// The copy carries the gates so the card can never promise more than
+    /// the chain does: the tier is inert while no cloud provider is
+    /// configured (a household that never added a key never meets it), the
+    /// keyword safety net still runs before any brain, and a spoken hold
+    /// cue — not a silent wait — precedes the cloud call.
+    private var cloudCascadeCard: some View {
+        let percent = CloudCascadeSettings.percent(coordinator.cloudCascadeThreshold)
+        let minimumPercent = CloudCascadeSettings.percent(CloudCascadeSettings.minimumThreshold)
+        let maximumPercent = CloudCascadeSettings.percent(CloudCascadeSettings.maximumThreshold)
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("settings.cloudCascade.title")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundStyle(DesignTokens.textPrimary)
+            Toggle(isOn: Binding(
+                get: { coordinator.cloudCascadeEnabled },
+                set: { coordinator.cloudCascadeEnabled = $0 }
+            )) {
+                Text("settings.cloudCascade.toggleLabel")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+            }
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            Text("settings.cloudCascade.toggleNote")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 16) {
+                cascadeThresholdStepButton(steps: -1, systemImage: "minus",
+                                           labelKey: "settings.cloudCascade.decrease",
+                                           enabled: percent > minimumPercent)
+                Spacer(minLength: 8)
+                Text(verbatim: "\(percent)%")
+                    .font(.system(size: DesignTokens.titlePointSize, weight: .bold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                    .frame(minWidth: 128)
+                    .accessibilityLabel(Text("settings.cloudCascade.thresholdLabel"))
+                    .accessibilityValue(Text(verbatim: "\(percent)%"))
+                Spacer(minLength: 8)
+                cascadeThresholdStepButton(steps: +1, systemImage: "plus",
+                                           labelKey: "settings.cloudCascade.increase",
+                                           enabled: percent < maximumPercent)
+            }
+
+            Text("settings.cloudCascade.thresholdNote")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// One threshold step button; disabled at the ends of the range (no
+    /// dead press, and the dimmed state shows where the range ends). The
+    /// write goes through the coordinator, whose didSet persists the
+    /// clamped value AND re-resolves the router's tier — so a step acts on
+    /// the next turn, not the next launch.
+    private func cascadeThresholdStepButton(steps: Int, systemImage: String,
+                                            labelKey: LocalizedStringKey,
+                                            enabled: Bool) -> some View {
+        Button {
+            let next = CloudCascadeSettings.stepped(coordinator.cloudCascadeThreshold,
+                                                    bySteps: steps)
+            guard next != coordinator.cloudCascadeThreshold else { return }
+            coordinator.cloudCascadeThreshold = next
+        } label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 26, weight: .bold))
+                .foregroundStyle(enabled ? DesignTokens.textPrimary
+                                         : DesignTokens.textSecondary)
+                .frame(minWidth: DesignTokens.minTapTargetSize + 24,
+                       minHeight: DesignTokens.minTapTargetSize + 24)
+                .background(DesignTokens.background)
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(Text(labelKey))
     }
 
     /// The encoder artifact's install state, resolved through the same

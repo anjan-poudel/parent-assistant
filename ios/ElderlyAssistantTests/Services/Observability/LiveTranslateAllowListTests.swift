@@ -55,11 +55,20 @@ final class LiveTranslateAllowListTests: XCTestCase {
 
     func testTheExtensionIsAdditiveAndTheAllowListIsStillAnAllowList() {
         let added = LogSanitiser.allowedKeys.subtracting(shippedKeysBeforeThisChange)
+        // The guard is unchanged — every key beyond the pre-change shipped
+        // set must be DECLARED here, so a silent widening still fails — but
+        // the declared set is now the union of both declared extensions:
+        // this feature's 15 keys plus `provider` / `threshold` /
+        // `confidence`, declared by [CLOUD-CASCADE] on master
+        // (`cloud_cascade_escalated`: a provider raw value and two 0…1
+        // scores). Neither side's entries are dropped and nothing is
+        // widened without a name.
         XCTAssertEqual(added, [
             "regionCount", "stringCount", "batchIndex", "batchCount", "resolvedCount",
             "unresolvedCount", "durationMs", "keyCount", "count", "origin", "mode",
-            "reason", "disclosureVersion", "cap", "errorCode"
-        ], "the feature's extension is exactly the declared key set")
+            "reason", "disclosureVersion", "cap", "errorCode",
+            "provider", "threshold", "confidence"
+        ], "the extension is exactly the union of the two declared key sets")
         XCTAssertNil(sanitisedMetadata(["somethingNoOneDeclared": "x"])["somethingNoOneDeclared"],
                      "unknown keys are still dropped outright")
     }

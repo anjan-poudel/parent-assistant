@@ -991,6 +991,53 @@ private struct ResetHoldAffordance: ViewModifier {
 /// asked the question twice — once in the title and again in the spoken
 /// prompt row below. The title is now the neutral "Please confirm"
 /// frame; the kind-specific question always comes from the prompt row.
+/// The yes/no chip's half of the confirmation-speech contract.
+///
+/// [APP-LAUNCHER F2] The generic "Okay, marked as taken" / "Okay, I won't
+/// mark it" catalog text is MEDICATION-flavored. It is correct for a dose
+/// challenge and wrong for every other flow that shares the confirmation
+/// window — a call, a navigation disambiguation, a calendar write, an app
+/// launch — because each of those speaks its own honest outcome from
+/// `AppCoordinator.handleConfirmationResponse`, and the generic line would
+/// both contradict it and claim a dose was recorded.
+///
+/// The voice path has known this since the call-confirmation fix
+/// (`CommandRouter.route`'s `speaksItsOwnYesNo`); the chip knew only about
+/// calls. Rather than repeat the list a second time in a second file, the
+/// decision is expressed once, here, as a pure value — the same shape the
+/// router uses, so the two can be read side by side, and so it is testable
+/// without a screen. The chip and the router must be changed together.
+struct ConfirmationChipSpeech {
+    /// Which confirmation the window currently belongs to. All four are
+    /// read from the coordinator BEFORE `handleConfirmationResponse`,
+    /// which clears them as it handles the answer.
+    struct Flags: Equatable {
+        var isCall: Bool = false
+        var isNavigationDisambiguation: Bool = false
+        var isCalendarEvent: Bool = false
+        var isAppLaunch: Bool = false
+
+        init(isCall: Bool = false,
+             isNavigationDisambiguation: Bool = false,
+             isCalendarEvent: Bool = false,
+             isAppLaunch: Bool = false) {
+            self.isCall = isCall
+            self.isNavigationDisambiguation = isNavigationDisambiguation
+            self.isCalendarEvent = isCalendarEvent
+            self.isAppLaunch = isAppLaunch
+        }
+
+        /// True when the flow owns its own words.
+        var speaksForItself: Bool {
+            isCall || isNavigationDisambiguation || isCalendarEvent || isAppLaunch
+        }
+    }
+
+    /// Whether the chip may follow up with the generic catalog line. The
+    /// medication challenge is the only flow left that needs it.
+    static func speaksGenericYesNo(_ flags: Flags) -> Bool { !flags.speaksForItself }
+}
+
 struct ConfirmationChips: View {
     @EnvironmentObject var coordinator: AppCoordinator
     let titleKey: String
@@ -1034,10 +1081,23 @@ struct ConfirmationChips: View {
             // cancel that correct utterance (SystemSpeechSpeaker.speak()
             // cancels whatever's currently speaking) — checked BEFORE
             // handleConfirmationResponse, which clears pendingCallAction.
-            let isCall = coordinator.isAwaitingCallConfirmation
+            //
+            // [APP-LAUNCHER F2] The exemption has to name EVERY flow that
+            // speaks for itself, not just the call one, or the chip is a
+            // second, drifting copy of the voice path's list — which is
+            // how a chip-yes on "क्यामेरा खोल्ने हो?" came to announce
+            // "marked as taken" (a medication claim) while the camera was
+            // opening. `ConfirmationChipSpeech` mirrors
+            // `CommandRouter.route`'s `speaksItsOwnYesNo`; the two must
+            // move together.
+            let flags = ConfirmationChipSpeech.Flags(
+                isCall: coordinator.isAwaitingCallConfirmation,
+                isNavigationDisambiguation: coordinator.isAwaitingNavigationDisambiguation,
+                isCalendarEvent: coordinator.isAwaitingCalendarEventConfirmation,
+                isAppLaunch: coordinator.isAwaitingAppLaunchConfirmation)
             let response: ConfirmationResponse = isYes ? .yes : .no
             coordinator.handleConfirmationResponse(response)
-            if !isCall {
+            if ConfirmationChipSpeech.speaksGenericYesNo(flags) {
                 coordinator.speak(key: isYes ? "router.confirmationYes" : "router.confirmationNo")
             }
         } label: {

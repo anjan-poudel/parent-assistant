@@ -151,6 +151,18 @@ struct LogSanitiser {
         // unbounded twin that the B2 defect was. Tests pin both halves: a
         // real code survives, a description does not.
         "errorCode",
+        // [CLOUD-CASCADE] The cascade tier's `cloud_cascade_escalated`
+        // payload (2026-09-16): which online provider took the turn and the
+        // two scores that decided it. NUMBERS AND AN ID ONLY —
+        // `provider` is a `CloudProvider` raw value ("gemini", a fixed
+        // vocabulary), `threshold` and `confidence` are 0…1 scores
+        // rendered "%.2f" by `PipelineTraceSummary.score` — never the
+        // transcript, never the reply, never an API key (C9 policy). The
+        // same `provider` key the `cloud_fallback` state event already
+        // emits.
+        "provider",
+        "threshold",
+        "confidence"
     ]
 
     /// Metadata keys whose value must satisfy the *code* bound rather than a

@@ -15,10 +15,16 @@ import Foundation
 /// concern that lands with the Phase 4 Google Calendar sync — it does
 /// not require the firing mechanism itself to be EventKit.
 protocol RoutineAlarmScheduling {
+    /// `visualAidURL` is the reminder's first photo, or nil when it has
+    /// none (photo-visual-aids task, 2026-09-16) — the notification carries
+    /// it as an attachment so the firing banner shows the medicine box, not
+    /// just its name. Attaching is best-effort and must never affect
+    /// whether the reminder is armed.
     func scheduleRoutineReminder(
         occurrenceId: UUID,
         entryId: UUID,
         title: String,
+        visualAidURL: URL?,
         at scheduledTime: Date
     )
 
@@ -57,6 +63,7 @@ final class UNRoutineNotificationScheduler: RoutineAlarmScheduling {
         occurrenceId: UUID,
         entryId: UUID,
         title: String,
+        visualAidURL: URL?,
         at scheduledTime: Date
     ) {
         let content = UNMutableNotificationContent()
@@ -70,6 +77,14 @@ final class UNRoutineNotificationScheduler: RoutineAlarmScheduling {
             "entry_id": entryId.uuidString,
             "type": "routine_reminder"
         ]
+        // The reminder's photo in the banner (photo-visual-aids task).
+        // Best-effort by construction: a nil or unreadable photo simply
+        // arms a text-only reminder, exactly as before the feature.
+        if let visualAidURL,
+           let attachment = Self.visualAidAttachment(from: visualAidURL,
+                                                     occurrenceId: occurrenceId) {
+            content.attachments = [attachment]
+        }
 
         let components = Calendar.current.dateComponents(
             [.year, .month, .day, .hour, .minute, .second],
@@ -87,6 +102,43 @@ final class UNRoutineNotificationScheduler: RoutineAlarmScheduling {
             if let error = error {
                 print("[UNRoutineNotificationScheduler] Failed to schedule: \(ErrorCodeMapper.code(for: error))")
             }
+        }
+    }
+
+    /// Builds the banner image from a THROWAWAY COPY of the stored photo.
+    ///
+    /// The copy is not an optimisation, it is the whole point:
+    /// `UNNotificationAttachment` **moves** the file it is handed into the
+    /// system's attachment store. Handing it the app's only copy would
+    /// delete the reminder's photo as a side effect of arming its
+    /// notification — and arming re-runs on every launch
+    /// (`RoutineScheduler.scheduleAll`), so the photo would vanish the
+    /// first time. One copy per occurrence, overwritten on each re-arm, so
+    /// nothing accumulates.
+    ///
+    /// Returns nil (leaving the reminder armed, text-only) when the copy
+    /// cannot be made or the image is not an attachment the system accepts.
+    private static func visualAidAttachment(from sourceURL: URL,
+                                            occurrenceId: UUID) -> UNNotificationAttachment? {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("VisualAidAttachments", isDirectory: true)
+        let copyURL = directory.appendingPathComponent(occurrenceId.uuidString + ".jpg")
+        do {
+            try FileManager.default.createDirectory(at: directory,
+                                                    withIntermediateDirectories: true)
+            // A previous arm normally leaves nothing behind (the system
+            // took the copy), but a failed attachment may have.
+            try? FileManager.default.removeItem(at: copyURL)
+            try FileManager.default.copyItem(at: sourceURL, to: copyURL)
+        } catch {
+            return nil
+        }
+        do {
+            return try UNNotificationAttachment(identifier: "routine_visual_aid",
+                                                url: copyURL)
+        } catch {
+            try? FileManager.default.removeItem(at: copyURL)
+            return nil
         }
     }
 

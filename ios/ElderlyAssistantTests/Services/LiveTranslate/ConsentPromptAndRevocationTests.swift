@@ -398,7 +398,12 @@ final class ConsentPromptAndRevocationTests: XCTestCase {
     }
 
     func testTheSettingsLeafDrivesTheAppsOneConsentController() {
-        let settings = sourceText("App/SettingsView.swift", relativeToFeature: false)
+        // The settings reorg (2026-09-16) moved every leaf route out of
+        // `App/SettingsView.swift` into `SettingsTabs.swift`'s
+        // `SettingsDestinationView`, so this is the file that now holds the
+        // row → leaf route. The claim scanned is unchanged: the route hands
+        // the leaf the coordinator's own controller.
+        let settings = sourceText("App/SettingsTabs.swift", relativeToFeature: false)
         XCTAssertNotNil(FeatureSourceScan.firstMatch(of: "liveTranslateConsentController\\(\\)",
                                                      in: settings),
                         "the Settings row presents the coordinator's own controller, so a "

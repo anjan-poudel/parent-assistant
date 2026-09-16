@@ -111,11 +111,11 @@ final class ModelCatalogLanguageTests: XCTestCase {
     }
 
     func testNepaliDefaultsAreNepaliTagged() {
-        // The EXPLICIT map's ne pick (fix 1) — the bundled medium, chosen
-        // over the curated list's first entry (whisperMediumV6) so the
-        // auto-switch never starts a download on its own.
+        // The EXPLICIT map's ne pick (fix 1), retargeted 2026-09-16 to the
+        // default rule: best measured accuracy AND the ANE build, which is
+        // the v6 WhisperKit model — also the curated list's own leader.
         let stt = ModelCatalog.defaultEntry(kind: .whisperBase, language: "ne")
-        XCTAssertEqual(stt?.id, ModelCatalog.whisperMediumFinetunedNepali)
+        XCTAssertEqual(stt?.id, ModelCatalog.whisperKitMediumV6)
         XCTAssertEqual(stt?.languages, ["ne"])
         let brain = ModelCatalog.defaultEntry(kind: .llamaBase, language: "ne")
         XCTAssertEqual(brain?.id, ModelCatalog.intentQwen4BSlotCanon,
@@ -137,9 +137,31 @@ final class ModelCatalogLanguageTests: XCTestCase {
 
     func testDefaultEntryIsCaseInsensitive() {
         XCTAssertEqual(ModelCatalog.defaultEntry(kind: .whisperBase, language: "NE")?.id,
-                       ModelCatalog.whisperMediumFinetunedNepali)
+                       ModelCatalog.whisperKitMediumV6)
         XCTAssertEqual(ModelCatalog.explicitDefaultEntry(kind: .llamaBase, language: "EN")?.id,
                        ModelCatalog.qwen3_1_7BInstruct)
+    }
+
+    /// The curated picker order IS the preference order, and (since
+    /// 2026-09-16) it leads with the per-language ne default — so the first
+    /// row a household sees is the model an app-language switch lands on,
+    /// and the "best / ANE where one exists" default rule is legible in one
+    /// place. The list is pinned exactly; the STT naming suite pins the same
+    /// array for its names.
+    func testCuratedSTTListLeadsWithTheNepaliANEDefault() {
+        let entries = ModelCatalog.availableSTTEntries
+        XCTAssertEqual(entries.first?.id, ModelCatalog.whisperKitMediumV6,
+                       "the v6 ANE leads — best accuracy on the fast path")
+        XCTAssertEqual(entries.first?.id,
+                       ModelCatalog.defaultEntry(kind: .whisperBase, language: "ne")?.id,
+                       "the picker's first row and the ne auto-switch target agree")
+        // Every entry the list offers is actually usable in its own
+        // language — the English pick must not be a Devanagari fine-tune.
+        XCTAssertEqual(ModelCatalog.availableSTTEntries.last?.id,
+                       ModelCatalog.whisperBaseEn,
+                       "the en pick stays last (60 MB, English-tuned)")
+        XCTAssertEqual(ModelCatalog.defaultEntry(kind: .whisperBase, language: "en")?.id,
+                       ModelCatalog.whisperBaseEn)
     }
 
     // MARK: - Explicit per-language map (fix 1)

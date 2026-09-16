@@ -22,6 +22,28 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertEqual(coordinator.recordedTranscripts, ["मैले औषधि खाएँ"])
     }
 
+    // MARK: - Medication vocabulary (extracted for [APP-LAUNCHER F3])
+
+    /// The acknowledgement vocabulary keeps its guard order after the
+    /// extraction: a denial is never an acknowledgement, in either
+    /// direction of the substring traps ("नखाए" ⊃ "खाए", "भएन" ⊃ "भयो",
+    /// "i didn't take it" ⊃ "i took").
+    func testExplicitMedicationAcknowledgementExcludesEveryDenial() {
+        for denial in ["मैले औषधि खाएको छैन", "नखाए", "औषधि भएन",
+                       "i didn't take it", "i did not take my medication",
+                       "not yet"] {
+            XCTAssertFalse(CommandRouter.isExplicitMedicationAcknowledgement(denial),
+                           "\(denial) is a denial, not an acknowledgement")
+        }
+        for ack in ["मैले औषधि खाएँ", "औषधि खाए", "i took my medication",
+                    "taken my medicine", "खाइसकेँ"] {
+            XCTAssertTrue(CommandRouter.isExplicitMedicationAcknowledgement(ack),
+                          "\(ack) is an acknowledgement")
+        }
+        XCTAssertFalse(CommandRouter.isExplicitMedicationAcknowledgement("हो"))
+        XCTAssertFalse(CommandRouter.isExplicitMedicationAcknowledgement("होइन"))
+    }
+
     // MARK: - Emergency (deterministic keyword net — see CommandRouter.emergencyPhrases)
 
     /// Regression for a real bug found via live testing against the Gemini
@@ -594,6 +616,205 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertEqual(coordinator.confirmationResponses, [.no])
     }
 
+    /// [APP-LAUNCHER] (2026-09-16) The yes/no follow-up to an app-launch
+    /// question must NOT speak the generic medication-flavored text — the
+    /// coordinator speaks "Opening X" (or the honest cancellation) itself,
+    /// and the routing result is its own case so no caller mistakes it for
+    /// a dose ack.
+    func testAppLaunchConfirmationYesDoesNotSpeakGenericMedicationText() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isAwaitingConfirmation = true
+        coordinator.isAwaitingAppLaunchConfirmation = true
+        let speaker = MockSpeaker()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: MockObservabilityBus(),
+                                   speaker: speaker)
+
+        let result = router.route(transcript: "हजुर")
+
+        XCTAssertEqual(result, .appLaunchConfirmed)
+        XCTAssertEqual(coordinator.confirmationResponses, [.yes])
+        XCTAssertTrue(speaker.utterances.isEmpty,
+                      "the coordinator speaks its own launch outcome")
+    }
+
+    /// A no is a no: the router reports no launch outcome, and (with the
+    /// three older confirmation kinds all inert) it never falls through
+    /// to the medication ack either.
+    func testAppLaunchConfirmationNoIsNotAConfirmation() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.isAwaitingConfirmation = true
+        coordinator.isAwaitingAppLaunchConfirmation = true
+        let speaker = MockSpeaker()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: MockObservabilityBus(),
+                                   speaker: speaker)
+
+        let result = router.route(transcript: "होइन")
+
+        XCTAssertNotEqual(result, .appLaunchConfirmed)
+        XCTAssertEqual(coordinator.confirmationResponses, [.no])
+        XCTAssertTrue(speaker.utterances.isEmpty,
+                      "the coordinator speaks the cancellation, not the generic no")
+    }
+
+    /// [APP-LAUNCHER F3] A dose acknowledgement is never an answer to an
+    /// app-launch question.
+    ///
+    /// The confirmation-follow-up block intercepts EVERY utterance while a
+    /// window is open, so "औषधि खाएँ" said over "क्यामेरा खोल्ने हो?" was
+    /// parsed as an ambiguous yes/no — the launch question went unanswered,
+    /// the dose was never recorded, and `routeSafetyNet` (whose comment
+    /// promises it "runs first, always") never ran, because the follow-up
+    /// block sits above it. The elder said they took their medication and
+    /// nothing happened.
+    func testMedicationAcknowledgementDuringAnAppLaunchQuestionStillRecordsTheDose() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let reminderId = UUID()
+        coordinator.pendingReminderId = reminderId
+        coordinator.isAwaitingConfirmation = true
+        coordinator.isAwaitingAppLaunchConfirmation = true
+        let router = CommandRouter(coordinator: coordinator,
+                                   observabilityBus: MockObservabilityBus(),
+                                   speaker: MockSpeaker())
+
+        let result = router.route(transcript: "औषधि खाएँ")
+
+        XCTAssertEqual(result, .acknowledgedMedication)
+        XCTAssertEqual(coordinator.confirmationChallengeEntryIds, [reminderId],
+                       "the FR-D01 challenge is issued for the dose")
+        XCTAssertTrue(coordinator.confirmationResponses.isEmpty,
+                      "the utterance is not a yes/no answer to the launch question")
+        // The spoken assertion reads `assistantSpoken`, NOT
+        // `speaker.utterances`: `speak(text:)` commits the line through
+        // `noteAssistantSpoke` synchronously but hands it to the speaker
+        // inside a Task, so `utterances` is recorded asynchronously (the
+        // mock's own doc, and the 2026-09-16 18:29 full-target run where
+        // this assertion lost the race and saw an empty list) — the
+        // synchronous record is the line the router actually committed to
+        // speech. Exactly ONE line: the dose challenge, never the launch
+        // question.
+        XCTAssertEqual(coordinator.assistantSpoken, [coordinator.confirmationPrompt ?? ""],
+                       "the dose challenge is what the elder hears")
+    }
+
+    /// The launch question keeps its ordinary yes/no handling: the F3
+    /// exemption is for the acknowledgement vocabulary ONLY, so a plain
+    /// "हो" still confirms the launch and still reaches
+    /// `handleConfirmationResponse(.yes)`.
+    func testPlainYesDuringAnAppLaunchQuestionIsStillTheLaunchAnswer() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.pendingReminderId = UUID()
+        coordinator.isAwaitingConfirmation = true
+        coordinator.isAwaitingAppLaunchConfirmation = true
+        let router = CommandRouter(coordinator: coordinator,
+                                   observabilityBus: MockObservabilityBus(),
+                                   speaker: MockSpeaker())
+
+        let result = router.route(transcript: "हो")
+
+        XCTAssertEqual(result, .appLaunchConfirmed)
+        XCTAssertEqual(coordinator.confirmationResponses, [.yes])
+        XCTAssertTrue(coordinator.confirmationChallengeEntryIds.isEmpty,
+                      "no dose challenge is invented out of a launch yes")
+    }
+
+    /// The launcher plugin's whole contract at the router layer: a
+    /// `.plugin` intent for `launcher.open` reaches the plugin, the plugin
+    /// resolves the app entity through the catalog and hands the id to the
+    /// coordinator's launch seam, and the QUESTION the coordinator returns
+    /// is what the elder hears (the plugin composes no line of its own).
+    func testLauncherPluginIntentAsksThroughTheLaunchSeam() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.appLaunchPrompt = "ह्वाट्सएप खोल्ने हो?"
+        var requests: [(appID: String, confidence: Double)] = []
+        let registry = PluginRegistry()
+        registry.register(AppLauncherPlugin { appID, confidence in
+            requests.append((appID, confidence))
+            return coordinator.requestAppLaunch(appID: appID, confidence: confidence)
+        })
+        let store = GeminiConfigStore(storage: GeminiInMemoryStorage())
+        store.save("fake-key")
+        let client = GeminiClient(configStore: store, observabilityBus: MockObservabilityBus(),
+                                  transport: FakeGeminiTransport())
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .plugin, entryId: nil, contact: nil, time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil,
+            pluginAction: "launcher.open", pluginEntities: ["app": "ह्वाट्सएप"],
+            confidence: 0.88, reply: ""
+        )
+        let bus = MockObservabilityBus()
+        let speaker = MockSpeaker()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: speaker, interpreter: interpreter,
+                                   pluginRegistry: registry, geminiClient: client)
+
+        // A BARE app name on purpose: "ह्वाट्सएप खोल" (app word ∧ open
+        // verb) is claimed by the deterministic keyword fast path
+        // (`KeywordIntentRule` app-launch rule, T5 of the 2026-09-16
+        // launcher plan) before any interpreter runs — this test owns
+        // the PLUGIN path, so it routes the shape the fast path
+        // deliberately declines.
+        _ = router.route(transcript: "ह्वाट्सएप")
+
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_plugin_dispatched" })
+        let exp = expectation(description: "plugin handled")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp.fulfill() }
+        wait(for: [exp], timeout: 2.0)
+        XCTAssertEqual(coordinator.appLaunchRequests.map(\.appID), ["whatsapp"],
+                       "the Nepali name the elder said resolves to the catalog id")
+        XCTAssertEqual(requests.map(\.confidence), [0.88])
+        // The LLM round trip is acked first (the router's pre-ack), then
+        // the question: the plugin's reply is the LAST thing heard.
+        XCTAssertEqual(speaker.utterances.map(\.text),
+                       [L10n.str("voiceAck.moment1", locale: Locale(identifier: "ne-NP")),
+                        "ह्वाट्सएप खोल्ने हो?"],
+                       "the coordinator's question — not a plugin-composed line")
+        XCTAssertEqual(coordinator.genericReplies, ["ह्वाट्सएप खोल्ने हो?"],
+                       "and it lands on the outcome card like every plugin reply")
+    }
+
+    /// An entity the catalog does not know never reaches the launch seam:
+    /// the elder hears the honest unknown-app line instead of a question
+    /// about an app that cannot be opened.
+    func testLauncherPluginUnknownAppNeverReachesTheLaunchSeam() {
+        let coordinator = MockVoiceCommandCoordinator()
+        var requests: [String] = []
+        let registry = PluginRegistry()
+        registry.register(AppLauncherPlugin { appID, _ in
+            requests.append(appID)
+            return coordinator.requestAppLaunch(appID: appID, confidence: nil)
+        })
+        let store = GeminiConfigStore(storage: GeminiInMemoryStorage())
+        store.save("fake-key")
+        let client = GeminiClient(configStore: store, observabilityBus: MockObservabilityBus(),
+                                  transport: FakeGeminiTransport())
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .plugin, entryId: nil, contact: nil, time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil,
+            pluginAction: "launcher.open", pluginEntities: ["app": "tiktok"],
+            confidence: 0.88, reply: ""
+        )
+        let bus = MockObservabilityBus()
+        let speaker = MockSpeaker()
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: speaker, interpreter: interpreter,
+                                   pluginRegistry: registry, geminiClient: client)
+
+        _ = router.route(transcript: "टिकटक खोल")
+
+        let exp = expectation(description: "plugin handled")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { exp.fulfill() }
+        wait(for: [exp], timeout: 2.0)
+        XCTAssertTrue(requests.isEmpty, "no app, no question, nothing pended")
+        XCTAssertTrue(coordinator.appLaunchRequests.isEmpty)
+        XCTAssertEqual(speaker.utterances.map(\.text),
+                       [L10n.str("voiceAck.moment1", locale: Locale(identifier: "ne-NP")),
+                        L10n.fmt("launcher.unknownApp",
+                                 locale: Locale(identifier: "ne-NP"), "tiktok")],
+                       "the honest unknown-app line, after the LLM round-trip's pre-ack")
+    }
+
     /// suggest_video stays the honest not-yet stub — the video phase owns
     /// its executor, and nothing here may pretend a video was queued.
     func testSuggestVideoStillStubs() {
@@ -812,6 +1033,22 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
         return calendarEventPrompt
     }
     var isAwaitingCalendarEventConfirmation = false
+
+    /// [APP-LAUNCHER] (2026-09-16) Voice app launcher — the same additive
+    /// shape as the calendar block above: protocol requirements whose
+    /// extension defaults (false / the generic unavailable line) keep
+    /// every pre-existing router test on its historical path. The stored
+    /// vars script both sides: a prompt makes the coordinator "ask", and
+    /// `isAwaitingAppLaunchConfirmation` stands in for a pended launch
+    /// during the yes/no follow-up.
+    var appLaunchPrompt: String? = "सेटिङ खोल्ने हो?"
+    private(set) var appLaunchRequests: [(appID: String, confidence: Double?)] = []
+    func requestAppLaunch(appID: String, confidence: Double?) -> String {
+        appLaunchRequests.append((appID, confidence))
+        return appLaunchPrompt
+            ?? L10n.str("router.pluginUnavailable", locale: activeLocale)
+    }
+    var isAwaitingAppLaunchConfirmation = false
 
     /// [ALARMS-TIMERS] (2026-09-07) Alarm/timer creation — protocol
     /// requirements with an extension default of .failed; these stored

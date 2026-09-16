@@ -76,6 +76,18 @@ packages:
   sherpa-onnx:
     url: https://github.com/k2-fsa/sherpa-onnx
     exactVersion: 1.13.7
+  # Google sign-in for calendar & family sharing (2026-09-16). The SDK
+  # only does the OAuth dance and holds the tokens in the Keychain; the
+  # Calendar/People REST calls are hand-rolled over URLSession
+  # (`GoogleCalendarGateway`), because the generated Google API client
+  # (GTLR) would add a much larger dependency for four endpoints.
+  #
+  # Graceful degradation is the rule here: with no OAuth client id in
+  # the bundle the app must still build, launch and show the honest "not
+  # configured" card — see `GoogleAccountSession.isConfigured`.
+  GoogleSignIn:
+    url: https://github.com/google/GoogleSignIn-iOS
+    from: 8.0.0
   # Porcupine:
   #   url: https://github.com/Picovoice/porcupine.git
   #   from: 3.0.0
@@ -268,6 +280,10 @@ targets:
         product: WhisperKit
       - package: sherpa-onnx
         product: sherpa-onnx
+      # Calendar & family sharing (2026-09-16) — OAuth + Keychain token
+      # storage only; the Calendar/People REST calls are ours.
+      - package: GoogleSignIn
+        product: GoogleSignIn
       # [TIMER-ALARM] (2026-09-10) The widget extension hosting the
       # AlarmKit alarm presentation (ActivityConfiguration for
       # AlarmAttributes<TimerAlarmSystemMetadata>) — the system renders

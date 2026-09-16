@@ -20,6 +20,21 @@ protocol CalendarEventWriting: AnyObject {
     /// Current permission truth for calendar events (no prompting).
     var eventsAccess: CalendarAccess { get }
 
+    /// Fired after a SUCCESSFUL `create`, carrying the written event's
+    /// native identifier and the values it was written with (calendar &
+    /// family sharing, 2026-09-16).
+    ///
+    /// `create` answers only "did it land", but the share layer needs the
+    /// IDENTITY of what landed — its Google twin is keyed by the native
+    /// event identifier, and re-finding the event by title and time after
+    /// the fact would be a guess that two same-named events would break.
+    /// So the writer reports it while it still has it.
+    ///
+    /// Optional, and absent by default: a writer with no observer behaves
+    /// exactly as it did before, which is what the whole voice path —
+    /// already shipped and covered — relies on.
+    var onEventCreated: ((CalendarEventCreation) -> Void)? { get set }
+
     /// Point-of-use access request. Called only when the write is
     /// already confirmed AND `eventsAccess == .notDetermined` — the
     /// confirmation prompt comes first, so the elder is never asked to
@@ -31,6 +46,19 @@ protocol CalendarEventWriting: AnyObject {
     /// (no access, or EventKit refused the save) — the caller speaks the
     /// honest unavailable line rather than claiming success.
     func create(title: String, startDate: Date, durationMinutes: Int) -> Bool
+}
+
+/// A one-off event just written to the native calendar, as a plain value
+/// — the writer's report to the share layer (calendar & family sharing,
+/// 2026-09-16). No `EKEvent` crosses the seam, the same rule
+/// `CalendarEventRecord` follows.
+struct CalendarEventCreation: Equatable {
+    /// The native `eventIdentifier` — also the join key the share layer
+    /// and `ExternalEventLinkStore` both use for native events.
+    let localEventId: String
+    let title: String
+    let startDate: Date
+    let durationMinutes: Int
 }
 
 /// Production writer over the protocol-typed `EventKitCalendarGateway`.
@@ -57,6 +85,8 @@ final class EventKitCalendarEventWriter: CalendarEventWriting {
 
     private let gateway: EventKitCalendarGateway
 
+    var onEventCreated: ((CalendarEventCreation) -> Void)?
+
     init(gateway: EventKitCalendarGateway = EKCalendarGateway()) {
         self.gateway = gateway
     }
@@ -75,7 +105,16 @@ final class EventKitCalendarEventWriter: CalendarEventWriting {
             durationMinutes: durationMinutes,
             recurrence: nil
         )
-        return gateway.createEvent(draft, in: nil) != nil
+        guard let identifier = gateway.createEvent(draft, in: nil) else { return false }
+        // Only on success, and with the identifier EventKit just handed
+        // back — the observer is told about an event that EXISTS, never
+        // about an attempt.
+        onEventCreated?(CalendarEventCreation(
+            localEventId: identifier,
+            title: title,
+            startDate: startDate,
+            durationMinutes: durationMinutes))
+        return true
     }
 }
 

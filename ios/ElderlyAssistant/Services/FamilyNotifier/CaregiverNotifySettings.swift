@@ -6,7 +6,13 @@ import Foundation
 /// `MedicationEntry` and therefore fires through `MedicationScheduler`,
 /// so it is a `.medicationReminder` for notification purposes (the
 /// elder never has to know which subsystem produced the alarm).
-enum EventNotifyKind: String, CaseIterable {
+///
+/// `Codable` (calendar & family sharing, 2026-09-16): the kind is part
+/// of a persisted share-queue entry and of the `CalendarShareKey`
+/// grammar, so it has to survive a relaunch. Raw-value conformance —
+/// the stored form is the case name, the same string already used in
+/// observability metadata and in share keys.
+enum EventNotifyKind: String, CaseIterable, Codable {
     /// A medication dose reminder fired (`MedicationScheduler`).
     case medicationReminder
     /// A routine reminder fired (`RoutineScheduler`).

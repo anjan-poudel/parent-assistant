@@ -48,10 +48,14 @@ enum WhisperPostTurnPolicy {
 
     /// [LAT-M1] Seconds the whisper weights stay held after the last
     /// transcript before they are released again (the TTL-hold window
-    /// for back-to-back turns). Chosen so a normal back-and-forth
-    /// conversation (a reply plays, the user answers) lands well inside
-    /// the hold.
-    static let ttlSeconds: TimeInterval = 60.0
+    /// for back-to-back turns). Was 60 s; device evidence (2026-09-16,
+    /// "क्यामेरा खोल" turn) shows a 72 s inter-turn gap paying a 77 s
+    /// cold load — an elderly user pausing to think between turns easily
+    /// exceeds a minute. 180 s keeps the weights resident across the
+    /// reply playback plus a slow answer; the RAM-critical probe in
+    /// `decide` remains the safety valve, so the longer window costs
+    /// nothing when memory is tight.
+    static let ttlSeconds: TimeInterval = 180.0
 
     enum Decision: Equatable {
         /// Keep the weights resident (TTL-hold).

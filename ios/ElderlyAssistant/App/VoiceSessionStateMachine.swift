@@ -126,6 +126,36 @@ final class VoiceSessionStateMachine: ObservableObject {
         }
     }
 
+    /// Opens the confirmation window unconditionally, bridging through
+    /// `.idle` when the current state cannot reach `.awaitingConfirmation`
+    /// directly (`.error` and `.stopped` cannot; every state can reach
+    /// `.idle`).
+    ///
+    /// [APP-LAUNCHER F14] A caller that has just pended a question needs
+    /// the window to EXIST, not merely to be attempted. A bare
+    /// `transition(to: .awaitingConfirmation)` from `.error`/`.stopped` is
+    /// an illegal transition: it asserts in debug, silently no-ops in
+    /// release, and leaves the pended question with no timer and no
+    /// clearer — it can only be resolved if the elder happens to answer
+    /// before anything else moves the state. The bridge keeps the
+    /// transition table's guarantees intact (it only ever travels legal
+    /// edges) while making the window's existence a promise.
+    ///
+    /// Returns whether the window is open on the way out — always true
+    /// today, since `.idle` is reachable from every state, but the callers
+    /// get to depend on the answer rather than on that argument.
+    @discardableResult
+    func openConfirmationWindow() -> Bool {
+        if state != .awaitingConfirmation {
+            if !state.canTransition(to: .awaitingConfirmation) {
+                guard state.canTransition(to: .idle) else { return false }
+                transition(to: .idle)
+            }
+            transition(to: .awaitingConfirmation)
+        }
+        return state == .awaitingConfirmation
+    }
+
     private func armConfirmationTimer() {
         cancelConfirmationTimer()
         let seconds = config.confirmationTimeoutSeconds
@@ -134,6 +164,14 @@ final class VoiceSessionStateMachine: ObservableObject {
             guard !Task.isCancelled, let self else { return }
             // All mutations stay on the main queue (H1).
             DispatchQueue.main.async {
+                // [APP-LAUNCHER F6] Report an expiry only for a window that
+                // is STILL open. Cancelling the timer is not enough: a
+                // callback already queued on main survives cancellation, so
+                // a question resolved by another route (the elder tapped
+                // the app's tile instead of answering) could still hear
+                // "Time is up" over the app it had just opened. The window
+                // knows whether it is still awaiting an answer — ask it.
+                guard self.state == .awaitingConfirmation else { return }
                 self.transition(to: .idle)
                 self.onConfirmationTimeout?()
             }

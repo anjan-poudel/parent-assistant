@@ -49,6 +49,15 @@ import Foundation
 /// decoder default, not nil: the custom decoder reads a missing key as
 /// false, and a pre-flag payload simply falls back to the old behavior
 /// (first contact wins).
+///
+/// `email` (calendar & family sharing task, 2026-09-16): the address a
+/// Google Calendar invitation is sent to. Optional at the MODEL level
+/// with the usual missing-key-reads-nil migration, even though the
+/// EDITOR makes it mandatory for emergency contacts — contacts saved
+/// before the field existed (including the synthetic fallback contact
+/// `AppCoordinator` builds when the list is empty) must keep loading.
+/// Invite logic simply skips a contact with no address (see
+/// `CalendarShareMapper`).
 struct FamilyContact: Codable, Identifiable, Equatable {
     let id: UUID
     var name: String
@@ -63,6 +72,13 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     /// Free-form home address for voice navigation, nil when the user
     /// never set one (the contact then cannot be a navigation target).
     var address: String?
+
+    /// Google account address this contact's calendar invitations are
+    /// sent to (calendar & family sharing task, 2026-09-16). Mandatory
+    /// in the EDITOR while `isEmergencyContact` is on; nil in the model
+    /// for every contact saved before the field existed — those simply
+    /// receive no invite until an address is added.
+    var email: String?
 
     /// Whether the Emergency affordance dials this contact before any
     /// other (family-emergency task, 2026-09-07). False when unset —
@@ -82,7 +98,8 @@ struct FamilyContact: Codable, Identifiable, Equatable {
          messengerHandle: String? = nil,
          preferredVideoApp: CallApp = .faceTime, preferredCallApp: CallApp = .phone,
          photoFilename: String? = nil, nickname: String? = nil,
-         address: String? = nil, isEmergencyContact: Bool = false) {
+         address: String? = nil, email: String? = nil,
+         isEmergencyContact: Bool = false) {
         self.id = id
         self.name = name
         self.phone = phone
@@ -93,6 +110,7 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         self.photoFilename = photoFilename
         self.nickname = nickname
         self.address = address
+        self.email = email
         self.isEmergencyContact = isEmergencyContact
     }
 
@@ -120,6 +138,10 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         // Same rule for the address (directions task, 2026-09-07): a
         // payload written before the field existed loads address-less.
         address = (try? container.decodeIfPresent(String.self, forKey: .address)) ?? nil
+        // And for the email (calendar & family sharing task, 2026-09-16):
+        // a payload written before the field existed loads email-less
+        // rather than failing the whole read.
+        email = (try? container.decodeIfPresent(String.self, forKey: .email)) ?? nil
         // The emergency flag (family-emergency task, 2026-09-07) is the
         // one non-optional field: a missing key is not "nil value" but
         // "not flagged" — false, the same answer a pre-flag payload

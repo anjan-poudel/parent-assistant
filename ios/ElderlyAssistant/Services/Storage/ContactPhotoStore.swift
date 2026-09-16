@@ -27,10 +27,22 @@ final class ContactPhotoStore {
     static let maxDimension: CGFloat = 512
     static let jpegQuality: CGFloat = 0.8
 
+    /// The directory name this store's photos live under (rich-events
+    /// task, 2026-09-17). A parameter rather than a constant because the
+    /// class is the house's whole thumbnail implementation — downscale,
+    /// orientation bake, `.completeFileProtection`, the plain-filename
+    /// guard — and the free-form Events feature needs all of it with one
+    /// difference: its photos belong in a directory of their own, so an
+    /// event photo can never be read or deleted as a contact's. The
+    /// default keeps every existing caller byte-identical.
+    static let defaultDirectoryName = "ContactPhotos"
+
     private let fileManager: FileManager
     private let rootDirectory: URL
 
-    init(fileManager: FileManager = .default, rootDirectory: URL? = nil) {
+    init(fileManager: FileManager = .default,
+         rootDirectory: URL? = nil,
+         directoryName: String = ContactPhotoStore.defaultDirectoryName) {
         self.fileManager = fileManager
         if let rootDirectory {
             self.rootDirectory = rootDirectory
@@ -40,14 +52,14 @@ final class ContactPhotoStore {
             appropriateFor: nil,
             create: true
         ) {
-            self.rootDirectory = base.appendingPathComponent("ContactPhotos",
+            self.rootDirectory = base.appendingPathComponent(directoryName,
                                                              isDirectory: true)
         } else {
             // Directory resolution can only fail in a broken sandbox —
             // degrade to a working scratch spot rather than trap at init;
             // every operation below still fails soft.
             self.rootDirectory = fileManager.temporaryDirectory
-                .appendingPathComponent("ContactPhotos", isDirectory: true)
+                .appendingPathComponent(directoryName, isDirectory: true)
         }
         try? fileManager.createDirectory(at: self.rootDirectory,
                                          withIntermediateDirectories: true)

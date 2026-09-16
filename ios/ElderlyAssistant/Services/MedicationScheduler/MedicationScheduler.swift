@@ -15,6 +15,14 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
     /// reminder itself carries no "notify" flag, so flipping the toggle
     /// changes every subsequent fire and nothing that already fired.
     private let caregiverNotifySettings: CaregiverNotifySettings
+    /// Photo store for the entries' visual aids (medication-visual-aids
+    /// task, 2026-09-16). Optional with a nil default so every existing
+    /// test harness constructs a scheduler unchanged, and so a medicine
+    /// with no photos — the overwhelming majority — never touches the
+    /// disk on the arming path. `AppCoordinator` passes the app's shared
+    /// MEDICATION store (the prefixed one), which is what puts the right
+    /// box photo in the right dose's banner.
+    private let visualAidStore: VisualAidStore?
 
     private var entries: [UUID: MedicationEntry] = [:]
     /// Escalation engines are keyed by REMINDER id, not medication entry id.
@@ -33,6 +41,22 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
     /// strings.
     var locale: Locale = Locale(identifier: "en")
 
+    /// Fired after the schedule changes, with the new entry list
+    /// (calendar & family sharing, 2026-09-16).
+    ///
+    /// Every write path already funnels through `loadSchedule` — the
+    /// Settings editor, the voice `set_reminder` path and the app's own
+    /// restore — so one seam here observes all of them without any of
+    /// them having to remember to tell the share layer. The list is
+    /// passed rather than left for the observer to re-read so the
+    /// observer sees exactly the version that was stored.
+    ///
+    /// Deliberately a plain closure and not a delegate/protocol: the
+    /// only consumer is `CalendarShareService`, failures there must
+    /// never affect the scheduler's own behavior, and a closure the
+    /// coordinator assigns once is the smallest thing that works.
+    var onScheduleChanged: (([MedicationEntry]) -> Void)?
+
     private let storageKeyReminders = "medication.pending_reminders"
     private let storageKeyAdherenceLog = "medication.adherence_log"
     private let storageKeyEntries = "medication.entries"
@@ -48,18 +72,106 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         Array(entries.values).sorted { $0.medicationName < $1.medicationName }
     }
 
+    /// One entry by id, or nil when it does not exist (deleted since the
+    /// alarm was armed, or never loaded). Read by the Settings photo
+    /// editor and by `MedicationVisualAidFireHandler` at FIRE time
+    /// (medication-visual-aids task, 2026-09-16).
+    func medicationEntry(for id: UUID) -> MedicationEntry? {
+        entries[id]
+    }
+
+    /// The photo to attach to this entry's armed notifications: its FIRST
+    /// visual aid, or nil when the entry has none, no store is wired, or
+    /// the file has gone missing. One image per notification is the
+    /// platform's limit (a `UNNotificationAttachment` is singular), and
+    /// "the first photo the family added" is the one that matters — the
+    /// full set is what the in-app dose screen pages through.
+    ///
+    /// The `entry.visualAids.first` guard comes first on purpose: a
+    /// medicine with no photos must not touch the disk at all on the
+    /// arming path.
+    private func visualAidURL(for entry: MedicationEntry) -> URL? {
+        guard let visualAidStore, let aid = entry.visualAids.first else { return nil }
+        return visualAidStore.existingFileURL(aid, for: entry.id)
+    }
+
+    /// Replaces one entry's visual aids (the photo editor's save path,
+    /// medication-visual-aids task 2026-09-16) — the medication analogue
+    /// of `RoutineScheduler.setVisualAids`.
+    ///
+    /// Deliberately NOT `loadSchedule`: that rebuilds every pending
+    /// reminder and drops the escalation engines, which is exactly right
+    /// for an EDIT to the schedule and exactly wrong for attaching a photo.
+    /// A photo must never reschedule a dose, reset an escalation window or
+    /// disturb an acknowledgement in flight — so this persists the entry
+    /// payload and touches nothing else. The armed notifications keep their
+    /// existing trigger; the photo reaches the elder through the dose
+    /// screen at fire time, which reads the entry.
+    ///
+    /// The FILES are the caller's business (`VisualAidStore.save` on add,
+    /// `delete` on remove) — this mutator owns only the model payload.
+    @discardableResult
+    func setVisualAids(_ aids: [VisualAid], entryId: UUID) -> Bool {
+        guard var entry = entries[entryId] else { return false }
+        entry.visualAids = aids
+        entries[entryId] = entry
+        // The same payload shape `loadSchedule` writes (sorted by name),
+        // so a photo edit and a schedule edit leave identical bytes.
+        guard case .success = storage.write(key: storageKeyEntries,
+                                            value: medicationEntries()) else {
+            emit("entry_persistence_failed",
+                 metadata: ["entry_id_hash": idHash(entryId)])
+            return false
+        }
+        emit("entry_visual_aids_updated",
+             metadata: ["entry_id_hash": idHash(entryId),
+                        "count": String(aids.count)])
+        return true
+    }
+
+    /// Replaces one entry's dose times — the family retimed or deleted
+    /// its mirror events in the Calendar app (calendar-driven
+    /// reconciliation, rich-events task 2026-09-17).
+    ///
+    /// Goes through `loadSchedule` DELIBERATELY, unlike
+    /// `setVisualAids`: an edit to WHEN a dose fires must clear the old
+    /// pending reminders and arm new ones, or the elder keeps being
+    /// prompted at the time the family just moved. `loadSchedule` does
+    /// exactly that — it drops every pending reminder and its escalation
+    /// engine, re-creates them from the new times, and re-arms the
+    /// platform alarms.
+    ///
+    /// The cost is that an in-flight acknowledgement is lost with the
+    /// old schedule, and that is the right trade: the times under it
+    /// changed. The alternative — keeping a reminder for a time that no
+    /// longer exists — would fire a dose the family removed.
+    ///
+    /// Returns false when the entry is unknown (deleted in Settings
+    /// since the plan was made) or when the write fails.
+    @discardableResult
+    func setScheduleTimes(_ times: [DateComponents], entryId: UUID) -> Bool {
+        guard let entry = entries[entryId] else { return false }
+        var next = medicationEntries()
+        guard let index = next.firstIndex(where: { $0.id == entryId }) else { return false }
+        next[index] = entry.withScheduleTimes(times)
+        loadSchedule(entries: next)
+        return true
+    }
+
     init(
         storage: EncryptedLocalStorage,
         alarmScheduler: PlatformAlarmScheduler,
         observabilityBus: ObservabilityBus,
         familyNotifier: FamilyNotifierProtocol,
-        caregiverNotifySettings: CaregiverNotifySettings
+        caregiverNotifySettings: CaregiverNotifySettings,
+        visualAidStore: VisualAidStore? = nil
     ) {
         self.storage = storage
         self.alarmScheduler = alarmScheduler
         self.observabilityBus = observabilityBus
         self.familyNotifier = familyNotifier
         self.caregiverNotifySettings = caregiverNotifySettings
+        self.visualAidStore = visualAidStore
         self.doubleDoseDetector = DoubleDoseDetector()
     }
 
@@ -79,6 +191,12 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
         emit("schedule_loaded", metadata: ["entry_count": "\(newEntries.count)"])
 
         createPendingReminders(for: newEntries, now: Date())
+
+        // Last, and after the local work is fully committed: an observer
+        // must never see a half-applied schedule, and the local
+        // reminders are the part the elder depends on — they are armed
+        // before anything is offered to the share layer.
+        onScheduleChanged?(newEntries)
     }
 
     // MARK: - Schedule All
@@ -290,6 +408,7 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
                     reminderId: reminderId,
                     entryId: entry.id,
                     medicationName: entry.medicationName,
+                    visualAidURL: visualAidURL(for: entry),
                     at: nextFireAt
                 )
             }
@@ -481,6 +600,7 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
                 reminderId: reminderId,
                 entryId: entryId,
                 medicationName: entry.medicationName,
+                visualAidURL: visualAidURL(for: entry),
                 at: nextTime
             )
         }
@@ -546,6 +666,7 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
                         reminderId: reminderId,
                         entryId: entry.id,
                         medicationName: entry.medicationName,
+                        visualAidURL: visualAidURL(for: entry),
                         at: reminder.scheduledAt
                     )
                 } else {
@@ -617,6 +738,7 @@ final class MedicationScheduler: MedicationSchedulerProtocol {
                 reminderId: reminder.id,
                 entryId: entry.id,
                 medicationName: entry.medicationName,
+                visualAidURL: visualAidURL(for: entry),
                 at: reminder.scheduledAt
             )
         }

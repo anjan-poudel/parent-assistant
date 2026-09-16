@@ -170,19 +170,23 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
     let ownsAudioCapture = false
 
     var isAvailable: Bool {
-        // Whisper is available when the model is on disk AND the runtime
-        // package is present in the build. The runtime check is a
-        // `#if canImport(SwiftWhisper)` in the actual inference path; without
-        // it we short-circuit `startListening` with .localeUnsupported.
-        guard modelStore.isCached(ModelCatalog.whisperMediumFinetunedNepali) ||
-              modelStore.isCached(ModelCatalog.whisperFinetunedNepali) ||
-              modelStore.isCached(ModelCatalog.whisperFinetunedNepaliQ8) ||
-              modelStore.isCached(ModelCatalog.whisperSmallNepali) ||
-              modelStore.isCached(ModelCatalog.whisperLargeV3Nepali) ||
-              modelStore.isCached(ModelCatalog.whisperSmallMultilingual) ||
-              modelStore.isCached(ModelCatalog.whisperBaseEn) else {
-            return false
-        }
+        // Whisper is available when there is a model it would ACTUALLY
+        // RUN (the explicit pick when cached, else a model the automatic
+        // order names) AND the runtime package is present in the build.
+        // The runtime check is a `#if canImport(SwiftWhisper)` in the
+        // actual inference path; without it we short-circuit
+        // `startListening` with .localeUnsupported.
+        //
+        // [CPU-SAFETY 2026-09-16] Asking `currentModelID()` instead of
+        // listing cached files is what keeps this honest now that the
+        // bundled medium (`whisperMediumFinetunedNepali`) is no longer
+        // auto-runnable: a device whose only whisper artifact is one the
+        // automatic order refuses to run must report UNAVAILABLE, so
+        // `OnDeviceSTTSelection` hands the turn to the SFSpeechRecognizer
+        // — the old hardcoded list claimed available and then failed
+        // every utterance with .localeUnsupported (`model_missing`), a
+        // dead end the selection table could not see.
+        guard currentModelID() != nil else { return false }
         #if canImport(SwiftWhisper)
         return true
         #else
@@ -190,12 +194,20 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         #endif
     }
 
+    /// [MODEL-LIFECYCLE] Residency owner. whisper.cpp is the OTHER engine
+    /// that can back the `.speechToText` slot, and it is the expensive one
+    /// to co-reside: the fresh context per attempt is pageable, but the
+    /// wedged-context leak is not (see `ModelLifecycleInventory`).
+    private let lifecycle: ModelLifecycleManager
+
     init(modelStore: ModelStore,
          observabilityBus: ObservabilityBus,
-         config: Config = .default) {
+         config: Config = .default,
+         lifecycle: ModelLifecycleManager = .shared) {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
         self.config = config
+        self.lifecycle = lifecycle
     }
 
     // MARK: - Model preference (UI selection)
@@ -226,19 +238,19 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
     /// The model the next utterance will use: the user's pick when it's
     /// cached, else the automatic order. Mirrors `selectModelId` but is
     /// side-effect-free (no RAM gating, no events) so the UI can call it
-    /// for labels.
+    /// for labels — and so `isAvailable` can ask it.
+    ///
+    /// [CPU-SAFETY 2026-09-16] The automatic order is
+    /// `OnDeviceSTTSelection.whisperCppAutomaticOrder`: small class first,
+    /// the app-bundled medium deliberately absent (an explicit pick is the
+    /// only way to it — see that list's note).
     func currentModelID() -> ModelID? {
         if let pref = preferredModelID, modelStore.isCached(pref) {
             return pref
         }
-        let automaticOrder: [ModelID] = [
-            ModelCatalog.whisperLargeV3Nepali,
-            ModelCatalog.whisperMediumFinetunedNepali,
-            ModelCatalog.whisperFinetunedNepali,
-            ModelCatalog.whisperSmallMultilingual,
-            ModelCatalog.whisperBaseEn
-        ]
-        return automaticOrder.first { modelStore.isCached($0) }
+        let cached = OnDeviceSTTSelection.whisperCppAutomaticOrder
+            .filter { modelStore.isCached($0) }
+        return OnDeviceSTTSelection.automaticWhisperCppModel(cached: Set(cached))
     }
 
     /// Frees the loaded Whisper context so LLaMA can have the RAM.
@@ -260,6 +272,11 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         consecutiveTimeouts = 0
         inFlightWhisper = nil
         stateLock.unlock()
+        // [MODEL-LIFECYCLE] Deliberately outside the state lock: the
+        // manager takes its own lock, and the doc comment above forbids
+        // this method from blocking on anything a wedged attempt might
+        // hold. `didUnload` is a single dictionary write.
+        lifecycle.didUnload(.speechToText, owner: self)
     }
 
     // MARK: - LoRA hot-swap (skeleton)
@@ -592,12 +609,10 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
             return
         }
 
-        // 1. Pick the model. Priority: the user's pick when cached and
-        //    RAM-appropriate, else small-multilingual (validated + safe on
-        //    all devices), then large-Nepali when RAM allows, then
-        //    base-en. Large-v3-Nepali is downranked until the offline
-        //    validation in docs/voice-gibberish-transcript-fix-plan.md §4
-        //    passes.
+        // 1. Pick the model: the user's pick when cached and
+        //    RAM-appropriate, else the automatic order (see
+        //    `selectModelId` and `OnDeviceSTTSelection.whisperCppAutomaticOrder`
+        //    — small class first, the bundled medium explicit-pick only).
         guard let modelId = selectModelId() else {
             emit("model_missing", errorCode: "no_cached_model")
             settleAttempt(attemptID, with: .failure(.localeUnsupported), timedOut: false)
@@ -725,8 +740,32 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         } else if biasPlan.state == .disabledByUser {
             reportBiasDisabledOnce()
         }
+        // 3b. [MODEL-LIFECYCLE] The residency gate, at the one place a
+        //     whisper.cpp context is built. This engine reloads per
+        //     attempt, so the gate runs per attempt — which is exactly
+        //     what the design wants: the budget is re-read from
+        //     `os_proc_available_memory` at every load, so a context is
+        //     never built on top of a brain that grew since the last turn.
+        lifecycle.register(
+            slot: .speechToText,
+            modelID: modelId,
+            owner: self
+        ) { [weak self] in
+            self?.releaseModel()
+        }
+        if case .denied(let reason) =
+            lifecycle.prepareLoad(of: .speechToText, modelID: modelId) {
+            emit("model_load_denied", errorCode: reason.rawValue)
+            settleAttempt(attemptID, with: .failure(.recognitionFailed(
+                NSError(domain: "WhisperSTT", code: -4,
+                        userInfo: [NSLocalizedDescriptionKey:
+                            "not enough memory headroom to load this model right now"])
+            )), timedOut: false)
+            return
+        }
         let loadStart = CFAbsoluteTimeGetCurrent()
         let whisper = Whisper(fromFileURL: modelURL, withParams: params)
+        lifecycle.didLoad(.speechToText, owner: self)
         let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
         // [TURN-TIMING] Model ready — the load ms rides as a point entry
         // when this load happened inside a live turn.
@@ -967,13 +1006,21 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
 
     /// Pick which cached Whisper model to run.
     ///
-    ///   1. The user's explicit pick from the UI (RAM-gated only for the
-    ///      1.9 GB large-v3; the small models fit every supported device).
-    ///   2. Automatic order is device-tier-aware: the large-v3 Nepali
-    ///      fine-tune first when the device can hold it (6 GB class) —
-    ///      the stock small produces gibberish on Nepali (109% WER in
-    ///      the eval), so it is a low-RAM fallback, not the default on
-    ///      capable devices. Then small multilingual, then base-en.
+    ///   1. The user's explicit pick from the UI — the ONLY way to a
+    ///      medium-class whisper.cpp model since 2026-09-16 — RAM-gated
+    ///      for the 1.9 GB large-v3 (the small models fit every
+    ///      supported device).
+    ///   2. The automatic order in
+    ///      `OnDeviceSTTSelection.whisperCppAutomaticOrder` (small class
+    ///      first; the app-bundled medium is deliberately absent — on CPU
+    ///      it is a ~1 GB cold load that SIGKILLed a fresh install,
+    ///      2026-09-16). Each cached candidate is RAM-gated against its
+    ///      own catalog floor and skipped with `model_skipped_ram` when
+    ///      the device cannot hold it — large-v3 used to be the only
+    ///      gated entry, which was an accident of its size.
+    ///
+    /// `currentModelID()` is the side-effect-free twin (same list, no RAM
+    /// gate, no events) that `isAvailable` and the UI read.
     private func selectModelId() -> ModelID? {
         if let pref = preferredModelID {
             if modelStore.isCached(pref) {
@@ -985,25 +1032,9 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
                 emit("preferred_model_not_cached", errorCode: "not_cached")
             }
         }
-        if modelStore.isCached(ModelCatalog.whisperLargeV3Nepali) {
-            if fitsRAM(ModelCatalog.whisperLargeV3Nepali) {
-                return ModelCatalog.whisperLargeV3Nepali
-            }
-            // fitsRAM emitted model_skipped_ram — drop through to small.
-        }
-        if modelStore.isCached(ModelCatalog.whisperMediumFinetunedNepali) {
-            return ModelCatalog.whisperMediumFinetunedNepali
-        }
-        if modelStore.isCached(ModelCatalog.whisperFinetunedNepali) {
-            return ModelCatalog.whisperFinetunedNepali
-        }
-        if modelStore.isCached(ModelCatalog.whisperSmallMultilingual) {
-            return ModelCatalog.whisperSmallMultilingual
-        }
-        if modelStore.isCached(ModelCatalog.whisperBaseEn) {
-            return ModelCatalog.whisperBaseEn
-        }
-        return nil
+        let candidates = OnDeviceSTTSelection.whisperCppAutomaticOrder
+            .filter { modelStore.isCached($0) && fitsRAM($0) }
+        return OnDeviceSTTSelection.automaticWhisperCppModel(cached: Set(candidates))
     }
 
     /// True when the device's memory ceiling can hold the model. Emits

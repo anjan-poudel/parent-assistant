@@ -222,9 +222,11 @@ struct DirectionsView: View {
         // Empty-state deep link (2026-09-07): the "Add place" card pushes
         // PlacesSettingsView through the SAME type-erased NavigationStack
         // Home owns, value-based like every other push. Only `.places` is
-        // reachable from this leaf — the other sections map to nothing.
-        .navigationDestination(for: SettingsView.SettingsSection.self) { section in
-            switch section {
+        // reachable from this leaf — the other destinations map to nothing.
+        // (`SettingsSection` names the hub's five TABS since the 2026-09-16
+        // reorg; the leaf rows are `SettingsDestination`.)
+        .navigationDestination(for: SettingsView.SettingsDestination.self) { destination in
+            switch destination {
             case .places: PlacesSettingsView()
             default: EmptyView()
             }
@@ -501,7 +503,7 @@ struct DirectionsView: View {
                 .foregroundStyle(DesignTokens.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            NavigationLink(value: SettingsView.SettingsSection.places) {
+            NavigationLink(value: SettingsView.SettingsDestination.places) {
                 Text(LocalizedStringKey("settings.places.add"))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundStyle(.white)

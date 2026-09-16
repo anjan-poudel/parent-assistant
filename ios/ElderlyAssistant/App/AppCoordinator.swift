@@ -154,6 +154,14 @@ final class AppCoordinator: ObservableObject {
     /// memory is written only by the Settings picker (`remember`), never
     /// by this automatic switch.
     ///
+    /// [MODEL-MEMORY 2026-09-16] The STT and brain re-picks now prefer the
+    /// language's remembered pick the same way (`ModelPreferenceMemory`,
+    /// PR 1 of the settings/models reorg): before this, the single stored
+    /// STT/brain preference was flattened to the per-language default on
+    /// every switch, so a ne→en→ne round trip destroyed an explicit engine
+    /// choice. That memory too is written ONLY by the Settings pickers —
+    /// this switch reads it, never writes it.
+    ///
     /// Note this deliberately does NOT run at launch: the init-time
     /// restore assigns the preferences directly (house pattern), and a
     /// launch-time reconciliation — a language stored in a previous
@@ -162,12 +170,16 @@ final class AppCoordinator: ObservableObject {
     private func syncModelPreferencesToLanguage() {
         let language = appLanguage.rawValue
         if let resolved = LanguageModelResolver.resolvedPreference(
-            current: sttModelPreference, language: language),
+            current: sttModelPreference,
+            language: language,
+            remembered: ModelPreferenceMemory.rememberedSTT()),
            resolved != sttModelPreference {
             sttModelPreference = resolved
         }
         if let resolved = LanguageModelResolver.resolvedPreference(
-            current: brainModelPreference, language: language),
+            current: brainModelPreference,
+            language: language,
+            remembered: ModelPreferenceMemory.rememberedBrain()),
            resolved != brainModelPreference {
             brainModelPreference = resolved
         }
@@ -215,6 +227,11 @@ final class AppCoordinator: ObservableObject {
     /// One bundled-STT install at a time (the install is idempotent, but
     /// re-entrancy would queue a second useless copy attempt).
     private var bundledSTTInstallInFlight = false
+
+    /// [STT-RESTORE] Watches `ModelDownloadService` for a landed ANE
+    /// artifact so the restored engine reaches the live pipeline (see
+    /// `observeSTTArtifactCompletion`).
+    private var sttArtifactCompletionCancellable: AnyCancellable?
 
     /// User's STT model pick from the UI. Nil = automatic selection.
     /// Persisted in UserDefaults (a UI preference, not a secret) and
@@ -404,6 +421,37 @@ final class AppCoordinator: ObservableObject {
         }
     }
     private static let cloudProviderKey = "cloudProvider"
+
+    /// [CLOUD-CASCADE] (2026-09-16) The cloud cascade tier's confidence
+    /// threshold — the internal Settings card's ± row, shown as a
+    /// percentage (97 % ↔ 0.97). When the large local brain answers BELOW
+    /// this while an online provider is configured, the turn goes to the
+    /// cloud (with the spoken hold cue first). Persisted through
+    /// `CloudCascadeSettings` (UserDefaults, clamped on read AND write —
+    /// a UI preference, not a secret). didSet persists AND re-arms the
+    /// tier, so a ± press in Settings takes effect on the NEXT utterance
+    /// (the same instant-apply rule `cloudFallbackEnabled` follows).
+    /// Init-time restore assigns the property directly (house pattern —
+    /// didSet does not fire there).
+    @Published var cloudCascadeThreshold: Double {
+        didSet {
+            guard cloudCascadeThreshold != oldValue else { return }
+            CloudCascadeSettings.setThreshold(cloudCascadeThreshold)
+            applyCloudCascadeConfiguration()
+        }
+    }
+
+    /// [CLOUD-CASCADE] The internal card's switch — ON by default (the
+    /// tier's rule is the requested behaviour and it stays inert on its
+    /// own wherever no provider is configured), OFF to hold the ladder
+    /// local-first on purpose. Persisted through `CloudCascadeSettings`.
+    @Published var cloudCascadeEnabled: Bool {
+        didSet {
+            guard cloudCascadeEnabled != oldValue else { return }
+            CloudCascadeSettings.setEnabled(cloudCascadeEnabled)
+            applyCloudCascadeConfiguration()
+        }
+    }
 
     /// The user's favourite apps for the Home quick-access row
     /// (quick-access-apps task, 2026-09-06), in stored order.
@@ -759,6 +807,27 @@ final class AppCoordinator: ObservableObject {
     /// used to run in `init` (keychain IO before first paint, which the
     /// constant-time startup contract forbids).
     private let routineStore: RoutineStore
+
+    /// Reminder photo store (photo-visual-aids task, 2026-09-16) —
+    /// `Application Support/VisualAids/<entryId>/<file>.jpg`. One shared
+    /// instance: the view layer renders from it, the routine scheduler
+    /// reads attachments out of it, and deleting a reminder clears its
+    /// folder through it. Stateless (a directory URL plus JPEG helpers),
+    /// and its `init` performs NO disk IO — a path lookup only, so
+    /// building it here keeps the constant-time boot contract
+    /// (`NoIOInInitTests`). The directory appears on the first save.
+    let visualAidStore = VisualAidStore()
+
+    /// The MEDICATION photo store (medication-visual-aids task,
+    /// 2026-09-16) — the same `VisualAidStore`, built with the medication
+    /// directory prefix so dose photos land at
+    /// `Application Support/VisualAids/med-<entryId>/<file>.jpg` and can
+    /// never resolve into a routine entry's folder. A second INSTANCE, not
+    /// a second implementation: compression, the picker's cap and the
+    /// failure-soft file handling are one code path for both systems.
+    /// Like its sibling, `init` is a path lookup with no disk IO.
+    let medicationVisualAidStore =
+        VisualAidStore(directoryPrefix: VisualAidStore.medicationDirectoryPrefix)
 
     /// The curated "Family and friends" list (spec §4.4.2) — persisted
     /// encrypted, feeds the notifier whenever the list changes.
@@ -1463,6 +1532,9 @@ final class AppCoordinator: ObservableObject {
     /// Level-2 memory-warning observer for the encoder (nil unless the
     /// internal-testing gate is on).
     private var intentEncoderMemoryObserver: NSObjectProtocol?
+    /// [MODEL-LIFECYCLE] Level-2 observer for the residency ledger (STT +
+    /// brain eviction). Installed in every build.
+    private var modelLifecycleObserver: NSObjectProtocol?
 
     /// True once the encoder has actually been OFFERED the slot, i.e. the
     /// lazy instance exists. A/B means a tester can switch the encoder on
@@ -1514,6 +1586,11 @@ final class AppCoordinator: ObservableObject {
         }
         if let offeredEncoder {
             intentEncoderOffered = true
+            // [MODEL-LIFECYCLE] The encoder now exists, so its bytes are
+            // real: give the residency ledger a row for them. Placed here
+            // (not in `start()`) so a launch that never builds the encoder
+            // never declares it.
+            registerEncoderSlotIfNeeded()
             offeredEncoder.requestReadiness()
         }
         // "Can it serve now?" — decides the selection event, unchanged
@@ -1685,9 +1762,13 @@ final class AppCoordinator: ObservableObject {
     /// selectability (2026-09-06) the Settings "AI मोडेल" screen offers
     /// every `ModelCatalog.availableBrainEntries` model; the LIVE
     /// choice is `resolvedBrainModelID`.
-    // The Qwen 1.7B intent fine-tune (v12, seed 42) is the default
-    // brain — the legacy LLaMA 1B is hidden from the picker now.
-    static let defaultBrainModelID = ModelCatalog.intentQwen4BS43
+    // [DEFAULT-BRAIN 2026-09-16] The gate-passing slot-canonical Qwen 4B
+    // (v16) is the default brain — the same model the curated brain list
+    // leads with and the per-language ne pick names, so the value no longer
+    // straddles a superseded entry (`intentQwen4BS43`, kept in the catalog
+    // for devices that cached it). The pre-Qwen LLaMA 1B this comment used
+    // to describe is hidden from the picker.
+    static let defaultBrainModelID = ModelCatalog.intentQwen4BSlotCanon
 
     /// The brain model the interpreter actually uses: the stored
     /// preference when it names a real catalog entry, else the default.
@@ -1814,6 +1895,31 @@ final class AppCoordinator: ObservableObject {
             makeDependencies: { [weak self] locale in
                 self?.makeLiveTranslateDependencies(locale: locale)
             }))
+        // [APP-LAUNCHER] (2026-09-16) "क्यामेरा खोल" / "open WhatsApp":
+        // the plugin resolves the entity against the catalog and asks this
+        // coordinator to pend the launch — the confirmation machinery, the
+        // 45 s window and the open all live here, where the call and
+        // calendar-event confirmations already do (wired weak so the
+        // registry never keeps the coordinator alive).
+        //
+        // The hop is part of the seam's contract: the router dispatches
+        // plugins inside a `Task`, so `handle` — and this closure — can run
+        // off the main thread, while the pending launch, its @Published
+        // state and the session's confirmation window are all
+        // main-confined (every other `request…Confirmation` here is called
+        // synchronously from `route`, i.e. already on main). The line must
+        // come back synchronously, so this is a sync hop rather than an
+        // async one; `isMainThread` keeps it deadlock-free if the dispatch
+        // context ever changes.
+        registry.register(AppLauncherPlugin { [weak self] appID, confidence in
+            let requestOnMain = { [weak self] () -> String in
+                self?.requestAppLaunch(appID: appID, confidence: confidence)
+                    ?? L10n.str("router.pluginUnavailable",
+                                locale: self?.activeLocale ?? Locale(identifier: "ne-NP"))
+            }
+            return Thread.isMainThread ? requestOnMain()
+                                       : DispatchQueue.main.sync(execute: requestOnMain)
+        })
         return registry
     }
 
@@ -2061,7 +2167,14 @@ final class AppCoordinator: ObservableObject {
             alarmScheduler: alarmScheduler,
             observabilityBus: bus,
             familyNotifier: familyNotifier,
-            caregiverNotifySettings: caregiverNotifySettings
+            caregiverNotifySettings: caregiverNotifySettings,
+            // [MED-PHOTO-AIDS] Two jobs, matching the routine scheduler's:
+            // arming a dose notification with the entry's first photo as a
+            // banner attachment (the Lock Screen case), and clearing the
+            // entry's photo folder when the medication is deleted. Built
+            // with the MEDICATION prefix, so dose photos never resolve
+            // into a routine entry's folder.
+            visualAidStore: medicationVisualAidStore
         )
 
         // Routine reminders (v2 pivot Phase 1): the medication path's
@@ -2084,7 +2197,11 @@ final class AppCoordinator: ObservableObject {
             // notification path at all; `markDelivered` is where the
             // alert now fires from.
             familyNotifier: familyNotifier,
-            caregiverNotifySettings: caregiverNotifySettings
+            caregiverNotifySettings: caregiverNotifySettings,
+            // [PHOTO-AIDS] Two jobs: arming a notification with the
+            // entry's first photo as a banner attachment, and clearing
+            // the entry's photo folder when the entry is deleted.
+            visualAidStore: visualAidStore
         )
         self.routineScheduler = routineScheduler
         self.routinePlugin = RoutinePlugin(scheduler: routineScheduler)
@@ -2280,6 +2397,15 @@ final class AppCoordinator: ObservableObject {
         self.cloudProvider = UserDefaults.standard.string(forKey: Self.cloudProviderKey)
             .flatMap(CloudProvider.init(rawValue:)) ?? .gemini
 
+        // Restore the persisted cloud-cascade tier settings ([CLOUD-CASCADE],
+        // 2026-09-16 — default threshold 0.97, default ON). These are the
+        // properties' ONLY initial assignments, so their didSets do not fire
+        // here (same rule as `voiceEngineStack` above); the tier itself is
+        // armed by `applyCloudCascadeConfiguration()`, reached from
+        // `applyVoiceEngineStack()` once `start()` has built the pipeline.
+        self.cloudCascadeThreshold = CloudCascadeSettings.threshold()
+        self.cloudCascadeEnabled = CloudCascadeSettings.isEnabled()
+
         // Restore the persisted Voice Processing I/O preset mirror
         // (voice-personalisation P0, slice C — default OFF, the A/B
         // gate). The manager composed above already read the persisted
@@ -2350,18 +2476,11 @@ final class AppCoordinator: ObservableObject {
         // pushes it to the recognizer and refreshes the label. Unknown
         // IDs (a model removed from the catalog, or a bad stored value)
         // are ignored so a stale preference can't wedge the picker.
-        // Migration: the mid-training distill is superseded by the
-        // stage-4 fine-tune.
+        // Superseded ids migrate forward through `migratedSTTPreference`.
         if let raw = UserDefaults.standard.string(forKey: Self.sttPreferenceKey),
            ModelCatalog.entry(for: ModelID(rawValue: raw)) != nil {
-            let stored = ModelID(rawValue: raw)
-            // Superseded models migrate forward to the current default:
-            // mid-training distill → stage-4 fine-tune → medium fine-tune.
-            self.sttModelPreference =
-                (stored == ModelCatalog.whisperSmallNepali
-                 || stored == ModelCatalog.whisperFinetunedNepali)
-                ? ModelCatalog.whisperMediumFinetunedNepali
-                : stored
+            self.sttModelPreference = Self.migratedSTTPreference(
+                ModelID(rawValue: raw))
         }
 
         // C12: the confirmation challenge expires — clear the pending entry
@@ -2377,9 +2496,49 @@ final class AppCoordinator: ObservableObject {
                 self.recordConfirmationTimeout()
                 self.pendingConfirmationEntryId = nil
                 self.pendingRephrase = nil
-                self.speak(key: "router.confirmationTimeout")
+                // [APP-LAUNCHER] (2026-09-16) An unanswered launch question
+                // is DISMISSED, never launched late (design §Error
+                // handling: "Confirmation timeout → auto-dismiss; never
+                // launch"). Clearing the pending launch here is what makes
+                // that true — a later "यो" would otherwise still find it
+                // pended once the session had returned to idle — and the
+                // timeout line says plainly that nothing was opened
+                // (the medication-flavored "I'll remind you again" would be
+                // a promise about an app launch that nobody keeps).
+                let pendedLaunchID = self.pendingAppLaunch?.appID
+                self.pendingAppLaunch = nil
+                // [APP-LAUNCHER F13] A launch question that expired is a
+                // terminal outcome like every other one, so it gets the
+                // same two treatments the tap paths get: an observability
+                // event (`launch_timeout`) and a card that says what
+                // happened. Before this, the timeout spoke a line and left
+                // the question card — "Should I open Camera?" — sitting on
+                // screen as if it were still pending, with no record on the
+                // bus that the question had ever been asked. The card is
+                // replaced rather than cleared because the elder must still
+                // be able to see WHAT was not opened after the speech has
+                // faded.
+                if let appID = pendedLaunchID {
+                    self.emitAppLaunch(eventType: Self.LaunchTimeout.eventType,
+                                       outcome: Self.LaunchTimeout.outcome(appID: appID))
+                    self.setOutcome(icon: Self.LaunchTimeout.icon,
+                                    text: L10n.str(Self.LaunchTimeout.speechKey,
+                                                   locale: self.activeLocale))
+                }
+                self.speak(key: pendedLaunchID != nil ? Self.LaunchTimeout.speechKey
+                                                      : "router.confirmationTimeout")
             }
         }
+
+        // [APP-LAUNCHER] (2026-09-16) The camera capture flow (T4): the
+        // system picker + the add-only photo write, plus the channel
+        // closures that put the flow's words on the same three surfaces
+        // every other reply uses (speech, the outcome card, the
+        // observability bus). Built here — the cost is three object
+        // allocations and no I/O — so the flow is ready before the first
+        // "क्यामेरा खोल"; the presenter resolves its host at presentation
+        // time, not now.
+        cameraCapture = makeCameraCaptureFlow()
 
         // All stored properties are initialised — push the restored
         // language into services that build user-facing strings.
@@ -2403,6 +2562,28 @@ final class AppCoordinator: ObservableObject {
         // the voice path (RoutinePlugin.handleSet → addEntry) and the
         // Reminders leaf toggles alike.
         routineScheduler.onScheduleChanged = { [weak self] in
+            self?.calendarSync.syncNow(entries: self?.routineScheduler.entries() ?? [])
+            // [CALENDAR-SHARE] (2026-09-16) Same seam, second consumer: the
+            // routine schedule's shared twins. Enqueue-only and cheap when
+            // sharing is off (the service gates before it touches storage),
+            // so no toggle check is needed here — and reading the toggle
+            // here would be one more place to get the gate wrong.
+            if let entries = self?.routineScheduler.entries() {
+                self?.calendarShareService.reconcileRoutines(entries)
+            }
+        }
+        // [CALENDAR-SHARE] (2026-09-16) Medication needed its own seam:
+        // `MedicationScheduler` had no change notification at all, so its
+        // shared twins were added along with one (`onScheduleChanged`,
+        // fired at the end of `loadSchedule`) — the single funnel every
+        // medication write path already goes through.
+        medicationScheduler.onScheduleChanged = { [weak self] entries in
+            self?.calendarShareService.reconcileMedication(entries)
+            // [RICH-EVENTS] (2026-09-17) Same seam, second consumer: the
+            // Sahayak mirror of the dose times (design §3). `syncNow`
+            // reads the medication list back through the provider wired
+            // below rather than taking it here, so there is exactly one
+            // path that decides what the mirror should contain.
             self?.calendarSync.syncNow(entries: self?.routineScheduler.entries() ?? [])
         }
         // Forward the external calendar service's publishes (Settings
@@ -2637,6 +2818,10 @@ final class AppCoordinator: ObservableObject {
         // [T-037-a] Encoder memory-pressure lifecycle (no-op unless the
         // internal-testing INTENT_ENCODER gate is compiled in).
         observeIntentEncoderMemoryPressure()
+        // [MODEL-LIFECYCLE] The residency ledger: light-slot registration,
+        // the level-2 observer that evicts heavy models, and the idle
+        // sweep. Installed post-first-frame like every other observer.
+        startModelLifecycle()
 
         // Restore and re-arm any outstanding medication reminders
         medicationScheduler.scheduleAll()
@@ -2673,13 +2858,6 @@ final class AppCoordinator: ObservableObject {
         // when the family already enabled + granted access), then the
         // hourly BGAppRefresh keeps it current while backgrounded.
         Task { await externalCalendar.startIfEnabled() }
-        // Mirror staleness fix: re-mirror at launch when enabled (the
-        // restored status survives relaunches now), so the family's
-        // calendar view of the routine is current from a fresh start.
-        if calendarSync.isEnabled {
-            calendarSync.syncNow(entries: routineScheduler.entries())
-        }
-
         // Two-way mirroring (calendar-driven task, 2026-09-07): the
         // coordinator relays native edits — family changes made in the
         // Calendar app on Sahayak mirror events — back into
@@ -2688,15 +2866,46 @@ final class AppCoordinator: ObservableObject {
         // Sahayak calendar id (restored from the link store) is
         // excluded from the read-only import: those events ARE the
         // routine, whose alarms fire in-app already.
+        //
+        // [RICH-EVENTS] (2026-09-17) Wired BEFORE the launch pass below
+        // rather than after it: the pass reads both providers, and one
+        // that ran without the medication one would judge every dose
+        // mirror undesired and prune its link.
         calendarSync.entriesProvider = { [weak self] in
             self?.routineScheduler.entries() ?? []
         }
         calendarSync.onNativeChanges = { [weak self] mutations in
             self?.applyNativeCalendarMutations(mutations)
         }
+        // Medications ride the same mirror (design §3): one recurring
+        // event per dose in the Sahayak calendar, reconciled in both
+        // directions. The provider is the scheduler's own list, so the
+        // mirror can never describe a dose the app would not fire.
+        calendarSync.medicationEntriesProvider = { [weak self] in
+            self?.medicationScheduler.medicationEntries() ?? []
+        }
+        calendarSync.onMedicationNativeChanges = { [weak self] mutations in
+            self?.applyMedicationCalendarMutations(mutations)
+        }
         if let sahayakIdentifier = calendarSync.sahayakCalendarIdentifier {
             externalCalendar.excludedCalendarIdentifiers.insert(sahayakIdentifier)
         }
+
+        // Mirror staleness fix: re-mirror at launch when enabled (the
+        // restored status survives relaunches now), so the family's
+        // calendar view of the routine is current from a fresh start.
+        // [RICH-EVENTS] (2026-09-17) The SEAMS are wired first, a few
+        // lines up, precisely so this first pass already knows about
+        // medications — a pass that cannot see them would judge their
+        // mirror events undesired and would prune their links.
+        if calendarSync.isEnabled {
+            calendarSync.syncNow(entries: routineScheduler.entries())
+        }
+        // [CALENDAR-SHARE] (2026-09-16) Launch pass for the share layer —
+        // after the medication restore above (it reads the restored
+        // entries) and post-first-frame like everything else here, so no
+        // network work delays the first paint.
+        syncCalendarShare()
 
         // Voice pipeline is built lazily here so the CommandRouter can hold a
         // weak ref back to this fully-initialised coordinator.
@@ -2827,7 +3036,59 @@ final class AppCoordinator: ObservableObject {
             },
             observability: observabilityBus
         )
-        let facade = NotificationFacade(handlers: [timerAlarmEngine, notificationReader, caregiverEventHandler],
+        // [PHOTO-AIDS] The reminder's photos at the moment it fires: a
+        // routine notification whose entry carries a visual aid presents
+        // the full-screen elder-facing view. Registered beside the reader
+        // and the caregiver handler and claims nothing, so delivery and
+        // read-aloud are untouched (see the handler's own contract).
+        let routineVisualAidFireHandler = RoutineVisualAidFireHandler(
+            entryLookup: { [weak routineScheduler] entryId in
+                routineScheduler?.entry(for: entryId)
+            },
+            onFire: { [weak self] entry in
+                self?.presentRoutineVisualAids(for: entry)
+            }
+        )
+        // [MED-PHOTO-AIDS] The dose's photos at the moment it fires
+        // (medication-visual-aids task, 2026-09-16): a medication
+        // notification whose entry carries a photo presents the
+        // full-screen dose screen. Claims nothing (delivery and read-aloud
+        // unchanged), exactly like its routine sibling — but it MUST be
+        // registered BEFORE `notificationReader`: "MEDICATION_REMINDER" is
+        // the one category the reader allowlists, and the facade stops
+        // consulting handlers at the first claim, so a dose reaching this
+        // handler at all depends on this position in the array.
+        let medicationVisualAidFireHandler = MedicationVisualAidFireHandler(
+            entryLookup: { [weak medicationScheduler] entryId in
+                medicationScheduler?.medicationEntry(for: entryId)
+            },
+            onFire: { [weak self] entry in
+                self?.presentMedicationVisualAids(for: entry)
+            }
+        )
+        // [RICH-EVENTS] The free-form event's own reminder (rich-events
+        // task, 2026-09-17; design §4): an event with a photo presents the
+        // app's event detail at fire time, and the banner's Open action (or
+        // a plain tap) deep-links to the same screen. Claims nothing —
+        // delivery, read-aloud and the caregiver alert are untouched —
+        // and needs no position rule of its own: its category
+        // ("EVENT_REMINDER") is not on the reader's allowlist, so no other
+        // handler can claim a notification before this one sees it. The
+        // lookups run through the coordinator's LAZY service, so wiring
+        // this handler still constructs nothing at launch.
+        let freeFormEventFireHandler = FreeFormEventFireHandler(
+            eventLookup: { [weak self] eventId in
+                self?.freeFormEventService.event(withId: eventId)
+            },
+            onFire: { [weak self] eventId in
+                self?.openEventDetail(eventId: eventId)
+            }
+        )
+        let facade = NotificationFacade(handlers: [timerAlarmEngine,
+                                                   medicationVisualAidFireHandler,
+                                                   notificationReader, caregiverEventHandler,
+                                                   routineVisualAidFireHandler,
+                                                   freeFormEventFireHandler],
                                          observability: observabilityBus)
         UNUserNotificationCenter.current().delegate = facade
         // [TIMER-ALARM] Foreground driver: evaluates the ringing engine
@@ -3001,6 +3262,10 @@ final class AppCoordinator: ObservableObject {
             .sink { [weak self] _ in
                 self?.trySwapToGemini()
             }
+        // [STT-RESTORE] Companion subscription for the ANE auto-restore:
+        // a landed artifact re-applies the stack (see
+        // `observeSTTArtifactCompletion`).
+        observeSTTArtifactCompletion()
 
         // [STARTUP-PERF] The voice pipeline (which needs the KWS engine
         // the boot builds off-main) is constructed and started in the
@@ -4544,12 +4809,72 @@ self.noteTalkContractChanged()
             // applied from the boot's voice-start callback (or a Settings
             // toggle), never from `init`.
             installBundledSTTModelIfNeeded()
+            // [STT-RESTORE] …and the ANE artifact a fresh container wiped
+            // is restored the same way: a background download of the
+            // language default, so the on-device stack climbs back to the
+            // ANE path without a Settings trip (2026-09-16 device bug).
+            restoreWhisperKitArtifactIfNeeded()
         }
+        // [CLOUD-CASCADE] Last: (re-)arm the cascade tier on the fresh
+        // stack. It reads the provider seam + the two persisted settings,
+        // so it belongs to the same "apply the stack" pass as
+        // `cloudEnabled` above — one place decides what the ladder may
+        // reach, and this call can never arm a tier the stack just
+        // declined (it is gated on the same `cloudEnabled`).
+        applyCloudCascadeConfiguration()
+    }
+
+    /// [CLOUD-CASCADE] (2026-09-16) Arms the cloud cascade tier on
+    /// `intentRouter` from the SAME inputs the rest of the app consults:
+    /// the Gemini interpreter the boot built, `GeminiConfigStore.isConfigured`
+    /// (the key) and `GeminiCostGovernor.allowsCall()` (the day's budget) —
+    /// so a Settings promise can never outrun what the tier would do, and
+    /// an unconfigured household gets a nil tier (no cue, no event, no log,
+    /// no activity row: silent, exactly as the ladder behaved before the
+    /// tier existed).
+    ///
+    /// Called from `applyVoiceEngineStack()` (once at startup, and again on
+    /// every stack / opt-in / threshold / switch change). No-ops before
+    /// `start()` has built the pipeline and the interpreter — the same
+    /// tolerance `applyVoiceEngineStack()` itself holds.
+    ///
+    /// The tier is inert unless the cloud is REACHABLE at all
+    /// (`cloudEnabled`, which `applyVoiceEngineStack()` has just decided
+    /// from the stack + the opt-in), so this can never be the one path that
+    /// puts a cloud on the wire behind the household's back (OD-12's
+    /// consent posture is decided there, not here).
+    private func applyCloudCascadeConfiguration() {
+        guard let router = intentRouter, let gemini = geminiCommandInterpreter else {
+            return
+        }
+        let providers = CloudBrainProviders(gemini: CloudBrainRegistration(
+            interpreter: gemini,
+            isConfigured: { [weak self] in self?.geminiConfigStore.isConfigured ?? false },
+            costAllows: { [weak self] in self?.geminiCostGovernor.allowsCall() ?? false }
+        ))
+        // Resolved through the seam — the coordinator never names a cloud
+        // interpreter for a provider id; the registry does (adding a
+        // provider is a case + a registration, not a branch here).
+        guard let endpoint = providers.endpoint(for: cloudProvider) else {
+            router.cloudCascade = nil
+            return
+        }
+        router.cloudCascade = CloudCascadeConfiguration(
+            endpoint: endpoint,
+            threshold: cloudCascadeThreshold,
+            isEnabled: cloudCascadeEnabled,
+            holdCue: { [weak self] in
+                self?.commandRouter?.speakCloudCascadeHoldCue()
+            },
+            onEscalated: { [weak self] escalation in
+                self?.recordCloudCascadeEscalation(escalation)
+            }
+        )
     }
 
     /// [BOOT-REVIEW P1-5] Installs the ONE app-bundled STT model (the
-    /// default Nepali medium — the only catalog entry with a
-    /// `bundledResourceName`) the first time the on-device stack actually
+    /// Nepali medium ggml — the only catalog entry with a
+    /// `bundledResourceName`) the first time the household's OWN pick
     /// needs it, so a normal launch copies NOTHING. The old boot loop
     /// copied the 586 MB ggml into Application Support on every launch,
     /// gating `.ready` behind a multi-second disk write.
@@ -4557,6 +4882,13 @@ self.noteTalkContractChanged()
     /// Gates, in order:
     ///  - the on-device stack is ACTIVE (a Gemini household never pays
     ///    for a model it will not use),
+    ///  - [CPU-SAFETY 2026-09-16] the bundled medium is the household's
+    ///    EXPLICIT pick (`sttModelPreference`). It is no longer part of
+    ///    the automatic whisper.cpp order — running it on a CPU-only
+    ///    fresh install is the ~1 GB cold load that SIGKILLed the app
+    ///    (2026-09-16) — so copying it for any other reason buys nothing
+    ///    and costs 586 MB. The bundled copy stays the offline-friendly
+    ///    install path for the one household that asks for it.
     ///  - whisper.cpp is what the pure selection table would pick once a
     ///    model IS present (an ANE device with WhisperKit installed runs
     ///    WhisperKit — no copy),
@@ -4572,7 +4904,8 @@ self.noteTalkContractChanged()
     private func installBundledSTTModelIfNeeded() {
         guard voiceEngineStack == .onDevice else { return }
         let bundled = ModelCatalog.whisperMediumFinetunedNepali
-        guard !modelStore.isCached(bundled),
+        guard sttModelPreference == bundled,
+              !modelStore.isCached(bundled),
               !bundledSTTInstallInFlight,
               bundledSTTModelIsTheNextChoice() else { return }
         bundledSTTInstallInFlight = true
@@ -4620,6 +4953,136 @@ self.noteTalkContractChanged()
             return true
         }
         return false
+    }
+
+    // MARK: - Missing ANE artifact (PR 3, 2026-09-16)
+
+    /// [STT-RESTORE] A fresh install (or an app update, which gives the
+    /// app a new container) has no WhisperKit ANE artifact, and the
+    /// artifact is a DOWNLOAD: without this, the on-device stack would
+    /// sink to whisper.cpp — the 2026-09-16 device report, where the
+    /// bundled medium's ~1 GB CPU cold load SIGKILLed the app — and stay
+    /// there until someone walked into Settings. Kicks the standard
+    /// `ModelDownloadService` download at first voice readiness instead.
+    ///
+    /// The decision itself is the pure table
+    /// (`OnDeviceSTTSelection.restoreAction`): simulator, an installed
+    /// artifact, an explicit whisper.cpp pick, an in-flight download and
+    /// a language with no ANE build (`en`) all answer `.none`. Called
+    /// from `applyVoiceEngineStack()` — once at the boot's voice start,
+    /// and again on every stack / language change — so it is deliberately
+    /// cheap and idempotent: the in-flight set comes straight from the
+    /// service's published states, and a completed install short-circuits
+    /// on `isAvailable` before the table is even consulted.
+    private func restoreWhisperKitArtifactIfNeeded() {
+        switch OnDeviceSTTSelection.restoreAction(
+            whisperKitAvailable: whisperKitSpeechRecognizer.isAvailable,
+            preferredModel: sttModelPreference,
+            isSimulator: Self.isSimulator,
+            inFlight: downloadsInFlight,
+            language: appLanguage.rawValue,
+            iOS18OrLater: Self.isIOS18OrLater
+        ) {
+        case .none:
+            break
+        case .download(let id):
+            // [STT-RESTORE] Point the ANE engine at what it is about to
+            // receive BEFORE the bytes move, or the landed artifact would
+            // change nothing: `WhisperKitSpeechRecognizer.isAvailable` and
+            // `loadDescriptor()` resolve `directoryURL(for:
+            // preferredModelID)`, and with no stored pick that pref is the
+            // engine's init default — the v3 medium, NOT PR 1's per-language
+            // default. A restored v6 would land on disk and stay invisible,
+            // leaving the household on the fallback forever. With an
+            // explicit ANE pick the recognizer already holds this id (the
+            // adoption rule), so this call is a no-op; a ggml pick never
+            // reaches this branch (the table answers `.none` for it), so no
+            // engine is ever repointed away from a model it can run. Only
+            // the engine's target moves — `sttModelPreference` stays nil
+            // ("Automatic"), so the picker keeps saying Automatic rather
+            // than claiming a pick the household never made.
+            whisperKitSpeechRecognizer.setPreferredModel(id)
+            observabilityBus.emit(ObservabilityEvent(
+                component: "model_download",
+                eventType: "stt_ane_restore_started",
+                durationMs: nil,
+                outcome: "info",
+                errorCode: nil,
+                metadata: ["state": id.rawValue]
+            ))
+            print("[AppCoordinator] ANE STT artifact missing — restoring \(id.rawValue)")
+            modelDownloadService.start(id)
+        }
+    }
+
+    /// The downloads `ModelDownloadService` currently owns, as the
+    /// restore table's "do not re-kick" set: `queued` → `completed` is an
+    /// attempt that is live or done, while `notStarted` / `failed` /
+    /// `cancelled` is an attempt that is OVER — a transient failure is
+    /// retried on the next stack apply instead of being abandoned for the
+    /// life of the install.
+    private var downloadsInFlight: Set<ModelID> {
+        Self.inFlightModels(from: modelDownloadService.states)
+    }
+
+    /// Pure form of the set above — a static seam so the retry semantics
+    /// are pinned by a test rather than by the comment alone.
+    static func inFlightModels(from states: [ModelID: ModelDownloadState]) -> Set<ModelID> {
+        Set(states.compactMap { entry -> ModelID? in
+            switch entry.value {
+            case .queued, .downloading, .verifying, .completed: return entry.key
+            case .notStarted, .failed, .cancelled: return nil
+            }
+        })
+    }
+
+    /// [STT-RESTORE] Re-applies the stack when an ANE artifact lands, so
+    /// the restore actually reaches the live pipeline: nothing else
+    /// re-applies on a download completion (the Settings screen's own
+    /// `$states` observer only recomputes the caption), so a restored
+    /// artifact used to need a relaunch to take effect. The selection
+    /// table decides whether the completion changes the engine, so a
+    /// download for an unrelated WhisperKit model costs one idempotent
+    /// pass.
+    private func observeSTTArtifactCompletion() {
+        sttArtifactCompletionCancellable = modelDownloadService.$states
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] states in
+                guard let self, self.started else { return }
+                let landed = states.contains {
+                    $0.value == .completed
+                        && WhisperKitSpeechRecognizer.isWhisperKitArtifact($0.key)
+                }
+                guard landed else { return }
+                self.applyVoiceEngineStack()
+            }
+    }
+
+    /// Whether this OS can load the CoreML spec-v9 (palettized) ANE
+    /// builds — the same gate `ModelDownloadService` applies before
+    /// spending ~767 MB on one, so the auto-restore never picks an
+    /// artifact the service would refuse on this device.
+    private static let isIOS18OrLater: Bool = ProcessInfo.processInfo
+        .isOperatingSystemAtLeast(
+            OperatingSystemVersion(majorVersion: 18, minorVersion: 0, patchVersion: 0))
+
+    /// The stored STT pick this build runs, migrating superseded ids
+    /// forward.
+    ///
+    /// [CPU-SAFETY 2026-09-16] The small fine-tunes migrate to their q8_0
+    /// SIBLING (same checkpoint, better quality), never to the medium
+    /// fine-tune they used to map to: the medium is no longer
+    /// auto-runnable on CPU (see
+    /// `OnDeviceSTTSelection.whisperCppAutomaticOrder`), and a migration
+    /// that writes it into `sttModelPreference` would both install the
+    /// 586 MB bundled copy and hand the household a model it never chose.
+    /// A migration stays inside the class the household picked.
+    static func migratedSTTPreference(_ stored: ModelID?) -> ModelID? {
+        if stored == ModelCatalog.whisperSmallNepali
+            || stored == ModelCatalog.whisperFinetunedNepali {
+            return ModelCatalog.whisperFinetunedNepaliQ8
+        }
+        return stored
     }
 
     /// Re-applies the audio-session preset after `voiceProcessingEnabled`
@@ -5094,6 +5557,7 @@ self.noteTalkContractChanged()
                           photo: UIImage? = nil,
                           nickname: String? = nil,
                           address: String? = nil,
+                          email: String? = nil,
                           isEmergencyContact: Bool = false) -> Bool {
         let filename = photo.flatMap { contactPhotoStore.save($0) }
         let contact = FamilyContact(name: name, phone: phone, relationship: relationship,
@@ -5101,6 +5565,7 @@ self.noteTalkContractChanged()
                                     photoFilename: filename,
                                     nickname: nickname,
                                     address: Self.normalizedOptionalText(address),
+                                    email: FamilyContactValidation.normalizedEmail(email),
                                     isEmergencyContact: isEmergencyContact)
         guard familyContactStore.add(contact) else {
             if let filename { contactPhotoStore.delete(named: filename) }
@@ -5143,6 +5608,7 @@ self.noteTalkContractChanged()
                              photo: UIImage? = nil, removingPhoto: Bool = false,
                              nickname: String? = nil,
                              address: String? = nil,
+                             email: String? = nil,
                              isEmergencyContact: Bool = false) -> Bool {
         guard var contact = familyContacts.first(where: { $0.id == id }) else { return false }
         contact.name = name
@@ -5155,6 +5621,11 @@ self.noteTalkContractChanged()
         // stored address (nil), so "remove the address" is an edit, not a
         // separate affordance (directions task, 2026-09-07).
         contact.address = Self.normalizedOptionalText(address)
+        // Same rule for the Google address (calendar & family sharing,
+        // 2026-09-16): blank clears it, and the editor's emergency gate
+        // is what makes a blank impossible while the contact is flagged
+        // — this normalizes, it does not enforce.
+        contact.email = FamilyContactValidation.normalizedEmail(email)
 
         let oldFilename = contact.photoFilename
         var newFilename = oldFilename
@@ -5360,38 +5831,454 @@ self.noteTalkContractChanged()
         favoriteAppIDs.removeAll { $0 == app.id }
     }
 
-    /// Launches a quick-access app from the Home row / picker, with the
-    /// dual-channel honesty every open path holds: probe FIRST, and when
-    /// the app is gone (deleted after the row appeared) say so out loud
-    /// and show it on the outcome card — never a silent dead tap. One
+    /// Launches a quick-access app — the Home row / picker tile tap AND
+    /// the confirmed voice launch (`launcher.open`) share this ONE
+    /// executor, so the two paths can never drift apart in what they
+    /// probe, say, or claim.
+    ///
+    /// Dual-channel honesty as before: probe FIRST, and when the app is
+    /// gone (deleted after the row appeared) say so out loud and show it
+    /// on the outcome card — never a silent dead tap. An absent app that
+    /// HAS a web fallback (Facebook, Instagram, YouTube, WhatsApp — the
+    /// four the design gives one) opens its website and discloses the
+    /// swap; an absent app without one hears the honest not-installed
+    /// line rather than being sent to Safari on an unrelated page. One
     /// `app_launcher` event per attempt; the outcome names which surface
-    /// appeared (`<id>:opened`) or why nothing did (`<id>:notInstalled`).
+    /// appeared (`<id>:opened`, `<id>:openedWebFallback`) or why nothing
+    /// did (`<id>:notInstalled`, `<id>:cameraUnavailable`).
+    ///
+    /// The camera entry never reaches the URL branch: it has no URL
+    /// (`AppLauncher.Kind.camera`) and is answered by the in-app capture
+    /// flow, which is why a `.camera` tile is no longer a tap that
+    /// announces "Opening Camera" over a screen that never appears.
     func performAppLaunch(_ app: AppLauncher.App) {
-        let locale = activeLocale
-        let name = L10n.str(app.nameKey, locale: locale)
-        guard isAppInstalled(app) else {
-            let text = L10n.fmt("apps.announce.notInstalled", locale: locale, name)
-            setOutcome(icon: "exclamationmark.triangle.fill", text: text)
-            speak(text: text)
-            emitAppLaunch(outcome: "\(app.id):notInstalled")
-            return
+        // [APP-LAUNCHER F6] A tap IS an answer. Resolving the outstanding
+        // question first is what keeps the tile from racing the 45 s
+        // window it pends: the question is cleared (and its window closed)
+        // before the app opens, so the elder can never hear "Time is up, I
+        // won't open it" over an app they are already looking at.
+        resolveLaunchQuestion(openedBy: app.id)
+        switch app.kind {
+        case .camera:
+            presentCameraCapture(app)
+        case .url:
+            launchURLApp(app)
         }
-        appLauncher.open(app)
-        let text = L10n.fmt("apps.announce.opened", locale: locale, name)
-        setOutcome(icon: app.systemImage, text: text)
-        speak(text: text)
-        emitAppLaunch(outcome: "\(app.id):opened")
     }
 
-    private func emitAppLaunch(outcome: String) {
+    /// The `.url` half of the executor: probe, open, and speak the surface
+    /// that actually appeared.
+    private func launchURLApp(_ app: AppLauncher.App) {
+        let locale = activeLocale
+        let name = L10n.str(app.nameKey, locale: locale)
+        // [F9] The probe, the web fallback and the Settings fallback are
+        // resolved in ONE place (`AppLauncher.launchPlan`) so the tile, the
+        // voice request and this executor can never decide differently
+        // about what a launch opens.
+        switch appLauncher.launchPlan(for: app) {
+        case .app:
+            appLauncher.open(app)
+            let text = L10n.fmt("apps.announce.opened", locale: locale, name)
+            setOutcome(icon: app.systemImage, text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):opened")
+        case .webFallback:
+            // The web fallback is a REAL surface (Safari, or the app's own
+            // universal link when it turns out to be installed after all),
+            // disclosed out loud — never a silent substitution.
+            guard appLauncher.openWebFallback(app) else {
+                return announceNotInstalled(app, name: name, locale: locale)
+            }
+            let text = L10n.fmt("apps.announce.openingWeb", locale: locale, name)
+            setOutcome(icon: app.systemImage, text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):openedWebFallback")
+        case .settingsFallback:
+            // [F9] The pane's private App-Prefs URL did not answer; the
+            // public Settings deep link always does. Same disclosure rule
+            // as the web fallback — the elder is told which surface
+            // actually appeared, and the outcome names it too.
+            guard appLauncher.openSettingsFallback() else {
+                return announceNotInstalled(app, name: name, locale: locale)
+            }
+            let text = L10n.str("apps.announce.openingSettings", locale: locale)
+            setOutcome(icon: app.systemImage, text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):openedSettingsFallback")
+        case .unavailable:
+            announceNotInstalled(app, name: name, locale: locale)
+        case .camera:
+            // `performAppLaunch` routes `.camera` before it reaches this
+            // executor (see its `switch`); a caller that reaches it anyway
+            // lands on the honest capture path rather than a silent no-op.
+            presentCameraCapture(app)
+        }
+    }
+
+    /// The honest absent-app line, spoken and carded (the same surface
+    /// every other failed launch uses) — shared by the three plans that
+    /// can end with nothing opened.
+    private func announceNotInstalled(_ app: AppLauncher.App, name: String,
+                                      locale: Locale) {
+        let text = L10n.fmt("apps.announce.notInstalled", locale: locale, name)
+        setOutcome(icon: "exclamationmark.triangle.fill", text: text)
+        speak(text: text)
+        emitAppLaunch(outcome: "\(app.id):notInstalled")
+    }
+
+    /// The camera half of the executor (launcher plan T4 owns the system
+    /// picker behind this seam). Everything the capture flow says — the
+    /// saved / save-failed / no-camera / permission-denied lines — is
+    /// spoken by the flow through these channels, so the coordinator adds
+    /// no claim of its own: an unset seam means no presenter is installed
+    /// and the honest answer is that nothing can be captured here, never
+    /// an "Opening Camera" over a screen that does not appear.
+    private func presentCameraCapture(_ app: AppLauncher.App) {
+        guard let cameraCapture else {
+            let text = L10n.str("apps.camera.unavailable", locale: activeLocale)
+            setOutcome(icon: "exclamationmark.triangle.fill", text: text)
+            speak(text: text)
+            emitAppLaunch(outcome: "\(app.id):cameraUnavailable")
+            return
+        }
+        cameraCapture.start()
+    }
+
+    /// The camera-capture seam: presenter + photo writer + the flow that
+    /// speaks the outcome. A stored, assignable property so a test can put
+    /// a scripted flow in its place; production value is built once in
+    /// `init` (see `makeCameraCaptureFlow`). Nil would mean no presenter is
+    /// installed: see `presentCameraCapture`.
+    var cameraCapture: CameraCaptureFlow?
+
+    /// Builds the production capture flow (T4): the system picker
+    /// (`PhotoCameraPresenter`) and the add-only library write
+    /// (`PhotosLibraryPhotoSaver`) behind the two injectable seams, with
+    /// this coordinator's own speech / outcome-card / bus channels.
+    ///
+    /// Deliberately cheap and I/O-free: constructing it resolves no window
+    /// and asks no permission (the presenter probes both at presentation
+    /// time), so it is safe in `init` before the UI exists.
+    private func makeCameraCaptureFlow() -> CameraCaptureFlow {
+        CameraCaptureFlow(
+            presenter: PhotoCameraPresenter(),
+            saver: PhotosLibraryPhotoSaver(),
+            locale: { [weak self] in
+                self?.activeLocale ?? Locale(identifier: "ne-NP")
+            },
+            channels: CameraCaptureFlow.Channels(
+                speak: { [weak self] text in
+                    self?.speak(text: text)
+                },
+                announce: { [weak self] icon, text in
+                    self?.setOutcome(icon: icon, text: text)
+                },
+                emit: { [weak self] eventType, outcome in
+                    self?.emitAppLaunch(eventType: eventType, outcome: outcome)
+                }
+            )
+        )
+    }
+
+    private func emitAppLaunch(eventType: String = "launch", outcome: String) {
         observabilityBus.emit(ObservabilityEvent(
             component: "app_launcher",
-            eventType: "launch",
+            eventType: eventType,
             durationMs: nil,
             outcome: outcome,
             errorCode: nil,
             metadata: [:]  // catalog app id only — no contact identifiers (C9)
         ))
+    }
+
+    // MARK: - Voice app launcher (launcher.open plugin, 2026-09-16)
+    //
+    // The confirmation half of the voice launch (design D3: confirm-first
+    // before EVERY external launch). It reuses the router's existing
+    // confirmation-follow-up machinery rather than adding a parallel one:
+    // `requestAppLaunch` pends a launch and returns the question,
+    // `isAwaitingAppLaunchConfirmation` widens `CommandRouter.route`'s
+    // yes/no path, `handleConfirmationResponse` executes or cancels, and
+    // the session's existing 45 s window auto-dismisses (below, in
+    // `voiceSession.onConfirmationTimeout`) — the same four seams the
+    // call / calendar-event / navigation confirmations ride.
+
+    /// [APP-LAUNCHER F1] Who owns the elder's NEXT yes/no when a launch
+    /// question and a medication dose-challenge are both outstanding.
+    ///
+    /// The two flows share one confirmation window
+    /// (`VoiceSessionState.awaitingConfirmation`) and one router yes/no
+    /// parse, so exactly one of them may own the answer. The medication
+    /// challenge wins, always. It is the dementia-aware FR-D01
+    /// double-dose gate (spec §3.3), and the whole point of the window is
+    /// that a "हो" lands in `medicationScheduler.acknowledgeWithConfirmation`
+    /// where the double-dose check can see it; a launch, by contrast, can
+    /// simply be asked again. The failure mode this prevents is the
+    /// dangerous one: a dose question answered yes while the launch block
+    /// returns early means the dose is never recorded and the elder is
+    /// told (by the launch's own line) that something was opened.
+    ///
+    /// Pure policy so the rule is testable without an AppCoordinator —
+    /// the same shape as the other extracted helper types in this file.
+    enum ConfirmationArbitration {
+        enum Owner: Equatable {
+            case appLaunch
+            case medication
+            case none
+        }
+
+        static func owner(pendingAppLaunch: String?,
+                          hasMedicationChallenge: Bool) -> Owner {
+            if hasMedicationChallenge { return .medication }
+            return pendingAppLaunch == nil ? .none : .appLaunch
+        }
+
+        /// [APP-LAUNCHER F6] What a launch performed by a TAP means for the
+        /// question still pended. The same app is the question being
+        /// answered yes (`.confirmed`); a different app is that question
+        /// being superseded, which is the unanswered verdict the flywheel
+        /// already understands (`.superseded` → recorded as a timeout).
+        enum TileResolution: Equatable {
+            case confirmed
+            case superseded
+        }
+
+        static func tileResolution(pending: String, opened: String) -> TileResolution {
+            pending == opened ? .confirmed : .superseded
+        }
+    }
+
+    /// [APP-LAUNCHER F13] The launch question's expiry, named in one place.
+    ///
+    /// A launch question that runs out its 45 s is a terminal outcome like
+    /// the yes and the no, so it gets the same three treatments they get:
+    /// a spoken line, a card that says what happened, and one
+    /// `app_launcher` event. It used to get only the first — the question
+    /// card ("Should I open Camera?") stayed on screen as if still
+    /// pending, and the bus carried no record that a question had been
+    /// asked and dropped. The constants live together so the handler, the
+    /// event and the test can never drift apart.
+    enum LaunchTimeout {
+        static let eventType = "launch_timeout"
+        static let icon = "clock.badge.exclamationmark"
+        static let speechKey = "launcher.timeout"
+        static func outcome(appID: String) -> String { "\(appID):timeout" }
+    }
+
+    /// A launch pended for the elder's spoken yes/no. Mirrors
+    /// `PendingCallAction`: the pending state, the flywheel identity and
+    /// the question→verdict clock all live together, so a verdict can
+    /// never be recorded against a launch that was never asked about.
+    struct PendingAppLaunch {
+        let appID: String
+        /// The interpreted command's confidence, when the launch came from
+        /// the model (nil for the keyword/plugin seams that don't carry
+        /// one) — the flywheel's accept-band input.
+        let confidence: Double?
+        /// [INTENTLOG-CAPTURE] When the confirmation question was asked —
+        /// the flywheel's latency start (question → verdict).
+        let requestedAt: Date = Date()
+
+        /// [APP-LAUNCHER F10] Which routing stage asked the question — the
+        /// flywheel's PATH label, and the reason this is derived here
+        /// rather than defaulted at the recording site.
+        ///
+        /// `IntentLogStore.Capture`'s path defaults to "model", which is
+        /// right for everything the interpreter or a plugin produced but
+        /// WRONG for the deterministic keyword fast path: a
+        /// `KeywordIntentRule` hit never saw a model, and labelling it
+        /// "model" teaches the accept-band statistics that the model
+        /// proposed launches it never saw. That stage is exactly the one
+        /// that carries no confidence (`CommandRouter` passes
+        /// `confidence: nil` from its `.appLaunch` stage; every
+        /// interpreter/plugin command has one by construction), so nil IS
+        /// the keyword signature.
+        var capturePath: String { confidence == nil ? "keyword" : "model" }
+
+        /// This launch's flywheel identity. The slot is the catalog app id
+        /// — a public catalog key, never user content (C9).
+        var capture: IntentLogStore.Capture {
+            IntentLogStore.Capture(action: "launcher.open",
+                                   slots: ["app": appID],
+                                   confidence: confidence,
+                                   requestedAt: requestedAt)
+        }
+    }
+
+    @Published private(set) var pendingAppLaunch: PendingAppLaunch?
+
+    /// Router-side twin of `pendingAppLaunch != nil` — the router skips its
+    /// generic medication-flavored yes/no speech while a launch is pended
+    /// (see `VoiceCommandCoordinating.isAwaitingAppLaunchConfirmation`)
+    /// and reports `.appLaunchConfirmed` for the yes.
+    ///
+    /// [APP-LAUNCHER F1] …but never while a dose challenge is pended: the
+    /// launch does not own that answer (see `ConfirmationArbitration`), so
+    /// the router must not treat the utterance as a launch confirmation
+    /// NOR suppress the medication line.
+    var isAwaitingAppLaunchConfirmation: Bool {
+        ConfirmationArbitration.owner(
+            pendingAppLaunch: pendingAppLaunch?.appID,
+            hasMedicationChallenge: pendingConfirmationEntryId != nil) == .appLaunch
+    }
+
+    /// Pends a catalog app for the elder's spoken yes/no and returns the
+    /// line to speak — the `app_launcher` plugin's single seam (voice) and
+    /// the API a deterministic keyword stage can call the same way.
+    ///
+    /// Two refusals to ASK, both deliberate (the call path's
+    /// messenger-no-handle gate, same rationale): a launch that can only
+    /// fail must never be turned into a yes/no question. An app that is not
+    /// installed AND has no web fallback is answered with the honest
+    /// not-installed line, nothing pended. An app that is not installed but
+    /// HAS a web fallback IS asked about — the launch can still succeed
+    /// (Safari) — with the swap disclosed in the question itself, so the
+    /// "yes" the elder gives is a yes to what actually happens.
+    ///
+    /// The camera entry is always asked about: it needs no installed app
+    /// (the capture is in-process), and whether the DEVICE can capture is
+    /// answered after the yes, where the failure is.
+    func requestAppLaunch(appID: String, confidence: Double?) -> String {
+        let locale = activeLocale
+        guard let app = AppLauncher.app(for: appID) else {
+            // No catalog entry: nothing to ask about, and the caller speaks
+            // this honest line instead (the plugin's own unknown-app case
+            // is caught before it gets here — this is the same line, from
+            // the layer that knows the catalog).
+            emitAppLaunch(eventType: "launch_request", outcome: "unknownApp")
+            return L10n.fmt("launcher.unknownApp", locale: locale, appID)
+        }
+        let name = L10n.str(app.nameKey, locale: locale)
+        // [F9] Same single resolution the executor uses: what this launch
+        // can actually open decides which question is asked — or whether
+        // one is asked at all.
+        switch appLauncher.launchPlan(for: app) {
+        case .app, .camera:
+            pendAppLaunch(appID: app.id, confidence: confidence)
+            emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):pending")
+            return L10n.fmt("launcher.confirmOpen", locale: locale, name)
+        case .webFallback:
+            pendAppLaunch(appID: app.id, confidence: confidence)
+            emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):webFallbackPending")
+            return L10n.fmt("launcher.confirmOpenWeb", locale: locale, name)
+        case .settingsFallback:
+            // [F9] A pane whose private App-Prefs URL did not answer is
+            // still launchable — the public Settings deep link opens the
+            // Settings app. The swap is disclosed in the question itself,
+            // so the elder's "yes" is a yes to what actually happens (the
+            // same contract as the web-fallback question above). The line
+            // names no pane: for the Settings ROOT entry the fallback is
+            // the same screen, and "I can't open that exact screen" is
+            // true in every case.
+            pendAppLaunch(appID: app.id, confidence: confidence)
+            emitAppLaunch(eventType: "launch_request",
+                          outcome: "\(app.id):settingsFallbackPending")
+            return L10n.str("launcher.confirmOpenSettings", locale: locale)
+        case .unavailable:
+            // A launch that can only fail is never turned into a yes/no
+            // question: the honest not-installed line, nothing pended.
+            emitAppLaunch(eventType: "launch_request", outcome: "\(app.id):notInstalled")
+            return L10n.fmt("apps.announce.notInstalled", locale: locale, name)
+        }
+    }
+
+    /// Pends the launch and arms the session's existing confirmation
+    /// window (the 45 s budget in `VoiceSessionStateMachine`) — nothing is
+    /// opened until the elder says yes.
+    ///
+    /// [APP-LAUNCHER F14] The window is opened in the SAME breath as the
+    /// pend (`openConfirmationWindow`), not by a bare `transition(to:)`
+    /// that could no-op: a launch question may arrive while the session
+    /// sits in a state the transition table does not let reach
+    /// `.awaitingConfirmation` directly (`.error` after a pipeline
+    /// failure, `.stopped` before the pipeline is primed), and a pend with
+    /// no window is a pend with no timer and no clearer — the question
+    /// would sit on screen forever, answered only by chance.
+    private func pendAppLaunch(appID: String, confidence: Double?) {
+        pendingAppLaunch = PendingAppLaunch(appID: appID, confidence: confidence)
+        openConfirmationWindow()
+    }
+
+    /// [APP-LAUNCHER F14] Guarantees the confirmation window is open —
+    /// the session machine bridges through `.idle` when the current state
+    /// cannot reach `.awaitingConfirmation` directly, and the machine
+    /// reports whether it got there. Main-queue confinement is preserved
+    /// by the same hop the callers used before; when the caller is already
+    /// on main (the usual case — the router and the tile both are) the
+    /// window opens synchronously, so there is no instant in which the
+    /// caller has pended work but no timer exists for it.
+    private func openConfirmationWindow() {
+        if Thread.isMainThread {
+            voiceSession.openConfirmationWindow()
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.voiceSession.openConfirmationWindow()
+            }
+        }
+    }
+
+    /// [APP-LAUNCHER F6] A launch performed OUTSIDE the spoken yes/no —
+    /// the Home quick-access tile, or the executor reached from any other
+    /// tap — resolves the launch question that is still on screen.
+    ///
+    /// Without this the question stayed pended over a live camera with
+    /// its 45 s window still armed: the elder tapped the tile, the app
+    /// opened, and 45 seconds later the assistant announced "Time is up, I
+    /// won't open it" over the app they were looking at. The tile IS an
+    /// answer, and it is a CONFIRMED one when it names the same app (the
+    /// question was "should I open X?" and X is what opened); a tile for a
+    /// DIFFERENT app supersedes the question the same way a new question
+    /// does, and is recorded as the unanswered verdict it is.
+    ///
+    /// The window is closed with the pend (when no other flow is riding on
+    /// it) so the timer cannot fire at all: `VoiceSessionStateMachine` only
+    /// reports an expiry for a window that is still open, so a closed one
+    /// stays silent even if its callback was already in flight.
+    private func resolveLaunchQuestion(openedBy appID: String) {
+        guard let launch = pendingAppLaunch else { return }
+        pendingAppLaunch = nil
+        switch ConfirmationArbitration.tileResolution(pending: launch.appID,
+                                                      opened: appID) {
+        case .confirmed:
+            appendCapture(launch.capture, .confirmed, path: launch.capturePath)
+            emitAppLaunch(eventType: "launch_confirmed",
+                          outcome: "\(launch.appID):confirmedByTile")
+        case .superseded:
+            appendCapture(launch.capture, .timeout, path: launch.capturePath)
+            emitAppLaunch(eventType: "launch_superseded",
+                          outcome: "\(launch.appID):supersededByTile")
+        }
+        // Close the window only when nothing else pended is riding on it —
+        // closing it under a medication challenge would leave that pend
+        // with no timer (the F14 failure mode in mirror image).
+        if !isAwaitingConfirmation, voiceSession.state == .awaitingConfirmation {
+            voiceSession.transition(to: .idle)
+        }
+    }
+
+    /// Confirmed: resolve the pended id through the catalog and hand it to
+    /// the SAME executor the Home tile uses. A catalog id that no longer
+    /// resolves (catalog changed between the question and the yes) speaks
+    /// the honest unknown-app line rather than opening a guess.
+    private func executePendingAppLaunch(_ launch: PendingAppLaunch) {
+        guard let app = AppLauncher.app(for: launch.appID) else {
+            // The catalog changed between the question and the yes: say so
+            // honestly, and record NOTHING — a confirmed verdict that
+            // could not be executed teaches the flywheel nothing (the same
+            // rule the calendar write and the call path hold for a failed
+            // open).
+            replyHonestly(key: "launcher.noApp")
+            return
+        }
+        performAppLaunch(app)
+        // Recorded on the launch, exactly like the call path's confirmed
+        // execution: by construction every pended launch was launchable
+        // when it was asked about (installed, or carrying a web fallback,
+        // or the in-process camera), so the elder's yes is the verdict the
+        // executor acts on. A device that refuses the CAMERA after the yes
+        // is a separate, honestly-reported outcome (its own
+        // `camera_capture_*` event) — the interpretation was still right.
+        appendCapture(launch.capture, .confirmed, path: launch.capturePath)
     }
 
     // MARK: - Phone-leaf contact-list launches (contact-leaf-launch task,
@@ -5574,6 +6461,17 @@ self.noteTalkContractChanged()
             guard let self else { return }
             if self.voiceCalendarEventWriter.eventsAccess == .notDetermined {
                 _ = await self.voiceCalendarEventWriter.requestAccess()
+            }
+            // [CALENDAR-SHARE] (2026-09-16) Attached here, not at
+            // construction, to keep the writer lazy (its property doc
+            // explains why) — and re-attached each write, which is
+            // harmless because the closure is the same every time.
+            self.voiceCalendarEventWriter.onEventCreated = { [weak self] creation in
+                self?.calendarShareService.eventCreated(
+                    localEventId: creation.localEventId,
+                    title: creation.title,
+                    startDate: creation.startDate,
+                    durationMinutes: creation.durationMinutes)
             }
             let created = self.voiceCalendarEventWriter.create(
                 title: event.title,
@@ -6267,6 +7165,38 @@ self.noteTalkContractChanged()
                        contactName: "", phone: "", timestamp: timestamp)
     }
 
+    /// [CLOUD-CASCADE] (2026-09-16) Records one turn the cloud cascade tier
+    /// sent to the ONLINE brain — the coordinator half of the tier's
+    /// `onEscalated` seam, run once per escalated turn, right after the
+    /// observability event and BEFORE the cloud call.
+    ///
+    /// Two trails, and neither one carries the utterance (C9 policy):
+    ///  · an activity-log row (`Kind.cloudEscalation` / `Channel.cloud`)
+    ///    with an EMPTY contact and number — the household can see that a
+    ///    turn reached the cloud, and nothing about what was said;
+    ///  · an app log line naming the escalation unmistakably, with the
+    ///    provider id and the two scores only (the same numbers the
+    ///    observability event carries — read this line and the
+    ///    `cloud_cascade_escalated` event side by side to tell a
+    ///    cloud-answered turn from an on-device one).
+    ///
+    /// Main queue by contract (the tier's completion runs there, like every
+    /// other brain in the ladder → `recordActivity`'s rule).
+    private func recordCloudCascadeEscalation(_ escalation: CloudCascadeEscalation) {
+        recordActivity(kind: .cloudEscalation, channel: .cloud, contactName: "")
+        // Numbers and a provider id only — never what the user said or what
+        // the assistant answered (C9 policy; the same rule the
+        // `cloud_cascade_escalated` event holds to). Note the Release-log
+        // privacy gate (tools/check-release-log-safety.sh) rejects any
+        // non-DEBUG print whose statement names the utterance's text, so
+        // this line is deliberately vocabulary-clean.
+        print("[cloud_cascade] LOCAL ANSWER OVERRULED — this turn goes to the ONLINE brain "
+              + "provider=\(escalation.provider) "
+              + "threshold=\(PipelineTraceSummary.score(escalation.threshold)) "
+              + "local_confidence=\(PipelineTraceSummary.score(escalation.localConfidence)) "
+              + "(numbers only — no utterance or reply content)")
+    }
+
     /// Refreshes the published window from the store (see
     /// `recentActivity`). Main queue.
     private func refreshRecentActivity() {
@@ -6593,6 +7523,31 @@ self.noteTalkContractChanged()
         requestNavigation(to: .defaultHome)
     }
 
+    /// Navigates to a free-form event's address — the detail screen's Go
+    /// button (rich-events task, 2026-09-17; design §4), and the route a
+    /// fired reminder's Open action leads into.
+    ///
+    /// A free-form event has no saved-place id, so — unlike the three
+    /// wrappers above — this one carries the name and address straight
+    /// into the shared executor. That is the whole feature: geocoding at
+    /// TAP time, map-app policy, the in-app fallback and the honest
+    /// spoken lines all stay `launchNavigation`'s, already built and
+    /// already audited, so an event behaves exactly like a saved place.
+    /// Nothing is stored: whatever the family last corrected in their own
+    /// Calendar app is what gets geocoded.
+    func navigateToEvent(_ event: FreeFormEvent) {
+        guard let address = event.address?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !address.isEmpty else {
+            // The Go button is not even drawn without an address, so this
+            // is only reachable by a race — the family cleared the
+            // address while the screen was open. Honest line, no dead end.
+            emitDirections(eventType: "command", outcome: "place_missing")
+            replyHonestly(key: "directions.placeNotFound")
+            return
+        }
+        launchNavigation(name: event.title, address: address)
+    }
+
     /// The core navigation executor — shared by `requestNavigation` and
     /// the ambiguity walk's yes branch. Resolves the target to a concrete
     /// destination, then launches the map surface the current override
@@ -6896,6 +7851,27 @@ self.noteTalkContractChanged()
             .medicationName ?? ""
     }
 
+    /// One medication entry by id (medication-visual-aids task,
+    /// 2026-09-16) — the Settings photo editor and the Reminders leaf read
+    /// an entry's photos through this. Nil when the entry is gone.
+    func medicationEntry(for entryId: UUID) -> MedicationEntry? {
+        medicationScheduler.medicationEntry(for: entryId)
+    }
+
+    /// A medication entry's photos, snapshotted for presentation — the
+    /// tap-to-view paths (the Meds leaf's dose thumbnail, the Reminders
+    /// leaf's dose rows) share the fired-dose screen's presentation type,
+    /// so all three draw the same screen from the same values. Nil when
+    /// the entry is gone or carries no photos, which is also the answer to
+    /// "is there anything to tap": callers gate the thumbnail on this, not
+    /// on a separate `isEmpty` check that could drift from it.
+    func medicationVisualAidsPresentation(for entryId: UUID)
+        -> MedicationVisualAidsPresentation? {
+        guard let entry = medicationEntry(for: entryId),
+              !entry.visualAids.isEmpty else { return nil }
+        return MedicationVisualAidsPresentation(entry: entry)
+    }
+
     // MARK: - Derived notification count ([BOOT-REVIEW P1-7])
 
     /// The bell badge's derived count — how many notification rows the
@@ -7001,6 +7977,76 @@ self.noteTalkContractChanged()
         intentEncoderInterpreter.handleMemoryPressure()
     }
 
+    // MARK: - Model lifecycle ([MODEL-LIFECYCLE])
+
+    /// Level-2 observer for the residency ledger.
+    ///
+    /// Installed unconditionally, unlike the encoder's gate-scoped observer
+    /// below: the models it evicts (STT, the brain) are in EVERY build, so
+    /// a build without the internal-testing encoder gate still needs the
+    /// OOM protection. Two observers on the same notification is fine —
+    /// the encoder's handler releases only the encoder, and the manager
+    /// leaves light slots alone, so neither can undo the other.
+    private func observeModelLifecycleMemoryPressure() {
+        guard modelLifecycleObserver == nil else { return }
+        modelLifecycleObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil, queue: .main
+        ) { _ in
+            ModelLifecycleManager.shared.handleMemoryPressure()
+        }
+    }
+
+    /// Registers the slots the coordinator itself owns and starts the idle
+    /// sweep. The heavy slots (STT, brain) register themselves at their own
+    /// load sites, because a slot must describe the engine that is actually
+    /// about to load.
+    private func startModelLifecycle() {
+        let lifecycle = ModelLifecycleManager.shared
+        observeModelLifecycleMemoryPressure()
+
+        // The encoder slot is NOT registered here. `intentEncoderInterpreter`
+        // is a `lazy var` built only when the encoder gate AND the runtime
+        // toggle both allow it, and touching it here would defeat that gate
+        // by constructing the object in every launch. `installLocalBrainSlot`
+        // registers it at the moment `gatedEncoder` actually resolves it —
+        // see `registerEncoderSlotIfNeeded()`.
+
+        // The corrector is NOT a model — it is a ~2.6 MB JSON lexicon in a
+        // process-wide `static let`. Registered ownerless and un-evictable
+        // so the ledger's total is honest and the next reader does not have
+        // to rediscover that.
+        lifecycle.register(
+            slot: .sttCorrector,
+            modelID: nil,
+            owner: nil,
+            evictable: false
+        ) {}
+
+        lifecycle.startIdleTimer()
+    }
+
+    /// Declares the encoder's ledger row the first time the encoder is
+    /// actually constructed. Idempotent — `register` overwrites the slot's
+    /// footprint and closure, so calling it again on a re-install is
+    /// harmless.
+    ///
+    /// The encoder is LIGHT (≈ 140 MB) and already has a complete
+    /// unload/re-arm contract of its own, so it is registered for the
+    /// ledger's sake but excluded from eviction — its residency is the
+    /// [T-037-a] observer's business, and routing it through the idle sweep
+    /// would trip the pressure flag on a timer.
+    private func registerEncoderSlotIfNeeded() {
+        ModelLifecycleManager.shared.register(
+            slot: .intentEncoder,
+            modelID: ModelCatalog.intentEncoderSpike,
+            owner: intentEncoderInterpreter,
+            evictable: false
+        ) { [weak intentEncoderInterpreter] in
+            intentEncoderInterpreter?.handleMemoryPressure()
+        }
+    }
+
     /// Re-arms the encoder after a memory-pressure unload at the start of
     /// a voice turn (no-op unless the internal-testing gate is on AND the
     /// runtime toggle is ON, so the lazy encoder object is never even
@@ -7053,6 +8099,12 @@ self.noteTalkContractChanged()
         entries.removeAll { $0.id == id }
         medicationScheduler.loadSchedule(entries: entries)
         medicationScheduler.scheduleAll()
+        // The dose's photos go WITH the medication (medication-visual-aids
+        // task, 2026-09-16): a picture of a box the household no longer
+        // takes must not outlive the entry, and nothing else can find
+        // those files afterwards. Same rule the routine scheduler applies
+        // when a reminder is removed.
+        medicationVisualAidStore.deleteAll(for: id)
         calendarSync.syncNow(entries: routineScheduler.entries())
         // [BOOT-REVIEW P1-7] Removing an entry can empty today's doses —
         // the row hides itself, so the count must follow.
@@ -7098,6 +8150,124 @@ self.noteTalkContractChanged()
         appointmentSmsNoteDismissed = true
     }
 
+    // MARK: - Free-form events (rich-events task, 2026-09-17; design §2)
+
+    /// The household's own events — the ones that are neither a routine
+    /// nor a medication ("डाक्टर भेट, मंगलबार ११ बजे").
+    ///
+    /// The app owns no event store for these: a free-form event IS a
+    /// native `EKEvent` in the default calendar (design §1 decision 4),
+    /// so the family's Calendar app, the app's own import, the reminder
+    /// that fires and the Google bridge all see the same event, and a
+    /// family edit is simply an edit. `FreeFormEventService` is the thin
+    /// read/write face over EventKit plus the encrypted side index that
+    /// holds the ONE field the platform cannot (`EventExtrasStore` →
+    /// `EventExtras.photoFilename`).
+    ///
+    /// LAZY like the calendar services around it: constructing it opens
+    /// an `EKEventStore` and reads one encrypted payload, so it belongs
+    /// off the launch path. Nothing here requests permission — the Events
+    /// screens ask through the same EventKit prompt every other calendar
+    /// surface uses, and a denial reads as an empty list, never a crash.
+    private(set) lazy var freeFormEventService = FreeFormEventService(
+        extras: EventExtrasStore(storage: storage),
+        observability: observabilityBus
+    )
+
+    /// The Events leaf's list: the app's own events, soonest first.
+    /// Loaded from the leaf's `.task`, never its `body` — every row is an
+    /// EventKit fetch (see the service's note).
+    func freeFormEvents() -> [FreeFormEvent] {
+        freeFormEventService.upcoming()
+    }
+
+    /// One event for the detail screen, or nil when it is gone (deleted
+    /// here, or by the family in their own Calendar app).
+    func freeFormEvent(id: String) -> FreeFormEvent? {
+        freeFormEventService.event(withId: id)
+    }
+
+    /// The event's photo, or nil when it has none. Read through the
+    /// service, so the screens never touch a file store themselves.
+    func freeFormEventPhoto(forEventId eventId: String) -> UIImage? {
+        freeFormEventService.photo(forEventId: eventId)
+    }
+
+    /// Saves the Events form — creating when `eventId` is nil — and tells
+    /// the Google bridge, answering the native identifier. nil means
+    /// nothing was written, which is the form's cue to stay open with its
+    /// draft rather than claim a save that did not happen.
+    ///
+    /// Create AND edit both go through `eventCreated`, and that is the
+    /// whole edit-reconcile (design §3): the call rebuilds the twin's
+    /// draft from the event's CURRENT values and the service's
+    /// fingerprint diff decides whether anything changed — so an edit
+    /// that alters nothing sends no request, and one that moves the time
+    /// queues exactly one PUT.
+    @discardableResult
+    func saveFreeFormEvent(_ form: FreeFormEventForm,
+                           editing eventId: String? = nil) -> String? {
+        guard let savedId = freeFormEventService.save(form, editing: eventId) else {
+            return nil
+        }
+        // Read back through the service rather than the form: what was
+        // actually written is the honest thing to share (the gateway
+        // normalizes blank notes and address to nil on the way in).
+        if let saved = freeFormEventService.event(withId: savedId) {
+            calendarShareService.eventCreated(localEventId: savedId,
+                                              title: saved.title,
+                                              startDate: saved.startDate,
+                                              durationMinutes: saved.durationMinutes,
+                                              location: saved.address)
+        }
+        return savedId
+    }
+
+    /// Deletes the event natively, then tells the Google bridge — so the
+    /// family's copy does not keep an appointment the elder removed. The
+    /// bridge's tombstone is gated on sharing being ON (`canShare`), so
+    /// no queue row accumulates while the family has not made a decision;
+    /// `cleanupVanishedEvents()` queues the same tombstone on the first
+    /// pass after they switch it on.
+    ///
+    /// Answers whether the native event was actually removed — a false
+    /// still means "gone from this app" (the index row and the photo go
+    /// either way), so the UI treats both as deleted.
+    @discardableResult
+    func deleteFreeFormEvent(eventId: String) -> Bool {
+        let removed = freeFormEventService.delete(eventId: eventId)
+        calendarShareService.eventDeleted(localEventId: eventId)
+        return removed
+    }
+
+    /// A sheet-presents-this request for the Event detail screen, in the
+    /// `pendingPluginPresentation` shape so ContentView stays the only
+    /// place that knows how a screen is put on top.
+    struct EventDetailPresentation: Identifiable, Equatable {
+        let id = UUID()
+        let eventId: String
+    }
+    @Published var pendingEventDetail: EventDetailPresentation?
+
+    /// Opens the detail screen for `eventId` — the reminder notification's
+    /// **Open** action (design §4), and the same screen the Events list
+    /// opens for an edit, so an event never has two faces.
+    ///
+    /// The id is carried through, not a copy of the event: the calendar
+    /// may have changed since the notification was armed, and the detail
+    /// screen re-reads from the service when it appears.
+    func openEventDetail(eventId: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.pendingEventDetail = EventDetailPresentation(eventId: eventId)
+        }
+    }
+
+    /// The detail sheet's close button — clears the request so the sheet
+    /// cannot reappear on the next body pass.
+    func dismissEventDetail() {
+        pendingEventDetail = nil
+    }
+
     // MARK: - Native Calendar mirroring (v2 design §4.1, 2026-09-06)
 
     /// EventKit mirror of the unified routine schedule — the app remains
@@ -7108,6 +8278,70 @@ self.noteTalkContractChanged()
     /// natively — the parallel tag-store approach from the same merge
     /// was dropped in favor of it).
     private(set) lazy var calendarSync = CalendarSyncService(observabilityBus: observabilityBus)
+
+    // MARK: - Calendar & family sharing (2026-09-16)
+
+    /// The Google Calendar bridge (design §4.1). LAZY like `calendarSync`
+    /// above: constructing it reads a bundle key, an `EKEventStore` and
+    /// three local stores and touches no permission and no network. Its
+    /// first real work is `syncCalendarShare()` in
+    /// `composePostFirstFrame` — post-first-frame, so nothing here delays
+    /// the first paint.
+    ///
+    /// A missing OAuth client id is NOT a construction failure. The
+    /// session reports `isConfigured == false`, the service reports
+    /// `.notConfigured`, and the Settings card says so in words — which
+    /// is the state the app ships in until the family provides a client
+    /// (design §0). Graceful degradation here is the difference between
+    /// "sharing is not set up" and a crash on launch.
+    ///
+    /// No `objectWillChange` forward is installed for it, unlike the
+    /// eager nested services above: the Settings card observes the
+    /// service directly (`@ObservedObject`), and no coordinator state is
+    /// derived from it, so a forward would only invalidate every
+    /// coordinator observer for nothing — and installing one would force
+    /// this lazy service to exist at boot.
+    private(set) lazy var calendarShareService = CalendarShareService(
+        session: calendarShareSession,
+        gateway: calendarShareGateway,
+        store: LocalGoogleEventMappingStore(storage: storage),
+        consent: CalendarShareConsent(),
+        notifySettings: caregiverNotifySettings,
+        observabilityBus: observabilityBus,
+        contactsProvider: { [weak self] in self?.familyContacts ?? [] }
+    )
+
+    /// The Google account session — separate from the service so sign-out
+    /// is one call on one object, and so the presenter (a UI concern the
+    /// service must not know about) lives with the composition root that
+    /// can actually reach the window.
+    private(set) lazy var calendarShareSession: GoogleAccountSession = {
+        let session = GoogleAccountSession(observabilityBus: observabilityBus)
+        // Resolved at PRESENT time, never captured: the window scene does
+        // not exist when the composition root runs, and a controller
+        // captured then would be a detached one.
+        session.presenter = { [weak self] in self?.topPresentingViewController() }
+        return session
+    }()
+
+    /// The Calendar v3 / People v1 REST client over the session above.
+    private(set) lazy var calendarShareGateway = GoogleCalendarGateway(
+        session: calendarShareSession,
+        observabilityBus: observabilityBus
+    )
+
+    /// The topmost view controller Google's sign-in sheet presents from.
+    /// Walks past anything already presented so the sheet never lands
+    /// under an open modal. Returns nil before the scene exists, which
+    /// the session reports as a failed sign-in rather than a crash.
+    private func topPresentingViewController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        guard let window = scene?.windows.first(where: \.isKeyWindow) ?? scene?.windows.first,
+              var top = window.rootViewController else { return nil }
+        while let presented = top.presentedViewController { top = presented }
+        return top
+    }
 
     /// Read-only native Calendar/Reminders integration (2026-09-07): the
     /// REVERSE direction of `calendarSync` — native events/reminders
@@ -7237,6 +8471,27 @@ self.noteTalkContractChanged()
         refreshActiveNotificationCount()
     }
 
+    /// Applies family edits to the dose mirror — the
+    /// `onMedicationNativeChanges` relay (rich-events task, 2026-09-17).
+    /// The scheduler's mutator writes through `loadSchedule`, which
+    /// re-persists the entry, re-arms every dose and fires
+    /// `onScheduleChanged`: the Google twins follow from there, and the
+    /// mirror re-syncs over the new times, so a retime converges in one
+    /// pass instead of two apps disagreeing until the next launch.
+    private func applyMedicationCalendarMutations(
+        _ mutations: [CalendarSyncService.MedicationCalendarMutation]) {
+        for mutation in mutations {
+            switch mutation {
+            case .setScheduleTimes(let entryId, let times):
+                medicationScheduler.setScheduleTimes(times, entryId: entryId)
+            }
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.objectWillChange.send()
+        }
+        refreshActiveNotificationCount()
+    }
+
     // MARK: - Read-only external Calendar/Reminders surface (2026-09-07)
 
     /// Settings toggle handler for the native-item import: ON asks for
@@ -7322,10 +8577,59 @@ self.noteTalkContractChanged()
             // fire ran, and any refresh racing the task above is
             // superseded by the task's post-fire read.
             refreshTodayBriefing()
+            // [CALENDAR-SHARE] (2026-09-16) Same activation, the share
+            // layer's pass: reconcile both schedules, drain the queue,
+            // pull invitations the family sent. Runs here rather than on
+            // its own timer because a foreground return is the only
+            // moment the elder's device is reliably online.
+            syncCalendarShare()
         case .background:
             externalCalendar.submitBackgroundRefresh()
         default:
             break
+        }
+    }
+
+    // MARK: - Calendar & family sharing (2026-09-16)
+
+    /// The share layer's launch/foreground pass.
+    ///
+    /// The reconciling is here, not only on the schedulers' change
+    /// seams, for one reason: those seams fire on CHANGES, so a schedule
+    /// that already existed before the family connected Google would
+    /// never be shared at all. Reconcile is fingerprint-diffed and
+    /// enqueue is the only thing that can produce work, so an unchanged
+    /// schedule costs a few local reads and zero requests — which is
+    /// what makes it safe to run on every activation.
+    func syncCalendarShare() {
+        let share = calendarShareService
+        share.locale = activeLocale
+        // Idempotent assignment: the closure is the same every pass, and
+        // setting it here (rather than at construction) is what keeps
+        // the service lazy until the first pass.
+        share.onLocalEventImported = { [weak self] in
+            // An accepted invitation now sits in the native calendar;
+            // the existing import is what turns it into an armed
+            // reminder that fires and alerts a caregiver.
+            Task { await self?.externalCalendar.rescan() }
+        }
+        share.reconcileMedication(medicationScheduler.medicationEntries())
+        share.reconcileRoutines(routineScheduler.entries())
+        // Swept BEFORE the flush, so a twin whose local event the elder
+        // deleted natively in the same window is deleted from the family
+        // calendar by this pass rather than the next one.
+        share.cleanupVanishedEvents()
+        // And the free-form events' CURRENT native state, for the same
+        // window and the same reason: an event retimed by the family in
+        // their own Calendar app is an edit to the one native event this
+        // app reads back, so it belongs in this pass rather than only at
+        // the form's save seam. The key set is the side INDEX (not the
+        // ledger) because the ledger also holds invitations this device
+        // imported, whose twin belongs to the organizer.
+        share.reconcileFreeFormEvents(trackedEventIds: freeFormEventService.trackedEventIds)
+        Task {
+            await share.flushPending()
+            await share.syncInbound()
         }
     }
 
@@ -7343,6 +8647,15 @@ self.noteTalkContractChanged()
     }
 
     // MARK: - Routine reminder surface (v2 pivot Phase 1)
+
+    /// A routine reminder that just fired WITH photos, presented full
+    /// screen for the person the reminder is for (photo-visual-aids task,
+    /// 2026-09-16). Set by `RoutineVisualAidFireHandler` — the app's only
+    /// in-app firing surface for reminders, since routine reminders
+    /// otherwise deliver as text-only notification banners. Nil (the
+    /// normal state) means nothing to present; entries without photos
+    /// never set it, so their behaviour is byte-for-byte unchanged.
+    @Published private(set) var firedRoutineVisualAids: FiredRoutineVisualAids?
 
     /// All configured routine entries (seeded categories + voice-created)
     /// — the Reminders leaf's manage list.
@@ -7365,6 +8678,94 @@ self.noteTalkContractChanged()
         // [BOOT-REVIEW P1-7] Routine mutations land in the same reminder
         // surface the derived count reads.
         refreshActiveNotificationCount()
+    }
+
+    /// Replaces a routine's photos (the photo editor's save path).
+    /// Files are already written by `VisualAidStore` before this is
+    /// called; this persists the model payload and re-arms, so a photo
+    /// edit and a time edit take the same path. Re-arming matters here:
+    /// the fired notification carries the first photo, so a photo added
+    /// to an already-armed reminder only reaches the banner through the
+    /// reschedule.
+    func setRoutineVisualAids(_ entryId: UUID, aids: [VisualAid]) {
+        routineScheduler.setVisualAids(aids, entryId: entryId)
+    }
+
+    /// The presentation is dismissed (Close button, or the cover's own
+    /// swipe) — clearing the item is what actually dismisses it.
+    func dismissFiredRoutineVisualAids() {
+        firedRoutineVisualAids = nil
+    }
+
+    /// `RoutineVisualAidFireHandler`'s presentation sink, on the main
+    /// queue. Reads the title through `activeLocale` at fire time — the
+    /// language the app is in NOW, not the one it was in when the
+    /// notification was armed.
+    private func presentRoutineVisualAids(for entry: RoutineEntry) {
+        firedRoutineVisualAids = FiredRoutineVisualAids(
+            entryId: entry.id,
+            title: entry.displayTitle(locale: activeLocale),
+            aids: entry.visualAids
+        )
+    }
+
+    // MARK: - Medication dose surface (medication-visual-aids, 2026-09-16)
+
+    /// A medication reminder that just fired WITH photos, presented full
+    /// screen for the person the dose is for. Set by
+    /// `MedicationVisualAidFireHandler` — nil (the normal state) means
+    /// nothing to present, and entries without photos never set it, so
+    /// their delivery is exactly what it was before this feature.
+    @Published private(set) var firedMedicationVisualAids: MedicationVisualAidsPresentation?
+
+    /// Replaces a medication's photos (the photo editor's save path).
+    /// Files are already written by `VisualAidStore` before this is
+    /// called; this persists the entry payload only — a photo edit is not
+    /// a schedule edit, so no alarm is re-armed and no escalation state is
+    /// touched (see `MedicationScheduler.setVisualAids`; the dose screen
+    /// reads the entry at fire time, so the photo is live either way).
+    func setMedicationVisualAids(_ entryId: UUID, aids: [VisualAid]) {
+        medicationScheduler.setVisualAids(aids, entryId: entryId)
+    }
+
+    /// The presentation is dismissed (Close button, or the cover's own
+    /// swipe) — clearing the item is what actually dismisses it.
+    func dismissFiredMedicationVisualAids() {
+        firedMedicationVisualAids = nil
+    }
+
+    /// The elder tapped "I took it" on the fired-dose screen. Runs the same
+    /// dose path as the Meds leaf row (`confirmMedicationDose`: the FR-D01
+    /// challenge gate first, then the baseline acknowledgement) and clears
+    /// the presentation: when a challenge was issued the Home chips own the
+    /// follow-up, and when the dose was recorded the Home outcome caption
+    /// behind this screen is what the elder should now see.
+    func confirmFiredMedicationDose(entryId: UUID) {
+        confirmMedicationDose(entryId: entryId)
+        firedMedicationVisualAids = nil
+    }
+
+    /// The elder's "I took it" from an elder-facing dose surface — the
+    /// Meds leaf's dose row and the fired-dose screen share this one path,
+    /// so the safety gate cannot drift between them. Returns true when the
+    /// dementia-aware confirmation challenge was issued (the caller's
+    /// surface gets out of the way; the Home chips own the answer).
+    @discardableResult
+    func confirmMedicationDose(entryId: UUID) -> Bool {
+        if startVoiceAckConfirmation(for: entryId) != nil {
+            return true
+        }
+        handleMedicationAcknowledgement(entryId: entryId)
+        speak(key: "router.confirmationYes")
+        return false
+    }
+
+    /// `MedicationVisualAidFireHandler`'s presentation sink, on the main
+    /// queue. Snapshots the name and dose line at FIRE time — the entry
+    /// may be edited (or deleted) while the screen is up, and the dose the
+    /// elder is being shown must be the one that fired.
+    private func presentMedicationVisualAids(for entry: MedicationEntry) {
+        firedMedicationVisualAids = MedicationVisualAidsPresentation(entry: entry)
     }
 
     /// Today's medication reminders as localized "name — time" lines for
@@ -7421,11 +8822,31 @@ self.noteTalkContractChanged()
         guard let prompt = medicationScheduler.startConfirmationChallenge(for: entryId) else {
             return nil
         }
+        // [APP-LAUNCHER F1] The dose challenge takes the window — and the
+        // question it displaces is dropped BEFORE the challenge is armed,
+        // so the two can never be pended at once (the invariant
+        // `ConfirmationArbitration.owner` encodes).
+        dropLaunchSupersededByMedicationChallenge()
         DispatchQueue.main.async { [weak self] in
             self?.pendingConfirmationEntryId = entryId
-            self?.voiceSession.transition(to: .awaitingConfirmation)
+            self?.openConfirmationWindow()
         }
         return prompt
+    }
+
+    /// [APP-LAUNCHER F1] Drops a pended launch because a dose challenge is
+    /// taking the confirmation window. The launch is recorded as the
+    /// unanswered verdict it now is (`timeout` — the question expired
+    /// without an answer) and announced on the bus; nothing is opened. The
+    /// alternative — leaving it pended — is the bug this fixes: the next
+    /// "हो" would then be spent on the launch, and the FR-D03 double-dose
+    /// gate would never run on a dose the elder had just been asked about.
+    private func dropLaunchSupersededByMedicationChallenge() {
+        guard let launch = pendingAppLaunch else { return }
+        pendingAppLaunch = nil
+        appendCapture(launch.capture, .timeout, path: launch.capturePath)
+        emitAppLaunch(eventType: "launch_superseded",
+                      outcome: "\(launch.appID):supersededByMedicationChallenge")
     }
 
     // MARK: - [INTENTLOG-CAPTURE] Flywheel capture (T-054 precursor)
@@ -7453,6 +8874,8 @@ self.noteTalkContractChanged()
             appendCapture(action.capture, .timeout)
         } else if let event = pendingCalendarEvent {
             appendCapture(event.capture, .timeout)
+        } else if let launch = pendingAppLaunch {
+            appendCapture(launch.capture, .timeout)
         }
     }
 
@@ -7539,7 +8962,44 @@ self.noteTalkContractChanged()
             }
             return
         }
+        // App-launch confirmations (voice app launcher, 2026-09-16): the
+        // same additive shape as the call and calendar-event blocks above
+        // — checked and returned early, so the medication path below stays
+        // untouched for every confirmation EXCEPT a simultaneous dose
+        // challenge, which outranks the launch (F1). A YES hands the pended app to the shared launch
+        // executor (which speaks the surface that actually appeared); a NO
+        // speaks the honest cancellation, because an elder who answers
+        // "होइन" must hear that they were heard. Nothing is opened on a no.
+        //
+        // [APP-LAUNCHER F1] ONLY when the launch owns this answer. A
+        // medication dose-challenge that is pended at the same time takes
+        // precedence (`ConfirmationArbitration`), so the block falls
+        // through to the medication path below — which is where the FR-D03
+        // double-dose check lives. This early return used to swallow it:
+        // the launch was answered, the launch was opened, and the dose the
+        // elder had just confirmed was never recorded.
+        let confirmationOwner = ConfirmationArbitration.owner(
+            pendingAppLaunch: pendingAppLaunch?.appID,
+            hasMedicationChallenge: pendingConfirmationEntryId != nil)
+        if confirmationOwner == .appLaunch, let launch = pendingAppLaunch {
+            pendingAppLaunch = nil
+            if case .yes = response {
+                emitAppLaunch(eventType: "launch_confirmed", outcome: "\(launch.appID):confirmed")
+                executePendingAppLaunch(launch)
+            } else {
+                // [INTENTLOG-CAPTURE] Same negative-half capture as the
+                // call path above — a declined launch is flywheel signal.
+                appendCapture(launch.capture, .denied, path: launch.capturePath)
+                emitAppLaunch(eventType: "launch_cancelled", outcome: "\(launch.appID):cancelled")
+                speak(text: L10n.str("launcher.cancelled", locale: activeLocale))
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.voiceSession.transition(to: .idle)
+            }
+            return
+        }
         guard let entryId = pendingConfirmationEntryId else { return }
+
         _ = medicationScheduler.acknowledgeWithConfirmation(
             entryId: entryId,
             at: Date(),
@@ -7571,6 +9031,7 @@ self.noteTalkContractChanged()
         pendingConfirmationEntryId != nil || pendingCallAction != nil || pendingRephrase != nil
             || pendingCalendarEvent != nil
             || !pendingNavigationWalk.isEmpty
+            || pendingAppLaunch != nil
     }
 
     /// Used by `CommandRouter` to identify what "I took my medication" refers
@@ -7659,6 +9120,18 @@ self.noteTalkContractChanged()
             }
             Task {
                 await self.externalCalendar.rescan()
+                // [CALENDAR-SHARE] (2026-09-16) The share layer's INTERVAL
+                // pass (design §2.5: "foreground + interval"). It rides
+                // this handler rather than a task identifier of its own:
+                // the identifier set is fixed in Info.plist, the cadence
+                // wanted is exactly this one, and this handler is already
+                // awake with the app free to use the network.
+                //
+                // The hop is not cosmetic — the handler fires on a
+                // background queue and the share service is main-confined
+                // (it reads schedulers and settings and, on an import,
+                // kicks the rescan that touches the UI's published state).
+                await MainActor.run { self.syncCalendarShare() }
                 task.setTaskCompleted(success: true)
             }
         }

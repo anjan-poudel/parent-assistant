@@ -196,8 +196,10 @@ enum ModelCatalog {
     /// v5 fine-tune on the ANE path — 6-bit palettized, best accuracy +
     /// fast (v9 release, 2026-09-09).
     static let whisperKitMediumV5 = ModelID("whisperkit-ne-medium-v5-q6")
-    /// v6 fine-tune on the ANE path — 6-bit palettized, best accuracy +
-    /// fast (v11 release, 2026-09-11).
+    /// v6 fine-tune on the ANE path — 8-bit palettized rebuild (v17
+    /// release, 2026-09-14), best accuracy + fast. The id keeps the
+    /// `-q6` suffix it was first published under (the model DIRECTORY
+    /// name WhisperKit looks up); only the delivered zip changed.
     static let whisperKitMediumV6 = ModelID("whisperkit-ne-medium-v6-q6")
     static let whisperSmallMultilingual = ModelID("whisper-small-multilingual-q5_1")
     /// The FINISHED small Devanagari Nepali model: stage-4 fine-tune on
@@ -689,13 +691,21 @@ enum ModelCatalog {
             // v9 → iOS 18+.
             filename: "whisperkit-ne-medium-v6-q6",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v17/whisperkit-ne-medium-v6-q8.zip")!,
-            // Unpacked q6 mlmodelc trio + tokenizer (~613 MB zip).
+            // Unpacked q8 mlmodelc trio + tokenizer (~767 MB zip).
             sizeBytes: 800_000_000,
             // SHA-256 of the release ZIP — verified by installWhisperKitModel.
             sha256: "b894e0b4c39a200872b4266c7df2be00600a6bb19898aa784926277b379ebe52",
             minDeviceRAMBytes: 4_000_000_000,
             dependsOn: nil,
-            whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v11/whisperkit-ne-medium-v6-q6.zip")!,
+            // The URL the installer actually fetches (`whisperKitZipURL ??
+            // downloadURL` — ModelDownloadService), and it MUST be the asset
+            // the `sha256`/`whisperKitZipBytes` above describe. df12bd0 moved
+            // the hash to the q8 rebuild but left this field on v11, so every
+            // v6 install fetched the q6 zip and died on checksum verification
+            // (the model could not be installed at all). GitHub asset digests,
+            // checked 2026-09-16: v11 q6 = 88ff2a77… / 642,434,570 B, v17 q8
+            // = b894e0b4… / 766,945,619 B — the pair above is the v17 one.
+            whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v17/whisperkit-ne-medium-v6-q8.zip")!,
             whisperKitZipBytes: 766_945_619,
             requiresiOS18: true,
             // Language tag (2026-09-13): ne-only model.
@@ -1196,9 +1206,12 @@ enum ModelCatalog {
 
     /// The STT engines the Settings "AI मोडेल" screen offers, best first.
     ///
+    /// [DEFAULTS 2026-09-16] v6 on the ANE leads: it is the best-measured
+    /// accuracy AND the fast path, and it is the per-language Nepali
+    /// default (`languageDefaultPicks`), so the picker's first row is the
+    /// model an auto-switch lands on.
+    ///
     /// Hidden (in `all`, not offered):
-    ///   - `whisperKitNepaliMedium` — superseded by the v6 ANE build
-    ///     (same medium class, better accuracy, same fast path).
     ///   - `whisperLargeV3Nepali` / `whisperLargeV3NepaliV2` — Large on
     ///     the CPU path: ~1.2 GB and minutes per utterance, and the v2
     ///     fine-tune never beat its own base on the FLEURS harness.
@@ -1206,9 +1219,17 @@ enum ModelCatalog {
     ///     the same checkpoint at better quality.
     ///   - `whisperSmallNepali` — the mid-training distill the small
     ///     fine-tune superseded.
+    ///
+    /// NOTE: `whisperKitNepaliMedium` is offered again, contrary to the
+    /// declutter note that used to live here — 02b2596 re-offered the v3
+    /// ANE on user request because the v6 **q6** quant mangled short
+    /// medication phrases. The v6 entry now DELIVERS the **q8** rebuild
+    /// (df12bd0, completed by the `whisperKitZipURL` fix on that entry),
+    /// which is token-identical to fp32 in verification, so v6 keeps the
+    /// lead.
     static let availableSTTEntries: [ModelCatalogEntry] = [
-        whisperMediumV6,
         whisperKitMediumV6,
+        whisperMediumV6,
         whisperKitNepaliMedium,
         whisperMediumV5,
         whisperKitMediumV5,
@@ -1275,10 +1296,13 @@ enum ModelCatalog {
     /// pickers' preference order, which leads with the best-accuracy
     /// downloads, so an en household that had a Nepali brain selected used
     /// to trigger an implicit multi-GB download (qwen3-4B) it never asked
-    /// for. The map's picks are the small/bundled models instead:
-    ///   - STT `ne` → the BUNDLED medium fine-tune (`bundledResourceName`
-    ///     is set — the first-run install already put it on disk, so the
-    ///     switch downloads nothing);
+    /// for. The map's picks are the ones the household should land on:
+    ///   - STT `ne` → the v6 whisperKit build — the ANE fast path, the
+    ///     best measured accuracy, and the picker's own first row
+    ///     ([DEFAULTS 2026-09-16]: the default rule is "best and, where
+    ///     the catalog has one, ANE-accelerated". It is a download, so
+    ///     PR 3's auto-restore is what makes a fresh install converge on
+    ///     it without a Settings trip);
     ///   - STT `en` → whisper-base.en (60 MB, not the 190 MB multilingual);
     ///   - brain `ne` → the gate-passing slot-canonical 4B (the curated
     ///     list's own pick — a superseded entry must never be what an
@@ -1292,7 +1316,7 @@ enum ModelCatalog {
     /// narrows, what the catalog can answer.
     static let languageDefaultPicks: [ModelKind: [String: ModelID]] = [
         .whisperBase: [
-            "ne": whisperMediumFinetunedNepali,
+            "ne": whisperKitMediumV6,
             "en": whisperBaseEn
         ],
         .llamaBase: [

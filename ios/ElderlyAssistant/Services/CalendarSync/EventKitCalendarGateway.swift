@@ -36,12 +36,44 @@ struct CalendarEventRecord: Equatable {
     /// The event's recurrence in app terms; nil when it carries none
     /// or a shape the app cannot express (monthly, yearly…).
     let recurrence: EventRecurrence?
+    /// `EKEvent.location` — the free-form address a rich event carries
+    /// (rich-events task, 2026-09-17). Read back so the share layer can
+    /// tell "the family changed the address in the Calendar app" from
+    /// "the address is unchanged" (see `CalendarShareService`'s
+    /// free-form reconcile) and so an address the family added natively
+    /// still reaches the Google twin. nil for events with no address —
+    /// the overwhelming majority.
+    ///
+    /// A `var` with a default rather than a `let`: it is an ADDITION to
+    /// a record that several fakes and call sites construct positionally,
+    /// and a defaulted trailing member keeps every one of them compiling
+    /// unchanged.
+    var location: String? = nil
+
+    /// How long the event's block runs, in minutes (rich-events task,
+    /// 2026-09-17) — `endDate - startDate`, clamped to at least one
+    /// minute. The mirror planners ignore it (a mirror is always the
+    /// house 30 minutes); it exists for the SHARE layer, where the
+    /// duration the elder set in the Events form is part of the event
+    /// the family reads, and dropping it would silently shorten every
+    /// shared appointment to half an hour.
+    ///
+    /// Defaulted like `location` above, and for the same reason: the
+    /// fakes that model a record without an end time still compile and
+    /// still describe the house default.
+    var durationMinutes: Int = 30
 }
 
 /// Recurrence shapes the app's mirrors can take — the RoutineEntry
 /// model's daily/weekly pair, in EventKit terms. Weekday numbering is
 /// the app's: 1 = Sunday … 7 = Saturday (matches `EKWeekday`).
-enum EventRecurrence: Equatable {
+///
+/// `Codable` (calendar & family sharing, 2026-09-16): the persistent
+/// share queue stores a draft's recurrence verbatim, so an operation
+/// enqueued before a relaunch still knows it was a series when it is
+/// flushed. Synthesized conformance — the associated value round-trips
+/// as `{"weekly":{"weekdays":[…]}}` / `{"daily":{}}`.
+enum EventRecurrence: Equatable, Codable {
     case daily
     case weekly(weekdays: [Int])
 }
@@ -55,14 +87,26 @@ struct CalendarEventDraft: Equatable {
     let startDate: Date
     var durationMinutes: Int = 30
     let recurrence: EventRecurrence?
+    /// A plain address string written to `EKEvent.location` (rich-events
+    /// task, 2026-09-17). Deliberately a STRING, not a coordinate: the
+    /// native Calendar app renders it in the event's location row, and
+    /// the Google twin inherits it verbatim. Forward-geocoding happens
+    /// only at navigation time, never here — a stored coordinate would
+    /// go stale the moment the family corrects the address.
+    ///
+    /// nil (and blank, normalized to nil by the callers that take it
+    /// from a text field) means "no address".
+    let location: String?
 
     init(title: String, notes: String?, startDate: Date,
-         durationMinutes: Int = 30, recurrence: EventRecurrence?) {
+         durationMinutes: Int = 30, recurrence: EventRecurrence?,
+         location: String? = nil) {
         self.title = title
         self.notes = notes
         self.startDate = startDate
         self.durationMinutes = durationMinutes
         self.recurrence = recurrence
+        self.location = location
     }
 }
 
@@ -96,6 +140,22 @@ protocol EventKitCalendarGateway: AnyObject {
     /// Every event with an occurrence in [start, end], all calendars.
     func fetchEvents(from start: Date, to end: Date) -> [CalendarEventRecord]
 
+    /// One event by identifier, or nil when it no longer exists.
+    ///
+    /// The free-form share reconcile's read (rich-events task,
+    /// 2026-09-17): it walks the side-index's native event ids and needs
+    /// each one's CURRENT title / start / location to decide whether the
+    /// family's edit in the Calendar app has to reach the Google twin.
+    /// A window fetch would do that too, but only for events inside the
+    /// window — an event the family moved a year out would silently stop
+    /// being reconciled, which is exactly the edit that matters most.
+    ///
+    /// NO default implementation on purpose. A protocol extension that
+    /// answered nil would make every fake report "gone", and the caller
+    /// reads "gone" as "tombstone the twin" — a default here would be a
+    /// mass-delete waiting to happen. Conformers state their answer.
+    func fetchEvent(identifier: String) -> CalendarEventRecord?
+
     /// Creates the event — in the given calendar when an identifier is
     /// provided (the Sahayak calendar), else the store's default
     /// calendar (the legacy one-way mirror's home). Returns the new
@@ -116,6 +176,31 @@ protocol EventKitCalendarGateway: AnyObject {
     /// calendars) and returns the count removed — the legacy rebuild's
     /// wipe-by-tag. One commit for the whole batch.
     func removeEvents(matchingNotesFragment fragment: String) -> Int
+
+    /// Whether an event with this identifier is still in the store — the
+    /// stale-twin sweep's only question (`CalendarShareService`), which
+    /// asks it before deleting a twin from the family's calendar.
+    ///
+    /// A gateway that cannot answer says ALIVE: see the extension below.
+    func eventExists(identifier: String) -> Bool
+}
+
+extension EventKitCalendarGateway {
+    /// Fail-SAFE default: `true` ("I cannot tell you it is gone").
+    ///
+    /// The only thing a "gone" verdict can trigger is a DELETE on the
+    /// family's shared calendar — irreversible, and visible to everyone
+    /// the elder shares with. A wrong "gone" therefore costs an event the
+    /// family is relying on; a wrong "alive" costs one stale twin until
+    /// the next sweep. So the answer that cannot do harm is the default,
+    /// and every conformer that genuinely owns an event store (the
+    /// EventKit one, and the fakes that model it) overrides it.
+    ///
+    /// The sweep additionally refuses to run without FULL calendar access
+    /// — write-only access cannot read events at all, so every lookup
+    /// would answer nil and the sweep would delete everything it knows
+    /// about.
+    func eventExists(identifier: String) -> Bool { true }
 }
 
 // MARK: - Production gateway
@@ -128,6 +213,15 @@ final class EKCalendarGateway: EventKitCalendarGateway {
     static let sahayakCalendarTitle = "Sahayak"
 
     private let store = EKEventStore()
+
+    /// A real answer, unlike the protocol's fail-safe default: the store
+    /// either holds the identifier or it does not. `event(withIdentifier:)`
+    /// also returns the recurring-event MASTER for an occurrence's id,
+    /// which is what the sweep wants — a series the elder deleted in the
+    /// Calendar app takes its master with it.
+    func eventExists(identifier: String) -> Bool {
+        store.event(withIdentifier: identifier) != nil
+    }
 
     var eventsAccess: CalendarAccess {
         let status = EKEventStore.authorizationStatus(for: .event)
@@ -193,18 +287,55 @@ final class EKCalendarGateway: EventKitCalendarGateway {
 
     func fetchEvents(from start: Date, to end: Date) -> [CalendarEventRecord] {
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
-        return store.events(matching: predicate).map { event in
-            CalendarEventRecord(
-                eventIdentifier: event.eventIdentifier,
-                calendarIdentifier: event.calendar.calendarIdentifier,
-                title: event.title ?? "",
-                notes: event.notes,
-                startDate: event.startDate,
-                isAllDay: event.isAllDay,
-                isCanceled: event.status == .canceled,
-                recurrence: Self.recurrence(from: event.recurrenceRules?.first)
-            )
-        }
+        return store.events(matching: predicate).map(Self.record(from:))
+    }
+
+    func fetchEvent(identifier: String) -> CalendarEventRecord? {
+        guard let event = store.event(withIdentifier: identifier) else { return nil }
+        return Self.record(from: event)
+    }
+
+    /// `EKEvent` → plain record, in ONE place so the window fetch and the
+    /// by-identifier read can never describe the same event differently —
+    /// the reconcile compares the two readings' fields against each
+    /// other, and a field mapped in one and forgotten in the other would
+    /// read as a family edit on every pass.
+    private static func record(from event: EKEvent) -> CalendarEventRecord {
+        CalendarEventRecord(
+            eventIdentifier: event.eventIdentifier,
+            calendarIdentifier: event.calendar.calendarIdentifier,
+            title: event.title ?? "",
+            notes: event.notes,
+            startDate: event.startDate,
+            isAllDay: event.isAllDay,
+            isCanceled: event.status == .canceled,
+            recurrence: recurrence(from: event.recurrenceRules?.first),
+            location: Self.normalizedLocation(event.location),
+            durationMinutes: Self.durationMinutes(from: event)
+        )
+    }
+
+    /// An event's block length in whole minutes, floored at 1.
+    ///
+    /// A zero or negative span is not hypothetical: EventKit returns a
+    /// zero-length block for an event whose end was never set, and a
+    /// duration of 0 would make a shared twin an instant the family
+    /// cannot see on their calendar at all. One minute is the smallest
+    /// honest answer.
+    static func durationMinutes(from event: EKEvent) -> Int {
+        guard let end = event.endDate, let start = event.startDate else { return 30 }
+        return max(1, Int(end.timeIntervalSince(start) / 60))
+    }
+
+    /// `EKEvent.location` normalized to "a non-blank address or nil".
+    /// EventKit happily stores an empty string (and a whitespace-only
+    /// one), and the share layer's "does this event have an address?"
+    /// question has to answer the same way whether the field was never
+    /// filled or was emptied by the family.
+    static func normalizedLocation(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     func createEvent(_ draft: CalendarEventDraft,
@@ -298,32 +429,53 @@ final class EKCalendarGateway: EventKitCalendarGateway {
     private func apply(_ draft: CalendarEventDraft, to event: EKEvent) {
         event.title = draft.title
         event.notes = draft.notes
+        // Written verbatim as plain text: the native Calendar app shows
+        // it in the event's location row, and the Google twin inherits
+        // it. A draft with no address CLEARS the field, so a family
+        // edit that removed an address is not silently put back by the
+        // next mirror pass.
+        event.location = draft.location
         event.startDate = draft.startDate
         event.endDate = draft.startDate
             .addingTimeInterval(TimeInterval(draft.durationMinutes) * 60)
-        if let recurrence = draft.recurrence {
-            switch recurrence {
-            case .daily:
-                event.recurrenceRules = [
-                    EKRecurrenceRule(recurrenceWith: .daily, interval: 1, end: nil)
-                ]
-            case .weekly(let weekdays):
-                // A weekly rule always lists at least one day here
-                // (the planner only emits `.weekly` with days);
-                // weekNumber must be 0 for weekly rules.
-                let days = weekdays
-                    .compactMap { EKWeekday(rawValue: $0) }
-                    .map { EKRecurrenceDayOfWeek(dayOfTheWeek: $0, weekNumber: 0) }
-                event.recurrenceRules = [
-                    EKRecurrenceRule(recurrenceWith: .weekly, interval: 1,
+        let rules = Self.recurrenceRules(for: draft.recurrence)
+        // nil rather than [] for "does not repeat": EventKit's own
+        // property is optional and every reader in this codebase (the
+        // gateway's `recurrence(from:)` included) treats a present-but-
+        // empty rule list as ambiguous. Clearing the field outright is
+        // the one answer that cannot be misread.
+        event.recurrenceRules = rules.isEmpty ? nil : rules
+        event.alarms = nil
+    }
+
+    /// The EventKit rules a draft's recurrence means. A pure, static
+    /// mapping (rich-events task, 2026-09-17) so the one place the app's
+    /// none/daily/weekly vocabulary becomes an `EKRecurrenceRule` is
+    /// unit-testable (`FreeFormEventFormTests`) without an event store —
+    /// the free-form Events form's weekly choice and the mirror planners
+    /// both land here, and they must produce the same rule for the same
+    /// input.
+    ///
+    /// nil means "does not repeat" and answers an empty array, which
+    /// CLEARS any rule an event already carried (a family edit that took
+    /// a series back to a one-off), exactly as the previous inline switch
+    /// did.
+    static func recurrenceRules(for recurrence: EventRecurrence?) -> [EKRecurrenceRule] {
+        guard let recurrence else { return [] }
+        switch recurrence {
+        case .daily:
+            return [EKRecurrenceRule(recurrenceWith: .daily, interval: 1, end: nil)]
+        case .weekly(let weekdays):
+            // A weekly rule always lists at least one day here (the
+            // planner only emits `.weekly` with days); weekNumber must be
+            // 0 for weekly rules.
+            let days = weekdays
+                .compactMap { EKWeekday(rawValue: $0) }
+                .map { EKRecurrenceDayOfWeek(dayOfTheWeek: $0, weekNumber: 0) }
+            return [EKRecurrenceRule(recurrenceWith: .weekly, interval: 1,
                                      daysOfTheWeek: days, daysOfTheMonth: nil,
                                      monthsOfTheYear: nil, weeksOfTheYear: nil,
-                                     daysOfTheYear: nil, setPositions: nil, end: nil)
-                ]
-            }
-        } else {
-            event.recurrenceRules = nil
+                                     daysOfTheYear: nil, setPositions: nil, end: nil)]
         }
-        event.alarms = nil
     }
 }

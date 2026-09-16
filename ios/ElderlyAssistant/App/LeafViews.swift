@@ -104,6 +104,10 @@ struct MedicalView: View {
     /// Honest no-parse caption under the paste button; cleared on the
     /// next paste attempt.
     @State private var showPasteFailed = false
+    /// A dose row's photos, open full screen (medication-visual-aids task,
+    /// 2026-09-16). Snapshot taken at TAP time: the viewer shows the dose
+    /// line the row showed, even if the entry is edited while it is up.
+    @State private var viewingDoseAids: MedicationVisualAidsPresentation?
 
     private var todaysReminders: [ScheduledReminder] {
         coordinator.pendingReminders
@@ -139,6 +143,28 @@ struct MedicalView: View {
                    role: .cancel) {}
         } message: {
             Text(pasteAlertMessage)
+        }
+        // The dose photos, full screen — the SAME screen a dose fires into
+        // (photo large above the name and the dose line, one "I took it"),
+        // so a dose looks identical whether it was opened from a
+        // notification or tapped in this list. Acknowledge runs the one
+        // shared path and closes the screen either way: a challenge hands
+        // the UI to the Home chips, a recorded dose leaves the Home
+        // outcome caption behind it.
+        .fullScreenCover(item: $viewingDoseAids) { dose in
+            MedicationDoseFireScreen(
+                medicationName: dose.medicationName,
+                doseDescription: dose.doseDescription,
+                aids: dose.aids,
+                entryId: dose.entryId,
+                store: coordinator.medicationVisualAidStore,
+                locale: coordinator.activeLocale,
+                onAcknowledge: {
+                    coordinator.confirmMedicationDose(entryId: dose.entryId)
+                    viewingDoseAids = nil
+                },
+                onClose: { viewingDoseAids = nil }
+            )
         }
     }
 
@@ -458,7 +484,13 @@ struct MedicalView: View {
     // MARK: - Today's doses (spec §4.3)
 
     private func doseRow(_ reminder: ScheduledReminder) -> some View {
-        HStack(spacing: 12) {
+        // The dose's photos, if the family attached any. Read (not shown)
+        // while the row draws: a thumbnail here would mean reading image
+        // files from `body`, which this screen must never do — the
+        // full-screen viewer loads them in its own `.task`, exactly like
+        // the routine reminder's screen.
+        let aids = coordinator.medicationVisualAidsPresentation(for: reminder.medicationEntryId)
+        return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(coordinator.medicationName(for: reminder.medicationEntryId))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
@@ -468,6 +500,19 @@ struct MedicalView: View {
                     .foregroundStyle(DesignTokens.textSecondary)
             }
             Spacer()
+            if let aids {
+                Button {
+                    viewingDoseAids = aids
+                } label: {
+                    Image(systemName: "photo.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(DesignTokens.accent)
+                        .frame(minWidth: DesignTokens.minTapTargetSize,
+                               minHeight: DesignTokens.minTapTargetSize)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("visualAid.title"))
+            }
             Button {
                 takeDose(reminder)
             } label: {
@@ -490,14 +535,15 @@ struct MedicalView: View {
 
     /// Baseline ack or challenge → Home for the yes/no chips. The
     /// confirmation answer is handled by the chips/voice on Home.
+    ///
+    /// The gate itself lives on the coordinator (`confirmMedicationDose`)
+    /// because the fired-dose screen runs the same path — the two
+    /// elder-facing dose surfaces must not be able to disagree about when
+    /// a challenge is required.
     private func takeDose(_ reminder: ScheduledReminder) {
-        let entryId = reminder.medicationEntryId
-        if coordinator.startVoiceAckConfirmation(for: entryId) != nil {
+        if coordinator.confirmMedicationDose(entryId: reminder.medicationEntryId) {
             // Challenge issued — chips now own the UI on Home.
             dismiss()
-        } else {
-            coordinator.handleMedicationAcknowledgement(entryId: entryId)
-            coordinator.speak(key: "router.confirmationYes")
         }
     }
 }
@@ -507,44 +553,51 @@ struct MedicalView: View {
 /// Today's reminders from ALL THREE reminder systems — medication doses
 /// (`MedicationScheduler`), routine occurrences (walk, exercise, meals, …
 /// from `RoutineScheduler`), and items imported from the native
-/// Calendar/Reminders apps (`ExternalCalendarService`, read-only bridge)
-/// — plus a manage list where the family enables/disables the seeded
-/// routine categories. Native Calendar events from the days ahead sit
-/// under an "Upcoming events" section (upcoming-events task, 2026-09-07).
-/// Medication management stays on the Medical leaf
-/// (the renamed Meds leaf, medical task 2026-09-07) / Settings editor;
-/// this screen never mutates medication data.
+/// Calendar/Reminders apps (`ExternalCalendarService`, read-only bridge).
+/// Native Calendar events from the days ahead sit under an "Upcoming
+/// events" section (upcoming-events task, 2026-09-07). Medication
+/// management stays on the Medical leaf (the renamed Meds leaf, medical
+/// task 2026-09-07) / Settings editor; this screen never mutates
+/// medication data.
+///
+/// The manage list that used to live here — the family's enable/disable
+/// toggles and per-routine photo management — moved to the Settings hub's
+/// Reminders tab (`RoutineSettingsView`, routine-settings move,
+/// 2026-09-17). This leaf shows the day; Settings configures it.
 struct RemindersView: View {
     @EnvironmentObject var coordinator: AppCoordinator
-    /// Bumped after a toggle so the cached lists re-read fresh data —
-    /// the coordinator exposes reminders as computed vars, not @Published.
-    @State private var entriesVersion = 0
 
     /// DESIGN-REVIEW (P2 — "keep encrypted storage reads out of `body`",
     /// "build row presentation values when source data changes"): every
     /// `coordinator.routineEntries` access is a Keychain read plus a JSON
     /// decode (`RoutineStore.loadEntries` → `EncryptedLocalStorage`), and
-    /// this screen used to make that read TWICE per body evaluation —
-    /// once building `todayRows`, once in the `ForEach` below — plus one
-    /// more for the occurrences. A body evaluation happens on any
-    /// coordinator publish, so merely having this leaf open used to mean
-    /// a steady stream of securityd round-trips.
+    /// this screen used to make that read once per body evaluation just
+    /// building `todayRows`, plus one more for the occurrences. A body
+    /// evaluation happens on any coordinator publish, so merely having
+    /// this leaf open used to mean a steady stream of securityd
+    /// round-trips.
     ///
     /// The roster and the finished rows now live in state, rebuilt by the
     /// `.task` below when the underlying data actually changes; the body
     /// only reads them.
     @State private var routineEntries: [RoutineEntry] = []
     @State private var todayRows: [TodayRow] = []
-    /// Each manage row's subtitle ("Sun, Tue · 9:00 AM"), built with the
-    /// rows so no formatter work runs while drawing.
-    @State private var routineSummaries: [UUID: String] = [:]
+    /// A today row whose photos the elder tapped. Only rows that actually
+    /// carry photos can set this, so the full-screen viewer never appears
+    /// for a reminder without one. Medication dose rows are included
+    /// (medication-visual-aids task, 2026-09-16) — but note what they open:
+    /// the VIEWING screen, not the dose screen's "I took it". This leaf
+    /// shows the day and never mutates medication data (see the type's
+    /// doc comment); acknowledging a dose belongs to the Meds leaf and to
+    /// the notification, which is where a dose actually fires.
+    @State private var viewingAidRow: TodayRow?
 
-    /// Everything the cached rows depend on: an in-screen toggle, a voice
-    /// turn (a routine can be added by asking), a dose completed
-    /// elsewhere, and the app's language (the rows carry localized
-    /// titles). Counting these is cheap; re-reading the stores is not.
+    /// Everything the cached rows depend on: a voice turn (a routine can
+    /// be added by asking), a dose completed elsewhere, and the app's
+    /// language (the rows carry localized titles). Counting these is
+    /// cheap; re-reading the stores is not.
     private var refreshKey: String {
-        "\(entriesVersion)|\(coordinator.conversationHistory.count)"
+        "\(coordinator.conversationHistory.count)"
             + "|\(coordinator.pendingReminders.count)"
             + "|\(coordinator.activeLocale.identifier)"
     }
@@ -558,10 +611,24 @@ struct RemindersView: View {
         )
         let meds = coordinator.pendingReminders
             .filter { Calendar.current.isDateInToday($0.scheduledAt) }
-            .map { TodayRow(id: $0.id.uuidString, scheduledAt: $0.scheduledAt,
-                            title: coordinator.medicationName(for: $0.medicationEntryId),
-                            systemImage: RoutineCategory.medication.systemImage,
-                            isDimmed: false, external: nil) }
+            .map { reminder -> TodayRow in
+                // A dose row carries the medication's photos (medication-
+                // visual-aids task, 2026-09-16) — the same affordance as a
+                // routine row, but through the MEDICATION store: dose photos
+                // live under their own prefixed directory, never the routine
+                // store's (see `VisualAidStore.medicationDirectoryPrefix`).
+                let aids = coordinator
+                    .medicationVisualAidsPresentation(for: reminder.medicationEntryId)?
+                    .aids ?? []
+                return TodayRow(id: reminder.id.uuidString,
+                                scheduledAt: reminder.scheduledAt,
+                                title: coordinator.medicationName(for: reminder.medicationEntryId),
+                                systemImage: RoutineCategory.medication.systemImage,
+                                isDimmed: false, external: nil,
+                                entryId: reminder.medicationEntryId,
+                                visualAids: aids,
+                                aidStore: coordinator.medicationVisualAidStore)
+            }
         let routines = coordinator.todaysRoutineOccurrences.map { occurrence in
             let entry = entriesById[occurrence.entryId]
             return TodayRow(id: occurrence.id.uuidString, scheduledAt: occurrence.scheduledAt,
@@ -569,7 +636,10 @@ struct RemindersView: View {
                                 ?? L10n.str("routine.category.custom", locale: coordinator.activeLocale),
                             systemImage: entry?.category.systemImage
                                 ?? RoutineCategory.custom.systemImage,
-                            isDimmed: occurrence.state != .pending, external: nil)
+                            isDimmed: occurrence.state != .pending, external: nil,
+                            entryId: occurrence.entryId,
+                            visualAids: entry?.visualAids ?? [],
+                            aidStore: coordinator.visualAidStore)
         }
         // Imported native items (2026-09-07): timed ones are always still
         // ahead (already-started events are dropped at scan time), so
@@ -578,7 +648,8 @@ struct RemindersView: View {
         let externals = coordinator.externalRemindersToday.map { item in
             TodayRow(id: item.id, scheduledAt: item.startDate, title: item.title,
                      systemImage: item.source.systemImage, isDimmed: false,
-                     external: item)
+                     external: item, entryId: nil, visualAids: [],
+                     aidStore: coordinator.visualAidStore)
         }
         return (meds + routines + externals).sorted { $0.scheduledAt < $1.scheduledAt }
     }
@@ -598,22 +669,28 @@ struct RemindersView: View {
                 // Native events from the days ahead (upcoming-events
                 // task, 2026-09-07) — see `upcomingEventsSection`.
                 upcomingEventsSection
-
-                if !routineEntries.isEmpty {
-                    sectionHeader(key: "reminders.routinesSection")
-                    ForEach(routineEntries) { entry in
-                        routineManageRow(entry)
-                    }
-                }
             }
         }
         .task(id: refreshKey) {
-            let roster = coordinator.routineEntries
-            routineEntries = roster
-            routineSummaries = Dictionary(
-                uniqueKeysWithValues: roster.map { ($0.id, scheduleSummary($0)) }
-            )
+            routineEntries = coordinator.routineEntries
             todayRows = buildTodayRows()
+        }
+        // The elder's own view of a row's photos: the same large-image
+        // screen the firing notification presents, reading through the
+        // store the row was built with (routine or medication).
+        .fullScreenCover(item: $viewingAidRow) { row in
+            Group {
+                if let entryId = row.entryId {
+                    ReminderVisualAidScreen(
+                        entryId: entryId,
+                        title: row.title,
+                        aids: row.visualAids,
+                        store: row.aidStore,
+                        locale: coordinator.activeLocale,
+                        onClose: { viewingAidRow = nil }
+                    )
+                }
+            }
         }
     }
 
@@ -629,6 +706,22 @@ struct RemindersView: View {
         /// carry the imported native item itself so a tap can open it in
         /// its own app — the read-only bridge's only gesture.
         let external: ExternalReminder?
+        /// The owning entry, when this row carries visual aids: a routine
+        /// occurrence's `RoutineEntry.id` or a dose's
+        /// `ScheduledReminder.medicationEntryId` (medication-visual-aids
+        /// task, 2026-09-16) — nil for external rows, which have none.
+        let entryId: UUID?
+        /// The entry's photos, hoisted here so the row can show a
+        /// thumbnail and open the viewer without touching the store
+        /// while drawing (the same rule the rest of this screen keeps).
+        /// Empty for external rows, and for any reminder whose family
+        /// never attached a photo.
+        let visualAids: [VisualAid]
+        /// WHO owns those photos. The two reminder systems keep separate
+        /// stores (routine ids vs the medication store's prefixed
+        /// directory), so the row carries its store rather than assuming
+        /// one — the viewer reads through whichever the row was built with.
+        let aidStore: VisualAidStore
     }
 
     private func sectionHeader(key: String) -> some View {
@@ -660,6 +753,19 @@ struct RemindersView: View {
                 }
             }
             Spacer()
+            // A photo glyph rather than a thumbnail, so the elder knows the
+            // reminder has a picture and that tapping is what opens it big
+            // (photo-visual-aids task, 2026-09-16). Not a thumbnail on
+            // purpose: drawing one would mean reading image files while the
+            // body runs, which this screen never does.
+            if !row.visualAids.isEmpty {
+                Image(systemName: "photo.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(DesignTokens.accent)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
+                    .accessibilityHidden(true)
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity)
@@ -667,13 +773,17 @@ struct RemindersView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
         .contentShape(Rectangle())
         // External rows open their item in the native app (read-only
-        // bridge); medication/routine rows stay non-interactive.
+        // bridge); a row WITH photos — routine OR medication dose — opens
+        // the same large-image screen the notification presents. Rows
+        // without photos stay non-interactive, exactly as before.
         .onTapGesture {
             if let external = row.external {
                 coordinator.openExternalReminder(external)
+            } else if !row.visualAids.isEmpty {
+                viewingAidRow = row
             }
         }
-        .accessibilityAddTraits(row.external != nil ? .isButton : [])
+        .accessibilityAddTraits(row.external != nil || !row.visualAids.isEmpty ? .isButton : [])
     }
 
     /// All-day external items caption "All day"; everything else the
@@ -683,61 +793,6 @@ struct RemindersView: View {
             return L10n.str("externalReminders.allDay", locale: coordinator.activeLocale)
         }
         return row.scheduledAt.formatted(date: .omitted, time: .shortened)
-    }
-
-    private func routineManageRow(_ entry: RoutineEntry) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: entry.category.systemImage)
-                .font(.system(size: 24))
-                .foregroundStyle(DesignTokens.accent)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(entry.displayTitle(locale: coordinator.activeLocale))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Text(routineSummaries[entry.id] ?? "")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
-            }
-            Spacer()
-            Toggle("", isOn: Binding(
-                get: { entry.isEnabled },
-                set: { enabled in
-                    coordinator.setRoutineEntryEnabled(entry.id, enabled: enabled)
-                    entriesVersion += 1
-                }
-            ))
-            .labelsHidden()
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-    }
-
-    /// "7:00 AM, 4:00 PM" for daily entries; weekly entries prefix the
-    /// localized weekday names ("Sun, Tue · 9:00 AM").
-    ///
-    /// DESIGN-REVIEW (P2): this ran per routine row, per body evaluation,
-    /// and built a `DateFormatter` on every pass just to read its
-    /// weekday-symbol table — plus a `Date.formatted` per scheduled time.
-    /// Both now come from the locale-keyed cache in `ViewCaches.swift`,
-    /// and the times format in the app's ACTIVE language rather than the
-    /// device locale, matching how the rest of the app renders time.
-    private func scheduleSummary(_ entry: RoutineEntry) -> String {
-        let locale = coordinator.activeLocale
-        let calendar = Calendar.current
-        let timeFormatter = LocaleFormatters.shortTime(locale: locale)
-        let times = entry.scheduleTimes.compactMap { components -> String? in
-            calendar.date(from: components).map { timeFormatter.string(from: $0) }
-        }
-        let timesText = times.joined(separator: ", ")
-        guard entry.frequency == .weekly, !entry.weekdays.isEmpty else { return timesText }
-        let symbols = LocaleFormatters.shortWeekdaySymbols(locale: locale)
-        guard !symbols.isEmpty else { return timesText }
-        let days = entry.weekdays.sorted().compactMap { weekday -> String? in
-            weekday >= 1 && weekday <= symbols.count ? symbols[weekday - 1] : nil
-        }
-        return days.joined(separator: ", ") + " · " + timesText
     }
 
     // MARK: - Upcoming native Calendar events (upcoming-events task, 2026-09-07)
@@ -944,7 +999,7 @@ struct CallView: View {
     /// Bumped after a chooser pick or a saved Messenger handle so the
     /// per-outcome row-state dictionary re-resolves (the coordinator
     /// stores are plain reads, not @Published — same bump pattern as
-    /// RemindersView's `entriesVersion`).
+    /// RoutineSettingsView's `entriesVersion`).
     @State private var channelStateVersion = 0
     /// The result row the Messenger-handle sheet is editing (nil =
     /// closed). The sheet is item-driven so a swipe-dismiss also clears
@@ -1794,24 +1849,47 @@ struct CallView: View {
     /// do. The trailing circle is a visual affordance inside that
     /// button, hidden from VoiceOver so the row reads once (label
     /// below).
+    @ViewBuilder
     private func recentActivityRow(_ entry: AppActivityEntry) -> some View {
-        Button {
-            initiateRecentActivity(entry)
-        } label: {
-            HStack(spacing: 12) {
-                IconBadge(systemImage: recentChannelIcon(for: entry.channel),
-                          tint: recentChannelTint(for: entry.channel),
-                          diameter: 40)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(ActivityRowText.name(for: entry, locale: coordinator.activeLocale))
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
-                    Text(recentActivityTimeText(entry))
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
-                        .lineLimit(2)
-                }
-                Spacer(minLength: 8)
+        // [CLOUD-CASCADE] A cloud-cascade row is INFORMATIONAL: nothing
+        // was opened on the user's behalf, so there is no surface to
+        // re-open and no dial affordance to promise — the row renders as
+        // content, exactly like the History leaf's. Every channel row
+        // keeps the whole-row button (the same trust model as every other
+        // dial surface here).
+        if entry.channel == .cloud {
+            recentActivityRowContent(entry, showsDialAffordance: false)
+                .accessibilityLabel(Text(recentActivityRowLabel(entry)))
+        } else {
+            Button {
+                initiateRecentActivity(entry)
+            } label: {
+                recentActivityRowContent(entry, showsDialAffordance: true)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(recentActivityRowLabel(entry)))
+        }
+    }
+
+    /// The row's visual content, shared by the button and the
+    /// informational (cloud) shape above so the two can never drift.
+    private func recentActivityRowContent(_ entry: AppActivityEntry,
+                                          showsDialAffordance: Bool) -> some View {
+        HStack(spacing: 12) {
+            IconBadge(systemImage: recentChannelIcon(for: entry.channel),
+                      tint: recentChannelTint(for: entry.channel),
+                      diameter: 40)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(ActivityRowText.name(for: entry, locale: coordinator.activeLocale))
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                Text(recentActivityTimeText(entry))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(DesignTokens.textSecondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            if showsDialAffordance {
                 Image(systemName: "phone.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
@@ -1821,13 +1899,11 @@ struct CallView: View {
                     .clipShape(Circle())
                     .accessibilityHidden(true)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(Text(recentActivityRowLabel(entry)))
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
     /// Screen-reader label of the row above — HistoryView's split: call
@@ -1838,9 +1914,15 @@ struct CallView: View {
     /// what the row is and what its tap does — "Unanswered call, Open
     /// Phone app" for the anonymous row, "Missed call: बुबा, Open Phone
     /// app" when the app placed the call itself — mirror of
-    /// HistoryView.rowAccessibilityLabel; keep in step.
+    /// HistoryView.rowAccessibilityLabel; keep in step. A cloud-cascade
+    /// row ([CLOUD-CASCADE], 2026-09-16) also mirrors the leaf there: it
+    /// is informational and announces only what it is — no action verb,
+    /// because the row has no tap.
     private func recentActivityRowLabel(_ entry: AppActivityEntry) -> String {
         let locale = coordinator.activeLocale
+        if entry.channel == .cloud {
+            return ActivityRowText.name(for: entry, locale: locale)
+        }
         if entry.channel == .unanswered {
             let described = entry.contactName.isEmpty
                 ? L10n.str("history.unanswered", locale: locale)
@@ -1871,8 +1953,9 @@ struct CallView: View {
     /// a phone surface), video.fill for FaceTime video, the WhatsApp
     /// bubble, the Messenger paperplane, message.fill for SMS, and the
     /// missed-call glyph (phone.arrow.down.left) for unanswered rows
-    /// (missed-calls task, 2026-09-07). Keep in step with
-    /// `HistoryView.icon(for:)`.
+    /// (missed-calls task, 2026-09-07), and cloud.fill for a cloud-cascade
+    /// row ([CLOUD-CASCADE], 2026-09-16) — the online brain it records.
+    /// Keep in step with `HistoryView.icon(for:)`.
     private func recentChannelIcon(for channel: AppActivityEntry.Channel) -> String {
         switch channel {
         case .phone, .faceTimeAudio: return "phone.fill"
@@ -1881,15 +1964,19 @@ struct CallView: View {
         case .messenger: return "paperplane.fill"
         case .sms: return "message.fill"
         case .unanswered: return "phone.arrow.down.left"
+        case .cloud: return "cloud.fill"
         }
     }
 
-    /// Badge tint mirror of `HistoryView.tint(for:)` — keep in step.
+    /// Badge tint mirror of `HistoryView.tint(for:)` — keep in step: the
+    /// cloud-cascade row is informational, so it takes the neutral
+    /// category role (`.settings`) rather than a channel's accent.
     private func recentChannelTint(for channel: AppActivityEntry.Channel) -> DesignTokens.BadgeTint {
         switch channel {
         case .phone, .faceTimeVideo, .faceTimeAudio: return .call
         case .whatsapp, .messenger, .sms: return .reminders
         case .unanswered: return .call
+        case .cloud: return .settings
         }
     }
 
@@ -1944,6 +2031,16 @@ struct CallView: View {
             // Recents, one tab away (missed-calls task, 2026-09-07).
             // Mirror of HistoryView's `.unanswered` case; keep in step.
             PhoneAppOpener.openDialer()
+        case .cloud:
+            // [CLOUD-CASCADE] (2026-09-16) Mirror of HistoryView's
+            // `.cloud` case; keep in step. The row is INFORMATIONAL and
+            // `recentActivityRow` renders it without a button — there is
+            // no surface a cloud turn could be re-opened into. Reached
+            // only if a future call site made the row tappable; speaking
+            // the row's own description is the honest answer there,
+            // never a dead tap.
+            coordinator.speak(text: ActivityRowText.name(for: entry,
+                                                         locale: coordinator.activeLocale))
         }
     }
 
@@ -2912,7 +3009,11 @@ struct BriefingView: View {
 
 // MARK: - Shared
 
-private func emptyState(key: String) -> some View {
+/// The house "nothing here yet" card. Shared by every leaf that has an
+/// empty list state — internal rather than private to this file so the
+/// Events leaf (`EventsView`) draws the identical card instead of a
+/// look-alike.
+func emptyState(key: String) -> some View {
     Text(LocalizedStringKey(key))
         .font(.system(size: DesignTokens.minBodyPointSize))
         .foregroundStyle(DesignTokens.textSecondary)
