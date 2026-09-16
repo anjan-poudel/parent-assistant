@@ -1,0 +1,112 @@
+{
+  "schema_version": "1",
+  "workflow": "live-camera-translation",
+  "project": "/Users/anjan/workspace/projects/elderly-ai-assistant",
+  "started_at": "2026-09-16T06:28:32.453Z",
+  "updated_at": "2026-09-16T23:25:48.151Z",
+  "tasks": {
+    "define-requirements": {
+      "status": "COMPLETED",
+      "started_at": null,
+      "completed_at": "2026-09-16T06:37:55.541Z",
+      "outputs": [
+        {
+          "path": "specs/define-requirements.md",
+          "contract": "requirements_doc"
+        },
+        {
+          "path": "specs/define-requirements.lock.yaml",
+          "contract": "requirements_lock"
+        }
+      ],
+      "iterations": 0
+    },
+    "design-component": {
+      "status": "COMPLETED",
+      "started_at": "2026-09-16T09:43:24.900Z",
+      "completed_at": "2026-09-16T09:43:27.343Z",
+      "outputs": [
+        {
+          "path": "specs/design-component.md",
+          "contract": "component_design_l2"
+        }
+      ],
+      "iterations": 0
+    },
+    "review-l2": {
+      "status": "COMPLETED",
+      "started_at": "2026-09-16T09:59:12.374Z",
+      "completed_at": "2026-09-16T09:59:15.306Z",
+      "outputs": [
+        {
+          "path": "specs/review-l2.md",
+          "contract": "review_report"
+        }
+      ],
+      "iterations": 0
+    },
+    "security-design-review": {
+      "status": "COMPLETED",
+      "started_at": "2026-09-16T10:06:00.866Z",
+      "completed_at": "2026-09-16T10:06:03.101Z",
+      "outputs": [
+        {
+          "path": "specs/security-design-review.md",
+          "contract": "review_report"
+        }
+      ],
+      "iterations": 0
+    },
+    "plan-tasks": {
+      "status": "COMPLETED",
+      "started_at": "2026-09-16T10:23:19.248Z",
+      "completed_at": "2026-09-16T10:23:21.205Z",
+      "outputs": [
+        {
+          "path": "specs/plan-tasks/plan.md",
+          "contract": "task_breakdown_l3"
+        }
+      ],
+      "iterations": 0
+    },
+    "implement": {
+      "status": "COMPLETED",
+      "started_at": "2026-09-16T23:18:05.684Z",
+      "completed_at": "2026-09-16T23:18:07.514Z",
+      "outputs": [
+        {
+          "path": "specs/implement-notes.md",
+          "contract": "implementation"
+        }
+      ],
+      "iterations": 0
+    },
+    "review-implementation": {
+      "status": "COMPLETED",
+      "started_at": "2026-09-16T23:25:25.904Z",
+      "completed_at": "2026-09-16T23:25:48.151Z",
+      "outputs": [
+        {
+          "path": "specs/review-implementation.md",
+          "contract": "review_report"
+        }
+      ],
+      "iterations": 0,
+      "rework_feedback": "Injection pattern detected in output: shell_injection"
+    },
+    "security-test": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0
+    },
+    "final-sign-off": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0
+    }
+  }
+}

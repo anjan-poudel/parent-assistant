@@ -103,8 +103,63 @@ struct LogSanitiser {
         "correction_classes",
         "correction_class_origins",
         "correction_best_bucket",
-        "correction_margin_bucket"
+        "correction_margin_bucket",
+        // [LIVE-CAMERA-TRANSLATION] The feature's event metadata
+        // (`Services/LiveTranslate/` `LiveTranslateEvents.swift`, T-003).
+        // ADDITIVE ONLY: nothing above is removed, renamed or reordered.
+        // Count-shaped, duration-shaped and closed-vocabulary values only, by
+        // construction of the emitter API — `LiveTranslateEvents.MetadataKey`
+        // is the only way one of these keys is spelled, and every one of its
+        // cases is mirrored here (a test pins the two sets against each
+        // other). No key here may ever carry recognized text, a translation,
+        // an image or a scene identifier; the feature's catalogue and its
+        // tests enforce that, and the values that land are integers, closed
+        // tokens and the disclosure version stamp.
+        "regionCount",
+        "stringCount",
+        "batchIndex",
+        "batchCount",
+        "resolvedCount",
+        "unresolvedCount",
+        "durationMs",
+        "keyCount",
+        "count",
+        "origin",
+        "mode",
+        "reason",
+        "disclosureVersion",
+        // [LIVE-CAMERA-TRANSLATION] AM-2 decision, recorded rather than
+        // widened silently: `cap`. The shipped `GeminiCostGovernor` emits
+        // `daily_cap_warning` / `daily_cap_reached` with metadata `count` and
+        // `cap` on component `gemini_cost`. Until this extension both keys
+        // were dropped by this allow-list, so the family-visible cap signal
+        // arrived with no count and no cap — the cap doing its job looked
+        // like a cap doing nothing. `cap` is count-shaped and additive, and
+        // the feature does not touch the shipped payloads: a test drives the
+        // real governor over its cap and asserts both keys survive.
+        "cap",
+        // [LIVE-CAMERA-TRANSLATION] AM-2 decision, recorded rather than
+        // widened silently: the code key. A code normally travels on the
+        // event's top-level `errorCode` field, which `boundErrorCode`
+        // (T-050/B2) already bounds — and the feature's own emitters use
+        // exactly that field. Allow-listing the metadata spelling keeps the
+        // design's catalogue convention ("content-free code" for the failure
+        // events) inside the allow-list instead of silently dropping the
+        // code, which is CL-5's failure mode. **It is not left unbounded**:
+        // `codeShapedMetadataKeys` routes this one key through the same
+        // `boundErrorCode` the top-level field gets, so it cannot become the
+        // unbounded twin that the B2 defect was. Tests pin both halves: a
+        // real code survives, a description does not.
+        "errorCode",
     ]
+
+    /// Metadata keys whose value must satisfy the *code* bound rather than a
+    /// PII scrub alone. Deliberately a separate set from `allowedKeys`: the
+    /// shipped snake_case `error_code` is **not** listed here, because
+    /// shipped emitters already write it and re-bounding it would change
+    /// their behaviour (NFR-LCT-012). Bounding a key that did not exist
+    /// before this feature is additive; changing one that did is not.
+    private static let codeShapedMetadataKeys: Set<String> = ["errorCode"]
 
     private static let piiPatterns: [NSRegularExpression] = {
         let patterns = [
@@ -121,7 +176,12 @@ struct LogSanitiser {
     func sanitise(_ event: ObservabilityEvent) -> ObservabilityEvent {
         var cleanMetadata: [String: String] = [:]
         for (key, value) in event.metadata where Self.allowedKeys.contains(key) {
-            cleanMetadata[key] = scrubValue(value)
+            // A code-shaped key gets the same bound as the top-level field,
+            // so allow-listing it cannot become a PII-scrubbed bypass of
+            // that bound (T-050/B2). Every other allowed key is unchanged.
+            cleanMetadata[key] = Self.codeShapedMetadataKeys.contains(key)
+                ? (boundErrorCode(value) ?? "")
+                : scrubValue(value)
         }
         return ObservabilityEvent(
             component: event.component,

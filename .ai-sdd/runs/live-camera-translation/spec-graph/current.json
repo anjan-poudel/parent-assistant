@@ -1,0 +1,574 @@
+{
+  "version": "1",
+  "workflow_name": "live-camera-translation",
+  "built_at": "2026-09-16T09:42:59.975Z",
+  "nodes": [
+    {
+      "id": "define-requirements",
+      "type": "task",
+      "label": "Elicit and document project requirements. Produce a structured folder of\nrequirements: one file per FR, one file per NFR, with Gherkin acceptance\ncriteria embedded in each file, and index files at each folder level.\nAfter stakeholder HIL sign-off, produce a requirements lock file that\ncaptures a stable snapshot for downstream drift detection.\n",
+      "hash": "sha256:f629d47aebb26467ca6ac2354521007578e6de26d722875083d5db06f32862b2",
+      "metadata": {
+        "agent": "ba",
+        "phase": "requirements"
+      }
+    },
+    {
+      "id": "design-component",
+      "type": "task",
+      "label": "Produce L2 component design documents. Define component interfaces,\ndata models, error handling strategy, and observability approach.\nConsult the requirements lock file (specs/<requirements-task-id>.lock.yaml)\nand the L1 architecture document to ensure component designs stay within scope.\n",
+      "hash": "sha256:22a9fbe979801a1f18220d759cc246b79f832ad182687b46f937ce29009bbb16",
+      "metadata": {
+        "agent": "pe",
+        "phase": "design"
+      }
+    },
+    {
+      "id": "review-l2",
+      "type": "task",
+      "label": "Review the L2 component design. Verify component interfaces are correct,\ndata models are complete, and the design aligns with L1 architecture.\nIssue GO/NO_GO decision.\n",
+      "hash": "sha256:7621f054b471e34bda2d07f8d5b7229aeb5b291fe4937339f9e01c2510702565",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review"
+      }
+    },
+    {
+      "id": "security-design-review",
+      "type": "task",
+      "label": "Security-focused design review. Check: STRIDE threat model completeness,\nall data flows encrypted in transit, PII identified with handling specified,\ninput validation specified for all external inputs, audit logging covers\nsecurity-relevant events, secrets management sound, least-privilege auth,\ncompliance requirements traceable to design decisions.\nIssue SECURITY-GO or SECURITY-NO_GO.\n",
+      "hash": "sha256:71e5120c67134d2fa5085059a8c0d679294cf5aa64f9bfbcbac47c6daa47446b",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review"
+      }
+    },
+    {
+      "id": "plan-tasks",
+      "type": "task",
+      "label": "Break down the component designs into concrete implementation tasks.\nDefine acceptance criteria (including Gherkin tests) per task, identify\ndependencies, and estimate effort. Output is a folder of one file per task\nplus an index.\n",
+      "hash": "sha256:a8c50f6435f7bffef83aa4ab4794eee69e9055c3bc1ddb403622e67b0a739eff",
+      "metadata": {
+        "agent": "le",
+        "phase": "planning"
+      }
+    },
+    {
+      "id": "implement",
+      "type": "task",
+      "label": "Implement the feature per the task specification. Write unit tests,\nensure all acceptance criteria pass, fix lint and type errors.\n",
+      "hash": "sha256:9e845529f804e7936633b031c16b824dfa9f18d607b1af899f998c45039650be",
+      "metadata": {
+        "agent": "dev",
+        "phase": "implement"
+      }
+    },
+    {
+      "id": "review-implementation",
+      "type": "task",
+      "label": "Review the implementation. Check code quality, test coverage, security,\nand conformance to the design. Issue GO/NO_GO decision.\n",
+      "hash": "sha256:e604de503319b459e3ff2ce2f685a18d651f0752641e02149509e9892aac4c3b",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review"
+      }
+    },
+    {
+      "id": "security-test",
+      "type": "task",
+      "label": "Security testing pass on the implementation. Test:\n- SQL injection: parameterised queries used everywhere, no string concat\n- Input validation: malformed/oversized/special-char inputs return 400\n- Auth bypass: unauthenticated requests return 401/403\n- PII in logs: confirm PII is masked in all log entries\n- Secrets in output: scan all output files for secret patterns\n- Audit log completeness: each auditable event produces a log entry\n- Error leakage: errors don't expose stack traces or internals\nIssue SECURITY-GO or SECURITY-NO_GO per category.\n",
+      "hash": "sha256:1c0a246628c159582d0b1b1f078f875d697f931fc1b00b1ad947b2fb01d20514",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review"
+      }
+    },
+    {
+      "id": "final-sign-off",
+      "type": "task",
+      "label": "Produce change summary document for human sign-off. Include:\n- Change summary: what was built and what changed\n- Requirements traceability: FR/NFR → implementation → test evidence\n- Security posture: summary of security design review + security test results\n- Open items: known issues, deferred items, post-deploy monitoring\n- Rollback plan: how to revert if the change causes production issues\n- Compliance checklist: confirm each applicable compliance item is satisfied\n",
+      "hash": "sha256:c02257caf7133e47e9fc718241db04570abdd910a05ca619d6e4ad888a029487",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "sign-off"
+      }
+    },
+    {
+      "id": "define-requirements:output:specs/define-requirements.md",
+      "type": "output",
+      "label": "specs/define-requirements.md",
+      "hash": "sha256:75f555959adb405761e57ddefad9e79535a2e357758094a5f2c37a60ae934b55",
+      "metadata": {
+        "task_id": "define-requirements",
+        "contract": "requirements_doc"
+      }
+    },
+    {
+      "id": "define-requirements:output:specs/define-requirements.lock.yaml",
+      "type": "output",
+      "label": "specs/define-requirements.lock.yaml",
+      "hash": "sha256:ff55fba50f383d0f4040aa231552345cff57dc6ed227ff06c795a8374692ccf3",
+      "metadata": {
+        "task_id": "define-requirements",
+        "contract": "requirements_lock"
+      }
+    },
+    {
+      "id": "design-component:output:specs/design-component.md",
+      "type": "output",
+      "label": "specs/design-component.md",
+      "hash": "sha256:a4a771956f8a31d28a4d4f928c280d1e05f6a026f63af7c27997674283c0e787",
+      "metadata": {
+        "task_id": "design-component",
+        "contract": "component_design_l2"
+      }
+    },
+    {
+      "id": "review-l2:output:specs/review-l2.md",
+      "type": "output",
+      "label": "specs/review-l2.md",
+      "hash": "sha256:13a5057e96f8878d8c74c89e933f88b0135c821973dea85f7e3f3f203d2d6f7c",
+      "metadata": {
+        "task_id": "review-l2",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "security-design-review:output:specs/security-design-review.md",
+      "type": "output",
+      "label": "specs/security-design-review.md",
+      "hash": "sha256:b70ba3cc3aaaf68196526d554a7988e13dcbcc8dac8507566c0e993e2a9c32b6",
+      "metadata": {
+        "task_id": "security-design-review",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "plan-tasks:output:specs/plan-tasks/plan.md",
+      "type": "output",
+      "label": "specs/plan-tasks/plan.md",
+      "hash": "sha256:ed7639b75f7530a91c81ae5509015c6a8b6b259185a0c6cffb89656d2837578d",
+      "metadata": {
+        "task_id": "plan-tasks",
+        "contract": "task_breakdown_l3"
+      }
+    },
+    {
+      "id": "plan-tasks:output:specs/plan-tasks/tasks/",
+      "type": "output",
+      "label": "specs/plan-tasks/tasks/",
+      "hash": "sha256:d9706c3405fa6930ed6e105a4fdddff050eefc61a8437ebb6aedf7eb1e1e76a2",
+      "metadata": {
+        "task_id": "plan-tasks"
+      }
+    },
+    {
+      "id": "implement:output:specs/implement-notes.md",
+      "type": "output",
+      "label": "specs/implement-notes.md",
+      "hash": "sha256:23f3b8cc53fe17d9bbd1673a382681ed1c7e6e12616a0984515b3f42e40b0114",
+      "metadata": {
+        "task_id": "implement",
+        "contract": "implementation"
+      }
+    },
+    {
+      "id": "review-implementation:output:specs/review-implementation.md",
+      "type": "output",
+      "label": "specs/review-implementation.md",
+      "hash": "sha256:2d03760237e8bf38e363556077047b79c5085e4d0c77c004db4d98024a9ce943",
+      "metadata": {
+        "task_id": "review-implementation",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "security-test:output:specs/security-test.md",
+      "type": "output",
+      "label": "specs/security-test.md",
+      "hash": "sha256:111a666788bf4ca10b8df025815106f0f11b3d08ebd375ab6b088258a6c3c9d0",
+      "metadata": {
+        "task_id": "security-test",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "final-sign-off:output:specs/final-sign-off.md",
+      "type": "output",
+      "label": "specs/final-sign-off.md",
+      "hash": "sha256:9f59ea338bf799fed3b33c8e1bd28965821cf89e11ac313f61a7fba1c40aea03",
+      "metadata": {
+        "task_id": "final-sign-off",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "FR-LCT-001",
+      "type": "requirement",
+      "label": "Live camera preview without photo capture",
+      "hash": "sha256:4d0585a18dbebfc2ba72f57e7058a96f187b01676545a8e431361cb6953b1c88",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-002",
+      "type": "requirement",
+      "label": "Camera permission and purpose disclosure",
+      "hash": "sha256:d33c35e72b23d043469da4263a863d59d5a808c87c4d6ca92c5238aa2bf9cea0",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-003",
+      "type": "requirement",
+      "label": "On-device OCR with automatic language detection",
+      "hash": "sha256:4c584d6e6853e40e764471829f1657f15f8f1d1ed6e2a59c0bf04e3babdcd194",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-004",
+      "type": "requirement",
+      "label": "Region tracking between OCR passes",
+      "hash": "sha256:3eb3f441ae4a71af1ea2cb46977ec6767e99d3f59df3aef33fca87d3b338d0c2",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-005",
+      "type": "requirement",
+      "label": "Stable text regions with hysteresis and change-only events",
+      "hash": "sha256:e9db79cc04731bcda9936157a673cc72500bbc460e7f5c1385195093af5a1332",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-006",
+      "type": "requirement",
+      "label": "Decluttering for dense multi-region scenes",
+      "hash": "sha256:fa35b16747352f09c6b46742dccf1878540d45c72743d7d2bed2e07111a6ab99",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-007",
+      "type": "requirement",
+      "label": "Tier 0 curated dictionary translation",
+      "hash": "sha256:b27e3dff915aba9d23559e4743d53ea607e0ce6840bf4caf2712ab93941bbd40",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-008",
+      "type": "requirement",
+      "label": "Truthful tier attribution and no success without translation",
+      "hash": "sha256:bf70bf256c0551240a568026b0781c02470602e309e3fc7ff65498eb44e8490c",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-009",
+      "type": "requirement",
+      "label": "Tier 2 text-only cloud translation",
+      "hash": "sha256:04a8df7f077f139b952bdc5daed097d1844a94df2b26656d06c4a86b27eb5193",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-010",
+      "type": "requirement",
+      "label": "Consent gate before any cloud translation",
+      "hash": "sha256:d4449b87c2d0e7a6f9de6b2c293ed4b790dbcda8f782f02435e32bbd09cef3d1",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-011",
+      "type": "requirement",
+      "label": "Visible cloud-activity indicator",
+      "hash": "sha256:d718442ce765c9d4d91f53707913c2af1e07e47ddb0ea781a39385015866c00a",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-012",
+      "type": "requirement",
+      "label": "Consent revocation degrades to dictionary-only offline mode",
+      "hash": "sha256:8a2bc920bd5637e8035aba5e288621f3c68782ad9fedd195b96eb46ce262a708",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-013",
+      "type": "requirement",
+      "label": "Cost governor bound and fail-closed behaviour",
+      "hash": "sha256:6b3b74ec626d2f5a5299814f8a8662165af1e74b12e5e363bae5edf9f1157c97",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-014",
+      "type": "requirement",
+      "label": "Text-only egress guarantee",
+      "hash": "sha256:e8b993a9c1663cf2fe0a67c91c138086f603fa5133857af06eda9f7fd7066dac",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-015",
+      "type": "requirement",
+      "label": "Smart-mix in-place replacement (bounded)",
+      "hash": "sha256:563659254c8df5523adf9d153bd91e6c6c06e7f5933081cf7c0d3335deb6d336",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-016",
+      "type": "requirement",
+      "label": "Anchored callouts that never obscure the original",
+      "hash": "sha256:4efd6675f207cff2bdb010939857ca715ffa445cbbcb5b6a52459e5ee96d401f",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-017",
+      "type": "requirement",
+      "label": "\"Always show original text\" toggle",
+      "hash": "sha256:ca31d5658c5319f791a617abfe0a5221d064385e0913eeb721552d7c3d908b85",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-018",
+      "type": "requirement",
+      "label": "Pending and failed translation states in the overlay",
+      "hash": "sha256:ac93ed5b1b6977f0e3b63c1c6926f3d200cad5eb4e09776f27ce7c068d168b20",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-019",
+      "type": "requirement",
+      "label": "Persistent encrypted translation cache",
+      "hash": "sha256:2de4f97f96b94de79fe8bf8ab81e426579702d865735603dcfb61b75d6fe59db",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-020",
+      "type": "requirement",
+      "label": "Shared dictionary and translation cache with the appliance helper",
+      "hash": "sha256:e314766a6cd328774c720d010066f1e418c997c9294a58cfbc8618b2228fb26a",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-021",
+      "type": "requirement",
+      "label": "Tap-to-hear and \"read this to me\"",
+      "hash": "sha256:36703a27ba2048c139b02178e735c30bc76f0d4c0bca6be567d57c8fb596eb04",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-022",
+      "type": "requirement",
+      "label": "LiveTranslatePlugin voice entry and session lifecycle",
+      "hash": "sha256:12510b1da56bebec679070a87c44b16e686edc1cf62364718794e2f50d8db439",
+      "metadata": {}
+    },
+    {
+      "id": "FR-LCT-023",
+      "type": "requirement",
+      "label": "Honest degradation — never silently report success",
+      "hash": "sha256:c22b60cd8ee68430baa6b001c9c28c3fb8b5e33180c1ca3ec5b061183cc1b4d8",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-LCT-001",
+      "type": "requirement",
+      "label": "Overlay responsiveness and translation latency",
+      "hash": "sha256:027c188ba7075690a59cf4a66b79b6b0ea39d28a77aca84bd9a66e76438eeff0",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-LCT-002",
+      "type": "requirement",
+      "label": "OCR cadence, battery and thermal budget",
+      "hash": "sha256:823f683f50e23f37fbb05c494d408b8a7dd8979d05d60b8fc8d211602cc1c203",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-LCT-003",
+      "type": "requirement",
+      "label": "Accessibility — tap targets, overlay text, contrast",
+      "hash": "sha256:87063ff01d251710ff6e4ce5b4d9191dafa83e8d25ef619fea39ad9a9084d431",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-LCT-004",
+      "type": "requirement",
+      "label": "Localisation of new UI strings",
+      "hash": "sha256:03e96c887ec6468768443e835bcd06482acca6d0ec8a4b1b120b2eb95c8c5251",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-LCT-005",
+      "type": "requirement",
+      "label": "Privacy — no image or unrelated-content egress",
+      "hash": "sha256:fecb2ce3fc127aa5f75199732f818442134c64500bcd13d158fcf15fa8b0de74",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-LCT-006",
+      "type": "requirement",
+      "label": "Log safety — no recognized or translated text in logs",
+      "hash": "sha256:4245d43eff9d09b40f96632942ffd13ff582c73cf8a5ff30df1f26e6238a279c",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-LCT-007",
+      "type": "requirement",
+      "label": "Consent enforcement and auditability",
+      "hash": "sha256:babc30822aedd18953f0c19a6b17355a6a519b12867116088e66c6092405862c",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-LCT-008",
+      "type": "requirement",
+      "label": "Cache at rest — encrypted, keyed, bounded",
+      "hash": "sha256:60ab040c7dcebf16ae899aa21d6defc0a104caa8386eb3ba80e3f72dc8d289ed",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-LCT-009",
+      "type": "requirement",
+      "label": "Untrusted scene text hardening (injection)",
+      "hash": "sha256:4fbc908733a37364fff153e9a0a1102cf31ba75026a2a1b6e47a36b95b4c2e42",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-LCT-010",
+      "type": "requirement",
+      "label": "Offline degradation integrity — no false success",
+      "hash": "sha256:4543f4b013384bf7ada12b0a90a0e46e081510f47a589f17ad90968f7075f449",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-LCT-011",
+      "type": "requirement",
+      "label": "Configurable parameters — no hardcoded operational constants",
+      "hash": "sha256:08392e6edd39d62ab64f103863e02d2f3770b8255c483806509b1cc85c59f52b",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-LCT-012",
+      "type": "requirement",
+      "label": "Shared-component integrity — no regression to the appliance helper",
+      "hash": "sha256:dc087fa29bd45dd62c3d7daf23c8955eeb8b53c33aa3f6293514ac09cbfb9d16",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-LCT-013",
+      "type": "requirement",
+      "label": "Compliance and release gates",
+      "hash": "sha256:df948402a87ab20a8357a78d72280b626180f0623ad479857a6ce160e5cadfa8",
+      "metadata": {}
+    }
+  ],
+  "edges": [
+    {
+      "source": "design-component",
+      "target": "define-requirements",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-l2",
+      "target": "design-component",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "security-design-review",
+      "target": "review-l2",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "plan-tasks",
+      "target": "security-design-review",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "implement",
+      "target": "plan-tasks",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-implementation",
+      "target": "implement",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "security-test",
+      "target": "review-implementation",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "final-sign-off",
+      "target": "security-test",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "define-requirements",
+      "target": "define-requirements:output:specs/define-requirements.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "define-requirements",
+      "target": "define-requirements:output:specs/define-requirements.lock.yaml",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "design-component",
+      "target": "design-component:output:specs/design-component.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-l2",
+      "target": "review-l2:output:specs/review-l2.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "security-design-review",
+      "target": "security-design-review:output:specs/security-design-review.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "plan-tasks",
+      "target": "plan-tasks:output:specs/plan-tasks/plan.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "plan-tasks",
+      "target": "plan-tasks:output:specs/plan-tasks/tasks/",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "implement",
+      "target": "implement:output:specs/implement-notes.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-implementation",
+      "target": "review-implementation:output:specs/review-implementation.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "security-test",
+      "target": "security-test:output:specs/security-test.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "final-sign-off",
+      "target": "final-sign-off:output:specs/final-sign-off.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    }
+  ]
+}

@@ -69,6 +69,28 @@ final class AppCoordinator: ObservableObject {
     /// resolves against.
     var activeLocale: Locale { appLanguage.locale }
 
+    /// [LIVE-TRANSLATE T-015] The consent prompt/control state, shared by the
+    /// session view's prompt and the Settings leaf so both drive the one gate
+    /// above. Built on first use, on the main actor, against the language in
+    /// force at that moment; the locale is refreshed when the surfaces appear.
+    @MainActor
+    func liveTranslateConsentController() -> ConsentPromptController {
+        if let existing = consentController { return existing }
+        let controller = ConsentPromptController(gate: liveTranslateConsentGate,
+                                                 observabilityBus: observabilityBus,
+                                                 locale: activeLocale)
+        consentController = controller
+        return controller
+    }
+
+    /// [LIVE-TRANSLATE T-014] The consent gate itself — the decision the cloud
+    /// tier must ask for. Read-only for callers: recording and revocation go
+    /// through the prompt/control, which is the only pair of writers the
+    /// design sanctions.
+    var liveTranslateConsentDecision: LiveTranslateConsentGate.Decision {
+        liveTranslateConsentGate.currentDecision()
+    }
+
     /// The region-qualified app locale — the Settings locale row's
     /// binding (encoder-branch SettingsView, 2026-09-14). Bridged to
     /// `AppLocale`'s own UserDefaults persistence; `activeLocale` keeps
@@ -658,6 +680,27 @@ final class AppCoordinator: ObservableObject {
     /// and cannot tell which channel it is on.
     private let storage: MigratingEncryptedStorage
     private let observabilityBus: ObservabilityBus
+    /// [LIVE-TRANSLATE T-013] The app's ONE label-translation store: the
+    /// live camera-translation pipeline resolves and records through it, and
+    /// the appliance helper's label seam reads the same instance, which is
+    /// what makes "a translation cached on one surface is reused by the
+    /// other with no network call" (FR-LCT-020) true by construction rather
+    /// than by convention. Constructed in init — that is an empty dictionary
+    /// and a lock, no I/O; the payload is read lazily on the first lookup —
+    /// and never a second one anywhere.
+    private let labelTranslationCache: LabelTranslationCache
+    /// [LIVE-TRANSLATE T-015] The app's ONE consent gate: the cloud tier
+    /// asks it for permission, and the only things that ever write it are the
+    /// consent prompt and the revocation control — both of which drive THIS
+    /// instance, so a decision made in Settings is the decision in force over
+    /// the session view, with no restart and no second record. Constructed in
+    /// init (a lock and a closure, no I/O; nothing is read until a decision
+    /// is asked for) and never a second one anywhere.
+    private let liveTranslateConsentGate: LiveTranslateConsentGate
+    /// [LIVE-TRANSLATE T-015] The prompt/control state shared by the session
+    /// view's prompt and the Settings leaf. Created on the main actor on
+    /// first use — it is view state, so it is born where views live.
+    private var consentController: ConsentPromptController?
     /// [TURN-TIMING] Turn-scoped stage tracer — created in init (after
     /// the bus) and injected into the pipeline/router/speaker composition
     /// in `start()` and the recognizers below.
@@ -1752,13 +1795,96 @@ final class AppCoordinator: ObservableObject {
     private func makePluginRegistry() -> PluginRegistry {
         let registry = PluginRegistry(observabilityBus: observabilityBus)
         registry.register(NepaliCalendarPlugin(storage: storage))
-        registry.register(ApplianceHelperPlugin(storage: storage))
+        registry.register(ApplianceHelperPlugin(storage: storage,
+                                                labelCache: labelTranslationCache))
         registry.register(routinePlugin)
         // [YOUTUBE] (2026-09-08) The interpreter-side twin of the
         // router's deterministic YouTube stage — same `YouTubeTool`
         // behavior (shared config store + transport + opener seams).
         registry.register(YouTubePlugin(configStore: youtubeConfigStore))
+        // [LIVE-TRANSLATE T-027] The live-camera-translation plugin. It is
+        // registered with a *factory* and nothing else: no camera session,
+        // no detector, no client and no session model is built here, so
+        // registering at launch costs nothing and an app that never opens
+        // the feature never creates any of them (NFR-LCT-012). The factory
+        // runs on the one path that opens it — the voice entry inside
+        // `handle`, the Home tile inside `presentLiveTranslate()`.
+        registry.register(LiveTranslatePlugin(
+            observabilityBus: observabilityBus,
+            makeDependencies: { [weak self] locale in
+                self?.makeLiveTranslateDependencies(locale: locale)
+            }))
         return registry
+    }
+
+    /// [LIVE-TRANSLATE T-027] Assembles one live-translation session (C13).
+    ///
+    /// Called only when the feature is opened, and it is the only place a
+    /// capture session, a detector, a recognition request or a tier is built
+    /// for this feature. The two stores it hands over are the process's own
+    /// instances (`labelTranslationCache`, `liveTranslateConsentGate`, both
+    /// built in `init` over the same cipher) — the session never constructs
+    /// storage and never constructs a second gate.
+    ///
+    /// `nil` when the shell's speech queue does not exist yet. That queue is
+    /// built in `start()`; both entry points are downstream of it, so this is
+    /// the pre-`start()` state and is not reachable from either. Returning
+    /// `nil` rather than a session without speech is deliberate: the plugin
+    /// turns it into the spoken apology the design's failure table specifies,
+    /// instead of a session that silently cannot talk.
+    private func makeLiveTranslateDependencies(locale: Locale) -> LiveTranslateSessionDependencies? {
+        guard let queue = speakQueue else { return nil }
+        return LiveTranslateSessionDependencies(
+            locale: locale,
+            camera: LiveCameraSession(observabilityBus: observabilityBus),
+            detector: LiveTextDetector(observabilityBus: observabilityBus),
+            cache: labelTranslationCache,
+            consentGate: liveTranslateConsentGate,
+            costGovernor: geminiCostGovernor,
+            client: geminiClient,
+            // The shell's one queue, through the feature's own protocol: the
+            // session's speech is the assistant's speech, on the interactive
+            // lane, and T-025's microphone gate can see it (C12).
+            speechPath: queue,
+            // The shipped one-shot microphone, the same instance the Phone
+            // leaf's search uses: one mic stack, one arbitration.
+            captureDevice: searchPhraseCapture,
+            audioSession: audioSessionManager,
+            // A struct over `UserDefaults`: one store, so the session's
+            // toggle and Settings read and write the same preference.
+            settings: LiveTranslateSettings(),
+            observabilityBus: observabilityBus)
+    }
+
+    /// [LIVE-TRANSLATE T-027] The Home feature tile's entry (FR-LCT-001).
+    ///
+    /// Like the appliance tile, the tap IS the intent: no encoder round trip,
+    /// no question, just the session. It goes through the plugin rather than
+    /// building the view here, so the tile and the voice entry cannot end up
+    /// presenting two different sessions.
+    @MainActor
+    func presentLiveTranslate() {
+        let locale = activeLocale
+        guard let plugin = pluginRegistry.plugins.compactMap({ $0 as? LiveTranslatePlugin }).first else {
+            // Unreachable: the registry always registers it (see
+            // `makePluginRegistry`). Reported rather than swallowed, because
+            // a tile that does nothing is the one outcome nobody can debug.
+            observabilityBus.emit(ObservabilityEvent(
+                component: "plugin_live_translate",
+                eventType: "live_translate_open_failed",
+                durationMs: nil,
+                outcome: "failure",
+                errorCode: "plugin_not_registered",
+                metadata: [:]
+            ))
+            speak(text: L10n.str(LiveTranslatePlugin.unavailableKey, locale: locale))
+            return
+        }
+        guard let view = plugin.tileView(locale: locale) else {
+            speak(text: L10n.str(LiveTranslatePlugin.unavailableKey, locale: locale))
+            return
+        }
+        presentPluginView(view)
     }
 
     /// [ACCENT-ADAPT] per-user decode-biasing terms (doc
@@ -1804,8 +1930,27 @@ final class AppCoordinator: ObservableObject {
         // `MigratingEncryptedStorage`). Observability goes through the
         // log sanitiser so no PII leaks into device logs.
         let bus = ConsoleObservabilityBus(sanitiser: LogSanitiser())
-        self.storage = MigratingEncryptedStorage()
+        let storage = MigratingEncryptedStorage()
+        self.storage = storage
         self.observabilityBus = bus
+        // [LIVE-TRANSLATE T-032] The feature's two payloads (the translation
+        // cache and the consent record) are sealed with AES-GCM before they
+        // reach the file channel — Data Protection Complete alone is "locked
+        // device", not "a cipher" (security review, AM-10). The decorator is
+        // applied HERE and to these two consumers only, so every other
+        // feature's on-disk format is unchanged and no migration is needed.
+        let liveTranslateStorage = LiveTranslateCipherStorage(wrapping: storage)
+        // [LIVE-TRANSLATE T-013] The shared store is built here, next to the
+        // storage it writes through, so exactly one instance exists for the
+        // process lifetime (see the property doc). Construction performs no
+        // I/O; nothing is read until a label is actually resolved.
+        self.labelTranslationCache = LabelTranslationCache(storage: liveTranslateStorage,
+                                                           observabilityBus: bus)
+        // [LIVE-TRANSLATE T-015] The consent gate lives next to the store it
+        // writes through: one instance, for the process lifetime. It is the
+        // only thing in the app that records or revokes consent.
+        self.liveTranslateConsentGate = LiveTranslateConsentGate(storage: liveTranslateStorage,
+                                                                 observabilityBus: bus)
         // [TURN-TIMING] The turn tracer lives as long as the app: every
         // voice component (pipeline, router, speaker, recognizers) shares
         // it. Its finalize callback (the transcript caption) is wired in
@@ -6636,7 +6781,8 @@ self.noteTalkContractChanged()
                                              cache: ApplianceCache(storage: storage),
                                              observabilityBus: observabilityBus,
                                              speaker: speaker)
-        presentPluginView(AnyView(ApplianceHelperView(session: session)))
+        presentPluginView(AnyView(ApplianceHelperView(session: session,
+                                                      labelCache: labelTranslationCache)))
     }
 
     /// Opens a bundled default manual from the Settings → Manuals leaf.
@@ -6658,7 +6804,8 @@ self.noteTalkContractChanged()
                                              observabilityBus: observabilityBus,
                                              speaker: speaker)
         guard session.presentBundledManual(manual, locale: activeLocale) else { return false }
-        presentPluginView(AnyView(ApplianceHelperView(session: session)))
+        presentPluginView(AnyView(ApplianceHelperView(session: session,
+                                                      labelCache: labelTranslationCache)))
         return true
     }
 

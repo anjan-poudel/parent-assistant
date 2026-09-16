@@ -10,5 +10,7 @@
 | review-l2 | `specs/review-l2.md` | `review_report` | COMPLETED | 2026-09-16 |
 | security-design-review | `specs/security-design-review.md` | `review_report` | COMPLETED | 2026-09-16 |
 | plan-tasks | `specs/plan-tasks/plan.md` | `task_breakdown_l3` | COMPLETED | 2026-09-16 |
+| implement | `specs/implement-notes.md` | `implementation` | COMPLETED | 2026-09-16 |
+| review-implementation | `specs/review-implementation.md` | `review_report` | COMPLETED | 2026-09-16 |
 
 <!-- end:workflow-artifacts -->

@@ -876,10 +876,35 @@ The observability record for a translation is the *fact* of a translation, never
 is also what makes the family-visible cost and usage stories possible without a privacy exception.
 
 `ios/tools/check-release-log-safety.sh` is a build-blocking gate wired into `ios/build.sh`. This
-feature's sources are new scan roots under `Services/LiveTranslate/` and `App/Gemini+Translate`, and
-the gate must exit 0 with those roots covered. The design's rule for implementers is absolute: no
-`print`, no `debugPrint`, no interpolation of a recognized or translated string into any log line or
-event field.
+feature's sources are new scan roots — `Services/LiveTranslate/`, `App/LiveTranslate/`,
+`Services/Plugins/LiveTranslatePlugin.swift` and the translation client
+`Services/Gemini/GeminiClient+Translate.swift` — and the gate must exit 0 with those roots covered.
+The design's rule for implementers is absolute: no `print`, no `debugPrint`, no interpolation of a
+recognized or translated string into any log line or event field.
+
+**What the gate actually enforces over those roots (corrected per AM-5).** Four rules were added to
+the shipped B1/T-049 engine, and each is judged on the feature's roots only:
+
+| Rule | Fires on | Configuration |
+| --- | --- | --- |
+| `feature-console-write` | any console write in the feature's sources | Release framing — a `#if DEBUG` region is exempt, as for the shipped rules |
+| `feature-content-print` | a recognized or translated string in a console write | **every** configuration, including `#if DEBUG` |
+| `feature-unlisted-metadata-key` | an event metadata key with no `LogSanitiser.allowedKeys` entry — including a `MetadataKey` case that is not allow-listed | every configuration |
+| `feature-text-interpolated-into-event` | an `errorCode` or metadata value built by interpolating text or a raw error object, or by rendering a description | every configuration |
+
+The gate also runs the engine's own fixture suite (`tools/log-safety-fixtures/`, one positive and one
+negative tree per declared rule) as part of the same invocation, so a rule that stops firing fails
+the next build rather than passing silently.
+
+**Stated limits, not implied ones.** The gate is a source-level check and cannot follow indirection:
+a value laundered through a helper's return, a `metadata:` variable, a wrapper function or a sink
+spelled in a way the rule set does not know is a *documented gap*, not a covered case (the engine's
+"Known limitations" section is the authoritative list). The primary safeguard is therefore the typed
+event schema together with the runtime allow-list survival tests — `LiveTranslateAllowListTests` in
+`ElderlyAssistantTests/Services/Observability/`, which proves key by key that a value under an
+unlisted key is dropped and that the feature's keys reach the real console sink: the gate is the
+backstop that catches the direct shape a reviewer would miss, and its coverage must not be restated
+as stronger than this table.
 
 **Release gates carried by this design (NFR-LCT-013):** the recorded exception amendment (Open
 Decision 13, recorded 2026-09-16 — verified at `final-sign-off`, not created here); the
@@ -1409,7 +1434,7 @@ trusting intent.
 |---|---|---|---|
 | No tier-2 request without a recorded consent decision | FR-LCT-010, NFR-LCT-007 | `CloudTranslationTier.resolve` consults `LiveTranslateConsentGate.currentDecision()` before building any payload; every cloud path (initial and the single retry) goes through `resolve`; the gate has no default-on state and fails closed on an unreadable record | Force a dictionary miss with no consent record and assert zero requests reach the transport, including on the retry path |
 | Text-only egress: recognised strings and language parameters only | FR-LCT-014, NFR-LCT-005 | `GeminiClient.translateStrings` is the only translation request builder; it constructs `GeminiRequest` from `.text` parts and sets no tools; no image parameter exists to populate; the camera session configures no photo output, so the feature has no image bytes to attach | Inspect the built request: text parts only, no media part, no health/contacts/profile content, same shape on the retry |
-| No recognized or translated text on the log surface | NFR-LCT-006 | The event schema (see §Components) admits counts, durations, tiers, reasons and statuses only; `errorCode` is a `LogSafeErrorCode` constant or a status number; `check-release-log-safety.sh` scans `Services/LiveTranslate/` and fails the build | Run the gate; grep the new sources for any log line that could carry content |
+| No recognized or translated text on the log surface | NFR-LCT-006 | The event schema (see §Components) admits counts, durations, tiers, reasons and statuses only; `errorCode` is a `LogSafeErrorCode` constant or a status number; the runtime allow-list (`LogSanitiser.allowedKeys`, key-by-key in `LiveTranslateAllowListTests`) drops any value under an unlisted key; `check-release-log-safety.sh` additionally fails the build on a console write, a content-bearing console write in any configuration, an unlisted metadata key or a text/error-interpolated event field across `Services/LiveTranslate/`, `App/LiveTranslate/`, `LiveTranslatePlugin.swift` and `GeminiClient+Translate.swift` — a source-level backstop whose stated limits are in §Components | Run the gate (it also runs its own fixture suite, so a rule that stopped firing fails here); probe the allow-list at runtime with an unlisted key; treat any log line that reaches a sink through an indirection the gate documents as a gap, not as covered |
 | Cache encrypted at rest with no plaintext file | NFR-LCT-008 | `StoragePlacementPolicy` routes the key to the encrypted file channel (Data Protection Complete, backups excluded); the payload is encoded and written by the storage implementation with no intermediate plaintext file; entries carry no image, box, scene timestamp, identifier or location | Inspect the app container for readable translation text; inspect the stored entry shape |
 | Cost governor fails closed and never retries around the cap | FR-LCT-013 | `GeminiClient.send(_:)` refuses before any network work; the tier's session latch makes every subsequent attempt a no-op; no alternative request shape exists that could bypass it | Reach the cap and assert zero further requests for the rest of the session, on a changing scene |
 | Cloud-activity indicator cannot disagree with reality or be suppressed | FR-LCT-011 | Its only input is the in-flight request counter, incremented on issue and released in `defer`; it is not writable from settings or the overlay; it has no minimum-dwell timer | Toggle the overlay mode mid-flight and assert the indicator state is unchanged; assert it is absent when idle |

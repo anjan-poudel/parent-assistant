@@ -1,6 +1,365 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "livetranslate.empty.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I don't see any text yet. Point the camera at a sign, a label or a screen."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले कुनै अक्षर देखिएन। क्यामेरा साइनबोर्ड, लेबल वा स्क्रिनतिर फर्काउनुहोस्।"
+          }
+        }
+      }
+    },
+    "livetranslate.state.pending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translating…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवाद हुँदैछ…"
+          }
+        }
+      }
+    },
+    "livetranslate.state.unavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translation isn't available right now — showing the original text."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले अनुवाद उपलब्ध छैन — मूल अक्षर देखाइँदैछ।"
+          }
+        }
+      }
+    },
+    "livetranslate.state.quarantined": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This text can't be sent for translation. Showing it as it is."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो अक्षर अनुवादका लागि पठाउन मिल्दैन। जस्तो छ त्यस्तै देखाइँदैछ।"
+          }
+        }
+      }
+    },
+    "livetranslate.consent.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the internet to translate?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवाद गर्न इन्टरनेट प्रयोग गर्ने?"
+          }
+        }
+      }
+    },
+    "livetranslate.consent.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When a word isn't in the phone's own dictionary, the text on this screen — only the text, never the picture — is sent to the assistant's cloud service to be translated. Nothing is sent until you agree, and you can stop it any time."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोनको शब्दकोशमा नभएको शब्दको लागि यही स्क्रिनको अक्षर मात्र — तस्बिर कहिल्यै नहुने — अनुवादका लागि असिस्टेन्टको क्लाउड सेवामा पठाइन्छ। तपाईं मन्जुर नगर्दासम्म केही पठाइँदैन, र जहिले पनि बन्द गर्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "livetranslate.consent.grant": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yes, use the internet"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हो, इन्टरनेट प्रयोग गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "livetranslate.consent.decline": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No, keep it on this phone"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "होइन, यही फोनमै राख्नुहोस्"
+          }
+        }
+      }
+    },
+    "livetranslate.consent.revoke": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop using the internet for translation"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवादका लागि इन्टरनेट प्रयोग बन्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "livetranslate.cloudIndicator.label": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translating online"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनलाइन अनुवाद हुँदैछ"
+          }
+        }
+      }
+    },
+    "livetranslate.toggle.showOriginal": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Always show original text"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सधैं मूल अक्षर देखाउनुहोस्"
+          }
+        }
+      }
+    },
+    "livetranslate.camera.explanation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Point the camera at a sign, a label or a screen. The phone reads the text and shows the translation here."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्यामेरा साइनबोर्ड, लेबल वा स्क्रिनतिर फर्काउनुहोस्। फोनले अक्षर पढेर यहाँ अनुवाद देखाउँछ।"
+          }
+        }
+      }
+    },
+    "livetranslate.camera.denied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Camera access is turned off. Allow it in Settings to use live translation."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्यामेराको अनुमति बन्द छ। लाइभ अनुवाद चलाउन Settings मा गएर खोल्नुहोस्।"
+          }
+        }
+      }
+    },
+    "livetranslate.command.readAll": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "read this to me"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो पढेर सुनाउनुहोस्"
+          }
+        }
+      }
+    },
+    "livetranslate.command.stop": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "stop reading"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पढ्न रोक्नुहोस्"
+          }
+        }
+      }
+    },
+    "livetranslate.command.showOriginal": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "show the original"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मूल अक्षर देखाउनुहोस्"
+          }
+        }
+      }
+    },
+    "livetranslate.command.hideOriginal": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "hide the original"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मूल अक्षर लुकाउनुहोस्"
+          }
+        }
+      }
+    },
+    "livetranslate.command.repeatLast": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "say that again"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फेरि भन्नुहोस्"
+          }
+        }
+      }
+    },
+    "livetranslate.command.close": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "close translation"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवाद बन्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "livetranslate.snapshot.capture": {
+      "comment": "T-033 freeze-frame control. DRAFT: awaiting the owner's OD3 copy review at final sign-off.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hold this picture"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो दृश्य रोक्नुहोस्"
+          }
+        }
+      }
+    },
+    "livetranslate.snapshot.live": {
+      "comment": "T-033 freeze-frame control, the way back. DRAFT: awaiting the owner's OD3 copy review at final sign-off.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go live again"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फेरि चलाउनुहोस्"
+          }
+        }
+      }
+    },
     "settings.notifyCaregivers.title": {
       "extractionState": "manual",
       "localizations": {
@@ -16261,6 +16620,108 @@
           "stringUnit": {
             "state": "translated",
             "value": "अहिलेसम्म कुनै पालोको ट्रेस भएको छैन"
+          }
+        }
+      }
+    },
+    "livetranslate.consent.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That could not be saved. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो सुरक्षित हुन सकेन। कृपया फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "livetranslate.consent.grantedTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Internet translation is on"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "इन्टरनेटबाट अनुवाद चालु छ"
+          }
+        }
+      }
+    },
+    "livetranslate.consent.grantedNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Words that are not in the phone's own dictionary are sent to the assistant's cloud service. You can stop this at any time."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोनको शब्दकोशमा नभएका शब्दहरू असिस्टेन्टको क्लाउड सेवामा पठाइन्छ। तपाईं जहिले पनि यो बन्द गर्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "livetranslate.consent.revokeFailedTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your change could not be saved"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको परिवर्तन सुरक्षित हुन सकेन"
+          }
+        }
+      }
+    },
+    "livetranslate.consent.revokeFailedNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing is being sent now, but the setting may come back when the app is restarted. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले केही पठाइँदैन, तर एप फेरि खोल्दा यो सेटिङ फर्किन सक्छ। कृपया फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "settings.livetranslate.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live translation"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "लाइभ अनुवाद"
           }
         }
       }

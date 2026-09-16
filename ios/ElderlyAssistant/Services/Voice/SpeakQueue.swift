@@ -179,6 +179,42 @@ final class SpeakQueue: SpeakQueueProtocol, ObservableObject {
         return active != nil
     }
 
+    // MARK: - Source-scoped cancellation (live camera translation, C12/T-024)
+
+    /// Drops every pending announcement belonging to `sourceID`, and cancels
+    /// the utterance now playing when it is that source's — so a feature that
+    /// reads a screen aloud can be told "stop" and leave nothing of its own
+    /// queued to play later.
+    ///
+    /// **Source-scoped on purpose.** This is additive to the shipped lane
+    /// policy (no admission, arbitration or delivery decision changes) and it
+    /// deliberately cannot touch another source's work: an elder saying "stop
+    /// reading" must never silence a medication reminder queued behind the
+    /// reading. The cancel runs after the lock is released for the same reason
+    /// preemption does — a resumed continuation executes inline on the
+    /// resuming thread and must never re-enter the lock.
+    func drain(sourceID: String) {
+        var cancelActive = false
+        lock.lock()
+        pending.removeAll { $0.announcement.sourceID == sourceID }
+        if let current = active, current.sourceID == sourceID {
+            cancelActive = true
+        }
+        lock.unlock()
+        if cancelActive { speaker.cancel() }
+    }
+
+    /// True while an announcement from `sourceID` is playing or waiting. The
+    /// counterpart `isSpeaking` asks of the whole queue; a feature that must
+    /// not listen to its own voice (R10) needs the source-scoped answer, since
+    /// another lane speaking is not this feature speaking.
+    func isSpeaking(sourceID: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if let current = active, current.sourceID == sourceID { return true }
+        return pending.contains { $0.announcement.sourceID == sourceID }
+    }
+
     // MARK: - Lane policy
 
     /// Interrupt policy (spec §3, interrupt-policy column): only the

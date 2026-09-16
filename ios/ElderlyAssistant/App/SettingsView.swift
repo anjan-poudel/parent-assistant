@@ -16,7 +16,7 @@ struct SettingsView: View {
     @State private var showHiddenAIModels = false
 
     enum SettingsSection: Identifiable {
-        case appearance, language, calling, places, family, meds, manuals, calendar, caregiverNotifications, alarms, geminiAI, voiceEngine, wakeWord, ttsVoices, voicePersonalization, webSearch, youtube, feeds, quickApps, privacy, intentLog, toolLog
+        case appearance, language, calling, places, family, meds, manuals, calendar, caregiverNotifications, alarms, liveTranslate, geminiAI, voiceEngine, wakeWord, ttsVoices, voicePersonalization, webSearch, youtube, feeds, quickApps, privacy, intentLog, toolLog
 
         var id: String {
             switch self {
@@ -30,6 +30,7 @@ struct SettingsView: View {
             case .calendar: return "calendar"
             case .caregiverNotifications: return "caregiverNotifications"
             case .alarms: return "alarms"
+            case .liveTranslate: return "liveTranslate"
             case .geminiAI: return "geminiAI"
             case .voiceEngine: return "voiceEngine"
             case .wakeWord: return "wakeWord"
@@ -171,6 +172,15 @@ struct SettingsView: View {
                         // honesty caption — iOS alarms ring through the
                         // app's own notifications, not the Clock app.
                         sectionRow(.alarms, icon: "alarm.fill", titleKey: "settings.alarms.title")
+                        // [LIVE-TRANSLATE T-015] The live-translation
+                        // consent control: the same prompt and the same
+                        // revocation control the session view shows, so a
+                        // decision can be made — or withdrawn — without the
+                        // camera running (FR-LCT-015). Deliberately its own
+                        // row rather than a sub-page of Privacy: the elder
+                        // changing their mind is the common case.
+                        sectionRow(.liveTranslate, icon: "text.viewfinder",
+                                   titleKey: "settings.livetranslate.title")
                         sectionRow(.privacy, icon: "lock.shield.fill", titleKey: "settings.privacy.title")
                         sectionRow(.intentLog, icon: "checklist", titleKey: "settings.intentLog.title")
                         // [TOOL-DEBUG-LOG] (2026-09-07) Tool requests —
@@ -219,6 +229,11 @@ struct SettingsView: View {
             case .caregiverNotifications:
                 CaregiverNotifySettingsView(settings: coordinator.caregiverNotifySettings)
             case .alarms: AlarmsTimersSettingsView()
+            // [LIVE-TRANSLATE T-015] The leaf drives the coordinator's one
+            // consent controller, so its decision is the session view's
+            // decision with no restart and no second record.
+            case .liveTranslate:
+                LiveTranslateConsentSettingsView(controller: coordinator.liveTranslateConsentController())
             case .geminiAI: GeminiAPISettingsView()
             case .voiceEngine: VoiceEngineSettingsView()
             case .wakeWord: WakeWordSettingsView()
