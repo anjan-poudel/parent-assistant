@@ -14,6 +14,12 @@ import SwiftUI
 //    it. Both labels are the catalog's, in the active language, at the app's
 //    body floor — and the control is at least `DesignTokens.minTapTargetSize`
 //    in both directions.
+//  - **The wait is visible.** Between the tap and the held picture nothing
+//    else on screen changes — the camera keeps moving and no card is up — so
+//    the control carries the wait itself: a spinner and the catalog's holding
+//    sentence in place of an action, from the tap until the picture is held
+//    (owner, device testing: "could not tell if it was working, slow, or
+//    broken").
 //  - **Chrome, not overlay.** It is drawn by the session view inside the strip
 //    the placement reserves (`LiveTranslateView.topChromeRects`), so no callout
 //    can land on it — and, being chrome, it is not part of the overlay's
@@ -38,6 +44,10 @@ struct LiveTranslateSnapshotSurface: Equatable {
     static let captureSymbolName = "pause.circle.fill"
     static let liveSymbolName = "play.circle.fill"
 
+    /// The catalog key for the wait: the tap has been taken and the picture is
+    /// not held yet.
+    static let holdingKey = "livetranslate.snapshot.holding"
+
     /// Whether the session is holding a frozen frame.
     let isFrozen: Bool
     /// Whether the session has a camera picture to offer. A failed start
@@ -46,26 +56,42 @@ struct LiveTranslateSnapshotSurface: Equatable {
     /// Whether a tap would do something right now: the camera is running and a
     /// frame is in hand, or a frame is held and can be released.
     let isEnabled: Bool
+    /// Whether a freeze is in flight: the tap has been served and the picture
+    /// is not held *yet*. The control then shows the wait — a spinner and the
+    /// catalog's holding sentence — instead of an action, because between the
+    /// tap and the held picture nothing on screen moves and "working" and
+    /// "broken" would otherwise look identical (owner, device testing: "could
+    /// not tell if it was working, slow, or broken").
+    ///
+    /// Defaults to `false`: a session that is not mid-capture is the state
+    /// every other construction here is in.
+    let isLoading: Bool
     /// The active language, resolved here rather than through the view
     /// hierarchy, so a Nepali session reads Nepali.
     let locale: Locale
 
-    init(isFrozen: Bool, isPresented: Bool, isEnabled: Bool, locale: Locale) {
+    init(isFrozen: Bool, isPresented: Bool, isEnabled: Bool,
+         isLoading: Bool = false, locale: Locale) {
         self.isFrozen = isFrozen
         self.isPresented = isPresented
         self.isEnabled = isEnabled
+        self.isLoading = isLoading
         self.locale = locale
     }
 
     /// The control's label, from the catalog, in the active language: what the
-    /// tap will do, not what the current state is.
+    /// tap will do, not what the current state is — and while a freeze is in
+    /// flight, what is happening instead of what a tap would do.
     var label: String {
-        L10n.str(isFrozen ? "livetranslate.snapshot.live" : "livetranslate.snapshot.capture",
-                 locale: locale)
+        if isLoading { return L10n.str(Self.holdingKey, locale: locale) }
+        return L10n.str(isFrozen ? "livetranslate.snapshot.live" : "livetranslate.snapshot.capture",
+                        locale: locale)
     }
 
     /// The glyph beside the label. A pause for "hold this picture", a play for
-    /// "go back to the live one".
+    /// "go back to the live one". While a freeze is in flight the control draws
+    /// a progress indicator instead: no glyph means "this is what your tap is
+    /// doing right now".
     var symbolName: String {
         isFrozen ? Self.liveSymbolName : Self.captureSymbolName
     }
@@ -86,7 +112,22 @@ struct LiveTranslateSnapshotControl: View {
     var body: some View {
         Button(action: onToggle) {
             HStack(spacing: DesignTokens.interElementSpacing) {
-                Image(systemName: surface.symbolName)
+                // The wait is drawn, not described: a `ProgressView` is what
+                // the elder already reads as "it is working", and the words
+                // beside it say what it is working on. (The design forbids a
+                // glyph without a label, so both are here either way.)
+                if surface.isLoading {
+                    // Tinted with the app's accent, which on the card measures
+                    // ≈5.9:1 — a control's own floor is 3:1 — and `.large`,
+                    // the size the assistant's own hero uses, because the
+                    // default wheel is too small to read as "working" from
+                    // across a room, which is the room this is for.
+                    ProgressView()
+                        .tint(DesignTokens.accent)
+                        .controlSize(.large)
+                } else {
+                    Image(systemName: surface.symbolName)
+                }
                 Text(surface.label)
                     .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
                                                 weight: .semibold))
@@ -103,5 +144,8 @@ struct LiveTranslateSnapshotControl: View {
         .buttonStyle(.plain)
         .disabled(!surface.isEnabled)
         .accessibilityIdentifier(Self.accessibilityIdentifier)
+        // The wait is announced through the button's own label — the sentence
+        // above — so a screen reader hears it without the state being carried
+        // by the spinner's motion.
     }
 }
